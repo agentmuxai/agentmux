@@ -353,12 +353,16 @@ fn swap_nodes_rejects_ancestor() {
 // ── moveNode ─────────────────────────────────────────────────────────────────
 
 #[test]
-fn move_node_to_different_parent() {
+fn move_node_same_parent_target_eq_cur_plus_one_is_no_op() {
+    // [a, b], move a to index 1 — TS oracle: no-op (cur=0, target=cur+1).
+    // The TS insert-then-remove flow inserts a copy at index 1 making
+    // [a, a, b], then removes the first a, producing [a, b] unchanged.
     let a = leaf("a", "b1", 5.0);
     let b = leaf("b", "b2", 5.0);
     let mut root = group("root", FlexDirection::Row, 10.0, vec![a, b]);
     move_node(&mut root, "a", "root", 1).unwrap();
-    assert_eq!(root.children[1].id, "a");
+    assert_eq!(root.children[0].id, "a");
+    assert_eq!(root.children[1].id, "b");
 }
 
 #[test]
@@ -375,11 +379,32 @@ fn move_node_same_parent_earlier_index() {
 
 #[test]
 fn move_node_same_parent_later_index() {
+    // [a, b, c], move a to index 2 — TS oracle: [b, a, c].
+    // (cur=0, target=2; the TS insert-then-remove flow lands a between b
+    // and c. Detach-then-insert in Rust must compensate by inserting at
+    // index 1 to match.) See PR #691 Codex P1 + frontend layoutTree.ts:248.
     let a = leaf("a", "b1", 5.0);
     let b = leaf("b", "b2", 5.0);
     let c = leaf("c", "b3", 5.0);
     let mut root = group("root", FlexDirection::Row, 10.0, vec![a, b, c]);
     move_node(&mut root, "a", "root", 2).unwrap();
+    assert_eq!(root.children[0].id, "b");
+    assert_eq!(root.children[1].id, "a");
+    assert_eq!(root.children[2].id, "c");
+}
+
+#[test]
+fn move_node_same_parent_target_past_end_appends() {
+    // [a, b, c], move a to index 3 — out-of-range target in same parent.
+    // TS appends after the detach: addChildAt(parent, 3, a) on [a,b,c]
+    // produces [a,b,c,a], then removeChild(parent, a, 0) removes index 0,
+    // leaving [b, c, a]. Compensation rule (target > cur → target-1) plus
+    // clamping to len gives the same result.
+    let a = leaf("a", "b1", 5.0);
+    let b = leaf("b", "b2", 5.0);
+    let c = leaf("c", "b3", 5.0);
+    let mut root = group("root", FlexDirection::Row, 10.0, vec![a, b, c]);
+    move_node(&mut root, "a", "root", 3).unwrap();
     assert_eq!(root.children[0].id, "b");
     assert_eq!(root.children[1].id, "c");
     assert_eq!(root.children[2].id, "a");

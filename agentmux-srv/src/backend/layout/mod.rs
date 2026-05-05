@@ -308,6 +308,16 @@ pub fn move_node(
     let old_parent_id = find_parent_id(root, node_id);
     let same_parent = old_parent_id.as_deref() == Some(new_parent_id);
 
+    // Capture the node's current index inside the new parent BEFORE the
+    // detach so we can compensate for the source-removal shift below.
+    // Only meaningful when same_parent (otherwise cur_idx is None).
+    let cur_idx_in_new_parent = if same_parent {
+        find_node_by_id(root, new_parent_id)
+            .and_then(|p| p.children.iter().position(|c| c.id == node_id))
+    } else {
+        None
+    };
+
     // Now it is safe to detach (both endpoints exist).
     remove_node_from_parent(root, node_id);
 
@@ -316,10 +326,22 @@ pub fn move_node(
         node_with_size.size = DEFAULT_NODE_SIZE;
     }
 
+    // Mirror the TypeScript oracle (`moveNode` in
+    // frontend/layout/lib/layoutTree.ts): TS does insert-then-remove with
+    // a `startingIndex` shift, which makes same-parent moves where the
+    // requested index is past the current position resolve to one slot
+    // earlier in the final array (because the to-be-removed source eats
+    // a slot from `index`). We do detach-then-insert here, so we apply
+    // that compensation by decrementing `index` when target > cur_idx.
+    let effective_index = match cur_idx_in_new_parent {
+        Some(ci) if index > ci => index - 1,
+        _ => index,
+    };
+
     // Insert at new location (destination guaranteed to still exist).
     let new_parent = find_node_by_id_mut(root, new_parent_id).unwrap();
     ensure_group_node(new_parent);
-    let insert_at = index.min(new_parent.children.len());
+    let insert_at = effective_index.min(new_parent.children.len());
     new_parent.children.insert(insert_at, node_with_size);
     Ok(())
 }
