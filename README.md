@@ -237,8 +237,12 @@ gh release view v0.X.Y --repo agentmuxai/agentmux    # release exists with asset
 curl -sf https://agentmux.ai/release.json | jq .version  # landing shows new version
 ```
 
-## License
+## Contact Us
 
-Developed by **[AgentMux Corp.](https://agentmux.ai)** — Delaware corporation.
+For enterprises interested in adopting or deploying AgentMux at scale, including technical consulting, sponsorship opportunities, or partnership inquiries, please contact us at [enterprise@agentmux.ai](mailto:enterprise@agentmux.ai) or [partner@agentmux.ai](mailto:partner@agentmux.ai).
+
+Long-term active AgentMux contributors are eligible for coding agent sponsorship, including tools such as Cursor, Claude Code, or OpenAI Codex. Email [partner@agentmux.ai](mailto:partner@agentmux.ai) with your most important commits or pull requests.
+
+## License
 
 Apache-2.0 — Originally forked from [Wave Terminal](https://github.com/wavetermdev/waveterm)
