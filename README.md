@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./frontend/logos/agentmux-logo.svg" alt="AgentMux Logo" width="120">
+  <img src="./frontend/logos/agentmux-logo-brain-alternate.svg" alt="AgentMux Logo" width="120">
 </p>
 
 # AgentMux
