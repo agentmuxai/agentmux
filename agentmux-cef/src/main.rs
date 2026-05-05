@@ -376,15 +376,10 @@ fn main() {
     // Create the App handler with state.
     let mut cef_app = app::AgentMuxApp::new(app_state.clone(), ipc_port);
 
-    // Resolve resource directories for portable layout.
-    // In portable mode the CEF host is IN runtime/, so resources are
-    // flat alongside it. In dev mode they are also flat in dist/cef-
-    // dev/. We re-derive host_exe_dir here (the path-based env
-    // resolution at startup didn't keep it around).
-    let host_exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-        .unwrap_or_default();
+    // Resolve resource directories for portable layout. In portable
+    // mode the CEF host is IN runtime/, so resources are flat
+    // alongside it. In dev mode they are also flat in dist/cef-dev/.
+    // Reuses `host_exe_dir` from the startup mode-detection block.
     let runtime_dir = host_exe_dir.join("runtime");
     let base_dir = if runtime_dir.exists() {
         runtime_dir

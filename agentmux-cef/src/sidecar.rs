@@ -67,13 +67,18 @@ pub fn use_launcher_endpoints(
         let instance_id = try_get("AGENTMUX_INSTANCE_ID")?;
         let data_dir = try_get("AGENTMUX_DATA_DIR")?;
         let config_dir = try_get("AGENTMUX_CONFIG_DIR")?;
-        // Frontend "user home" → maps to the per-version
-        // `instance_dir` (`~/.agentmux/versions/<v>/`). The frontend
-        // calls `agentmuxHome()` and APPENDS `/agents/<slug>` and
-        // `/config/gh-<slug>` itself — so user_home_dir must be the
-        // root the frontend appends to, NOT the agents subdir
-        // directly (which would produce `agents/agents/<slug>`).
-        let user_home_dir = try_get("AGENTMUX_INSTANCE_DIR")?;
+        // Frontend "user home" → the AgentMux root (`~/.agentmux/`).
+        // The frontend's `agentmuxHome()` appends multiple suffix
+        // patterns including some that are EXPLICITLY versioned
+        // (`/instances/v<version>/cli/<provider>`), so user_home_dir
+        // must be the account-wide root, NOT a per-version subdir.
+        // We pull it via DataPaths::from_env which re-derives the
+        // root consumer-side (it isn't an env var).
+        let user_home_dir = agentmux_common::DataPaths::from_env()
+            .ok_or_else(|| "DataPaths::from_env() failed inside use_launcher_endpoints".to_string())?
+            .home_dir
+            .to_string_lossy()
+            .to_string();
 
         // Populate AppState in the same shape `spawn_backend` would.
         // Notably we do NOT take ownership of a Child handle (launcher
@@ -151,11 +156,12 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     // Store version-specific paths in AppState for frontend IPC commands.
     *state.version_data_dir.lock() = Some(data_dir.to_string_lossy().to_string());
     *state.version_config_dir.lock() = Some(config_dir.to_string_lossy().to_string());
-    // Frontend "user home" → maps to the per-version `instance_dir`
-    // (`~/.agentmux/versions/<v>/`). The frontend appends its own
-    // `/agents/<slug>` and `/config/gh-<slug>` suffixes; passing
-    // `agents_dir` directly would produce `agents/agents/<slug>`.
-    *state.user_home_dir.lock() = Some(paths.instance_dir.to_string_lossy().to_string());
+    // Frontend "user home" → the AgentMux root (`~/.agentmux/`).
+    // The frontend appends multiple suffix patterns including some
+    // explicitly versioned (`/instances/v<version>/cli/<provider>`),
+    // so the value must be the account-wide root, not a per-version
+    // subdir.
+    *state.user_home_dir.lock() = Some(paths.home_dir.to_string_lossy().to_string());
 
     // 3. Resolve the backend binary path
     let backend_name = "agentmux-srv";
