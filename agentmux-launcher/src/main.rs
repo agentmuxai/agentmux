@@ -173,14 +173,13 @@ async fn run_windows(
     use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
 
     let version = env!("CARGO_PKG_VERSION");
-    let is_dev = cfg!(debug_assertions);
 
     // 1. Resolve data_dir / config_dir / user_home_dir. Both srv and
     // host receive these via env so they don't recompute (and so they
     // can't drift). Host's existing data_dir computation in sidecar.rs
     // still runs as a fallback for `task dev` mode where the launcher
     // is not in the loop.
-    let paths = match data_dir::resolve_paths(launcher_exe_dir, version, is_dev) {
+    let paths = match data_dir::resolve_paths(launcher_exe_dir, version) {
         Ok(p) => p,
         Err(e) => {
             log(&format!("FATAL: path resolution failed: {}", e));
@@ -502,15 +501,14 @@ async fn run_windows(
         .env("AGENTMUX_BACKEND_PID", srv_result.pid.to_string())
         .env("AGENTMUX_AUTH_KEY", &srv_result.auth_key)
         .env("AGENTMUX_INSTANCE_ID", &srv_result.instance_id)
-        .env("AGENTMUX_DATA_DIR", paths.data_dir.to_string_lossy().to_string())
-        .env(
-            "AGENTMUX_CONFIG_DIR",
-            paths.config_dir.to_string_lossy().to_string(),
-        )
-        .env(
-            "AGENTMUX_USER_HOME_DIR",
-            paths.user_home_dir.to_string_lossy().to_string(),
-        )
+        // Canonical AGENTMUX_* env vars from `DataPaths::to_env_vars()`
+        // (AGENTMUX_INSTANCE_DIR / DATA_DIR / CONFIG_DIR / LOG_DIR /
+        // CEF_CACHE_DIR / AGENTS_DIR / INSTANCE_RUNTIME_DIR /
+        // SHARED_DIR / RUNTIME_MODE). Replaces the old ad-hoc set
+        // (AGENTMUX_USER_HOME_DIR, AGENTMUX_DATA_HOME) that drifted
+        // between launcher / host / sidecar and forced the host to
+        // re-detect mode independently.
+        .envs(paths.common.to_env_vars())
         // Phase B.2: tell the host where to find our IPC pipe so it
         // can connect and Register itself. Absent → host runs the
         // pre-Phase-B path (no IPC connection; standalone state).

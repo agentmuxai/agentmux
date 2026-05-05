@@ -160,52 +160,43 @@ fn main() {
     }
 
     let version = env!("CARGO_PKG_VERSION");
-    let is_dev = std::env::var("AGENTMUX_DEV").is_ok();
-    let version_slug = version.replace('.', "-");
 
-    // Detect portable mode: in portable builds the CEF host binary lives inside
-    // <portable-root>/runtime/. If current_exe()'s parent directory is named
-    // "runtime", we are in portable mode and the portable root is its parent.
+    // Read paths + mode from the launcher-injected env vars. Two
+    // reachable configurations:
+    //   a) Launcher-managed startup → env vars present, from_env()
+    //      returns Some.
+    //   b) Standalone `task dev` → env absent. We re-derive via
+    //      `RuntimeMode::current` + `DataPaths::resolve` (symmetric
+    //      with sidecar.rs::spawn_backend's fallback so they agree on
+    //      the disk layout).
     let host_exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_default();
-    let portable_root: Option<std::path::PathBuf> = if host_exe_dir
-        .file_name()
-        .and_then(|n| n.to_str())
-        == Some("runtime")
-    {
-        host_exe_dir.parent().map(|p| p.to_path_buf())
-    } else {
-        None
+    let common_paths = agentmux_common::DataPaths::from_env().or_else(|| {
+        let mode = agentmux_common::RuntimeMode::current(&host_exe_dir);
+        agentmux_common::DataPaths::resolve(version, &mode).ok()
+    });
+    let is_dev = match &common_paths {
+        Some(p) => matches!(p.mode, agentmux_common::RuntimeMode::Dev { .. }),
+        None => false,
     };
 
-    // Resolve the CEF cache directory and log directory.
-    //
-    // Portable:  all state lives under <portable-root>/data/
-    //            → cef cache:  data/cef/
-    //            → logs:       data/logs/
-    //
-    // Installed: state lives in platform AppData (version-isolated)
-    //            → cef cache:  %LOCALAPPDATA%/ai.agentmux.cef.vX/
-    //            → logs:       ~/.agentmux/logs/  (shared, easy to find)
-    let (data_dir, log_dir) = if let Some(ref root) = portable_root {
-        let base = root.join("data");
-        (base.join("cef"), base.join("logs"))
-    } else {
-        let cef_name = if is_dev {
-            "ai.agentmux.cef.dev".to_string()
-        } else {
-            format!("ai.agentmux.cef.v{}", version_slug)
-        };
-        let cef_dir = dirs::data_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join(&cef_name);
-        let log_dir = dirs::home_dir()
-            .unwrap_or_default()
-            .join(".agentmux")
-            .join("logs");
-        (cef_dir, log_dir)
+    let (data_dir, log_dir) = match &common_paths {
+        Some(p) => (p.cef_cache_dir.clone(), p.logs_dir.clone()),
+        None => {
+            // Both env-read AND fallback resolution failed (no home
+            // dir on disk, or platform unsupported). Use a degraded
+            // path so log init at least works; the runtime-startup
+            // check below will surface the underlying error.
+            (
+                std::path::PathBuf::from("."),
+                dirs::home_dir()
+                    .unwrap_or_default()
+                    .join(".agentmux")
+                    .join("logs"),
+            )
+        }
     };
     std::fs::create_dir_all(&data_dir).ok();
 
@@ -215,7 +206,7 @@ fn main() {
 
     tracing::info!(
         version,
-        portable = portable_root.is_some(),
+        runtime_mode = ?common_paths.as_ref().map(|p| p.mode.to_env_string()),
         data_dir = %data_dir.display(),
         log_dir = %log_dir.display(),
         "Initializing CEF browser process"
@@ -351,7 +342,10 @@ fn main() {
     // See docs/specs/SPEC_TEST_API_ACCESS.md §3 (threat model) — the
     // attacker class affected is "same-user local process", which we
     // do not defend against.
-    if std::env::var("AGENTMUX_DEV").as_deref() == Ok("1") {
+    // Dev mode is signalled by AGENTMUX_RUNTIME_MODE=dev:<branch>
+    // injected by the launcher (see agentmux_common::RuntimeMode).
+    // We use the same boolean we computed at startup.
+    if is_dev {
         let endpoints = app_state.backend_endpoints.lock().clone();
         let auth_key = app_state.auth_key.lock().clone();
         let ipc_token = app_state.ipc_token.clone();
@@ -382,10 +376,10 @@ fn main() {
     // Create the App handler with state.
     let mut cef_app = app::AgentMuxApp::new(app_state.clone(), ipc_port);
 
-    // Resolve resource directories for portable layout.
-    // In portable mode the CEF host is IN runtime/, so resources are flat
+    // Resolve resource directories for portable layout. In portable
+    // mode the CEF host is IN runtime/, so resources are flat
     // alongside it. In dev mode they are also flat in dist/cef-dev/.
-    // host_exe_dir is already computed above.
+    // Reuses `host_exe_dir` from the startup mode-detection block.
     let runtime_dir = host_exe_dir.join("runtime");
     let base_dir = if runtime_dir.exists() {
         runtime_dir

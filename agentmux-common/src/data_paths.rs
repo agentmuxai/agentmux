@@ -25,6 +25,12 @@ use std::path::{Path, PathBuf};
 /// where each binary made its own portable / dev-mode determination).
 #[derive(Debug, Clone)]
 pub struct DataPaths {
+    /// `~/.agentmux/` itself — the resolved root. Account-wide config
+    /// that predates the unified layout (e.g. the launcher's
+    /// `config.toml`) lives directly here. Honors
+    /// `AGENTMUX_HOME_OVERRIDE` for tests.
+    pub home_dir: PathBuf,
+
     /// Top-level dir for this version+mode. All version-keyed paths
     /// below are children. Either `~/.agentmux/versions/<v>/` (installed/
     /// portable) or `~/.agentmux/dev/<branch>/` (dev).
@@ -94,6 +100,7 @@ impl DataPaths {
         let shared_dir = root.join("shared");
 
         Ok(Self {
+            home_dir: root,
             instance_dir,
             data_dir,
             config_dir,
@@ -176,7 +183,14 @@ impl DataPaths {
         let shared_dir = std::env::var_os("AGENTMUX_SHARED_DIR")?;
         let mode = RuntimeMode::from_env()?;
 
+        // Re-resolve home_dir (the agentmux root) on the consumer
+        // side rather than transmitting it via env — it's a function
+        // of the AGENTMUX_HOME_OVERRIDE env (test only) and the OS
+        // home dir, which are stable across the launcher → host hop.
+        let home_dir = resolve_root().ok()?;
+
         Some(Self {
+            home_dir,
             instance_dir: PathBuf::from(instance_dir),
             data_dir: PathBuf::from(data_dir),
             config_dir: PathBuf::from(config_dir),
@@ -274,6 +288,26 @@ mod tests {
             assert_eq!(p.agents_dir, p.instance_dir.join("agents"));
             assert_eq!(p.instance_runtime_dir, p.instance_dir.join("runtime"));
             assert_eq!(p.shared_dir, root.join("shared"));
+        });
+    }
+
+    #[test]
+    fn home_dir_resolves_to_root() {
+        // The agentmux root (~/.agentmux/ or AGENTMUX_HOME_OVERRIDE)
+        // is exposed via DataPaths.home_dir for legacy account-wide
+        // state like the launcher's config.toml. Resolve in both
+        // installed and dev modes; both should point at the same root.
+        with_home_override(|root| {
+            let inst = DataPaths::resolve("0.33.641", &RuntimeMode::Installed).unwrap();
+            assert_eq!(inst.home_dir, root);
+            let dev = DataPaths::resolve(
+                "0.33.641",
+                &RuntimeMode::Dev {
+                    branch: "main".into(),
+                },
+            )
+            .unwrap();
+            assert_eq!(dev.home_dir, root);
         });
     }
 
