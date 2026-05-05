@@ -414,22 +414,33 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
             );
         }
         Event::HostShouldQuit { .. } => {
-            // Phase B.9.3 — diagnostic only. The actual close
-            // cascade is now driven host-side by the
-            // `is_quitting` drain flag in `client.rs::on_before_close`
-            // (Cause A fix). This event remains as a launcher-side
-            // observability signal: when it fires, the host's
-            // close-path SHOULD have already started draining, so
-            // we just log and trust the host to exit. Three smoke
-            // sessions in v0.33.491–v0.33.494 attempted to make
-            // this saga deliver work to the host's UI thread; all
-            // failed (CEF post_task drops, direct call is UB,
-            // PostThreadMessage(WM_QUIT) ignored by CEF's pump).
-            // See `docs/retro/b9-3-lifecycle-analysis.md`.
+            // Phase B.9.3 was diagnostic-only; the comment in
+            // `agentmux-common/src/ipc.rs::HostShouldQuit` explicitly
+            // calls this advisory. v0.33.643 caught the gap: when
+            // promoted `window-pool-*` browsers go orphan (in host's
+            // browsers map but the launcher's mirror has dropped
+            // them), the cascade in `on_before_close` gates on a
+            // user_browser_count that wrongly includes them, so the
+            // gate fails and the host stays alive forever.
+            //
+            // Spec: `docs/specs/SPEC_HOST_ORPHAN_RECONCILIATION_2026_05_05.md`.
+            //
+            // The reconciler runs on this IPC reader's thread but
+            // does NOT touch CEF directly — it dispatches via
+            // `PostMessageW(WM_CLOSE)` (preferred on Windows) or
+            // `cef::post_task(UI, ClosePoolBrowserTask)` (the
+            // existing fallback path). Same channels the cascade
+            // already uses, so each close funnels back through
+            // `on_before_close` and the existing Stage-2
+            // `quit_message_loop` fires when `browser_list` empties.
+            // Earlier v0.33.491–v0.33.494 attempts failed because
+            // they tried to drive UI-thread work *directly* from
+            // here — we don't, we hand it to CEF's task queue.
             tracing::warn!(
                 target: "wrr",
-                "[wrr] HostShouldQuit received — host close cascade should be in flight"
+                "[wrr] HostShouldQuit received — running orphan reconciler"
             );
+            crate::commands::orphan_reconcile::reconcile_and_drain(state);
         }
         _ => {}
     }
