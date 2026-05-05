@@ -67,7 +67,19 @@ PS_OUTPUT=$(
             ForEach-Object {
                 if (\$_ -match '--wavedata\s+\"?([^\"]+?)\"?(\s|$)') { \$matches[1] }
             }
-        @(\$exeParents + \$dataDirs) | Where-Object { \$_ } | Sort-Object -Unique
+        # Codex P1 round-3 on PR #694: installed instances split state
+        # across LocalAppData (data) and Roaming (config). \`--wavedata\`
+        # only points at the Local side. Mirror each Local path to its
+        # Roaming companion so neither gets wiped while the instance is
+        # running. The Local→Roaming substitution is exact (Windows
+        # Microsoft-conventional layout); if a value doesn't contain
+        # \\Local\\ the substitution is a no-op and the path is just
+        # passed through.
+        \$dataDirsRoaming = \$dataDirs | ForEach-Object {
+            \$_ -replace '\\\\AppData\\\\Local\\\\', '\\AppData\\Roaming\\'
+        }
+        @(\$exeParents + \$dataDirs + \$dataDirsRoaming) |
+            Where-Object { \$_ } | Sort-Object -Unique
     "
 ) || {
     echo "ERROR: PowerShell process-discovery failed (exit $?)." >&2
@@ -205,7 +217,25 @@ if [ "$DRY_RUN" = 1 ]; then
 fi
 
 echo "Proceeding to delete…"
+FAIL_COUNT=0
+FAIL_PATHS=()
 for d in "${FILTERED[@]}"; do
-    rm -rf -- "$d" 2>&1 | head -5 || true
+    # Claude P1 round-3 on PR #694: don't swallow rm failures — locked
+    # files / permission errors would silently leave dirs behind while
+    # we cheerfully reported "Done." Track each failure and exit non-zero
+    # at the end so callers (CI, follow-up scripts) see the truth.
+    if ! rm -rf -- "$d" 2>>/tmp/wipe-rm-errors.log; then
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        FAIL_PATHS+=("$d")
+        printf "  FAILED: %s\n" "$d" >&2
+    fi
 done
-echo "Done."
+
+if [ "$FAIL_COUNT" -gt 0 ]; then
+    echo
+    echo "INCOMPLETE: $FAIL_COUNT of ${#FILTERED[@]} entries could not be removed." >&2
+    echo "  See /tmp/wipe-rm-errors.log for the underlying rm errors." >&2
+    echo "  Common causes: locked files (still-running process), permissions, antivirus." >&2
+    exit 2
+fi
+echo "Done. ${#FILTERED[@]} entries removed."
