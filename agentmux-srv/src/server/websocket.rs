@@ -919,16 +919,31 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     expanded_working_dir.to_string_lossy().to_string()
                 };
                 let base_path = std::path::Path::new(&final_working_dir);
+                // Canonicalize base ONCE (it exists — allocate_agent_workdir
+                // or the explicit-path mkdir-p created it just above). Used
+                // by the per-file symlink-escape verifier so we catch a
+                // symlinked ancestor like `<base>/.claude -> /tmp/outside`
+                // before fs::write follows it.
+                let canonical_base = base_path.canonicalize().map_err(|e| {
+                    format!("failed to canonicalize working dir {}: {e}", base_path.display())
+                })?;
 
                 for file in &cmd.files {
                     // Lexical join + traversal check — works on Windows where
                     // canonicalize() adds the `\\?\` UNC prefix and breaks
-                    // starts_with against not-yet-created files.
+                    // starts_with against not-yet-created files. Catches `..`,
+                    // absolute paths, drive-letter prefixes (root and inner).
                     let file_path = crate::backend::base::safe_join_within_base(
                         base_path,
                         &file.path,
                     )
                     .map_err(|e| format!("path traversal denied: {} ({e})", file.path))?;
+                    // Symlink-escape guard: if any EXISTING ancestor is a
+                    // symlink that resolves outside the workdir, reject.
+                    // No-op for fully-fresh agent dirs (the common case
+                    // where every component is new).
+                    crate::backend::base::verify_no_symlink_escape(&file_path, &canonical_base)
+                        .map_err(|e| format!("path traversal denied: {} ({e})", file.path))?;
                     // Create parent directories if needed
                     if let Some(parent) = file_path.parent() {
                         if !parent.exists() {
