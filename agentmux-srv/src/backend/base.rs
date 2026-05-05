@@ -268,6 +268,18 @@ pub fn expand_home_dir_safe(path: &str) -> PathBuf {
     expand_home_dir(path).unwrap_or_else(|_| PathBuf::from(path))
 }
 
+/// True if `s` starts with `<ASCII letter>:` — a Windows drive-letter
+/// prefix. Both rooted (`C:\foo`) and drive-relative (`C:foo`) forms
+/// match. Used by `safe_join_within_base` to reject paths that would
+/// rebase off the working directory under Windows path semantics.
+fn has_drive_letter_prefix(s: &str) -> bool {
+    let mut chars = s.chars();
+    matches!(
+        (chars.next(), chars.next()),
+        (Some(c), Some(':')) if c.is_ascii_alphabetic()
+    )
+}
+
 /// Lexically join `relative` onto `base` while guaranteeing the result
 /// stays inside `base`. No filesystem access — does not require either
 /// path to exist, which matters on Windows where `Path::canonicalize`
@@ -296,6 +308,16 @@ pub fn safe_join_within_base(base: &Path, relative: &str) -> Result<PathBuf, Str
     // drive's root, escaping `base`.
     if matches!(relative.chars().next(), Some('/') | Some('\\')) {
         return Err(format!("safe_join_within_base: rooted path not allowed: {relative}"));
+    }
+    // Windows drive-letter prefix (e.g. `C:foo`, `D:\bar`). `is_absolute()`
+    // requires both prefix AND root, so a drive-relative path like
+    // `C:payload.txt` slips through unless we reject it explicitly.
+    // `Path::join` would otherwise replace the base with the drive's CWD
+    // on Windows, escaping the working directory.
+    if has_drive_letter_prefix(relative) {
+        return Err(format!(
+            "safe_join_within_base: drive-letter prefix not allowed: {relative}"
+        ));
     }
     let mut cleaned = PathBuf::new();
     for segment in relative.split(['/', '\\']) {
@@ -501,6 +523,36 @@ mod tests {
         assert!(safe_join_within_base(&base, "/foo").is_err());
         #[cfg(windows)]
         assert!(safe_join_within_base(&base, "C:\\Windows").is_err());
+    }
+
+    #[test]
+    fn test_safe_join_within_base_rejects_drive_letter_prefix() {
+        // Drive-relative (no root) — Path::is_absolute() returns false on
+        // Windows, but Path::join would still replace base with the
+        // drive's CWD. Must be rejected on every platform so the helper
+        // behaves consistently regardless of where the validation runs.
+        let base = PathBuf::from("/base");
+        assert!(safe_join_within_base(&base, "C:foo").is_err());
+        assert!(safe_join_within_base(&base, "D:payload.txt").is_err());
+        assert!(safe_join_within_base(&base, "z:relative\\file").is_err());
+        // Rooted drive paths also rejected (already covered by is_absolute
+        // on Windows; on Unix the drive-letter check catches them).
+        assert!(safe_join_within_base(&base, "C:\\Windows\\System32").is_err());
+    }
+
+    #[test]
+    fn test_has_drive_letter_prefix() {
+        assert!(has_drive_letter_prefix("C:foo"));
+        assert!(has_drive_letter_prefix("c:bar"));
+        assert!(has_drive_letter_prefix("Z:\\baz"));
+        assert!(!has_drive_letter_prefix(":foo"));
+        assert!(!has_drive_letter_prefix("foo"));
+        assert!(!has_drive_letter_prefix("12:not-a-drive"));
+        assert!(!has_drive_letter_prefix(""));
+        // Multibyte first char: the check requires ASCII letter, so
+        // non-ASCII letters do NOT match (they wouldn't be valid drive
+        // letters on Windows anyway).
+        assert!(!has_drive_letter_prefix("Ω:foo"));
     }
 
     #[test]
