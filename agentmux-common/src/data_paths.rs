@@ -236,18 +236,11 @@ fn sanitize_path_segment(s: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use crate::TEST_ENV_LOCK;
     use tempfile::TempDir;
 
-    /// All tests in this module touch process-global env vars
-    /// (`AGENTMUX_HOME_OVERRIDE` plus the eight `AGENTMUX_*` vars in
-    /// the round-trip test). cargo test runs tests in parallel by
-    /// default, so without serialization the env state visible inside
-    /// one test gets clobbered by another. Lock at module scope.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
     fn with_home_override<F: FnOnce(&Path)>(f: F) {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = TempDir::new().expect("tempdir");
         let path_str = tmp.path().display().to_string();
         std::env::set_var("AGENTMUX_HOME_OVERRIDE", &path_str);
@@ -373,7 +366,7 @@ mod tests {
 
     #[test]
     fn from_env_fails_fast_on_missing_vars() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Clear all expected vars.
         for k in [
             "AGENTMUX_INSTANCE_DIR",

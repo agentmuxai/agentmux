@@ -112,8 +112,10 @@ impl RuntimeMode {
             // Defense in depth: branch is sanitized at parse time, but
             // a Dev variant constructed directly (e.g. via tests) might
             // still hold an unsafe value. Slug-on-format ensures the
-            // path produced here is always a single-segment subdir of
-            // dev/.
+            // returned string is always exactly two segments — `dev/`
+            // followed by a single-segment branch slug — so callers
+            // splitting on `/` see the expected shape and the resulting
+            // filesystem path is always a child of `dev/`.
             Self::Dev { branch } => format!("dev/{}", sanitize_branch_slug(branch)),
         }
     }
@@ -247,18 +249,15 @@ fn sanitize_branch_slug(b: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TEST_ENV_LOCK;
     use std::path::PathBuf;
-    use std::sync::Mutex;
 
-    /// Tests in this module touch process-global env vars; cargo
-    /// test runs tests in parallel so without serialization one
-    /// test's set_var can be visible to another test's lookup.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    /// `with_env` does NOT take ENV_LOCK — callers must hold it.
-    /// This avoids the re-entrant-locking problem when a test nests
-    /// `with_env` calls (both would try to acquire the same Mutex
-    /// and deadlock).
+    /// `with_env` does NOT take `TEST_ENV_LOCK` — callers must hold
+    /// it. This avoids the re-entrant-locking problem when a test
+    /// nests `with_env` calls. The lock is shared across the whole
+    /// crate (defined in lib.rs) so tests in this module also
+    /// serialize against `data_paths::tests` which touches the same
+    /// process-global env vars.
     fn with_env<F: FnOnce()>(key: &str, val: Option<&str>, f: F) {
         let prev = std::env::var(key).ok();
         match val {
@@ -308,7 +307,7 @@ mod tests {
 
     #[test]
     fn env_override_wins_over_path_detection() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Even if exe_dir looks portable (has `runtime/`), env override wins.
         // We simulate by passing a path that doesn't exist (so .is_dir()
         // returns false), but we also force the env override.
