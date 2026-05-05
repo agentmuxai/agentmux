@@ -292,6 +292,26 @@ mod tests {
     }
 
     #[test]
+    fn home_dir_resolves_to_root() {
+        // The agentmux root (~/.agentmux/ or AGENTMUX_HOME_OVERRIDE)
+        // is exposed via DataPaths.home_dir for legacy account-wide
+        // state like the launcher's config.toml. Resolve in both
+        // installed and dev modes; both should point at the same root.
+        with_home_override(|root| {
+            let inst = DataPaths::resolve("0.33.641", &RuntimeMode::Installed).unwrap();
+            assert_eq!(inst.home_dir, root);
+            let dev = DataPaths::resolve(
+                "0.33.641",
+                &RuntimeMode::Dev {
+                    branch: "main".into(),
+                },
+            )
+            .unwrap();
+            assert_eq!(dev.home_dir, root);
+        });
+    }
+
+    #[test]
     fn portable_paths_match_installed() {
         with_home_override(|root| {
             let inst = DataPaths::resolve("0.33.639", &RuntimeMode::Installed).unwrap();
