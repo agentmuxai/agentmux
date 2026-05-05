@@ -268,6 +268,55 @@ pub fn expand_home_dir_safe(path: &str) -> PathBuf {
     expand_home_dir(path).unwrap_or_else(|_| PathBuf::from(path))
 }
 
+/// Lexically join `relative` onto `base` while guaranteeing the result
+/// stays inside `base`. No filesystem access — does not require either
+/// path to exist, which matters on Windows where `Path::canonicalize`
+/// adds the `\\?\` UNC prefix and breaks naive `starts_with` checks
+/// against not-yet-created files.
+///
+/// The relative path:
+/// - must be non-empty
+/// - must NOT be absolute (rooted, drive-prefixed, or starting with `/`/`\`)
+/// - must NOT contain a `..` component
+/// - may contain `.` components (silently dropped)
+/// - is treated as forward- or back-slash separated; both are accepted
+///
+/// Returns `base.join(<cleaned>)` on success.
+pub fn safe_join_within_base(base: &Path, relative: &str) -> Result<PathBuf, String> {
+    if relative.is_empty() {
+        return Err("safe_join_within_base: empty relative path".into());
+    }
+    let rel_path = Path::new(relative);
+    if rel_path.is_absolute() {
+        return Err(format!("safe_join_within_base: absolute path not allowed: {relative}"));
+    }
+    // On Windows `Path::is_absolute` covers drive-letter and UNC roots,
+    // but a leading `/` or `\` (without drive) is technically "rooted but
+    // not absolute". Reject those too — they'd resolve onto the current
+    // drive's root, escaping `base`.
+    if matches!(relative.chars().next(), Some('/') | Some('\\')) {
+        return Err(format!("safe_join_within_base: rooted path not allowed: {relative}"));
+    }
+    let mut cleaned = PathBuf::new();
+    for segment in relative.split(['/', '\\']) {
+        match segment {
+            "" | "." => continue,
+            ".." => {
+                return Err(format!(
+                    "safe_join_within_base: '..' traversal not allowed: {relative}"
+                ));
+            }
+            other => cleaned.push(other),
+        }
+    }
+    if cleaned.as_os_str().is_empty() {
+        return Err(format!(
+            "safe_join_within_base: relative path resolves to empty: {relative}"
+        ));
+    }
+    Ok(base.join(cleaned))
+}
+
 /// Replace the home directory prefix with `~`.
 pub fn replace_home_dir(path: &str) -> String {
     let home = get_home_dir();
@@ -398,6 +447,68 @@ mod tests {
         // But normal dots are fine
         assert!(expand_home_dir("~/.config").is_ok());
         assert!(expand_home_dir("/tmp/.hidden").is_ok());
+    }
+
+    #[test]
+    fn test_safe_join_within_base_simple() {
+        let base = PathBuf::from("/home/user/agent");
+        let p = safe_join_within_base(&base, "CLAUDE.md").unwrap();
+        assert_eq!(p, PathBuf::from("/home/user/agent/CLAUDE.md"));
+    }
+
+    #[test]
+    fn test_safe_join_within_base_nested() {
+        let base = PathBuf::from("/home/user/agent");
+        let p = safe_join_within_base(&base, ".claude/commands/startup.md").unwrap();
+        assert_eq!(p, PathBuf::from("/home/user/agent/.claude/commands/startup.md"));
+    }
+
+    #[test]
+    fn test_safe_join_within_base_backslash_separator() {
+        // Frontends running on Windows may send `\\` separators; accept them.
+        let base = PathBuf::from("C:\\agent");
+        let p = safe_join_within_base(&base, ".claude\\commands\\startup.md").unwrap();
+        // The cleaned components are joined as native segments — final path
+        // should contain all three trailing pieces in order.
+        let s = p.to_string_lossy();
+        assert!(s.contains(".claude"));
+        assert!(s.contains("commands"));
+        assert!(s.contains("startup.md"));
+    }
+
+    #[test]
+    fn test_safe_join_within_base_dot_segments_skipped() {
+        let base = PathBuf::from("/base");
+        let p = safe_join_within_base(&base, "./a/./b").unwrap();
+        assert_eq!(p, PathBuf::from("/base/a/b"));
+    }
+
+    #[test]
+    fn test_safe_join_within_base_rejects_dotdot() {
+        let base = PathBuf::from("/base");
+        assert!(safe_join_within_base(&base, "..").is_err());
+        assert!(safe_join_within_base(&base, "../etc").is_err());
+        assert!(safe_join_within_base(&base, "a/../b").is_err());
+        assert!(safe_join_within_base(&base, "a/b/..").is_err());
+    }
+
+    #[test]
+    fn test_safe_join_within_base_rejects_absolute() {
+        let base = PathBuf::from("/base");
+        assert!(safe_join_within_base(&base, "/etc/passwd").is_err());
+        assert!(safe_join_within_base(&base, "\\Windows\\System32").is_err());
+        // Bare leading slash on a relative-looking path is also rooted.
+        assert!(safe_join_within_base(&base, "/foo").is_err());
+        #[cfg(windows)]
+        assert!(safe_join_within_base(&base, "C:\\Windows").is_err());
+    }
+
+    #[test]
+    fn test_safe_join_within_base_rejects_empty() {
+        let base = PathBuf::from("/base");
+        assert!(safe_join_within_base(&base, "").is_err());
+        // After stripping `.` segments, an effectively-empty path also fails.
+        assert!(safe_join_within_base(&base, "./.").is_err());
     }
 
     #[test]

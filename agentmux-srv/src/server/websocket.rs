@@ -921,21 +921,14 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let base_path = std::path::Path::new(&final_working_dir);
 
                 for file in &cmd.files {
-                    let file_path = base_path.join(&file.path);
-                    // Prevent path traversal: resolved path must stay within base_path
-                    let canonical_base = base_path.canonicalize()
-                        .map_err(|e| format!("failed to canonicalize base path: {e}"))?;
-                    let canonical_file = file_path.canonicalize().unwrap_or_else(|_| {
-                        // File doesn't exist yet — normalize by resolving parent + filename
-                        if let (Some(parent), Some(name)) = (file_path.parent(), file_path.file_name()) {
-                            parent.canonicalize().map(|p| p.join(name)).unwrap_or_else(|_| file_path.clone())
-                        } else {
-                            file_path.clone()
-                        }
-                    });
-                    if !canonical_file.starts_with(&canonical_base) {
-                        return Err(format!("path traversal denied: {} escapes working dir", file.path));
-                    }
+                    // Lexical join + traversal check — works on Windows where
+                    // canonicalize() adds the `\\?\` UNC prefix and breaks
+                    // starts_with against not-yet-created files.
+                    let file_path = crate::backend::base::safe_join_within_base(
+                        base_path,
+                        &file.path,
+                    )
+                    .map_err(|e| format!("path traversal denied: {} ({e})", file.path))?;
                     // Create parent directories if needed
                     if let Some(parent) = file_path.parent() {
                         if !parent.exists() {
