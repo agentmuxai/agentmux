@@ -373,7 +373,35 @@ export class AgentViewModel implements ViewModel {
         const oref = WOS.makeORef("block", this.blockId);
         const blockId = this.blockId;
         try {
-            // Store CLI config in block metadata
+            // Whether the work_dir was constructed by us (and is thus
+            // eligible for `<base>-N` collision suffixing) or was
+            // pulled verbatim from the agent definition's
+            // `working_directory` field (e.g. a user repo path that
+            // we must NOT rewrite even if it happens to contain
+            // CLAUDE.md). The two auto cases above are: an explicit
+            // overrides.instanceName launch, and the legacy
+            // ~/.agentmux/agents/<slug> default when no
+            // working_directory was set on the definition.
+            const autoAllocate =
+                Boolean(overrides?.instanceName) ||
+                (agent.working_directory ?? "").trim() === "" ||
+                persisted.startsWith("~/.agentmux/");
+
+            // Allocate the workdir + write config files BEFORE we set
+            // cmd:cwd, so the meta records the actual collision-
+            // resolved path the controller will spawn the CLI in.
+            // Always call WriteAgentConfigCommand (even with no files
+            // to write) when auto-allocate so we get the atomic
+            // `mkdir` reservation. Returns the final path.
+            const writeResult = await RpcApi.WriteAgentConfigCommand(TabRpcClient, {
+                working_dir: workDir,
+                files: configFiles,
+                auto_allocate: autoAllocate,
+            });
+            const finalWorkDir = writeResult?.working_dir || workDir;
+
+            // Store CLI config in block metadata using the (possibly
+            // collision-resolved) finalWorkDir.
             await RpcApi.SetMetaCommand(TabRpcClient, {
                 oref,
                 meta: {
@@ -386,20 +414,12 @@ export class AgentViewModel implements ViewModel {
                     controller: isPersistent ? "persistent" : "subprocess",
                     cmd: cliBin,
                     "cmd:args": cliArgs,
-                    "cmd:cwd": workDir,
+                    "cmd:cwd": finalWorkDir,
                     "cmd:env": envVars,
                     "agent:resume_flag": provider.resumeFlag ?? "",
                     "agent:session_id_field": provider.sessionIdField,
                 },
             });
-
-            // Write config files (CLAUDE.md, .mcp.json) to working directory via backend
-            if (configFiles.length > 0) {
-                await RpcApi.WriteAgentConfigCommand(TabRpcClient, {
-                    working_dir: workDir,
-                    files: configFiles,
-                });
-            }
 
             // Create SubprocessController (no-op start — waits for first message)
             await RpcApi.ControllerResyncCommand(TabRpcClient, {

@@ -343,11 +343,11 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "agent.open: block created + layout updated"
                 );
 
-                // 8. Write agent config files into the already-
-                //    collision-resolved work_dir (allocated before the
-                //    block meta was built — see step 5). The function
-                //    no longer retries; it just creates the dir +
-                //    writes files.
+                // 8. Write agent config files. No collision resolution
+                //    in this path — the function creates the dir if
+                //    missing and overwrites whatever's there. Same-
+                //    name same-hour launches will share a workdir;
+                //    proper allocation is tracked as a follow-up.
                 write_agent_config_files(&wstore, &agent, &agent_slug, &work_dir)?;
 
                 // 9. Register controller (resync)
@@ -1589,6 +1589,46 @@ fn find_agent_block(wstore: &WaveStore, tab_id: &str, agent_id: &str) -> Result<
         }
     }
     Ok(None)
+}
+
+/// Atomically allocate an agent working directory.
+///
+/// Tries to atomically create `desired` via `std::fs::create_dir`. If
+/// that fails because the directory already exists, tries `<desired>-1`,
+/// `<desired>-2`, …, up to `-99`. The atomic `create_dir` (NOT
+/// `create_dir_all` for the leaf) is the reservation mechanism: two
+/// concurrent callers competing for the same path race on the OS
+/// `mkdir` syscall and one wins; the loser sees `AlreadyExists` and
+/// moves on.
+///
+/// Caller is responsible for distinguishing auto-generated paths from
+/// user-specified ones — this function rewrites the path on collision,
+/// which would clobber a user's intent if they pointed an agent at
+/// `~/projects/myrepo` and that already had a `CLAUDE.md`.
+pub fn allocate_agent_workdir(desired: &str) -> Result<String, String> {
+    let p = std::path::Path::new(desired);
+    if let Some(parent) = p.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("allocate_agent_workdir: parent {}: {e}", parent.display()))?;
+        }
+    }
+    match std::fs::create_dir(p) {
+        Ok(()) => return Ok(desired.to_string()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(format!("allocate_agent_workdir: create_dir({}): {e}", desired)),
+    }
+    for n in 1..=99u32 {
+        let candidate = format!("{desired}-{n}");
+        match std::fs::create_dir(std::path::Path::new(&candidate)) {
+            Ok(()) => return Ok(candidate),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("allocate_agent_workdir: create_dir({candidate}): {e}")),
+        }
+    }
+    Err(format!(
+        "allocate_agent_workdir: too many collisions (>99) under {desired}-N — clean up old runs"
+    ))
 }
 
 /// Write agent config files (CLAUDE.md, .mcp.json, etc.) to the working directory.

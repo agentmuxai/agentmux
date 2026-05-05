@@ -51,8 +51,9 @@ function hourToBase24Char(h: number): string {
  *   DD = 2-digit day (01-31)
  *   h  = base24 hour char (0-9 then a-n for 10-23)
  *
- * Total: 5 chars exactly. Two launches within the same hour collide
- * and require the launch-time `-N` counter (see allocateWorkDir).
+ * Total: 5 chars exactly. Two launches within the same hour share
+ * a slug; collision resolution is a follow-up (the previous
+ * millisecond-precision suffix made this a non-issue).
  *
  * Year is omitted because per-version isolation already separates
  * runs across releases; within a version, month+day+hour gives users
@@ -69,7 +70,7 @@ export function formatLocalStamp(d: Date): string {
  * `<slug>-<stamp>` — stable, filesystem-safe, and 5-char date.
  *
  * Collision resolution: callers should pass the result through
- * `allocateWorkDir()` or equivalent at launch time to append `-N`
+ * `a future server-side allocator` or equivalent at launch time to append `-N`
  * when the directory already exists.
  */
 export function buildInstanceSlug(name: string, at: Date = new Date()): string {
