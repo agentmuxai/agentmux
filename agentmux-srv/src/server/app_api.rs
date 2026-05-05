@@ -1677,13 +1677,26 @@ fn write_agent_config_files(
 /// Expand `~` / `~/...` in a path against `$HOME` (or `$USERPROFILE`
 /// on Windows). Returns the input verbatim if neither var is set.
 fn expand_tilde_path(p: &str) -> String {
-    if !(p.starts_with("~/") || p == "~") {
+    let rest = if p == "~" {
+        Some("")
+    } else {
+        // strip_prefix only matches the literal "~/" prefix; a bare
+        // "~" returns None here. trim_start_matches would have left a
+        // stray `~` in the suffix for the bare-tilde case (producing
+        // `/home/user/~`).
+        p.strip_prefix("~/")
+    };
+    let Some(rest) = rest else {
         return p.to_string();
+    };
+    let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) else {
+        return p.to_string();
+    };
+    if rest.is_empty() {
+        home
+    } else {
+        format!("{home}/{rest}")
     }
-    if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
-        return format!("{}/{}", home, p.trim_start_matches("~/"));
-    }
-    p.to_string()
 }
 
 /// Pick an unused working dir for an agent launch. Mirrors the

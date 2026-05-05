@@ -7,9 +7,12 @@
  * (for preview) and the AgentViewModel (for actual launch) agree on
  * the format without importing from each other's files.
  *
- * Format: `<slug(name)>-MMDDh`, local time. Conflict resolution
- * appends `-N` (1, 2, …) at launch time when the directory already
- * exists; see AgentViewModel.allocateWorkDir().
+ * Format: `<slug(name)>-MMDDh`, local time. Collision resolution is
+ * handled server-side: `agent.open` calls
+ * `allocate_agent_workdir()` in agentmux-srv/src/server/app_api.rs
+ * which appends `-N` (1, 2, …) when the desired directory already
+ * contains a prior agent run (CLAUDE.md present). The block's
+ * `cmd:cwd` meta records the actual collision-resolved path.
  */
 
 /**
