@@ -27,20 +27,30 @@ use crate::state::AppState;
 
 /// Classify which labels in `browser_labels` are orphan
 /// `window-pool-*` entries — i.e., promoted out of the pool but no
-/// longer tracked by the launcher's mirror.
+/// longer tracked by *any* window-metadata source (launcher mirror
+/// or host's local handoff cache).
+///
+/// `tracked_window_meta_keys` MUST be the union of `shadow_window_meta`
+/// (launcher-fed projection) AND host's local `window_meta` (the eager
+/// pre-create handoff that catches the race window where a pool window
+/// has just been promoted but the launcher's `WindowOpened` echo hasn't
+/// returned yet, see `state.rs::window_meta` doc + Phase B.5c). Without
+/// the union, a `HostShouldQuit` event in flight when the user opens a
+/// new window would classify the freshly-promoted pool window as an
+/// orphan and post `WM_CLOSE` to it (codex #702 P1).
 ///
 /// Pure function over snapshot inputs, so tests don't need CEF.
 pub(crate) fn classify_orphan_labels(
     browser_labels: &[String],
     unpromoted_pool: &HashSet<String>,
-    shadow_window_meta_keys: &HashSet<String>,
+    tracked_window_meta_keys: &HashSet<String>,
 ) -> Vec<String> {
     browser_labels
         .iter()
         .filter(|label| {
             label.starts_with("window-pool-")
                 && !unpromoted_pool.contains(label.as_str())
-                && !shadow_window_meta_keys.contains(label.as_str())
+                && !tracked_window_meta_keys.contains(label.as_str())
         })
         .cloned()
         .collect()
@@ -57,14 +67,22 @@ pub(crate) fn classify_orphan_labels(
 pub fn reconcile_and_drain(state: &Arc<AppState>) {
     let browser_pairs = state.list_browsers();
     let unpromoted = state.unpromoted_pool_labels_snapshot();
-    let shadow_keys: HashSet<String> = state
+    // Union of launcher-fed mirror + host's local pre-create handoff
+    // cache. The local cache covers the race window where a pool window
+    // has just been promoted (label removed from `unpromoted_pool`,
+    // `ReportWindowOpened` queued) but the launcher's `WindowOpened`
+    // echo hasn't returned yet to update `shadow_window_meta`. Without
+    // this union, a stale `HostShouldQuit` from the previous last-close
+    // would WM_CLOSE the freshly-promoted live window (codex #702 P1).
+    let mut tracked: HashSet<String> = state
         .shadow_window_meta
         .lock()
         .keys()
         .cloned()
         .collect();
+    tracked.extend(state.window_meta.lock().keys().cloned());
     let labels: Vec<String> = browser_pairs.iter().map(|(l, _)| l.clone()).collect();
-    let orphan_labels = classify_orphan_labels(&labels, &unpromoted, &shadow_keys);
+    let orphan_labels = classify_orphan_labels(&labels, &unpromoted, &tracked);
 
     if orphan_labels.is_empty() {
         tracing::info!(
@@ -219,6 +237,25 @@ mod tests {
             classify_orphan_labels(&labels, &unpromoted, &shadow),
             vec_of(&["window-pool-bbb", "window-pool-ddd"])
         );
+    }
+
+    #[test]
+    fn classify_skips_label_in_local_window_meta_only() {
+        // codex #702 P1 race: user just promoted a pool window. The
+        // host has already removed it from unpromoted_pool and queued
+        // ReportWindowOpened, but the launcher's WindowOpened echo
+        // hasn't arrived yet, so shadow_window_meta is empty. The
+        // host's *local* window_meta has the entry though (eager
+        // pre-create handoff). The reconciler MUST treat that as
+        // "tracked" so we don't WM_CLOSE a live new window.
+        //
+        // The caller (`reconcile_and_drain`) builds `tracked` as the
+        // union of shadow + local; this test pretends the union is
+        // local-only (the freshly-promoted case).
+        let labels = vec_of(&["window-pool-newly-promoted"]);
+        let unpromoted = set_of(&[]);
+        let tracked = set_of(&["window-pool-newly-promoted"]);
+        assert_eq!(classify_orphan_labels(&labels, &unpromoted, &tracked), Vec::<String>::new());
     }
 
     #[test]
