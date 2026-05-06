@@ -65,7 +65,10 @@ pub struct WorkspaceRecord {
 /// Tabs are owned by exactly one workspace; the workspace's
 /// `tab_ids` field gives the ordering. E.3 adds `block_ids` so the
 /// tab tracks which blocks live inside it.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+// `Eq` dropped in Phase E.4.B because `LayoutNode.size: f32` precludes
+// it. Nothing in the codebase relies on `TabRecord: Eq` (no HashSet
+// usage, no `==` comparisons in the reducer).
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct TabRecord {
     pub tab_id: String,
     pub workspace_id: String,
@@ -85,6 +88,21 @@ pub struct TabRecord {
     /// no pane is magnified (toggle-off). Mirrors
     /// `LayoutState.magnifiednodeid`.
     pub magnified_node_id: String,
+    /// Phase E.4.B (Option B) — layout tree root.
+    ///
+    /// Mirrors the persisted `LayoutState.rootnode`. Mutated by the
+    /// `LayoutClear` / `LayoutSetTree` / `LayoutInsertNode` /
+    /// `LayoutDeleteNode` reducer arms (and the rest of the 11 in
+    /// follow-up PRs). `None` represents an empty tree (no panes).
+    ///
+    /// **Status: scaffolded, not yet bootstrap-loaded.** Production
+    /// writers still go through the wcore-direct path (per
+    /// `srv-phase-e4b-implementation-plan-2026-05-03.md` Phase 7);
+    /// this field stays `None` at startup until those writers are
+    /// migrated. Reducer arms operate on it under the same
+    /// "no-callers-yet" discipline that H.6 follows in the host
+    /// reducer.
+    pub rootnode: Option<agentmux_common::LayoutNode>,
 }
 
 /// Phase E.3 — block as held by the srv reducer's canonical state.

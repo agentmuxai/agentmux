@@ -70,6 +70,35 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         Command::SetMagnifiedNode { tab_id, node_id } => {
             handle_set_magnified_node(state, tab_id, node_id)
         }
+        // Phase E.4.B Phase 5 — layout tree mutation arms. Currently
+        // dormant scaffolding (no production callers; Phase 7 migrates
+        // the wcore-direct writers to dispatch through these). 4 of 11
+        // arms shipped in this PR; remaining 7 (insert_at_index, move,
+        // swap, resize, replace, split_horizontal, split_vertical) are
+        // structurally identical and follow in subsequent PRs.
+        Command::LayoutClear {
+            tab_id,
+            correlation_id,
+        } => handle_layout_clear(state, tab_id, correlation_id),
+        Command::LayoutSetTree {
+            tab_id,
+            new_tree,
+            correlation_id,
+        } => handle_layout_set_tree(state, tab_id, new_tree, correlation_id),
+        Command::LayoutInsertNode {
+            tab_id,
+            node,
+            parent_id,
+            index,
+            focus_after: _,
+            magnify_after: _,
+            correlation_id,
+        } => handle_layout_insert_node(state, tab_id, node, parent_id, index, correlation_id),
+        Command::LayoutDeleteNode {
+            tab_id,
+            node_id,
+            correlation_id,
+        } => handle_layout_delete_node(state, tab_id, node_id, correlation_id),
         Command::CreateWindow {
             window_id,
             workspace_id,
@@ -386,6 +415,7 @@ fn handle_create_tab(state: &mut State, workspace_id: String, name: String) -> V
             block_ids: Vec::new(),
             focused_node_id: String::new(),
             magnified_node_id: String::new(),
+            rootnode: None,
         },
     );
     let workspace = state.workspaces.get_mut(&workspace_id).expect("checked");
@@ -695,6 +725,154 @@ fn handle_set_magnified_node(state: &mut State, tab_id: String, node_id: String)
     vec![Event::MagnifiedNodeChanged {
         tab_id,
         node_id,
+        version: v,
+    }]
+}
+
+// ── Phase E.4.B Phase 5 — layout tree reducer arms ──────────────────
+//
+// 4 of 11 arms shipped in this PR (clear, set_tree, insert_node,
+// delete_node). Pattern uniform across all 11:
+//   1. Look up tab; emit Event::Error on missing.
+//   2. Mutate `tab.rootnode` via the pure helpers in
+//      `crate::backend::layout::*` (shipped in Phase 4 / PRs #691, #692).
+//   3. Emit the matching Event::Layout* variant carrying the
+//      correlation_id and a fresh version.
+//
+// **No production callers yet** — wcore-direct writers continue to be
+// authoritative until Phase 7 migrates them. These arms are the
+// destination, not the source; tests below exercise them in isolation.
+
+fn handle_layout_clear(
+    state: &mut State,
+    tab_id: String,
+    correlation_id: String,
+) -> Vec<Event> {
+    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("LayoutClear: unknown tab {}", tab_id),
+            fatal: false,
+            version: v,
+        }];
+    };
+    tab.rootnode = None;
+    tab.focused_node_id = String::new();
+    tab.magnified_node_id = String::new();
+    let v = state.bump_version();
+    vec![Event::LayoutCleared {
+        tab_id,
+        correlation_id,
+        version: v,
+    }]
+}
+
+fn handle_layout_set_tree(
+    state: &mut State,
+    tab_id: String,
+    new_tree: Option<agentmux_common::LayoutNode>,
+    correlation_id: String,
+) -> Vec<Event> {
+    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("LayoutSetTree: unknown tab {}", tab_id),
+            fatal: false,
+            version: v,
+        }];
+    };
+    tab.rootnode = new_tree.clone();
+    let v = state.bump_version();
+    vec![Event::LayoutTreeReplaced {
+        tab_id,
+        new_tree,
+        correlation_id,
+        version: v,
+    }]
+}
+
+fn handle_layout_insert_node(
+    state: &mut State,
+    tab_id: String,
+    node: agentmux_common::LayoutNode,
+    parent_id: Option<String>,
+    index: Option<usize>,
+    correlation_id: String,
+) -> Vec<Event> {
+    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("LayoutInsertNode: unknown tab {}", tab_id),
+            fatal: false,
+            version: v,
+        }];
+    };
+    // Empty tree → promote new node to root (frontend's
+    // `findNextInsertLocation` returns the empty case as "make me root").
+    // Non-empty tree → delegate to the pure helper, which honours the
+    // same heuristic the frontend uses.
+    match tab.rootnode.as_mut() {
+        None => tab.rootnode = Some(node.clone()),
+        Some(root) => crate::backend::layout::insert_node(root, node.clone()),
+    }
+    // `parent_id` and `index` are accepted for forward-compat with the
+    // command schema but ignored by the pure-heuristic insert helper.
+    // Phase 7 wcore-migration will exercise the parent_id/index path
+    // via `LayoutInsertNodeAtIndex` (a separate command); this arm
+    // matches `findNextInsertLocation` semantics exactly.
+    let _ = (parent_id, index);
+    let v = state.bump_version();
+    vec![Event::LayoutNodeInserted {
+        tab_id,
+        node,
+        parent_id: None,
+        index: None,
+        correlation_id,
+        version: v,
+    }]
+}
+
+fn handle_layout_delete_node(
+    state: &mut State,
+    tab_id: String,
+    node_id: String,
+    correlation_id: String,
+) -> Vec<Event> {
+    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("LayoutDeleteNode: unknown tab {}", tab_id),
+            fatal: false,
+            version: v,
+        }];
+    };
+    let was_focused = tab.focused_node_id == node_id;
+    let Some(root) = tab.rootnode.as_mut() else {
+        // Empty tree — nothing to delete; idempotent no-op (no event).
+        return Vec::new();
+    };
+    if let Err(e) = crate::backend::layout::delete_node(root, &node_id) {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("LayoutDeleteNode: {} (tab {})", e, tab_id),
+            fatal: false,
+            version: v,
+        }];
+    }
+    if was_focused {
+        tab.focused_node_id = String::new();
+    }
+    let v = state.bump_version();
+    vec![Event::LayoutNodeDeleted {
+        tab_id,
+        node_id,
+        was_focused,
+        correlation_id,
         version: v,
     }]
 }
@@ -3361,5 +3539,216 @@ mod tests {
             // And invariants hold on the empty state.
             assert_invariants(&state);
         }
+    }
+
+    // ── Phase E.4.B Phase 5 — layout reducer arms ─────────────────
+    //
+    // Tests for the 4 arms shipped in this PR. All arms share the
+    // same shape (lookup tab → mutate `tab.rootnode` via pure helper
+    // → emit Event::Layout*); the unit tests below verify state
+    // mutation and event shape per arm. The pure helpers themselves
+    // have their own ~40 tests in `agentmux-srv/src/backend/layout/`.
+
+    fn leaf_node(id: &str, block_id: &str) -> agentmux_common::LayoutNode {
+        agentmux_common::LayoutNode {
+            id: id.to_string(),
+            size: 1.0,
+            data: Some(agentmux_common::LayoutNodeData {
+                block_id: block_id.to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn fresh_tab() -> (State, String) {
+        let mut state = State::default();
+        let ws = create_workspace(&mut state, "w");
+        let tab = create_tab(&mut state, &ws, "t");
+        (state, tab)
+    }
+
+    #[test]
+    fn layout_clear_wipes_rootnode_focus_magnify_and_emits_event() {
+        let (mut state, tab_id) = fresh_tab();
+        // Pre-load some state.
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("n1", "b1"));
+        state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "n1".into();
+        state.tabs.get_mut(&tab_id).unwrap().magnified_node_id = "n1".into();
+
+        let events = update(
+            &mut state,
+            Command::LayoutClear {
+                tab_id: tab_id.clone(),
+                correlation_id: "corr-1".into(),
+            },
+            &ctx(1),
+        );
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::LayoutCleared { correlation_id, .. } if correlation_id == "corr-1"
+        ));
+        let tab = &state.tabs[&tab_id];
+        assert!(tab.rootnode.is_none(), "rootnode wiped");
+        assert_eq!(tab.focused_node_id, "");
+        assert_eq!(tab.magnified_node_id, "");
+    }
+
+    #[test]
+    fn layout_clear_unknown_tab_emits_error() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::LayoutClear {
+                tab_id: "nope".into(),
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::Error { code: ErrorCode::InvalidCommand, .. }));
+    }
+
+    #[test]
+    fn layout_set_tree_replaces_rootnode_wholesale() {
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("old", "b1"));
+
+        let new_tree = Some(leaf_node("new", "b2"));
+        let events = update(
+            &mut state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: new_tree.clone(),
+                correlation_id: "corr-set".into(),
+            },
+            &ctx(1),
+        );
+
+        assert!(matches!(&events[0], Event::LayoutTreeReplaced { .. }));
+        assert_eq!(state.tabs[&tab_id].rootnode, new_tree);
+    }
+
+    #[test]
+    fn layout_set_tree_to_none_clears_rootnode() {
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("n", "b"));
+
+        let _ = update(
+            &mut state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: None,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(state.tabs[&tab_id].rootnode.is_none());
+    }
+
+    #[test]
+    fn layout_insert_node_into_empty_tree_promotes_to_root() {
+        let (mut state, tab_id) = fresh_tab();
+        let node = leaf_node("first", "b1");
+        let events = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: node.clone(),
+                parent_id: None,
+                index: None,
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr-ins".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::LayoutNodeInserted { .. }));
+        assert_eq!(state.tabs[&tab_id].rootnode.as_ref().map(|n| n.id.as_str()), Some("first"));
+    }
+
+    #[test]
+    fn layout_insert_node_into_existing_tree_uses_helper() {
+        let (mut state, tab_id) = fresh_tab();
+        // Pre-load a single-leaf tree.
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("root", "b1"));
+        let new_node = leaf_node("added", "b2");
+        let events = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: new_node,
+                parent_id: None,
+                index: None,
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::LayoutNodeInserted { .. }));
+        // Helper turned the leaf root into a group with both leaves;
+        // exact shape is the helper's contract — we just assert the
+        // tree changed and contains both block ids.
+        let root = state.tabs[&tab_id].rootnode.as_ref().expect("rootnode set");
+        let collected = collect_block_ids(root);
+        assert!(collected.contains(&"b1".to_string()));
+        assert!(collected.contains(&"b2".to_string()));
+    }
+
+    fn collect_block_ids(node: &agentmux_common::LayoutNode) -> Vec<String> {
+        let mut ids = Vec::new();
+        if let Some(d) = &node.data {
+            if !d.block_id.is_empty() {
+                ids.push(d.block_id.clone());
+            }
+        }
+        for c in &node.children {
+            ids.extend(collect_block_ids(c));
+        }
+        ids
+    }
+
+    #[test]
+    fn layout_delete_node_on_empty_tree_is_noop() {
+        let (mut state, tab_id) = fresh_tab();
+        let events = update(
+            &mut state,
+            Command::LayoutDeleteNode {
+                tab_id: tab_id.clone(),
+                node_id: "ghost".into(),
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(events.is_empty(), "no event for delete on empty tree");
+        assert!(state.tabs[&tab_id].rootnode.is_none());
+    }
+
+    #[test]
+    fn layout_delete_node_clears_focused_when_target_was_focused() {
+        let (mut state, tab_id) = fresh_tab();
+        // Tree: group with two leaves.
+        let mut root = leaf_node("root-group", "");
+        root.data = None;
+        root.children = vec![leaf_node("a", "b1"), leaf_node("b", "b2")];
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(root);
+        state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "a".into();
+
+        let events = update(
+            &mut state,
+            Command::LayoutDeleteNode {
+                tab_id: tab_id.clone(),
+                node_id: "a".into(),
+                correlation_id: "corr-del".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(
+            &events[0],
+            Event::LayoutNodeDeleted { was_focused: true, .. }
+        ));
+        assert_eq!(state.tabs[&tab_id].focused_node_id, "");
     }
 }
