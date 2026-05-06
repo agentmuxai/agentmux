@@ -235,11 +235,9 @@ describe("launcher-event idempotency (§8.14 contract, property tests)", () => {
         expect(shouldDispatchLauncherEvent(sentinel)).toBe(true);
         expect(launcherEventDedupStats().tracked).toBe(1);
 
-        // Post-restart: v=2..N admit if increasing per key. The "a" key
-        // already saw v=1 from the sentinel; subsequent v=2..N events
-        // for "a" must strictly increase. "b" wasn't reset since the
-        // sentinel was for "a"... wait — the sentinel CLEARS the entire
-        // cache, so all keys reset. Track from scratch.
+        // Post-restart: the sentinel clears the entire cache (not just
+        // the sentinel's own key), so all keys reset to "unseen". Build
+        // up fresh post-restart watermarks per key from this point.
         const seenPostRestart = new Map<string, number>([["a", 1]]);
         for (let i = 0; i < 30; i++) {
             // Avoid v=1 in the post-restart sequence so we don't trip
