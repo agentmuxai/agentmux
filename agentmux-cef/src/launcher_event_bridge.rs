@@ -28,10 +28,24 @@ use cef::{CefString, ImplBrowser, ImplFrame};
 
 /// Forward a launcher event to every top-level renderer.
 ///
-/// Pool + browser-pane labels are excluded — they have no UI.
-/// The JSON payload uses `serde_json::to_string`, so any string
-/// content from the Event is escaped against quote / backtick
-/// injection at the JS-string boundary.
+/// Excluded:
+///   - **Unpromoted** pool labels (`window-pool-*` still in
+///     `state.unpromoted_pool_labels`): no UI yet; renderer is
+///     waiting for `pool:promote`. Sending launcher events here
+///     would be wasted work.
+///   - Browser-pane labels (`browser-pane-*`): not top-level
+///     windows; have no InstancePanel.
+///
+/// Promoted pool windows (label still has the `window-pool-*`
+/// prefix but the entry is no longer in `unpromoted_pool_labels`)
+/// ARE included — they're the user-visible torn-off windows. Pre-fix,
+/// a label-prefix-only check excluded them too, so torn-off windows
+/// stopped receiving launcher events post-promotion (InstancePanel
+/// drift, plus anything else listening to launcher events).
+///
+/// JSON payload uses `serde_json::to_string`, so any string content
+/// from the Event is escaped against quote / backtick injection at
+/// the JS-string boundary.
 pub fn dispatch_to_renderers(state: &Arc<crate::state::AppState>, event: &Event) {
     let json = match serde_json::to_string(event) {
         Ok(s) => s,
@@ -52,9 +66,18 @@ pub fn dispatch_to_renderers(state: &Arc<crate::state::AppState>, event: &Event)
     let code = CefString::from(script.as_str());
     let url = CefString::from("");
 
+    // Snapshot unpromoted pool labels once. Iterating `list_browsers()`
+    // calls into the reducer per-iteration; the prefix+set check is
+    // a hot path on every event so we precompute the set.
+    let unpromoted = state.unpromoted_pool_labels_snapshot();
+
     // Phase H.2.b — reducer-aware iteration with fallback.
     for (label, browser) in state.list_browsers() {
-        if label.starts_with("window-pool-") || label.starts_with("browser-pane-") {
+        if label.starts_with("browser-pane-") {
+            continue;
+        }
+        if unpromoted.contains(label.as_str()) {
+            // Unpromoted pool window — has no UI, skip.
             continue;
         }
         if let Some(frame) = browser.main_frame() {
