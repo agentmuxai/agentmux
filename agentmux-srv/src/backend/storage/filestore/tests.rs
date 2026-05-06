@@ -667,20 +667,46 @@ fn test_lru_entries_under_cap_all_retained() {
 fn test_lru_oldest_evicted_when_cap_exceeded() {
     // Cap = 200 bytes.  Each file charges max(size, 64) bytes.
     // We'll write files of 100 bytes each (charged as 100 bytes).
-    // Three files = 300 bytes > 200 cap → oldest should be evicted.
-    let cap: usize = 200;
+    // Cap chosen to fit f1+f2 writes without triggering eviction
+    // (so the timestamps from make_file don't matter), but exceed
+    // on the f3 write so eviction targets the oldest 100B entry (f1).
+    //
+    // Sizing: make_file inserts 64B metadata entries; write_file
+    // grows them to 100B each.
+    //   - After 3× make_file:        192B
+    //   - After write_file f1 100B:  228B (delta +36 → ≤ cap)
+    //   - After write_file f2 100B:  264B (still ≤ cap)
+    //   - After write_file f3 100B:  300B (> cap, evicts oldest)
+    let cap: usize = 290;
     let store = FileStore::open_in_memory_with_cap(cap).unwrap();
 
-    // Create files and write 100-byte payloads, accessing them in order f1, f2, f3.
     for name in &["f1", "f2", "f3"] {
         store.make_file("z1", name, FileMeta::new(), FileOpts::default()).unwrap();
     }
 
     let data = vec![0xBB_u8; 100];
 
-    // Write f1 first (oldest), then f2, then f3 (newest).
+    // Write f1 first, backdate it before writing f2 (write_file
+    // overwrites last_access_ms to `now`, so backdating must come
+    // AFTER each write). Without per-write backdating, all 3 entries
+    // share the same millisecond timestamp on fast machines and the
+    // LRU sort tie-break is undefined.
     store.write_file("z1", "f1", &data).unwrap();
+    {
+        let mut cache = store.cache.lock().unwrap();
+        if let Some(e) = cache.get_mut(&("z1".to_string(), "f1".to_string())) {
+            e.last_access_ms = 1;
+        }
+    }
     store.write_file("z1", "f2", &data).unwrap();
+    {
+        let mut cache = store.cache.lock().unwrap();
+        if let Some(e) = cache.get_mut(&("z1".to_string(), "f2".to_string())) {
+            e.last_access_ms = 2;
+        }
+    }
+    // f3's write triggers the cap-exceeded eviction. f1 (ts=1) is
+    // strictly the oldest by construction.
     store.write_file("z1", "f3", &data).unwrap();
 
     // After inserting f3 the cap (200) is exceeded.  evict_to_cap should have
@@ -707,11 +733,12 @@ fn test_lru_oldest_evicted_when_cap_exceeded() {
 
 #[test]
 fn test_lru_access_promotes_entry() {
-    // Cap sized to hold exactly 2 × 100-byte entries.
-    // Insert f1, f2 (fills to cap).  Then re-access f1 (promotes it to MRU).
-    // Insert f3 → cap exceeded → eviction should remove f2 (now the oldest),
-    // not f1 (recently touched).
-    let cap: usize = 200;
+    // Cap sized to fit f1+f2 writes without eviction; the f3 write
+    // pushes total to 300B, triggering eviction of the oldest. By
+    // construction below f2 is the oldest (timestamp=1), f1 is newer.
+    // See `test_lru_oldest_evicted_when_cap_exceeded` for the cap
+    // sizing rationale.
+    let cap: usize = 290;
     let store = FileStore::open_in_memory_with_cap(cap).unwrap();
 
     for name in &["f1", "f2", "f3"] {
@@ -722,15 +749,14 @@ fn test_lru_access_promotes_entry() {
     store.write_file("z1", "f1", &data).unwrap();
     store.write_file("z1", "f2", &data).unwrap();
 
-    // Re-access f1 to promote it (make it newer than f2).
-    // We use a small sleep-free timestamp backdate trick: directly set f2's
-    // last_access_ms to an older value so f1 is definitively newer.
+    // Promote f1 to MRU (newer than f2). We backdate f2 explicitly
+    // and touch f1 with a fresh `now` so the LRU sort sees a strict
+    // f2 < f1 order regardless of millisecond timestamp ties.
     {
         let mut cache = store.cache.lock().unwrap();
         if let Some(e) = cache.get_mut(&("z1".to_string(), "f2".to_string())) {
-            e.last_access_ms = 1; // artificially old
+            e.last_access_ms = 1; // artificially oldest
         }
-        // Touch f1 to make it newer
         if let Some(e) = cache.get_mut(&("z1".to_string(), "f1".to_string())) {
             e.last_access_ms = FileStore::now_ms();
         }

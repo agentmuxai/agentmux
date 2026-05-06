@@ -280,8 +280,11 @@ fn test_handler_inject_agent_not_found() {
     assert!(resp.error.unwrap().contains("agent not found"));
 }
 
-#[test]
-fn test_handler_inject_success() {
+// `#[tokio::test]` because `Handler::inject_message` internally
+// `tokio::spawn`s the delayed-Enter follow-up; without a runtime it
+// panics at the spawn site (handler.rs:308).
+#[tokio::test]
+async fn test_handler_inject_success() {
     let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
     let sent_clone = sent.clone();
 
@@ -311,9 +314,13 @@ fn test_handler_inject_success() {
     assert_eq!(resp.block_id.as_deref(), Some("block1"));
 
     let calls = sent.lock().unwrap();
+    // Production sequence (handler.rs:268-280): clear `\r`, then
+    // message+`\r` as a single payload. The 3 delayed `\r` follow-ups
+    // are tokio-spawned with 200ms delays so they don't run before
+    // the assertions in this synchronous-only test body.
     assert_eq!(calls.len(), 2);
-    assert_eq!(calls[0], ("block1".to_string(), b"hello".to_vec()));
-    assert_eq!(calls[1], ("block1".to_string(), b"\r".to_vec()));
+    assert_eq!(calls[0], ("block1".to_string(), b"\r".to_vec()));
+    assert_eq!(calls[1], ("block1".to_string(), b"hello\r".to_vec()));
 }
 
 #[test]

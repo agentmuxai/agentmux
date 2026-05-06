@@ -74,3 +74,8 @@ tempfile = "3"
 # that doesn't play nicely with our existing test runner; we only
 # need the strategy combinators + `proptest!` macro.
 proptest = { version = "1", default-features = false, features = ["std"] }
+# `blocking` feature enabled for the integration test target only —
+# `tests/integration_test.rs` spawns the srv as a subprocess and
+# wants synchronous HTTP from a non-tokio test fn. Production code
+# stays on the async client.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
