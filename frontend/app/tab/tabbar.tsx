@@ -540,47 +540,6 @@ function TabBar(props: TabBarProps): JSX.Element {
             icon: "window-restore",
             onClick: () => getApi().openNewWindow().catch(console.error),
         },
-        {
-            label: "Open in New Window",
-            icon: "arrow-up-right-from-square",
-            subItems: [
-                {
-                    label: "Agent",
-                    icon: "sparkles",
-                    onClick: () => getApi().openNewWindow().catch(console.error),
-                },
-                {
-                    label: "Terminal",
-                    icon: "square-terminal",
-                    onClick: () => getApi().openNewWindow().catch(console.error),
-                },
-                {
-                    label: "Browser",
-                    icon: "globe",
-                    onClick: () => getApi().openNewWindow().catch(console.error),
-                },
-                {
-                    label: "Editor",
-                    icon: "file-code",
-                    onClick: () => getApi().openNewWindow().catch(console.error),
-                },
-                {
-                    label: "System Info",
-                    icon: "chart-line",
-                    onClick: () => getApi().openNewWindow().catch(console.error),
-                },
-                {
-                    label: "Swarm",
-                    icon: "bee",
-                    onClick: () => getApi().openNewWindow().catch(console.error),
-                },
-                {
-                    label: "Help",
-                    icon: "circle-question",
-                    onClick: () => getApi().openNewWindow().catch(console.error),
-                },
-            ],
-        },
         { label: "", divider: true },
         {
             label: "Settings",
