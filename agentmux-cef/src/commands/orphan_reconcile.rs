@@ -213,13 +213,12 @@ pub fn reconcile_and_drain(state: &Arc<AppState>) {
         .collect();
     let candidates = classify_candidate_orphans(&labels, &unpromoted, &shadow_keys);
 
-    if candidates.is_empty() {
-        tracing::info!(
-            target: "wrr",
-            "[orphan-reconcile] no candidates — host is consistent; cascade should already be in flight"
-        );
-        return;
-    }
+    // Don't early-return when candidates is empty: the warm-pool
+    // close loop in the UI-thread planner ALSO needs to fire when
+    // the only remaining browsers are unpromoted-pool inventory
+    // (which the classifier filters out by design — they're not
+    // orphan candidates, but they DO need to drain on shutdown when
+    // the host's normal Stage-1 cascade was skipped).
 
     // Marshal CEF Browser/BrowserHost calls to the UI thread. The
     // existing two-stage cascade (`client/mod.rs::on_before_close`)
