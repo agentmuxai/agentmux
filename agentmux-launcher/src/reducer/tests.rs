@@ -1668,6 +1668,47 @@ fn duplicate_open_for_promoted_label_preserves_foregrounded_since_open() {
 }
 
 #[test]
+fn promote_after_open_marks_existing_mirror_foregrounded() {
+    // Order-tolerant promote (PR #709 round 2): if open arrives before
+    // promote (out-of-order IPC, replay, or test fuzzer), the mirror
+    // exists with foregrounded_since_open=false. Promote must update
+    // the existing mirror directly INSTEAD of leaking an entry into
+    // just_promoted_labels that will never be drained.
+    //
+    // Caught by the `just_promoted_labels_drained_by_open_or_close`
+    // proptest after codex P2 PR #709 round 1 pointed out that the
+    // original strategy used disjoint label spaces.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-x".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    assert!(
+        !state.windows.get("window-x").unwrap().foregrounded_since_open,
+        "control: pre-promote, mirror has foregrounded_since_open=false"
+    );
+
+    let _ = update(
+        &mut state,
+        Command::ReportPoolWindowPromoted { label: "window-x".into() },
+        &c,
+    );
+    assert!(
+        state.windows.get("window-x").unwrap().foregrounded_since_open,
+        "promote-after-open must update the existing mirror"
+    );
+    assert!(
+        !state.just_promoted_labels.contains("window-x"),
+        "promote-after-open must NOT leak into just_promoted_labels (no consumer to drain it)"
+    );
+}
+
+#[test]
 fn close_drops_orphaned_just_promoted_entry() {
     // If promote was emitted but the matching open never arrived
     // (host crash mid-tear-off etc.), a subsequent close for the
@@ -2450,6 +2491,49 @@ fn arb_b8_host_command() -> impl proptest::strategy::Strategy<Value = Command> {
             Command::ReportBackendWindowIdRegistered { label, window_id }
         }),
         2 => "[a-c]{1,3}".prop_map(|label| Command::ReportBackendWindowIdUnregistered { label }),
+        // Promote — exercises just_promoted_labels (PR #708 round 3).
+        // Drift-storm fix relies on this set bridging the
+        // PoolPromoted → WindowOpened gap; a proptest verifies the
+        // set never grows without bound. NOTE: this strategy uses a
+        // disjoint `pool-*` label space from opens/closes — the
+        // producer-side bound holds, but the consumer paths in
+        // `handle_report_window_opened/Closed` aren't exercised here.
+        // For consumer-path coverage see `arb_promote_focused_command`.
+        2 => "pool-[a-c]{1,2}".prop_map(|label| Command::ReportPoolWindowPromoted { label }),
+    ]
+}
+
+/// Strategy with **overlapping label space** between promote / open /
+/// close — every label is drawn from the same small pool so that
+/// `ReportPoolWindowPromoted("a")` is followed (with non-trivial
+/// probability) by `ReportWindowOpened { label: "a", .. }` or
+/// `ReportWindowClosed { label: "a" }`. Used by the
+/// `just_promoted_labels_drained_by_open_or_close` proptest, which
+/// codex flagged in PR #709 round 1: with the disjoint label space
+/// in `arb_b8_host_command`, the cleanup paths in
+/// `handle_report_window_opened/Closed` never ran on promoted labels,
+/// so the property test would still pass with the cleanups removed.
+///
+/// This is a regression-guard strategy specifically for the
+/// drift-storm fix from PR #708 round 3.
+fn arb_promote_focused_command() -> impl proptest::strategy::Strategy<Value = Command> {
+    use proptest::prelude::*;
+    // Shared label space — opens, closes, AND promotes all draw from
+    // {a, b, c, ab, ac, bc} so producer/consumer paths overlap.
+    prop_oneof![
+        3 => (
+            "[a-c]{1,2}",
+            prop_oneof![Just(WindowKind::FullInstance), Just(WindowKind::Subwindow)],
+        )
+            .prop_map(|(label, kind)| {
+                Command::ReportWindowOpened { label, kind, parent_label: None }
+            }),
+        3 => "[a-c]{1,2}".prop_map(|label| Command::ReportWindowClosed { label }),
+        3 => "[a-c]{1,2}".prop_map(|label| Command::ReportPoolWindowPromoted { label }),
+        // Pool add/remove kept to maintain pool invariants under the
+        // overlapping label space (mirrors b8_host_command's mix).
+        1 => "[a-c]{1,2}".prop_map(|label| Command::ReportPoolWindowAdded { label, saga_id: None }),
+        1 => "[a-c]{1,2}".prop_map(|label| Command::ReportPoolWindowRemoved { label }),
     ]
 }
 
@@ -2479,6 +2563,130 @@ proptest! {
                 "label(s) in both pool and windows: {:?}", overlap
             );
         }
+    }
+
+    /// Both consumer paths drain `just_promoted_labels`:
+    ///   - `handle_report_window_opened` (production path, primary)
+    ///   - `handle_report_window_closed` (fallback for promote-with-no-open)
+    ///
+    /// **Property:** for every label `L` whose LAST seen command was an
+    /// open or close (consumer), `L` MUST NOT be in
+    /// `just_promoted_labels` at end-of-sequence. Catches both broken
+    /// drains: codex P2 PR #709 round 2 noted the prior version only
+    /// caught the open-consumer regression (a sequence like
+    /// `Promoted("a") → Closed("a")` would leave "a" in the set with
+    /// `windows.contains_key("a") == false`, passing the old "no
+    /// label in both sets" check trivially).
+    ///
+    /// Mutation-test: commenting out either cleanup line in
+    /// `handle_report_window_opened` or `handle_report_window_closed`
+    /// makes this proptest fail.
+    #[test]
+    fn both_drain_paths_remove_just_promoted_entry(
+        cmds in proptest::collection::vec(arb_promote_focused_command(), 1..80)
+    ) {
+        let (mut state, host_ctx) = registered_host_state();
+        // Track the LAST command kind seen per label as we apply the
+        // sequence. After all commands are applied, any label whose
+        // last-command was an open or close is a "post-consumer"
+        // label and MUST have been drained from just_promoted_labels.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        enum LastCmd { Promote, OpenOrClose }
+        let mut last_cmd_per_label: std::collections::HashMap<String, LastCmd> = std::collections::HashMap::new();
+        for cmd in cmds {
+            match &cmd {
+                Command::ReportPoolWindowPromoted { label } => {
+                    last_cmd_per_label.insert(label.clone(), LastCmd::Promote);
+                }
+                Command::ReportWindowOpened { label, .. }
+                | Command::ReportWindowClosed { label } => {
+                    last_cmd_per_label.insert(label.clone(), LastCmd::OpenOrClose);
+                }
+                _ => {}
+            }
+            let _ = update(&mut state, cmd, &host_ctx);
+        }
+        for (label, last) in &last_cmd_per_label {
+            if *last == LastCmd::OpenOrClose {
+                prop_assert!(
+                    !state.just_promoted_labels.contains(label),
+                    "label {:?} had last-cmd open/close (consumer) but is still in just_promoted_labels — drain regression",
+                    label
+                );
+            }
+        }
+    }
+
+    /// Bound on the just_promoted set: it never grows past the count
+    /// of distinct labels for which `ReportPoolWindowPromoted` has
+    /// been emitted across the whole sequence. This is a cumulative
+    /// upper-bound (the "ever promoted" denominator), NOT a
+    /// "currently pending" bound — the consumer paths can also
+    /// remove entries, but never add to the denominator.
+    ///
+    /// Reagent P2 PR #709 round 2 flagged the prior name
+    /// (`bounded_by_pending_promotes`) as misleading vs the actual
+    /// bound. Renamed to match what's measured.
+    #[test]
+    fn just_promoted_labels_bounded_by_distinct_labels_ever_promoted(
+        cmds in proptest::collection::vec(arb_promote_focused_command(), 1..80)
+    ) {
+        let (mut state, host_ctx) = registered_host_state();
+        let mut distinct_ever_promoted: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for cmd in &cmds {
+            if let Command::ReportPoolWindowPromoted { label } = cmd {
+                distinct_ever_promoted.insert(label.clone());
+            }
+        }
+        for cmd in cmds {
+            let _ = update(&mut state, cmd, &host_ctx);
+            prop_assert!(
+                state.just_promoted_labels.len() <= distinct_ever_promoted.len(),
+                "just_promoted_labels grew past distinct labels ever promoted: {} > {}",
+                state.just_promoted_labels.len(),
+                distinct_ever_promoted.len()
+            );
+        }
+    }
+
+    /// `ReportPoolWindowPromoted` is idempotent: applying the SAME
+    /// promote command N times produces equivalent state to applying
+    /// once (modulo `event_version`, which is monotonic by design).
+    /// Spec §8.14 sibling — this is the GENERATOR-side property
+    /// (sub set insertion is naturally idempotent), exercised
+    /// explicitly to lock the contract.
+    #[test]
+    fn promote_is_idempotent_on_just_promoted_labels(
+        label in "pool-[a-c]{1,2}",
+        n in 2usize..10
+    ) {
+        let (mut state, host_ctx) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportPoolWindowAdded { label: label.clone(), saga_id: None },
+            &host_ctx,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportPoolWindowRemoved { label: label.clone() },
+            &host_ctx,
+        );
+        for _ in 0..n {
+            let _ = update(
+                &mut state,
+                Command::ReportPoolWindowPromoted { label: label.clone() },
+                &host_ctx,
+            );
+        }
+        prop_assert!(
+            state.just_promoted_labels.contains(&label),
+            "promote must record label"
+        );
+        prop_assert_eq!(
+            state.just_promoted_labels.len(), 1,
+            "{} promotes for the same label produce 1 entry, not n",
+            n
+        );
     }
 
     /// Instance numbers within `state.instance_registry` are

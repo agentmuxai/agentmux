@@ -95,9 +95,25 @@ pub(super) fn handle_report_pool_window_removed(state: &mut State, label: String
 /// pool membership in `handle_report_window_opened` either. The
 /// `just_promoted_labels` set bridges the microsecond gap.
 ///
+/// **Order-tolerant:** if the open already arrived (out-of-order
+/// IPC, replay, fuzzed sequence), update the existing mirror
+/// immediately so we don't leak a `just_promoted_labels` entry that
+/// will never be drained. The proptest in tests.rs
+/// (`just_promoted_labels_drained_by_open_or_close`) caught this
+/// gap on PR #709 round 2.
+///
 /// See `docs/specs/ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`.
 pub(super) fn handle_report_pool_window_promoted(state: &mut State, label: String) -> Vec<Event> {
-    state.just_promoted_labels.insert(label.clone());
+    // Order-tolerant: if the open already created the mirror, mark
+    // it foregrounded directly (don't bother with the bridge set).
+    // Production order has open AFTER promote, so the else-branch
+    // (insert into just_promoted_labels, consumed at open time) is
+    // the common path.
+    if let Some(mirror) = state.windows.get_mut(&label) {
+        mirror.foregrounded_since_open = true;
+    } else {
+        state.just_promoted_labels.insert(label.clone());
+    }
     let v = state.bump_version();
     vec![Event::PoolWindowPromoted { label, version: v }]
 }
