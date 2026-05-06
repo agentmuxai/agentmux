@@ -3,6 +3,7 @@
 
 import { atoms, createBlock, createTab, getApi, setActiveTab } from "@/store/global";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
+import { invokeCommand } from "@/app/platform/ipc";
 import { fireAndForget } from "@/util/util";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
@@ -584,7 +585,11 @@ function TabBar(props: TabBarProps): JSX.Element {
         {
             label: "Settings",
             icon: "cog",
-            onClick: () => fireAndForget(() => createBlock({ meta: { view: "settings" } })),
+            onClick: () =>
+                fireAndForget(async () => {
+                    const path = await invokeCommand<string>("ensure_settings_file");
+                    await invokeCommand("open_in_editor", { path });
+                }),
         },
         {
             label: "Help",
