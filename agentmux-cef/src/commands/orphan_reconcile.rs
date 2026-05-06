@@ -276,18 +276,31 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
     }
 
     if plan.closes.is_empty() {
-        if plan.begin_drain {
-            // The reducer's `browsers` is empty AND we're in drain
-            // mode, but Stage-2 quit (`client::browser_list.is_empty()`)
-            // may still be blocked by stale CefClient entries we
-            // can't see from here. Drive quit ourselves — same
-            // semantics as the hostless+drain path. (Codex round-19
-            // P2: previously this just logged and returned.)
+        // Even in drain mode, hold off on `quit_message_loop` if a
+        // window creation is in flight: `open_window_with_kind`
+        // pushes a `PendingWindowCreation` BEFORE its `post_create_window`
+        // task registers the new browser. A stale `HostShouldQuit`
+        // racing that gap would see empty browsers and (without this
+        // gate) terminate the message loop, dropping the new window.
+        let pending_create = !state
+            .host_state
+            .lock()
+            .pending_window_creations
+            .is_empty();
+        if plan.begin_drain && !pending_create {
+            // Drain mode AND no in-flight creation: Stage-2 quit may
+            // be blocked by stale `client::browser_list` entries we
+            // can't see from here. Drive quit ourselves.
             tracing::warn!(
                 target: "wrr",
                 "[orphan-reconcile] nothing to close but drain requested — driving quit_message_loop"
             );
             quit_message_loop();
+        } else if plan.begin_drain {
+            tracing::info!(
+                target: "wrr",
+                "[orphan-reconcile] drain requested but pending window creation in flight — deferring quit"
+            );
         } else {
             tracing::info!(
                 target: "wrr",
@@ -352,10 +365,7 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
     // run before the loop terminates, but we're shutting down anyway
     // and OS process exit reclaims their resources. Gated on
     // `begin_drain` so a stale `HostShouldQuit` racing with a live
-    // session can't terminate it. (Codex round-18 P1: the previous
-    // gate also required `state.browsers.is_empty()`, which is false
-    // mid-close in the mixed case — meant the host could stay alive
-    // forever when Hostless + Closable were drained together.)
+    // session can't terminate it.
     if any_hostless && plan.begin_drain {
         tracing::warn!(
             target: "wrr",
@@ -419,7 +429,9 @@ fn drive_close_browser(
         // BrowserHost vanished before we got here. Mirror the
         // planner's Hostless path — but only fall through to
         // UnregisterBrowser if drain is active (same gating as the
-        // Hostless bucket; see codex round-17 P1 #2).
+        // Hostless bucket — outside drain, dispatching
+        // UnregisterBrowser bypasses on_pool_window_destroyed
+        // bookkeeping and creates pool-reducer drift).
         if drain_mode {
             tracing::warn!(
                 target: "wrr",
@@ -479,9 +491,7 @@ mod tests {
     //         and the resulting (live_user_count, freshly_promoted)
     //         derivation that drives `safe_to_drain`.
     //
-    // Each test names the scenario from the spec (Race A/B/C/D) it
-    // exercises, plus the codex round it would have caught if it
-    // had existed earlier.
+    // Each test names the spec scenario (Race A/B/C/D) it exercises.
 
     fn map_of(items: &[(&str, HwndStatus)]) -> HashMap<String, HwndStatus> {
         items.iter().map(|(s, st)| (s.to_string(), *st)).collect()
@@ -705,9 +715,7 @@ mod tests {
     fn plan_hostless_unpromoted_pool_unregisters_not_closes() {
         // Hostless takes precedence over pool-state classification:
         // an unpromoted-pool slot that lost its BrowserHost still
-        // needs UnregisterBrowser, not CloseBrowser. Codex round-16
-        // P1 case (the warm-pool loop must not blindly emit
-        // CloseBrowser for non-probed pool labels).
+        // needs UnregisterBrowser, not CloseBrowser.
         let label = "window-pool-hostless-unpromoted";
         let plan = plan_reconcile(
             &map_of(&[(label, HwndStatus::Hostless)]),
@@ -751,10 +759,10 @@ mod tests {
             &set_of(&[unpromoted]),
         );
         // freshly_promoted blocks drain → only Dead zombies close.
-        // Hostless is gated on safe_to_drain (codex round-17 P1 #2
-        // — Hostless cleanup outside drain bypasses pool reducer
-        // bookkeeping, so it waits for the next reconcile that
-        // can drain).
+        // Hostless is gated on safe_to_drain (outside drain,
+        // dispatching UnregisterBrowser bypasses pool-reducer
+        // bookkeeping; it waits for the next reconcile that can
+        // drain).
         assert_eq!(plan.freshly_promoted, vec![fresh.to_string()]);
         assert!(!plan.begin_drain);
         let actions: HashMap<String, CloseAction> = plan
@@ -773,10 +781,10 @@ mod tests {
 
     #[test]
     fn plan_non_pool_zombie_closes_too() {
-        // Codex round-17 P1 #1: a regular `main`/`window-X` top-level
-        // can crash. The launcher's apply_hwnd_destroyed emits
-        // HostShouldQuit; the reconciler must reap that zombie too,
-        // not just `window-pool-*` ones.
+        // A regular `main`/`window-X` top-level can crash. The
+        // launcher's apply_hwnd_destroyed emits HostShouldQuit; the
+        // reconciler must reap that zombie too, not just
+        // `window-pool-*` ones.
         let main = "main";
         let plan = plan_reconcile(
             &map_of(&[(main, HwndStatus::Dead)]),
@@ -791,11 +799,11 @@ mod tests {
 
     #[test]
     fn plan_hostless_skipped_when_drain_blocked() {
-        // Codex round-17 P1 #2: hostless cleanup outside drain mode
-        // bypasses on_pool_window_destroyed and creates pool-reducer
-        // drift. When a live user window is present, the hostless
-        // entry must NOT be unregistered — wait for the next
-        // reconcile that can drain.
+        // Hostless cleanup outside drain mode bypasses
+        // on_pool_window_destroyed and creates pool-reducer drift.
+        // When a live user window is present, the hostless entry
+        // must NOT be unregistered — wait for the next reconcile
+        // that can drain.
         let user = "main";
         let hostless = "window-pool-hostless";
         let plan = plan_reconcile(
@@ -839,19 +847,17 @@ mod tests {
 
     #[test]
     fn plan_mixed_hostless_and_closable_in_drain() {
-        // Codex round-18 P1: when a drain plan contains both Hostless
-        // AND CloseBrowser entries, the orchestrator must still
-        // drive quit_message_loop. The closables' on_before_close
-        // would normally satisfy Stage-2 quit, but the Hostless
-        // entries leave stale references in `client::browser_list`
+        // When a drain plan contains both Hostless AND CloseBrowser
+        // entries, the orchestrator must still drive
+        // quit_message_loop. The closables' on_before_close would
+        // normally satisfy Stage-2 quit, but the Hostless entries
+        // leave stale references in `client::browser_list`
         // (UnregisterBrowser doesn't touch that), so Stage 2 never
         // fires. The reconciler drives quit itself.
         //
         // Plan-level assertion: both actions are scheduled, drain
         // fires. The quit_message_loop drive itself is exercised by
-        // the orchestrator and gated on `begin_drain && any_hostless`
-        // (no `state.browsers.is_empty` precondition — that was the
-        // bug).
+        // the orchestrator and gated on `begin_drain && any_hostless`.
         let dead = "window-pool-dead";
         let hostless = "window-pool-hostless";
         let plan = plan_reconcile(
