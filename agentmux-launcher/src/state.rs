@@ -192,6 +192,23 @@ pub struct State {
     /// pending HWND by `label_hint`/timing). Anything still here
     /// after a follow-up event is classified as `HwndWithoutBrowser`.
     pub pending_hwnds: HashMap<u64, PendingHwnd>,
+    /// Drift-storm fix (PR #708 round 3) — labels for which the host
+    /// emitted `ReportPoolWindowPromoted` but the corresponding
+    /// `ReportWindowOpened` hasn't arrived yet. The actual host emit
+    /// order on tear-off is `ReportPoolWindowRemoved` →
+    /// `ReportPoolWindowPromoted` → `ReportWindowOpened`, so at
+    /// promote-time the launcher has NO `WindowMirror` for the label
+    /// — the mirror is created by `ReportWindowOpened` a few ms
+    /// later. Without this set, the post-promote mirror is initialized
+    /// with `foregrounded_since_open: false`, the open-transient drift
+    /// detector then fires `HiddenSinceOpen` on every visible→hidden
+    /// flicker during HWND repositioning, the host fans each event
+    /// out across the bridge and the renderer's V8 isolate crashes.
+    /// `ReportWindowOpened` consumes the entry to initialize the new
+    /// mirror with `foregrounded_since_open: true`. Removed on
+    /// `ReportWindowClosed` if open never arrived (bounded leak).
+    /// See `docs/specs/ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`.
+    pub just_promoted_labels: HashSet<String>,
     // F.7 cleanup audit: removed unused `launcher_start_ms: Option<u64>`
     // field. It was set in Default but no reducer arm or consumer
     // ever read it — the WRR observability path uses the OnceLock-
@@ -232,6 +249,7 @@ impl Default for State {
             next_client_id: 1,
             monitors: Vec::new(),
             pending_hwnds: HashMap::new(),
+            just_promoted_labels: HashSet::new(),
         }
     }
 }

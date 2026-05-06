@@ -1467,6 +1467,231 @@ fn wrr_off_monitor_after_user_foregrounded_does_not_correct() {
 }
 
 #[test]
+fn tear_off_promote_emit_order_initializes_mirror_with_foregrounded_true() {
+    // Drift-storm regression (v0.33.655 smoke). PRODUCTION emit order
+    // (per agentmux-cef/src/commands/window_pool.rs):
+    //
+    //   1. ReportPoolWindowAdded   → pool spawn (some time earlier)
+    //   2. ReportPoolWindowRemoved → about to promote (no mirror yet)
+    //   3. ReportPoolWindowPromoted → records in just_promoted_labels
+    //   4. ReportWindowOpened      → mirror created NOW
+    //   5. ReportHwndOpened        → HWND linked
+    //   6. SetWindowPos churn      → ReportHwndVisibilityChanged false
+    //
+    // Pre-fix: step 4 initialized foregrounded_since_open=false, so
+    // step 6 re-fired HiddenSinceOpen drift → host fans across bridge
+    // → renderer V8 crash. Fix: step 3 records, step 4 consumes and
+    // initializes foregrounded_since_open=true.
+    //
+    // See `docs/specs/ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`.
+    let (mut state, c) = registered_host_state();
+
+    // Steps 1–2: pool spawn + remove (no mirror in state.windows).
+    let _ = update(
+        &mut state,
+        Command::ReportPoolWindowAdded { label: "window-pool-abc".into(), saga_id: None },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportPoolWindowRemoved { label: "window-pool-abc".into() },
+        &c,
+    );
+    assert!(
+        !state.windows.contains_key("window-pool-abc"),
+        "pre-promote: no mirror yet (production invariant)"
+    );
+
+    // Step 3: promote. Records in just_promoted_labels; emits typed event.
+    let _ = update(
+        &mut state,
+        Command::ReportPoolWindowPromoted { label: "window-pool-abc".into() },
+        &c,
+    );
+    assert!(
+        state.just_promoted_labels.contains("window-pool-abc"),
+        "promote must record label in just_promoted_labels"
+    );
+
+    // Step 4: window opened — mirror created with foregrounded_since_open=true.
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-pool-abc".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let mirror = state.windows.get("window-pool-abc").expect("mirror created on open");
+    assert!(
+        mirror.foregrounded_since_open,
+        "post-promote open must initialize foregrounded_since_open=true (got false → drift storm regression)"
+    );
+    assert!(
+        !state.just_promoted_labels.contains("window-pool-abc"),
+        "open consumes the just_promoted entry"
+    );
+
+    // Step 5: HWND link.
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xBB,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("window-pool-abc".into()),
+        },
+        &c,
+    );
+
+    // Step 6: visibility flicker during HWND repositioning. MUST NOT drift.
+    let post = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xBB, visible: false },
+        &c,
+    );
+    assert!(
+        !post.iter().any(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+        )),
+        "post-promote hide must not drift, got {:?}",
+        post
+    );
+}
+
+#[test]
+fn cold_open_without_promote_still_initializes_foregrounded_false() {
+    // Sanity: a regular window open (e.g. main, fresh tear-off NOT
+    // through pool) MUST keep foregrounded_since_open=false so the
+    // open-transient corrective logic still applies for those windows.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-fresh".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    assert!(
+        !state.windows.get("window-fresh").unwrap().foregrounded_since_open,
+        "non-promote open must keep foregrounded_since_open=false"
+    );
+}
+
+#[test]
+fn promote_for_label_without_window_mirror_emits_event_idempotently() {
+    // The handler's idempotency contract: ReportPoolWindowPromoted
+    // can arrive without a paired ReportWindowOpened (e.g. the open
+    // IPC was lost). The handler must emit the typed event and
+    // record in just_promoted_labels without synthesising a mirror.
+    let (mut state, c) = registered_host_state();
+    let evs = update(
+        &mut state,
+        Command::ReportPoolWindowPromoted { label: "window-pool-xyz".into() },
+        &c,
+    );
+    assert!(
+        evs.iter().any(|e| matches!(e, Event::PoolWindowPromoted { .. })),
+        "promote without mirror must still emit PoolWindowPromoted"
+    );
+    assert!(
+        state.just_promoted_labels.contains("window-pool-xyz"),
+        "promote records in just_promoted_labels"
+    );
+    assert!(
+        !state.windows.contains_key("window-pool-xyz"),
+        "promote must not synthesise a mirror"
+    );
+}
+
+#[test]
+fn duplicate_open_for_promoted_label_preserves_foregrounded_since_open() {
+    // Codex P2 PR #708 round 3: `foregrounded_since_open` is monotonic
+    // per its WindowMirror contract. The first open after a promote
+    // consumes `just_promoted_labels` and sets the flag to true. A
+    // duplicate ReportWindowOpened (existing handler overwrites the
+    // mirror wholesale) must NOT reset the flag — otherwise the next
+    // post-promote `ReportHwndVisibilityChanged` re-fires
+    // `HiddenSinceOpen` drift.
+    let (mut state, c) = registered_host_state();
+
+    // Production tear-off sequence.
+    let _ = update(
+        &mut state,
+        Command::ReportPoolWindowAdded { label: "window-pool-dup".into(), saga_id: None },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportPoolWindowRemoved { label: "window-pool-dup".into() },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportPoolWindowPromoted { label: "window-pool-dup".into() },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-pool-dup".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    assert!(
+        state.windows.get("window-pool-dup").unwrap().foregrounded_since_open,
+        "first open: foregrounded_since_open=true (consumed just_promoted)"
+    );
+
+    // Duplicate open for the same label. just_promoted entry is
+    // already gone; the flag must survive via OR with the prior
+    // mirror's value.
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-pool-dup".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    assert!(
+        state.windows.get("window-pool-dup").unwrap().foregrounded_since_open,
+        "duplicate open MUST preserve foregrounded_since_open=true (regression: drift storm returns)"
+    );
+}
+
+#[test]
+fn close_drops_orphaned_just_promoted_entry() {
+    // If promote was emitted but the matching open never arrived
+    // (host crash mid-tear-off etc.), a subsequent close for the
+    // same label must clean up the just_promoted entry to bound the
+    // leak.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportPoolWindowPromoted { label: "window-pool-orphan".into() },
+        &c,
+    );
+    assert!(state.just_promoted_labels.contains("window-pool-orphan"));
+    let _ = update(
+        &mut state,
+        Command::ReportWindowClosed { label: "window-pool-orphan".into() },
+        &c,
+    );
+    assert!(
+        !state.just_promoted_labels.contains("window-pool-orphan"),
+        "close must drop orphaned just_promoted entry"
+    );
+}
+
+#[test]
 fn wrr_duplicate_hwnd_open_for_same_label_is_idempotent() {
     // codex #600 P2: ReportHwndOpened arrives twice (once from
     // the WinEvent CREATE hook with label_hint=None, then again
