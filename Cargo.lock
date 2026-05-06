@@ -20,6 +20,7 @@ dependencies = [
  "futures-util",
  "json_comments",
  "parking_lot",
+ "proptest",
  "reqwest",
  "serde",
  "serde_json",
