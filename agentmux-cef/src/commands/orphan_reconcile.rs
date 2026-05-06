@@ -201,7 +201,15 @@ fn ui_thread_reconcile(state: &Arc<AppState>, candidates: &[String]) {
 
     let mut to_close: Vec<(String, Browser)> = zombies;
 
-    if live_user_count == 0 {
+    // A freshly-promoted candidate (live HWND, not in pool.queue) is
+    // a live user window whose `WindowOpened` echo hasn't returned
+    // yet — it's not in shadow, so it doesn't bump `live_user_count`,
+    // but draining around it would freeze its session (no transition
+    // back from Draining to Running). Defer to the next
+    // `HostShouldQuit` once shadow catches up.
+    let safe_to_drain = live_user_count == 0 && freshly_promoted.is_empty();
+
+    if safe_to_drain {
         // Set drain BEFORE posting closes. Each close re-enters
         // `on_pool_window_destroyed`, which checks `quit_state` to
         // decide whether to refill. Without this, the reconciler
@@ -244,10 +252,11 @@ fn ui_thread_reconcile(state: &Arc<AppState>, candidates: &[String]) {
     } else {
         tracing::info!(
             target: "wrr",
-            "[orphan-reconcile] {} live user browser(s) remain — skipping BeginDrain and warm-pool close",
-            live_user_count
+            "[orphan-reconcile] {} live user browser(s) + {} freshly-promoted candidate(s) — skipping BeginDrain and warm-pool close",
+            live_user_count,
+            freshly_promoted.len()
         );
-        // Stale `HostShouldQuit` racing with an active session: any
+        // Stale `HostShouldQuit` (or pre-shadow-echo race): any
         // ready-pool / freshly-promoted candidates stay alive; only
         // zombies get closed (already in `to_close`).
         let _ = ready_pool;
@@ -278,14 +287,14 @@ fn ui_thread_reconcile(state: &Arc<AppState>, candidates: &[String]) {
     // Hostless orphans don't get an on_before_close callback to drive
     // the stage-2 quit_message_loop in client/mod.rs. If we just
     // unregistered such an entry AND the reducer's browser registry
-    // is now empty AND we entered drain (live_user_count == 0), no
-    // future CEF callback will satisfy the quit gate. Drive it
-    // ourselves on this UI-thread task — same call site, same thread,
-    // just no `on_before_close` to ride on. Skipped when live user
-    // browsers remained (drain wasn't set) so a stale HostShouldQuit
-    // doesn't terminate an active session.
+    // is now empty AND we entered drain (`safe_to_drain`), no future
+    // CEF callback will satisfy the quit gate. Drive it ourselves on
+    // this UI-thread task — same call site, same thread, just no
+    // `on_before_close` to ride on. Gated on `safe_to_drain` instead
+    // of just `live_user_count == 0` so a freshly-promoted live
+    // window isn't terminated mid-handshake.
     if any_hostless_unregistered
-        && live_user_count == 0
+        && safe_to_drain
         && state.host_state.lock().browsers.is_empty()
     {
         tracing::warn!(
