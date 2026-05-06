@@ -276,11 +276,24 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
     }
 
     if plan.closes.is_empty() {
-        tracing::info!(
-            target: "wrr",
-            "[orphan-reconcile] nothing to close after classification (begin_drain={})",
-            plan.begin_drain
-        );
+        if plan.begin_drain {
+            // The reducer's `browsers` is empty AND we're in drain
+            // mode, but Stage-2 quit (`client::browser_list.is_empty()`)
+            // may still be blocked by stale CefClient entries we
+            // can't see from here. Drive quit ourselves — same
+            // semantics as the hostless+drain path. (Codex round-19
+            // P2: previously this just logged and returned.)
+            tracing::warn!(
+                target: "wrr",
+                "[orphan-reconcile] nothing to close but drain requested — driving quit_message_loop"
+            );
+            quit_message_loop();
+        } else {
+            tracing::info!(
+                target: "wrr",
+                "[orphan-reconcile] nothing to close, drain not requested — host has live work"
+            );
+        }
         return;
     }
 
@@ -307,7 +320,11 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
         match action {
             CloseAction::CloseBrowser => {
                 if let Some(browser) = label_to_browser.get(label).cloned() {
-                    drive_close_browser(i, label, browser);
+                    let late_hostless =
+                        drive_close_browser(state, i, label, browser, plan.begin_drain);
+                    if late_hostless {
+                        any_hostless = true;
+                    }
                 } else {
                     tracing::warn!(
                         target: "wrr",
@@ -378,7 +395,17 @@ fn classify_hwnd(browser: &Browser) -> HwndStatus {
 /// `host.close_browser(force=1)` works regardless of HWND state and
 /// triggers the host's `on_before_close` callback chain (which
 /// dispatches `UnregisterBrowser` and drives Stage-2 quit naturally).
-fn drive_close_browser(idx: usize, label: &str, mut browser: Browser) {
+/// Returns `true` iff the browser's host had vanished by execute
+/// time and the orchestrator should treat this as a late hostless
+/// transition (relevant for the Stage-2 quit drive — same reasoning
+/// as the planner's Hostless bucket).
+fn drive_close_browser(
+    state: &Arc<AppState>,
+    idx: usize,
+    label: &str,
+    mut browser: Browser,
+    drain_mode: bool,
+) -> bool {
     if let Some(host) = browser.host() {
         host.close_browser(1);
         tracing::debug!(
@@ -386,16 +413,31 @@ fn drive_close_browser(idx: usize, label: &str, mut browser: Browser) {
             "[orphan-reconcile][{}] close_browser(force=1) label={}",
             idx, label
         );
+        false
     } else {
-        // Edge case: HWND status was Live/Dead at planning but
-        // BrowserHost vanished before we got here. Fall through to
-        // the same UnregisterBrowser path; the planner will catch
-        // this on the next reconcile if it happens.
-        tracing::warn!(
-            target: "wrr",
-            "[orphan-reconcile][{}] browser host=None at execute time label={} — late hostless transition",
-            idx, label
-        );
+        // Race: HWND status was Live/Dead at planning, but
+        // BrowserHost vanished before we got here. Mirror the
+        // planner's Hostless path — but only fall through to
+        // UnregisterBrowser if drain is active (same gating as the
+        // Hostless bucket; see codex round-17 P1 #2).
+        if drain_mode {
+            tracing::warn!(
+                target: "wrr",
+                "[orphan-reconcile][{}] browser host=None at execute time label={} — late hostless transition; dispatching UnregisterBrowser",
+                idx, label
+            );
+            state.host_dispatch(crate::reducer::HostCommand::UnregisterBrowser {
+                label: label.to_string(),
+            });
+            true
+        } else {
+            tracing::warn!(
+                target: "wrr",
+                "[orphan-reconcile][{}] browser host=None at execute time label={} — late hostless transition; deferring UnregisterBrowser (drain not active)",
+                idx, label
+            );
+            false
+        }
     }
 }
 
