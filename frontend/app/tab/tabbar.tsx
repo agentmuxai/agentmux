@@ -7,7 +7,7 @@ import { invokeCommand } from "@/app/platform/ipc";
 import { fireAndForget } from "@/util/util";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { For, onCleanup, onMount, Show } from "solid-js";
+import { createMemo, For, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import { ObjectService, WorkspaceService } from "../store/services";
 import { makeORef, getObjectValue } from "../store/wos";
@@ -528,7 +528,24 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     const activeIndex = () => tabIds().indexOf(activeTabId());
 
-    const tabBarMenuItems: MenuItem[] = [
+    // Widgets that can be opened in a new window, sorted by display:order.
+    // Excludes settings (non-pane, opens external editor) and devtools (toggles inspector).
+    const openInNewWindowItems = createMemo((): MenuItem[] => {
+        const wmap = atoms.fullConfigAtom()?.widgets ?? {};
+        return Object.entries(wmap)
+            .filter(([, w]) => {
+                const view = w.blockdef?.meta?.view;
+                return view !== "settings" && view !== "devtools";
+            })
+            .sort(([, a], [, b]) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0))
+            .map(([, widget]) => ({
+                label: widget.label ?? "",
+                icon: widget.icon,
+                onClick: () => getApi().openNewWindow().catch(console.error),
+            }));
+    });
+
+    const tabBarMenuItems = createMemo((): MenuItem[] => [
         {
             label: "New Tab",
             icon: "plus",
@@ -539,6 +556,11 @@ function TabBar(props: TabBarProps): JSX.Element {
             label: "New Window",
             icon: "window-restore",
             onClick: () => getApi().openNewWindow().catch(console.error),
+        },
+        {
+            label: "Open in New Window",
+            icon: "arrow-up-right-from-square",
+            subItems: openInNewWindowItems(),
         },
         { label: "", divider: true },
         {
@@ -555,12 +577,12 @@ function TabBar(props: TabBarProps): JSX.Element {
             icon: "circle-question",
             onClick: () => fireAndForget(() => createBlock({ meta: { view: "help" } })),
         },
-    ];
+    ]);
 
     return (
         <div class="tab-bar" {...dragProps}>
             <FlyoutMenu
-                items={tabBarMenuItems}
+                items={tabBarMenuItems()}
                 placement="bottom-start"
             >
                 <button class="hamburger-btn" title="Menu" data-drag-region="false">

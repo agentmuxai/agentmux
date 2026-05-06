@@ -76,13 +76,13 @@
         padding: 0;
         background: transparent;
         border: none;
-        color: var(--tab-green);
+        color: var(--accent-color);
         -webkit-app-region: no-drag;
         cursor: pointer;
         align-self: center;
 
         &:hover {
-            color: color-mix(in srgb, var(--tab-green), white 25%);
+            color: color-mix(in srgb, var(--accent-color), white 25%);
         }
 
         i {
