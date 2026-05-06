@@ -19,7 +19,7 @@
  * post-tearoff. Spec: `docs/specs/SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md`.
  */
 
-import { getApi } from "@/store/global";
+import type { getApi } from "@/store/global";
 import { Logger } from "@/util/logger";
 
 type Api = ReturnType<typeof getApi>;
