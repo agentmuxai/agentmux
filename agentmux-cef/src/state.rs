@@ -809,10 +809,42 @@ impl AppState {
     // `state.window_pool: Mutex<VecDeque>` reads. All under one
     // `host_state` lock, snapshot-and-drop discipline.
 
-    /// Snapshot of unpromoted pool labels. Used by `list_windows`,
-    /// `compute_and_report_host_counts`, and saga-dispatch's
-    /// `drain_pool_if_last`. Caller can `.contains()` against the set
-    /// or iterate.
+    /// Atomic snapshot of (user_window_count, unpromoted_pool_count)
+    /// for the launcher drift-detection report. Both reads taken
+    /// under ONE `host_state` lock; a two-lock variant races
+    /// against `promote_pool_window` and would let queued pool
+    /// windows leak into the user-window count.
+    ///
+    /// Filter rules (mirror `list_windows` / `dispatch_to_renderers`):
+    /// - exclude pool inventory (`pool.unpromoted` ∪ `pool.queue`)
+    /// - exclude `browser-pane-*` child HWNDs
+    ///
+    /// `unpromoted_pool_count` is the count the launcher's
+    /// `state.pool` mirror tracks (added/removed events emit at
+    /// the unpromoted boundary; `pool.queue` is host-internal and
+    /// has no launcher event).
+    pub fn host_counts_snapshot(&self) -> (u32, u32) {
+        let st = self.host_state.lock();
+        let pool_inventory: std::collections::HashSet<&str> = st
+            .pool
+            .unpromoted
+            .iter()
+            .map(String::as_str)
+            .chain(st.pool.queue.iter().map(String::as_str))
+            .collect();
+        let unpromoted = st.pool.unpromoted.len() as u32;
+        let windows = st
+            .browsers
+            .keys()
+            .filter(|k| !k.starts_with("browser-pane-") && !pool_inventory.contains(k.as_str()))
+            .count() as u32;
+        (windows, unpromoted)
+    }
+
+    /// Snapshot of unpromoted pool labels. Used by orphan
+    /// reconciliation and the pool-count report after spawning a
+    /// new pool slot. Caller can `.contains()` against the set or
+    /// iterate.
     pub fn unpromoted_pool_labels_snapshot(&self) -> std::collections::HashSet<String> {
         self.host_state
             .lock()
