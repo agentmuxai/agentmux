@@ -828,31 +828,58 @@ fn handle_layout_insert_node(
             version: v,
         }];
     };
-    // Empty tree → promote new node to root (frontend's
-    // `findNextInsertLocation` returns the empty case as "make me root").
-    // Non-empty tree → delegate to the pure helper, which honours the
-    // same heuristic the frontend uses.
+    // Three insert paths, in priority order:
+    //   1. Empty tree → promote new node to root.
+    //   2. parent_id given → insert under that specific parent at
+    //      `index` (or append if None). Codex P2 PR #715 round 4
+    //      flagged that the prior code ignored explicit parent_id/
+    //      index; the schema documents these as the request location.
+    //   3. parent_id None → use the `findNextInsertLocation`
+    //      heuristic via the pure helper.
     match tab.rootnode.as_mut() {
         None => tab.rootnode = Some(node.clone()),
-        Some(root) => crate::backend::layout::insert_node(root, node.clone()),
+        Some(root) => {
+            let placed = match parent_id.as_deref() {
+                Some(pid) => match crate::backend::layout::find_node_by_id_mut(root, pid) {
+                    Some(parent_node) if parent_node.data.is_none() => {
+                        // Group node — insert into children at `index`,
+                        // clamped into [0, len].
+                        let len = parent_node.children.len();
+                        let target = index.map(|i| i.min(len)).unwrap_or(len);
+                        parent_node.children.insert(target, node.clone());
+                        true
+                    }
+                    _ => {
+                        // parent_id missing or points at a leaf (data set);
+                        // fall through to the heuristic so the insert isn't
+                        // dropped silently.
+                        false
+                    }
+                },
+                None => false,
+            };
+            if !placed {
+                crate::backend::layout::insert_node(root, node.clone());
+            }
+        }
     }
     // Codex P2 PR #715 round 1: honour focus_after / magnify_after.
     // The schema documents these as the side effects callers rely on
     // for "insert + activate" flows; ignoring them desyncs the snapshot
     // from the event the caller's handler observed.
-    if focus_after {
+    //
+    // Codex P2 PR #715 round 4: a magnified node must also be the
+    // focused one. Without this, a `magnify_after=true,
+    // focus_after=false` insert leaves `focused_node_id` pointing at
+    // the prior pane while `magnified_node_id` points at the new one
+    // — a UI invariant violation (frontend treats magnify-implies-
+    // focus). Treat magnify as implying focus.
+    if focus_after || magnify_after {
         tab.focused_node_id = node.id.clone();
     }
     if magnify_after {
         tab.magnified_node_id = node.id.clone();
     }
-    // `parent_id` and `index` are accepted for forward-compat with the
-    // command schema but ignored by the pure-heuristic insert helper.
-    // Phase 7 wcore-migration will exercise the parent_id/index path
-    // via `LayoutInsertNodeAtIndex` (a separate command); this arm
-    // matches `findNextInsertLocation` semantics exactly. The values
-    // are still echoed in the emitted event below so subscribers see
-    // what the caller asked for.
     let v = state.bump_version();
     vec![Event::LayoutNodeInserted {
         tab_id,
@@ -3871,8 +3898,13 @@ mod tests {
     }
 
     #[test]
-    fn layout_insert_node_honours_magnify_after() {
+    fn layout_insert_node_magnify_after_implies_focus() {
+        // Codex P2 PR #715 round 4: magnify-implies-focus. Even when
+        // focus_after=false, setting magnify_after=true must also
+        // update focused_node_id so it doesn't dangle on the prior
+        // pane (UI invariant: a magnified pane is the focused pane).
         let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "prev".into();
         let node = leaf_node("new", "b1");
         let _ = update(
             &mut state,
@@ -3887,8 +3919,96 @@ mod tests {
             },
             &ctx(1),
         );
-        assert_eq!(state.tabs[&tab_id].focused_node_id, "");
+        assert_eq!(
+            state.tabs[&tab_id].focused_node_id, "new",
+            "magnify_after must imply focus_after"
+        );
         assert_eq!(state.tabs[&tab_id].magnified_node_id, "new");
+    }
+
+    #[test]
+    fn layout_insert_node_honours_explicit_parent_id_and_index() {
+        // Codex P2 PR #715 round 4: with parent_id given, insert at
+        // that node at the requested index instead of running the
+        // heuristic helper.
+        let (mut state, tab_id) = fresh_tab();
+        let mut group = leaf_node("group", "");
+        group.data = None;
+        group.children = vec![leaf_node("a", "ba"), leaf_node("c", "bc")];
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(group);
+
+        let _ = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: leaf_node("b", "bb"),
+                parent_id: Some("group".into()),
+                index: Some(1), // between a and c
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+
+        let root = state.tabs[&tab_id].rootnode.as_ref().expect("root");
+        let ids: Vec<_> = root.children.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "b", "c"], "explicit index honoured");
+    }
+
+    #[test]
+    fn layout_insert_node_index_clamps_when_out_of_range() {
+        // Out-of-range index clamps to the end (matches frontend
+        // `findNextInsertLocation` defensive semantics).
+        let (mut state, tab_id) = fresh_tab();
+        let mut group = leaf_node("group", "");
+        group.data = None;
+        group.children = vec![leaf_node("a", "ba")];
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(group);
+
+        let _ = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: leaf_node("b", "bb"),
+                parent_id: Some("group".into()),
+                index: Some(99),
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        let root = state.tabs[&tab_id].rootnode.as_ref().expect("root");
+        let ids: Vec<_> = root.children.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "b"], "out-of-range index clamps to end");
+    }
+
+    #[test]
+    fn layout_insert_node_falls_back_to_heuristic_when_parent_id_missing() {
+        // parent_id refers to a non-existent node → fall back to the
+        // heuristic helper so the insert isn't dropped silently.
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("only", "b1"));
+
+        let _ = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: leaf_node("added", "b2"),
+                parent_id: Some("does-not-exist".into()),
+                index: None,
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        // Heuristic ran — both leaves are in the tree somewhere.
+        let root = state.tabs[&tab_id].rootnode.as_ref().expect("root");
+        let collected = collect_block_ids(root);
+        assert!(collected.contains(&"b1".to_string()));
+        assert!(collected.contains(&"b2".to_string()));
     }
 
     #[test]
