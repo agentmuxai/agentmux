@@ -98,8 +98,25 @@ function dedupKey(evt: LauncherEvent): string {
  * Per-key (event-kind, label, hwnd) version-monotonicity guard.
  * Returns true if the event should be dispatched, false if it's a
  * duplicate or stale re-emission for the same logical entity.
+ *
+ * **Launcher restart pass-through (codex P1, this PR round 2):** when
+ * the launcher process restarts, its `event_version` resets to 1
+ * (`agentmux-launcher/src/state.rs::default`). `PerSourceTracker.deliver`
+ * has explicit handling for the v=1 sentinel — it resets `lastVersion`
+ * so post-restart events aren't dropped as stale. This bridge-level
+ * dedup runs BEFORE the tracker, so without an equivalent reset the
+ * sentinel would be suppressed against a cached key from the prior
+ * incarnation (e.g. a long-lived label like `main`) and the tracker
+ * would never see v=1, leaving subsequent low-version events
+ * permanently stuck behind `lastVersion` from the dead launcher.
+ * Heuristic mirrors the tracker's: `evt.version === 1` AND we've
+ * recorded at least one prior version → clear the cache and admit.
  */
 export function shouldDispatchLauncherEvent(evt: LauncherEvent): boolean {
+    if (evt.version === 1 && hasSeenAnyVersionAbove(0)) {
+        dedupSeen.clear();
+        // Don't reset suppressed counter — it's a cumulative diag.
+    }
     const k = dedupKey(evt);
     const seenVersion = dedupSeen.get(k);
     if (seenVersion !== undefined && evt.version <= seenVersion) {
@@ -109,14 +126,24 @@ export function shouldDispatchLauncherEvent(evt: LauncherEvent): boolean {
     dedupSeen.set(k, evt.version);
     if (dedupSeen.size > MAX_DEDUP_KEYS) {
         // Bound memory. Map iteration order is insertion order → drop
-        // the oldest entry. Acceptable: a re-arrival for an evicted
-        // key can only re-fire if it carries a higher launcher
-        // version than this renderer has ever seen, which means it's
-        // not actually a duplicate.
+        // the oldest entry. Acceptable trade-off: an evicted key's
+        // next arrival is admitted unconditionally (whatever its
+        // version), but the worst case is one duplicate event slipping
+        // through after a 1024-key eviction window. The
+        // `PerSourceTracker` behind this still drops by global
+        // monotonic version, so a same-version evicted-key duplicate
+        // is still caught one layer down.
         const firstKey = dedupSeen.keys().next().value;
         if (firstKey !== undefined) dedupSeen.delete(firstKey);
     }
     return true;
+}
+
+function hasSeenAnyVersionAbove(threshold: number): boolean {
+    for (const v of dedupSeen.values()) {
+        if (v > threshold) return true;
+    }
+    return false;
 }
 
 /** Diagnostic accessor for the dedup guard — used by tests + diag tools. */
@@ -124,7 +151,13 @@ export function launcherEventDedupStats(): { tracked: number; suppressed: number
     return { tracked: dedupSeen.size, suppressed: dedupSuppressedCount };
 }
 
-/** Test-only: clear the dedup cache. Not exported in production paths. */
+/**
+ * Reset the dedup cache. Test-only by convention — the `__` prefix is
+ * the project's marker for non-production APIs (see `__snapshot` /
+ * `__resetState` in `app/store/launcher-event-reducer.ts`). Production
+ * code MUST NOT call this; the only legitimate cache reset is the
+ * launcher-restart sentinel inside `shouldDispatchLauncherEvent`.
+ */
 export function __resetDedupForTests(): void {
     dedupSeen.clear();
     dedupSuppressedCount = 0;
