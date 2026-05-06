@@ -156,42 +156,30 @@ pub fn reconcile_and_drain(state: &Arc<AppState>) {
 /// case is Windows-specific so this is acceptable for now; revisit
 /// if the bug reproduces on macOS/Linux.
 fn hwnd_is_dead_or_missing(browser: &cef::Browser) -> bool {
-    use cef::*;
-    let mut b = browser.clone();
-    let Some(host) = b.host() else { return true };
-    let wh = host.window_handle();
-    if wh.0.is_null() {
-        return true;
-    }
     #[cfg(target_os = "windows")]
-    unsafe {
-        use windows_sys::Win32::Foundation::HWND;
-        use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;
-        IsWindow(wh.0 as HWND) == 0
+    {
+        resolve_live_hwnd(browser).is_none()
     }
     #[cfg(not(target_os = "windows"))]
     {
-        false
+        use cef::*;
+        let mut b = browser.clone();
+        let Some(host) = b.host() else { return true };
+        host.window_handle().0.is_null()
     }
 }
 
 #[cfg(target_os = "windows")]
-fn post_close_or_fallback(idx: usize, label: &str, mut browser: cef::Browser) {
-    // Bring CEF wrapper traits into scope so `.host()` and
-    // `.window_handle()` resolve on the FFI types — same pattern as
-    // `client/mod.rs` (`use cef::*;`).
-    use cef::*;
-    use windows_sys::Win32::Foundation::HWND;
+fn post_close_or_fallback(idx: usize, label: &str, browser: cef::Browser) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
-    let hwnd_opt = browser.host().and_then(|h: BrowserHost| {
-        let wh = h.window_handle();
-        if wh.0.is_null() {
-            None
-        } else {
-            Some(wh.0 as HWND)
-        }
-    });
-    if let Some(hwnd) = hwnd_opt {
+    // Use the same liveness probe `hwnd_is_dead_or_missing` uses so
+    // path selection here agrees with the orchestrator's discriminator.
+    // A non-null but destroyed HWND must NOT take the PostMessageW
+    // branch — Windows returns 0 for that and the message goes
+    // nowhere, leaving the Race C zombie unclosed (codex + reagent
+    // round-3 P1). Force those onto the post_task path, which calls
+    // `host.close_browser(force=1)` and works regardless of HWND.
+    if let Some(hwnd) = resolve_live_hwnd(&browser) {
         let ok = unsafe { PostMessageW(hwnd, WM_CLOSE, 0, 0) };
         tracing::debug!(
             target: "wrr-trace",
@@ -203,9 +191,32 @@ fn post_close_or_fallback(idx: usize, label: &str, mut browser: cef::Browser) {
         let posted = cef::post_task(cef::ThreadId::UI, Some(&mut task));
         tracing::warn!(
             target: "wrr",
-            "[orphan-reconcile][{}] hwnd=null; fell back to post_task(close_browser) label={} posted={}",
+            "[orphan-reconcile][{}] hwnd dead/missing; fell back to post_task(close_browser) label={} posted={}",
             idx, label, posted != 0
         );
+    }
+}
+
+/// Returns `Some(hwnd)` only when the browser's underlying HWND is
+/// alive (non-null AND `IsWindow == 1`). Used by both the
+/// orchestrator's discriminator and the path selection inside
+/// `post_close_or_fallback` so they agree on what "live" means.
+#[cfg(target_os = "windows")]
+fn resolve_live_hwnd(browser: &cef::Browser) -> Option<windows_sys::Win32::Foundation::HWND> {
+    use cef::*;
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;
+    let mut b = browser.clone();
+    let host = b.host()?;
+    let wh = host.window_handle();
+    if wh.0.is_null() {
+        return None;
+    }
+    let h = wh.0 as HWND;
+    if unsafe { IsWindow(h) } == 0 {
+        None
+    } else {
+        Some(h)
     }
 }
 

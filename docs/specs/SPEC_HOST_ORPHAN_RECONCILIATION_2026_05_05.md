@@ -163,13 +163,20 @@ Two distinct races have to be handled:
 
 **Race C — zombie HWND (the original v0.33.643 case):** A promoted pool window's HWND is destroyed without the host's `on_before_close` ever running (CEF crash, OS kill, missed callback). Host's local `window_meta` was inserted in `on_after_created` and is only cleared by `on_before_close`, so the local entry is stale. Launcher's `apply_hwnd_destroyed` removes the label from its mirror and emits `WindowClosed` — so shadow correctly drops the label, BUT host's local meta keeps it. A round-2 attempt at fixing Race B by unioning shadow + local meta would skip exactly this case (codex #702 round-2 P1).
 
-**Discrimination via HWND validity (round 3, current design):** Race B and Race C both produce labels in `browsers` that are absent from shadow and not in `unpromoted_pool`. The classifier returns both as *candidates*. The orchestrator then applies a Win32 `IsWindow(hwnd)` check on each candidate's underlying HWND:
+**Discrimination via HWND validity (current design):** Race B and Race C both produce labels in `browsers` that are absent from shadow and not in `unpromoted_pool`. The classifier returns both as *candidates*. The orchestrator then applies a Win32 `IsWindow(hwnd)` check on each candidate's underlying HWND:
 
 - `IsWindow == 1` (live HWND) → freshly-promoted, Race B → SKIP. The next `HostShouldQuit` (or the launcher's `WindowOpened` echo populating shadow) will resolve this naturally.
 - `IsWindow == 0` (destroyed HWND) → zombie, Race C → CLOSE.
 - `host()` returns `None` or `window_handle().0.is_null()` → also treated as dead → CLOSE.
 
-This puts the discrimination in exactly one place — the orchestrator's `hwnd_is_dead_or_missing` filter — and uses the OS as the source of truth for "is this HWND alive". No new state, no time-based wait. Non-Windows targets fall back to the null-handle check (best-effort; v0.33.643 is Windows-specific).
+The "is this HWND live" check is shared between two call sites via `resolve_live_hwnd(browser)`:
+
+1. The orchestrator's `hwnd_is_dead_or_missing` filter (which candidates to close).
+2. `post_close_or_fallback`'s path selection (PostMessageW vs. `post_task(close_browser)`).
+
+Both must agree, because Race C zombies have a non-null but destroyed HWND. If `post_close_or_fallback` only nullity-checked, it would route the zombie to the PostMessageW branch — Windows returns 0 for a destroyed HWND, the message goes nowhere, and the zombie stays alive (codex + reagent #702 round-3 P1). With the shared probe, zombies always take the `post_task(ClosePoolBrowserTask)` path which calls `host.close_browser(force=1)` and works regardless of HWND.
+
+No new state, no time-based wait, OS as the source of truth. Non-Windows targets fall back to the null-handle check (best-effort; v0.33.643 is Windows-specific).
 
 ### 5.5 What we don't change
 
