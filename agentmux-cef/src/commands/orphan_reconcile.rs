@@ -93,6 +93,7 @@ pub(crate) fn plan_reconcile(
     shadow_keys: &HashSet<String>,
     pool_queue: &HashSet<String>,
     unpromoted_pool: &HashSet<String>,
+    pending_creation_in_flight: bool,
 ) -> ReconcilePlan {
     // Live user count = labels in shadow, not pane-prefixed. Zombies
     // are absent from shadow (`apply_hwnd_destroyed` prunes
@@ -135,7 +136,15 @@ pub(crate) fn plan_reconcile(
         }
     }
 
-    let safe_to_drain = live_user_count == 0 && freshly_promoted.is_empty();
+    // `pending_creation_in_flight` blocks drain too: a stale
+    // `HostShouldQuit` racing with `open_window_with_kind` (which
+    // enqueues `PendingWindowCreation` BEFORE `post_create_window`
+    // registers the browser) would otherwise close the warm pool
+    // and drive Stage-2 quit before the new window is registered,
+    // dropping it.
+    let safe_to_drain = live_user_count == 0
+        && freshly_promoted.is_empty()
+        && !pending_creation_in_flight;
 
     // Sort for determinism (HashMap iteration order is unspecified).
     dead_zombies.sort();
@@ -258,12 +267,18 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
         .collect();
 
     let all_labels: Vec<String> = browser_pairs.iter().map(|(l, _)| l.clone()).collect();
+    let pending_creation_in_flight = !state
+        .host_state
+        .lock()
+        .pending_window_creations
+        .is_empty();
     let plan = plan_reconcile(
         &browser_status,
         &all_labels,
         &shadow_keys,
         &pool_queue,
         &unpromoted_pool,
+        pending_creation_in_flight,
     );
 
     if !plan.freshly_promoted.is_empty() {
@@ -276,35 +291,21 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
     }
 
     if plan.closes.is_empty() {
-        // Even in drain mode, hold off on `quit_message_loop` if a
-        // window creation is in flight: `open_window_with_kind`
-        // pushes a `PendingWindowCreation` BEFORE its `post_create_window`
-        // task registers the new browser. A stale `HostShouldQuit`
-        // racing that gap would see empty browsers and (without this
-        // gate) terminate the message loop, dropping the new window.
-        let pending_create = !state
-            .host_state
-            .lock()
-            .pending_window_creations
-            .is_empty();
-        if plan.begin_drain && !pending_create {
-            // Drain mode AND no in-flight creation: Stage-2 quit may
-            // be blocked by stale `client::browser_list` entries we
-            // can't see from here. Drive quit ourselves.
+        if plan.begin_drain {
+            // Drain requested AND nothing for us to do (state.browsers
+            // is empty). Stage-2 quit may be blocked by stale
+            // `client::browser_list` entries we can't see from here.
+            // Drive quit ourselves. The pending-creation gate is
+            // already enforced by `plan.begin_drain`.
             tracing::warn!(
                 target: "wrr",
                 "[orphan-reconcile] nothing to close but drain requested — driving quit_message_loop"
             );
             quit_message_loop();
-        } else if plan.begin_drain {
-            tracing::info!(
-                target: "wrr",
-                "[orphan-reconcile] drain requested but pending window creation in flight — deferring quit"
-            );
         } else {
             tracing::info!(
                 target: "wrr",
-                "[orphan-reconcile] nothing to close, drain not requested — host has live work"
+                "[orphan-reconcile] nothing to close, drain not requested — host has live work or pending creation"
             );
         }
         return;
@@ -505,6 +506,7 @@ mod tests {
             &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
+            false,
         );
         assert!(plan.closes.is_empty());
         assert!(plan.freshly_promoted.is_empty());
@@ -520,6 +522,7 @@ mod tests {
             &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
+            false,
         );
         assert_eq!(plan.closes, vec![(label.to_string(), CloseAction::CloseBrowser)]);
         assert!(plan.freshly_promoted.is_empty());
@@ -535,6 +538,7 @@ mod tests {
             &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
+            false,
         );
         assert_eq!(
             plan.closes,
@@ -555,6 +559,7 @@ mod tests {
             &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
+            false,
         );
         assert!(plan.closes.is_empty(), "freshly promoted must not be closed: {:?}", plan.closes);
         assert_eq!(plan.freshly_promoted, vec![label.to_string()]);
@@ -571,6 +576,7 @@ mod tests {
             &set_of(&[]),
             &set_of(&[label]),
             &set_of(&[]),
+            false,
         );
         assert_eq!(plan.closes, vec![(label.to_string(), CloseAction::CloseBrowser)]);
         assert!(plan.freshly_promoted.is_empty());
@@ -588,6 +594,7 @@ mod tests {
             &set_of(&[]),
             &set_of(&[]),
             &set_of(&[label]),
+            false,
         );
         assert_eq!(plan.closes, vec![(label.to_string(), CloseAction::CloseBrowser)]);
         assert!(plan.begin_drain);
@@ -606,6 +613,7 @@ mod tests {
             &set_of(&[user_label]),
             &set_of(&[]),
             &set_of(&[]),
+            false,
         );
         assert_eq!(
             plan.closes,
@@ -628,6 +636,7 @@ mod tests {
             &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
+            false,
         );
         assert_eq!(
             plan.closes,
@@ -650,6 +659,7 @@ mod tests {
             &set_of(&[]),
             &set_of(&[ready]),
             &set_of(&[]),
+            false,
         );
         let close_labels: Vec<&str> = plan.closes.iter().map(|(l, _)| l.as_str()).collect();
         assert!(close_labels.contains(&zombie));
@@ -670,6 +680,7 @@ mod tests {
             &set_of(&[promoted]),
             &set_of(&[]),
             &set_of(&[]),
+            false,
         );
         assert!(plan.closes.is_empty());
         assert!(plan.freshly_promoted.is_empty());
@@ -686,6 +697,7 @@ mod tests {
             &set_of(&[pane]),
             &set_of(&[]),
             &set_of(&[]),
+            false,
         );
         assert!(plan.begin_drain);
         let close_labels: Vec<&str> = plan.closes.iter().map(|(l, _)| l.as_str()).collect();
@@ -702,6 +714,7 @@ mod tests {
             &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
+            false,
         );
         assert_eq!(plan.closes.len(), 2);
         for (label, action) in &plan.closes {
@@ -723,6 +736,7 @@ mod tests {
             &set_of(&[]),
             &set_of(&[]),
             &set_of(&[label]),
+            false,
         );
         assert_eq!(
             plan.closes,
@@ -757,6 +771,7 @@ mod tests {
             &set_of(&[promoted]),
             &set_of(&[ready]),
             &set_of(&[unpromoted]),
+            false,
         );
         // freshly_promoted blocks drain → only Dead zombies close.
         // Hostless is gated on safe_to_drain (outside drain,
@@ -792,6 +807,7 @@ mod tests {
             &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
+            false,
         );
         assert_eq!(plan.closes, vec![(main.to_string(), CloseAction::CloseBrowser)]);
         assert!(plan.begin_drain);
@@ -815,6 +831,7 @@ mod tests {
             &set_of(&[user]),
             &set_of(&[]),
             &set_of(&[]),
+            false,
         );
         assert!(!plan.begin_drain);
         assert!(plan.closes.is_empty(), "hostless must not close while drain blocked: {:?}", plan.closes);
@@ -837,6 +854,7 @@ mod tests {
             &set_of(&[user]),
             &set_of(&[]),
             &set_of(&[]),
+            false,
         );
         assert!(!plan.begin_drain);
         assert_eq!(
@@ -869,6 +887,7 @@ mod tests {
             &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
+            false,
         );
         assert!(plan.begin_drain);
         let actions: HashMap<String, CloseAction> = plan
@@ -881,6 +900,46 @@ mod tests {
     }
 
     #[test]
+    fn plan_pending_window_creation_blocks_drain() {
+        // A stale HostShouldQuit racing with `open_window_with_kind`
+        // can land in the gap between `PendingWindowCreation`
+        // enqueue and `post_create_window` registering the browser.
+        // In that gap the browser doesn't appear in any state, but
+        // a creation is in flight. Drain MUST be deferred — closing
+        // the warm pool here would let Stage-2 quit fire before the
+        // new browser registers, dropping it.
+        let ready = "window-pool-ready";
+        let plan = plan_reconcile(
+            &map_of(&[(ready, HwndStatus::Live)]),
+            &vec_of(&[ready]),
+            &set_of(&[]),
+            &set_of(&[ready]),
+            &set_of(&[]),
+            true, // pending creation in flight
+        );
+        assert!(!plan.begin_drain, "pending creation must block drain");
+        assert!(plan.closes.is_empty(), "ready warm pool must not close while creation pending: {:?}", plan.closes);
+    }
+
+    #[test]
+    fn plan_pending_creation_doesnt_block_zombie_close() {
+        // Dead zombies always close — they don't depend on drain
+        // being safe. A pending creation should not stop us from
+        // reaping a zombie.
+        let zombie = "window-pool-zombie";
+        let plan = plan_reconcile(
+            &map_of(&[(zombie, HwndStatus::Dead)]),
+            &vec_of(&[zombie]),
+            &set_of(&[]),
+            &set_of(&[]),
+            &set_of(&[]),
+            true,
+        );
+        assert!(!plan.begin_drain);
+        assert_eq!(plan.closes, vec![(zombie.to_string(), CloseAction::CloseBrowser)]);
+    }
+
+    #[test]
     fn plan_idempotent_under_repeat() {
         let label = "window-pool-zombie";
         let inputs = (
@@ -890,8 +949,8 @@ mod tests {
             set_of(&[]),
             set_of(&[]),
         );
-        let p1 = plan_reconcile(&inputs.0, &inputs.1, &inputs.2, &inputs.3, &inputs.4);
-        let p2 = plan_reconcile(&inputs.0, &inputs.1, &inputs.2, &inputs.3, &inputs.4);
+        let p1 = plan_reconcile(&inputs.0, &inputs.1, &inputs.2, &inputs.3, &inputs.4, false);
+        let p2 = plan_reconcile(&inputs.0, &inputs.1, &inputs.2, &inputs.3, &inputs.4, false);
         assert_eq!(p1, p2);
     }
 
