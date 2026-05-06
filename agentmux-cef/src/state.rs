@@ -809,10 +809,46 @@ impl AppState {
     // `state.window_pool: Mutex<VecDeque>` reads. All under one
     // `host_state` lock, snapshot-and-drop discipline.
 
-    /// Snapshot of unpromoted pool labels. Used by `list_windows`,
-    /// `compute_and_report_host_counts`, and saga-dispatch's
-    /// `drain_pool_if_last`. Caller can `.contains()` against the set
-    /// or iterate.
+    /// Atomic snapshot of (user_window_count, unpromoted_pool_count)
+    /// for the launcher drift-detection report. Both reads taken
+    /// under ONE `host_state` lock; a two-lock variant races
+    /// against `promote_pool_window` and would let queued pool
+    /// windows leak into the user-window count.
+    ///
+    /// Filter rules (mirror `list_windows` / `dispatch_to_renderers`):
+    /// - exclude pool inventory (`pool.unpromoted` ∪ `pool.queue`)
+    /// - exclude `browser-pane-*` child HWNDs
+    ///
+    /// `pool_count` is the size of the pool **inventory** (unpromoted
+    /// ∪ queue) — NOT just unpromoted. The launcher's `state.pool`
+    /// mirror is built from `ReportPoolWindowAdded` / `Removed` /
+    /// `Promoted` events. On the host's unpromoted→queue transition
+    /// (when `pool_ready` fires) NO event is emitted, so the
+    /// launcher mirror retains the queued label. Reporting just
+    /// `unpromoted.len()` would under-count and trigger spurious
+    /// pool drift while the warm pool is idle and ready.
+    pub fn host_counts_snapshot(&self) -> (u32, u32) {
+        let st = self.host_state.lock();
+        let pool_inventory: std::collections::HashSet<&str> = st
+            .pool
+            .unpromoted
+            .iter()
+            .map(String::as_str)
+            .chain(st.pool.queue.iter().map(String::as_str))
+            .collect();
+        let pool = pool_inventory.len() as u32;
+        let windows = st
+            .browsers
+            .keys()
+            .filter(|k| !k.starts_with("browser-pane-") && !pool_inventory.contains(k.as_str()))
+            .count() as u32;
+        (windows, pool)
+    }
+
+    /// Snapshot of unpromoted pool labels. Used by orphan
+    /// reconciliation and the pool-count report after spawning a
+    /// new pool slot. Caller can `.contains()` against the set or
+    /// iterate.
     pub fn unpromoted_pool_labels_snapshot(&self) -> std::collections::HashSet<String> {
         self.host_state
             .lock()
@@ -834,6 +870,42 @@ impl AppState {
     /// whether to bootstrap more pool windows.
     pub fn pool_queue_size(&self) -> usize {
         self.host_state.lock().pool.queue.len()
+    }
+
+    /// Atomic snapshot for user-visibility filtering: pool inventory
+    /// (`pool.unpromoted` ∪ `pool.queue`) AND the browser registry,
+    /// taken under ONE `host_state` lock acquisition.
+    ///
+    /// Two-lock variants (one snapshot for the pool, one for
+    /// `list_browsers()`) race against `promote_pool_window`:
+    /// between the reads, a label can move from pool.queue to
+    /// promoted, leaving the stale inventory excluding a now-real
+    /// user window. Atomic snapshot eliminates the gap.
+    ///
+    /// Returns:
+    /// - `pool_inventory`: labels in `pool.unpromoted` ∪ `pool.queue`
+    ///   (host-internal, no user UI yet — exclude from user-visible
+    ///   filters and from launcher-event dispatch).
+    /// - `browsers`: every label → Browser pair currently registered
+    ///   (cheap clone — `Browser` is a CEF refcounted wrapper).
+    pub fn user_visibility_snapshot(&self) -> (
+        std::collections::HashSet<String>,
+        Vec<(String, Browser)>,
+    ) {
+        let st = self.host_state.lock();
+        let pool_inventory: std::collections::HashSet<String> = st
+            .pool
+            .unpromoted
+            .iter()
+            .cloned()
+            .chain(st.pool.queue.iter().cloned())
+            .collect();
+        let browsers: Vec<(String, Browser)> = st
+            .browsers
+            .iter()
+            .map(|(k, h)| (k.clone(), h.browser.clone()))
+            .collect();
+        (pool_inventory, browsers)
     }
 
     /// PR #5 H.5 — read-side helper for the legacy `is_quitting` check.

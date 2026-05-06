@@ -28,10 +28,33 @@ use cef::{CefString, ImplBrowser, ImplFrame};
 
 /// Forward a launcher event to every top-level renderer.
 ///
-/// Pool + browser-pane labels are excluded — they have no UI.
-/// The JSON payload uses `serde_json::to_string`, so any string
-/// content from the Event is escaped against quote / backtick
-/// injection at the JS-string boundary.
+/// Excluded:
+///   - Pool **inventory** labels (`window-pool-*` in
+///     `pool.unpromoted` OR `pool.queue`): no user UI yet. Two
+///     sub-states:
+///       * `pool.unpromoted` — spawning, renderer not ready.
+///       * `pool.queue` — renderer ready, waiting for promote.
+///     Both are hidden off-screen and would build stale InstancePanel
+///     state from launcher events the user never sees. The bridge
+///     uses `state.user_visibility_snapshot()` which atomically
+///     reads the pool inventory (unpromoted ∪ queue) and the
+///     browser registry under one host_state lock — a two-lock
+///     variant would race against `promote_pool_window` and let a
+///     just-promoted window slip through (or, worse, count a
+///     real user window in the close-cascade gate's exclusion).
+///   - Browser-pane labels (`browser-pane-*`): not top-level
+///     windows; have no InstancePanel.
+///
+/// Promoted pool windows (label still has the `window-pool-*`
+/// prefix but the entry is in NEITHER pool set) ARE included —
+/// they're the user-visible torn-off windows. Pre-fix, a
+/// label-prefix-only check excluded them too, so torn-off windows
+/// stopped receiving launcher events post-promotion (InstancePanel
+/// drift, plus anything else listening to launcher events).
+///
+/// JSON payload uses `serde_json::to_string`, so any string content
+/// from the Event is escaped against quote / backtick injection at
+/// the JS-string boundary.
 pub fn dispatch_to_renderers(state: &Arc<crate::state::AppState>, event: &Event) {
     let json = match serde_json::to_string(event) {
         Ok(s) => s,
@@ -52,9 +75,19 @@ pub fn dispatch_to_renderers(state: &Arc<crate::state::AppState>, event: &Event)
     let code = CefString::from(script.as_str());
     let url = CefString::from("");
 
+    // Atomic snapshot — pool inventory + browsers under ONE lock.
+    // Two-lock variants race against `promote_pool_window` between
+    // the reads.
+    let (pool_inventory, browsers) = state.user_visibility_snapshot();
+
     // Phase H.2.b — reducer-aware iteration with fallback.
-    for (label, browser) in state.list_browsers() {
-        if label.starts_with("window-pool-") || label.starts_with("browser-pane-") {
+    for (label, browser) in browsers {
+        if label.starts_with("browser-pane-") {
+            continue;
+        }
+        if pool_inventory.contains(label.as_str()) {
+            // Pool inventory (unpromoted or ready-queued) — no user
+            // UI yet, skip.
             continue;
         }
         if let Some(frame) = browser.main_frame() {

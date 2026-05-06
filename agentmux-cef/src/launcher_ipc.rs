@@ -792,13 +792,11 @@ pub fn report_monitor_topology_changed(rects: Vec<agentmux_common::ipc::Rect>) {
 /// `docs/retro/multi-reducer-proposal-2026-04-28.md`), this becomes
 /// "report host's authoritative reducer-state to the launcher."
 pub fn compute_and_report_host_counts(state: &std::sync::Arc<crate::state::AppState>) {
-    // Phase H.2.b — reducer-aware label snapshot.
-    let unpromoted = state.unpromoted_pool_labels_snapshot();
-    let pool = unpromoted.len() as u32;
-    let windows = state
-        .list_browser_labels()
-        .into_iter()
-        .filter(|k| !k.starts_with("browser-pane-") && !unpromoted.contains(k.as_str()))
-        .count() as u32;
+    // Atomic snapshot — pool inventory + browsers under ONE
+    // `host_state` lock. Two-lock variants race against
+    // `promote_pool_window` between reads and let queued pool
+    // windows leak into the user-window count, triggering spurious
+    // launcher drift-detection.
+    let (windows, pool) = state.host_counts_snapshot();
     report_host_counts(windows, pool);
 }
