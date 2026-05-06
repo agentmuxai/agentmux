@@ -414,28 +414,23 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
             );
         }
         Event::HostShouldQuit { .. } => {
-            // Phase B.9.3 was diagnostic-only; the comment in
-            // `agentmux-common/src/ipc.rs::HostShouldQuit` explicitly
-            // calls this advisory. v0.33.643 caught the gap: when
-            // promoted `window-pool-*` browsers go orphan (in host's
-            // browsers map but the launcher's mirror has dropped
-            // them), the cascade in `on_before_close` gates on a
-            // user_browser_count that wrongly includes them, so the
-            // gate fails and the host stays alive forever.
+            // The launcher emits this when it detects the
+            // last-user-visible-window-closed-but-host-alive state.
+            // The host's reconciler closes any orphan
+            // `window-pool-*` browsers so the existing on_before_close
+            // cascade can drain to `browser_list.is_empty()` and
+            // fire `quit_message_loop`.
             //
             // Spec: `docs/specs/SPEC_HOST_ORPHAN_RECONCILIATION_2026_05_05.md`.
             //
-            // The reconciler runs on this IPC reader's thread but
-            // does NOT touch CEF directly — it dispatches via
-            // `PostMessageW(WM_CLOSE)` (preferred on Windows) or
-            // `cef::post_task(UI, ClosePoolBrowserTask)` (the
-            // existing fallback path). Same channels the cascade
-            // already uses, so each close funnels back through
-            // `on_before_close` and the existing Stage-2
-            // `quit_message_loop` fires when `browser_list` empties.
-            // Earlier v0.33.491–v0.33.494 attempts failed because
-            // they tried to drive UI-thread work *directly* from
-            // here — we don't, we hand it to CEF's task queue.
+            // We're on the launcher IPC reader thread; CEF
+            // Browser/BrowserHost calls aren't safe here. The
+            // reconciler does state-snapshot + classification only,
+            // then posts a UI-thread task that does the HWND probe
+            // and `host.close_browser(force=1)`. Earlier v0.33.491–
+            // v0.33.494 attempts at driving UI shutdown directly
+            // from this handler hung CEF; using the task scheduler
+            // is the difference.
             tracing::warn!(
                 target: "wrr",
                 "[wrr] HostShouldQuit received — running orphan reconciler"
