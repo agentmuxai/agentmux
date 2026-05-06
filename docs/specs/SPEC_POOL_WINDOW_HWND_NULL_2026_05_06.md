@@ -44,29 +44,31 @@ The mismatch: a pool window is "renderer ready" but has no HWND. Possible causes
 
 The 11-minute-idle case argues against (3) (way too long for a thread race) but supports (1) or (2).
 
-## 4. Proposed approach
+## 4. Diagnosis (2026-05-06)
 
-### 4.1 Diagnose first
+Instrumented diagnostic build (PR #704 follow-up) captured this:
 
-Before patching, instrument:
+```
+07:14:17  HWND probe at register time: valid  hwnd=0x130892
+07:15:39  HWND probe at renderer-ready time   cef_status=null  cached_status=cached=0x130892 alive=true
+```
 
-- In `mark_pool_window_renderer_ready`, log the HWND from `Browser::host().window_handle()` at enqueue time.
-- In `promote_pool_window`, log the HWND value (null vs non-null vs stale-pointer) and the time-since-enqueue.
-- If HWND is null at enqueue time → cause (1): the renderer-ready signal precedes HWND assignment.
-- If HWND is non-null at enqueue but null at promote → cause (2): OS cleaned it up.
-- If HWND is non-null at enqueue, non-null at promote, but `IsWindow(hwnd)` returns false → stale handle.
+The HWND is **alive** per Win32 `IsWindow`, but `BrowserHost::window_handle()` returns null. Pattern:
 
-### 4.2 If cause (1) — defer enqueue
+- **Register time:** CEF's `BrowserHost::window_handle()` returns the valid HWND.
+- **Renderer-ready time** (~80s later in dev mode, ~1-2s in production): CEF returns null. The cached HWND is still a live OS window.
 
-Don't enqueue a pool window until BOTH renderer-ready AND `host().window_handle()` is non-null. Add a second gate. If the renderer is ready but no HWND yet, schedule a deferred check (e.g. on the next `WM_WINDOWPOSCHANGED`).
+So this is **none of (1), (2), or (3)** as previously hypothesized. CEF Views' `BrowserHost::window_handle()` is unreliable after the page loads — the underlying Win32 window is intact, CEF just stops reporting its handle. Root cause likely lives inside CEF's view-attachment lifecycle (the parent HWND association on the view changes once content is fully loaded).
 
-### 4.3 If cause (2) — show + hide cycle
+### 4.1 Fix: cache the HWND at register time
 
-Periodically nudge pool windows: `ShowWindow(SW_HIDE)` → `ShowWindow(SW_SHOW)` to keep them registered with the OS without making them visible. Hacky but proven workaround for similar Windows behavior.
+Pool windows have one moment when CEF reliably reports their HWND: `on_after_created`, where `register_pool_window` already runs. Cache the HWND there in a module-level `Mutex<HashMap<String, usize>>`. At promote time, fall back to the cache if `host.window_handle()` returns null. Verify cache is still a live OS window via `IsWindow` before using; if not (genuine OS-level destruction), refuse the promote and let the frontend cold-path.
 
-### 4.4 If cause (3) — synchronize
+Cache cleanup happens in `on_pool_window_destroyed`, which fires for any `window-pool-*` close (including post-promote user-window closes that retain the prefix).
 
-Move the renderer-ready signal onto the UI thread, ensuring it can only fire after `on_after_created` has registered the HWND. Single-threaded happens-before relationship.
+### 4.2 Why not just always use the cached HWND
+
+`BrowserHost::window_handle()` is preferred when it returns non-null — that's the path CEF intends, and a future CEF version may stop returning null after page-load. Keeping the CEF call as the first try means the moment CEF stabilizes, no further code change is needed.
 
 ## 5. Out of scope
 
