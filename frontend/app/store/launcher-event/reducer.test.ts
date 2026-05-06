@@ -12,13 +12,17 @@ const win = (label: string, windowId: string | null = null): WindowEntry => ({ l
 
 describe("launcher-event reducer", () => {
     describe("isInstanceLabel filter", () => {
-        it("ignores window_opened for pool labels", () => {
+        it("accepts window_opened for promoted pool labels", () => {
+            // Promoted pool windows retain their `window-pool-*` prefix.
+            // The host-side gates (list_window_instances + launcher_event_bridge)
+            // exclude unpromoted pool labels upstream, so by the time
+            // a `window-pool-*` label reaches the reducer, it has been
+            // promoted to a user window and must be tracked.
             const r = update(initialState(), {
                 type: "ApplyEvent",
                 event: evt({ event: "window_opened", label: "window-pool-abc" }),
             });
-            expect(r.state.knownEntries.size).toBe(0);
-            expect(r.events[0]).toMatchObject({ type: "filtered-out", reason: "non-instance-label" });
+            expect(r.state.knownEntries.size).toBe(1);
         });
 
         it("ignores window_opened for browser-pane labels", () => {
