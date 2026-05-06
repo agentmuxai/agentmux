@@ -275,11 +275,25 @@ These came out of the multi-reducer proposal sessions and have been reaffirmed a
 
 These are real design decisions still pending. Listed in priority order.
 
-### 9.1 Cross-process saga dispatch (BLOCKER for F.5/F.6)
-F.5's `PoolRespawnSaga` emits `IssueCmd::Host` as log-only no-op. There's no launcher→host pipe yet. **Spec needed.** Sketch in [`SPEC_CROSS_PROCESS_DISPATCH_2026-05-01.md`](./SPEC_CROSS_PROCESS_DISPATCH_2026-05-01.md); needs formal write per phase-fg-roadmap §3. Until this lands, sagas can't coordinate atomic operations across the launcher / host boundary.
+### 9.1 Cross-process saga dispatch — RESOLVED (CPD-1 through CPD-5 shipped)
 
-### 9.2 Per-event saga_id correlation (BLOCKER for E.6)
-Codex flagged twice during E.5, deferred twice. Evict-and-replace policy mitigates today; proper solution is `saga_id` tags on events. ~300 LOC. Bundle with cross-process dispatch mini-phase.
+**Status: ✅ DONE.** All five sub-PRs from [`SPEC_CROSS_PROCESS_DISPATCH_2026-05-01.md`](./SPEC_CROSS_PROCESS_DISPATCH_2026-05-01.md) §4 landed:
+
+| CPD-N | Scope | Lands as |
+|---|---|---|
+| **CPD-1** | Schema additions: `saga_id` mandatory on `SpawnPoolWindow`/`ReapPanes`/`DrainPoolIfLast`; `Option<u64>` on `Report*` Commands and Events; `HostFrame` envelope; `ReportSagaActionFailed` event | `agentmux-common/src/ipc.rs` |
+| **CPD-2** | `HostPipe` wrapper + framing + connection loop + bounded `pending_buffer` | `agentmux-launcher/src/host_pipe/` |
+| **CPD-3** | `apply_action` dispatches via `host_pipe.send_command()` instead of log-only; `inject_saga_id` helper; per-saga `timeout()` override | `agentmux-launcher/src/saga/mod.rs` |
+| **CPD-4** | Per-saga `on_event()` correlation by `saga_id`; evict-and-replace policy retired | `pool_respawn.rs`, `window_cleanup.rs` |
+| **CPD-5** | Host-side `(saga_id, kind)` LRU for idempotency on duplicate launcher dispatches | `agentmux-cef/src/saga_dispatch.rs` |
+
+F.5 (`pool_respawn_on_promote`) and F.6 (`window_cleanup_cascade`) sagas drive host-side actions through the wire instead of just narrating organic events. Saga timeouts and retries are meaningful for `IssueCmd::Host`. Concurrent same-kind sagas correlate cleanly.
+
+**Open follow-up (deferred):** `PipeTarget::LauncherSelf` and `PipeTarget::Srv` arms are still log-only stubs (no consumer); spec §3.6 recommended preemptive wire-up; deferred until a class-D/E saga needs them. The companion durability spec ([`SPEC_LAUNCHER_SAGA_DURABILITY`](./SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md), Phase LSD) builds on top of CPD and is its own thread.
+
+### 9.2 Per-event saga_id correlation — RESOLVED (folded into CPD-4)
+
+**Status: ✅ DONE.** Closed with §9.1 above. CPD-4 wires `saga.on_event()` to filter by `event.saga_id == self.expected_saga_id`; evict-and-replace policy retired. The "~300 LOC, deferred twice" estimate was the work that landed inside CPD-4.
 
 ### 9.3 Phase F hosting strategy — RESOLVED in-process
 
