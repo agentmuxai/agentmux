@@ -178,11 +178,14 @@ Both must agree, because Race C zombies have a non-null but destroyed HWND. If `
 
 No new state, no time-based wait, OS as the source of truth. Non-Windows targets fall back to the null-handle check (best-effort; v0.33.643 is Windows-specific).
 
-### 5.5 What we don't change
+### 5.5 Drain state must be set before closing
 
-- `drain_pool_if_last` query semantics in `saga_dispatch.rs` stay as-is. Once the reconciler clears orphans, the next `WindowClosed` (for the orphan's eventual close) re-runs the saga and the query returns `was_last=true` correctly.
-- `BeginDrain` reducer command stays as-is.
-- The two-stage cascade in `on_before_close` stays as-is. We feed inputs into it via `PostMessageW(WM_CLOSE)`, same channel the cascade already uses for orderly drains.
+Each orphan close re-enters `client::on_before_close → on_pool_window_destroyed`. That handler checks `quit_state` to decide whether to refill the pool: if `Running`, it can spawn a fresh `window-pool-*` browser to keep the queue at target. Without setting drain state first, the reconciler would close zombies and the refill path would immediately spawn replacements — net zero progress on shutdown. The reconciler dispatches `HostCommand::BeginDrain { reason: LastWindowClosed }` before posting any closes; `BeginDrain` is itself idempotent (already-Draining is a no-op), so a `HostShouldQuit` racing with the existing organic cascade in `on_before_close` (which already calls `BeginDrain`) is safe.
+
+### 5.6 What we don't change
+
+- `drain_pool_if_last` query semantics in `saga_dispatch.rs` stay as-is. Once the reconciler clears zombies, the next `WindowClosed` re-runs the saga and the query returns `was_last=true` correctly.
+- The two-stage cascade in `on_before_close` stays as-is. We feed inputs into it via `PostMessageW(WM_CLOSE)` (live HWND) or `post_task(close_browser)` (dead HWND), same channels the cascade already uses for orderly drains.
 - `state.pool.queue` (host reducer) stays the source of truth for *unpromoted* pool. Orphans are by definition *promoted* — the reducer's `state.pool` is already correctly empty for them.
 
 ## 6. Tests

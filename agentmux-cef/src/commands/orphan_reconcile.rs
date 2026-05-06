@@ -6,42 +6,35 @@
 //!
 //! When the launcher detects that the last user-visible window
 //! has closed but the host is still alive, it emits
-//! `Event::HostShouldQuit`. Pre-this-module, the host's handler
-//! was log-only because three prior attempts at making it deliver
-//! UI-thread work all failed (post_task drops, direct call UB,
-//! PostThreadMessage(WM_QUIT) ignored — see comment at
-//! `launcher_ipc.rs:421`).
+//! `Event::HostShouldQuit`. The host's handler invokes the
+//! reconciler here, which closes any orphan `window-pool-*`
+//! browsers (promoted out of the warm pool, but the launcher
+//! mirror has dropped them — typically because their HWND was
+//! destroyed without the host's `on_before_close` running).
 //!
-//! This module wires the event to a real corrective action without
-//! reintroducing those hazards: snapshot host state, drop the lock,
-//! `PostMessageW(WM_CLOSE)` (or `post_task(close_browser)` fallback)
-//! to each orphan `window-pool-*` browser. The two-stage cascade in
-//! `client/mod.rs::on_before_close` then funnels each close back
-//! through the existing path that empties `browser_list` and fires
-//! `quit_message_loop`.
+//! Each close is dispatched via `PostMessageW(WM_CLOSE)` (live
+//! HWND) or `cef::post_task(close_browser)` (dead/missing HWND).
+//! Both routes funnel back through `client::on_before_close`,
+//! whose Stage 2 hook fires `quit_message_loop()` once
+//! `browser_list` empties — so the reconciler doesn't have to
+//! drive UI-thread shutdown directly. Earlier attempts at doing
+//! that from this IPC thread all hung CEF (see
+//! `launcher_ipc.rs::HostShouldQuit` comment).
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::state::AppState;
 
-/// Classify which labels are *candidate* orphan `window-pool-*`
-/// entries — promoted out of the pool but not tracked by the
-/// launcher's `shadow_window_meta` mirror.
+/// Classify which labels are *candidate* orphans — promoted
+/// `window-pool-*` entries not tracked by the launcher's
+/// `shadow_window_meta` mirror. Necessary but not sufficient: a
+/// freshly-promoted pool window briefly satisfies this (the
+/// launcher's `WindowOpened` echo hasn't populated shadow yet),
+/// so the orchestrator must additionally verify the HWND is dead
+/// before dispatching close.
 ///
-/// This is a NECESSARY but not SUFFICIENT condition. The orchestrator
-/// must additionally check HWND validity before dispatching close,
-/// because a freshly-promoted pool window will briefly satisfy this
-/// classification (label removed from `unpromoted_pool`, but the
-/// launcher's `WindowOpened` echo hasn't yet populated shadow). Codex
-/// #702 round 1 flagged the missing post-classify check; round 2's
-/// attempt to fix it via local `window_meta` union failed because
-/// local meta is also stale in the actual zombie case (host's
-/// `on_before_close` never runs, so the entry is never cleared) —
-/// codex round 2 P1. The HWND-validity check at the orchestrator
-/// level is the right discriminator.
-///
-/// Pure function over snapshot inputs, so tests don't need CEF.
+/// Pure function over snapshot inputs.
 pub(crate) fn classify_candidate_orphans(
     browser_labels: &[String],
     unpromoted_pool: &HashSet<String>,
@@ -59,23 +52,20 @@ pub(crate) fn classify_candidate_orphans(
 }
 
 /// Snapshot-and-drop entry point. Walks the host's browser map,
-/// classifies orphans, and dispatches a close to each via the same
-/// PostMessageW / post_task channel used by the two-stage cascade.
+/// identifies orphan `window-pool-*` zombies, sets the host into
+/// drain mode, and dispatches a close to each.
 ///
-/// Idempotent: a second call after the first has dispatched closes
-/// will see the same orphan set until CEF actually destroys those
-/// browsers, then will see an empty set and return early. Duplicate
-/// `WM_CLOSE` messages are coalesced by Windows.
+/// Idempotent: a second call before CEF processes the closes will
+/// see the same orphan set and re-dispatch; Windows coalesces
+/// duplicate `WM_CLOSE` and `BeginDrain` is itself idempotent.
 pub fn reconcile_and_drain(state: &Arc<AppState>) {
     let browser_pairs = state.list_browsers();
     let unpromoted = state.unpromoted_pool_labels_snapshot();
     // Shadow alone is the source of truth for "launcher tracks this
     // as live". Local `window_meta` is unreliable here because it's
     // populated in `on_after_created` and only cleared in
-    // `on_before_close` — the v0.33.643 zombie case, by definition,
-    // is the one where `on_before_close` never ran, so a local-meta
-    // union would skip exactly the labels we need to reap (codex #702
-    // round 2 P1).
+    // `on_before_close` — exactly the callback that doesn't run for
+    // the zombies we're trying to reap.
     let shadow_keys: HashSet<String> = state
         .shadow_window_meta
         .lock()
@@ -93,11 +83,9 @@ pub fn reconcile_and_drain(state: &Arc<AppState>) {
         return;
     }
 
-    // Discriminate Race B (just-promoted, launcher echo lag — HWND
-    // valid, must NOT close) from Race C (zombie, on_before_close
-    // never ran — HWND destroyed, must close) via Win32 IsWindow on
-    // the browser's underlying handle. See spec §5.4. Each iteration
-    // takes one HWND check; cheap.
+    // Discriminate freshly-promoted (live HWND, must NOT close)
+    // from zombie (dead HWND, must close) via Win32 `IsWindow` on
+    // the browser's underlying handle. See spec §5.4.
     let candidate_set: HashSet<&str> = candidates.iter().map(|s| s.as_str()).collect();
     let mut to_close: Vec<(String, cef::Browser)> = Vec::new();
     let mut deferred_live: Vec<String> = Vec::new();
@@ -129,6 +117,17 @@ pub fn reconcile_and_drain(state: &Arc<AppState>) {
         return;
     }
 
+    // Set drain state BEFORE posting closes. Each close re-enters
+    // `on_before_close → on_pool_window_destroyed`, which checks
+    // `quit_state` to decide whether to refill the pool. Without
+    // this, the reconciler would close orphans and the pool refill
+    // path would immediately spawn fresh `window-pool-*` browsers
+    // (see `commands/window_pool.rs` quit-state guard). `BeginDrain`
+    // is idempotent — already-draining state is a no-op.
+    state.host_dispatch(crate::reducer::HostCommand::BeginDrain {
+        reason: crate::state::QuitReason::LastWindowClosed,
+    });
+
     tracing::warn!(
         target: "wrr",
         "[orphan-reconcile] reaping {} zombie window-pool-* browser(s): {:?}",
@@ -142,19 +141,17 @@ pub fn reconcile_and_drain(state: &Arc<AppState>) {
 }
 
 /// True when the browser's underlying HWND is missing or destroyed.
-/// Used to distinguish Race B (live HWND — freshly-promoted pool
-/// window, must NOT close) from Race C (zombie — `on_before_close`
-/// never ran, HWND was destroyed without clearing host state, must
-/// close).
+/// Used by the orchestrator to keep freshly-promoted (live-HWND)
+/// candidates out of the close set.
 ///
-/// Windows: `IsWindow` returns 0 for destroyed HWNDs, even when the
-/// stale handle value is still around. This is the discriminator.
+/// Windows: `IsWindow` returns 0 for destroyed HWNDs even when the
+/// stale handle value is non-null — the discriminator we need.
 ///
-/// Non-Windows: we only have the null-handle check. Race B/C
-/// distinction is best-effort — if the platform ever produces a
-/// stale-but-non-null HWND, we'd skip a real zombie. The v0.33.643
-/// case is Windows-specific so this is acceptable for now; revisit
-/// if the bug reproduces on macOS/Linux.
+/// Non-Windows: only the null-handle check is available. If a
+/// platform produces stale-but-non-null HWNDs, a real zombie
+/// would be skipped here. The Windows-specific zombie scenario is
+/// the one we have evidence for; revisit if it reproduces on
+/// macOS/Linux.
 fn hwnd_is_dead_or_missing(browser: &cef::Browser) -> bool {
     #[cfg(target_os = "windows")]
     {
@@ -172,12 +169,10 @@ fn hwnd_is_dead_or_missing(browser: &cef::Browser) -> bool {
 #[cfg(target_os = "windows")]
 fn post_close_or_fallback(idx: usize, label: &str, browser: cef::Browser) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
-    // Use the same liveness probe `hwnd_is_dead_or_missing` uses so
-    // path selection here agrees with the orchestrator's discriminator.
-    // A non-null but destroyed HWND must NOT take the PostMessageW
-    // branch — Windows returns 0 for that and the message goes
-    // nowhere, leaving the Race C zombie unclosed (codex + reagent
-    // round-3 P1). Force those onto the post_task path, which calls
+    // Path selection uses the same liveness probe the orchestrator
+    // ran, so a non-null but destroyed HWND can't slip onto the
+    // `PostMessageW` branch (which Windows silently drops). Dead
+    // HWNDs route to `post_task`, which calls
     // `host.close_browser(force=1)` and works regardless of HWND.
     if let Some(hwnd) = resolve_live_hwnd(&browser) {
         let ok = unsafe { PostMessageW(hwnd, WM_CLOSE, 0, 0) };
@@ -198,9 +193,9 @@ fn post_close_or_fallback(idx: usize, label: &str, browser: cef::Browser) {
 }
 
 /// Returns `Some(hwnd)` only when the browser's underlying HWND is
-/// alive (non-null AND `IsWindow == 1`). Used by both the
-/// orchestrator's discriminator and the path selection inside
-/// `post_close_or_fallback` so they agree on what "live" means.
+/// alive (non-null AND `IsWindow == 1`). Single source of truth for
+/// "live HWND" — used by both `hwnd_is_dead_or_missing` and the
+/// path selection in `post_close_or_fallback`.
 #[cfg(target_os = "windows")]
 fn resolve_live_hwnd(browser: &cef::Browser) -> Option<windows_sys::Win32::Foundation::HWND> {
     use cef::*;
@@ -245,7 +240,7 @@ mod tests {
 
     #[test]
     fn classify_no_orphans_returns_empty() {
-        // One promoted user window: in browsers, NOT in unpromoted_pool,
+        // Promoted user window: in browsers, NOT in unpromoted_pool,
         // IS in shadow_window_meta. Not an orphan.
         let labels = vec_of(&["window-pool-aaa"]);
         let unpromoted = set_of(&[]);
@@ -256,7 +251,7 @@ mod tests {
     #[test]
     fn classify_one_orphan_is_returned() {
         // Promoted (not in unpromoted) but launcher dropped it
-        // (not in shadow). Classic orphan.
+        // (not in shadow). Classic orphan candidate.
         let labels = vec_of(&["window-pool-bbb"]);
         let unpromoted = set_of(&[]);
         let shadow = set_of(&[]);
@@ -277,8 +272,7 @@ mod tests {
 
     #[test]
     fn classify_skips_browser_pane_labels() {
-        // Pane labels never qualify; pane drain runs through a
-        // different cascade entirely.
+        // Pane labels are reaped via a different cascade.
         let labels = vec_of(&["browser-pane-foo"]);
         let unpromoted = set_of(&[]);
         let shadow = set_of(&[]);
@@ -287,8 +281,7 @@ mod tests {
 
     #[test]
     fn classify_skips_main_label() {
-        // Plain `main` (or any non-pool prefix) is excluded — only
-        // promoted `window-pool-*` entries are reaped here.
+        // Only `window-pool-*` is reaped here.
         let labels = vec_of(&["main"]);
         let unpromoted = set_of(&[]);
         let shadow = set_of(&[]);
@@ -298,11 +291,11 @@ mod tests {
     #[test]
     fn classify_returns_multiple_orphans_in_input_order() {
         let labels = vec_of(&[
-            "window-pool-aaa",   // shadow tracked → not orphan
-            "window-pool-bbb",   // orphan
-            "window-pool-ccc",   // unpromoted → not orphan
-            "window-pool-ddd",   // orphan
-            "main",              // not pool prefix
+            "window-pool-aaa", // shadow tracked → not orphan
+            "window-pool-bbb", // orphan
+            "window-pool-ccc", // unpromoted → not orphan
+            "window-pool-ddd", // orphan
+            "main",            // not pool prefix
         ]);
         let unpromoted = set_of(&["window-pool-ccc"]);
         let shadow = set_of(&["window-pool-aaa"]);
@@ -314,15 +307,11 @@ mod tests {
 
     #[test]
     fn classify_returns_freshly_promoted_as_candidate() {
-        // codex #702 round 1: in the WindowOpened-echo lag, a freshly-
-        // promoted pool window is in `browsers` (not in unpromoted)
-        // and the launcher's mirror hasn't caught up yet (not in
-        // shadow). The classifier returns it as a CANDIDATE; the
-        // orchestrator's HWND-validity check is what saves it from
-        // being closed (live HWND → skip). We test the negative side
-        // here — that we do NOT silently skip it at the classifier
-        // layer, because round-2's local-window-meta union (codex
-        // round 2 P1) would also skip the actual v0.33.643 zombie.
+        // In the WindowOpened-echo lag a freshly-promoted pool window
+        // is in `browsers` (not in unpromoted) and the launcher's
+        // mirror hasn't caught up yet (not in shadow). The classifier
+        // returns it as a CANDIDATE; the orchestrator's HWND check
+        // is what saves it from being closed (live HWND → skip).
         let labels = vec_of(&["window-pool-just-promoted"]);
         let unpromoted = set_of(&[]);
         let shadow = set_of(&[]);
@@ -333,12 +322,10 @@ mod tests {
     }
 
     #[test]
-    fn classify_handles_user_v0_33_643_scenario() {
-        // Drift snapshot from the launcher log:
-        //   DRIFT Pool: host=0 mirror=2
+    fn classify_handles_zombie_pool_pair() {
         // Two `window-pool-*` labels still in browsers, both promoted
-        // (host's pool.queue is empty so unpromoted is empty), and the
-        // launcher's mirror has dropped them (shadow is empty).
+        // (host's pool.queue is empty so unpromoted is empty), and
+        // the launcher's mirror has dropped them (shadow is empty).
         let labels = vec_of(&[
             "window-pool-722b6186bb6e42378b48b7068c0d54b0",
             "window-pool-b4e20337180247bdbd7408ddd7754b78",
