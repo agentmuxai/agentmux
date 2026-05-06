@@ -1467,6 +1467,105 @@ fn wrr_off_monitor_after_user_foregrounded_does_not_correct() {
 }
 
 #[test]
+fn promote_clears_foregrounded_since_open_so_post_promote_hide_does_not_drift() {
+    // Drift-storm regression (v0.33.655 smoke): pool window opens
+    // hidden → never foregrounded → promote → host repositions HWND
+    // (multiple SetWindowPos calls) → some intermediate state has
+    // visible=false → `apply_hwnd_visibility_changed` re-fires
+    // `HiddenSinceOpen` against the now-promoted user window. The
+    // host fans each emission across the bridge to every renderer
+    // and the V8 isolate eventually crashes. Promote is the user
+    // explicitly tearing off a tab — the open-transient corrective
+    // logic must NOT apply post-promote. Promote handler flips
+    // `foregrounded_since_open=true` to suppress.
+    // See `docs/specs/ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-pool-abc".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xBB,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("window-pool-abc".into()),
+        },
+        &c,
+    );
+    // Pre-promote: never-foregrounded → a hide event fires drift.
+    let pre = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xBB, visible: false },
+        &c,
+    );
+    assert!(
+        pre.iter().any(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+        )),
+        "pre-promote hide must drift (control: {:?})",
+        pre
+    );
+
+    // Promote.
+    let _ = update(
+        &mut state,
+        Command::ReportPoolWindowPromoted { label: "window-pool-abc".into() },
+        &c,
+    );
+    assert!(
+        state.windows.get("window-pool-abc").unwrap().foregrounded_since_open,
+        "promote must flip foregrounded_since_open to suppress open-transient drift"
+    );
+
+    // Post-promote: identical hide event must NOT drift.
+    let post = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xBB, visible: false },
+        &c,
+    );
+    assert!(
+        !post.iter().any(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+        )),
+        "post-promote hide must not drift, got {:?}",
+        post
+    );
+}
+
+#[test]
+fn promote_for_label_without_window_mirror_is_a_no_op() {
+    // The handler's idempotency contract: ReportPoolWindowPromoted
+    // can arrive before, after, or interleaved with
+    // ReportPoolWindowRemoved. If the mirror isn't present at this
+    // moment (e.g. it was removed first, or the host promote IPC
+    // outraced the open IPC), the handler must still emit the typed
+    // event without panicking.
+    let (mut state, c) = registered_host_state();
+    let evs = update(
+        &mut state,
+        Command::ReportPoolWindowPromoted { label: "window-pool-xyz".into() },
+        &c,
+    );
+    assert!(
+        evs.iter().any(|e| matches!(e, Event::PoolWindowPromoted { .. })),
+        "promote without mirror must still emit PoolWindowPromoted"
+    );
+    assert!(
+        !state.windows.contains_key("window-pool-xyz"),
+        "promote must not synthesise a mirror"
+    );
+}
+
+#[test]
 fn wrr_duplicate_hwnd_open_for_same_label_is_idempotent() {
     // codex #600 P2: ReportHwndOpened arrives twice (once from
     // the WinEvent CREATE hook with label_hint=None, then again
