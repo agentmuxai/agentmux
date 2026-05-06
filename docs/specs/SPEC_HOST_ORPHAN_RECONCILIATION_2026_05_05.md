@@ -194,6 +194,8 @@ live_user_count = count(labels that are NOT in to_close
 
 If `live_user_count == 0`, dispatch `HostCommand::BeginDrain { reason: LastWindowClosed }` (idempotent — a parallel `on_before_close` cascade already having dispatched it is a no-op). If `live_user_count > 0`, skip drain — close the zombies but leave the running session alone.
 
+In the drain branch, the reconciler also appends every `window-pool-*` browser still in `browser_pairs` (excluding the zombies already in `to_close`) to the close list. The reason is subtle: the normal Stage-1 cascade in `on_before_close` *would have* closed those warm-pool browsers when the user's last visible window closed, but it gated on `user_browser_count > 0` — and the zombies inflated that count, so Stage 1 was skipped. Those warm-pool browsers are still in `browser_list`. Stage 2 (`quit_message_loop`) doesn't fire until `browser_list.is_empty()`. Without explicitly closing them here, killing the zombies isn't enough — the host still doesn't quit. (Note: in the drain branch, `deferred_live_candidates` is necessarily empty by construction — a freshly-promoted pool window is itself a live user window and would have bumped `live_user_count > 0`.)
+
 ### 5.6 Threading: the IPC reader must NOT call CEF directly
 
 CEF Browser/BrowserHost methods (`host()`, `window_handle()`, `close_browser()`) must run on the UI thread. The `HostShouldQuit` handler runs on the launcher IPC reader thread. The reconciler therefore splits the work:
