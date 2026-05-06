@@ -259,6 +259,8 @@ These came out of the multi-reducer proposal sessions and have been reaffirmed a
 
 13. **Doc-only PRs are noise.** `docs/retro/*.md` are local working notes; don't open PRs for them. **This master spec is in `docs/specs/` precisely because it's intended for review.** (phase-b-status memory note)
 
+14. **Launcher event subscribers MUST be idempotent under `(event_kind, label, version)`.** Duplicates may legally arrive from re-dispatch, resync (Phase D `GetSnapshot`), or replay; the contract is that subscribers fold them into a no-op past the first application. The launcher's broadcast bus, the host's `apply_event_to_shadow`, and the renderer-side dispatchers are all subscribers under this rule. The renderer-side guard (`shouldDispatchLauncherEvent` in `frontend/util/launcher-events.ts`) maintains a `(event, label, hwnd) → max_version_seen` map; the host's shadow projection is idempotent by construction (HashMap insert/remove of the same key are no-ops past the first call). Property tests in PR #708 follow-up. **Drift-storm motivation:** prior to PR #708 the renderer-side dispatcher was idempotent only via the tracker's global monotonic-version drop, which fails when a fresh JS context resets `lastVersion=0` (pool window bootstrap) — same launcher event re-dispatched ~600× → V8 stack exhaustion → Crashpad. See [`ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`](./ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md).
+
 ---
 
 ## 9. Open questions
@@ -289,6 +291,11 @@ Phase 4 helpers shipped. Phases 5–7 designed but not started. Open: what's the
 
 ### 9.7 Phase G go/no-go itself
 Roadmap defers *Phase G* until F.6+F.7+cross-process dispatch. But the decision to *do* Phase G at all is open. Cost/benefit per phase-fg-roadmap §4: Phase E validated the pattern for srv. Still need system-level validation (host reducer + cross-process dispatch) before committing to event-sourced everywhere.
+
+### 9.8 Phase F.7 — host bridge resilience
+The host's `launcher_event_bridge::dispatch_to_renderers` is currently a thin pass-through: every launcher event becomes one `Frame::ExecuteJavaScript` call per top-level browser, no de-dup, no rate limit, no batching. PR #708 added a renderer-side guard (§8.14) which catches the cross-cutting class. Open: does the **host** also need a per-`(kind, label, version)` cache + rate limiter to defend against future upstream regressions, or is the renderer-side guard sufficient? Diagnostic to drive the decision: `launcherEventDedupStats().suppressed` in production. If non-zero under normal use, the launcher is still emitting duplicates and the host should de-dup too. Pairs with §9.1 — both are about the host's role as a relay between launcher and renderer.
+
+Tracked as Phase F.7 in roadmap; deferred until §9.1 (cross-process dispatch) lands, since that work also touches the same bridge layer. See [`ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`](./ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md) §4.4.
 
 ---
 

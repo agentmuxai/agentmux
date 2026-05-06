@@ -133,3 +133,128 @@ describe("launcher-event per-key dedup", () => {
         expect(launcherEventDedupStats().tracked).toBe(1);
     });
 });
+
+// Master spec §8.14 — subscriber idempotency contract. The bridge guard
+// is the renderer-side enforcement point; this property test exercises
+// it under randomised duplicate-arrival sequences. Uses a seeded Mulberry32
+// PRNG so failures reproduce deterministically without adding fast-check
+// as a dependency.
+function mulberry32(seed: number): () => number {
+    let t = seed >>> 0;
+    return () => {
+        t = (t + 0x6d2b79f5) >>> 0;
+        let r = Math.imul(t ^ (t >>> 15), 1 | t);
+        r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+        return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+describe("launcher-event idempotency (§8.14 contract, property tests)", () => {
+    beforeEach(() => __resetDedupForTests());
+
+    // NOTE: these property tests use versions ≥2 to avoid the
+    // launcher-restart sentinel (v=1 with prior cache → reset). The
+    // monotonicity property holds *within a launcher incarnation*; the
+    // restart path is exercised separately in the unit tests above.
+
+    it("dispatch count for a (kind,label,hwnd) key never exceeds the count of distinct max-versions seen", () => {
+        // Spec §8.14: subscribers must be idempotent under (kind,label,version).
+        // Bridge guard's contract: for a given key, only events with strictly
+        // higher version than any seen pass through. Random shuffle of
+        // duplicates + arbitrary versions per key — admitted count == count
+        // of strictly-increasing version watermarks.
+        for (let seed = 1; seed <= 50; seed++) {
+            __resetDedupForTests();
+            const rng = mulberry32(seed);
+            const keys = ["a", "b", "c"];
+            const events: LauncherEvent[] = [];
+            // Build 200 events: random key, random version 2..21, mostly
+            // duplicates (low version range vs high event count).
+            for (let i = 0; i < 200; i++) {
+                events.push(evt({
+                    event: "hwnd_drift_detected",
+                    version: 2 + Math.floor(rng() * 20),
+                    label: keys[Math.floor(rng() * keys.length)],
+                    hwnd: 1,
+                }));
+            }
+            // Per-key max version that ever passed through.
+            const admittedMaxByKey = new Map<string, number>();
+            for (const e of events) {
+                const passed = shouldDispatchLauncherEvent(e);
+                const k = `${(e as { label: string }).label}`;
+                if (passed) {
+                    const prev = admittedMaxByKey.get(k) ?? 0;
+                    expect(e.version).toBeGreaterThan(prev);
+                    admittedMaxByKey.set(k, e.version);
+                }
+            }
+        }
+    });
+
+    it("is monotonic per key: once version V is admitted, no version <=V for that key admits", () => {
+        for (let seed = 100; seed < 130; seed++) {
+            __resetDedupForTests();
+            const rng = mulberry32(seed);
+            const admitted = new Map<string, number>();
+            for (let i = 0; i < 100; i++) {
+                const ev = evt({
+                    event: "window_opened",
+                    version: 2 + Math.floor(rng() * 30),
+                    label: ["x", "y"][Math.floor(rng() * 2)],
+                });
+                const k = (ev as { label: string }).label;
+                const wasAdmitted = shouldDispatchLauncherEvent(ev);
+                if (wasAdmitted) {
+                    const prev = admitted.get(k);
+                    if (prev !== undefined) {
+                        expect(ev.version).toBeGreaterThan(prev);
+                    }
+                    admitted.set(k, ev.version);
+                }
+            }
+        }
+    });
+
+    it("after a launcher restart, the cache is cleared and post-restart sequence admits normally", () => {
+        // Pre-restart: random sequence of 30 events at v=10..30.
+        const rng = mulberry32(7);
+        for (let i = 0; i < 30; i++) {
+            shouldDispatchLauncherEvent(evt({
+                event: "hwnd_drift_detected",
+                version: 10 + Math.floor(rng() * 21),
+                label: ["a", "b"][Math.floor(rng() * 2)],
+                hwnd: 1,
+            }));
+        }
+        const preRestartTracked = launcherEventDedupStats().tracked;
+        expect(preRestartTracked).toBeGreaterThan(0);
+
+        // Restart sentinel: v=1 with prior versions cached.
+        const sentinel = evt({ event: "window_opened", version: 1, label: "a" });
+        expect(shouldDispatchLauncherEvent(sentinel)).toBe(true);
+        expect(launcherEventDedupStats().tracked).toBe(1);
+
+        // Post-restart: the sentinel clears the entire cache (not just
+        // the sentinel's own key), so all keys reset to "unseen". Build
+        // up fresh post-restart watermarks per key from this point.
+        const seenPostRestart = new Map<string, number>([["a", 1]]);
+        for (let i = 0; i < 30; i++) {
+            // Avoid v=1 in the post-restart sequence so we don't trip
+            // the sentinel a second time.
+            const ev = evt({
+                event: "hwnd_drift_detected",
+                version: 2 + Math.floor(rng() * 20),
+                label: ["a", "b"][Math.floor(rng() * 2)],
+                hwnd: 1,
+            });
+            const k = (ev as { label: string }).label;
+            const passed = shouldDispatchLauncherEvent(ev);
+            if (passed) {
+                const prev = seenPostRestart.get(k);
+                if (prev !== undefined) expect(ev.version).toBeGreaterThan(prev);
+                seenPostRestart.set(k, ev.version);
+            }
+        }
+    });
+});
