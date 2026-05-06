@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-cef"
-version = "0.33.664"
+version = "0.33.665"
 description = "AgentMux Host — Desktop app with bundled Chromium"
 authors = ["AgentMux Corp"]
 edition = "2021"
@@ -74,3 +74,9 @@ windows-sys = { version = "0.59", features = [
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1"
+
+[dev-dependencies]
+# Property tests for the shadow projection (master spec §8.14
+# subscriber idempotency contract). Mirrors agentmux-launcher's
+# proptest setup.
+proptest = { version = "1", default-features = false, features = ["std"] }
