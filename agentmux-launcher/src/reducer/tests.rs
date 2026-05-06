@@ -2063,8 +2063,7 @@ fn wrr_orphan_destroy_emits_host_should_quit_when_last_window() {
     // the LAST mirrored window's HWND with it, the host's orphan
     // reconciler — which only listens to HostShouldQuit — must
     // still wake up. Without it, warm-pool browsers stay alive
-    // and the host process becomes a zombie. (codex #702 round-7
-    // P1 case.)
+    // and the host process becomes a zombie.
     let (mut state, c) = registered_host_state();
     let _ = update(
         &mut state,
