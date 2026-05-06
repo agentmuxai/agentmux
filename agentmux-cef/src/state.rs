@@ -819,10 +819,14 @@ impl AppState {
     /// - exclude pool inventory (`pool.unpromoted` ∪ `pool.queue`)
     /// - exclude `browser-pane-*` child HWNDs
     ///
-    /// `unpromoted_pool_count` is the count the launcher's
-    /// `state.pool` mirror tracks (added/removed events emit at
-    /// the unpromoted boundary; `pool.queue` is host-internal and
-    /// has no launcher event).
+    /// `pool_count` is the size of the pool **inventory** (unpromoted
+    /// ∪ queue) — NOT just unpromoted. The launcher's `state.pool`
+    /// mirror is built from `ReportPoolWindowAdded` / `Removed` /
+    /// `Promoted` events. On the host's unpromoted→queue transition
+    /// (when `pool_ready` fires) NO event is emitted, so the
+    /// launcher mirror retains the queued label. Reporting just
+    /// `unpromoted.len()` would under-count and trigger spurious
+    /// pool drift while the warm pool is idle and ready.
     pub fn host_counts_snapshot(&self) -> (u32, u32) {
         let st = self.host_state.lock();
         let pool_inventory: std::collections::HashSet<&str> = st
@@ -832,13 +836,13 @@ impl AppState {
             .map(String::as_str)
             .chain(st.pool.queue.iter().map(String::as_str))
             .collect();
-        let unpromoted = st.pool.unpromoted.len() as u32;
+        let pool = pool_inventory.len() as u32;
         let windows = st
             .browsers
             .keys()
             .filter(|k| !k.starts_with("browser-pane-") && !pool_inventory.contains(k.as_str()))
             .count() as u32;
-        (windows, unpromoted)
+        (windows, pool)
     }
 
     /// Snapshot of unpromoted pool labels. Used by orphan
