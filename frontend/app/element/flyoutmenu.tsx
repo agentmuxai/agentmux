@@ -163,6 +163,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
             <div
                 ref={(el) => { referenceEl = el; }}
                 class="menu-anchor"
+                data-drag-region="false"
                 onClick={() => onOpenChangeMenu(!isOpen())}
             >
                 {props.children}
@@ -186,10 +187,17 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
                                     onClick: (e: MouseEvent) => handleOnClick(e, item),
                                 };
 
+                                if (item.divider) {
+                                    return <div class="menu-divider" aria-hidden="true" />;
+                                }
+
                                 const renderedItem = props.renderMenuItem ? (
                                     props.renderMenuItem(item, menuItemProps)
                                 ) : (
                                     <div {...menuItemProps}>
+                                        <Show when={item.icon}>
+                                            <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                                        </Show>
                                         <span class="label">{item.label}</span>
                                         <Show when={item.subItems}>
                                             <i class="fa-sharp fa-solid fa-chevron-right" />
@@ -276,10 +284,17 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
                         onClick: (e: MouseEvent) => props.handleOnClick(e, item),
                     };
 
+                    if (item.divider) {
+                        return <div class="menu-divider" aria-hidden="true" />;
+                    }
+
                     const renderedItem = props.renderMenuItem ? (
                         props.renderMenuItem(item, menuItemProps)
                     ) : (
                         <div {...menuItemProps}>
+                            <Show when={item.icon}>
+                                <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                            </Show>
                             <span class="label">{item.label}</span>
                             <Show when={item.subItems}>
                                 <i class="fa-sharp fa-solid fa-chevron-right" />

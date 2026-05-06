@@ -1,11 +1,13 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, createTab, getApi, setActiveTab } from "@/store/global";
+import { atoms, createBlock, createTab, getApi, setActiveTab } from "@/store/global";
+import { FlyoutMenu } from "@/app/element/flyoutmenu";
+import { invokeCommand } from "@/app/platform/ipc";
 import { fireAndForget } from "@/util/util";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { For, onCleanup, onMount, Show } from "solid-js";
+import { createMemo, For, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import { ObjectService, WorkspaceService } from "../store/services";
 import { makeORef, getObjectValue } from "../store/wos";
@@ -526,11 +528,45 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     const activeIndex = () => tabIds().indexOf(activeTabId());
 
+    const tabBarMenuItems = createMemo((): MenuItem[] => [
+        {
+            label: "New Tab",
+            icon: "plus",
+            onClick: () => createTab(),
+        },
+        { label: "", divider: true },
+        {
+            label: "New Window",
+            icon: "window-restore",
+            onClick: () => getApi().openNewWindow().catch(console.error),
+        },
+        { label: "", divider: true },
+        {
+            label: "Settings",
+            icon: "cog",
+            onClick: () =>
+                fireAndForget(async () => {
+                    const path = await invokeCommand<string>("ensure_settings_file");
+                    await invokeCommand("open_in_editor", { path });
+                }),
+        },
+        {
+            label: "Help",
+            icon: "circle-question",
+            onClick: () => fireAndForget(() => createBlock({ meta: { view: "help" } })),
+        },
+    ]);
+
     return (
         <div class="tab-bar" {...dragProps}>
-            <button class="add-tab-btn" onClick={createTab} title="New Tab" data-drag-region="false">
-                <i class="fa fa-plus" />
-            </button>
+            <FlyoutMenu
+                items={tabBarMenuItems()}
+                placement="bottom-start"
+            >
+                <button class="hamburger-btn" title="Menu" data-drag-region="false">
+                    <i class="fa fa-bars" />
+                </button>
+            </FlyoutMenu>
             <div ref={tabBarScrollRef!} class="tab-bar-scroll" data-drag-region="false">
                 <For each={tabIds()}>
                     {(tabId, i) => (

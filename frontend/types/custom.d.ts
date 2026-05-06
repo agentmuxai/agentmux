@@ -354,6 +354,7 @@ declare global {
         icon?: string | JSX.Element;
         subItems?: MenuItem[];
         onClick?: (e: MouseEvent) => void;
+        divider?: boolean;
     };
 
     type MenuButtonProps = {
