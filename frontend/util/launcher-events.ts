@@ -113,6 +113,20 @@ function dedupKey(evt: LauncherEvent): string {
  * recorded at least one prior version → clear the cache and admit.
  */
 export function shouldDispatchLauncherEvent(evt: LauncherEvent): boolean {
+    // Defensive shape check (codex P2, this PR round 3): if the event
+    // is malformed (null, non-object, missing required fields), defer
+    // to PerSourceTracker.deliver — it has the canonical
+    // log-and-discard path. Touching `evt.event` / `evt.version` here
+    // on a null/non-object would throw out of __agentmux_launcher_event,
+    // breaking the bridge for subsequent events.
+    if (
+        evt == null ||
+        typeof evt !== "object" ||
+        typeof (evt as { version?: unknown }).version !== "number" ||
+        typeof (evt as { event?: unknown }).event !== "string"
+    ) {
+        return true;
+    }
     if (evt.version === 1 && hasSeenAnyVersionAbove(0)) {
         dedupSeen.clear();
         // Don't reset suppressed counter — it's a cumulative diag.

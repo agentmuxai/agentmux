@@ -102,6 +102,28 @@ describe("launcher-event per-key dedup", () => {
         expect(shouldDispatchLauncherEvent(evt({ event: "hwnd_drift_detected", version: 3, label: "main", hwnd: 99 }))).toBe(true);
     });
 
+    it("passes malformed events through without throwing or polluting the cache", () => {
+        // Codex P2 PR #708 round 2: the bridge dedup runs before
+        // PerSourceTracker, so accessing evt.version/evt.event on a
+        // null/non-object would throw out of __agentmux_launcher_event.
+        // Guard returns true (let the tracker's canonical
+        // log-and-discard handle it) and doesn't touch the cache.
+        const malformed: unknown[] = [
+            null,
+            undefined,
+            "string",
+            42,
+            {},
+            { event: "ok-but-no-version" },
+            { version: 5 }, // missing event
+            { event: "ok", version: "not-a-number" },
+        ];
+        for (const m of malformed) {
+            expect(shouldDispatchLauncherEvent(m as LauncherEvent)).toBe(true);
+        }
+        expect(launcherEventDedupStats()).toEqual({ tracked: 0, suppressed: 0 });
+    });
+
     it("does NOT treat the very first v=1 event as a restart (cold start)", () => {
         // No prior versions → v=1 is just the first event of a fresh launcher,
         // not a restart sentinel. Cache should NOT be cleared (it's already empty)
