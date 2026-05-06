@@ -1,7 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, createTab, getApi, setActiveTab } from "@/store/global";
+import { atoms, createBlock, createTab, getApi, setActiveTab } from "@/store/global";
+import { FlyoutMenu } from "@/app/element/flyoutmenu";
 import { fireAndForget } from "@/util/util";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
@@ -526,11 +527,82 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     const activeIndex = () => tabIds().indexOf(activeTabId());
 
+    const tabBarMenuItems: MenuItem[] = [
+        {
+            label: "New Tab",
+            icon: "plus",
+            onClick: () => createTab(),
+        },
+        { label: "", divider: true },
+        {
+            label: "New Window",
+            icon: "window-restore",
+            onClick: () => getApi().openNewWindow().catch(console.error),
+        },
+        {
+            label: "Open in New Window",
+            icon: "arrow-up-right-from-square",
+            subItems: [
+                {
+                    label: "Agent",
+                    icon: "sparkles",
+                    onClick: () => getApi().openNewWindow().catch(console.error),
+                },
+                {
+                    label: "Terminal",
+                    icon: "square-terminal",
+                    onClick: () => getApi().openNewWindow().catch(console.error),
+                },
+                {
+                    label: "Browser",
+                    icon: "globe",
+                    onClick: () => getApi().openNewWindow().catch(console.error),
+                },
+                {
+                    label: "Editor",
+                    icon: "file-code",
+                    onClick: () => getApi().openNewWindow().catch(console.error),
+                },
+                {
+                    label: "System Info",
+                    icon: "chart-line",
+                    onClick: () => getApi().openNewWindow().catch(console.error),
+                },
+                {
+                    label: "Swarm",
+                    icon: "bee",
+                    onClick: () => getApi().openNewWindow().catch(console.error),
+                },
+                {
+                    label: "Help",
+                    icon: "circle-question",
+                    onClick: () => getApi().openNewWindow().catch(console.error),
+                },
+            ],
+        },
+        { label: "", divider: true },
+        {
+            label: "Settings",
+            icon: "cog",
+            onClick: () => fireAndForget(() => createBlock({ meta: { view: "settings" } })),
+        },
+        {
+            label: "Help",
+            icon: "circle-question",
+            onClick: () => fireAndForget(() => createBlock({ meta: { view: "help" } })),
+        },
+    ];
+
     return (
         <div class="tab-bar" {...dragProps}>
-            <button class="add-tab-btn" onClick={createTab} title="New Tab" data-drag-region="false">
-                <i class="fa fa-plus" />
-            </button>
+            <FlyoutMenu
+                items={tabBarMenuItems}
+                placement="bottom-start"
+            >
+                <button class="hamburger-btn" title="Menu" data-drag-region="false">
+                    <i class="fa fa-bars" />
+                </button>
+            </FlyoutMenu>
             <div ref={tabBarScrollRef!} class="tab-bar-scroll" data-drag-region="false">
                 <For each={tabIds()}>
                     {(tabId, i) => (
