@@ -93,6 +93,15 @@ This spec proposes a **bounded, near-term fix** that lives entirely inside `Even
 
 Make `Event::HostShouldQuit` actively reconcile the host's `browsers` map against the launcher's authoritative window mirror, then re-run the existing close cascade. The event already crosses processes via the broadcast bus; we're upgrading its handler from "log only" to "log + reconcile + cascade".
 
+### 4.1 Trigger paths for `HostShouldQuit`
+
+The launcher emits `HostShouldQuit` whenever its mirror's `state.windows` becomes empty AND the host process is still `Running`. Two reducer paths can land in that state:
+
+1. **Normal close** — host's `on_before_close` ran and dispatched `Command::ReportWindowClosed`. Handled in `reducer/window.rs::handle_report_window_closed`.
+2. **Crash-detected close** — Win32 fired `WM_DESTROY` for the HWND but `on_before_close` didn't run (renderer crash, OS-level kill, etc.). Handled in `wrr/mod.rs::apply_hwnd_destroyed`.
+
+Both paths must emit the OrphanInstance drift + `HostShouldQuit` pair when they remove the last window. The crash path is exactly the case the reconciler is designed for — without it firing `HostShouldQuit`, a renderer-crashed last window leaves the warm pool unreaped (codex #702 round-7 P1).
+
 **Out of scope:** generalizing this beyond shutdown (e.g., reconciling mid-session orphans). The concern under master spec §9.2 (per-event saga_id correlation, deferred ~300 LOC) is upstream — this spec doesn't depend on it. We act on the *existence* of `HostShouldQuit`, not on a saga_id match.
 
 ## 5. Design
