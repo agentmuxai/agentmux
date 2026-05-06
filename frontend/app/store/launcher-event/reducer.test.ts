@@ -393,15 +393,21 @@ describe("launcher-event reducer", () => {
             // Property: for any sequence of events S, applying S with each event
             // duplicated 1-5x produces the same final state as applying S once.
             // Holds for the events listed above (idempotent per spec §8.14).
-            const labels = ["a", "b", "c"];
+            //
+            // Labels MUST be accepted by `isInstanceLabel` (`main` or
+            // `window-*`) — codex P2 PR #709 round 3 caught a prior version
+            // using `a`/`b`/`c` which were filtered out, leaving both
+            // sequences producing an empty state and the property holding
+            // vacuously. The non-empty-knownEntries assertion below is the
+            // anti-vacuity guard.
             const baseSequence: LauncherEvent[] = [
-                evt({ event: "window_opened", label: "a" }),
-                evt({ event: "backend_window_id_registered", label: "a", window_id: "w-1" }),
-                evt({ event: "window_opened", label: "b" }),
-                evt({ event: "window_instance_assigned", label: "b" }),
+                evt({ event: "window_opened", label: "window-a" }),
+                evt({ event: "backend_window_id_registered", label: "window-a", window_id: "w-1" }),
+                evt({ event: "window_opened", label: "window-b" }),
+                evt({ event: "window_instance_assigned", label: "window-b" }),
                 evt({ event: "hwnd_drift_detected" }),
-                evt({ event: "window_opened", label: "c" }),
-                evt({ event: "backend_window_id_registered", label: "c", window_id: "w-3" }),
+                evt({ event: "window_opened", label: "window-c" }),
+                evt({ event: "backend_window_id_registered", label: "window-c", window_id: "w-3" }),
             ];
 
             const apply = (events: LauncherEvent[]) => {
@@ -413,6 +419,12 @@ describe("launcher-event reducer", () => {
             };
 
             const expected = apply(baseSequence);
+
+            // Anti-vacuity: if the reducer's label filter ever changes,
+            // the empty-state-equals-empty-state trap returns. Assert the
+            // base run actually mutates state.
+            expect(expected.knownEntries.size).toBe(3);
+            expect(expected.instances.length).toBe(3);
 
             // 30 deterministic seeds.
             for (let seed = 1; seed <= 30; seed++) {
@@ -433,7 +445,6 @@ describe("launcher-event reducer", () => {
                 expect(got.instances).toEqual(expected.instances);
                 expect(got.seedHasHappened).toEqual(expected.seedHasHappened);
             }
-            void labels;
         });
     });
 
