@@ -619,26 +619,21 @@ pub enum Command {
     /// Phase F.5 — launcher-side saga coordinator asks the host to
     /// spawn a fresh pool window (refill after promote).
     ///
-    /// **F.5 status: framework-only.** Today the launcher's saga
-    /// coordinator does not yet have a launcher→host command pipe
-    /// (host's `launcher_ipc.rs` is wired to send Commands up but
-    /// not receive them down on the same connection). The
-    /// pool-respawn saga issues this command via `SagaAction::IssueCmd`
-    /// for state-machine completeness, but the dispatch is currently a
-    /// no-op LOG and the saga relies on the host's existing implicit
-    /// `spawn_pool_window` call inside `promote_pool_window` to
-    /// produce the `Event::PoolWindowAdded` it waits for. F.6 (or
-    /// the cross-process command dispatch follow-up) replaces the
-    /// log with a real wire-level send.
+    /// **Status: live.** Cross-process dispatch (CPD-1 through CPD-5)
+    /// shipped; the saga coordinator's `apply_action` for
+    /// `PipeTarget::Host` writes this command through `host_pipe`
+    /// (`agentmux-launcher/src/host_pipe/`) and waits on the
+    /// `Event::PoolWindowAdded { saga_id: Some(N) }` echo. Host's
+    /// implicit `spawn_pool_window` call inside `promote_pool_window`
+    /// remains the organic refill path for non-saga-driven
+    /// promotions (with `saga_id: None`).
     ///
-    /// Phase CPD-1 (cross-process dispatch) — `saga_id` is mandatory
-    /// on the wire (every host-bound command carries the originating
+    /// `saga_id`: every host-bound command carries the originating
     /// saga's id so the host can echo it on the corresponding
-    /// `Report*` reply). Defaults to `0` via `#[serde(default)]` for
-    /// forward-compat with launchers running pre-CPD-1 builds; the
-    /// soak default is removed in a later PR (CPD-3) once the wire
-    /// has shipped a release cycle. `0` is reserved as "no saga"
-    /// and is treated by the host as a non-saga-driven dispatch.
+    /// `Report*` reply. `0` is reserved as "no saga" and treated as a
+    /// non-saga dispatch. `#[serde(default)]` retained for
+    /// forward-compat with any pre-CPD-1 deserializers (no real-world
+    /// consumer today; portable runtime is bundled per release).
     SpawnPoolWindow {
         #[serde(default)]
         saga_id: u64,
@@ -699,18 +694,17 @@ pub enum Command {
     /// Phase F.6 — launcher-side saga coordinator asks the host to
     /// reap all browser-pane HWNDs for a window that just closed.
     ///
-    /// **F.6 status: framework-only.** Same as `SpawnPoolWindow` in
-    /// F.5: no launcher→host command pipe exists yet. The saga
-    /// issues this with `target = PipeTarget::Host` for forward
-    /// compatibility; the coordinator's IssueCmd handler logs the
-    /// dispatch without transmitting. The host's existing implicit
-    /// pane drain inside `on_before_close` produces the
-    /// `Event::PanesReaped` the saga waits for. F.7 / cross-process
-    /// dispatch follow-up replaces the log with a real wire send.
+    /// **Status: live.** Wired through `host_pipe` post-CPD-3. The
+    /// saga issues this with `target = PipeTarget::Host`; the
+    /// coordinator's `apply_action` writes it through the host pipe
+    /// and waits for the `Event::PanesReaped { saga_id: Some(N) }`
+    /// echo. Host's organic pane drain inside `on_before_close` still
+    /// emits the same Report with `saga_id: None` for non-saga-driven
+    /// closes.
     ///
-    /// Phase CPD-1 — `saga_id` is mandatory on the wire (host echoes
-    /// back on `ReportPanesReaped`). `#[serde(default)]` returning `0`
-    /// for forward-compat soak; removed in CPD-3.
+    /// `saga_id`: mandatory on the wire (host echoes back on
+    /// `ReportPanesReaped`). `#[serde(default)]` retained for
+    /// forward-compat (see `SpawnPoolWindow` for rationale).
     ReapPanes {
         label: String,
         #[serde(default)]
@@ -721,14 +715,15 @@ pub enum Command {
     /// user-visible window (i.e. trigger Stage 1 of the close
     /// cascade).
     ///
-    /// **F.6 status: framework-only** (same caveat as `ReapPanes`).
-    /// Today the host's `on_before_close` already runs the equivalent
-    /// inline check; the saga relies on the resulting
-    /// `Event::PoolDrained` / `Event::PoolNotLast` to close its
-    /// bracket.
+    /// **Status: live** (same shipping path as `ReapPanes`). Wired
+    /// through `host_pipe` post-CPD-3; saga waits on
+    /// `Event::PoolDrained { saga_id: Some(N) }` /
+    /// `Event::PoolNotLast { saga_id: Some(N) }` echo. Host's
+    /// `on_before_close` still runs the equivalent inline check
+    /// organically (with `saga_id: None`).
     ///
-    /// Phase CPD-1 — `saga_id` is mandatory on the wire.
-    /// `#[serde(default)]` for forward-compat soak; removed in CPD-3.
+    /// `saga_id`: mandatory on the wire. `#[serde(default)]` retained
+    /// for forward-compat.
     DrainPoolIfLast {
         label: String,
         #[serde(default)]
