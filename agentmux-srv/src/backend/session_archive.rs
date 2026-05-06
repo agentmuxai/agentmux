@@ -478,8 +478,15 @@ mod tests {
         let filestore = Arc::new(
             FileStore::open_in_memory().expect("filestore"),
         );
-        // Write a fake "output" file for block "blk-sweep-test"
-        let block_id = "blk-sweep-test";
+        // Write a fake "output" file for the block. The ID must be a
+        // valid UUID — `archive_session_output` calls
+        // `update_object_meta`, which parses the ORef
+        // `format!("block:{}", block_id)` via `ORef::parse` and
+        // rejects non-UUID oids. The earlier "blk-sweep-test" string
+        // failed silently inside the sweep's logged-but-suppressed
+        // error path.
+        let block_id_owned = uuid::Uuid::new_v4().to_string();
+        let block_id = block_id_owned.as_str();
         filestore
             .make_file(block_id, OUTPUT_FILENAME, FileMeta::default(), FileOpts::default())
             .expect("make_file");
