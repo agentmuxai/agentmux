@@ -133,7 +133,17 @@ wrap_task! {
 fn ui_thread_reconcile(state: &Arc<AppState>, candidates: &[String]) {
     let candidate_set: HashSet<&str> = candidates.iter().map(|s| s.as_str()).collect();
     let browser_pairs = state.list_browsers();
-    let unpromoted = state.unpromoted_pool_labels_snapshot();
+    // Re-snapshot shadow on the UI thread (used below for the
+    // `live_user_count` check). If the launcher's `WindowOpened`
+    // echo for a freshly-promoted pool window arrived between the
+    // IPC-thread classification and now, the new entry appears here
+    // and counts toward `live_user_count` correctly.
+    let shadow_keys: HashSet<String> = state
+        .shadow_window_meta
+        .lock()
+        .keys()
+        .cloned()
+        .collect();
 
     let mut to_close: Vec<(String, Browser)> = Vec::new();
     let mut deferred_live_candidates: Vec<String> = Vec::new();
@@ -165,16 +175,22 @@ fn ui_thread_reconcile(state: &Arc<AppState>, candidates: &[String]) {
         return;
     }
 
-    // Compute remaining live user browsers AFTER removing the zombies
-    // we're about to close. If anything remains, a stale
-    // `HostShouldQuit` raced with an active user session — close the
-    // zombies but leave drain mode untouched.
+    // Compute remaining live user browsers AFTER removing the zombies.
+    // The launcher's `shadow_window_meta` is the authoritative set of
+    // labels the launcher tracks as user-visible — a label is in
+    // shadow iff `ReportWindowOpened` was sent for it (which only
+    // happens at promotion time for pool windows, not at pool
+    // registration). So this filter naturally excludes both
+    // `pool.unpromoted` AND `pool.queue` inventory (neither is in
+    // shadow), and includes promoted pool windows (which retain
+    // their `window-pool-*` prefix but ARE in shadow). Pane labels
+    // are excluded because they drain via a separate cascade.
     let zombie_labels: HashSet<&str> = to_close.iter().map(|(l, _)| l.as_str()).collect();
     let live_user_count = browser_pairs
         .iter()
         .filter(|(label, _)| {
-            !zombie_labels.contains(label.as_str())
-                && !unpromoted.contains(label.as_str())
+            shadow_keys.contains(label)
+                && !zombie_labels.contains(label.as_str())
                 && !label.starts_with("browser-pane-")
         })
         .count();

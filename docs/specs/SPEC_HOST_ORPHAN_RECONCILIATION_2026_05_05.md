@@ -193,13 +193,15 @@ Each orphan close re-enters `client::on_before_close → on_pool_window_destroye
 
 But unconditionally entering drain mode is also wrong: a stale `HostShouldQuit` can fire after the user has opened a new live `window-*` or shadow-tracked promoted window. There's no transition back to `Running` once `BeginDrain` runs — `spawn_pool_window` then refuses to refill the pool for the live session. The user's session quietly degrades.
 
-The UI-thread runner therefore computes `live_user_count` AFTER classifying zombies:
+The UI-thread runner therefore computes `live_user_count` AFTER classifying zombies, gated on the launcher's `shadow_window_meta` (which is the authoritative set of "user-visible" labels — `ReportWindowOpened` is sent only at promotion time, never at pool registration):
 
 ```
-live_user_count = count(labels that are NOT in to_close
-                                  AND NOT in unpromoted_pool
+live_user_count = count(labels that ARE in shadow_window_meta
+                                  AND NOT in to_close
                                   AND NOT prefixed `browser-pane-`)
 ```
+
+Excluding `unpromoted_pool` alone is insufficient: `handle_pool_ready` removes labels from `pool.unpromoted` and adds them to `pool.queue`. A ready-but-not-yet-promoted pool window therefore satisfies `!unpromoted.contains(label)` but is NOT in shadow (no `ReportWindowOpened` fires until promotion). Filtering by shadow membership covers both `pool.unpromoted` and `pool.queue` inventory in one predicate.
 
 If `live_user_count == 0`, dispatch `HostCommand::BeginDrain { reason: LastWindowClosed }` (idempotent — a parallel `on_before_close` cascade already having dispatched it is a no-op). If `live_user_count > 0`, skip drain — close the zombies but leave the running session alone.
 
