@@ -95,13 +95,14 @@ pub struct TabRecord {
     /// `LayoutDeleteNode` reducer arms (and the rest of the 11 in
     /// follow-up PRs). `None` represents an empty tree (no panes).
     ///
-    /// **Status: scaffolded, not yet bootstrap-loaded.** Production
-    /// writers still go through the wcore-direct path (per
+    /// **Status: scaffolded; bootstrap-loaded.** `persist::
+    /// bootstrap_state_from_wstore` populates this from
+    /// `LayoutState.rootnode` at startup. Production writers still
+    /// go through the wcore-direct path (per
     /// `srv-phase-e4b-implementation-plan-2026-05-03.md` Phase 7);
-    /// this field stays `None` at startup until those writers are
-    /// migrated. Reducer arms operate on it under the same
-    /// "no-callers-yet" discipline that H.6 follows in the host
-    /// reducer.
+    /// reducer arms mutate this field but no production code
+    /// dispatches to them yet — same "no-callers-yet" discipline H.6
+    /// follows in the host reducer.
     pub rootnode: Option<agentmux_common::LayoutNode>,
 }
 
