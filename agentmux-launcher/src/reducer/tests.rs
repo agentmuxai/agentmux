@@ -2450,6 +2450,11 @@ fn arb_b8_host_command() -> impl proptest::strategy::Strategy<Value = Command> {
             Command::ReportBackendWindowIdRegistered { label, window_id }
         }),
         2 => "[a-c]{1,3}".prop_map(|label| Command::ReportBackendWindowIdUnregistered { label }),
+        // Promote — exercises just_promoted_labels (PR #708 round 3).
+        // Drift-storm fix relies on this set bridging the
+        // PoolPromoted → WindowOpened gap; a proptest verifies the
+        // set never grows without bound.
+        2 => "pool-[a-c]{1,2}".prop_map(|label| Command::ReportPoolWindowPromoted { label }),
     ]
 }
 
@@ -2479,6 +2484,80 @@ proptest! {
                 "label(s) in both pool and windows: {:?}", overlap
             );
         }
+    }
+
+    /// `just_promoted_labels` size is bounded by the count of
+    /// distinct pool labels seen — every promoted entry is removed
+    /// by the matching `ReportWindowOpened` (or `ReportWindowClosed`
+    /// fallback). Random sequences of host commands MUST NOT cause
+    /// unbounded growth.
+    ///
+    /// Drift-storm regression guard (PR #708 round 3):
+    /// `just_promoted_labels` is the microsecond-bridge from
+    /// `PoolPromoted → WindowOpened`. If either consumer is missed,
+    /// the set leaks. Bounding by distinct labels seen catches a
+    /// future regression where promote inserts but consumers don't
+    /// remove.
+    #[test]
+    fn just_promoted_labels_bounded_by_distinct_pool_labels(
+        cmds in proptest::collection::vec(arb_b8_host_command(), 1..80)
+    ) {
+        let (mut state, host_ctx) = registered_host_state();
+        let mut distinct_pool_labels: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for cmd in &cmds {
+            if let Command::ReportPoolWindowPromoted { label } = cmd {
+                distinct_pool_labels.insert(label.clone());
+            }
+        }
+        for cmd in cmds {
+            let _ = update(&mut state, cmd, &host_ctx);
+            prop_assert!(
+                state.just_promoted_labels.len() <= distinct_pool_labels.len(),
+                "just_promoted_labels grew past distinct labels seen: {} > {}",
+                state.just_promoted_labels.len(),
+                distinct_pool_labels.len()
+            );
+        }
+    }
+
+    /// `ReportPoolWindowPromoted` is idempotent: applying the SAME
+    /// promote command N times produces equivalent state to applying
+    /// once (modulo `event_version`, which is monotonic by design).
+    /// Spec §8.14 sibling — this is the GENERATOR-side property
+    /// (sub set insertion is naturally idempotent), exercised
+    /// explicitly to lock the contract.
+    #[test]
+    fn promote_is_idempotent_on_just_promoted_labels(
+        label in "pool-[a-c]{1,2}",
+        n in 2usize..10
+    ) {
+        let (mut state, host_ctx) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportPoolWindowAdded { label: label.clone(), saga_id: None },
+            &host_ctx,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportPoolWindowRemoved { label: label.clone() },
+            &host_ctx,
+        );
+        for _ in 0..n {
+            let _ = update(
+                &mut state,
+                Command::ReportPoolWindowPromoted { label: label.clone() },
+                &host_ctx,
+            );
+        }
+        prop_assert!(
+            state.just_promoted_labels.contains(&label),
+            "promote must record label"
+        );
+        prop_assert_eq!(
+            state.just_promoted_labels.len(), 1,
+            "{} promotes for the same label produce 1 entry, not n",
+            n
+        );
     }
 
     /// Instance numbers within `state.instance_registry` are

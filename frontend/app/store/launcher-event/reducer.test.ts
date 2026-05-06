@@ -322,6 +322,121 @@ describe("launcher-event reducer", () => {
         });
     });
 
+    // Master spec §8.14 — subscriber idempotency contract. Pure
+    // reducer property: applying the same event N times to a stable
+    // state produces the same state as applying it once. Per-event-kind
+    // because some are inherently non-idempotent (e.g. window_closed
+    // deletes; the first call deletes, the second is a known no-op).
+    describe("§8.14 idempotency property tests", () => {
+        const idempotentApplyEvent = (
+            initial: ReturnType<typeof initialState>,
+            event: Partial<LauncherEvent> & { event: string },
+        ) => {
+            const once = update(initial, { type: "ApplyEvent", event: evt(event) }).state;
+            const twice = update(once, { type: "ApplyEvent", event: evt(event) }).state;
+            const thrice = update(twice, { type: "ApplyEvent", event: evt(event) }).state;
+            return { once, twice, thrice };
+        };
+
+        it("repeated window_opened for the same label folds to the first apply", () => {
+            const r = idempotentApplyEvent(initialState(), {
+                event: "window_opened",
+                label: "window-x",
+            });
+            expect(r.twice.knownEntries).toEqual(r.once.knownEntries);
+            expect(r.thrice.knownEntries).toEqual(r.once.knownEntries);
+            expect(r.twice.instances).toEqual(r.once.instances);
+        });
+
+        it("repeated backend_window_id_registered with same id is a no-op past the first", () => {
+            const r = idempotentApplyEvent(initialState(), {
+                event: "backend_window_id_registered",
+                label: "window-x",
+                window_id: "w-123",
+            });
+            expect(r.twice.knownEntries.get("window-x")).toEqual(r.once.knownEntries.get("window-x"));
+            expect(r.thrice.knownEntries.get("window-x")).toEqual(r.once.knownEntries.get("window-x"));
+        });
+
+        it("repeated hwnd_drift_detected does not mutate state (audit-only event)", () => {
+            const start = initialState();
+            const r = idempotentApplyEvent(start, { event: "hwnd_drift_detected" });
+            expect(r.once).toBe(start); // ref-equal: audit-only events don't allocate
+            expect(r.twice).toBe(start);
+            expect(r.thrice).toBe(start);
+        });
+
+        it("repeated window_instance_assigned for an existing entry is a no-op past the first", () => {
+            const seeded = update(initialState(), {
+                type: "ApplyEvent",
+                event: evt({ event: "window_opened", label: "window-x" }),
+            }).state;
+            const r = idempotentApplyEvent(seeded, {
+                event: "window_instance_assigned",
+                label: "window-x",
+            });
+            expect(r.twice).toBe(r.once);
+            expect(r.thrice).toBe(r.once);
+        });
+
+        it("repeated unknown variant is forward-compat no-op every time", () => {
+            const start = initialState();
+            const r = idempotentApplyEvent(start, {
+                event: "future_event_we_dont_know_yet",
+            });
+            expect(r.once).toBe(start); // ref-equal: unknown variants don't allocate
+            expect(r.twice).toBe(start);
+            expect(r.thrice).toBe(start);
+        });
+
+        it("a randomised duplicate-bursting sequence produces the same final state as the dedup'd sequence", () => {
+            // Property: for any sequence of events S, applying S with each event
+            // duplicated 1-5x produces the same final state as applying S once.
+            // Holds for the events listed above (idempotent per spec §8.14).
+            const labels = ["a", "b", "c"];
+            const baseSequence: LauncherEvent[] = [
+                evt({ event: "window_opened", label: "a" }),
+                evt({ event: "backend_window_id_registered", label: "a", window_id: "w-1" }),
+                evt({ event: "window_opened", label: "b" }),
+                evt({ event: "window_instance_assigned", label: "b" }),
+                evt({ event: "hwnd_drift_detected" }),
+                evt({ event: "window_opened", label: "c" }),
+                evt({ event: "backend_window_id_registered", label: "c", window_id: "w-3" }),
+            ];
+
+            const apply = (events: LauncherEvent[]) => {
+                let s = initialState();
+                for (const e of events) {
+                    s = update(s, { type: "ApplyEvent", event: e }).state;
+                }
+                return s;
+            };
+
+            const expected = apply(baseSequence);
+
+            // 30 deterministic seeds.
+            for (let seed = 1; seed <= 30; seed++) {
+                let t = seed >>> 0;
+                const next = () => {
+                    t = (t + 0x6d2b79f5) >>> 0;
+                    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+                    r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+                    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+                };
+                const inflated: LauncherEvent[] = [];
+                for (const e of baseSequence) {
+                    const n = 1 + Math.floor(next() * 5);
+                    for (let i = 0; i < n; i++) inflated.push(e);
+                }
+                const got = apply(inflated);
+                expect(got.knownEntries).toEqual(expected.knownEntries);
+                expect(got.instances).toEqual(expected.instances);
+                expect(got.seedHasHappened).toEqual(expected.seedHasHappened);
+            }
+            void labels;
+        });
+    });
+
     describe("Purity", () => {
         it("does not mutate input state", () => {
             const start = update(initialState(), {
