@@ -1467,19 +1467,53 @@ fn wrr_off_monitor_after_user_foregrounded_does_not_correct() {
 }
 
 #[test]
-fn promote_clears_foregrounded_since_open_so_post_promote_hide_does_not_drift() {
-    // Drift-storm regression (v0.33.655 smoke): pool window opens
-    // hidden → never foregrounded → promote → host repositions HWND
-    // (multiple SetWindowPos calls) → some intermediate state has
-    // visible=false → `apply_hwnd_visibility_changed` re-fires
-    // `HiddenSinceOpen` against the now-promoted user window. The
-    // host fans each emission across the bridge to every renderer
-    // and the V8 isolate eventually crashes. Promote is the user
-    // explicitly tearing off a tab — the open-transient corrective
-    // logic must NOT apply post-promote. Promote handler flips
-    // `foregrounded_since_open=true` to suppress.
+fn tear_off_promote_emit_order_initializes_mirror_with_foregrounded_true() {
+    // Drift-storm regression (v0.33.655 smoke). PRODUCTION emit order
+    // (per agentmux-cef/src/commands/window_pool.rs):
+    //
+    //   1. ReportPoolWindowAdded   → pool spawn (some time earlier)
+    //   2. ReportPoolWindowRemoved → about to promote (no mirror yet)
+    //   3. ReportPoolWindowPromoted → records in just_promoted_labels
+    //   4. ReportWindowOpened      → mirror created NOW
+    //   5. ReportHwndOpened        → HWND linked
+    //   6. SetWindowPos churn      → ReportHwndVisibilityChanged false
+    //
+    // Pre-fix: step 4 initialized foregrounded_since_open=false, so
+    // step 6 re-fired HiddenSinceOpen drift → host fans across bridge
+    // → renderer V8 crash. Fix: step 3 records, step 4 consumes and
+    // initializes foregrounded_since_open=true.
+    //
     // See `docs/specs/ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`.
     let (mut state, c) = registered_host_state();
+
+    // Steps 1–2: pool spawn + remove (no mirror in state.windows).
+    let _ = update(
+        &mut state,
+        Command::ReportPoolWindowAdded { label: "window-pool-abc".into(), saga_id: None },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportPoolWindowRemoved { label: "window-pool-abc".into() },
+        &c,
+    );
+    assert!(
+        !state.windows.contains_key("window-pool-abc"),
+        "pre-promote: no mirror yet (production invariant)"
+    );
+
+    // Step 3: promote. Records in just_promoted_labels; emits typed event.
+    let _ = update(
+        &mut state,
+        Command::ReportPoolWindowPromoted { label: "window-pool-abc".into() },
+        &c,
+    );
+    assert!(
+        state.just_promoted_labels.contains("window-pool-abc"),
+        "promote must record label in just_promoted_labels"
+    );
+
+    // Step 4: window opened — mirror created with foregrounded_since_open=true.
     let _ = update(
         &mut state,
         Command::ReportWindowOpened {
@@ -1489,6 +1523,17 @@ fn promote_clears_foregrounded_since_open_so_post_promote_hide_does_not_drift() 
         },
         &c,
     );
+    let mirror = state.windows.get("window-pool-abc").expect("mirror created on open");
+    assert!(
+        mirror.foregrounded_since_open,
+        "post-promote open must initialize foregrounded_since_open=true (got false → drift storm regression)"
+    );
+    assert!(
+        !state.just_promoted_labels.contains("window-pool-abc"),
+        "open consumes the just_promoted entry"
+    );
+
+    // Step 5: HWND link.
     let _ = update(
         &mut state,
         Command::ReportHwndOpened {
@@ -1499,33 +1544,8 @@ fn promote_clears_foregrounded_since_open_so_post_promote_hide_does_not_drift() 
         },
         &c,
     );
-    // Pre-promote: never-foregrounded → a hide event fires drift.
-    let pre = update(
-        &mut state,
-        Command::ReportHwndVisibilityChanged { hwnd: 0xBB, visible: false },
-        &c,
-    );
-    assert!(
-        pre.iter().any(|e| matches!(
-            e,
-            Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
-        )),
-        "pre-promote hide must drift (control: {:?})",
-        pre
-    );
 
-    // Promote.
-    let _ = update(
-        &mut state,
-        Command::ReportPoolWindowPromoted { label: "window-pool-abc".into() },
-        &c,
-    );
-    assert!(
-        state.windows.get("window-pool-abc").unwrap().foregrounded_since_open,
-        "promote must flip foregrounded_since_open to suppress open-transient drift"
-    );
-
-    // Post-promote: identical hide event must NOT drift.
+    // Step 6: visibility flicker during HWND repositioning. MUST NOT drift.
     let post = update(
         &mut state,
         Command::ReportHwndVisibilityChanged { hwnd: 0xBB, visible: false },
@@ -1542,13 +1562,32 @@ fn promote_clears_foregrounded_since_open_so_post_promote_hide_does_not_drift() 
 }
 
 #[test]
-fn promote_for_label_without_window_mirror_is_a_no_op() {
+fn cold_open_without_promote_still_initializes_foregrounded_false() {
+    // Sanity: a regular window open (e.g. main, fresh tear-off NOT
+    // through pool) MUST keep foregrounded_since_open=false so the
+    // open-transient corrective logic still applies for those windows.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-fresh".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    assert!(
+        !state.windows.get("window-fresh").unwrap().foregrounded_since_open,
+        "non-promote open must keep foregrounded_since_open=false"
+    );
+}
+
+#[test]
+fn promote_for_label_without_window_mirror_emits_event_idempotently() {
     // The handler's idempotency contract: ReportPoolWindowPromoted
-    // can arrive before, after, or interleaved with
-    // ReportPoolWindowRemoved. If the mirror isn't present at this
-    // moment (e.g. it was removed first, or the host promote IPC
-    // outraced the open IPC), the handler must still emit the typed
-    // event without panicking.
+    // can arrive without a paired ReportWindowOpened (e.g. the open
+    // IPC was lost). The handler must emit the typed event and
+    // record in just_promoted_labels without synthesising a mirror.
     let (mut state, c) = registered_host_state();
     let evs = update(
         &mut state,
@@ -1560,8 +1599,36 @@ fn promote_for_label_without_window_mirror_is_a_no_op() {
         "promote without mirror must still emit PoolWindowPromoted"
     );
     assert!(
+        state.just_promoted_labels.contains("window-pool-xyz"),
+        "promote records in just_promoted_labels"
+    );
+    assert!(
         !state.windows.contains_key("window-pool-xyz"),
         "promote must not synthesise a mirror"
+    );
+}
+
+#[test]
+fn close_drops_orphaned_just_promoted_entry() {
+    // If promote was emitted but the matching open never arrived
+    // (host crash mid-tear-off etc.), a subsequent close for the
+    // same label must clean up the just_promoted entry to bound the
+    // leak.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportPoolWindowPromoted { label: "window-pool-orphan".into() },
+        &c,
+    );
+    assert!(state.just_promoted_labels.contains("window-pool-orphan"));
+    let _ = update(
+        &mut state,
+        Command::ReportWindowClosed { label: "window-pool-orphan".into() },
+        &c,
+    );
+    assert!(
+        !state.just_promoted_labels.contains("window-pool-orphan"),
+        "close must drop orphaned just_promoted entry"
     );
 }
 
