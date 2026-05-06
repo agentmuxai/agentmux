@@ -6,23 +6,27 @@
 //!
 //! When the launcher detects that the last user-visible window
 //! has closed but the host is still alive, it emits
-//! `Event::HostShouldQuit`. The host's handler invokes the
-//! reconciler here, which closes any orphan `window-pool-*`
-//! browsers (promoted out of the warm pool, but the launcher
-//! mirror has dropped them — typically because their HWND was
-//! destroyed without the host's `on_before_close` running).
+//! `Event::HostShouldQuit`. The host's handler invokes
+//! `reconcile_and_drain` here, which closes any orphan
+//! `window-pool-*` browsers (promoted out of the warm pool, but
+//! the launcher mirror has dropped them — typically because their
+//! HWND was destroyed without the host's `on_before_close` running).
 //!
-//! Each close is dispatched via `PostMessageW(WM_CLOSE)` (live
-//! HWND) or `cef::post_task(close_browser)` (dead/missing HWND).
-//! Both routes funnel back through `client::on_before_close`,
+//! Each close funnels back through `client::on_before_close`,
 //! whose Stage 2 hook fires `quit_message_loop()` once
-//! `browser_list` empties — so the reconciler doesn't have to
-//! drive UI-thread shutdown directly. Earlier attempts at doing
-//! that from this IPC thread all hung CEF (see
-//! `launcher_ipc.rs::HostShouldQuit` comment).
+//! `browser_list` empties — so the reconciler doesn't drive
+//! UI-thread shutdown directly.
+//!
+//! Threading: CEF Browser/BrowserHost methods (`host()`,
+//! `window_handle()`, `close_browser()`) MUST run on the UI
+//! thread per CEF docs. The IPC reader thread that delivers
+//! `HostShouldQuit` does only state-snapshot + classification
+//! work, then `cef::post_task`s the UI-thread closure.
 
 use std::collections::HashSet;
 use std::sync::Arc;
+
+use cef::*;
 
 use crate::state::AppState;
 
@@ -31,8 +35,8 @@ use crate::state::AppState;
 /// `shadow_window_meta` mirror. Necessary but not sufficient: a
 /// freshly-promoted pool window briefly satisfies this (the
 /// launcher's `WindowOpened` echo hasn't populated shadow yet),
-/// so the orchestrator must additionally verify the HWND is dead
-/// before dispatching close.
+/// so the UI-thread runner must additionally verify the HWND is
+/// dead before dispatching close.
 ///
 /// Pure function over snapshot inputs.
 pub(crate) fn classify_candidate_orphans(
@@ -51,15 +55,15 @@ pub(crate) fn classify_candidate_orphans(
         .collect()
 }
 
-/// Snapshot-and-drop entry point. Walks the host's browser map,
-/// identifies orphan `window-pool-*` zombies, sets the host into
-/// drain mode, and dispatches a close to each.
-///
-/// Idempotent: a second call before CEF processes the closes will
-/// see the same orphan set and re-dispatch; Windows coalesces
-/// duplicate `WM_CLOSE` and `BeginDrain` is itself idempotent.
+/// IPC-thread entry point. Snapshots host state under locks (no
+/// CEF calls), classifies candidate orphans, and posts the
+/// CEF-touching work to the UI thread.
 pub fn reconcile_and_drain(state: &Arc<AppState>) {
-    let browser_pairs = state.list_browsers();
+    let labels: Vec<String> = state
+        .list_browsers()
+        .into_iter()
+        .map(|(l, _)| l)
+        .collect();
     let unpromoted = state.unpromoted_pool_labels_snapshot();
     // Shadow alone is the source of truth for "launcher tracks this
     // as live". Local `window_meta` is unreliable here because it's
@@ -72,7 +76,6 @@ pub fn reconcile_and_drain(state: &Arc<AppState>) {
         .keys()
         .cloned()
         .collect();
-    let labels: Vec<String> = browser_pairs.iter().map(|(l, _)| l.clone()).collect();
     let candidates = classify_candidate_orphans(&labels, &unpromoted, &shadow_keys);
 
     if candidates.is_empty() {
@@ -83,29 +86,74 @@ pub fn reconcile_and_drain(state: &Arc<AppState>) {
         return;
     }
 
-    // Discriminate freshly-promoted (live HWND, must NOT close)
-    // from zombie (dead HWND, must close) via Win32 `IsWindow` on
-    // the browser's underlying handle. See spec §5.4.
+    // Marshal CEF Browser/BrowserHost calls to the UI thread. The
+    // existing two-stage cascade (`client/mod.rs::on_before_close`)
+    // gets to make these calls inline because it already runs on
+    // the UI thread; we don't, so we hand the work to CEF's task
+    // queue. Three v0.33.491–v0.33.494 attempts at driving UI work
+    // *directly* from the IPC handler all hung CEF — this path
+    // avoids that by using CEF's own scheduler.
+    let mut task = OrphanReconcileTask::new(state.clone(), candidates);
+    let posted = post_task(ThreadId::UI, Some(&mut task));
+    tracing::debug!(
+        target: "wrr-trace",
+        "[orphan-reconcile] posted UI-thread task posted={}",
+        posted != 0
+    );
+}
+
+wrap_task! {
+    pub struct OrphanReconcileTask {
+        state: Arc<AppState>,
+        candidates: Vec<String>,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            ui_thread_reconcile(&self.state, &self.candidates);
+        }
+    }
+}
+
+/// UI-thread body. CEF Browser methods are safe here.
+///
+/// Re-snapshot browsers (state may have advanced since the IPC
+/// thread classified candidates — labels that have actually closed
+/// are no longer in the map; new candidates may have appeared, but
+/// we'll catch them on the next `HostShouldQuit`). For each
+/// candidate that's still present, probe its HWND: live → skip
+/// (Race B, freshly promoted), dead → close.
+///
+/// Drain mode is set ONLY if no live user browser remains *after*
+/// removing the zombies we're about to close. A stale
+/// `HostShouldQuit` racing with a live user session must NOT flip
+/// `quit_state` to `Draining`, because there's no transition back
+/// to `Running` and `spawn_pool_window` then refuses to refill the
+/// pool — silently degrading the live session.
+fn ui_thread_reconcile(state: &Arc<AppState>, candidates: &[String]) {
     let candidate_set: HashSet<&str> = candidates.iter().map(|s| s.as_str()).collect();
-    let mut to_close: Vec<(String, cef::Browser)> = Vec::new();
-    let mut deferred_live: Vec<String> = Vec::new();
-    for (label, browser) in browser_pairs.into_iter() {
+    let browser_pairs = state.list_browsers();
+    let unpromoted = state.unpromoted_pool_labels_snapshot();
+
+    let mut to_close: Vec<(String, Browser)> = Vec::new();
+    let mut deferred_live_candidates: Vec<String> = Vec::new();
+    for (label, browser) in browser_pairs.iter() {
         if !candidate_set.contains(label.as_str()) {
             continue;
         }
-        if hwnd_is_dead_or_missing(&browser) {
-            to_close.push((label, browser));
+        if hwnd_is_dead_or_missing(browser) {
+            to_close.push((label.clone(), browser.clone()));
         } else {
-            deferred_live.push(label);
+            deferred_live_candidates.push(label.clone());
         }
     }
 
-    if !deferred_live.is_empty() {
+    if !deferred_live_candidates.is_empty() {
         tracing::info!(
             target: "wrr",
             "[orphan-reconcile] {} candidate(s) have live HWNDs — likely freshly-promoted, skipping: {:?}",
-            deferred_live.len(),
-            deferred_live
+            deferred_live_candidates.len(),
+            deferred_live_candidates
         );
     }
 
@@ -117,16 +165,37 @@ pub fn reconcile_and_drain(state: &Arc<AppState>) {
         return;
     }
 
-    // Set drain state BEFORE posting closes. Each close re-enters
-    // `on_before_close → on_pool_window_destroyed`, which checks
-    // `quit_state` to decide whether to refill the pool. Without
-    // this, the reconciler would close orphans and the pool refill
-    // path would immediately spawn fresh `window-pool-*` browsers
-    // (see `commands/window_pool.rs` quit-state guard). `BeginDrain`
-    // is idempotent — already-draining state is a no-op.
-    state.host_dispatch(crate::reducer::HostCommand::BeginDrain {
-        reason: crate::state::QuitReason::LastWindowClosed,
-    });
+    // Compute remaining live user browsers AFTER removing the zombies
+    // we're about to close. If anything remains, a stale
+    // `HostShouldQuit` raced with an active user session — close the
+    // zombies but leave drain mode untouched.
+    let zombie_labels: HashSet<&str> = to_close.iter().map(|(l, _)| l.as_str()).collect();
+    let live_user_count = browser_pairs
+        .iter()
+        .filter(|(label, _)| {
+            !zombie_labels.contains(label.as_str())
+                && !unpromoted.contains(label.as_str())
+                && !label.starts_with("browser-pane-")
+        })
+        .count();
+
+    if live_user_count == 0 {
+        // Set drain BEFORE posting closes. Each close re-enters
+        // `on_pool_window_destroyed`, which checks `quit_state` to
+        // decide whether to refill. Without this, the reconciler
+        // closes zombies and the refill path immediately respawns
+        // them. `BeginDrain` is idempotent — a parallel cascade
+        // having already dispatched it is a no-op.
+        state.host_dispatch(crate::reducer::HostCommand::BeginDrain {
+            reason: crate::state::QuitReason::LastWindowClosed,
+        });
+    } else {
+        tracing::info!(
+            target: "wrr",
+            "[orphan-reconcile] {} live user browser(s) remain after excluding zombies — skipping BeginDrain",
+            live_user_count
+        );
+    }
 
     tracing::warn!(
         target: "wrr",
@@ -136,94 +205,60 @@ pub fn reconcile_and_drain(state: &Arc<AppState>) {
     );
 
     for (i, (label, browser)) in to_close.into_iter().enumerate() {
-        post_close_or_fallback(i, &label, browser);
+        close_one(i, &label, browser);
+    }
+}
+
+/// Dispatch close for a single browser. Already on UI thread when
+/// invoked — calling `BrowserHost::close_browser` directly is safe.
+/// We prefer it over PostMessageW because it works regardless of
+/// whether the underlying HWND is still alive.
+fn close_one(idx: usize, label: &str, mut browser: Browser) {
+    if let Some(host) = browser.host() {
+        host.close_browser(1); // force_close = true
+        tracing::debug!(
+            target: "wrr-trace",
+            "[orphan-reconcile][{}] close_browser(force=1) label={}",
+            idx, label
+        );
+    } else {
+        tracing::warn!(
+            target: "wrr",
+            "[orphan-reconcile][{}] browser host=None label={} — already torn down",
+            idx, label
+        );
     }
 }
 
 /// True when the browser's underlying HWND is missing or destroyed.
-/// Used by the orchestrator to keep freshly-promoted (live-HWND)
+/// Used by the UI-thread runner to keep freshly-promoted (live-HWND)
 /// candidates out of the close set.
 ///
 /// Windows: `IsWindow` returns 0 for destroyed HWNDs even when the
 /// stale handle value is non-null — the discriminator we need.
 ///
 /// Non-Windows: only the null-handle check is available. If a
-/// platform produces stale-but-non-null HWNDs, a real zombie
-/// would be skipped here. The Windows-specific zombie scenario is
-/// the one we have evidence for; revisit if it reproduces on
+/// platform produces stale-but-non-null HWNDs, a real zombie would
+/// be skipped here. The Windows-specific zombie scenario is the
+/// one we have evidence for; revisit if it reproduces on
 /// macOS/Linux.
-fn hwnd_is_dead_or_missing(browser: &cef::Browser) -> bool {
+fn hwnd_is_dead_or_missing(browser: &Browser) -> bool {
+    let mut b = browser.clone();
+    let Some(host) = b.host() else { return true };
+    let wh = host.window_handle();
+    if wh.0.is_null() {
+        return true;
+    }
     #[cfg(target_os = "windows")]
-    {
-        resolve_live_hwnd(browser).is_none()
+    unsafe {
+        use windows_sys::Win32::Foundation::HWND;
+        use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;
+        IsWindow(wh.0 as HWND) == 0
     }
     #[cfg(not(target_os = "windows"))]
     {
-        use cef::*;
-        let mut b = browser.clone();
-        let Some(host) = b.host() else { return true };
-        host.window_handle().0.is_null()
+        false
     }
-}
-
-#[cfg(target_os = "windows")]
-fn post_close_or_fallback(idx: usize, label: &str, browser: cef::Browser) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
-    // Path selection uses the same liveness probe the orchestrator
-    // ran, so a non-null but destroyed HWND can't slip onto the
-    // `PostMessageW` branch (which Windows silently drops). Dead
-    // HWNDs route to `post_task`, which calls
-    // `host.close_browser(force=1)` and works regardless of HWND.
-    if let Some(hwnd) = resolve_live_hwnd(&browser) {
-        let ok = unsafe { PostMessageW(hwnd, WM_CLOSE, 0, 0) };
-        tracing::debug!(
-            target: "wrr-trace",
-            "[orphan-reconcile][{}] PostMessage(hwnd={:p}, WM_CLOSE) label={} ok={}",
-            idx, hwnd, label, ok != 0
-        );
-    } else {
-        let mut task = crate::client::ClosePoolBrowserTask::new(browser);
-        let posted = cef::post_task(cef::ThreadId::UI, Some(&mut task));
-        tracing::warn!(
-            target: "wrr",
-            "[orphan-reconcile][{}] hwnd dead/missing; fell back to post_task(close_browser) label={} posted={}",
-            idx, label, posted != 0
-        );
-    }
-}
-
-/// Returns `Some(hwnd)` only when the browser's underlying HWND is
-/// alive (non-null AND `IsWindow == 1`). Single source of truth for
-/// "live HWND" — used by both `hwnd_is_dead_or_missing` and the
-/// path selection in `post_close_or_fallback`.
-#[cfg(target_os = "windows")]
-fn resolve_live_hwnd(browser: &cef::Browser) -> Option<windows_sys::Win32::Foundation::HWND> {
-    use cef::*;
-    use windows_sys::Win32::Foundation::HWND;
-    use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;
-    let mut b = browser.clone();
-    let host = b.host()?;
-    let wh = host.window_handle();
-    if wh.0.is_null() {
-        return None;
-    }
-    let h = wh.0 as HWND;
-    if unsafe { IsWindow(h) } == 0 {
-        None
-    } else {
-        Some(h)
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn post_close_or_fallback(idx: usize, label: &str, browser: cef::Browser) {
-    let mut task = crate::client::ClosePoolBrowserTask::new(browser);
-    let posted = cef::post_task(cef::ThreadId::UI, Some(&mut task));
-    tracing::debug!(
-        target: "wrr-trace",
-        "[orphan-reconcile][{}] post_task(close_browser) label={} posted={}",
-        idx, label, posted != 0
-    );
 }
 
 #[cfg(test)]
@@ -240,8 +275,6 @@ mod tests {
 
     #[test]
     fn classify_no_orphans_returns_empty() {
-        // Promoted user window: in browsers, NOT in unpromoted_pool,
-        // IS in shadow_window_meta. Not an orphan.
         let labels = vec_of(&["window-pool-aaa"]);
         let unpromoted = set_of(&[]);
         let shadow = set_of(&["window-pool-aaa"]);
@@ -250,8 +283,6 @@ mod tests {
 
     #[test]
     fn classify_one_orphan_is_returned() {
-        // Promoted (not in unpromoted) but launcher dropped it
-        // (not in shadow). Classic orphan candidate.
         let labels = vec_of(&["window-pool-bbb"]);
         let unpromoted = set_of(&[]);
         let shadow = set_of(&[]);
@@ -263,7 +294,6 @@ mod tests {
 
     #[test]
     fn classify_skips_unpromoted_pool_members() {
-        // Still in unpromoted_pool — warm pool member, not orphan.
         let labels = vec_of(&["window-pool-ccc"]);
         let unpromoted = set_of(&["window-pool-ccc"]);
         let shadow = set_of(&[]);
@@ -272,7 +302,6 @@ mod tests {
 
     #[test]
     fn classify_skips_browser_pane_labels() {
-        // Pane labels are reaped via a different cascade.
         let labels = vec_of(&["browser-pane-foo"]);
         let unpromoted = set_of(&[]);
         let shadow = set_of(&[]);
@@ -281,7 +310,6 @@ mod tests {
 
     #[test]
     fn classify_skips_main_label() {
-        // Only `window-pool-*` is reaped here.
         let labels = vec_of(&["main"]);
         let unpromoted = set_of(&[]);
         let shadow = set_of(&[]);
@@ -310,8 +338,8 @@ mod tests {
         // In the WindowOpened-echo lag a freshly-promoted pool window
         // is in `browsers` (not in unpromoted) and the launcher's
         // mirror hasn't caught up yet (not in shadow). The classifier
-        // returns it as a CANDIDATE; the orchestrator's HWND check
-        // is what saves it from being closed (live HWND → skip).
+        // returns it as a CANDIDATE; the UI-thread HWND check is
+        // what saves it from being closed (live HWND → skip).
         let labels = vec_of(&["window-pool-just-promoted"]);
         let unpromoted = set_of(&[]);
         let shadow = set_of(&[]);
