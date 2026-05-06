@@ -235,7 +235,7 @@ pub fn apply_hwnd_opened(
 ///      probably crashed → `OrphanDestroy` drift.
 ///   3. HWND was pending (never linked) → drop the pending entry,
 ///      no drift (it never claimed to be a real window).
-pub fn apply_hwnd_destroyed(state: &mut State, hwnd: u64) -> Vec<Event> {
+pub fn apply_hwnd_destroyed(state: &mut State, hwnd: u64, host_running: bool) -> Vec<Event> {
     // Drain any pending entry first. Don't early-return: the
     // dual-source design (WinEvent CREATE + explicit
     // on_after_created link) can leave a stale pending entry
@@ -300,6 +300,31 @@ pub fn apply_hwnd_destroyed(state: &mut State, hwnd: u64) -> Vec<Event> {
                 version: v_released,
             });
         }
+
+        // Mirror the OrphanInstance + HostShouldQuit pair the normal
+        // close path emits at `reducer/window.rs::handle_report_window_closed`.
+        // Without this, a crash-detected last-window close empties
+        // `state.windows` but never wakes the host's orphan reconciler
+        // (which only listens to `HostShouldQuit`), so the warm pool
+        // browsers stay alive and the host doesn't quit. Caller passes
+        // `host_running` so wrr stays out of the connection module's
+        // private API.
+        if state.windows.is_empty() && host_running {
+            let v_drift = state.bump_version();
+            out.push(Event::HwndDriftDetected {
+                kind: HwndDriftKind::OrphanInstance,
+                label: None,
+                hwnd: None,
+                detail:
+                    "Last user-visible window destroyed (crash-detected); host still alive (likely holding warm pool)"
+                        .to_string(),
+                severity: Severity::Warn,
+                version: v_drift,
+            });
+            let v_quit = state.bump_version();
+            out.push(Event::HostShouldQuit { version: v_quit });
+        }
+
         return out;
     }
 
