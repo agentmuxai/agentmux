@@ -528,23 +528,6 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     const activeIndex = () => tabIds().indexOf(activeTabId());
 
-    // Widgets that can be opened in a new window, sorted by display:order.
-    // Excludes settings (non-pane, opens external editor) and devtools (toggles inspector).
-    const openInNewWindowItems = createMemo((): MenuItem[] => {
-        const wmap = atoms.fullConfigAtom()?.widgets ?? {};
-        return Object.entries(wmap)
-            .filter(([, w]) => {
-                const view = w.blockdef?.meta?.view;
-                return view !== "settings" && view !== "devtools";
-            })
-            .sort(([, a], [, b]) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0))
-            .map(([, widget]) => ({
-                label: widget.label ?? "",
-                icon: widget.icon,
-                onClick: () => getApi().openNewWindow().catch(console.error),
-            }));
-    });
-
     const tabBarMenuItems = createMemo((): MenuItem[] => [
         {
             label: "New Tab",
@@ -556,11 +539,6 @@ function TabBar(props: TabBarProps): JSX.Element {
             label: "New Window",
             icon: "window-restore",
             onClick: () => getApi().openNewWindow().catch(console.error),
-        },
-        {
-            label: "Open in New Window",
-            icon: "arrow-up-right-from-square",
-            subItems: openInNewWindowItems(),
         },
         { label: "", divider: true },
         {
