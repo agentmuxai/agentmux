@@ -353,13 +353,17 @@ impl SagaActionRunner for LiveActionRunner {
 
     fn drain_pool_if_last(&self, label: &str) -> bool {
         // Compute the same condition `on_before_close` uses to
-        // decide drain. Read-only snapshot of host state.
-        // Phase H.2.b — reducer-aware label snapshot.
-        let unpromoted = self.state.unpromoted_pool_labels_snapshot();
-        let labels = self.state.list_browser_labels();
+        // decide drain. MUST mirror that gate exactly: same pool
+        // inventory (unpromoted ∪ queue), same atomic-snapshot
+        // discipline. A two-lock variant or unpromoted-only check
+        // here lets a queued pool window inflate `user_count` and
+        // suppress the drain when the user actually did close
+        // their last visible window.
+        let (pool_inventory, browsers) = self.state.user_visibility_snapshot();
+        let labels: Vec<String> = browsers.into_iter().map(|(l, _)| l).collect();
         let user_count = labels
             .iter()
-            .filter(|k| !unpromoted.contains(k.as_str()) && !k.starts_with("browser-pane-"))
+            .filter(|k| !pool_inventory.contains(k.as_str()) && !k.starts_with("browser-pane-"))
             .count();
         // `was_last` semantics: closing window is the last user-
         // visible window. Caller's `label` should be subtracted —

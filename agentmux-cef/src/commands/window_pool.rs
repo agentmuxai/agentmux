@@ -168,7 +168,18 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
     // P2 PR #578 rounds 2 + 3.)
     crate::launcher_ipc::report_pool_window_added(label.clone());
     {
-        let pool_count = state.unpromoted_pool_labels_snapshot().len() as u32;
+        // Pool inventory (unpromoted ∪ queue), not unpromoted-only:
+        // the launcher's `state.pool` mirror is built from
+        // ReportPoolWindowAdded/Removed/Promoted events; the host's
+        // unpromoted→queue transition emits NO event, so the
+        // launcher retains queued labels in its pool set. Reporting
+        // unpromoted.len() under-counts and triggers spurious pool
+        // drift while a warm slot is queued. Atomic snapshot —
+        // single host_state lock.
+        let pool_count = {
+            let st = state.host_state.lock();
+            (st.pool.unpromoted.len() + st.pool.queue.len()) as u32
+        };
         crate::launcher_ipc::report_host_pool_count(pool_count);
     }
 

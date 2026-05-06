@@ -117,12 +117,18 @@ export interface ReducerResult {
  *
  * Exported via the store layer for callers that need the same filter
  * outside the reducer (notably `app-init.ts::initInstanceTracking`).
- * The two filters MUST stay in sync — past divergence on `window-pool-*`
- * was caught by reagent P2 #603.
+ *
+ * `window-pool-*` labels are accepted: the host-side gates
+ * (`list_window_instances` and `launcher_event_bridge::dispatch_to_renderers`)
+ * already exclude UNPROMOTED pool labels via
+ * `unpromoted_pool_labels_snapshot`. By the time a `window-pool-*` label
+ * reaches this filter, the host has promoted it to a real user window,
+ * and InstancePanel must include it. Filtering on prefix here
+ * incorrectly drops torn-off windows (which keep their `window-pool-*`
+ * prefix forever).
  */
 export function isInstanceLabel(label: string): boolean {
     if (label === "main") return true;
-    if (label.startsWith("window-pool-")) return false;
     if (label.startsWith("browser-pane-")) return false;
     return label.startsWith("window-");
 }
