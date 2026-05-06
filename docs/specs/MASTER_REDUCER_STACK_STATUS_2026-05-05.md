@@ -56,7 +56,7 @@ Each reducer is canonical for its domain. Cross-reducer state moves only through
 | **Launcher** | ✅ DONE — Phases B.1–B.9 + D.1–D.3 | n/a — emerged from B work | [`phase-b-roadmap.md`](../retro/phase-b-roadmap.md) |
 | **Srv (Phase E)** | ✅ MOSTLY DONE — E.1a–E.5 + F1.A/B shipped | [`SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md`](./SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md) | [`phase-e-status-2026-05-01.md`](../retro/phase-e-status-2026-05-01.md) |
 | **Srv layout (E.4.B)** | 🟨 IN-FLIGHT — Phase 2/3/4 shipped, Phase 5+ pending | [`srv-phase-e4b-formal-spec-2026-05-03.md`](./srv-phase-e4b-formal-spec-2026-05-03.md) | This doc, §5 |
-| **Host (Phase F)** | 🟨 PARTIAL — mirrors built (B.5), reducer migration not started | [`SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`](./SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md) | [`phase-fg-status-2026-05-01.md`](../retro/phase-fg-status-2026-05-01.md) |
+| **Host (Phase F)** | 🟨 6/7 MIGRATED — F.1 + H.1/H.2/H.3/H.4/H.5 fully wired; H.6 top-level creation runner dormant (no dispatchers) | [`SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`](./SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md) | [`phase-fg-status-2026-05-01.md`](../retro/phase-fg-status-2026-05-01.md) |
 | **Frontend** | 🟨 IN-FLIGHT — slice #1 shipped (#681), #2 doc-approved, #3–#8 designed | [`frontend-reducer-architecture-2026-05-03.md`](./frontend-reducer-architecture-2026-05-03.md) | This doc, §6 |
 | **Sagas** | ✅ FOUNDATION — coordinator + 7 sagas merged | [`SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01.md`](./SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01.md) | [`saga-architecture-migration-complete-2026-05-02.md`](../retro/saga-architecture-migration-complete-2026-05-02.md) |
 | **Persistence** | ✅ Persist subscriber + event log shipped | n/a | Captured in E.2c.1–5a in phase-e-status |
@@ -93,39 +93,42 @@ Each reducer is canonical for its domain. Cross-reducer state moves only through
 
 ## 4. Layer 2 — Host reducer (Phase F)
 
-**Status: 🟨 PARTIAL.** Foundational shadow projections built (B.5); host's *own* reducer not yet started.
+**Status: 🟨 6/7 MIGRATED.** B.5 shadow mirrors built; host's own reducer (`HostState`) holds 6 of 7 planned migration domains all fully wired to production callers. Only H.6 (top-level creation runner) remains as dormant scaffolding.
 
-### 4.1 What landed (B.5 mirrors)
+### 4.1 B.5 shadow mirrors (events-only)
 
-The host now holds **read-only projections** of launcher state, updated via `apply_event_to_shadow`:
+The host holds **read-only projections** of launcher state, updated via `apply_shadow_projection` (extracted from `apply_event_to_shadow` in PR #711 for testability):
 - `shadow_instance_registry`
 - `shadow_window_meta`
 - `shadow_backend_window_ids`
-- `window_meta` (sync cache for open_subwindow + cascade-close needs)
+- `window_meta` (sync cache for `open_subwindow` parent-liveness + cascade-close child enumeration)
 
-These are already on the events-only contract — host doesn't write to them; subscribes to launcher events and projects.
+Idempotency contract enforced per §8.14 with property tests in `agentmux-cef/src/launcher_ipc.rs::shadow_projection_tests`.
 
-### 4.2 What stays scaffolding (deliberately, indefinitely)
+### 4.2 Migrated to `HostState` (6 phases, fully wired)
 
-Per [`b5-migration-architecture-2026-04-28.md`](../retro/b5-migration-architecture-2026-04-28.md), these can't migrate via the standard ratchet because of CEF FFI / UI-thread synchronization patterns:
-- `browsers: Mutex<HashMap<String, Browser>>` — CEF FFI handles, callback-driven lifecycle
-- `window_pool`, `unpromoted_pool_labels` — pool maintenance triggered by CEF callbacks
+Each followed the standard a→b→c→d→e ratchet from [`migration-pattern.md`](../retro/migration-pattern.md):
 
-**Discipline:** snapshot-and-drop. Callers snapshot `(label, HWND)` pairs, drop the lock, then do Win32 work outside the lock. Avoids cross-thread deadlock.
+| H.x | `HostState` field | Legacy field on `AppState` | Notes |
+|---|---|---|---|
+| **F.1** | `pending_window_creations: VecDeque<PendingWindowCreation>` | DELETED | Original pre-H scope; landed alongside Phase B.4 |
+| **H.1** | `browser_panes: HashMap<String, BrowserPaneEntry>` | DELETED (`pane::lifecycle::PaneStateMachine`) | `BrowserPaneManager` (browser_panes.rs) is now a zero-sized handle delegating all mutations through `host_dispatch` |
+| **H.2** | `browsers: HashMap<String, BrowserHandle>` | DELETED | Reversed the "scaffolding indefinitely" decision from `b5-migration-architecture-2026-04-28.md` — turned out the snapshot-and-drop discipline mapped cleanly onto reducer-arm semantics |
+| **H.3** | `active_drag: Option<DragSession>` | DELETED | |
+| **H.4** | `pool: PoolState` | DELETED (`window_pool`, `unpromoted_pool_labels`) | Drift-storm fix (PR #708) added `just_promoted_labels` to bridge the host's `PoolPromoted → WindowOpened` IPC gap |
+| **H.5** | `quit_state: QuitState` | DELETED (`is_quitting: AtomicBool`) | |
 
-### 4.3 What's in scope for Phase F (the host reducer migration)
+### 4.3 Scaffolded but NOT wired
 
-Per [`SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`](./SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md):
-- `pending_window_creations: VecDeque<PendingWindowCreation>` — clean lifecycle, ready to migrate
-- `active_drag: Option<DragSession>` — well-defined start/end
-- Tear-off hook state per window
-- `lifecycle`, `event_version` (minor)
+| H.x | `HostState` field | Legacy code still authoritative | Estimated effort |
+|---|---|---|---|
+| **H.6** top-level | `top_level_creation: TopLevelCreationState` (carries `#[allow(dead_code)]`) | `ui_tasks::post_create_window` direct calls (no state to migrate; pure function-call path) | 2–3 days; lower priority — current path works |
 
-5-PR breakdown in [`SPEC_HOST_REDUCER_5PR_PLAN_2026-05-02.md`](./SPEC_HOST_REDUCER_5PR_PLAN_2026-05-02.md).
+Wiring up H.6 would make every top-level open observable via the event log (timing per phase, etc.) but doesn't fix any current bug.
 
 ### 4.4 Why "Phase H" and "Phase F" specs both exist
 
-[`SPEC_HOST_REDUCER_PHASE_H_2026-05-02.md`](./SPEC_HOST_REDUCER_PHASE_H_2026-05-02.md) and [`SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`](./SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md) are two passes at the same scope. **PHASE_F is the canonical one** (more recent date and aligned with phase-fg-roadmap). PHASE_H exists as historical reframing — keep but treat as superseded for design decisions.
+[`SPEC_HOST_REDUCER_PHASE_H_2026-05-02.md`](./SPEC_HOST_REDUCER_PHASE_H_2026-05-02.md) is the granular per-domain spec; [`SPEC_HOST_REDUCER_5PR_PLAN_2026-05-02.md`](./SPEC_HOST_REDUCER_5PR_PLAN_2026-05-02.md) is its 5-PR operational compression. [`SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`](./SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md) is the original framing — the H.x naming used in code came after, when the scope expanded beyond F's "pending creations + active drag + tear-off hooks." Treat them as a series: F (initial scope) → H (full host migration) → this doc for current status.
 
 ---
 
@@ -278,12 +281,11 @@ F.5's `PoolRespawnSaga` emits `IssueCmd::Host` as log-only no-op. There's no lau
 ### 9.2 Per-event saga_id correlation (BLOCKER for E.6)
 Codex flagged twice during E.5, deferred twice. Evict-and-replace policy mitigates today; proper solution is `saga_id` tags on events. ~300 LOC. Bundle with cross-process dispatch mini-phase.
 
-### 9.3 Phase F hosting strategy
-Where does the host reducer live? Options:
-- **Centralize in launcher's Tokio runtime** — easier to debug, single dispatcher, but adds another cross-process hop.
-- **Run in a host-process runtime** — lighter, harder to coordinate with launcher events.
+### 9.3 Phase F hosting strategy — RESOLVED in-process
 
-Spec defers this ([`SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`](./SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md) §0). Decision needed before F.1.
+**Resolved (de-facto):** the host reducer runs in the `agentmux-cef` process (option B), with `host_dispatch` invoked synchronously from CEF callbacks and IPC handlers. The "launcher Tokio centralisation" alternative was never built. F.1 + H.1/H.2/H.3/H.4/H.5 all shipped under this model without cross-process coordination issues.
+
+**Cross-process bridging** is still needed for sagas (§9.1), but that's about command flow between *different* reducers, not where any single reducer's runtime lives.
 
 ### 9.4 Frontend command bus scope (slice #3)
 Originally planned as single outbound dispatch chokepoint for clicks + slash commands + agent app-API calls. Descoped per conventions Q1+Q4. Open: does a single bus still make sense, or are per-slice dispatchers sufficient? **Blocker for** agent-driven UI mutation audit + policy enforcement.
