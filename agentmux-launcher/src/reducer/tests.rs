@@ -1668,6 +1668,47 @@ fn duplicate_open_for_promoted_label_preserves_foregrounded_since_open() {
 }
 
 #[test]
+fn promote_after_open_marks_existing_mirror_foregrounded() {
+    // Order-tolerant promote (PR #709 round 2): if open arrives before
+    // promote (out-of-order IPC, replay, or test fuzzer), the mirror
+    // exists with foregrounded_since_open=false. Promote must update
+    // the existing mirror directly INSTEAD of leaking an entry into
+    // just_promoted_labels that will never be drained.
+    //
+    // Caught by the `just_promoted_labels_drained_by_open_or_close`
+    // proptest after codex P2 PR #709 round 1 pointed out that the
+    // original strategy used disjoint label spaces.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-x".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    assert!(
+        !state.windows.get("window-x").unwrap().foregrounded_since_open,
+        "control: pre-promote, mirror has foregrounded_since_open=false"
+    );
+
+    let _ = update(
+        &mut state,
+        Command::ReportPoolWindowPromoted { label: "window-x".into() },
+        &c,
+    );
+    assert!(
+        state.windows.get("window-x").unwrap().foregrounded_since_open,
+        "promote-after-open must update the existing mirror"
+    );
+    assert!(
+        !state.just_promoted_labels.contains("window-x"),
+        "promote-after-open must NOT leak into just_promoted_labels (no consumer to drain it)"
+    );
+}
+
+#[test]
 fn close_drops_orphaned_just_promoted_entry() {
     // If promote was emitted but the matching open never arrived
     // (host crash mid-tear-off etc.), a subsequent close for the
@@ -2453,8 +2494,46 @@ fn arb_b8_host_command() -> impl proptest::strategy::Strategy<Value = Command> {
         // Promote — exercises just_promoted_labels (PR #708 round 3).
         // Drift-storm fix relies on this set bridging the
         // PoolPromoted → WindowOpened gap; a proptest verifies the
-        // set never grows without bound.
+        // set never grows without bound. NOTE: this strategy uses a
+        // disjoint `pool-*` label space from opens/closes — the
+        // producer-side bound holds, but the consumer paths in
+        // `handle_report_window_opened/Closed` aren't exercised here.
+        // For consumer-path coverage see `arb_promote_focused_command`.
         2 => "pool-[a-c]{1,2}".prop_map(|label| Command::ReportPoolWindowPromoted { label }),
+    ]
+}
+
+/// Strategy with **overlapping label space** between promote / open /
+/// close — every label is drawn from the same small pool so that
+/// `ReportPoolWindowPromoted("a")` is followed (with non-trivial
+/// probability) by `ReportWindowOpened { label: "a", .. }` or
+/// `ReportWindowClosed { label: "a" }`. Used by the
+/// `just_promoted_labels_drained_by_open_or_close` proptest, which
+/// codex flagged in PR #709 round 1: with the disjoint label space
+/// in `arb_b8_host_command`, the cleanup paths in
+/// `handle_report_window_opened/Closed` never ran on promoted labels,
+/// so the property test would still pass with the cleanups removed.
+///
+/// This is a regression-guard strategy specifically for the
+/// drift-storm fix from PR #708 round 3.
+fn arb_promote_focused_command() -> impl proptest::strategy::Strategy<Value = Command> {
+    use proptest::prelude::*;
+    // Shared label space — opens, closes, AND promotes all draw from
+    // {a, b, c, ab, ac, bc} so producer/consumer paths overlap.
+    prop_oneof![
+        3 => (
+            "[a-c]{1,2}",
+            prop_oneof![Just(WindowKind::FullInstance), Just(WindowKind::Subwindow)],
+        )
+            .prop_map(|(label, kind)| {
+                Command::ReportWindowOpened { label, kind, parent_label: None }
+            }),
+        3 => "[a-c]{1,2}".prop_map(|label| Command::ReportWindowClosed { label }),
+        3 => "[a-c]{1,2}".prop_map(|label| Command::ReportPoolWindowPromoted { label }),
+        // Pool add/remove kept to maintain pool invariants under the
+        // overlapping label space (mirrors b8_host_command's mix).
+        1 => "[a-c]{1,2}".prop_map(|label| Command::ReportPoolWindowAdded { label, saga_id: None }),
+        1 => "[a-c]{1,2}".prop_map(|label| Command::ReportPoolWindowRemoved { label }),
     ]
 }
 
@@ -2486,21 +2565,58 @@ proptest! {
         }
     }
 
-    /// `just_promoted_labels` size is bounded by the count of
-    /// distinct pool labels seen — every promoted entry is removed
-    /// by the matching `ReportWindowOpened` (or `ReportWindowClosed`
-    /// fallback). Random sequences of host commands MUST NOT cause
-    /// unbounded growth.
+    /// `just_promoted_labels` is fully drained by the matching
+    /// `ReportWindowOpened` (or `ReportWindowClosed` fallback) over
+    /// any sequence of commands that includes both the producer
+    /// (`ReportPoolWindowPromoted`) and the consumers, AS LONG AS the
+    /// producer's last operation has a matching consumer downstream.
+    ///
+    /// Stronger property than codex P2 (PR #709 round 1) flagged the
+    /// original test for: the original `arb_b8_host_command` used
+    /// disjoint label spaces (`pool-[a-c]{1,2}` for promotes vs
+    /// `[a-c]{1,3}` for opens/closes), so the consumer-path cleanup
+    /// in `handle_report_window_opened/Closed` never fired for
+    /// promoted labels — the leak guard would have passed even with
+    /// cleanup deleted. This dedicated strategy uses a SHARED label
+    /// space for promote / open / close so consumers actually
+    /// exercise the cleanup paths.
     ///
     /// Drift-storm regression guard (PR #708 round 3):
     /// `just_promoted_labels` is the microsecond-bridge from
-    /// `PoolPromoted → WindowOpened`. If either consumer is missed,
-    /// the set leaks. Bounding by distinct labels seen catches a
-    /// future regression where promote inserts but consumers don't
-    /// remove.
+    /// `PoolPromoted → WindowOpened`. Mutation-test this guard by
+    /// commenting out either cleanup and watching this proptest fail.
     #[test]
-    fn just_promoted_labels_bounded_by_distinct_pool_labels(
-        cmds in proptest::collection::vec(arb_b8_host_command(), 1..80)
+    fn just_promoted_labels_drained_by_open_or_close(
+        cmds in proptest::collection::vec(arb_promote_focused_command(), 1..80)
+    ) {
+        let (mut state, host_ctx) = registered_host_state();
+        for cmd in cmds {
+            let _ = update(&mut state, cmd, &host_ctx);
+        }
+        // For every label still in just_promoted_labels at the end,
+        // there must be NO subsequent open or close — i.e. the entry
+        // is genuinely orphaned (promote was the last command for
+        // that label).
+        for label in &state.just_promoted_labels {
+            // If the label has a window mirror, the open consumer
+            // ran AFTER the promote, which means the entry should
+            // have been removed. Catches a regression where the
+            // open consumer is broken.
+            prop_assert!(
+                !state.windows.contains_key(label),
+                "label {:?} is in BOTH just_promoted_labels and windows — open consumer didn't drain",
+                label
+            );
+        }
+    }
+
+    /// Producer-side idempotency under the overlapping label space:
+    /// promote inserts, open consumes, close consumes (fallback).
+    /// Set size never exceeds the count of distinct promoted labels
+    /// awaiting their consumer.
+    #[test]
+    fn just_promoted_labels_bounded_by_pending_promotes(
+        cmds in proptest::collection::vec(arb_promote_focused_command(), 1..80)
     ) {
         let (mut state, host_ctx) = registered_host_state();
         let mut distinct_pool_labels: std::collections::HashSet<String> = std::collections::HashSet::new();
