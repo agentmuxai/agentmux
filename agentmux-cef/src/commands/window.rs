@@ -409,15 +409,14 @@ pub fn get_double_click_time() -> serde_json::Value {
 /// window before its frontend has finished init. Callers should
 /// fall back to label/index-based naming in that case.
 pub fn list_window_instances(state: &Arc<AppState>) -> serde_json::Value {
-    // Use the full pool inventory (unpromoted + ready-queued), not
-    // just unpromoted, so renderer-ready-but-not-yet-promoted pool
-    // windows don't appear in the user-facing listing as phantom
-    // entries. Same reasoning applies to `dispatch_to_renderers`.
-    let pool_labels = state.pool_inventory_labels_snapshot();
-    // Phase H.2.b — reducer-aware label snapshot.
-    let labels: Vec<String> = state
-        .list_browser_labels()
+    // Atomic snapshot — pool inventory + browsers under ONE lock.
+    // Two-lock variants race against `promote_pool_window` between
+    // the reads and would let a just-promoted user window be
+    // excluded (or admit a still-hidden pool window).
+    let (pool_labels, browsers) = state.user_visibility_snapshot();
+    let labels: Vec<String> = browsers
         .into_iter()
+        .map(|(l, _)| l)
         .filter(|l| !pool_labels.contains(l.as_str()) && !l.starts_with("browser-pane-"))
         .collect();
     // Read backend window IDs via `state.backend_window_id()`,
@@ -442,18 +441,18 @@ pub fn list_window_instances(state: &Arc<AppState>) -> serde_json::Value {
 /// in `list_windows` inflates the frontend's InstancePanel row count
 /// with phantom entries the user can't see or focus.
 ///
-/// Uses `state.pool_inventory_labels_snapshot()` — the union of
-/// `unpromoted` (synchronous, populated at spawn time) and `pool.queue`
-/// (populated after the renderer-ready handshake but before promote).
-/// Both states are host-internal: the window is hidden off-screen and
-/// has no UI a user could see or focus, so neither belongs in this
-/// listing.
+/// Uses `state.user_visibility_snapshot()` — atomic read of pool
+/// inventory (`unpromoted` ∪ `pool.queue`) and the browser registry
+/// under one host_state lock. Both `unpromoted` (populated at spawn
+/// time) and `pool.queue` (populated after renderer-ready, before
+/// promote) are host-internal: the window is hidden off-screen and
+/// has no UI a user could see or focus. The atomic read is required
+/// because a two-lock variant races against `promote_pool_window`.
 pub fn list_windows(state: &Arc<AppState>) -> serde_json::Value {
-    let pool_labels = state.pool_inventory_labels_snapshot();
-    // Phase H.2.b — reducer-aware label snapshot.
-    let labels: Vec<String> = state
-        .list_browser_labels()
+    let (pool_labels, browsers) = state.user_visibility_snapshot();
+    let labels: Vec<String> = browsers
         .into_iter()
+        .map(|(l, _)| l)
         .filter(|l| !pool_labels.contains(l.as_str()))
         .collect();
     serde_json::json!(labels)

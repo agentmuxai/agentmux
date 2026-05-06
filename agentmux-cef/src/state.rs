@@ -836,23 +836,40 @@ impl AppState {
         self.host_state.lock().pool.queue.len()
     }
 
-    /// Union of `pool.unpromoted` and `pool.queue` — every pool label
-    /// that's still HOST-INTERNAL (no user UI yet). Used by
-    /// `launcher_event_bridge::dispatch_to_renderers` to skip both
-    /// pre-ready and ready-but-not-yet-promoted pool windows.
-    /// `unpromoted_pool_labels_snapshot()` alone misses the
-    /// renderer-ready window-but-not-yet-promoted state where
-    /// `handle_pool_ready` has moved the label to `pool.queue`.
-    pub fn pool_inventory_labels_snapshot(&self) -> std::collections::HashSet<String> {
+    /// Atomic snapshot for user-visibility filtering: pool inventory
+    /// (`pool.unpromoted` ∪ `pool.queue`) AND the browser registry,
+    /// taken under ONE `host_state` lock acquisition.
+    ///
+    /// Two-lock variants (one snapshot for the pool, one for
+    /// `list_browsers()`) race against `promote_pool_window`:
+    /// between the reads, a label can move from pool.queue to
+    /// promoted, leaving the stale inventory excluding a now-real
+    /// user window. Atomic snapshot eliminates the gap.
+    ///
+    /// Returns:
+    /// - `pool_inventory`: labels in `pool.unpromoted` ∪ `pool.queue`
+    ///   (host-internal, no user UI yet — exclude from user-visible
+    ///   filters and from launcher-event dispatch).
+    /// - `browsers`: every label → Browser pair currently registered
+    ///   (cheap clone — `Browser` is a CEF refcounted wrapper).
+    pub fn user_visibility_snapshot(&self) -> (
+        std::collections::HashSet<String>,
+        Vec<(String, Browser)>,
+    ) {
         let st = self.host_state.lock();
-        let mut set: std::collections::HashSet<String> = st
+        let pool_inventory: std::collections::HashSet<String> = st
             .pool
             .unpromoted
             .iter()
             .cloned()
+            .chain(st.pool.queue.iter().cloned())
             .collect();
-        set.extend(st.pool.queue.iter().cloned());
-        set
+        let browsers: Vec<(String, Browser)> = st
+            .browsers
+            .iter()
+            .map(|(k, h)| (k.clone(), h.browser.clone()))
+            .collect();
+        (pool_inventory, browsers)
     }
 
     /// PR #5 H.5 — read-side helper for the legacy `is_quitting` check.

@@ -36,10 +36,12 @@ use cef::{CefString, ImplBrowser, ImplFrame};
 ///       * `pool.queue` — renderer ready, waiting for promote.
 ///     Both are hidden off-screen and would build stale InstancePanel
 ///     state from launcher events the user never sees. The bridge
-///     uses `state.pool_inventory_labels_snapshot()` (unpromoted ∪
-///     queue) so a renderer-ready-but-pre-promote pool window
-///     doesn't slip through (`unpromoted_pool_labels_snapshot()`
-///     alone misses that case).
+///     uses `state.user_visibility_snapshot()` which atomically
+///     reads the pool inventory (unpromoted ∪ queue) and the
+///     browser registry under one host_state lock — a two-lock
+///     variant would race against `promote_pool_window` and let a
+///     just-promoted window slip through (or, worse, count a
+///     real user window in the close-cascade gate's exclusion).
 ///   - Browser-pane labels (`browser-pane-*`): not top-level
 ///     windows; have no InstancePanel.
 ///
@@ -73,13 +75,13 @@ pub fn dispatch_to_renderers(state: &Arc<crate::state::AppState>, event: &Event)
     let code = CefString::from(script.as_str());
     let url = CefString::from("");
 
-    // Snapshot pool inventory once (unpromoted + ready-queue). Hot
-    // path — every launcher event runs this loop, and we want to
-    // avoid re-locking host_state per browser.
-    let pool_inventory = state.pool_inventory_labels_snapshot();
+    // Atomic snapshot — pool inventory + browsers under ONE lock.
+    // Two-lock variants race against `promote_pool_window` between
+    // the reads.
+    let (pool_inventory, browsers) = state.user_visibility_snapshot();
 
     // Phase H.2.b — reducer-aware iteration with fallback.
-    for (label, browser) in state.list_browsers() {
+    for (label, browser) in browsers {
         if label.starts_with("browser-pane-") {
             continue;
         }
