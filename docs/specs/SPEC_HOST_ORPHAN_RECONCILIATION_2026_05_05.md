@@ -100,7 +100,7 @@ The launcher emits `HostShouldQuit` whenever its mirror's `state.windows` become
 1. **Normal close** — host's `on_before_close` ran and dispatched `Command::ReportWindowClosed`. Handled in `reducer/window.rs::handle_report_window_closed`.
 2. **Crash-detected close** — Win32 fired `WM_DESTROY` for the HWND but `on_before_close` didn't run (renderer crash, OS-level kill, etc.). Handled in `wrr/mod.rs::apply_hwnd_destroyed`.
 
-Both paths must emit the OrphanInstance drift + `HostShouldQuit` pair when they remove the last window. The crash path is exactly the case the reconciler is designed for — without it firing `HostShouldQuit`, a renderer-crashed last window leaves the warm pool unreaped (codex #702 round-7 P1).
+Both paths must emit the OrphanInstance drift + `HostShouldQuit` pair when they remove the last window. The crash path is exactly the case the reconciler is designed for — without it firing `HostShouldQuit`, a renderer-crashed last window leaves the warm pool unreaped.
 
 **Out of scope:** generalizing this beyond shutdown (e.g., reconciling mid-session orphans). The concern under master spec §9.2 (per-event saga_id correlation, deferred ~300 LOC) is upstream — this spec doesn't depend on it. We act on the *existence* of `HostShouldQuit`, not on a saga_id match.
 
@@ -135,7 +135,7 @@ Internals:
   - label is NOT in `state.unpromoted_pool_labels` (i.e., promoted out)
   - launcher's `shadow_window_meta.contains(label)` is false (i.e., launcher's mirror has dropped it)
 - Drop the lock immediately. Do NOT touch CEF inside the lock (master spec §4.4 — snapshot-and-drop discipline).
-- `post_close_or_fallback` mirrors the existing two-stage cascade: `PostMessageW(WM_CLOSE, ...)` if hwnd is non-null; otherwise `cef::post_task(UI, ClosePoolBrowserTask)` as the fallback path that already exists in `client/mod.rs:817-826` (codex #601 P1 fix).
+- `post_close_or_fallback` mirrors the existing two-stage cascade: `PostMessageW(WM_CLOSE, ...)` if hwnd is non-null; otherwise `cef::post_task(UI, ClosePoolBrowserTask)` as the fallback path that already exists in `client/mod.rs:817-826`.
 
 ### 5.2 Wire `HostShouldQuit` to the reconciler
 
@@ -168,9 +168,9 @@ Two distinct races have to be handled:
 
 **Race A — Stage-2 quit:** Our handler doesn't quit directly — it just closes orphans. The Stage-2 quit in `on_before_close` re-evaluates `browser_list.is_empty()` after every close, so a new user window opened mid-reconcile keeps `browser_list` non-empty and Stage 2 stays parked. Benign by construction.
 
-**Race B — promotion before mirror echo:** A pool window can be promoted (`promote_pool_window` removes the label from `unpromoted_pool` and queues `ReportWindowOpened` to the launcher) BEFORE the launcher's `WindowOpened` event echoes back to populate `shadow_window_meta`. A shadow-only orphan check would classify the freshly-promoted live window as orphan and `WM_CLOSE` it (codex #702 round-1 P1).
+**Race B — promotion before mirror echo:** A pool window can be promoted (`promote_pool_window` removes the label from `unpromoted_pool` and queues `ReportWindowOpened` to the launcher) BEFORE the launcher's `WindowOpened` event echoes back to populate `shadow_window_meta`. A shadow-only orphan check would classify the freshly-promoted live window as orphan and `WM_CLOSE` it.
 
-**Race C — zombie HWND (the original v0.33.643 case):** A promoted pool window's HWND is destroyed without the host's `on_before_close` ever running (CEF crash, OS kill, missed callback). Host's local `window_meta` was inserted in `on_after_created` and is only cleared by `on_before_close`, so the local entry is stale. Launcher's `apply_hwnd_destroyed` removes the label from its mirror and emits `WindowClosed` — so shadow correctly drops the label, BUT host's local meta keeps it. A round-2 attempt at fixing Race B by unioning shadow + local meta would skip exactly this case (codex #702 round-2 P1).
+**Race C — zombie HWND (the original v0.33.643 case):** A promoted pool window's HWND is destroyed without the host's `on_before_close` ever running (CEF crash, OS kill, missed callback). Host's local `window_meta` was inserted in `on_after_created` and is only cleared by `on_before_close`, so the local entry is stale. Launcher's `apply_hwnd_destroyed` removes the label from its mirror and emits `WindowClosed` — so shadow correctly drops the label, BUT host's local meta keeps it. An earlier attempt at fixing Race B by unioning shadow + local meta would skip exactly this case.
 
 **Discrimination via HWND validity (current design):** Race B and Race C both produce labels in `browsers` that are absent from shadow and not in `unpromoted_pool`. The classifier returns both as *candidates*. The orchestrator then applies a Win32 `IsWindow(hwnd)` check on each candidate's underlying HWND:
 
@@ -183,7 +183,7 @@ The "is this HWND live" check is shared between two call sites via `resolve_live
 1. The orchestrator's `hwnd_is_dead_or_missing` filter (which candidates to close).
 2. `post_close_or_fallback`'s path selection (PostMessageW vs. `post_task(close_browser)`).
 
-Both must agree, because Race C zombies have a non-null but destroyed HWND. If `post_close_or_fallback` only nullity-checked, it would route the zombie to the PostMessageW branch — Windows returns 0 for a destroyed HWND, the message goes nowhere, and the zombie stays alive (codex + reagent #702 round-3 P1). With the shared probe, zombies always take the `post_task(ClosePoolBrowserTask)` path which calls `host.close_browser(force=1)` and works regardless of HWND.
+Both must agree, because Race C zombies have a non-null but destroyed HWND. If only nullity were checked, the zombie would route to `PostMessageW` — Windows returns 0 for a destroyed HWND, the message goes nowhere, and the zombie stays alive. With the shared probe, zombies always take the `post_task(ClosePoolBrowserTask)` path which calls `host.close_browser(force=1)` and works regardless of HWND.
 
 No new state, no time-based wait, OS as the source of truth. Non-Windows targets fall back to the null-handle check (best-effort; v0.33.643 is Windows-specific).
 
