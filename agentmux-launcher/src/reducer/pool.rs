@@ -73,7 +73,23 @@ pub(super) fn handle_report_pool_window_removed(state: &mut State, label: String
 /// command, or in either order; the typed event is "host says a
 /// promote happened" — subscribers correlate with the surrounding
 /// add/remove pair if they need stronger invariants.
+///
+/// **WRR side-effect:** flips the promoted label's
+/// `foregrounded_since_open` to `true` if the mirror exists. Promote
+/// is the user explicitly tearing off a tab into a real window, so
+/// the open-transient corrective logic in `apply_hwnd_visibility_changed`
+/// MUST stop firing for this label — otherwise the post-promote
+/// reposition (multiple SetWindowPos calls during HWND placement)
+/// re-fires `HiddenSinceOpen` indefinitely. Each fire is a launcher
+/// event broadcast to all renderers; without this reset the host
+/// fans the same drift event out across the bridge until the
+/// renderer's V8 isolate runs out of stack and crashes
+/// (`Crashpad_NotConnectedToHandler`, observed v0.33.655). See
+/// `docs/specs/ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`.
 pub(super) fn handle_report_pool_window_promoted(state: &mut State, label: String) -> Vec<Event> {
+    if let Some(mirror) = state.windows.get_mut(&label) {
+        mirror.foregrounded_since_open = true;
+    }
     let v = state.bump_version();
     vec![Event::PoolWindowPromoted { label, version: v }]
 }

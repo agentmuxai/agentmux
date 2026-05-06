@@ -71,6 +71,65 @@ export function launcherEventStats(): PerSourceStats {
 
 let installed = false;
 
+// Drift-storm guard (v0.33.655 smoke): the host fanned a single
+// `hwnd_drift_detected` event ~600× to the renderer in 3 seconds —
+// V8 stack exhaustion → renderer crash. The launcher-side reset
+// (`handle_report_pool_window_promoted` setting
+// `foregrounded_since_open=true`) stops the storm at source; this
+// per-key cache is the renderer-side defence-in-depth so a future
+// upstream regression can't crash us. Keyed by
+// `(event, label, hwnd)`; max version observed wins. PerSourceTracker
+// already drops by global monotonic version, but a per-key check
+// catches duplicates that the global counter advances past.
+//
+// See `docs/specs/ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`.
+const MAX_DEDUP_KEYS = 1024;
+const dedupSeen = new Map<string, number>();
+let dedupSuppressedCount = 0;
+
+function dedupKey(evt: LauncherEvent): string {
+    const e = evt as LauncherEvent & { label?: unknown; hwnd?: unknown };
+    const label = typeof e.label === "string" ? e.label : "";
+    const hwnd = typeof e.hwnd === "number" ? e.hwnd : "";
+    return `${evt.event}|${label}|${hwnd}`;
+}
+
+/**
+ * Per-key (event-kind, label, hwnd) version-monotonicity guard.
+ * Returns true if the event should be dispatched, false if it's a
+ * duplicate or stale re-emission for the same logical entity.
+ */
+export function shouldDispatchLauncherEvent(evt: LauncherEvent): boolean {
+    const k = dedupKey(evt);
+    const seenVersion = dedupSeen.get(k);
+    if (seenVersion !== undefined && evt.version <= seenVersion) {
+        dedupSuppressedCount++;
+        return false;
+    }
+    dedupSeen.set(k, evt.version);
+    if (dedupSeen.size > MAX_DEDUP_KEYS) {
+        // Bound memory. Map iteration order is insertion order → drop
+        // the oldest entry. Acceptable: a re-arrival for an evicted
+        // key can only re-fire if it carries a higher launcher
+        // version than this renderer has ever seen, which means it's
+        // not actually a duplicate.
+        const firstKey = dedupSeen.keys().next().value;
+        if (firstKey !== undefined) dedupSeen.delete(firstKey);
+    }
+    return true;
+}
+
+/** Diagnostic accessor for the dedup guard — used by tests + diag tools. */
+export function launcherEventDedupStats(): { tracked: number; suppressed: number } {
+    return { tracked: dedupSeen.size, suppressed: dedupSuppressedCount };
+}
+
+/** Test-only: clear the dedup cache. Not exported in production paths. */
+export function __resetDedupForTests(): void {
+    dedupSeen.clear();
+    dedupSuppressedCount = 0;
+}
+
 /**
  * Register `window.__agentmux_launcher_event` as the dispatcher.
  * Idempotent — safe to call multiple times. Called once from
@@ -80,6 +139,9 @@ let installed = false;
 export function installLauncherEventBridge(): void {
     if (installed) return;
     installed = true;
-    (window as any).__agentmux_launcher_event = (evt: LauncherEvent) => tracker.deliver(evt);
+    (window as any).__agentmux_launcher_event = (evt: LauncherEvent) => {
+        if (!shouldDispatchLauncherEvent(evt)) return;
+        tracker.deliver(evt);
+    };
     console.log("[launcher-events] bridge installed; window.__agentmux_launcher_event ready");
 }
