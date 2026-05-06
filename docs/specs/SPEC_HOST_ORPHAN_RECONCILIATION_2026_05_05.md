@@ -172,11 +172,13 @@ Two distinct races have to be handled:
 
 **Race C — zombie HWND (the original v0.33.643 case):** A promoted pool window's HWND is destroyed without the host's `on_before_close` ever running (CEF crash, OS kill, missed callback). Host's local `window_meta` was inserted in `on_after_created` and is only cleared by `on_before_close`, so the local entry is stale. Launcher's `apply_hwnd_destroyed` removes the label from its mirror and emits `WindowClosed` — so shadow correctly drops the label, BUT host's local meta keeps it. An earlier attempt at fixing Race B by unioning shadow + local meta would skip exactly this case.
 
-**Discrimination via HWND validity (current design):** Race B and Race C both produce labels in `browsers` that are absent from shadow and not in `unpromoted_pool`. The classifier returns both as *candidates*. The orchestrator then applies a Win32 `IsWindow(hwnd)` check on each candidate's underlying HWND:
+**Race D — ready warm-pool inventory:** The common shutdown case. `handle_pool_ready` moves a label from `pool.unpromoted` to `pool.queue`. A ready warm-pool window is in `state.browsers`, NOT in `unpromoted`, NOT in shadow (no `ReportWindowOpened` until promotion), and has a LIVE HWND. Without explicit handling, it satisfies the orphan-candidate predicate, has a live HWND so the IsWindow filter parks it, the orchestrator early-returns on `to_close.is_empty()`, and `BeginDrain` + warm-pool close never run — host stays alive holding the ready pool.
 
-- `IsWindow == 1` (live HWND) → freshly-promoted, Race B → SKIP. The next `HostShouldQuit` (or the launcher's `WindowOpened` echo populating shadow) will resolve this naturally.
-- `IsWindow == 0` (destroyed HWND) → zombie, Race C → CLOSE.
-- `host()` returns `None` or `window_handle().0.is_null()` → also treated as dead → CLOSE.
+**Three-way discrimination via HWND + pool queue:** Race B, C, and D all produce labels that are candidates (in browsers, not unpromoted, not shadow). The orchestrator splits them three ways:
+
+- `IsWindow == 0` or `host() == None` → zombie (Race C) → CLOSE.
+- live HWND AND in `pool.queue` → ready warm pool (Race D) → drain target (closed in drain mode).
+- live HWND AND NOT in `pool.queue` → freshly-promoted (Race B) → SKIP. The launcher's `WindowOpened` echo is in flight; the next `HostShouldQuit` will resolve this if needed.
 
 The "is this HWND live" check is shared between two call sites via `resolve_live_hwnd(browser)`:
 
