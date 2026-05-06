@@ -228,7 +228,7 @@ fn ui_thread_reconcile(state: &Arc<AppState>, candidates: &[String]) {
     );
 
     for (i, (label, browser)) in to_close.into_iter().enumerate() {
-        close_one(i, &label, browser);
+        close_one(state, i, &label, browser);
     }
 }
 
@@ -236,7 +236,16 @@ fn ui_thread_reconcile(state: &Arc<AppState>, candidates: &[String]) {
 /// invoked — calling `BrowserHost::close_browser` directly is safe.
 /// We prefer it over PostMessageW because it works regardless of
 /// whether the underlying HWND is still alive.
-fn close_one(idx: usize, label: &str, mut browser: Browser) {
+///
+/// If `browser.host()` returns None, the BrowserHost has already
+/// gone away. We can't drive `close_browser` to trigger
+/// `on_before_close` (which would normally dispatch
+/// `UnregisterBrowser` to clean up `state.browsers`), so the
+/// reconciler dispatches `UnregisterBrowser` itself. Without that,
+/// the entry sits in `state.browsers` indefinitely; nothing else
+/// will ever remove it because the upstream callback chain is
+/// already gone.
+fn close_one(state: &Arc<AppState>, idx: usize, label: &str, mut browser: Browser) {
     if let Some(host) = browser.host() {
         host.close_browser(1); // force_close = true
         tracing::debug!(
@@ -247,9 +256,12 @@ fn close_one(idx: usize, label: &str, mut browser: Browser) {
     } else {
         tracing::warn!(
             target: "wrr",
-            "[orphan-reconcile][{}] browser host=None label={} — already torn down",
+            "[orphan-reconcile][{}] browser host=None label={} — already torn down, dispatching UnregisterBrowser",
             idx, label
         );
+        state.host_dispatch(crate::reducer::HostCommand::UnregisterBrowser {
+            label: label.to_string(),
+        });
     }
 }
 
