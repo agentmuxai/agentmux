@@ -178,9 +178,30 @@ Both must agree, because Race C zombies have a non-null but destroyed HWND. If `
 
 No new state, no time-based wait, OS as the source of truth. Non-Windows targets fall back to the null-handle check (best-effort; v0.33.643 is Windows-specific).
 
-### 5.5 Drain state must be set before closing
+### 5.5 Drain state must be set before closing — but only if no live user browser remains
 
-Each orphan close re-enters `client::on_before_close → on_pool_window_destroyed`. That handler checks `quit_state` to decide whether to refill the pool: if `Running`, it can spawn a fresh `window-pool-*` browser to keep the queue at target. Without setting drain state first, the reconciler would close zombies and the refill path would immediately spawn replacements — net zero progress on shutdown. The reconciler dispatches `HostCommand::BeginDrain { reason: LastWindowClosed }` before posting any closes; `BeginDrain` is itself idempotent (already-Draining is a no-op), so a `HostShouldQuit` racing with the existing organic cascade in `on_before_close` (which already calls `BeginDrain`) is safe.
+Each orphan close re-enters `client::on_before_close → on_pool_window_destroyed`. That handler checks `quit_state` to decide whether to refill the pool: if `Running`, it can spawn a fresh `window-pool-*` browser to keep the queue at target. Without setting drain state first, the reconciler would close zombies and the refill path would immediately spawn replacements — net zero progress on shutdown.
+
+But unconditionally entering drain mode is also wrong: a stale `HostShouldQuit` can fire after the user has opened a new live `window-*` or shadow-tracked promoted window. There's no transition back to `Running` once `BeginDrain` runs — `spawn_pool_window` then refuses to refill the pool for the live session. The user's session quietly degrades.
+
+The UI-thread runner therefore computes `live_user_count` AFTER classifying zombies:
+
+```
+live_user_count = count(labels that are NOT in to_close
+                                  AND NOT in unpromoted_pool
+                                  AND NOT prefixed `browser-pane-`)
+```
+
+If `live_user_count == 0`, dispatch `HostCommand::BeginDrain { reason: LastWindowClosed }` (idempotent — a parallel `on_before_close` cascade already having dispatched it is a no-op). If `live_user_count > 0`, skip drain — close the zombies but leave the running session alone.
+
+### 5.6 Threading: the IPC reader must NOT call CEF directly
+
+CEF Browser/BrowserHost methods (`host()`, `window_handle()`, `close_browser()`) must run on the UI thread. The `HostShouldQuit` handler runs on the launcher IPC reader thread. The reconciler therefore splits the work:
+
+1. **IPC thread** (`reconcile_and_drain`): snapshot host state under existing locks (no CEF calls), classify candidates, and post a `OrphanReconcileTask` to the UI thread via `cef::post_task`.
+2. **UI thread** (`OrphanReconcileTask::execute → ui_thread_reconcile`): probe each candidate's HWND via `IsWindow`, compute `live_user_count`, conditionally dispatch `BeginDrain`, and call `host.close_browser(force=1)` directly on each zombie (no PostMessageW dance now that we're on the right thread).
+
+This avoids the v0.33.491–v0.33.494 freezes that came from trying to drive UI work directly from the IPC thread (post_task drops, direct call UB, PostThreadMessage(WM_QUIT) ignored). We use CEF's own scheduler the way the rest of the host already does.
 
 ### 5.6 What we don't change
 
