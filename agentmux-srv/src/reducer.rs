@@ -850,14 +850,22 @@ fn handle_layout_insert_node(
     // command schema but ignored by the pure-heuristic insert helper.
     // Phase 7 wcore-migration will exercise the parent_id/index path
     // via `LayoutInsertNodeAtIndex` (a separate command); this arm
-    // matches `findNextInsertLocation` semantics exactly.
-    let _ = (parent_id, index);
+    // matches `findNextInsertLocation` semantics exactly. The values
+    // are still echoed in the emitted event below so subscribers see
+    // what the caller asked for.
     let v = state.bump_version();
     vec![Event::LayoutNodeInserted {
         tab_id,
         node,
-        parent_id: None,
-        index: None,
+        // Reagent P2 (kimi) PR #715 round 3: pass the command's
+        // parent_id / index through to the event so subscribers see
+        // what the caller asked for, not a hardcoded `None, None`.
+        // The pure helper currently uses the `findNextInsertLocation`
+        // heuristic and ignores these hints — but the event is the
+        // record of what was *requested*; subscribers can correlate
+        // with the resulting tree by inspecting `node` itself.
+        parent_id,
+        index,
         correlation_id,
         version: v,
     }]
@@ -878,8 +886,10 @@ fn handle_layout_delete_node(
             version: v,
         }];
     };
-    let was_focused = tab.focused_node_id == node_id;
-    let was_magnified = tab.magnified_node_id == node_id;
+    // Snapshot pre-delete focus/magnify so we can both detect
+    // direct-target hits AND post-walk for indirect orphaning.
+    let pre_focused = tab.focused_node_id.clone();
+    let pre_magnified = tab.magnified_node_id.clone();
     let Some(root) = tab.rootnode.as_mut() else {
         // Empty tree — nothing to delete; idempotent no-op (no event).
         return Vec::new();
@@ -900,19 +910,44 @@ fn handle_layout_delete_node(
             version: v,
         }];
     }
+
+    // Reagent P2 PR #715 round 3 (finding B) and Codex P2 round 3
+    // (finding C): both involve focus/magnify ids referencing nodes
+    // that no longer exist in the tree post-delete:
+    //   - B: `delete_recursive` collapse-sole-child rewrites a
+    //        parent's id to the promoted child's id. If
+    //        focused/magnified was the parent's original id, that
+    //        id is gone from the tree even though the same physical
+    //        node remains.
+    //   - C: deleting a container removes all descendants. If
+    //        focused/magnified was a descendant, it's gone too.
+    // Direct-target match (`pre_focused == node_id`) doesn't catch
+    // either case. Reconcile by walking the post-delete tree and
+    // clearing any focus/magnify id that no longer resolves.
+    let id_resolves = |id: &str| -> bool {
+        if id.is_empty() {
+            return true;
+        }
+        match tab.rootnode.as_ref() {
+            None => false,
+            Some(root) => crate::backend::layout::find_node_by_id(root, id).is_some(),
+        }
+    };
+    let was_focused = !pre_focused.is_empty() && !id_resolves(&pre_focused);
+    let was_magnified = !pre_magnified.is_empty() && !id_resolves(&pre_magnified);
     if was_focused {
         tab.focused_node_id = String::new();
     }
-    // Reagent P1 PR #715 round 1: clearing focused without clearing
-    // magnified leaves a stale id pointing at the just-deleted node.
     if was_magnified {
         tab.magnified_node_id = String::new();
     }
+
     let v = state.bump_version();
     vec![Event::LayoutNodeDeleted {
         tab_id,
         node_id,
         was_focused,
+        was_magnified,
         correlation_id,
         version: v,
     }]
@@ -3924,6 +3959,152 @@ mod tests {
             &ctx(1),
         );
         assert_eq!(state.tabs[&tab_id].magnified_node_id, "");
+    }
+
+    #[test]
+    fn layout_node_deleted_event_carries_was_magnified() {
+        // Reagent P1 (kimi+sonnet) PR #715 round 3: subscribers need
+        // the was_magnified field to refresh their UI when the
+        // magnified node is deleted.
+        let (mut state, tab_id) = fresh_tab();
+        let mut root = leaf_node("group", "");
+        root.data = None;
+        root.children = vec![leaf_node("a", "b1"), leaf_node("b", "b2")];
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(root);
+        state.tabs.get_mut(&tab_id).unwrap().magnified_node_id = "a".into();
+
+        let events = update(
+            &mut state,
+            Command::LayoutDeleteNode {
+                tab_id: tab_id.clone(),
+                node_id: "a".into(),
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        match &events[0] {
+            Event::LayoutNodeDeleted { was_magnified, was_focused, .. } => {
+                assert!(*was_magnified, "was_magnified must be true");
+                assert!(!*was_focused, "was_focused stays false");
+            }
+            other => panic!("expected LayoutNodeDeleted, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn layout_delete_node_clears_focused_when_collapse_replaces_parent_id() {
+        // Reagent P2 (kimi+sonnet) PR #715 round 3 (finding B):
+        // `backend::layout::delete_node`'s collapse-sole-child path
+        // promotes the surviving child and rewrites the parent's id
+        // to the child's id. If focused/magnified pointed at the
+        // ORIGINAL parent id, that id is gone from the tree even
+        // though the same physical layout slot exists. Reducer must
+        // clear the dangling reference.
+        let (mut state, tab_id) = fresh_tab();
+        let mut group = leaf_node("group-id", "");
+        group.data = None;
+        group.children = vec![leaf_node("only-child", "b1"), leaf_node("sibling", "b2")];
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(group);
+        // Focus the group (the parent that will get its id rewritten
+        // when "sibling" is deleted and "only-child" is the sole
+        // survivor of the now-1-child group).
+        state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "group-id".into();
+
+        let events = update(
+            &mut state,
+            Command::LayoutDeleteNode {
+                tab_id: tab_id.clone(),
+                node_id: "sibling".into(),
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        match &events[0] {
+            Event::LayoutNodeDeleted { was_focused, .. } => {
+                assert!(
+                    *was_focused,
+                    "collapse rewrote parent id; reducer must report focus loss"
+                );
+            }
+            other => panic!("expected LayoutNodeDeleted, got {:?}", other),
+        }
+        assert_eq!(
+            state.tabs[&tab_id].focused_node_id, "",
+            "stale focus cleared post-collapse"
+        );
+    }
+
+    #[test]
+    fn layout_delete_node_clears_focused_when_target_subtree_contains_focus() {
+        // Codex P2 PR #715 round 3 (finding C): deleting a container
+        // wipes its descendants, but a direct-id-match check on
+        // focused/magnified misses descendants — they stay dangling.
+        let (mut state, tab_id) = fresh_tab();
+        // Tree:
+        //   root-group (children: group-A, leaf-z)
+        //     group-A (children: leaf-x, leaf-y)
+        let mut leaf_x = leaf_node("leaf-x", "bx");
+        leaf_x.data = Some(agentmux_common::LayoutNodeData {
+            block_id: "bx".into(),
+            ..Default::default()
+        });
+        let mut group_a = leaf_node("group-A", "");
+        group_a.data = None;
+        group_a.children = vec![leaf_x, leaf_node("leaf-y", "by")];
+        let mut root = leaf_node("root-group", "");
+        root.data = None;
+        root.children = vec![group_a, leaf_node("leaf-z", "bz")];
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(root);
+        // Focus a descendant of group-A, then delete group-A.
+        state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "leaf-x".into();
+        state.tabs.get_mut(&tab_id).unwrap().magnified_node_id = "leaf-y".into();
+
+        let events = update(
+            &mut state,
+            Command::LayoutDeleteNode {
+                tab_id: tab_id.clone(),
+                node_id: "group-A".into(),
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        match &events[0] {
+            Event::LayoutNodeDeleted { was_focused, was_magnified, .. } => {
+                assert!(*was_focused, "descendant focus must be cleared");
+                assert!(*was_magnified, "descendant magnify must be cleared");
+            }
+            other => panic!("expected LayoutNodeDeleted, got {:?}", other),
+        }
+        assert_eq!(state.tabs[&tab_id].focused_node_id, "");
+        assert_eq!(state.tabs[&tab_id].magnified_node_id, "");
+    }
+
+    #[test]
+    fn layout_insert_node_event_echoes_parent_id_and_index() {
+        // Reagent P2 (kimi only) PR #715 round 3 (finding D): event
+        // hardcoded `parent_id: None, index: None`; subscribers had
+        // no record of what the caller asked for.
+        let (mut state, tab_id) = fresh_tab();
+        let events = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: leaf_node("new", "b1"),
+                parent_id: Some("explicit-parent".into()),
+                index: Some(3),
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        match &events[0] {
+            Event::LayoutNodeInserted { parent_id, index, .. } => {
+                assert_eq!(parent_id.as_deref(), Some("explicit-parent"));
+                assert_eq!(*index, Some(3));
+            }
+            other => panic!("expected LayoutNodeInserted, got {:?}", other),
+        }
     }
 
     #[test]
