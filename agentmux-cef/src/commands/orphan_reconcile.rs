@@ -274,11 +274,18 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
         .collect();
 
     let all_labels: Vec<String> = browser_pairs.iter().map(|(l, _)| l.clone()).collect();
-    let pending_creation_in_flight = !state
+    // Only USER-window pending creates block drain. `spawn_pool_window`
+    // also enqueues `PendingWindowCreation` for warm-pool spawns —
+    // gating drain on those would suppress reconciliation indefinitely
+    // (pool creates fire continuously, so the gate would never lift,
+    // and there's no subsequent `HostShouldQuit` to retry). Pool
+    // creates have `window-pool-*` labels.
+    let pending_creation_in_flight = state
         .host_state
         .lock()
         .pending_window_creations
-        .is_empty();
+        .iter()
+        .any(|p| !p.label.starts_with("window-pool-"));
     let plan = plan_reconcile(
         &browser_status,
         &all_labels,
