@@ -30,8 +30,31 @@
 //   the process.
 
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::collections::HashMap;
 
 use crate::state::{AppState, WindowKind, WindowMeta};
+
+/// HWND cache for pool windows. Populated at `on_after_created`
+/// (register_pool_window) and consulted at `promote_pool_window` as
+/// the source of truth — `BrowserHost::window_handle()` returns null
+/// once the page loads even though the underlying Win32 window is
+/// alive (verified by `IsWindow` — see
+/// `SPEC_POOL_WINDOW_HWND_NULL_2026_05_06.md` §4.1 diagnostic run).
+///
+/// Entries are removed on pool-window destruction
+/// (`on_pool_window_destroyed`) so the map can't leak across the
+/// process lifetime. The HWND is stored as `usize` so this state is
+/// `Send + Sync` without `unsafe`; callers cast back to `HWND` /
+/// `*mut c_void` at use site.
+#[cfg(target_os = "windows")]
+static POOL_HWND_CACHE: std::sync::OnceLock<Mutex<HashMap<String, usize>>> =
+    std::sync::OnceLock::new();
+
+#[cfg(target_os = "windows")]
+fn pool_hwnd_cache() -> &'static Mutex<HashMap<String, usize>> {
+    POOL_HWND_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 /// Target pool size. See module-level comment for rationale.
 pub const POOL_TARGET_SIZE: usize = 2;
@@ -238,12 +261,21 @@ pub fn register_pool_window(state: &Arc<AppState>, label: &str) {
                 })
             });
         if let Some(hwnd) = raw_hwnd {
+            // Cache the HWND for promote-time use. CEF's
+            // `BrowserHost::window_handle()` returns null after the
+            // page loads (verified diagnostic run 2026-05-06), but
+            // the underlying Win32 window is still alive. The cache
+            // is the only reliable source for the HWND at promote.
+            pool_hwnd_cache()
+                .lock()
+                .unwrap()
+                .insert(label.to_string(), hwnd as usize);
             set_taskbar_hidden(hwnd, true);
         } else {
             tracing::warn!(
                 target: "dnd:tearoff:pool",
                 label = %label,
-                "[pool] HWND not yet available at register time — taskbar hide skipped"
+                "[pool] HWND null at register time — taskbar hide skipped, cache not populated"
             );
         }
     }
@@ -306,6 +338,14 @@ pub fn on_pool_window_destroyed(state: &Arc<AppState>, label: &str) {
     if !label.starts_with("window-pool-") {
         return;
     }
+    // Drop the cached HWND so the map can't grow unbounded across the
+    // process lifetime. Idempotent — fine if the entry isn't present
+    // (e.g. a window destroyed before register_pool_window populated
+    // the cache).
+    #[cfg(target_os = "windows")]
+    {
+        pool_hwnd_cache().lock().unwrap().remove(label);
+    }
     // PR #5 H.4 — atomic remove-from-{unpromoted,queue} + clear
     // respawn semaphore via reducer. The dispatch returns:
     //   - `pool_destroyed_was_unpromoted`: distinguishes pre-promote
@@ -351,6 +391,7 @@ pub fn mark_pool_window_renderer_ready(state: &Arc<AppState>, label: &str) {
     if !label.starts_with("window-pool-") {
         return;
     }
+
     // PR #5 H.4 — atomic move-from-unpromoted-to-queue + clear respawn
     // semaphore via reducer. Idempotent against duplicate frontend
     // signals (re-mount, hot reload). `pool_size_after` is the queue
@@ -452,7 +493,15 @@ pub fn promote_pool_window(
     // expected failure — log per-step at ERROR so an operator can
     // tell which invariant broke.
     use cef::{ImplBrowser, ImplBrowserHost};
-    // Phase H.2.b — reducer-aware lookup with fallback.
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;
+    // Resolve the HWND. CEF's `BrowserHost::window_handle()` returns
+    // null after the page loads on Views-based browsers, even though
+    // the underlying Win32 window is alive (verified 2026-05-06,
+    // SPEC_POOL_WINDOW_HWND_NULL_2026_05_06.md). Use the cache we
+    // populated at `register_pool_window`; the CEF path is kept as a
+    // first-try in case some future CEF version starts returning the
+    // HWND consistently again.
     let raw_hwnd: Option<*mut std::ffi::c_void> = match state.get_browser(&label) {
         None => {
             tracing::error!(
@@ -472,16 +521,46 @@ pub fn promote_pool_window(
                 None
             }
             Some(host) => {
-                let h = host.window_handle();
-                if h.0.is_null() {
-                    tracing::error!(
-                        target: "dnd:tearoff:pool",
-                        label = %label,
-                        "[pool] host window handle is null (state inconsistency)"
-                    );
-                    None
+                let cef_hwnd = host.window_handle().0;
+                if !cef_hwnd.is_null() {
+                    Some(cef_hwnd as *mut std::ffi::c_void)
                 } else {
-                    Some(h.0 as *mut std::ffi::c_void)
+                    // CEF lost the reference — fall back to cache.
+                    let cached = pool_hwnd_cache().lock().unwrap().get(&label).copied();
+                    match cached {
+                        None => {
+                            tracing::error!(
+                                target: "dnd:tearoff:pool",
+                                label = %label,
+                                "[pool] CEF HWND null AND no cache entry (state inconsistency)"
+                            );
+                            None
+                        }
+                        Some(h) => {
+                            // Verify the cached HWND is still a live
+                            // OS window. If the OS has reclaimed it,
+                            // the slot is genuinely dead; refuse the
+                            // promote and fall back to cold-path.
+                            let alive = unsafe { IsWindow(h as HWND) } != 0;
+                            if alive {
+                                tracing::debug!(
+                                    target: "dnd:tearoff:pool",
+                                    label = %label,
+                                    hwnd = format!("0x{:x}", h),
+                                    "[pool] using cached HWND (CEF returned null)"
+                                );
+                                Some(h as *mut std::ffi::c_void)
+                            } else {
+                                tracing::error!(
+                                    target: "dnd:tearoff:pool",
+                                    label = %label,
+                                    hwnd = format!("0x{:x}", h),
+                                    "[pool] cached HWND no longer a live window"
+                                );
+                                None
+                            }
+                        }
+                    }
                 }
             }
         },
