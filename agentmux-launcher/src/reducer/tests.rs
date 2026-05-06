@@ -197,6 +197,17 @@ fn extract_version(e: &Event) -> u64 {
         | Event::FocusedNodeChanged { version, .. }
         | Event::MagnifiedNodeChanged { version, .. }
         | Event::SagaActionFailed { version, .. }
+        | Event::LayoutNodeInserted { version, .. }
+        | Event::LayoutNodeInsertedAtIndex { version, .. }
+        | Event::LayoutNodeDeleted { version, .. }
+        | Event::LayoutNodeMoved { version, .. }
+        | Event::LayoutNodesSwapped { version, .. }
+        | Event::LayoutNodesResized { version, .. }
+        | Event::LayoutNodeReplaced { version, .. }
+        | Event::LayoutSplitHorizontalApplied { version, .. }
+        | Event::LayoutSplitVerticalApplied { version, .. }
+        | Event::LayoutCleared { version, .. }
+        | Event::LayoutTreeReplaced { version, .. }
         | Event::Error { version, .. } => *version,
     }
 }
@@ -2043,6 +2054,103 @@ fn wrr_orphan_destroy_emits_window_closed_and_instance_released() {
     // State pruned.
     assert!(!state.windows.contains_key("w1"));
     assert!(!state.instance_registry.contains_key("w1"));
+}
+
+#[test]
+fn wrr_orphan_destroy_emits_host_should_quit_when_last_window() {
+    // Companion to the normal-close path's HostShouldQuit emission
+    // (handle_report_window_closed). When a renderer crash takes
+    // the LAST mirrored window's HWND with it, the host's orphan
+    // reconciler — which only listens to HostShouldQuit — must
+    // still wake up. Without it, warm-pool browsers stay alive
+    // and the host process becomes a zombie.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportMonitorTopologyChanged {
+            rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "w1".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xAA,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("w1".into()),
+        },
+        &c,
+    );
+    let evs = update(
+        &mut state,
+        Command::ReportHwndDestroyed { hwnd: 0xAA },
+        &c,
+    );
+
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, Event::HwndDriftDetected { kind: HwndDriftKind::OrphanInstance, .. })),
+        "expected OrphanInstance drift after last-window crash, got {:?}", evs
+    );
+    assert!(
+        evs.iter().any(|e| matches!(e, Event::HostShouldQuit { .. })),
+        "expected HostShouldQuit after last-window crash, got {:?}", evs
+    );
+}
+
+#[test]
+fn wrr_orphan_destroy_does_not_emit_host_should_quit_when_other_windows_remain() {
+    // Crash of one window when others are still open — the host's
+    // organic close path will handle quitting when the last one
+    // closes; we don't want a stray HostShouldQuit here.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportMonitorTopologyChanged {
+            rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+        },
+        &c,
+    );
+    for (label, hwnd) in [("w1", 0xAA_u64), ("w2", 0xBB)] {
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: label.into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &c,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "".into(),
+                label_hint: Some(label.into()),
+            },
+            &c,
+        );
+    }
+    let evs = update(
+        &mut state,
+        Command::ReportHwndDestroyed { hwnd: 0xAA },
+        &c,
+    );
+    assert!(
+        !evs.iter().any(|e| matches!(e, Event::HostShouldQuit { .. })),
+        "HostShouldQuit must not fire while other windows remain, got {:?}", evs
+    );
 }
 
 #[test]

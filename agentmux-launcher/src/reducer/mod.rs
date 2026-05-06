@@ -251,7 +251,8 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHwndDestroyed") {
                 return vec![err];
             }
-            crate::wrr::apply_hwnd_destroyed(state, hwnd)
+            let host_running = connection::host_is_running(state);
+            crate::wrr::apply_hwnd_destroyed(state, hwnd, host_running)
         }
         Command::ReportHwndVisibilityChanged { hwnd, visible } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHwndVisibilityChanged") {

@@ -414,22 +414,28 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
             );
         }
         Event::HostShouldQuit { .. } => {
-            // Phase B.9.3 — diagnostic only. The actual close
-            // cascade is now driven host-side by the
-            // `is_quitting` drain flag in `client.rs::on_before_close`
-            // (Cause A fix). This event remains as a launcher-side
-            // observability signal: when it fires, the host's
-            // close-path SHOULD have already started draining, so
-            // we just log and trust the host to exit. Three smoke
-            // sessions in v0.33.491–v0.33.494 attempted to make
-            // this saga deliver work to the host's UI thread; all
-            // failed (CEF post_task drops, direct call is UB,
-            // PostThreadMessage(WM_QUIT) ignored by CEF's pump).
-            // See `docs/retro/b9-3-lifecycle-analysis.md`.
+            // The launcher emits this when it detects the
+            // last-user-visible-window-closed-but-host-alive state.
+            // The host's reconciler closes any orphan
+            // `window-pool-*` browsers so the existing on_before_close
+            // cascade can drain to `browser_list.is_empty()` and
+            // fire `quit_message_loop`.
+            //
+            // Spec: `docs/specs/SPEC_HOST_ORPHAN_RECONCILIATION_2026_05_05.md`.
+            //
+            // We're on the launcher IPC reader thread; CEF
+            // Browser/BrowserHost calls aren't safe here. The
+            // reconciler does state-snapshot + classification only,
+            // then posts a UI-thread task that does the HWND probe
+            // and `host.close_browser(force=1)`. Earlier v0.33.491–
+            // v0.33.494 attempts at driving UI shutdown directly
+            // from this handler hung CEF; using the task scheduler
+            // is the difference.
             tracing::warn!(
                 target: "wrr",
-                "[wrr] HostShouldQuit received — host close cascade should be in flight"
+                "[wrr] HostShouldQuit received — running orphan reconciler"
             );
+            crate::commands::orphan_reconcile::reconcile_and_drain(state);
         }
         _ => {}
     }
