@@ -670,17 +670,19 @@ impl AgentMuxHandler {
         // (`browser-pane-*`) are sub-views of a parent window, not
         // standalone instances, so they don't count either.
         //
-        // Use `unpromoted_pool_labels` (populated at spawn time)
-        // rather than `window_pool` (populated only after the
-        // renderer-ready handshake) so this filter is correct
-        // even during the spawn → ready gap.
+        // Use `pool_inventory_labels_snapshot()` — union of
+        // `unpromoted` (spawn-time) and `pool.queue` (renderer-ready,
+        // pre-promote). Both states are hidden off-screen with no
+        // user UI; counting them as user-visible inflates this
+        // gate and prevents the cascade from firing when the user
+        // really did close their last visible window.
         //
         // Promoted pool windows ARE counted: they're removed from
-        // `unpromoted_pool_labels` at promote time.
+        // BOTH pool sets at promote time.
         let (user_browser_count, browsers_keys, pool_keys) = {
             // Phase H.2.b — reducer-aware label snapshot. Single helper call
             // replaces an interleaved pool_labels.lock + browsers.lock pair.
-            let pool_labels = self.state.unpromoted_pool_labels_snapshot();
+            let pool_labels = self.state.pool_inventory_labels_snapshot();
             let keys = self.state.list_browser_labels();
             let count = keys
                 .iter()

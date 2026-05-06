@@ -409,7 +409,11 @@ pub fn get_double_click_time() -> serde_json::Value {
 /// window before its frontend has finished init. Callers should
 /// fall back to label/index-based naming in that case.
 pub fn list_window_instances(state: &Arc<AppState>) -> serde_json::Value {
-    let pool_labels = state.unpromoted_pool_labels_snapshot();
+    // Use the full pool inventory (unpromoted + ready-queued), not
+    // just unpromoted, so renderer-ready-but-not-yet-promoted pool
+    // windows don't appear in the user-facing listing as phantom
+    // entries. Same reasoning applies to `dispatch_to_renderers`.
+    let pool_labels = state.pool_inventory_labels_snapshot();
     // Phase H.2.b — reducer-aware label snapshot.
     let labels: Vec<String> = state
         .list_browser_labels()
@@ -438,15 +442,14 @@ pub fn list_window_instances(state: &Arc<AppState>) -> serde_json::Value {
 /// in `list_windows` inflates the frontend's InstancePanel row count
 /// with phantom entries the user can't see or focus.
 ///
-/// Use `state.unpromoted_pool_labels_snapshot()` (NOT `state.pool.queue`) as the
-/// "is unpromoted pool" oracle — the pool queue is only populated
-/// after the renderer-ready handshake (~100 ms after spawn), so it
-/// would miss freshly-spawned pool windows during the gap.
-/// `unpromoted_pool_labels` is populated synchronously in
-/// `spawn_pool_window` and removed in `promote_pool_window` /
-/// `on_pool_window_destroyed`.
+/// Uses `state.pool_inventory_labels_snapshot()` — the union of
+/// `unpromoted` (synchronous, populated at spawn time) and `pool.queue`
+/// (populated after the renderer-ready handshake but before promote).
+/// Both states are host-internal: the window is hidden off-screen and
+/// has no UI a user could see or focus, so neither belongs in this
+/// listing.
 pub fn list_windows(state: &Arc<AppState>) -> serde_json::Value {
-    let pool_labels = state.unpromoted_pool_labels_snapshot();
+    let pool_labels = state.pool_inventory_labels_snapshot();
     // Phase H.2.b — reducer-aware label snapshot.
     let labels: Vec<String> = state
         .list_browser_labels()

@@ -836,6 +836,25 @@ impl AppState {
         self.host_state.lock().pool.queue.len()
     }
 
+    /// Union of `pool.unpromoted` and `pool.queue` — every pool label
+    /// that's still HOST-INTERNAL (no user UI yet). Used by
+    /// `launcher_event_bridge::dispatch_to_renderers` to skip both
+    /// pre-ready and ready-but-not-yet-promoted pool windows.
+    /// `unpromoted_pool_labels_snapshot()` alone misses the
+    /// renderer-ready window-but-not-yet-promoted state where
+    /// `handle_pool_ready` has moved the label to `pool.queue`.
+    pub fn pool_inventory_labels_snapshot(&self) -> std::collections::HashSet<String> {
+        let st = self.host_state.lock();
+        let mut set: std::collections::HashSet<String> = st
+            .pool
+            .unpromoted
+            .iter()
+            .cloned()
+            .collect();
+        set.extend(st.pool.queue.iter().cloned());
+        set
+    }
+
     /// PR #5 H.5 — read-side helper for the legacy `is_quitting` check.
     /// Returns true iff the host has begun draining (BeginDrain
     /// dispatched) OR has fully quit. Replaces the AtomicBool.
