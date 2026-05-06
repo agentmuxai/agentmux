@@ -312,7 +312,19 @@ pub async fn connect_to_launcher(
 /// Phase B.7.3.3 — the bespoke `window-instances-changed` re-emit
 /// is gone; renderers now consume typed events directly via the
 /// CEF JS bridge dispatcher (`launcher_event_bridge`).
-fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: &Event) {
+/// Pure shadow-state projection — extracted from `apply_event_to_shadow`
+/// for property testing per master spec §8.14 (subscriber idempotency
+/// contract). Mutates ONLY the shadow Mutex<HashMap> fields:
+/// `shadow_instance_registry`, `shadow_window_meta`,
+/// `shadow_backend_window_ids`. No UI tasks, no renderer dispatch, no
+/// CEF calls — those live in the wrapper `apply_event_to_shadow`.
+///
+/// Idempotent by construction: every arm is `HashMap::insert` /
+/// `HashMap::remove` keyed by `label`, both naturally idempotent past
+/// the first call. The drift-compare branch in `WindowOpened` is
+/// read-only (logs a warning, doesn't mutate). Locked in by the
+/// `shadow_projection_idempotent_under_replay` proptest.
+pub(crate) fn apply_shadow_projection(state: &std::sync::Arc<crate::state::AppState>, event: &Event) {
     match event {
         Event::WindowInstanceAssigned { label, num, .. } => {
             // Phase B.5e — host's `WindowInstanceRegistry` was
@@ -389,6 +401,16 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
             // deleted; the drift compare is gone with it.
             state.shadow_instance_registry.lock().remove(label);
         }
+        // Side-effect arms (UI tasks, reconciler) handled in the
+        // `apply_event_to_shadow` wrapper. Excluded here so this
+        // function stays pure-projection and trivially idempotent.
+        _ => {}
+    }
+}
+
+fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: &Event) {
+    apply_shadow_projection(state, event);
+    match event {
         Event::CorrectiveWindowMove { hwnd, target_rect, reason, .. } => {
             // Phase B.9.2 — pure-reducer self-heal. Reducer detected
             // an off-monitor / sentinel-parked window that the user
@@ -799,4 +821,202 @@ pub fn compute_and_report_host_counts(state: &std::sync::Arc<crate::state::AppSt
     // launcher drift-detection.
     let (windows, pool) = state.host_counts_snapshot();
     report_host_counts(windows, pool);
+}
+
+#[cfg(test)]
+mod shadow_projection_tests {
+    //! Master spec §8.14 — subscriber idempotency property tests for
+    //! the host's shadow projection. The launcher event channel may
+    //! deliver duplicates (re-dispatch, resync, replay); the contract
+    //! is that subscribers fold them into a no-op past the first
+    //! application.
+    //!
+    //! These tests target `apply_shadow_projection`, the pure
+    //! HashMap-mutation slice of `apply_event_to_shadow`. Side-effect
+    //! arms (`CorrectiveWindowMove`, `HostShouldQuit`) are excluded
+    //! from the projection function and tested separately at the
+    //! integration level.
+
+    use super::*;
+    use agentmux_common::ipc::{Event, WindowKind};
+    use proptest::prelude::*;
+    use std::sync::Arc;
+
+    fn snapshot_shadow_state(
+        state: &Arc<crate::state::AppState>,
+    ) -> (
+        std::collections::HashMap<String, crate::state::WindowMeta>,
+        std::collections::HashMap<String, String>,
+        std::collections::HashMap<String, u32>,
+    ) {
+        (
+            state.shadow_window_meta.lock().clone(),
+            state.shadow_backend_window_ids.lock().clone(),
+            state.shadow_instance_registry.lock().clone(),
+        )
+    }
+
+    /// Strategy: events the projection actually mutates. Side-effect
+    /// arms (CorrectiveWindowMove, HostShouldQuit) excluded — they
+    /// don't reach `apply_shadow_projection`'s match.
+    ///
+    /// Labels drawn from `[a-c]{1,3}` so duplicates (open then close
+    /// for same label) are common. The launcher's strict-pairing
+    /// semantic means real production never sends close-without-open,
+    /// but the projection itself doesn't enforce that, and replaying
+    /// either order through `apply_shadow_projection` should still
+    /// converge to the same shadow state.
+    fn arb_projection_event() -> impl Strategy<Value = Event> {
+        prop_oneof![
+            3 => (
+                "[a-c]{1,3}",
+                prop_oneof![Just(WindowKind::FullInstance), Just(WindowKind::Subwindow)],
+                prop_oneof![Just(None::<String>), Just(Some("a".into()))],
+            )
+                .prop_map(|(label, kind, parent_label)| Event::WindowOpened {
+                    label,
+                    kind,
+                    parent_label,
+                    version: 0,
+                }),
+            3 => "[a-c]{1,3}".prop_map(|label| Event::WindowClosed {
+                label,
+                version: 0,
+                crash_detected: false,
+            }),
+            2 => ("[a-c]{1,3}", 1u32..100u32).prop_map(|(label, num)| {
+                Event::WindowInstanceAssigned { label, num, version: 0 }
+            }),
+            1 => ("[a-c]{1,3}", 1u32..100u32).prop_map(|(label, num)| {
+                Event::WindowInstanceReleased { label, num, version: 0 }
+            }),
+            2 => ("[a-c]{1,3}", "[0-9a-f]{4,8}").prop_map(|(label, window_id)| {
+                Event::BackendWindowIdRegistered { label, window_id, version: 0 }
+            }),
+            1 => ("[a-c]{1,3}", "[0-9a-f]{4,8}").prop_map(|(label, window_id)| {
+                Event::BackendWindowIdUnregistered { label, window_id, version: 0 }
+            }),
+        ]
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            ..ProptestConfig::default()
+        })]
+
+        /// Master spec §8.14 — replaying any event sequence twice
+        /// converges to the same shadow state. Property: for any
+        /// sequence S of events, `apply(S) == apply(S; S)`.
+        ///
+        /// Drift-storm regression class (PR #708): if a launcher
+        /// event reaches the host's `apply_event_to_shadow` 600
+        /// times instead of once, the shadow projection MUST stay
+        /// in the same final state. By construction
+        /// (HashMap::insert/remove are idempotent for the same key),
+        /// this holds — the proptest locks it.
+        #[test]
+        fn shadow_projection_idempotent_under_replay(
+            events in proptest::collection::vec(arb_projection_event(), 0..40)
+        ) {
+            let state = Arc::new(crate::state::AppState::default());
+
+            // Apply once.
+            for e in &events {
+                apply_shadow_projection(&state, e);
+            }
+            let (meta1, ids1, registry1) = snapshot_shadow_state(&state);
+
+            // Apply the SAME sequence again — every event is a duplicate.
+            for e in &events {
+                apply_shadow_projection(&state, e);
+            }
+            let (meta2, ids2, registry2) = snapshot_shadow_state(&state);
+
+            prop_assert_eq!(meta1, meta2, "shadow_window_meta diverged on replay");
+            prop_assert_eq!(ids1, ids2, "shadow_backend_window_ids diverged on replay");
+            prop_assert_eq!(registry1, registry2, "shadow_instance_registry diverged on replay");
+        }
+
+        /// Stronger property: arbitrary per-event duplication count
+        /// (1..5x per event) produces the same final state as
+        /// applying each event once. This is the §8.14 contract
+        /// directly — duplicates must fold to no-op.
+        #[test]
+        fn shadow_projection_collapses_arbitrary_duplicates(
+            events in proptest::collection::vec(arb_projection_event(), 1..30),
+            dup_counts in proptest::collection::vec(1u8..6, 1..30),
+        ) {
+            // Pair events with duplication counts, taking the shorter length.
+            let n = events.len().min(dup_counts.len());
+
+            // Run 1: apply each event once.
+            let state_once = Arc::new(crate::state::AppState::default());
+            for e in events.iter().take(n) {
+                apply_shadow_projection(&state_once, e);
+            }
+            let baseline = snapshot_shadow_state(&state_once);
+
+            // Run 2: apply each event N times (1..5x).
+            let state_dup = Arc::new(crate::state::AppState::default());
+            for (e, &dups) in events.iter().take(n).zip(dup_counts.iter().take(n)) {
+                for _ in 0..dups {
+                    apply_shadow_projection(&state_dup, e);
+                }
+            }
+            let inflated = snapshot_shadow_state(&state_dup);
+
+            prop_assert_eq!(baseline.0, inflated.0, "shadow_window_meta diverged under duplicate-bursting");
+            prop_assert_eq!(baseline.1, inflated.1, "shadow_backend_window_ids diverged under duplicate-bursting");
+            prop_assert_eq!(baseline.2, inflated.2, "shadow_instance_registry diverged under duplicate-bursting");
+        }
+    }
+
+    /// Anti-vacuity guard (per `feedback_property_test_input_must_match_sut_filter`):
+    /// confirm the projection actually mutates the shadow state under
+    /// the strategy's events. If the strategy ever drifts away from
+    /// the SUT (e.g. event variants renamed), this test fails loudly
+    /// instead of letting the property hold vacuously.
+    #[test]
+    fn projection_actually_mutates_state_for_strategy_events() {
+        let state = Arc::new(crate::state::AppState::default());
+        apply_shadow_projection(
+            &state,
+            &Event::WindowOpened {
+                label: "a".to_string(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+                version: 0,
+            },
+        );
+        assert!(
+            state.shadow_window_meta.lock().contains_key("a"),
+            "projection failed to mutate shadow_window_meta — strategy/SUT drift?"
+        );
+        apply_shadow_projection(
+            &state,
+            &Event::BackendWindowIdRegistered {
+                label: "a".to_string(),
+                window_id: "w-1".to_string(),
+                version: 0,
+            },
+        );
+        assert!(
+            state.shadow_backend_window_ids.lock().contains_key("a"),
+            "projection failed to mutate shadow_backend_window_ids"
+        );
+        apply_shadow_projection(
+            &state,
+            &Event::WindowInstanceAssigned {
+                label: "a".to_string(),
+                num: 7,
+                version: 0,
+            },
+        );
+        assert_eq!(
+            state.shadow_instance_registry.lock().get("a"),
+            Some(&7),
+            "projection failed to mutate shadow_instance_registry"
+        );
+    }
 }

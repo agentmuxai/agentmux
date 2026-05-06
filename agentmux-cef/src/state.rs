@@ -76,7 +76,7 @@ pub enum WindowKind {
 
 /// Per-window metadata held alongside the CEF `Browser`. See `WindowKind` for
 /// the semantics of `kind` and `parent_instance_id`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WindowMeta {
     pub label: String,
     pub kind: WindowKind,
