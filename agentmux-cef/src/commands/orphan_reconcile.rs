@@ -133,11 +133,12 @@ wrap_task! {
 fn ui_thread_reconcile(state: &Arc<AppState>, candidates: &[String]) {
     let candidate_set: HashSet<&str> = candidates.iter().map(|s| s.as_str()).collect();
     let browser_pairs = state.list_browsers();
-    // Re-snapshot shadow on the UI thread (used below for the
-    // `live_user_count` check). If the launcher's `WindowOpened`
-    // echo for a freshly-promoted pool window arrived between the
-    // IPC-thread classification and now, the new entry appears here
-    // and counts toward `live_user_count` correctly.
+    // Re-snapshot shadow on the UI thread. `shadow_window_meta` is
+    // the launcher's authoritative set of user-visible labels —
+    // `ReportWindowOpened` is sent only at promotion time, so pool
+    // inventory in any state (`unpromoted` OR `queue`) is absent
+    // from shadow, and promoted pool windows (which retain the
+    // `window-pool-*` prefix) ARE in shadow.
     let shadow_keys: HashSet<String> = state
         .shadow_window_meta
         .lock()
@@ -145,55 +146,60 @@ fn ui_thread_reconcile(state: &Arc<AppState>, candidates: &[String]) {
         .cloned()
         .collect();
 
-    let mut to_close: Vec<(String, Browser)> = Vec::new();
-    let mut deferred_live_candidates: Vec<String> = Vec::new();
+    // Live user browsers = shadow members minus pane labels.
+    // Zombies (Race C) had their HWND destroyed; the launcher's
+    // `apply_hwnd_destroyed` removed them from `state.windows`, so
+    // they're absent from shadow already — no need to subtract them
+    // separately. Freshly-promoted (Race B) windows whose
+    // `WindowOpened` echo hasn't returned yet are also absent from
+    // shadow but DO need to keep the host alive: handled below by
+    // detecting that case (candidate, live HWND, NOT in pool queue)
+    // and skipping drain.
+    let live_user_count = browser_pairs
+        .iter()
+        .filter(|(label, _)| {
+            shadow_keys.contains(label) && !label.starts_with("browser-pane-")
+        })
+        .count();
+
+    // Pool queue membership distinguishes ready warm-pool inventory
+    // (in queue, drainable on shutdown) from freshly-promoted user
+    // windows (popped from queue + waiting for shadow echo).
+    let pool_queue: HashSet<String> = state
+        .host_state
+        .lock()
+        .pool
+        .queue
+        .iter()
+        .cloned()
+        .collect();
+
+    let mut zombies: Vec<(String, Browser)> = Vec::new();
+    let mut ready_pool: Vec<(String, Browser)> = Vec::new();
+    let mut freshly_promoted: Vec<String> = Vec::new();
     for (label, browser) in browser_pairs.iter() {
         if !candidate_set.contains(label.as_str()) {
             continue;
         }
         if hwnd_is_dead_or_missing(browser) {
-            to_close.push((label.clone(), browser.clone()));
+            zombies.push((label.clone(), browser.clone()));
+        } else if pool_queue.contains(label) {
+            ready_pool.push((label.clone(), browser.clone()));
         } else {
-            deferred_live_candidates.push(label.clone());
+            freshly_promoted.push(label.clone());
         }
     }
 
-    if !deferred_live_candidates.is_empty() {
+    if !freshly_promoted.is_empty() {
         tracing::info!(
             target: "wrr",
-            "[orphan-reconcile] {} candidate(s) have live HWNDs — likely freshly-promoted, skipping: {:?}",
-            deferred_live_candidates.len(),
-            deferred_live_candidates
+            "[orphan-reconcile] {} candidate(s) appear freshly-promoted (live HWND, not in pool queue), skipping: {:?}",
+            freshly_promoted.len(),
+            freshly_promoted
         );
     }
 
-    if to_close.is_empty() {
-        tracing::info!(
-            target: "wrr",
-            "[orphan-reconcile] no zombies after HWND-validity filter — nothing to close"
-        );
-        return;
-    }
-
-    // Compute remaining live user browsers AFTER removing the zombies.
-    // The launcher's `shadow_window_meta` is the authoritative set of
-    // labels the launcher tracks as user-visible — a label is in
-    // shadow iff `ReportWindowOpened` was sent for it (which only
-    // happens at promotion time for pool windows, not at pool
-    // registration). So this filter naturally excludes both
-    // `pool.unpromoted` AND `pool.queue` inventory (neither is in
-    // shadow), and includes promoted pool windows (which retain
-    // their `window-pool-*` prefix but ARE in shadow). Pane labels
-    // are excluded because they drain via a separate cascade.
-    let zombie_labels: HashSet<&str> = to_close.iter().map(|(l, _)| l.as_str()).collect();
-    let live_user_count = browser_pairs
-        .iter()
-        .filter(|(label, _)| {
-            shadow_keys.contains(label)
-                && !zombie_labels.contains(label.as_str())
-                && !label.starts_with("browser-pane-")
-        })
-        .count();
+    let mut to_close: Vec<(String, Browser)> = zombies;
 
     if live_user_count == 0 {
         // Set drain BEFORE posting closes. Each close re-enters
@@ -206,13 +212,15 @@ fn ui_thread_reconcile(state: &Arc<AppState>, candidates: &[String]) {
             reason: crate::state::QuitReason::LastWindowClosed,
         });
 
-        // Stage-1 mirror: when the normal cascade in
-        // `on_before_close` ran with `user_browser_count > 0` (because
-        // zombies inflated the count), it skipped its `window-pool-*`
-        // close loop. Those warm-pool browsers are still in
-        // `browser_list`; Stage 2 won't fire `quit_message_loop` until
-        // they're gone. Append them to `to_close` so the close pass
-        // below clears the same set the normal cascade would have.
+        // Drain branch: also close every other `window-pool-*`
+        // browser still in `browser_pairs` (ready pool + unpromoted
+        // pool inventory). The normal Stage-1 cascade in
+        // `on_before_close` would have done this had it run; in
+        // some HostShouldQuit paths it didn't, so the reconciler
+        // closes them here. Stage 2's `quit_message_loop` waits on
+        // `browser_list.is_empty()`; missing this loop is the most
+        // common reason the host stays alive after the user's last
+        // window closes.
         let already_in_close: HashSet<String> =
             to_close.iter().map(|(l, _)| l.clone()).collect();
         for (label, browser) in browser_pairs.iter() {
@@ -222,18 +230,35 @@ fn ui_thread_reconcile(state: &Arc<AppState>, candidates: &[String]) {
             if already_in_close.contains(label) {
                 continue;
             }
-            // deferred_live can't appear here: live_user_count==0
-            // implies deferred_live_candidates is empty (a
-            // freshly-promoted pool window is itself a live user
-            // window and would have bumped the count).
+            // freshly_promoted (live HWND, not in pool.queue) MUST
+            // NOT be closed — they're real new user windows whose
+            // shadow echo is in flight. Skip them. ready_pool and
+            // unpromoted-pool slots fall through to `to_close`.
+            if freshly_promoted.iter().any(|l| l == label) {
+                continue;
+            }
             to_close.push((label.clone(), browser.clone()));
         }
+
+        let _ = ready_pool; // included via the loop above
     } else {
         tracing::info!(
             target: "wrr",
-            "[orphan-reconcile] {} live user browser(s) remain after excluding zombies — skipping BeginDrain and warm-pool close",
+            "[orphan-reconcile] {} live user browser(s) remain — skipping BeginDrain and warm-pool close",
             live_user_count
         );
+        // Stale `HostShouldQuit` racing with an active session: any
+        // ready-pool / freshly-promoted candidates stay alive; only
+        // zombies get closed (already in `to_close`).
+        let _ = ready_pool;
+    }
+
+    if to_close.is_empty() {
+        tracing::info!(
+            target: "wrr",
+            "[orphan-reconcile] nothing to close after classification"
+        );
+        return;
     }
 
     tracing::warn!(
