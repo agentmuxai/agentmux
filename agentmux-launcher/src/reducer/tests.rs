@@ -1609,6 +1609,65 @@ fn promote_for_label_without_window_mirror_emits_event_idempotently() {
 }
 
 #[test]
+fn duplicate_open_for_promoted_label_preserves_foregrounded_since_open() {
+    // Codex P2 PR #708 round 3: `foregrounded_since_open` is monotonic
+    // per its WindowMirror contract. The first open after a promote
+    // consumes `just_promoted_labels` and sets the flag to true. A
+    // duplicate ReportWindowOpened (existing handler overwrites the
+    // mirror wholesale) must NOT reset the flag — otherwise the next
+    // post-promote `ReportHwndVisibilityChanged` re-fires
+    // `HiddenSinceOpen` drift.
+    let (mut state, c) = registered_host_state();
+
+    // Production tear-off sequence.
+    let _ = update(
+        &mut state,
+        Command::ReportPoolWindowAdded { label: "window-pool-dup".into(), saga_id: None },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportPoolWindowRemoved { label: "window-pool-dup".into() },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportPoolWindowPromoted { label: "window-pool-dup".into() },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-pool-dup".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    assert!(
+        state.windows.get("window-pool-dup").unwrap().foregrounded_since_open,
+        "first open: foregrounded_since_open=true (consumed just_promoted)"
+    );
+
+    // Duplicate open for the same label. just_promoted entry is
+    // already gone; the flag must survive via OR with the prior
+    // mirror's value.
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-pool-dup".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    assert!(
+        state.windows.get("window-pool-dup").unwrap().foregrounded_since_open,
+        "duplicate open MUST preserve foregrounded_since_open=true (regression: drift storm returns)"
+    );
+}
+
+#[test]
 fn close_drops_orphaned_just_promoted_entry() {
     // If promote was emitted but the matching open never arrived
     // (host crash mid-tear-off etc.), a subsequent close for the
