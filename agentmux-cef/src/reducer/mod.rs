@@ -82,33 +82,39 @@ pub struct HostState {
     // arms below; no production callers yet. PRs #2-#5 wire each through
     // the a→e migration ratchet. See SPEC_HOST_REDUCER_5PR_PLAN_2026-05-02.md.
 
-    /// H.1 — pane lifecycle map. Replaces `BrowserPaneManager::PaneStateMachine`
-    /// (pane/lifecycle.rs:60). Keyed by `block_id`.
-    #[allow(dead_code)]
+    /// H.1 — pane lifecycle map. Replaces the deleted
+    /// `pane::lifecycle::PaneStateMachine`. Keyed by `block_id`.
+    /// Authoritative; `BrowserPaneManager` (browser_panes.rs) is now a
+    /// zero-sized handle that delegates all mutations through
+    /// `host_dispatch`.
     pub browser_panes: HashMap<String, BrowserPaneEntry>,
 
-    /// H.2 — browser handle registry. Replaces `AppState.browsers:
-    /// Mutex<HashMap<String, Browser>>` (state.rs:210). Keyed by label
-    /// (e.g., `window-...`, `browser-pane-...`, `window-pool-...`).
-    #[allow(dead_code)]
+    /// H.2 — browser handle registry. Replaces the deleted
+    /// `AppState.browsers: Mutex<HashMap<String, Browser>>`. Keyed by
+    /// label (e.g., `window-...`, `browser-pane-...`, `window-pool-...`).
+    /// Authoritative; read via `AppState::get_browser`, `list_browsers`, etc.
     pub browsers: HashMap<String, BrowserHandle>,
 
-    /// H.3 — active drag session (singleton). Replaces `AppState.active_drag:
-    /// Mutex<Option<DragSession>>`.
-    #[allow(dead_code)]
+    /// H.3 — active drag session (singleton). Replaces the deleted
+    /// `AppState.active_drag: Mutex<Option<DragSession>>`.
     pub active_drag: Option<DragSession>,
 
-    /// H.4 — pool state (queue + unpromoted + in-flight semaphore).
-    /// Replaces three separate fields on AppState.
-    #[allow(dead_code)]
+    /// H.4 — pool state (queue + unpromoted + in-flight semaphore +
+    /// just_promoted_labels bridge from PR #708). Replaces the deleted
+    /// `window_pool` / `unpromoted_pool_labels` fields on AppState.
     pub pool: PoolState,
 
-    /// H.5 — quit lifecycle. Replaces `AppState.is_quitting: AtomicBool`.
-    #[allow(dead_code)]
+    /// H.5 — quit lifecycle. Replaces the deleted
+    /// `AppState.is_quitting: AtomicBool`.
     pub quit_state: QuitState,
 
     /// H.6 — top-level window creation runner state (queue, in-flight,
-    /// history). Event-driven; no watchdog.
+    /// history). Event-driven; no watchdog. **Currently DORMANT** — the
+    /// reducer arms (`EnqueueTopLevelWindow`, `TopLevelCallbackFired`,
+    /// etc.) exist but no production code dispatches to them. The
+    /// `ui_tasks::post_create_window` direct-call path is still
+    /// authoritative. Wire-up is a low-priority structural improvement;
+    /// see master spec §4.3 and discussion #707.
     #[allow(dead_code)]
     pub top_level_creation: TopLevelCreationState,
 
