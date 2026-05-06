@@ -2565,73 +2565,86 @@ proptest! {
         }
     }
 
-    /// `just_promoted_labels` is fully drained by the matching
-    /// `ReportWindowOpened` (or `ReportWindowClosed` fallback) over
-    /// any sequence of commands that includes both the producer
-    /// (`ReportPoolWindowPromoted`) and the consumers, AS LONG AS the
-    /// producer's last operation has a matching consumer downstream.
+    /// Both consumer paths drain `just_promoted_labels`:
+    ///   - `handle_report_window_opened` (production path, primary)
+    ///   - `handle_report_window_closed` (fallback for promote-with-no-open)
     ///
-    /// Stronger property than codex P2 (PR #709 round 1) flagged the
-    /// original test for: the original `arb_b8_host_command` used
-    /// disjoint label spaces (`pool-[a-c]{1,2}` for promotes vs
-    /// `[a-c]{1,3}` for opens/closes), so the consumer-path cleanup
-    /// in `handle_report_window_opened/Closed` never fired for
-    /// promoted labels — the leak guard would have passed even with
-    /// cleanup deleted. This dedicated strategy uses a SHARED label
-    /// space for promote / open / close so consumers actually
-    /// exercise the cleanup paths.
+    /// **Property:** for every label `L` whose LAST seen command was an
+    /// open or close (consumer), `L` MUST NOT be in
+    /// `just_promoted_labels` at end-of-sequence. Catches both broken
+    /// drains: codex P2 PR #709 round 2 noted the prior version only
+    /// caught the open-consumer regression (a sequence like
+    /// `Promoted("a") → Closed("a")` would leave "a" in the set with
+    /// `windows.contains_key("a") == false`, passing the old "no
+    /// label in both sets" check trivially).
     ///
-    /// Drift-storm regression guard (PR #708 round 3):
-    /// `just_promoted_labels` is the microsecond-bridge from
-    /// `PoolPromoted → WindowOpened`. Mutation-test this guard by
-    /// commenting out either cleanup and watching this proptest fail.
+    /// Mutation-test: commenting out either cleanup line in
+    /// `handle_report_window_opened` or `handle_report_window_closed`
+    /// makes this proptest fail.
     #[test]
-    fn just_promoted_labels_drained_by_open_or_close(
+    fn both_drain_paths_remove_just_promoted_entry(
         cmds in proptest::collection::vec(arb_promote_focused_command(), 1..80)
     ) {
         let (mut state, host_ctx) = registered_host_state();
+        // Track the LAST command kind seen per label as we apply the
+        // sequence. After all commands are applied, any label whose
+        // last-command was an open or close is a "post-consumer"
+        // label and MUST have been drained from just_promoted_labels.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        enum LastCmd { Promote, OpenOrClose }
+        let mut last_cmd_per_label: std::collections::HashMap<String, LastCmd> = std::collections::HashMap::new();
         for cmd in cmds {
+            match &cmd {
+                Command::ReportPoolWindowPromoted { label } => {
+                    last_cmd_per_label.insert(label.clone(), LastCmd::Promote);
+                }
+                Command::ReportWindowOpened { label, .. }
+                | Command::ReportWindowClosed { label } => {
+                    last_cmd_per_label.insert(label.clone(), LastCmd::OpenOrClose);
+                }
+                _ => {}
+            }
             let _ = update(&mut state, cmd, &host_ctx);
         }
-        // For every label still in just_promoted_labels at the end,
-        // there must be NO subsequent open or close — i.e. the entry
-        // is genuinely orphaned (promote was the last command for
-        // that label).
-        for label in &state.just_promoted_labels {
-            // If the label has a window mirror, the open consumer
-            // ran AFTER the promote, which means the entry should
-            // have been removed. Catches a regression where the
-            // open consumer is broken.
-            prop_assert!(
-                !state.windows.contains_key(label),
-                "label {:?} is in BOTH just_promoted_labels and windows — open consumer didn't drain",
-                label
-            );
+        for (label, last) in &last_cmd_per_label {
+            if *last == LastCmd::OpenOrClose {
+                prop_assert!(
+                    !state.just_promoted_labels.contains(label),
+                    "label {:?} had last-cmd open/close (consumer) but is still in just_promoted_labels — drain regression",
+                    label
+                );
+            }
         }
     }
 
-    /// Producer-side idempotency under the overlapping label space:
-    /// promote inserts, open consumes, close consumes (fallback).
-    /// Set size never exceeds the count of distinct promoted labels
-    /// awaiting their consumer.
+    /// Bound on the just_promoted set: it never grows past the count
+    /// of distinct labels for which `ReportPoolWindowPromoted` has
+    /// been emitted across the whole sequence. This is a cumulative
+    /// upper-bound (the "ever promoted" denominator), NOT a
+    /// "currently pending" bound — the consumer paths can also
+    /// remove entries, but never add to the denominator.
+    ///
+    /// Reagent P2 PR #709 round 2 flagged the prior name
+    /// (`bounded_by_pending_promotes`) as misleading vs the actual
+    /// bound. Renamed to match what's measured.
     #[test]
-    fn just_promoted_labels_bounded_by_pending_promotes(
+    fn just_promoted_labels_bounded_by_distinct_labels_ever_promoted(
         cmds in proptest::collection::vec(arb_promote_focused_command(), 1..80)
     ) {
         let (mut state, host_ctx) = registered_host_state();
-        let mut distinct_pool_labels: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut distinct_ever_promoted: std::collections::HashSet<String> = std::collections::HashSet::new();
         for cmd in &cmds {
             if let Command::ReportPoolWindowPromoted { label } = cmd {
-                distinct_pool_labels.insert(label.clone());
+                distinct_ever_promoted.insert(label.clone());
             }
         }
         for cmd in cmds {
             let _ = update(&mut state, cmd, &host_ctx);
             prop_assert!(
-                state.just_promoted_labels.len() <= distinct_pool_labels.len(),
-                "just_promoted_labels grew past distinct labels seen: {} > {}",
+                state.just_promoted_labels.len() <= distinct_ever_promoted.len(),
+                "just_promoted_labels grew past distinct labels ever promoted: {} > {}",
                 state.just_promoted_labels.len(),
-                distinct_pool_labels.len()
+                distinct_ever_promoted.len()
             );
         }
     }
