@@ -109,6 +109,29 @@ pub(super) fn handle_report_window_opened(
         state.pending_hwnds.remove(&hwnd);
     }
 
+    // Drift-storm fix (PR #708 round 3) — if this open is the back
+    // half of a tear-off promote (host emit order is `pool_removed →
+    // pool_promoted → window_opened`), `handle_report_pool_window_promoted`
+    // recorded the label in `just_promoted_labels`. Initialize the new
+    // mirror with `foregrounded_since_open: true` so the open-transient
+    // corrective logic doesn't re-fire `HiddenSinceOpen` on the
+    // subsequent HWND repositioning. See state.rs::just_promoted_labels.
+    let was_just_promoted = state.just_promoted_labels.remove(&label);
+    // Codex P2 PR #708 round 3 — `foregrounded_since_open` is
+    // monotonic (false → true, never resets within a window's
+    // lifetime per its own contract: "has this label been
+    // foregrounded at any point since its ReportWindowOpened"). On
+    // duplicate opens (the existing handler overwrites the mirror
+    // wholesale), OR the prior value in so the flag isn't reset. The
+    // first open after a promote already consumed `just_promoted_labels`,
+    // so a 2nd open at the same label would otherwise re-arm the
+    // open-transient drift detector.
+    let prior_foregrounded = state
+        .windows
+        .get(&label)
+        .map(|m| m.foregrounded_since_open)
+        .unwrap_or(false);
+
     state.windows.insert(
         label.clone(),
         WindowMirror {
@@ -125,7 +148,7 @@ pub(super) fn handle_report_window_opened(
             iconic: false,
             last_rect: None,
             last_foreground_at_ms: None,
-            foregrounded_since_open: false,
+            foregrounded_since_open: was_just_promoted || prior_foregrounded,
         },
     );
     let mut out = Vec::with_capacity(2);
@@ -171,6 +194,11 @@ pub(super) fn handle_report_window_opened(
 /// monotonic per-launcher-run.
 pub(super) fn handle_report_window_closed(state: &mut State, label: String) -> Vec<Event> {
     let was_present = state.windows.remove(&label).is_some();
+    // Drift-storm fix cleanup — drop any orphaned just-promoted entry.
+    // Bounded leak protection for the (rare) case where promote was
+    // emitted but the matching `ReportWindowOpened` never arrived
+    // (host crash mid-tear-off, etc.).
+    state.just_promoted_labels.remove(&label);
     if !was_present {
         // Silent: only emit when the close pairs with a known open.
         return vec![];
