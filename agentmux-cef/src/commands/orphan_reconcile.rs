@@ -274,18 +274,21 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
         .collect();
 
     let all_labels: Vec<String> = browser_pairs.iter().map(|(l, _)| l.clone()).collect();
-    // Only USER-window pending creates block drain. `spawn_pool_window`
-    // also enqueues `PendingWindowCreation` for warm-pool spawns —
-    // gating drain on those would suppress reconciliation indefinitely
-    // (pool creates fire continuously, so the gate would never lift,
-    // and there's no subsequent `HostShouldQuit` to retry). Pool
-    // creates have `window-pool-*` labels.
+    // Only USER-window pending creates block drain. Pool spawns
+    // (`window-pool-*` via `spawn_pool_window`) and pane creates
+    // (`browser-pane-*` via the pane creation path) also enqueue
+    // `PendingWindowCreation`, but they're excluded from user-window
+    // counts everywhere else (live_user_count, Stage-2 quit gate)
+    // and gating drain on them would suppress reconciliation
+    // indefinitely with no later `HostShouldQuit` retry.
     let pending_creation_in_flight = state
         .host_state
         .lock()
         .pending_window_creations
         .iter()
-        .any(|p| !p.label.starts_with("window-pool-"));
+        .any(|p| {
+            !p.label.starts_with("window-pool-") && !p.label.starts_with("browser-pane-")
+        });
     let plan = plan_reconcile(
         &browser_status,
         &all_labels,
