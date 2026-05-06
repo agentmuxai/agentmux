@@ -25,6 +25,7 @@ import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "@/layout/index";
 import { invokeCommand } from "@/app/platform/ipc";
 import { Logger } from "@/util/logger";
+import { openTearOffWindow } from "./tear-off-pool-helper";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import type { LayoutNode } from "@/layout/lib/types";
@@ -234,12 +235,12 @@ async function performTearOff(
                     } as LayoutTreeDeleteNodeAction);
                 }
             }
-            await api.openWindowAtPosition(screenX, screenY, newWsId);
+            await openTearOffWindow(api, newWsId, screenX, screenY);
         }
     } else if (dragType === "tab" && payload.tabId) {
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
         if (newWsId) {
-            await api.openWindowAtPosition(screenX, screenY, newWsId);
+            await openTearOffWindow(api, newWsId, screenX, screenY);
         }
     }
 }

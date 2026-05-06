@@ -12,6 +12,7 @@ import { atoms, getApi } from "@/store/global";
 import { invokeCommand } from "@/app/platform/ipc";
 import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
+import { openTearOffWindow } from "./tear-off-pool-helper";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import type { LayoutNode } from "@/layout/lib/types";
@@ -132,10 +133,10 @@ async function performTearOff(
     const api = getApi();
     if (dragType === "pane" && payload.blockId) {
         const newWsId = await WorkspaceService.TearOffBlock(payload.blockId, sourceTabId, sourceWsId, true);
-        if (newWsId) await api.openWindowAtPosition(screenX, screenY, newWsId);
+        if (newWsId) await openTearOffWindow(api, newWsId, screenX, screenY);
     } else if (dragType === "tab" && payload.tabId) {
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
-        if (newWsId) await api.openWindowAtPosition(screenX, screenY, newWsId);
+        if (newWsId) await openTearOffWindow(api, newWsId, screenX, screenY);
     }
 }
 
