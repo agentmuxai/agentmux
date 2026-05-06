@@ -1395,6 +1395,11 @@ pub enum Event {
         /// True if the deleted node was the focused one (subscribers may
         /// need to refocus).
         was_focused: bool,
+        /// True if the deleted node was the magnified one (subscribers
+        /// may need to re-magnify or clear their magnification UI).
+        /// Reagent P1 PR #715 round 3: reducer was clearing
+        /// `magnified_node_id` internally but not reporting it.
+        was_magnified: bool,
         correlation_id: String,
         version: u64,
     },
