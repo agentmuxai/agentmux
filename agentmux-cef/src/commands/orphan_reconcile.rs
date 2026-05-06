@@ -189,17 +189,40 @@ fn ui_thread_reconcile(state: &Arc<AppState>, candidates: &[String]) {
         state.host_dispatch(crate::reducer::HostCommand::BeginDrain {
             reason: crate::state::QuitReason::LastWindowClosed,
         });
+
+        // Stage-1 mirror: when the normal cascade in
+        // `on_before_close` ran with `user_browser_count > 0` (because
+        // zombies inflated the count), it skipped its `window-pool-*`
+        // close loop. Those warm-pool browsers are still in
+        // `browser_list`; Stage 2 won't fire `quit_message_loop` until
+        // they're gone. Append them to `to_close` so the close pass
+        // below clears the same set the normal cascade would have.
+        let already_in_close: HashSet<String> =
+            to_close.iter().map(|(l, _)| l.clone()).collect();
+        for (label, browser) in browser_pairs.iter() {
+            if !label.starts_with("window-pool-") {
+                continue;
+            }
+            if already_in_close.contains(label) {
+                continue;
+            }
+            // deferred_live can't appear here: live_user_count==0
+            // implies deferred_live_candidates is empty (a
+            // freshly-promoted pool window is itself a live user
+            // window and would have bumped the count).
+            to_close.push((label.clone(), browser.clone()));
+        }
     } else {
         tracing::info!(
             target: "wrr",
-            "[orphan-reconcile] {} live user browser(s) remain after excluding zombies — skipping BeginDrain",
+            "[orphan-reconcile] {} live user browser(s) remain after excluding zombies — skipping BeginDrain and warm-pool close",
             live_user_count
         );
     }
 
     tracing::warn!(
         target: "wrr",
-        "[orphan-reconcile] reaping {} zombie window-pool-* browser(s): {:?}",
+        "[orphan-reconcile] closing {} window-pool-* browser(s): {:?}",
         to_close.len(),
         to_close.iter().map(|(l, _)| l).collect::<Vec<_>>()
     );
