@@ -153,12 +153,19 @@ pub(crate) fn plan_reconcile(
     freshly_promoted.sort();
 
     let mut closes: Vec<(String, CloseAction)> = Vec::new();
-    // Dead zombies always close — `close_browser(force=1)` triggers
-    // the host's own on_before_close cleanup chain regardless of
-    // drain state, so this is safe whether we're shutting down or
-    // recovering from a single-window crash mid-session.
-    for label in dead_zombies {
-        closes.push((label, CloseAction::CloseBrowser));
+    // Dead zombies normally close regardless of drain state —
+    // `close_browser(force=1)` triggers the host's own
+    // `on_before_close` cleanup chain. BUT if a window creation is
+    // pending, that cleanup chain itself can race the pending
+    // creation: when the zombie is the last registered browser,
+    // `on_before_close` sees `user_browser_count == 0`, dispatches
+    // `BeginDrain`, and Stage-2 `quit_message_loop` fires before
+    // the new window registers. Defer zombie reap until the
+    // creation completes; the next `HostShouldQuit` will catch it.
+    if !pending_creation_in_flight {
+        for label in dead_zombies {
+            closes.push((label, CloseAction::CloseBrowser));
+        }
     }
     if safe_to_drain {
         // Hostless gets UnregisterBrowser ONLY in drain mode.
@@ -922,10 +929,13 @@ mod tests {
     }
 
     #[test]
-    fn plan_pending_creation_doesnt_block_zombie_close() {
-        // Dead zombies always close — they don't depend on drain
-        // being safe. A pending creation should not stop us from
-        // reaping a zombie.
+    fn plan_pending_creation_blocks_zombie_close() {
+        // Dead zombies normally close regardless of drain state, but
+        // when a creation is in flight, even the zombie's
+        // `on_before_close` cleanup chain can race the pending
+        // creation: if the zombie is the last browser, that chain
+        // dispatches `BeginDrain` and quit before the new window
+        // registers. Defer zombie reap until next `HostShouldQuit`.
         let zombie = "window-pool-zombie";
         let plan = plan_reconcile(
             &map_of(&[(zombie, HwndStatus::Dead)]),
@@ -936,7 +946,7 @@ mod tests {
             true,
         );
         assert!(!plan.begin_drain);
-        assert_eq!(plan.closes, vec![(zombie.to_string(), CloseAction::CloseBrowser)]);
+        assert!(plan.closes.is_empty(), "zombie close must defer when creation pending: {:?}", plan.closes);
     }
 
     #[test]
