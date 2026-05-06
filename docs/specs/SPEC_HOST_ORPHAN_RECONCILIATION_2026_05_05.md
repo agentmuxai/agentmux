@@ -214,7 +214,13 @@ CEF Browser/BrowserHost methods (`host()`, `window_handle()`, `close_browser()`)
 
 This avoids the v0.33.491–v0.33.494 freezes that came from trying to drive UI work directly from the IPC thread (post_task drops, direct call UB, PostThreadMessage(WM_QUIT) ignored). We use CEF's own scheduler the way the rest of the host already does.
 
-### 5.7 What we don't change
+### 5.7 Hostless orphans need a direct `quit_message_loop` drive
+
+A pool window that's mid-teardown can leave its `Browser` handle in `state.browsers` but with `host()` returning `None` — CEF's `BrowserHost` is gone. We can't call `close_browser(force=1)` (no host to call it on), so the orchestrator dispatches `UnregisterBrowser` directly to clean `state.browsers`. But Stage-2 quit in `client::on_before_close` is the only call site for `cef::quit_message_loop`, and `on_before_close` won't fire for a hostless browser. Without an explicit drive, the message loop keeps spinning even though the reducer's registry is empty.
+
+After the close loop, if any candidate took the hostless-unregister branch AND `state.host_state.lock().browsers.is_empty()` AND drain was entered (`live_user_count == 0`), the reconciler calls `cef::quit_message_loop` itself. We're already on the UI thread (the post_task brought us here), the same thread Stage-2 calls it from, so there's no new threading hazard. The drain-mode gate ensures a stale `HostShouldQuit` racing with an active session doesn't terminate the app.
+
+### 5.8 What we don't change
 
 - `drain_pool_if_last` query semantics in `saga_dispatch.rs` stay as-is. Once the reconciler clears zombies, the next `WindowClosed` re-runs the saga and the query returns `was_last=true` correctly.
 - The two-stage cascade in `on_before_close` stays as-is. We feed inputs into it via `PostMessageW(WM_CLOSE)` (live HWND) or `post_task(close_browser)` (dead HWND), same channels the cascade already uses for orderly drains.

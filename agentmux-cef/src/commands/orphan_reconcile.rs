@@ -227,8 +227,31 @@ fn ui_thread_reconcile(state: &Arc<AppState>, candidates: &[String]) {
         to_close.iter().map(|(l, _)| l).collect::<Vec<_>>()
     );
 
+    let mut any_hostless_unregistered = false;
     for (i, (label, browser)) in to_close.into_iter().enumerate() {
-        close_one(state, i, &label, browser);
+        if close_one(state, i, &label, browser) {
+            any_hostless_unregistered = true;
+        }
+    }
+
+    // Hostless orphans don't get an on_before_close callback to drive
+    // the stage-2 quit_message_loop in client/mod.rs. If we just
+    // unregistered such an entry AND the reducer's browser registry
+    // is now empty AND we entered drain (live_user_count == 0), no
+    // future CEF callback will satisfy the quit gate. Drive it
+    // ourselves on this UI-thread task — same call site, same thread,
+    // just no `on_before_close` to ride on. Skipped when live user
+    // browsers remained (drain wasn't set) so a stale HostShouldQuit
+    // doesn't terminate an active session.
+    if any_hostless_unregistered
+        && live_user_count == 0
+        && state.host_state.lock().browsers.is_empty()
+    {
+        tracing::warn!(
+            target: "wrr",
+            "[orphan-reconcile] hostless orphans unregistered + browsers map empty — driving quit_message_loop"
+        );
+        quit_message_loop();
     }
 }
 
@@ -245,7 +268,11 @@ fn ui_thread_reconcile(state: &Arc<AppState>, candidates: &[String]) {
 /// the entry sits in `state.browsers` indefinitely; nothing else
 /// will ever remove it because the upstream callback chain is
 /// already gone.
-fn close_one(state: &Arc<AppState>, idx: usize, label: &str, mut browser: Browser) {
+/// Returns true iff the hostless-unregister branch was taken — the
+/// caller uses that signal to decide whether to drive
+/// `quit_message_loop` itself (no `on_before_close` callback will
+/// arrive for hostless browsers).
+fn close_one(state: &Arc<AppState>, idx: usize, label: &str, mut browser: Browser) -> bool {
     if let Some(host) = browser.host() {
         host.close_browser(1); // force_close = true
         tracing::debug!(
@@ -253,6 +280,7 @@ fn close_one(state: &Arc<AppState>, idx: usize, label: &str, mut browser: Browse
             "[orphan-reconcile][{}] close_browser(force=1) label={}",
             idx, label
         );
+        false
     } else {
         tracing::warn!(
             target: "wrr",
@@ -262,6 +290,7 @@ fn close_one(state: &Arc<AppState>, idx: usize, label: &str, mut browser: Browse
         state.host_dispatch(crate::reducer::HostCommand::UnregisterBrowser {
             label: label.to_string(),
         });
+        true
     }
 }
 
