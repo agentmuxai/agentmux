@@ -174,31 +174,6 @@ pub(crate) fn plan_reconcile(
     }
 }
 
-/// Classify which labels are *candidate* orphans — promoted
-/// `window-pool-*` entries not tracked by the launcher's
-/// `shadow_window_meta` mirror. Necessary but not sufficient: a
-/// freshly-promoted pool window briefly satisfies this (the
-/// launcher's `WindowOpened` echo hasn't populated shadow yet),
-/// so the UI-thread runner must additionally verify the HWND is
-/// dead before dispatching close.
-///
-/// Pure function over snapshot inputs.
-pub(crate) fn classify_candidate_orphans(
-    browser_labels: &[String],
-    unpromoted_pool: &HashSet<String>,
-    shadow_window_meta_keys: &HashSet<String>,
-) -> Vec<String> {
-    browser_labels
-        .iter()
-        .filter(|label| {
-            label.starts_with("window-pool-")
-                && !unpromoted_pool.contains(label.as_str())
-                && !shadow_window_meta_keys.contains(label.as_str())
-        })
-        .cloned()
-        .collect()
-}
-
 /// IPC-thread entry point. Posts a UI-thread task that does all
 /// state-snapshot + classification + close work. The IPC thread no
 /// longer pre-classifies candidates — between IPC and UI execution,
@@ -348,19 +323,26 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
         }
     }
 
-    // Hostless orphans don't get an `on_before_close` callback to
-    // drive Stage-2 `quit_message_loop`. If any unregister fired AND
-    // we entered drain AND the reducer's registry is now empty,
-    // drive the quit ourselves. Gated on `begin_drain` so a stale
-    // `HostShouldQuit` racing with a live session can't terminate
-    // it. Same UI thread Stage 2 calls it from.
-    if any_hostless
-        && plan.begin_drain
-        && state.host_state.lock().browsers.is_empty()
-    {
+    // Hostless orphans don't get `on_before_close` callbacks. The
+    // host's own Stage-2 quit gates on `client::browser_list.is_empty()`
+    // — but UnregisterBrowser only touches the reducer's `browsers`
+    // map, not CefClient's internal list, so a stale Hostless entry
+    // there permanently blocks Stage 2.
+    //
+    // Drive `quit_message_loop` ourselves whenever drain ran AND any
+    // Hostless cleanup happened. Closables we dispatched alongside
+    // are mid-close at this point; their `on_before_close` may not
+    // run before the loop terminates, but we're shutting down anyway
+    // and OS process exit reclaims their resources. Gated on
+    // `begin_drain` so a stale `HostShouldQuit` racing with a live
+    // session can't terminate it. (Codex round-18 P1: the previous
+    // gate also required `state.browsers.is_empty()`, which is false
+    // mid-close in the mixed case — meant the host could stay alive
+    // forever when Hostless + Closable were drained together.)
+    if any_hostless && plan.begin_drain {
         tracing::warn!(
             target: "wrr",
-            "[orphan-reconcile] hostless orphans unregistered + browsers map empty — driving quit_message_loop"
+            "[orphan-reconcile] hostless orphans unregistered in drain mode — driving quit_message_loop"
         );
         quit_message_loop();
     }
@@ -444,88 +426,9 @@ mod tests {
         items.iter().map(|s| s.to_string()).collect()
     }
 
-    #[test]
-    fn classify_no_orphans_returns_empty() {
-        let labels = vec_of(&["window-pool-aaa"]);
-        let unpromoted = set_of(&[]);
-        let shadow = set_of(&["window-pool-aaa"]);
-        assert_eq!(classify_candidate_orphans(&labels, &unpromoted, &shadow), Vec::<String>::new());
-    }
-
-    #[test]
-    fn classify_one_orphan_is_returned() {
-        let labels = vec_of(&["window-pool-bbb"]);
-        let unpromoted = set_of(&[]);
-        let shadow = set_of(&[]);
-        assert_eq!(
-            classify_candidate_orphans(&labels, &unpromoted, &shadow),
-            vec_of(&["window-pool-bbb"])
-        );
-    }
-
-    #[test]
-    fn classify_skips_unpromoted_pool_members() {
-        let labels = vec_of(&["window-pool-ccc"]);
-        let unpromoted = set_of(&["window-pool-ccc"]);
-        let shadow = set_of(&[]);
-        assert_eq!(classify_candidate_orphans(&labels, &unpromoted, &shadow), Vec::<String>::new());
-    }
-
-    #[test]
-    fn classify_skips_browser_pane_labels() {
-        let labels = vec_of(&["browser-pane-foo"]);
-        let unpromoted = set_of(&[]);
-        let shadow = set_of(&[]);
-        assert_eq!(classify_candidate_orphans(&labels, &unpromoted, &shadow), Vec::<String>::new());
-    }
-
-    #[test]
-    fn classify_skips_main_label() {
-        let labels = vec_of(&["main"]);
-        let unpromoted = set_of(&[]);
-        let shadow = set_of(&[]);
-        assert_eq!(classify_candidate_orphans(&labels, &unpromoted, &shadow), Vec::<String>::new());
-    }
-
-    #[test]
-    fn classify_returns_multiple_orphans_in_input_order() {
-        let labels = vec_of(&[
-            "window-pool-aaa", // shadow tracked → not orphan
-            "window-pool-bbb", // orphan
-            "window-pool-ccc", // unpromoted → not orphan
-            "window-pool-ddd", // orphan
-            "main",            // not pool prefix
-        ]);
-        let unpromoted = set_of(&["window-pool-ccc"]);
-        let shadow = set_of(&["window-pool-aaa"]);
-        assert_eq!(
-            classify_candidate_orphans(&labels, &unpromoted, &shadow),
-            vec_of(&["window-pool-bbb", "window-pool-ddd"])
-        );
-    }
-
-    #[test]
-    fn classify_returns_freshly_promoted_as_candidate() {
-        // In the WindowOpened-echo lag a freshly-promoted pool window
-        // is in `browsers` (not in unpromoted) and the launcher's
-        // mirror hasn't caught up yet (not in shadow). The classifier
-        // returns it as a CANDIDATE; the UI-thread HWND check is
-        // what saves it from being closed (live HWND → skip).
-        let labels = vec_of(&["window-pool-just-promoted"]);
-        let unpromoted = set_of(&[]);
-        let shadow = set_of(&[]);
-        assert_eq!(
-            classify_candidate_orphans(&labels, &unpromoted, &shadow),
-            vec_of(&["window-pool-just-promoted"])
-        );
-    }
-
     // ── plan_reconcile integration tests ──────────────────────────
     //
-    // The classifier above is necessary-but-not-sufficient — every
-    // codex P1 since round 1 has been in the orchestrator's decision
-    // logic, not the classifier. These tests cover the state cross-
-    // product the orchestrator must handle:
+    // Cover the state cross-product the orchestrator must handle:
     //
     //   axes: HwndStatus (Live / Dead / Hostless),
     //         in shadow_window_meta (yes / no),
@@ -893,6 +796,43 @@ mod tests {
     }
 
     #[test]
+    fn plan_mixed_hostless_and_closable_in_drain() {
+        // Codex round-18 P1: when a drain plan contains both Hostless
+        // AND CloseBrowser entries, the orchestrator must still
+        // drive quit_message_loop. The closables' on_before_close
+        // would normally satisfy Stage-2 quit, but the Hostless
+        // entries leave stale references in `client::browser_list`
+        // (UnregisterBrowser doesn't touch that), so Stage 2 never
+        // fires. The reconciler drives quit itself.
+        //
+        // Plan-level assertion: both actions are scheduled, drain
+        // fires. The quit_message_loop drive itself is exercised by
+        // the orchestrator and gated on `begin_drain && any_hostless`
+        // (no `state.browsers.is_empty` precondition — that was the
+        // bug).
+        let dead = "window-pool-dead";
+        let hostless = "window-pool-hostless";
+        let plan = plan_reconcile(
+            &map_of(&[
+                (dead, HwndStatus::Dead),
+                (hostless, HwndStatus::Hostless),
+            ]),
+            &vec_of(&[dead, hostless]),
+            &set_of(&[]),
+            &set_of(&[]),
+            &set_of(&[]),
+        );
+        assert!(plan.begin_drain);
+        let actions: HashMap<String, CloseAction> = plan
+            .closes
+            .iter()
+            .map(|(l, a)| (l.clone(), a.clone()))
+            .collect();
+        assert_eq!(actions.get(dead), Some(&CloseAction::CloseBrowser));
+        assert_eq!(actions.get(hostless), Some(&CloseAction::UnregisterBrowser));
+    }
+
+    #[test]
     fn plan_idempotent_under_repeat() {
         let label = "window-pool-zombie";
         let inputs = (
@@ -907,19 +847,4 @@ mod tests {
         assert_eq!(p1, p2);
     }
 
-    #[test]
-    fn classify_handles_zombie_pool_pair() {
-        // Two `window-pool-*` labels still in browsers, both promoted
-        // (host's pool.queue is empty so unpromoted is empty), and
-        // the launcher's mirror has dropped them (shadow is empty).
-        let labels = vec_of(&[
-            "window-pool-722b6186bb6e42378b48b7068c0d54b0",
-            "window-pool-b4e20337180247bdbd7408ddd7754b78",
-        ]);
-        let unpromoted = set_of(&[]);
-        let shadow = set_of(&[]);
-        let orphans = classify_candidate_orphans(&labels, &unpromoted, &shadow);
-        assert_eq!(orphans.len(), 2);
-        assert_eq!(orphans, labels);
-    }
 }
