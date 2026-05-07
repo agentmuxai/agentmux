@@ -467,6 +467,8 @@ pub fn promote_pool_window(
     workspace_id: &str,
     screen_x: i32,
     screen_y: i32,
+    width: Option<i32>,
+    height: Option<i32>,
 ) -> Option<String> {
     // PR #5 H.4 — atomic pop+remove via reducer. The dispatch pops
     // the front of the pool queue, removes the label from
@@ -657,7 +659,37 @@ pub fn promote_pool_window(
     // of or above the primary have negative coords), and clamping
     // would push tear-offs onto the primary monitor when the user
     // grabbed from a secondary.
-    let pos_x = screen_x - POOL_WIDTH / 2;
+    // Use the source window's dimensions when provided (tear-off
+    // UX: new window matches the frame the user dragged from). Fall
+    // back to the pool default otherwise.
+    //
+    // DPI conversion (codex P2 / reagent P1 PR #727): the frontend
+    // sends `window.outerWidth/Height` in CSS/DIP pixels but Win32
+    // `SetWindowPos` expects PHYSICAL pixels. Use the DESTINATION
+    // monitor's DPI (the one under cursor at the drop point), NOT
+    // the pool HWND's current monitor — pool windows live at
+    // POOL_OFFSCREEN_X/Y which is typically the primary monitor, so
+    // on mixed-DPI multi-monitor the pool HWND's DPI doesn't match
+    // the user's actual drop target.
+    let dpi_scale: f32 = unsafe {
+        use windows_sys::Win32::Foundation::POINT;
+        use windows_sys::Win32::Graphics::Gdi::{
+            MonitorFromPoint, MONITOR_DEFAULTTONEAREST,
+        };
+        use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+        let pt = POINT { x: screen_x, y: screen_y };
+        let monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+        let mut dpi_x: u32 = 0;
+        let mut dpi_y: u32 = 0;
+        let hr = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y);
+        if hr != 0 || dpi_x == 0 { 1.0 } else { dpi_x as f32 / 96.0 }
+    };
+    let to_physical = |dip: i32| -> i32 { (dip as f32 * dpi_scale).round() as i32 };
+    let win_w_dip = width.unwrap_or(POOL_WIDTH);
+    let win_h_dip = height.unwrap_or(POOL_HEIGHT);
+    let win_w = if width.is_some() { to_physical(win_w_dip) } else { win_w_dip };
+    let win_h = if height.is_some() { to_physical(win_h_dip) } else { win_h_dip };
+    let pos_x = screen_x - win_w / 2;
     let pos_y = screen_y - TITLE_BAR_OFFSET_PX;
 
     // Take the window out of WS_EX_TOOLWINDOW so the promoted window
@@ -680,8 +712,8 @@ pub fn promote_pool_window(
             HWND_TOP,
             pos_x,
             pos_y,
-            POOL_WIDTH,
-            POOL_HEIGHT,
+            win_w,
+            win_h,
             0, // no flags — apply move + size + Z-order all
         );
         if pos_ok == 0 {
@@ -796,6 +828,8 @@ pub fn promote_pool_window(
     _workspace_id: &str,
     _screen_x: i32,
     _screen_y: i32,
+    _width: Option<i32>,
+    _height: Option<i32>,
 ) -> Option<String> {
     // Non-Windows: pool isn't built yet (Phase 7). Caller falls
     // back to the cold path.

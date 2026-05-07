@@ -133,10 +133,10 @@ async function performTearOff(
     const api = getApi();
     if (dragType === "pane" && payload.blockId) {
         const newWsId = await WorkspaceService.TearOffBlock(payload.blockId, sourceTabId, sourceWsId, true);
-        if (newWsId) await openTearOffWindow(api, newWsId, screenX, screenY);
+        if (newWsId) await openTearOffWindow(api, newWsId, screenX, screenY, window.outerWidth, window.outerHeight);
     } else if (dragType === "tab" && payload.tabId) {
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
-        if (newWsId) await openTearOffWindow(api, newWsId, screenX, screenY);
+        if (newWsId) await openTearOffWindow(api, newWsId, screenX, screenY, window.outerWidth, window.outerHeight);
     }
 }
 

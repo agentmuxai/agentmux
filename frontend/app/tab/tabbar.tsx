@@ -661,6 +661,12 @@ async function requestTearOff(
     // to register against. (codex P1 round-3 #624.)
     let newWsId: string | undefined;
     let coldPathFailed = false;
+    // Capture source window's outer dimensions so the tear-off result
+    // matches the user's current frame instead of the hardcoded pool
+    // default (1200×800). UX expectation: dragging a tab out gives you
+    // a window the same size as the one you dragged from.
+    const sourceWidth = window.outerWidth;
+    const sourceHeight = window.outerHeight;
     try {
         const sourceWindowLabel = await getApi().getWindowLabel();
         // Step 1 — sidecar transfers the tab into a new workspace.
@@ -674,7 +680,13 @@ async function requestTearOff(
         // exhausted increments and can investigate the underlying race.
         let destWindowLabel: string;
         try {
-            destWindowLabel = await getApi().tearOffPoolPromote(newWsId, cursorX, cursorY);
+            destWindowLabel = await getApi().tearOffPoolPromote(
+                newWsId,
+                cursorX,
+                cursorY,
+                sourceWidth,
+                sourceHeight,
+            );
             Logger.info("dnd", "tear-off used warm pool", { destWindowLabel });
         } catch (poolErr) {
             Logger.warn("dnd", "tear-off pool exhausted, falling back to cold path", {
@@ -685,6 +697,8 @@ async function requestTearOff(
                     cursorX,
                     cursorY,
                     newWsId,
+                    sourceWidth,
+                    sourceHeight,
                 );
             } catch (coldErr) {
                 // F1.B safe-restore signal: cold-path API itself
