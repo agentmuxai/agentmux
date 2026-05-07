@@ -288,7 +288,7 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
     const onContextMenu = (e: MouseEvent) => {
         handleHeaderContextMenu(e, blockData(), props.viewModel, props.nodeModel.isMagnified(), props.nodeModel.toggleMagnify, props.nodeModel.onClose);
     };
-    const viewIconElem = getViewIconElem(viewIconUnion(), blockData());
+    const viewIconElem = createMemo(() => getViewIconElem(viewIconUnion(), blockData()));
 
     const preIconButtonElem: JSX.Element = preIconButton
         ? <IconButton decl={preIconButton} className="block-frame-preicon-button" />
@@ -341,7 +341,7 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
         >
             {preIconButtonElem}
             <div class="block-frame-default-header-iconview">
-                {viewIconElem}
+                {viewIconElem()}
                 <Show
                     when={props.viewModel?.setViewName}
                     fallback={<div class="block-frame-view-type">{viewName()}</div>}
