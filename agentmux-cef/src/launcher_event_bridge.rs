@@ -479,19 +479,21 @@ mod bridge_dedup_tests {
         // not insertion order, so the previous implementation could
         // evict the just-inserted key. Now: VecDeque tracks insert
         // order; pop_front drops the oldest.
+        //
+        // Use version=2 (NOT 1) for every event so the v=1 restart
+        // sentinel doesn't fire each iteration and clear the cache
+        // (reagent P2 PR #722 round 3 anti-vacuity guard).
         let state = fresh_state();
-        // Fill cache with 5000 unique keys.
         for i in 0..5000 {
             let label = format!("window-{}", i);
-            assert!(should_dispatch(&state, &drift_event(1, &label, i as u64)));
+            assert!(should_dispatch(&state, &drift_event(2, &label, i as u64)));
         }
         let cache = state.launcher_bridge_dedup.lock();
         assert!(cache.len() <= 4096, "cache bounded at 4096");
         // First 904 keys (5000 - 4096) should have been evicted.
-        // Verify a few from the start are gone:
         assert!(!cache.seen.contains_key("hwnd_drift_detected:HiddenSinceOpen|window-0|0"));
         assert!(!cache.seen.contains_key("hwnd_drift_detected:HiddenSinceOpen|window-100|100"));
-        // Verify recent keys are retained:
+        // Recent keys retained.
         assert!(cache.seen.contains_key("hwnd_drift_detected:HiddenSinceOpen|window-4999|4999"));
     }
 }

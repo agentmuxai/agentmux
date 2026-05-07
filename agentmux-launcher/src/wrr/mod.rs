@@ -608,10 +608,17 @@ pub fn apply_monitor_topology_changed(state: &mut State, rects: Vec<Rect>) -> Ve
         return vec![];
     }
     let mut events: Vec<Event> = Vec::new();
+    // Gate emission on `off_monitor_drift_emitted` (codex P2 PR
+    // #722 round 3): without this, repeated topology changes
+    // (display hot-plug or rapid resolution change) re-emit drift
+    // for the same stranded window every event.
     let stranded: Vec<(String, u64, Rect)> = state
         .windows
         .iter()
         .filter_map(|(label, mirror)| {
+            if mirror.off_monitor_drift_emitted {
+                return None;
+            }
             let r = mirror.last_rect?;
             let h = mirror.hwnd?;
             if rect::intersects_any(&r, &monitors) {
@@ -622,6 +629,13 @@ pub fn apply_monitor_topology_changed(state: &mut State, rects: Vec<Rect>) -> Ve
         })
         .collect();
     for (label, hwnd, rect) in stranded {
+        if let Some((_, mirror)) = state
+            .windows
+            .iter_mut()
+            .find(|(l, _)| **l == label)
+        {
+            mirror.off_monitor_drift_emitted = true;
+        }
         let v = state.bump_version();
         events.push(Event::HwndDriftDetected {
             kind: HwndDriftKind::OffMonitor,

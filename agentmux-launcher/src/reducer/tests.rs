@@ -1899,6 +1899,90 @@ fn corrective_window_move_fires_at_most_once_per_window() {
 }
 
 #[test]
+fn off_monitor_cap_blocks_repeated_topology_change_emissions() {
+    // Codex P2 PR #722 round 3: display hot-plug emits
+    // ReportMonitorTopologyChanged repeatedly. If a window stays
+    // stranded across multiple topology events, drift was being
+    // re-emitted every event because apply_monitor_topology_changed
+    // didn't consult the off_monitor_drift_emitted cap.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportMonitorTopologyChanged {
+            rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "w-strand".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xCD,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("w-strand".into()),
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndForegroundChanged { hwnd: 0xCD },
+        &c,
+    );
+    // Park the window where it WILL be stranded by topology change.
+    let _ = update(
+        &mut state,
+        Command::ReportHwndPositionChanged {
+            hwnd: 0xCD,
+            rect: Rect { left: 1000, top: 100, right: 1500, bottom: 600 },
+        },
+        &c,
+    );
+    // Topology change strands the window.
+    let first = update(
+        &mut state,
+        Command::ReportMonitorTopologyChanged {
+            rects: vec![Rect { left: 0, top: 0, right: 800, bottom: 600 }],
+        },
+        &c,
+    );
+    assert_eq!(
+        first.iter().filter(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::OffMonitor, .. }
+        )).count(),
+        1,
+        "first stranding emits drift once"
+    );
+
+    // Repeated topology changes (e.g. user toggles displays multiple
+    // times). Window stays stranded but cap should suppress.
+    let mut subsequent = 0;
+    for _ in 0..50 {
+        let evs = update(
+            &mut state,
+            Command::ReportMonitorTopologyChanged {
+                rects: vec![Rect { left: 0, top: 0, right: 800, bottom: 600 }],
+            },
+            &c,
+        );
+        subsequent += evs.iter().filter(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::OffMonitor, .. }
+        )).count();
+    }
+    assert_eq!(subsequent, 0, "cap suppresses repeated topology-change OffMonitor");
+}
+
+#[test]
 fn off_monitor_drift_cap_survives_duplicate_open() {
     // Same monotonicity discipline as hidden_since_open_emitted.
     // After cap fires, a duplicate ReportWindowOpened must preserve
