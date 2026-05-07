@@ -258,7 +258,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHwndVisibilityChanged") {
                 return vec![err];
             }
-            crate::wrr::apply_hwnd_visibility_changed(state, hwnd, visible)
+            crate::wrr::apply_hwnd_visibility_changed(state, hwnd, visible, ctx.now_ms)
         }
         Command::ReportHwndForegroundChanged { hwnd } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHwndForegroundChanged") {

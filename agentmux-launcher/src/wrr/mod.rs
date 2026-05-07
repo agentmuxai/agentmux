@@ -334,14 +334,24 @@ pub fn apply_hwnd_destroyed(state: &mut State, hwnd: u64, host_running: bool) ->
     vec![]
 }
 
+/// Placement grace window. CEF creates top-level windows hidden,
+/// runs `SetWindowPos` to place them, then shows them. The
+/// intermediate `WM_HIDE` events arrive before `WM_FOREGROUND`,
+/// which would otherwise look like `HiddenSinceOpen` drift on
+/// every fresh window. Hides occurring within this window of the
+/// host's `ReportWindowOpened` are part of normal placement and
+/// don't count.
+const HIDDEN_SINCE_OPEN_GRACE_MS: u64 = 500;
+
 /// Phase B.9.1 — handle `Command::ReportHwndVisibilityChanged`.
 /// Drift fires only on `visible=false` for a known label that has
-/// not been foregrounded since open: the user can't see this
-/// window and never has.
+/// not been foregrounded since open AND is past the post-open
+/// placement grace window.
 pub fn apply_hwnd_visibility_changed(
     state: &mut State,
     hwnd: u64,
     visible: bool,
+    now_ms: u64,
 ) -> Vec<Event> {
     let mut drift: Option<Event> = None;
     let mut version_to_bump = false;
@@ -352,15 +362,22 @@ pub fn apply_hwnd_visibility_changed(
         .and_then(|(label, mirror)| {
             mirror.visible = visible;
             // Drift-storm cap: HiddenSinceOpen fires AT MOST ONCE per
-            // window per session. A fresh top-level window goes
-            // through several SetWindowPos transitions during host
-            // placement; without the cap, each intermediate
-            // `visible=false` re-emits the same drift event and the
-            // renderer's V8 stack runs out (see `hidden_since_open_emitted`
-            // doc on `WindowMirror`). The flag set below is monotonic
-            // — once we've reported the drift, never report it again
-            // for the same label. Subscribers still see the signal.
-            if !visible && !mirror.foregrounded_since_open && !mirror.hidden_since_open_emitted {
+            // window per session. The cap flag is monotonic for the
+            // window's lifetime. The placement grace check below is
+            // additive: hides during placement don't fire AND don't
+            // set the cap, so a hide that persists past the grace
+            // window can still fire (one) drift.
+            //
+            // See `hidden_since_open_emitted` doc on `WindowMirror`
+            // for storm context (PR #708 added the cap; this PR adds
+            // the grace to suppress placement-only false positives).
+            let past_grace =
+                now_ms.saturating_sub(mirror.opened_at_ms) > HIDDEN_SINCE_OPEN_GRACE_MS;
+            if !visible
+                && past_grace
+                && !mirror.foregrounded_since_open
+                && !mirror.hidden_since_open_emitted
+            {
                 mirror.hidden_since_open_emitted = true;
                 version_to_bump = true;
                 Some(label.clone())

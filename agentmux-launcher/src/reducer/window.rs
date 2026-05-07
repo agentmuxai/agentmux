@@ -150,6 +150,7 @@ pub(super) fn handle_report_window_opened(
             kind,
             parent_label: parent_label.clone(),
             opened_at: ctx.now_rfc3339.clone(),
+            opened_at_ms: ctx.now_ms,
             // Best-effort drain above; authoritative explicit
             // ReportHwndOpened from on_after_created arrives a few
             // ms later via `apply_hwnd_opened` and REPAIRS any wrong

@@ -99,6 +99,13 @@ pub struct WindowMirror {
     /// has the parent linkage.
     pub parent_label: Option<String>,
     pub opened_at: String,
+    /// Milliseconds-since-launcher-start at which the host's
+    /// `ReportWindowOpened` arrived. Used by `apply_hwnd_visibility_changed`
+    /// to suppress `HiddenSinceOpen` drift during the post-create
+    /// placement grace window — CEF creates windows hidden, places
+    /// them, then shows them, and the intermediate `WM_HIDE` events
+    /// would otherwise fire spurious drift on every fresh window.
+    pub opened_at_ms: u64,
     /// Phase B.9.1 — Win32 HWND linked to this label by the WRR
     /// reducer arm (via `ReportHwndOpened` with matching
     /// `label_hint` or via the post-hoc reconciliation against

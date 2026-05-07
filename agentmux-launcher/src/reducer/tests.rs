@@ -13,6 +13,18 @@ fn ctx(conn_id: u64) -> Ctx {
     }
 }
 
+/// Clone a Ctx with `now_ms` advanced. Used by tests that need to
+/// fire commands past the `HIDDEN_SINCE_OPEN_GRACE_MS` placement
+/// window without re-deriving the rest of the Ctx.
+fn ctx_advance(base: &Ctx, ms: u64) -> Ctx {
+    Ctx {
+        now_rfc3339: base.now_rfc3339.clone(),
+        conn_id: base.conn_id,
+        registered_pid: base.registered_pid,
+        now_ms: base.now_ms + ms,
+    }
+}
+
 fn ctx_with_pid(conn_id: u64, pid: u32) -> Ctx {
     Ctx {
         now_rfc3339: "2026-04-28T00:00:00Z".to_string(),
@@ -1587,6 +1599,80 @@ fn cold_open_without_promote_still_initializes_foregrounded_false() {
 }
 
 #[test]
+fn hidden_since_open_grace_suppresses_placement_hides() {
+    // CEF creates top-level windows hidden, places them, then shows.
+    // Hides arriving within HIDDEN_SINCE_OPEN_GRACE_MS of open are
+    // placement transitions and must NOT fire drift. Without this
+    // grace, every fresh top-level window emits one false-positive
+    // drift on creation. (PR #?, smoke regression on v0.33.696 showed
+    // 8 such hides for 8 fresh windows in a clean session.)
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-placing".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xEE,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("window-placing".into()),
+        },
+        &c,
+    );
+
+    // Hide within grace window (now_ms still 0, opened_at_ms=0,
+    // delta=0, < 500ms). Drift suppressed.
+    let placement_hide = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xEE, visible: false },
+        &c,
+    );
+    assert_eq!(
+        placement_hide
+            .iter()
+            .filter(|e| matches!(
+                e,
+                Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+            ))
+            .count(),
+        0,
+        "hide within placement grace must NOT fire drift"
+    );
+    assert!(
+        !state.windows.get("window-placing").unwrap().hidden_since_open_emitted,
+        "cap flag must NOT be armed by placement-grace hides — \
+         a hide PAST the grace can still fire its drift"
+    );
+
+    // Hide PAST grace → drift fires (the cap should not have been
+    // armed by the placement-grace hide).
+    let post_grace = ctx_advance(&c, 600);
+    let real_hide = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xEE, visible: false },
+        &post_grace,
+    );
+    assert_eq!(
+        real_hide
+            .iter()
+            .filter(|e| matches!(
+                e,
+                Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+            ))
+            .count(),
+        1,
+        "hide past grace fires drift (cap was not pre-armed by placement)"
+    );
+}
+
+#[test]
 fn hidden_since_open_drift_fires_at_most_once_per_window() {
     // Drift-storm regression guard. The smoke crash on v0.33.685
     // ("New Window" from hamburger after a tear-off) was 170
@@ -1613,11 +1699,14 @@ fn hidden_since_open_drift_fires_at_most_once_per_window() {
         },
         &c,
     );
-    // First hide → drift fires.
+    // First hide past the placement grace → drift fires. Hides
+    // within HIDDEN_SINCE_OPEN_GRACE_MS of open are placement
+    // transitions and don't fire (separate test below).
+    let post_grace = ctx_advance(&c, 600);
     let first = update(
         &mut state,
         Command::ReportHwndVisibilityChanged { hwnd: 0xCC, visible: false },
-        &c,
+        &post_grace,
     );
     assert_eq!(
         first
@@ -1638,12 +1727,12 @@ fn hidden_since_open_drift_fires_at_most_once_per_window() {
         let _ = update(
             &mut state,
             Command::ReportHwndVisibilityChanged { hwnd: 0xCC, visible: true },
-            &c,
+            &post_grace,
         );
         let evs = update(
             &mut state,
             Command::ReportHwndVisibilityChanged { hwnd: 0xCC, visible: false },
-            &c,
+            &post_grace,
         );
         subsequent_drift_count += evs
             .iter()
@@ -1693,10 +1782,11 @@ fn hidden_since_open_cap_survives_duplicate_open() {
         },
         &c,
     );
+    let post_grace = ctx_advance(&c, 600);
     let first = update(
         &mut state,
         Command::ReportHwndVisibilityChanged { hwnd: 0xDD, visible: false },
-        &c,
+        &post_grace,
     );
     assert!(
         first.iter().any(|e| matches!(
@@ -1730,12 +1820,12 @@ fn hidden_since_open_cap_survives_duplicate_open() {
     let _ = update(
         &mut state,
         Command::ReportHwndVisibilityChanged { hwnd: 0xDD, visible: true },
-        &c,
+        &post_grace,
     );
     let second = update(
         &mut state,
         Command::ReportHwndVisibilityChanged { hwnd: 0xDD, visible: false },
-        &c,
+        &post_grace,
     );
     assert!(
         !second.iter().any(|e| matches!(
