@@ -9,7 +9,7 @@ pub mod runtime_mode;
 pub use cli::make_cli_cmd;
 pub use data_paths::DataPaths;
 pub use layout_types::{FlexDirection, LayoutNode, LayoutNodeData, ResizeOp, SplitPosition};
-pub use runtime_mode::RuntimeMode;
+pub use runtime_mode::{is_dev_build_exe, RuntimeMode};
 
 /// Crate-wide test-only lock for env-var-touching tests. Both
 /// `runtime_mode::tests` and `data_paths::tests` mutate process-global
