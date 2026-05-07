@@ -40,6 +40,14 @@ function installCefDragListener() {
     let clickScreenY = 0;
     let initWinX = 0;
     let initWinY = 0;
+    // Track the latest cursor position seen during a press, even
+    // before `dragging` is armed. When the get_window_position IPC
+    // resolves we can immediately catch up with one set_window_position
+    // call against the latest cursor — otherwise mousemoves during
+    // the initial round-trip are silently dropped (codex P2 PR #734
+    // round 4).
+    let latestScreenX = 0;
+    let latestScreenY = 0;
 
     document.addEventListener("mousedown", async (e: MouseEvent) => {
         if (e.button !== 0) return;
@@ -47,16 +55,28 @@ function installCefDragListener() {
         e.preventDefault();
         currentMouseDownId += 1;
         const myId = currentMouseDownId;
+        // Capture press coords synchronously — used as the baseline
+        // for both the live drag math and the catch-up move below.
+        clickScreenX = e.screenX;
+        clickScreenY = e.screenY;
+        latestScreenX = e.screenX;
+        latestScreenY = e.screenY;
         try {
             const pos = await invokeCommand<{ x: number; y: number }>("get_window_position");
             // Race guard: bail if a mouseup or a newer mousedown has
             // happened during the IPC round-trip.
             if (myId !== currentMouseDownId) return;
-            clickScreenX = e.screenX;
-            clickScreenY = e.screenY;
             initWinX = pos.x;
             initWinY = pos.y;
             dragging = true;
+            // Catch-up: if the cursor moved during the IPC, fire one
+            // set_window_position immediately against the latest known
+            // position so we don't lose the first few pixels of motion.
+            if (latestScreenX !== clickScreenX || latestScreenY !== clickScreenY) {
+                const tx = initWinX + (latestScreenX - clickScreenX);
+                const ty = initWinY + (latestScreenY - clickScreenY);
+                sendPos(tx, ty);
+            }
         } catch {
             // host unavailable — abort drag
         }
@@ -93,6 +113,12 @@ function installCefDragListener() {
             });
     };
     document.addEventListener("mousemove", (e: MouseEvent) => {
+        // Track latest cursor position even before `dragging` is armed
+        // so the catch-up at IPC resolution can use the most recent
+        // value (otherwise initial mousemoves during the round-trip
+        // are dropped).
+        latestScreenX = e.screenX;
+        latestScreenY = e.screenY;
         if (!dragging) return;
         const tx = initWinX + (e.screenX - clickScreenX);
         const ty = initWinY + (e.screenY - clickScreenY);
@@ -105,9 +131,12 @@ function installCefDragListener() {
         // fires when they resolve.
         currentMouseDownId += 1;
         dragging = false;
-        // Drop any queued post-drag position so a stray pendingPos
-        // doesn't fire after release.
-        pendingPos = null;
+        // Do NOT clear pendingPos — that would discard the FINAL
+        // queued position (the cursor's location at release time)
+        // and leave the window stranded at the previous in-flight
+        // position. Let the in-flight set_window_position complete
+        // naturally; its `.finally` will drain pendingPos to its
+        // correct end state. (codex P2 PR #734 round 4.)
     });
 
     document.addEventListener("dblclick", (e: MouseEvent) => {
