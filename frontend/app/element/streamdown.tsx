@@ -6,9 +6,10 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { IconButton } from "@/app/element/iconbutton";
 import { TableBlock } from "@/app/element/table-block";
+import { rehypeAlignToClass } from "@/app/element/rehype-align-to-class";
 import { cn, useAtomValueSafe } from "@/util/util";
 import { createEffect, createMemo, createSignal, JSX, onCleanup, Show } from "solid-js";
-import { Streamdown as StreamdownReact } from "streamdown";
+import { Streamdown as StreamdownReact, defaultRehypePlugins } from "streamdown";
 // Cast to any so SolidJS JSX doesn't complain about React component type
 const Streamdown = StreamdownReact as any;
 import { throttle } from "throttle-debounce";
@@ -262,12 +263,12 @@ export const WaveStreamdown = (props: WaveStreamdownProps): JSX.Element => {
         tbody: (tbProps: any) => <tbody {...tbProps} />,
         tr: (trProps: any) => <tr {...trProps} class="border-b border-border/40 last:border-0" />,
         th: (thProps: any) => (
-            <th class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-primary">
+            <th class={cn("px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-primary", thProps.className)}>
                 {thProps.children}
             </th>
         ),
         td: (tdProps: any) => (
-            <td class="px-3 py-2 text-sm text-secondary">
+            <td class={cn("px-3 py-2 text-sm text-secondary", tdProps.className)}>
                 {tdProps.children}
             </td>
         ),
@@ -321,6 +322,13 @@ export const WaveStreamdown = (props: WaveStreamdownProps): JSX.Element => {
                     props.className
                 )}
                 shikiTheme={[ShikiTheme, ShikiTheme]}
+                rehypePlugins={[
+                    defaultRehypePlugins.raw,
+                    defaultRehypePlugins.katex,
+                    rehypeAlignToClass,
+                    defaultRehypePlugins.sanitize,
+                    defaultRehypePlugins.harden,
+                ]}
                 controls={{
                     code: false,
                     table: false,
