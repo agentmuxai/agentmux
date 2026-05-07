@@ -467,6 +467,8 @@ pub fn promote_pool_window(
     workspace_id: &str,
     screen_x: i32,
     screen_y: i32,
+    width: Option<i32>,
+    height: Option<i32>,
 ) -> Option<String> {
     // PR #5 H.4 — atomic pop+remove via reducer. The dispatch pops
     // the front of the pool queue, removes the label from
@@ -657,7 +659,12 @@ pub fn promote_pool_window(
     // of or above the primary have negative coords), and clamping
     // would push tear-offs onto the primary monitor when the user
     // grabbed from a secondary.
-    let pos_x = screen_x - POOL_WIDTH / 2;
+    // Use the source window's dimensions when provided (tear-off
+    // UX: new window matches the frame the user dragged from). Fall
+    // back to the pool default otherwise.
+    let win_w = width.unwrap_or(POOL_WIDTH);
+    let win_h = height.unwrap_or(POOL_HEIGHT);
+    let pos_x = screen_x - win_w / 2;
     let pos_y = screen_y - TITLE_BAR_OFFSET_PX;
 
     // Take the window out of WS_EX_TOOLWINDOW so the promoted window
@@ -680,8 +687,8 @@ pub fn promote_pool_window(
             HWND_TOP,
             pos_x,
             pos_y,
-            POOL_WIDTH,
-            POOL_HEIGHT,
+            win_w,
+            win_h,
             0, // no flags — apply move + size + Z-order all
         );
         if pos_ok == 0 {
@@ -796,6 +803,8 @@ pub fn promote_pool_window(
     _workspace_id: &str,
     _screen_x: i32,
     _screen_y: i32,
+    _width: Option<i32>,
+    _height: Option<i32>,
 ) -> Option<String> {
     // Non-Windows: pool isn't built yet (Phase 7). Caller falls
     // back to the cold path.

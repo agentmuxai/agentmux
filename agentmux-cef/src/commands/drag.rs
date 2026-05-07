@@ -321,8 +321,28 @@ pub fn tear_off_pool_promote(
         .get("screenY")
         .and_then(|v| v.as_f64())
         .ok_or_else(|| "missing screenY".to_string())? as i32;
+    // Optional source-window dimensions for size-matching tear-off.
+    // Sanity-clamp before passing through so a malformed arg can't
+    // size the promoted pool window absurdly.
+    const MIN_DIM: i32 = 200;
+    const MAX_DIM: i32 = 8192;
+    let width = args
+        .get("width")
+        .and_then(|v| v.as_f64())
+        .map(|w| (w as i32).clamp(MIN_DIM, MAX_DIM));
+    let height = args
+        .get("height")
+        .and_then(|v| v.as_f64())
+        .map(|h| (h as i32).clamp(MIN_DIM, MAX_DIM));
 
-    match super::window_pool::promote_pool_window(state, workspace_id, screen_x, screen_y) {
+    match super::window_pool::promote_pool_window(
+        state,
+        workspace_id,
+        screen_x,
+        screen_y,
+        width,
+        height,
+    ) {
         Some(label) => Ok(serde_json::json!(label)),
         None => {
             // Per spec §0 the cold path is defence-in-depth, not an
@@ -359,8 +379,24 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
     let window_id = uuid::Uuid::new_v4();
     let label = format!("window-{}", window_id.simple());
 
-    let win_w = 1200i32;
-    let win_h = 800i32;
+    // Source-window-matching tear-off size. Frontend captures
+    // window.outerWidth/Height of the dragged-from window and passes
+    // them through; cold path falls back to the historical default if
+    // the args are absent (manual host RPC, etc.). Sanity-clamp to
+    // reasonable bounds so a malformed arg can't create a zero-sized
+    // or absurdly large window.
+    const MIN_DIM: i32 = 200;
+    const MAX_DIM: i32 = 8192;
+    let win_w = args
+        .get("width")
+        .and_then(|v| v.as_f64())
+        .map(|w| (w as i32).clamp(MIN_DIM, MAX_DIM))
+        .unwrap_or(1200);
+    let win_h = args
+        .get("height")
+        .and_then(|v| v.as_f64())
+        .map(|h| (h as i32).clamp(MIN_DIM, MAX_DIM))
+        .unwrap_or(800);
 
     // Position so cursor lands near top-center of title bar
     let pos_x = ((screen_x - win_w as f64 / 2.0).max(0.0)) as i32;

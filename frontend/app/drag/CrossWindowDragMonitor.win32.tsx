@@ -235,12 +235,12 @@ async function performTearOff(
                     } as LayoutTreeDeleteNodeAction);
                 }
             }
-            await openTearOffWindow(api, newWsId, screenX, screenY);
+            await openTearOffWindow(api, newWsId, screenX, screenY, window.outerWidth, window.outerHeight);
         }
     } else if (dragType === "tab" && payload.tabId) {
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
         if (newWsId) {
-            await openTearOffWindow(api, newWsId, screenX, screenY);
+            await openTearOffWindow(api, newWsId, screenX, screenY, window.outerWidth, window.outerHeight);
         }
     }
 }
