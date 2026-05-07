@@ -32,9 +32,15 @@ mod tab;
 mod window;
 mod workspace;
 
-use agentmux_common::ipc::{ClientKind, Command, ErrorCode, Event, LifecyclePhase};
-use crate::state::ProcessState;
+use agentmux_common::ipc::{Command, ErrorCode, Event};
 use crate::state::State;
+// Test-only imports: tests construct fixtures that mention these types
+// directly, but the dispatch+Ctx in this file goes through the
+// per-domain submodules.
+#[cfg(test)]
+use agentmux_common::ipc::{ClientKind, LifecyclePhase};
+#[cfg(test)]
+use crate::state::ProcessState;
 
 /// Per-dispatch context. Currently just an RFC3339 timestamp + the
 /// originating connection's `conn_id` for log correlation.

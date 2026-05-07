@@ -1,11 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use agentmux_common::ipc::{Command, ErrorCode, Event};
+use agentmux_common::ipc::{ErrorCode, Event};
 
 use crate::state::State;
 
-use super::Ctx;
 
 /// Phase E.4 (Option A) — set the focused layout-node id on a tab.
 /// Errors (non-fatal) if the tab is unknown to the reducer; no-op
