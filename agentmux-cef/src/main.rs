@@ -173,10 +173,25 @@ fn main() {
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_default();
-    let common_paths = agentmux_common::DataPaths::from_env().or_else(|| {
-        let mode = agentmux_common::RuntimeMode::current(&host_exe_dir);
+    // Dev builds NEVER inherit AGENTMUX_* env vars from a parent process.
+    // `task dev` is routinely launched from inside an AgentMux terminal
+    // pane, which means the child host inherits the parent instance's
+    // AGENTMUX_DATA_DIR pointing at the parent's version-isolated dir.
+    // Without this guard the dev build would resolve its data dir to the
+    // running portable's path and trip CEF's process-singleton lock,
+    // routing every "open" back to the existing window — the user would
+    // never see the dev code run. Path-based detection is authoritative
+    // for dev builds; for installed/portable we still honor the
+    // launcher-provided env (it's the launcher's job to publish them).
+    let common_paths = if agentmux_common::is_dev_build_exe(&host_exe_dir) {
+        let mode = agentmux_common::RuntimeMode::current_path_only(&host_exe_dir);
         agentmux_common::DataPaths::resolve(version, &mode).ok()
-    });
+    } else {
+        agentmux_common::DataPaths::from_env().or_else(|| {
+            let mode = agentmux_common::RuntimeMode::current(&host_exe_dir);
+            agentmux_common::DataPaths::resolve(version, &mode).ok()
+        })
+    };
     let is_dev = match &common_paths {
         Some(p) => matches!(p.mode, agentmux_common::RuntimeMode::Dev { .. }),
         None => false,

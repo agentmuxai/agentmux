@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux-cef"
-version = "0.33.707"
+version = "0.33.683"
 dependencies = [
  "agentmux-common",
  "axum 0.8.9",
@@ -38,7 +38,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-common"
-version = "0.33.707"
+version = "0.33.683"
 dependencies = [
  "dirs",
  "serde",
@@ -50,7 +50,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.33.707"
+version = "0.33.683"
 dependencies = [
  "agentmux-common",
  "chrono",
@@ -70,7 +70,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-srv"
-version = "0.33.707"
+version = "0.33.683"
 dependencies = [
  "agentmux-common",
  "async-stream",
@@ -815,13 +815,12 @@ checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 
 [[package]]
 name = "download-cef"
-version = "2.3.2"
+version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c169adf067a787e1f1c58ed62906a557de85388bee4b54fb878b722ff606b113"
+checksum = "d7471a7d5d3bd8df1b3b75871f0317d8a6dd73270ab861cc97ae7907ee63e554"
 dependencies = [
  "bzip2",
  "clap",
- "fs-err",
  "indicatif",
  "regex",
  "semver",
@@ -956,15 +955,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
-]
-
-[[package]]
-name = "fs-err"
-version = "3.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73fde052dbfc920003cfd2c8e2c6e6d4cc7c1091538c3a24226cec0665ab08c0"
-dependencies = [
- "autocfg",
 ]
 
 [[package]]
