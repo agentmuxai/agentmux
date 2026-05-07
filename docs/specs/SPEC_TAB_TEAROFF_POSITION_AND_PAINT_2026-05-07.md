@@ -87,35 +87,15 @@ let pos_y = tab_anchor_y
 
 Same logic for `drag.rs::open_window_at_position`.
 
-### 4.5 Suppress the OS drag image
+### 4.5 Suppress the OS drag image — DROPPED IN ROUND 2
 
-`droppable-tab.tsx`:
-```ts
-import { setCustomNativeDragPreview } from "@atlaskit/pragmatic-drag-and-drop/element/set-custom-native-drag-preview";
+**Original plan:** `setCustomNativeDragPreview` with a 1×1 transparent canvas, on the assumption that suppressing the OS image would let the SC_MOVE-driven new window be the visual.
 
-draggable({
-    element: tabWrapRef,
-    // ...
-    onGenerateDragPreview: ({ nativeSetDragImage }) => {
-        // Render a 1×1 transparent canvas as the drag preview so the
-        // OS doesn't paint its own ghost. The new window itself will
-        // be the visual once SC_MOVE engages (~15-30ms).
-        setCustomNativeDragPreview({
-            nativeSetDragImage,
-            render: ({ container }) => {
-                const c = document.createElement("canvas");
-                c.width = 1;
-                c.height = 1;
-                container.appendChild(c);
-                return () => container.removeChild(c);
-            },
-            getOffset: () => ({ x: 0, y: 0 }),
-        });
-    },
-});
-```
+**Actual behavior observed in v0.33.703 smoke:** SC_MOVE doesn't engage during the HTML5 drag at all — pragmatic-dnd's underlying OLE drag-capture blocks Windows from entering the modal move-loop. The legacy "follows the cursor at full opacity, no ghost" comment in `tear_off_sc_move_handshake` is aspirational; in reality the new window only materializes on mouseup. Pre-PR there was also no tab-shaped ghost during drag (HTML5 drag outside any drop zone produces only the no-drop cursor).
 
-Risk: if the IPC chain fails (cold path, host rejection), the user gets ZERO visual feedback for up to 150-300ms. Mitigation deferred — track in smoke; add a 50ms-fallback ghost only if smoke shows it's bad.
+**Conclusion:** suppressing the OS image is a no-op in user-visible terms, since there was nothing tab-shaped to suppress. Full Chrome-style paint requires bypassing HTML5 drag for the tear-off gesture entirely (raw `mousedown`/`mousemove` capture so SC_MOVE can take the modal move-loop). That's deferred to a separate spec.
+
+This PR keeps the no-op `onGenerateDragPreview` only because it's the convenient hook for capturing the grab-offset (the offset would otherwise need a `mousedown` handler).
 
 ## 5. Wire-format additions
 
