@@ -189,22 +189,32 @@ pub fn apply_hwnd_opened(
                 }];
             }
             HwndOpenedOutcome::Repaired(existing) => {
-                let v = state.bump_version();
+                // Repair is a normal self-healing path: the launcher's
+                // best-effort drain in `handle_report_window_opened`
+                // wrong-picked an HWND under burst-create concurrency,
+                // and the explicit `apply_hwnd_opened` from
+                // `client.rs::on_after_created` is now correcting it.
+                // Logging this at Error severity as a `HwndDriftDetected`
+                // event flooded the renderer with one drift per fresh
+                // top-level (6 in a clean v0.33.696 session) and made
+                // genuine drifts harder to spot.
+                //
+                // Now: log via tracing only, no event. The pure-state
+                // mutation (mirror.hwnd overwrite + drain_pending +
+                // optional steal-clear on the prior holder) still
+                // happens above. Linked + stole still emits drift —
+                // that's a different shape (clean link that had to
+                // claim a wrongly-held HWND, which the prior holder's
+                // own `apply_hwnd_opened` may not yet have repaired).
                 let stolen_suffix = stolen_from
                     .as_deref()
                     .map(|s| format!(" (stole from label={})", s))
                     .unwrap_or_default();
-                return vec![Event::HwndDriftDetected {
-                    kind: HwndDriftKind::HwndWithoutBrowser,
-                    label: Some(label.to_string()),
-                    hwnd: Some(hwnd),
-                    detail: format!(
-                        "ReportHwndOpened label_hint={} repaired stale link from hwnd={} to hwnd={}{}",
-                        label, existing, hwnd, stolen_suffix
-                    ),
-                    severity: severity_for(HwndDriftKind::HwndWithoutBrowser),
-                    version: v,
-                }];
+                crate::log(&format!(
+                    "[wrr] hwnd_repaired label={} prior_hwnd={} new_hwnd={}{}",
+                    label, existing, hwnd, stolen_suffix
+                ));
+                return vec![];
             }
             HwndOpenedOutcome::NoMatchingLabel => { /* fall through to pending */ }
         }

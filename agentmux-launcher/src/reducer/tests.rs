@@ -2563,10 +2563,21 @@ fn wrr_duplicate_hwnd_open_for_same_label_is_idempotent() {
 }
 
 #[test]
-fn wrr_double_link_with_different_hwnd_for_same_label_emits_drift() {
-    // The non-duplicate path: a second ReportHwndOpened for
-    // the same label but a DIFFERENT HWND is genuine drift —
-    // host is reporting a related popup or there's a real bug.
+fn wrr_double_link_with_different_hwnd_for_same_label_repairs_silently() {
+    // A second ReportHwndOpened for the same label but a DIFFERENT
+    // HWND is the Repaired path: the launcher's drain wrong-picked
+    // earlier and the explicit on_after_created is correcting it.
+    // This is normal self-healing — mirror.hwnd is overwritten,
+    // no drift event is emitted (logged via crate::log for visibility).
+    //
+    // Rationale: in v0.33.696 smoke this fired 6 false-positive
+    // HwndWithoutBrowser drifts in a clean session because the drain-
+    // wrong-pick happens routinely under burst create. Drift firing
+    // on every routine repair masked genuine drifts.
+    //
+    // Drift IS still fired for Linked+stole (different HWND that had
+    // to be taken from another label's mirror) — see the
+    // wrr_repair_steals_hwnd_from_other_mirror test for that case.
     let (mut state, c) = registered_host_state();
     let _ = update(
         &mut state,
@@ -2597,12 +2608,13 @@ fn wrr_double_link_with_different_hwnd_for_same_label_emits_drift() {
         },
         &c,
     );
+    assert_eq!(state.windows["w1"].hwnd, Some(0xBB), "mirror.hwnd repaired to new value");
     assert!(
-        evs.iter().any(|e| matches!(
+        !evs.iter().any(|e| matches!(
             e,
             Event::HwndDriftDetected { kind: HwndDriftKind::HwndWithoutBrowser, .. }
         )),
-        "different HWND for same label must fire drift, got {:?}", evs
+        "plain Repair must NOT emit drift event, got {:?}", evs
     );
 }
 
@@ -2863,11 +2875,15 @@ fn wrr_burst_creates_with_drain_then_repair() {
         title: "".into(), label_hint: Some("w1".into()),
     }, &c5);
     assert_eq!(state.windows["w1"].hwnd, Some(0xAA), "repair to authoritative");
+    // Repaired path (plain repair, no cross-label steal here) is a
+    // normal self-healing flow — log only, no drift event. Drift
+    // would still fire if this were a Linked+stole case (different
+    // HWND that took the slot from another label).
     assert!(
-        evs1.iter().any(|e| matches!(e, Event::HwndDriftDetected {
+        !evs1.iter().any(|e| matches!(e, Event::HwndDriftDetected {
             kind: HwndDriftKind::HwndWithoutBrowser, ..
         })),
-        "repair emits drift for diagnostic visibility, got {:?}", evs1
+        "plain Repair must NOT emit drift event (logged via crate::log instead), got {:?}", evs1
     );
 
     // on_after_created for w2 arrives with 0xBB. CRUCIAL: w1's
@@ -3028,11 +3044,15 @@ fn wrr_apply_hwnd_opened_repairs_stale_link() {
         state.windows["w1"].hwnd, Some(0xAA),
         "stale link must be REPAIRED to the authoritative HWND"
     );
+    // Repair logged via crate::log; no drift event (would otherwise
+    // fire on every routine drain wrong-pick correction). See the
+    // wrr_double_link_with_different_hwnd_for_same_label_repairs_silently
+    // test for the contract.
     assert!(
-        evs.iter().any(|e| matches!(e, Event::HwndDriftDetected {
+        !evs.iter().any(|e| matches!(e, Event::HwndDriftDetected {
             kind: HwndDriftKind::HwndWithoutBrowser, ..
         })),
-        "drift event must be emitted so the repair is visible in logs, got {:?}", evs
+        "plain Repair must NOT emit drift event, got {:?}", evs
     );
 }
 
