@@ -109,15 +109,13 @@ function project(): void {
  * pre-refactor behavior); the rest are silent. The diagnostics-panel
  * surface will hook this once PR-C ships.
  */
+let onAuditCount = 0;
 function onAuditEvent(event: LauncherEventReducerEvent): void {
-    // Preserve the pre-refactor logging fidelity — the full LauncherEvent
-    // payload carries label, window_id, coordinates etc. that are
-    // load-bearing for `muxlog host '[fe]'` triage of drift/saga issues
-    // (reagent P2 PR #684).
+    onAuditCount++;
     if (event.type === "drift-detected") {
-        console.warn("[launcher-event] drift", event.raw);
+        console.warn(`[launcher-event] drift #${onAuditCount}`, event.raw);
     } else if (event.type === "saga-event-observed") {
-        console.info("[launcher-event]", event.eventName, event.raw);
+        console.info(`[launcher-event] #${onAuditCount}`, event.eventName, event.raw);
     }
 }
 
@@ -146,8 +144,13 @@ export function startLauncherEventReducer(): void {
     if (started) return;
     started = true;
 
+    let effectRunCount = 0;
     createEffect(() => {
+        effectRunCount++;
         const evt = launcherEvent();
+        const v = (evt as any)?.version ?? "??";
+        const ev = (evt as any)?.event ?? "??";
+        (window as any).console.error(`[diag] EFFECT run #${effectRunCount} evt=${ev} v=${v}`);
         // Read version too so SolidJS tracks the version signal as a
         // dependency — guarantees the effect re-runs even when two
         // consecutive events have referentially-equal payloads (e.g.
