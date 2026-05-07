@@ -426,10 +426,18 @@ pub fn apply_hwnd_visibility_changed(
 
 /// Sweep `hidden_since_open_deferred` mirrors and emit drift for any
 /// that have crossed the placement grace boundary while still hidden
-/// and never foregrounded. Called from `reducer::update` BEFORE every
-/// command processes so events from any subsequent command serve as
-/// the heartbeat that catches stuck-hidden windows whose own
-/// `ReportHwndVisibilityChanged` was suppressed during grace.
+/// and never foregrounded. Called from `reducer::update` AFTER every
+/// command processes so any recovery event the command itself
+/// dispatched (visible=true / foreground change / window closed) has
+/// a chance to clear the deferred state first. Without the AFTER
+/// ordering, a slow placement whose first post-grace event is the
+/// recovery itself would fire a spurious drift before the recovery
+/// runs (codex P2 PR #725 round 2).
+///
+/// Even with the AFTER ordering, this pass is the heartbeat that
+/// catches stuck-hidden windows whose own `ReportHwndVisibilityChanged`
+/// was suppressed during grace: any subsequent unrelated command
+/// past the grace promotes the deferred state to a fired drift.
 ///
 /// (codex P2 PR #725 round 1 — addresses the "no recheck after grace"
 /// concern. Stuck-hidden windows that produce ZERO further commands
