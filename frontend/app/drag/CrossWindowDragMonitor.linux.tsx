@@ -138,9 +138,13 @@ async function performTearOff(
     } else if (dragType === "tab" && payload.tabId) {
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
         if (newWsId) {
+            // Tab anchor — see win32 sibling for DPI rationale. Linux
+            // host cursor coords also come from native GetCursor APIs
+            // and may be physical px; multiply DIP offset by DPR.
             const grabOffset = getTabGrabOffset();
-            const tabAnchorX = grabOffset ? screenX - grabOffset.x : undefined;
-            const tabAnchorY = grabOffset ? screenY - grabOffset.y : undefined;
+            const dpr = window.devicePixelRatio || 1;
+            const tabAnchorX = grabOffset ? screenX - grabOffset.x * dpr : undefined;
+            const tabAnchorY = grabOffset ? screenY - grabOffset.y * dpr : undefined;
             await openTearOffWindow(
                 api,
                 newWsId,
