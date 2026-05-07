@@ -369,8 +369,11 @@ mod tests {
     }
 
     #[test]
-    fn provider_list_has_six_entries() {
-        assert_eq!(get_provider_list().count(), 6);
+    fn provider_list_has_seven_entries() {
+        // Update this when a provider is added or removed; a stale
+        // count is the cheapest detection mechanism for accidental
+        // additions.
+        assert_eq!(get_provider_list().count(), 7);
     }
 
     #[test]
