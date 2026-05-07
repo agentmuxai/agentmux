@@ -244,9 +244,23 @@ async function performTearOff(
             // Tab anchor: convert grab-offset-in-tab to a screen point
             // so the new window's first tab lands under the cursor at
             // the same offset (no teleport on handoff).
+            //
+            // DPI mismatch fix (codex P2 PR #730 round 2): screenX/Y
+            // here come from the host's `get_cursor_point` which uses
+            // Win32 GetCursorPos = PHYSICAL pixels. The grab offset
+            // was captured from `clientX` + getBoundingClientRect()
+            // = CSS/DIP pixels. Subtracting raw DIP from physical px
+            // would land the new window in the wrong place on any
+            // display with DPR ≠ 1. Multiply offset by devicePixelRatio
+            // to bring both into physical px before subtracting.
+            //
+            // (The tabbar.tsx::performTabTearOff path doesn't have this
+            // mismatch because its screenX is `window.screenX +
+            // input.clientX`, both DIP — matches the offset.)
             const grabOffset = getTabGrabOffset();
-            const tabAnchorX = grabOffset ? screenX - grabOffset.x : undefined;
-            const tabAnchorY = grabOffset ? screenY - grabOffset.y : undefined;
+            const dpr = window.devicePixelRatio || 1;
+            const tabAnchorX = grabOffset ? screenX - grabOffset.x * dpr : undefined;
+            const tabAnchorY = grabOffset ? screenY - grabOffset.y * dpr : undefined;
             await openTearOffWindow(
                 api,
                 newWsId,

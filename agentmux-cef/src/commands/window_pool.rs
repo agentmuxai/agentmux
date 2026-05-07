@@ -723,10 +723,15 @@ pub fn promote_pool_window(
     // constants raw. The width/height conversion above is independent
     // and addresses the SetWindowPos-wants-physical-pixels constraint
     // for SIZE; that conversion stays.
+    // No `.max(0)` clamp on the anchor branch (codex P2 PR #730 round
+    // 2): on multi-monitor setups where a secondary display is to the
+    // left of or above the primary, screen coords can legitimately be
+    // negative, and clamping to 0 would yank the window back onto the
+    // primary monitor. The legacy fallback also doesn't clamp.
     let (pos_x, pos_y) = match (tab_anchor_x, tab_anchor_y) {
         (Some(ax), Some(ay)) => (
-            (ax - FIRST_TAB_INSET_X).max(0),
-            (ay - TAB_STRIP_TOP_OFFSET_PX).max(0),
+            ax - FIRST_TAB_INSET_X,
+            ay - TAB_STRIP_TOP_OFFSET_PX,
         ),
         _ => (
             screen_x - win_w / 2,

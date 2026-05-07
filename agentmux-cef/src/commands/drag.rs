@@ -411,10 +411,14 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
     // Position the new window. With tab anchor: place so the first
     // tab's top-left lands at the anchor (cursor stays on the grabbed
     // pixel). Without: cursor-centered title bar (legacy behavior).
+    //
+    // No `.max(0)` clamp on the anchor branch (codex P2 PR #730
+    // round 2): negative coords are valid on multi-monitor setups
+    // where a secondary display is left/above primary.
     let (pos_x, pos_y) = match (tab_anchor_x, tab_anchor_y) {
         (Some(ax), Some(ay)) => (
-            (ax - super::window_pool::FIRST_TAB_INSET_X).max(0),
-            (ay - super::window_pool::TAB_STRIP_TOP_OFFSET_PX).max(0),
+            ax - super::window_pool::FIRST_TAB_INSET_X,
+            ay - super::window_pool::TAB_STRIP_TOP_OFFSET_PX,
         ),
         _ => (
             ((screen_x - win_w as f64 / 2.0).max(0.0)) as i32,

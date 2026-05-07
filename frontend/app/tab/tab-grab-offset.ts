@@ -7,8 +7,10 @@
  * dragged tab lands under the cursor at the SAME offset the user
  * grabbed — Chrome-style "no teleport" handoff.
  *
- * Set in `droppable-tab.tsx::onDragStart`; read in
- * `tabbar.tsx::performTabTearOff`. Cleared on drop / drag end.
+ * Set in `droppable-tab.tsx::onGenerateDragPreview` (the earliest
+ * pragmatic-dnd hook that exposes `DragLocation`); read in
+ * `tabbar.tsx::performTabTearOff` and the cross-window drag
+ * monitors. Cleared on drop / drag end.
  *
  * Spec: docs/specs/SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md
  */
