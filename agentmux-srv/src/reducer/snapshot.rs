@@ -1,11 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use agentmux_common::ipc::{Command, ErrorCode, Event};
+use agentmux_common::ipc::Event;
 
 use crate::state::State;
 
-use super::Ctx;
 
 pub(super) fn handle_get_srv_snapshot(state: &mut State) -> Vec<Event> {
     let v = state.bump_version();

@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use agentmux_common::ipc::{Command, ErrorCode, Event};
+use agentmux_common::ipc::{ErrorCode, Event};
 
 use crate::state::State;
 
