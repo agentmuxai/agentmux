@@ -133,20 +133,9 @@ pub fn dispatch_to_renderers(state: &Arc<crate::state::AppState>, event: &Event)
     // launcher's single emit. Skip the entire dispatch if the event's
     // version is not strictly higher than the per-key max we've
     // already sent.
-    let (dedup_key_str, dedup_version) = dedup_key(event);
     if !should_dispatch(state, event) {
-        tracing::warn!(
-            target: "launcher-event-bridge",
-            "[launcher-event-bridge] dedup BLOCKED: key={} v={}",
-            dedup_key_str, dedup_version
-        );
         return;
     }
-    tracing::warn!(
-        target: "launcher-event-bridge",
-        "[launcher-event-bridge] dedup PASSED: key={} v={}",
-        dedup_key_str, dedup_version
-    );
 
     let json = match serde_json::to_string(event) {
         Ok(s) => s,
@@ -171,35 +160,20 @@ pub fn dispatch_to_renderers(state: &Arc<crate::state::AppState>, event: &Event)
     // Two-lock variants race against `promote_pool_window` between
     // the reads.
     let (pool_inventory, browsers) = state.user_visibility_snapshot();
-    let total_browsers = browsers.len();
-    let mut fanout_count = 0usize;
-    let mut skipped_pane = 0usize;
-    let mut skipped_pool = 0usize;
 
     for (label, browser) in browsers {
         if label.starts_with("browser-pane-") {
-            skipped_pane += 1;
             continue;
         }
         if pool_inventory.contains(label.as_str()) {
-            skipped_pool += 1;
+            // Pool inventory (unpromoted or ready-queued) — no user
+            // UI yet, skip.
             continue;
         }
         if let Some(frame) = browser.main_frame() {
             frame.execute_java_script(Some(&code), Some(&url), 0);
-            fanout_count += 1;
-            tracing::warn!(
-                target: "launcher-event-bridge",
-                "[launcher-event-bridge] FANOUT label={} key={} v={}",
-                label, dedup_key_str, dedup_version
-            );
         }
     }
-    tracing::warn!(
-        target: "launcher-event-bridge",
-        "[launcher-event-bridge] dispatch_summary key={} v={} total_browsers={} fanout={} skipped_pane={} skipped_pool={}",
-        dedup_key_str, dedup_version, total_browsers, fanout_count, skipped_pane, skipped_pool
-    );
 }
 
 /// Phase F.7 dedup gate. Returns `true` if the event is strictly
