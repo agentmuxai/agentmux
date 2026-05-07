@@ -131,6 +131,24 @@ export function seedKnownEntriesFromSnapshot(
     dispatch({ type: "ApplySeed", entries });
 }
 
+/**
+ * Reconcile knownEntries against a fresh `listWindowInstances` snapshot.
+ * Differs from `seedKnownEntriesFromSnapshot` (`ApplySeed`) in that it
+ * REPLACES the known set wholesale — labels absent from the snapshot
+ * are removed from the panel.
+ *
+ * Use for periodic refresh paths (e.g. InstancePanel reopens in
+ * `task dev` mode where the launcher doesn't push WindowClosed
+ * events). Don't use at boot — `ApplySeed` is the right boot path
+ * because it's additive against typed events that may have raced
+ * the snapshot fetch (codex P1 #603).
+ */
+export function reconcileKnownEntriesFromSnapshot(
+    entries: ReadonlyArray<WindowEntry>,
+): void {
+    dispatch({ type: "ReconcileFromSnapshot", entries });
+}
+
 let started = false;
 
 /**

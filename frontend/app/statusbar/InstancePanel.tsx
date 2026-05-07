@@ -16,7 +16,8 @@
  */
 
 import { getApi, openWindowEntriesAtom, type WindowEntry } from "@/store/global";
-import { seedKnownEntriesFromSnapshot } from "@/app/store/launcher-event-reducer";
+import { reconcileKnownEntriesFromSnapshot } from "@/app/store/launcher-event-reducer";
+import { launcherEventsActive } from "@/util/launcher-events";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ObjectService } from "@/store/services";
@@ -56,21 +57,32 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     const [myLabel, setMyLabel] = createSignal<string | null>(null);
     getApi().getWindowLabel().then((l) => setMyLabel(l)).catch(() => setMyLabel(null));
 
-    // Refresh window-instance seed each time the panel mounts. In
-    // production the launcher pushes WindowOpened/Closed events to all
-    // renderers and `openWindowEntriesAtom` stays in sync. In `task dev`
-    // mode there's no launcher, so each window only knows the snapshot
-    // it was seeded with at boot — windows opened later don't appear,
-    // closed ones aren't removed. Re-querying `listWindowInstances`
-    // every time the user opens the panel papers over this for dev
-    // mode without changing prod behavior (events also arriving will
-    // overwrite the seed shortly after).
-    getApi()
-        .listWindowInstances()
-        .then((snapshot) => {
-            seedKnownEntriesFromSnapshot(snapshot);
-        })
-        .catch(() => {});
+    // Refresh window-instance state ONLY when the launcher is silent
+    // (`task dev` mode — no launcher process, no typed events). In
+    // production the launcher pushes WindowOpened/Closed events and
+    // `openWindowEntriesAtom` stays in sync; reconciling against a
+    // stale `listWindowInstances()` snapshot would clobber a newer
+    // launcher event the renderer just applied — same race protection
+    // that motivates ApplySeed at boot (codex P2 PR #733).
+    //
+    // `launcherEventsActive` flips true on the first typed event the
+    // renderer receives; if false here, we're in dev mode and the
+    // reconcile is the only way windows opened/closed since boot will
+    // appear/disappear in the panel.
+    if (!launcherEventsActive()) {
+        getApi()
+            .listWindowInstances()
+            .then((snapshot) => {
+                // Re-check at resolution time. Between the sync gate
+                // above and the snapshot arriving (~ms RPC round-trip),
+                // a launcher event may have flipped launcherEventsActive
+                // true — applying the now-stale snapshot would clobber
+                // that newer state (codex P1 PR #733 round 2).
+                if (launcherEventsActive()) return;
+                reconcileKnownEntriesFromSnapshot(snapshot);
+            })
+            .catch(() => {});
+    }
 
     // Rename mode state — keyed by host label so the row's identity
     // survives entries() reordering. Single rename at a time.
