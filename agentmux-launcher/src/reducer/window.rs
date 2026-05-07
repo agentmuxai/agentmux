@@ -117,20 +117,35 @@ pub(super) fn handle_report_window_opened(
     // corrective logic doesn't re-fire `HiddenSinceOpen` on the
     // subsequent HWND repositioning. See state.rs::just_promoted_labels.
     let was_just_promoted = state.just_promoted_labels.remove(&label);
-    // Codex P2 PR #708 round 3 — `foregrounded_since_open` is
-    // monotonic (false → true, never resets within a window's
-    // lifetime per its own contract: "has this label been
-    // foregrounded at any point since its ReportWindowOpened"). On
-    // duplicate opens (the existing handler overwrites the mirror
-    // wholesale), OR the prior value in so the flag isn't reset. The
-    // first open after a promote already consumed `just_promoted_labels`,
-    // so a 2nd open at the same label would otherwise re-arm the
-    // open-transient drift detector.
-    let prior_foregrounded = state
-        .windows
-        .get(&label)
-        .map(|m| m.foregrounded_since_open)
-        .unwrap_or(false);
+    // Lifetime-state preservation. The handler overwrites the mirror
+    // wholesale on every `ReportWindowOpened`; without OR-with-prior
+    // here, a 2nd open at the same label would reset every monotonic
+    // flag/anchor below.
+    //
+    // - `foregrounded_since_open`: monotonic per its own contract
+    //   ("has this label been foregrounded at any point since
+    //   ReportWindowOpened"). Preserved against duplicate opens
+    //   since codex P2 PR #708 round 3.
+    // - `hidden_since_open_emitted` / `off_monitor_drift_emitted` /
+    //   `corrective_window_move_emitted`: storm-cap flags. Each fires
+    //   AT MOST ONCE per window per session. A duplicate open that
+    //   reset these to false would re-arm the cap and the next
+    //   transition would fire the drift again.
+    // - `hidden_since_open_deferred`: pending-drift flag set when
+    //   `apply_hwnd_visibility_changed` suppresses a hide during the
+    //   placement grace. A duplicate open that cleared it would lose
+    //   the deferred signal (codex P2 PR #725 round 1).
+    // - `opened_at_ms`: grace-window anchor. Preserving the ORIGINAL
+    //   value avoids resetting the placement grace every time a
+    //   duplicate open arrives, which would let real hides past the
+    //   first grace window be re-suppressed (codex P2 PR #725 round 1).
+    let prior = state.windows.get(&label);
+    let prior_foregrounded = prior.map(|m| m.foregrounded_since_open).unwrap_or(false);
+    let prior_hidden_emitted = prior.map(|m| m.hidden_since_open_emitted).unwrap_or(false);
+    let prior_hidden_deferred = prior.map(|m| m.hidden_since_open_deferred).unwrap_or(false);
+    let prior_off_monitor_emitted = prior.map(|m| m.off_monitor_drift_emitted).unwrap_or(false);
+    let prior_corrective_emitted = prior.map(|m| m.corrective_window_move_emitted).unwrap_or(false);
+    let prior_opened_at_ms = prior.map(|m| m.opened_at_ms);
 
     state.windows.insert(
         label.clone(),
@@ -139,6 +154,9 @@ pub(super) fn handle_report_window_opened(
             kind,
             parent_label: parent_label.clone(),
             opened_at: ctx.now_rfc3339.clone(),
+            // Preserve original open time on duplicate so the grace
+            // anchor never moves forward.
+            opened_at_ms: prior_opened_at_ms.unwrap_or(ctx.now_ms),
             // Best-effort drain above; authoritative explicit
             // ReportHwndOpened from on_after_created arrives a few
             // ms later via `apply_hwnd_opened` and REPAIRS any wrong
@@ -149,6 +167,10 @@ pub(super) fn handle_report_window_opened(
             last_rect: None,
             last_foreground_at_ms: None,
             foregrounded_since_open: was_just_promoted || prior_foregrounded,
+            hidden_since_open_emitted: prior_hidden_emitted,
+            hidden_since_open_deferred: prior_hidden_deferred,
+            off_monitor_drift_emitted: prior_off_monitor_emitted,
+            corrective_window_move_emitted: prior_corrective_emitted,
         },
     );
     let mut out = Vec::with_capacity(2);

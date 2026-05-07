@@ -5,6 +5,7 @@ import { atoms, createBlock, createTab, getApi, setActiveTab } from "@/store/glo
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
 import { invokeCommand } from "@/app/platform/ipc";
 import { fireAndForget } from "@/util/util";
+import { getTabGrabOffset } from "./tab-grab-offset";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { createMemo, For, onCleanup, onMount, Show } from "solid-js";
@@ -38,7 +39,12 @@ interface TabBarProps {
 // to filter out brief excursions while the user is still hunting for
 // the drop position; small enough that the tear feels intentional.
 // See docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26 §4.1.
-const TEAR_PAST_PX = 24;
+// Pixels past the tab bar's bottom edge before tear-off triggers. Was
+// 24px historically, which left a ~24-pixel zone where the user saw
+// only the OS drag image with no real window. Lowered to 5 to match
+// Chrome's perceived-instant tear-off (just enough to filter trembles).
+// Spec: SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md §4.2.
+const TEAR_PAST_PX = 5;
 
 function TabBar(props: TabBarProps): JSX.Element {
     const activeTabId = atoms.activeTabId;
@@ -158,13 +164,63 @@ function TabBar(props: TabBarProps): JSX.Element {
                         // (works across multi-monitor setups).
                         const screenX = window.screenX + input.clientX;
                         const screenY = window.screenY + input.clientY;
+                        // Tab anchor: position of the NEW window's outer
+                        // top-left such that its first tab lands at the
+                        // same screen pixel as the source tab the user
+                        // grabbed. The new window has identical chrome
+                        // + CSS, so its first-tab-rect equals the source's.
+                        //
+                        // Computation:
+                        //   sourceFirstTabScreenX = (cursor screen X)
+                        //                           - (cursor offset within grabbed tab)
+                        //                           - (first-tab-left in inner viewport)
+                        //   newOuterLeft = sourceFirstTabScreenX
+                        //                  - (chrome border-left, outer→inner)
+                        //
+                        // Total: newOuterLeft = screenX - grabOffset.x
+                        //                       - firstTabRect.left - chromeBorderX
+                        //
+                        // (window.outerWidth - innerWidth) on Windows is
+                        // left+right border; assume symmetric.
+                        // (window.outerHeight - innerHeight) - chromeBorderX
+                        // isolates title bar height.
+                        const grabOffset = getTabGrabOffset();
+                        const chromeBorderX =
+                            Math.max(0, window.outerWidth - window.innerWidth) / 2;
+                        const chromeBorderY = Math.max(
+                            0,
+                            window.outerHeight - window.innerHeight - chromeBorderX,
+                        );
+                        const firstTabEl = tabBarScrollRef?.firstElementChild as HTMLElement | null;
+                        const firstTabRect = firstTabEl?.getBoundingClientRect();
+                        const tabAnchorX =
+                            grabOffset && firstTabRect
+                                ? Math.round(
+                                      screenX - grabOffset.x - firstTabRect.left - chromeBorderX,
+                                  )
+                                : undefined;
+                        const tabAnchorY =
+                            grabOffset && firstTabRect
+                                ? Math.round(
+                                      screenY - grabOffset.y - firstTabRect.top - chromeBorderY,
+                                  )
+                                : undefined;
                         // Phase 2: real tear-off (sidecar TearOffTab +
                         // host openWindowAtPosition + Win32 SC_MOVE).
                         // Fire-and-forget — the user is mid-drag and the
                         // host's SC_MOVE handshake will take over the
                         // cursor synchronously from Windows' point of view.
                         fireAndForget(() =>
-                            requestTearOff(draggedTabId, wsId, screenX, screenY, originalTabIndex, wasPinned),
+                            requestTearOff(
+                                draggedTabId,
+                                wsId,
+                                screenX,
+                                screenY,
+                                originalTabIndex,
+                                wasPinned,
+                                tabAnchorX,
+                                tabAnchorY,
+                            ),
                         );
                     }
                     // Continue updating insertionPoint below — until the
@@ -564,7 +620,25 @@ function TabBar(props: TabBarProps): JSX.Element {
                 placement="bottom-start"
             >
                 <button class="hamburger-btn" title="Menu" data-drag-region="false">
-                    <i class="fa fa-bars" />
+                    {/*
+                     * Inline SVG with three filled rects instead of
+                     * `fa fa-bars`. Icon-font glyphs rasterized one of
+                     * the three lines on a fractional pixel boundary at
+                     * different chrome zoom levels, making it noticeably
+                     * thinner — and the affected line shifted as zoom
+                     * changed. Filled rects scale uniformly with the
+                     * parent's CSS zoom, no rasterization unevenness.
+                     */}
+                    <svg
+                        width="14"
+                        height="12"
+                        viewBox="0 0 14 12"
+                        fill="currentColor"
+                    >
+                        <rect x="1" y="1" width="12" height="2" rx="1" />
+                        <rect x="1" y="5" width="12" height="2" rx="1" />
+                        <rect x="1" y="9" width="12" height="2" rx="1" />
+                    </svg>
                 </button>
             </FlyoutMenu>
             <div ref={tabBarScrollRef!} class="tab-bar-scroll" data-drag-region="false">
@@ -637,6 +711,8 @@ async function requestTearOff(
     cursorY: number,
     originalTabIndex: number,
     wasPinned: boolean,
+    tabAnchorX?: number,
+    tabAnchorY?: number,
 ): Promise<void> {
     const t0 = performance.now();
     // F1.B — orphan-cleanup state. We only restore the tab when we
@@ -661,6 +737,12 @@ async function requestTearOff(
     // to register against. (codex P1 round-3 #624.)
     let newWsId: string | undefined;
     let coldPathFailed = false;
+    // Capture source window's outer dimensions so the tear-off result
+    // matches the user's current frame instead of the hardcoded pool
+    // default (1200×800). UX expectation: dragging a tab out gives you
+    // a window the same size as the one you dragged from.
+    const sourceWidth = window.outerWidth;
+    const sourceHeight = window.outerHeight;
     try {
         const sourceWindowLabel = await getApi().getWindowLabel();
         // Step 1 — sidecar transfers the tab into a new workspace.
@@ -674,7 +756,15 @@ async function requestTearOff(
         // exhausted increments and can investigate the underlying race.
         let destWindowLabel: string;
         try {
-            destWindowLabel = await getApi().tearOffPoolPromote(newWsId, cursorX, cursorY);
+            destWindowLabel = await getApi().tearOffPoolPromote(
+                newWsId,
+                cursorX,
+                cursorY,
+                sourceWidth,
+                sourceHeight,
+                tabAnchorX,
+                tabAnchorY,
+            );
             Logger.info("dnd", "tear-off used warm pool", { destWindowLabel });
         } catch (poolErr) {
             Logger.warn("dnd", "tear-off pool exhausted, falling back to cold path", {
@@ -685,6 +775,10 @@ async function requestTearOff(
                     cursorX,
                     cursorY,
                     newWsId,
+                    sourceWidth,
+                    sourceHeight,
+                    tabAnchorX,
+                    tabAnchorY,
                 );
             } catch (coldErr) {
                 // F1.B safe-restore signal: cold-path API itself

@@ -20,7 +20,7 @@
  * concrete debugging need surfaces (per the plan's lean default).
  */
 
-import { createSignal, type Accessor } from "solid-js";
+import { createSignal, untrack, type Accessor } from "solid-js";
 
 /**
  * Who initiated a command. Defaults to `"system"` when not specified
@@ -71,11 +71,19 @@ export const dispatchRecordsAtom: Accessor<ReadonlyArray<DispatchRecord>> = reco
  * function. Trims to RING_CAPACITY by dropping oldest first.
  */
 export function recordDispatch(record: DispatchRecord): void {
-    const prev = recordsAtom();
-    const next = prev.length >= RING_CAPACITY
-        ? [...prev.slice(prev.length - RING_CAPACITY + 1), record]
-        : [...prev, record];
-    setRecordsAtom(next);
+    // Read inside `untrack` so this call doesn't establish reactive
+    // deps when invoked from a SolidJS reactive context (e.g. the
+    // launcher-event reducer's createEffect dispatches through here).
+    // Without this, the read+write pair on `recordsAtom` causes the
+    // outer effect to re-run on every dispatch — observed as a
+    // ~3000× runaway and renderer V8-stack crash on the storm path.
+    untrack(() => {
+        const prev = recordsAtom();
+        const next = prev.length >= RING_CAPACITY
+            ? [...prev.slice(prev.length - RING_CAPACITY + 1), record]
+            : [...prev, record];
+        setRecordsAtom(next);
+    });
 }
 
 /**

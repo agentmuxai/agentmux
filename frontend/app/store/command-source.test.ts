@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { beforeEach, describe, expect, it } from "vitest";
+import { createEffect, createRoot, createSignal } from "solid-js";
 import {
     __resetDispatchLog,
     describeSource,
@@ -82,6 +83,45 @@ describe("command-source / dispatch log", () => {
             at: 1,
         });
         expect(dispatchRecordsAtom()).toHaveLength(1);
+    });
+
+    // Regression: storm-crash root cause — `recordDispatch` called from
+    // inside a SolidJS reactive context (e.g. the launcher-event reducer's
+    // createEffect) must NOT establish a dependency on `recordsAtom`.
+    // Without `untrack`, the read+write pair on recordsAtom caused the
+    // outer effect to re-run on every dispatch, observed as ~3000×
+    // runaway and renderer V8-stack crash on the storm path.
+    it("does not register reactive deps when called from inside createEffect", async () => {
+        let outerEffectRunCount = 0;
+        const dispose = createRoot((d) => {
+            const [trigger, setTrigger] = createSignal(0);
+            createEffect(() => {
+                trigger();
+                outerEffectRunCount++;
+                recordDispatch({
+                    slice: "test",
+                    key: null,
+                    command: { type: "X" },
+                    events: [],
+                    source: "system",
+                    at: outerEffectRunCount,
+                });
+            });
+            // SolidJS schedules effects on microtask; flush synchronously
+            // by triggering the signal a 2nd time after the first commit.
+            queueMicrotask(() => setTrigger((n) => n + 1));
+            return d;
+        });
+        // Wait for both microtask + any subsequent ones (if there's a
+        // leak the count would balloon; bound the wait by yielding twice).
+        await Promise.resolve();
+        await Promise.resolve();
+        await new Promise((r) => setTimeout(r, 0));
+        dispose();
+        // Initial run + one explicit trigger = 2 runs total. Anything
+        // more means recordDispatch leaked a reactive dep on recordsAtom
+        // (the storm-crash root cause).
+        expect(outerEffectRunCount).toBe(2);
     });
 
     it("describeSource handles all variants", () => {
