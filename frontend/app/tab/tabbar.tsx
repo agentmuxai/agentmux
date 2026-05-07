@@ -164,19 +164,47 @@ function TabBar(props: TabBarProps): JSX.Element {
                         // (works across multi-monitor setups).
                         const screenX = window.screenX + input.clientX;
                         const screenY = window.screenY + input.clientY;
-                        // Tab anchor: where the user grabbed the tab,
-                        // expressed as a screen point. Backend places the
-                        // new window's first tab at that point so the
-                        // cursor stays on the same pixel of the same
-                        // visual element across the handoff (no teleport).
-                        // Spec: SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md §4.3.
+                        // Tab anchor: position of the NEW window's outer
+                        // top-left such that its first tab lands at the
+                        // same screen pixel as the source tab the user
+                        // grabbed. The new window has identical chrome
+                        // + CSS, so its first-tab-rect equals the source's.
+                        //
+                        // Computation:
+                        //   sourceFirstTabScreenX = (cursor screen X)
+                        //                           - (cursor offset within grabbed tab)
+                        //                           - (first-tab-left in inner viewport)
+                        //   newOuterLeft = sourceFirstTabScreenX
+                        //                  - (chrome border-left, outer→inner)
+                        //
+                        // Total: newOuterLeft = screenX - grabOffset.x
+                        //                       - firstTabRect.left - chromeBorderX
+                        //
+                        // (window.outerWidth - innerWidth) on Windows is
+                        // left+right border; assume symmetric.
+                        // (window.outerHeight - innerHeight) - chromeBorderX
+                        // isolates title bar height.
                         const grabOffset = getTabGrabOffset();
-                        const tabAnchorX = grabOffset
-                            ? screenX - grabOffset.x
-                            : undefined;
-                        const tabAnchorY = grabOffset
-                            ? screenY - grabOffset.y
-                            : undefined;
+                        const chromeBorderX =
+                            Math.max(0, window.outerWidth - window.innerWidth) / 2;
+                        const chromeBorderY = Math.max(
+                            0,
+                            window.outerHeight - window.innerHeight - chromeBorderX,
+                        );
+                        const firstTabEl = tabBarScrollRef?.firstElementChild as HTMLElement | null;
+                        const firstTabRect = firstTabEl?.getBoundingClientRect();
+                        const tabAnchorX =
+                            grabOffset && firstTabRect
+                                ? Math.round(
+                                      screenX - grabOffset.x - firstTabRect.left - chromeBorderX,
+                                  )
+                                : undefined;
+                        const tabAnchorY =
+                            grabOffset && firstTabRect
+                                ? Math.round(
+                                      screenY - grabOffset.y - firstTabRect.top - chromeBorderY,
+                                  )
+                                : undefined;
                         // Phase 2: real tear-off (sidecar TearOffTab +
                         // host openWindowAtPosition + Win32 SC_MOVE).
                         // Fire-and-forget — the user is mid-drag and the
@@ -592,7 +620,25 @@ function TabBar(props: TabBarProps): JSX.Element {
                 placement="bottom-start"
             >
                 <button class="hamburger-btn" title="Menu" data-drag-region="false">
-                    <i class="fa fa-bars" />
+                    {/*
+                     * Inline SVG with three filled rects instead of
+                     * `fa fa-bars`. Icon-font glyphs rasterized one of
+                     * the three lines on a fractional pixel boundary at
+                     * different chrome zoom levels, making it noticeably
+                     * thinner — and the affected line shifted as zoom
+                     * changed. Filled rects scale uniformly with the
+                     * parent's CSS zoom, no rasterization unevenness.
+                     */}
+                    <svg
+                        width="14"
+                        height="12"
+                        viewBox="0 0 14 12"
+                        fill="currentColor"
+                    >
+                        <rect x="1" y="1" width="12" height="2" rx="1" />
+                        <rect x="1" y="5" width="12" height="2" rx="1" />
+                        <rect x="1" y="9" width="12" height="2" rx="1" />
+                    </svg>
                 </button>
             </FlyoutMenu>
             <div ref={tabBarScrollRef!} class="tab-bar-scroll" data-drag-region="false">

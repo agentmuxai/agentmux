@@ -16,6 +16,7 @@
  */
 
 import { getApi, openWindowEntriesAtom, type WindowEntry } from "@/store/global";
+import { seedKnownEntriesFromSnapshot } from "@/app/store/launcher-event-reducer";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ObjectService } from "@/store/services";
@@ -54,6 +55,22 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     const entries = openWindowEntriesAtom;
     const [myLabel, setMyLabel] = createSignal<string | null>(null);
     getApi().getWindowLabel().then((l) => setMyLabel(l)).catch(() => setMyLabel(null));
+
+    // Refresh window-instance seed each time the panel mounts. In
+    // production the launcher pushes WindowOpened/Closed events to all
+    // renderers and `openWindowEntriesAtom` stays in sync. In `task dev`
+    // mode there's no launcher, so each window only knows the snapshot
+    // it was seeded with at boot — windows opened later don't appear,
+    // closed ones aren't removed. Re-querying `listWindowInstances`
+    // every time the user opens the panel papers over this for dev
+    // mode without changing prod behavior (events also arriving will
+    // overwrite the seed shortly after).
+    getApi()
+        .listWindowInstances()
+        .then((snapshot) => {
+            seedKnownEntriesFromSnapshot(snapshot);
+        })
+        .catch(() => {});
 
     // Rename mode state — keyed by host label so the row's identity
     // survives entries() reordering. Single rename at a time.
@@ -257,25 +274,20 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                         e.stopPropagation();
                                         return;
                                     }
-                                    // If a focus was pending on THIS row, this is
-                                    // the second click of a dblclick — let dblClick
-                                    // handle it; cancel the pending focus.
-                                    if (pendingFocus && pendingFocus.label === entry.label) {
-                                        cancelPendingFocus();
-                                        return;
-                                    }
-                                    // Otherwise schedule a fresh focus past the
-                                    // dblclick threshold so a follow-up click can
-                                    // promote it to rename instead.
-                                    cancelPendingFocus();
-                                    const label = entry.label;
-                                    pendingFocus = {
-                                        label,
-                                        timer: window.setTimeout(() => {
-                                            pendingFocus = null;
-                                            handleFocusWindow(label);
-                                        }, dblclickDelayMs()),
-                                    };
+                                    // Focus immediately — the previous design
+                                    // deferred via setTimeout(dblclickDelayMs)
+                                    // to disambiguate from dblclick-rename, but
+                                    // the StatusBar's outside-click dismiss
+                                    // unmounts InstancePanel before the timer
+                                    // fires, and onCleanup cancels the timer.
+                                    // Result: clicks did nothing.
+                                    //
+                                    // Firing focus immediately means a
+                                    // double-click still triggers focus first
+                                    // (harmless — rename input then takes
+                                    // over). dblClick handler still runs and
+                                    // enters rename mode.
+                                    handleFocusWindow(entry.label);
                                 }}
                                 onDblClick={(e) => {
                                     e.preventDefault();
