@@ -62,13 +62,21 @@ export const initialState = (): LauncherEventState => ({
 });
 
 /**
- * Two command shapes feed the reducer:
+ * Three command shapes feed the reducer:
  *   1. `ApplyEvent` — typed event from the launcher channel
- *   2. `ApplySeed` — RPC-snapshot seed at app init
+ *   2. `ApplySeed` — RPC-snapshot seed at app init (additive merge)
+ *   3. `ReconcileFromSnapshot` — periodic refresh that REPLACES the
+ *      known set wholesale. Removes labels absent from the snapshot
+ *      — needed for the `task dev` no-launcher path where close
+ *      events never arrive. Distinct from `ApplySeed` because seed
+ *      is intentionally additive to protect against typed events
+ *      racing with the snapshot fetch (codex P1 #603); reconcile is
+ *      for steady-state refresh after seed.
  */
 export type LauncherEventCommand =
     | { type: "ApplyEvent"; event: LauncherEvent }
-    | { type: "ApplySeed"; entries: ReadonlyArray<WindowEntry> };
+    | { type: "ApplySeed"; entries: ReadonlyArray<WindowEntry> }
+    | { type: "ReconcileFromSnapshot"; entries: ReadonlyArray<WindowEntry> };
 
 /**
  * Audit events emitted by the reducer. Useful for tests + future
@@ -101,7 +109,13 @@ export type LauncherEventReducerEvent =
     | { type: "saga-event-observed"; eventName: string; raw: LauncherEvent }
     | { type: "unknown-variant-ignored"; eventName: string }
     | { type: "filtered-out"; label: string; reason: string }
-    | { type: "seeded"; addedCount: number; tombstonesSkipped: number };
+    | { type: "seeded"; addedCount: number; tombstonesSkipped: number }
+    | {
+          type: "reconciled";
+          addedCount: number;
+          removedCount: number;
+          totalAfter: number;
+      };
 
 export interface ReducerResult {
     state: LauncherEventState;
