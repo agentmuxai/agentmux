@@ -250,9 +250,18 @@ fn main() {
     // shared path. Falls back to the cef cache dir only when the env
     // is unset (`task dev` mode without launcher), where forwarding
     // wouldn't be wired anyway.
-    let port_file_dir = std::env::var_os("AGENTMUX_DATA_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| data_dir.clone());
+    // Dev builds inherit AGENTMUX_DATA_DIR from the parent pane they were
+    // launched from. Writing ipc-port there would overwrite the parent
+    // instance's port:token and break its single-instance forwarding.
+    // In dev mode there is no launcher so port forwarding isn't wired
+    // anyway — use the dev data dir directly.
+    let port_file_dir = if agentmux_common::is_dev_build_exe(&host_exe_dir) {
+        data_dir.clone()
+    } else {
+        std::env::var_os("AGENTMUX_DATA_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| data_dir.clone())
+    };
     let _ = std::fs::create_dir_all(&port_file_dir);
     let port_file = port_file_dir.join("ipc-port");
 
@@ -297,7 +306,15 @@ fn main() {
     // frontend before the backend is available, which causes a "raw
     // browser" appearance on slow machines or first launch.
     let backend_ready = runtime.block_on(async {
-        let launcher_provided = sidecar::use_launcher_endpoints(&app_state);
+        // Dev builds inherit AGENTMUX_BACKEND_WS from the parent pane.
+        // Consuming it would connect to the parent's srv instead of
+        // spawning our own, so the dev frontend runs against the wrong
+        // (parent's) backend and no dev-version srv is ever started.
+        let launcher_provided = if agentmux_common::is_dev_build_exe(&host_exe_dir) {
+            None
+        } else {
+            sidecar::use_launcher_endpoints(&app_state)
+        };
         let result = match launcher_provided {
             Some(Ok(r)) => {
                 tracing::info!(
