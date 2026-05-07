@@ -842,6 +842,26 @@ fn handle_layout_insert_node(
     //   3. parent_id None → `findNextInsertLocation` heuristic.
     let empty_tree = tab.rootnode.is_none();
     if empty_tree {
+        // Codex P2 PR #715 round 6 (post-merge follow-up): empty-tree
+        // promotion must reject any explicit `parent_id`/`index` for
+        // the same divergence reason path #2 rejects them — the
+        // event would echo a target that no caller can possibly
+        // resolve to (the tree is empty), and a replay consumer or
+        // the persist subscriber would diverge from the reducer.
+        // Per `srv-phase-e4b-formal-spec-2026-05-03.md` §7.1, both
+        // fields must be `None` for empty-tree promote.
+        if parent_id.is_some() || index.is_some() {
+            let v = state.bump_version();
+            return vec![Event::Error {
+                code: ErrorCode::InvalidCommand,
+                message: format!(
+                    "LayoutInsertNode: empty tree cannot honour explicit parent_id={:?} / index={:?} (tab {})",
+                    parent_id, index, tab_id
+                ),
+                fatal: false,
+                version: v,
+            }];
+        }
         tab.rootnode = Some(node.clone());
     } else if let Some(pid) = parent_id.as_deref() {
         let root = tab.rootnode.as_mut().expect("non-empty checked above");
@@ -4003,6 +4023,60 @@ mod tests {
     }
 
     #[test]
+    fn layout_insert_node_into_empty_tree_with_explicit_parent_id_emits_error() {
+        // Codex P2 PR #715 round 6 (post-merge follow-up): empty-tree
+        // promotion must reject explicit parent_id — otherwise the
+        // event echoes a target that subscribers can't resolve.
+        let (mut state, tab_id) = fresh_tab();
+        let events = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: leaf_node("first", "b1"),
+                parent_id: Some("does-not-exist".into()),
+                index: None,
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(
+            &events[0],
+            Event::Error { code: ErrorCode::InvalidCommand, .. }
+        ));
+        assert!(
+            state.tabs[&tab_id].rootnode.is_none(),
+            "tree must stay empty on rejection"
+        );
+    }
+
+    #[test]
+    fn layout_insert_node_into_empty_tree_with_explicit_index_emits_error() {
+        // Same rationale but with `index` only — the spec §7.1
+        // requires both fields be `None` for empty-tree promote.
+        let (mut state, tab_id) = fresh_tab();
+        let events = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: leaf_node("first", "b1"),
+                parent_id: None,
+                index: Some(0),
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(
+            &events[0],
+            Event::Error { code: ErrorCode::InvalidCommand, .. }
+        ));
+        assert!(state.tabs[&tab_id].rootnode.is_none());
+    }
+
+    #[test]
     fn layout_insert_node_with_unknown_parent_id_emits_error() {
         // Codex P2 PR #715 round 5: silent fallback to heuristic
         // diverges the event from the actual mutation. Reject
@@ -4256,15 +4330,22 @@ mod tests {
     fn layout_insert_node_event_echoes_parent_id_and_index() {
         // Reagent P2 (kimi only) PR #715 round 3 (finding D): event
         // hardcoded `parent_id: None, index: None`; subscribers had
-        // no record of what the caller asked for.
+        // no record of what the caller asked for. Tree pre-populated
+        // with a group so the explicit-parent path doesn't take the
+        // empty-tree rejection branch (codex round 6).
         let (mut state, tab_id) = fresh_tab();
+        let mut group = leaf_node("group", "");
+        group.data = None;
+        group.children = vec![leaf_node("a", "ba")];
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(group);
+
         let events = update(
             &mut state,
             Command::LayoutInsertNode {
                 tab_id: tab_id.clone(),
                 node: leaf_node("new", "b1"),
-                parent_id: Some("explicit-parent".into()),
-                index: Some(3),
+                parent_id: Some("group".into()),
+                index: Some(0),
                 focus_after: false,
                 magnify_after: false,
                 correlation_id: "corr".into(),
@@ -4273,8 +4354,8 @@ mod tests {
         );
         match &events[0] {
             Event::LayoutNodeInserted { parent_id, index, .. } => {
-                assert_eq!(parent_id.as_deref(), Some("explicit-parent"));
-                assert_eq!(*index, Some(3));
+                assert_eq!(parent_id.as_deref(), Some("group"));
+                assert_eq!(*index, Some(0));
             }
             other => panic!("expected LayoutNodeInserted, got {:?}", other),
         }
