@@ -408,12 +408,12 @@ const Markdown = ({
         tbody: (props: any) => <tbody>{props.children}</tbody>,
         tr: (props: any) => <tr class="border-b border-border/40 last:border-0">{props.children}</tr>,
         th: (props: any) => (
-            <th class={cn("px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-primary", props.class)}>
+            <th class={cn("px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-primary", props.className)}>
                 {props.children}
             </th>
         ),
         td: (props: any) => (
-            <td class={cn("px-3 py-2 text-sm text-secondary", props.class)}>
+            <td class={cn("px-3 py-2 text-sm text-secondary", props.className)}>
                 {props.children}
             </td>
         ),
