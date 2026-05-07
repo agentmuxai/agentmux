@@ -517,7 +517,6 @@ pub fn list_windows(state: &Arc<AppState>) -> serde_json::Value {
 pub fn focus_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
     crate::ui_tasks::post_focus_window(state, label);
-    let _ = (state, label);
     Ok(serde_json::Value::Null)
 }
 

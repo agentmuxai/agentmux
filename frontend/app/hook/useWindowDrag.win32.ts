@@ -25,15 +25,16 @@ function installCefDragListener() {
     if (cefDragListenerInstalled || detectHost() !== "cef") return;
     cefDragListenerInstalled = true;
 
-    // `mouseDownActive` is set synchronously in mousedown and cleared
-    // in mouseup. `dragging` is set after the async `get_window_position`
-    // resolves. The mousedown→mouseup race (codex P2 PR #734): if the
-    // user clicks and releases quickly (or the IPC round-trip is slow),
-    // `mouseup` fires while `get_window_position` is still in flight;
-    // when the promise resolves we'd otherwise arm drag AFTER release
-    // and the next mousemove (a stray pointer move) would teleport
-    // the window. Guard by checking `mouseDownActive` at resolution.
-    let mouseDownActive = false;
+    // Per-mousedown sequence token. Each press increments
+    // `currentMouseDownId`; the async `get_window_position` handler
+    // captures the value at press time and bails if it doesn't still
+    // match when the promise resolves.
+    //
+    // Without the sequence token, a rapid press → release → press
+    // sequence with a slow IPC could let the OLDER request arm drag
+    // using the older click coords (a shared boolean would already
+    // be true again from the newer press). Codex P2 PR #734 round 2.
+    let currentMouseDownId = 0;
     let dragging = false;
     let clickScreenX = 0;
     let clickScreenY = 0;
@@ -44,12 +45,13 @@ function installCefDragListener() {
         if (e.button !== 0) return;
         if (!isInDragRegion(e.target as HTMLElement)) return;
         e.preventDefault();
-        mouseDownActive = true;
+        currentMouseDownId += 1;
+        const myId = currentMouseDownId;
         try {
             const pos = await invokeCommand<{ x: number; y: number }>("get_window_position");
-            // Race guard: bail if the user has already released the
-            // mouse during the IPC round-trip.
-            if (!mouseDownActive) return;
+            // Race guard: bail if a mouseup or a newer mousedown has
+            // happened during the IPC round-trip.
+            if (myId !== currentMouseDownId) return;
             clickScreenX = e.screenX;
             clickScreenY = e.screenY;
             initWinX = pos.x;
@@ -68,7 +70,10 @@ function installCefDragListener() {
     });
 
     document.addEventListener("mouseup", () => {
-        mouseDownActive = false;
+        // Invalidate any in-flight mousedown handler — incrementing
+        // the id ensures their `myId !== currentMouseDownId` check
+        // fires when they resolve.
+        currentMouseDownId += 1;
         dragging = false;
     });
 
