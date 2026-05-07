@@ -443,10 +443,19 @@ pub fn apply_hwnd_position_changed(state: &mut State, hwnd: u64, new_rect: Rect)
     // Resolve the mirror: collect everything we need from a scoped
     // borrow, then release it before calling `state.bump_version()`
     // (rustc E0499 — same trick as `apply_hwnd_opened`).
+    //
+    // Storm-cap snapshot: capture the prior emit-flags so the gate
+    // logic below knows whether each side-effect has fired before.
+    // `apply_hwnd_position_changed` fires per WM_MOVE during a
+    // drag — without the caps, a window dragged across an off-
+    // monitor region storms the renderer with drift + corrective
+    // events.
     struct Resolved {
         label: String,
         off_monitor: bool,
         foregrounded_since_open: bool,
+        off_monitor_drift_emitted: bool,
+        corrective_window_move_emitted: bool,
     }
     let resolved: Option<Resolved> = state
         .windows
@@ -460,6 +469,8 @@ pub fn apply_hwnd_position_changed(state: &mut State, hwnd: u64, new_rect: Rect)
                 label: label.clone(),
                 off_monitor,
                 foregrounded_since_open: mirror.foregrounded_since_open,
+                off_monitor_drift_emitted: mirror.off_monitor_drift_emitted,
+                corrective_window_move_emitted: mirror.corrective_window_move_emitted,
             }
         });
 
@@ -472,8 +483,38 @@ pub fn apply_hwnd_position_changed(state: &mut State, hwnd: u64, new_rect: Rect)
     }
 
     // Window is off all monitors. Fire drift unless we're in the
-    // open-transient sentinel state (per above).
-    if !is_sentinel {
+    // open-transient sentinel state (per above) OR the cap has
+    // already fired for this window.
+    let mut fire_drift = false;
+    let mut fire_corrective = false;
+    if !is_sentinel && !r.off_monitor_drift_emitted {
+        fire_drift = true;
+    }
+
+    // Phase B.9.2 — pure-reducer self-heal. If the window has
+    // never been foregrounded, this off-monitor state is from the
+    // open transition (NOT user action), so we emit a corrective
+    // move. The host's WRR subscriber applies it via SetWindowPos
+    // on the UI thread. The Win32 hidden sentinel is INCLUDED in
+    // the corrective trigger (we always want to move a window off
+    // the sentinel before the user notices), even though it's
+    // suppressed for drift to avoid log noise.
+    if !r.foregrounded_since_open && !r.corrective_window_move_emitted {
+        if pick_primary_centered(&monitors).is_some() {
+            fire_corrective = true;
+        }
+    }
+
+    if fire_drift {
+        // Mark the cap before bumping the version so re-entrant
+        // event handlers see consistent state.
+        if let Some((_, mirror)) = state
+            .windows
+            .iter_mut()
+            .find(|(_, m)| m.hwnd == Some(hwnd))
+        {
+            mirror.off_monitor_drift_emitted = true;
+        }
         let v = state.bump_version();
         events.push(Event::HwndDriftDetected {
             kind: HwndDriftKind::OffMonitor,
@@ -489,16 +530,15 @@ pub fn apply_hwnd_position_changed(state: &mut State, hwnd: u64, new_rect: Rect)
         });
     }
 
-    // Phase B.9.2 — pure-reducer self-heal. If the window has
-    // never been foregrounded, this off-monitor state is from the
-    // open transition (NOT user action), so we emit a corrective
-    // move. The host's WRR subscriber applies it via SetWindowPos
-    // on the UI thread. The Win32 hidden sentinel is INCLUDED in
-    // the corrective trigger (we always want to move a window off
-    // the sentinel before the user notices), even though it's
-    // suppressed for drift to avoid log noise.
-    if !r.foregrounded_since_open {
+    if fire_corrective {
         if let Some(target) = pick_primary_centered(&monitors) {
+            if let Some((_, mirror)) = state
+                .windows
+                .iter_mut()
+                .find(|(_, m)| m.hwnd == Some(hwnd))
+            {
+                mirror.corrective_window_move_emitted = true;
+            }
             let v = state.bump_version();
             events.push(Event::CorrectiveWindowMove {
                 hwnd,
