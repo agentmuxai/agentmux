@@ -117,15 +117,11 @@ pub(super) fn handle_report_window_opened(
     // corrective logic doesn't re-fire `HiddenSinceOpen` on the
     // subsequent HWND repositioning. See state.rs::just_promoted_labels.
     let was_just_promoted = state.just_promoted_labels.remove(&label);
-    // Codex P2 PR #708 round 3 — `foregrounded_since_open` is
-    // monotonic (false → true, never resets within a window's
-    // lifetime per its own contract: "has this label been
-    // foregrounded at any point since its ReportWindowOpened"). On
-    // duplicate opens (the existing handler overwrites the mirror
-    // wholesale), OR the prior value in so the flag isn't reset. The
-    // first open after a promote already consumed `just_promoted_labels`,
-    // so a 2nd open at the same label would otherwise re-arm the
-    // open-transient drift detector.
+    // Duplicate-open monotonicity (codex P2 PR #708 round 3):
+    // `foregrounded_since_open` is monotonic (false → true, never
+    // resets within a window's lifetime). On duplicate opens (the
+    // existing handler overwrites the mirror wholesale), OR the prior
+    // value in so the flag isn't reset.
     let prior_foregrounded = state
         .windows
         .get(&label)
@@ -149,6 +145,7 @@ pub(super) fn handle_report_window_opened(
             last_rect: None,
             last_foreground_at_ms: None,
             foregrounded_since_open: was_just_promoted || prior_foregrounded,
+            hidden_since_open_emitted: false,
         },
     );
     let mut out = Vec::with_capacity(2);
