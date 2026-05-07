@@ -188,26 +188,37 @@ declare global {
         cancelCrossDrag: (dragId: string) => Promise<void>;
         /** Cold-path tear-off / new top-level. `width`/`height` set the
          *  outer window dimensions when matching the source window's
-         *  size on tab tear-off; omit for the historical default. */
+         *  size on tab tear-off; omit for the historical default.
+         *  `tabAnchorX`/`tabAnchorY` are the screen point where the
+         *  user grabbed the tab — backend places the new window so its
+         *  first tab lands at that point (Chrome-style no-teleport
+         *  handoff). Omit for cursor-centered fallback. */
         openWindowAtPosition: (
             screenX: number,
             screenY: number,
             workspaceId?: string,
             width?: number,
             height?: number,
+            tabAnchorX?: number,
+            tabAnchorY?: number,
         ) => Promise<string>;
         /** Phase 6 — promote a pre-warmed pool window for tear-off.
          *  Returns the destination window label on success. Throws if
          *  the pool is empty (caller should fall back to
          *  openWindowAtPosition for the cold path). `width`/`height`
          *  resize the promoted window to match the source frame on
-         *  tab tear-off; omit to keep the pool default. */
+         *  tab tear-off; omit to keep the pool default.
+         *  `tabAnchorX`/`tabAnchorY` are the screen point where the
+         *  user grabbed the tab — backend places the new window so its
+         *  first tab lands at that point. Omit for cursor-centered. */
         tearOffPoolPromote: (
             workspaceId: string,
             screenX: number,
             screenY: number,
             width?: number,
             height?: number,
+            tabAnchorX?: number,
+            tabAnchorY?: number,
         ) => Promise<string>;
         /** Tear-off Phase 2 Win32 SC_MOVE handshake. Call AFTER
          *  TearOffTab + openWindowAtPosition; this hands cursor capture

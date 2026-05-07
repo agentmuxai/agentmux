@@ -71,6 +71,20 @@ const POOL_HEIGHT: i32 = 800;
 /// of the title bar after promotion.
 const TITLE_BAR_OFFSET_PX: i32 = 16;
 
+/// Tab-anchor placement constants. When the frontend supplies
+/// `tabAnchorX/Y` (the screen point where the user grabbed the tab),
+/// the new window is positioned so its FIRST TAB's top-left lands at
+/// that anchor — cursor stays on the same visual element across the
+/// handoff. Spec: SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md §4.4.
+///
+/// `FIRST_TAB_INSET_X` is the left-edge gap from the window's outer
+/// frame to where the first tab actually starts (tab strip leading
+/// padding). `TAB_STRIP_TOP_OFFSET_PX` is the vertical distance from
+/// the window's outer top to the top of the tab strip — title bar
+/// sits above it.
+pub(super) const FIRST_TAB_INSET_X: i32 = 8;
+pub(super) const TAB_STRIP_TOP_OFFSET_PX: i32 = TITLE_BAR_OFFSET_PX;
+
 /// Spawn a single pool window. Called at startup (N times) and
 /// after each promote (1 refill). Idempotent against the
 /// in-flight semaphore — concurrent calls collapse to one spawn
@@ -469,6 +483,8 @@ pub fn promote_pool_window(
     screen_y: i32,
     width: Option<i32>,
     height: Option<i32>,
+    tab_anchor_x: Option<i32>,
+    tab_anchor_y: Option<i32>,
 ) -> Option<String> {
     // PR #5 H.4 — atomic pop+remove via reducer. The dispatch pops
     // the front of the pool queue, removes the label from
@@ -689,8 +705,25 @@ pub fn promote_pool_window(
     let win_h_dip = height.unwrap_or(POOL_HEIGHT);
     let win_w = if width.is_some() { to_physical(win_w_dip) } else { win_w_dip };
     let win_h = if height.is_some() { to_physical(win_h_dip) } else { win_h_dip };
-    let pos_x = screen_x - win_w / 2;
-    let pos_y = screen_y - TITLE_BAR_OFFSET_PX;
+
+    // Position the new window. With tab anchor (frontend captured the
+    // grab offset within the source tab and converted to a screen
+    // point): place the new window's first tab top-left at the anchor
+    // so the cursor stays on the same visual element across the
+    // handoff. Without anchor: cursor-centered title bar (legacy).
+    //
+    // Anchor is in screen coords matching `screen_x/y` so it shares
+    // the same monitor DPI assumptions handled above.
+    let (pos_x, pos_y) = match (tab_anchor_x, tab_anchor_y) {
+        (Some(ax), Some(ay)) => (
+            (ax - to_physical(FIRST_TAB_INSET_X)).max(0),
+            (ay - to_physical(TAB_STRIP_TOP_OFFSET_PX)).max(0),
+        ),
+        _ => (
+            screen_x - win_w / 2,
+            screen_y - TITLE_BAR_OFFSET_PX,
+        ),
+    };
 
     // Take the window out of WS_EX_TOOLWINDOW so the promoted window
     // appears in the taskbar / Alt+Tab like any other AgentMux
@@ -830,6 +863,8 @@ pub fn promote_pool_window(
     _screen_y: i32,
     _width: Option<i32>,
     _height: Option<i32>,
+    _tab_anchor_x: Option<i32>,
+    _tab_anchor_y: Option<i32>,
 ) -> Option<String> {
     // Non-Windows: pool isn't built yet (Phase 7). Caller falls
     // back to the cold path.
