@@ -26,32 +26,32 @@ function installCefDragListener() {
     cefDragListenerInstalled = true;
 
     let dragging = false;
-    let startScreenX = 0;
-    let startScreenY = 0;
+    let clickScreenX = 0;
+    let clickScreenY = 0;
+    let initWinX = 0;
+    let initWinY = 0;
 
-    document.addEventListener("mousedown", (e: MouseEvent) => {
+    document.addEventListener("mousedown", async (e: MouseEvent) => {
         if (e.button !== 0) return;
         if (!isInDragRegion(e.target as HTMLElement)) return;
-
-        dragging = true;
-        startScreenX = e.screenX;
-        startScreenY = e.screenY;
         e.preventDefault();
-
-        // Get initial window position
-        invokeCommand<{ x: number; y: number }>("get_window_position").catch(() => {
-            dragging = false;
-        });
+        try {
+            const pos = await invokeCommand<{ x: number; y: number }>("get_window_position");
+            clickScreenX = e.screenX;
+            clickScreenY = e.screenY;
+            initWinX = pos.x;
+            initWinY = pos.y;
+            dragging = true;
+        } catch {
+            // host unavailable — abort drag
+        }
     }, true);
 
     document.addEventListener("mousemove", (e: MouseEvent) => {
         if (!dragging) return;
-        const dx = e.screenX - startScreenX;
-        const dy = e.screenY - startScreenY;
-        if (dx === 0 && dy === 0) return;
-        startScreenX = e.screenX;
-        startScreenY = e.screenY;
-        invokeCommand("move_window_by", { dx, dy }).catch(() => {});
+        const tx = initWinX + (e.screenX - clickScreenX);
+        const ty = initWinY + (e.screenY - clickScreenY);
+        invokeCommand("set_window_position", { x: tx, y: ty }).catch(() => {});
     });
 
     document.addEventListener("mouseup", () => {
