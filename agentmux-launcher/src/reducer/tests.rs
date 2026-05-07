@@ -1673,6 +1673,174 @@ fn hidden_since_open_grace_suppresses_placement_hides() {
 }
 
 #[test]
+fn hidden_since_open_deferred_fires_when_window_stays_hidden_past_grace() {
+    // Codex P2 PR #725 round 1: if the ONLY visible=false event arrives
+    // within the placement grace and no further visibility events fire,
+    // we MUST still emit the drift. The deferred flag + drain pass on
+    // every reducer call (heartbeat-via-traffic) catches this.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-stuck".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xFE,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("window-stuck".into()),
+        },
+        &c,
+    );
+
+    // The ONLY visibility event arrives within grace. Drift suppressed
+    // but mirror is marked deferred.
+    let placement_hide = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xFE, visible: false },
+        &c,
+    );
+    assert_eq!(
+        placement_hide
+            .iter()
+            .filter(|e| matches!(e, Event::HwndDriftDetected { .. }))
+            .count(),
+        0,
+        "hide within grace must NOT fire drift (deferred)"
+    );
+    assert!(
+        state.windows.get("window-stuck").unwrap().hidden_since_open_deferred,
+        "deferred flag must be set"
+    );
+
+    // No further visibility events. ANY subsequent reducer call past
+    // the grace promotes the deferred state to a fired drift via the
+    // drain pass. Use a Ping (cheapest unrelated command) past grace.
+    let post_grace = ctx_advance(&c, 600);
+    let drained = update(&mut state, Command::Ping { nonce: 1 }, &post_grace);
+    assert_eq!(
+        drained
+            .iter()
+            .filter(|e| matches!(
+                e,
+                Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+            ))
+            .count(),
+        1,
+        "deferred drift fires on next post-grace reducer call regardless \
+         of command kind"
+    );
+    assert!(
+        state.windows.get("window-stuck").unwrap().hidden_since_open_emitted,
+        "cap is now armed (drift was emitted)"
+    );
+    assert!(
+        !state.windows.get("window-stuck").unwrap().hidden_since_open_deferred,
+        "deferred flag cleared after drift fires"
+    );
+}
+
+#[test]
+fn hidden_since_open_deferred_cleared_by_visible_or_foreground() {
+    // The deferred flag must clear when the window completes its
+    // placement transition (becomes visible OR foregrounded). Without
+    // this, a window that hid during placement, became visible, and
+    // was never seen again would fire spurious deferred drift.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-recovers".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xFD,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("window-recovers".into()),
+        },
+        &c,
+    );
+
+    // Hide during grace → deferred set.
+    let _ = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xFD, visible: false },
+        &c,
+    );
+    assert!(state.windows.get("window-recovers").unwrap().hidden_since_open_deferred);
+
+    // Become visible → deferred cleared.
+    let _ = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xFD, visible: true },
+        &c,
+    );
+    assert!(
+        !state.windows.get("window-recovers").unwrap().hidden_since_open_deferred,
+        "visible=true clears deferred flag"
+    );
+
+    // Past-grace heartbeat must NOT fire drift since deferred was cleared.
+    let post_grace = ctx_advance(&c, 600);
+    let drained = update(&mut state, Command::Ping { nonce: 1 }, &post_grace);
+    assert!(
+        !drained
+            .iter()
+            .any(|e| matches!(e, Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. })),
+        "no spurious drift after window recovers visibility"
+    );
+}
+
+#[test]
+fn opened_at_ms_preserved_on_duplicate_open() {
+    // Codex P2 PR #725 round 1: duplicate ReportWindowOpened must NOT
+    // reset opened_at_ms. Otherwise a duplicate that arrives after
+    // the original 500ms grace and before the first hide would
+    // re-anchor the grace window, suppressing real hides for another
+    // 500ms.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-dup-open".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let original_opened_at_ms = state.windows.get("window-dup-open").unwrap().opened_at_ms;
+
+    // Duplicate open arrives MUCH later (1000ms past grace).
+    let later = ctx_advance(&c, 1000);
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-dup-open".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &later,
+    );
+    assert_eq!(
+        state.windows.get("window-dup-open").unwrap().opened_at_ms,
+        original_opened_at_ms,
+        "duplicate open must preserve original opened_at_ms (grace anchor)"
+    );
+}
+
+#[test]
 fn hidden_since_open_drift_fires_at_most_once_per_window() {
     // Drift-storm regression guard. The smoke crash on v0.33.685
     // ("New Window" from hamburger after a tear-off) was 170

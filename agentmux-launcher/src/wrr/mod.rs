@@ -361,26 +361,41 @@ pub fn apply_hwnd_visibility_changed(
         .find(|(_, m)| m.hwnd == Some(hwnd))
         .and_then(|(label, mirror)| {
             mirror.visible = visible;
+            // Visibility=true at any time clears any deferred hide
+            // — the placement transition completed, no drift needed.
+            if visible {
+                mirror.hidden_since_open_deferred = false;
+                return None;
+            }
             // Drift-storm cap: HiddenSinceOpen fires AT MOST ONCE per
             // window per session. The cap flag is monotonic for the
             // window's lifetime. The placement grace check below is
-            // additive: hides during placement don't fire AND don't
-            // set the cap, so a hide that persists past the grace
-            // window can still fire (one) drift.
-            //
-            // See `hidden_since_open_emitted` doc on `WindowMirror`
-            // for storm context (PR #708 added the cap; this PR adds
-            // the grace to suppress placement-only false positives).
+            // additive: hides during placement set `hidden_since_open_deferred`
+            // (without arming the cap) so the next reducer call past
+            // the grace via `drain_deferred_hidden_since_open` can
+            // fire the drift. Hides past the grace fire immediately.
             let past_grace =
                 now_ms.saturating_sub(mirror.opened_at_ms) > HIDDEN_SINCE_OPEN_GRACE_MS;
-            if !visible
-                && past_grace
+            if past_grace
                 && !mirror.foregrounded_since_open
                 && !mirror.hidden_since_open_emitted
             {
                 mirror.hidden_since_open_emitted = true;
+                mirror.hidden_since_open_deferred = false;
                 version_to_bump = true;
                 Some(label.clone())
+            } else if !past_grace
+                && !mirror.foregrounded_since_open
+                && !mirror.hidden_since_open_emitted
+            {
+                // Suppressed during placement grace. Mark as deferred
+                // so a later reducer call past the grace window can
+                // promote this to a drift if the window is still
+                // hidden (codex P2 PR #725 round 1 — without this,
+                // a stuck-hidden window that gets no further
+                // visibility events permanently loses the signal).
+                mirror.hidden_since_open_deferred = true;
+                None
             } else {
                 None
             }
@@ -399,6 +414,48 @@ pub fn apply_hwnd_visibility_changed(
     drift.into_iter().collect()
 }
 
+/// Sweep `hidden_since_open_deferred` mirrors and emit drift for any
+/// that have crossed the placement grace boundary while still hidden
+/// and never foregrounded. Called from `reducer::update` BEFORE every
+/// command processes so events from any subsequent command serve as
+/// the heartbeat that catches stuck-hidden windows whose own
+/// `ReportHwndVisibilityChanged` was suppressed during grace.
+///
+/// (codex P2 PR #725 round 1 — addresses the "no recheck after grace"
+/// concern. Stuck-hidden windows that produce ZERO further commands
+/// are still a hole — we'd need a periodic timer for that — but
+/// realistic launcher traffic generates events constantly, so this
+/// catches the practical cases.)
+pub fn drain_deferred_hidden_since_open(state: &mut State, now_ms: u64) -> Vec<Event> {
+    let stuck: Vec<(String, Option<u64>)> = state
+        .windows
+        .iter()
+        .filter(|(_, m)| m.hidden_since_open_deferred)
+        .filter(|(_, m)| !m.visible)
+        .filter(|(_, m)| !m.foregrounded_since_open)
+        .filter(|(_, m)| !m.hidden_since_open_emitted)
+        .filter(|(_, m)| now_ms.saturating_sub(m.opened_at_ms) > HIDDEN_SINCE_OPEN_GRACE_MS)
+        .map(|(label, m)| (label.clone(), m.hwnd))
+        .collect();
+    let mut events = Vec::with_capacity(stuck.len());
+    for (label, hwnd) in stuck {
+        if let Some(mirror) = state.windows.get_mut(&label) {
+            mirror.hidden_since_open_emitted = true;
+            mirror.hidden_since_open_deferred = false;
+        }
+        let v = state.bump_version();
+        events.push(Event::HwndDriftDetected {
+            kind: HwndDriftKind::HiddenSinceOpen,
+            label: Some(label),
+            hwnd,
+            detail: "Window hidden without ever being foregrounded since open (deferred from placement grace)".to_string(),
+            severity: severity_for(HwndDriftKind::HiddenSinceOpen),
+            version: v,
+        });
+    }
+    events
+}
+
 /// Phase B.9.1 — handle `Command::ReportHwndForegroundChanged`.
 /// Updates the "has been seen" flag. Never emits drift directly
 /// — its role is to suppress future `HiddenSinceOpen` emissions.
@@ -406,6 +463,10 @@ pub fn apply_hwnd_foreground_changed(state: &mut State, hwnd: u64, now_ms: u64) 
     if let Some((_, mirror)) = state.windows.iter_mut().find(|(_, m)| m.hwnd == Some(hwnd)) {
         mirror.foregrounded_since_open = true;
         mirror.last_foreground_at_ms = Some(now_ms);
+        // Foreground = window made it to the user. Clear any deferred
+        // hide so the drain pass doesn't fire spurious drift past the
+        // grace for a window the user actually saw.
+        mirror.hidden_since_open_deferred = false;
     }
     vec![]
 }

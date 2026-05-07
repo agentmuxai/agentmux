@@ -150,6 +150,15 @@ pub struct WindowMirror {
     /// See `docs/specs/ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`
     /// for storm context.
     pub hidden_since_open_emitted: bool,
+    /// Set when `apply_hwnd_visibility_changed` sees `visible=false`
+    /// during the placement grace window. Marks "we suppressed a
+    /// hide; if it persists past the grace, drift fires on the next
+    /// reducer call via `drain_deferred_hidden_since_open`". Cleared
+    /// when the window subsequently becomes visible or is foregrounded.
+    /// Without this, a window that goes hidden during grace and
+    /// receives no further visibility events would permanently lose
+    /// its `HiddenSinceOpen` drift signal (codex P2 PR #725 round 1).
+    pub hidden_since_open_deferred: bool,
     /// See `hidden_since_open_emitted` doc above.
     pub off_monitor_drift_emitted: bool,
     /// See `hidden_since_open_emitted` doc above.

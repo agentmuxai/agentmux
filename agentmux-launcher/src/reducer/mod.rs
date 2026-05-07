@@ -83,7 +83,15 @@ mod connection;
 /// (panics are reserved for internal invariant violations).
 pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
     let _ = ctx.conn_id; // reserved for B.4 routing
-    match cmd {
+
+    // Heartbeat-via-traffic: drain any deferred hidden-since-open
+    // drifts whose grace window has now expired. Catches windows
+    // that hid during placement and produced no further visibility
+    // events; any subsequent reducer call past the grace promotes
+    // the deferred state to a fired drift.
+    let mut deferred = crate::wrr::drain_deferred_hidden_since_open(state, ctx.now_ms);
+
+    let mut cmd_events = match cmd {
         Command::Register {
             kind,
             pid,
@@ -535,7 +543,9 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
                 version: v,
             }]
         }
-    }
+    };
+    deferred.append(&mut cmd_events);
+    deferred
 }
 
 
