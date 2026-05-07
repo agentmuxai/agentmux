@@ -208,6 +208,41 @@ pub fn move_window_by(state: &Arc<AppState>, args: &serde_json::Value) -> Result
     Ok(serde_json::Value::Null)
 }
 
+/// Move the window to an absolute screen position (x, y).
+/// Each call is self-contained — no read-modify-write — so concurrent in-flight
+/// calls are idempotent: the last write wins, which is exactly correct for drag.
+pub fn set_window_position(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        use windows_sys::Win32::Foundation::RECT;
+        let hwnd = find_own_top_level_window();
+        if !hwnd.is_null() {
+            let mut rect: RECT = std::mem::zeroed();
+            GetWindowRect(hwnd, &mut rect);
+            let width = rect.right - rect.left;
+            let height = rect.bottom - rect.top;
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                x,
+                y,
+                width,
+                height,
+                0x0014, // SWP_NOZORDER | SWP_NOSIZE
+            );
+            return Ok(serde_json::Value::Null);
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    crate::ui_tasks::post_set_window_position(state, "main", x, y);
+    let _ = state;
+    Ok(serde_json::Value::Null)
+}
+
 /// Initiate window drag (for frameless windows).
 /// Windows: sends WM_NCLBUTTONDOWN/HTCAPTION via Win32 — find_own_top_level_window
 /// resolves the per-process HWND so multi-window works without a label.
@@ -459,17 +494,29 @@ pub fn list_windows(state: &Arc<AppState>) -> serde_json::Value {
 }
 
 /// Focus a specific window by label.
-///
-/// Uses the CEF Views `Window::activate()` API on all platforms (via
-/// `post_focus_window` → `FocusWindowTask`). On Windows in Views mode,
-/// `browser.host().window_handle()` returns NULL — the legacy direct
-/// SetForegroundWindow path silently failed. Views' `activate()` calls
-/// SetForegroundWindow internally on the actual top-level HWND
-/// resolved through `browser_view_get_for_browser → window()`, which
-/// is the only correct way to get the HWND in Views mode.
 pub fn focus_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+
+    #[cfg(target_os = "windows")]
+    {
+        // Phase H.2.b — reducer-aware lookup with fallback.
+        if let Some(browser) = state.get_browser(label) {
+            if let Some(host) = browser.host() {
+                let hwnd = host.window_handle();
+                if !hwnd.0.is_null() {
+                    unsafe {
+                        windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(
+                            hwnd.0 as *mut std::ffi::c_void,
+                        );
+                    }
+                    return Ok(serde_json::Value::Null);
+                }
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
     crate::ui_tasks::post_focus_window(state, label);
+    let _ = (state, label);
     Ok(serde_json::Value::Null)
 }
 
