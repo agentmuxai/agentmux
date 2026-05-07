@@ -141,6 +141,16 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 //   cmd /C npm install ... --prefix "C:\path with spaces\..." pkg
                                 // and tokenizes "..." as a quoted path correctly.
                                 use std::os::windows::process::CommandExt;
+                                // CREATE_NO_WINDOW (0x08000000): suppress the
+                                // brief cmd.exe console flash that Windows
+                                // shows by default when CreateProcess is
+                                // called from a GUI process. Without this
+                                // flag the user sees a black console
+                                // window pop and disappear during npm
+                                // install — observed during workspace
+                                // setup paths (e.g. tear-off triggering
+                                // CLI install on first agent block).
+                                const CREATE_NO_WINDOW: u32 = 0x08000000;
                                 let npm_cmd_str = format!(
                                     "npm install --loglevel=http --no-audit --no-fund --no-progress --prefix \"{}\" {}",
                                     prefix_dir, package_arg
@@ -148,6 +158,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 std::process::Command::new("cmd")
                                     .arg("/C")
                                     .raw_arg(&npm_cmd_str)
+                                    .creation_flags(CREATE_NO_WINDOW)
                                     .env("CI", "true")
                                     .env("FORCE_COLOR", "0")
                                     .output()
