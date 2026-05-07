@@ -1399,6 +1399,12 @@ pub enum Event {
         /// may need to re-magnify or clear their magnification UI).
         /// Reagent P1 PR #715 round 3: reducer was clearing
         /// `magnified_node_id` internally but not reporting it.
+        ///
+        /// `#[serde(default)]` for forward-compat with replay /
+        /// version-skewed senders that emit pre-round-3
+        /// `LayoutNodeDeleted` JSON without this field (codex P2 PR
+        /// #715 round 5).
+        #[serde(default)]
         was_magnified: bool,
         correlation_id: String,
         version: u64,
