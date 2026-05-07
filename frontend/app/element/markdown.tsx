@@ -457,6 +457,14 @@ const Markdown = ({
                                   ["media"],
                                   ["type"],
                               ],
+                              th: [
+                                  ...(defaultSchema.attributes?.th || []),
+                                  ["className", /^text-(?:left|center|right)$/],
+                              ],
+                              td: [
+                                  ...(defaultSchema.attributes?.td || []),
+                                  ["className", /^text-(?:left|center|right)$/],
+                              ],
                               waveblock: [["blockkey"]],
                           },
                           tagNames: [

@@ -262,17 +262,12 @@ export const WaveStreamdown = (props: WaveStreamdownProps): JSX.Element => {
         tbody: (tbProps: any) => <tbody {...tbProps} />,
         tr: (trProps: any) => <tr {...trProps} class="border-b border-border/40 last:border-0" />,
         th: (thProps: any) => (
-            <th
-                class={cn(
-                    "px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-primary",
-                    thProps.className
-                )}
-            >
+            <th class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-primary">
                 {thProps.children}
             </th>
         ),
         td: (tdProps: any) => (
-            <td class={cn("px-3 py-2 text-sm text-secondary", tdProps.className)}>
+            <td class="px-3 py-2 text-sm text-secondary">
                 {tdProps.children}
             </td>
         ),

@@ -28,10 +28,14 @@ export function TableBlock(props: TableBlockProps): JSX.Element {
 
     const handleCopy = async () => {
         if (!tableRef) return;
-        const csv = extractCsv(tableRef);
-        await clipboardWriteText(csv);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
+        try {
+            const csv = extractCsv(tableRef);
+            await clipboardWriteText(csv);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+        } catch (e) {
+            console.warn("TableBlock: clipboard write failed", e);
+        }
     };
 
     return (
