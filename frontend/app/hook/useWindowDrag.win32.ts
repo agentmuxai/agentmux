@@ -25,6 +25,15 @@ function installCefDragListener() {
     if (cefDragListenerInstalled || detectHost() !== "cef") return;
     cefDragListenerInstalled = true;
 
+    // `mouseDownActive` is set synchronously in mousedown and cleared
+    // in mouseup. `dragging` is set after the async `get_window_position`
+    // resolves. The mousedown→mouseup race (codex P2 PR #734): if the
+    // user clicks and releases quickly (or the IPC round-trip is slow),
+    // `mouseup` fires while `get_window_position` is still in flight;
+    // when the promise resolves we'd otherwise arm drag AFTER release
+    // and the next mousemove (a stray pointer move) would teleport
+    // the window. Guard by checking `mouseDownActive` at resolution.
+    let mouseDownActive = false;
     let dragging = false;
     let clickScreenX = 0;
     let clickScreenY = 0;
@@ -35,8 +44,12 @@ function installCefDragListener() {
         if (e.button !== 0) return;
         if (!isInDragRegion(e.target as HTMLElement)) return;
         e.preventDefault();
+        mouseDownActive = true;
         try {
             const pos = await invokeCommand<{ x: number; y: number }>("get_window_position");
+            // Race guard: bail if the user has already released the
+            // mouse during the IPC round-trip.
+            if (!mouseDownActive) return;
             clickScreenX = e.screenX;
             clickScreenY = e.screenY;
             initWinX = pos.x;
@@ -55,6 +68,7 @@ function installCefDragListener() {
     });
 
     document.addEventListener("mouseup", () => {
+        mouseDownActive = false;
         dragging = false;
     });
 
