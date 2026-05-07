@@ -712,12 +712,21 @@ pub fn promote_pool_window(
     // so the cursor stays on the same visual element across the
     // handoff. Without anchor: cursor-centered title bar (legacy).
     //
-    // Anchor is in screen coords matching `screen_x/y` so it shares
-    // the same monitor DPI assumptions handled above.
+    // Position units (codex P1 PR #730 round 1): the anchor and
+    // screen_x/y arrive in the SAME unit as the legacy `screen_x -
+    // win_w / 2` math (the unit CEF reports for `window.screenX`).
+    // The inset constants (`FIRST_TAB_INSET_X`, `TAB_STRIP_TOP_OFFSET_PX`)
+    // are LOGICAL/DIP pixels, but they're SMALL (8 / 16) and the
+    // cold-path drag.rs uses them raw too — converting them here in
+    // ONE path would make the warm and cold paths land at different
+    // offsets on HiDPI. Keep both paths consistent by using the
+    // constants raw. The width/height conversion above is independent
+    // and addresses the SetWindowPos-wants-physical-pixels constraint
+    // for SIZE; that conversion stays.
     let (pos_x, pos_y) = match (tab_anchor_x, tab_anchor_y) {
         (Some(ax), Some(ay)) => (
-            (ax - to_physical(FIRST_TAB_INSET_X)).max(0),
-            (ay - to_physical(TAB_STRIP_TOP_OFFSET_PX)).max(0),
+            (ax - FIRST_TAB_INSET_X).max(0),
+            (ay - TAB_STRIP_TOP_OFFSET_PX).max(0),
         ),
         _ => (
             screen_x - win_w / 2,

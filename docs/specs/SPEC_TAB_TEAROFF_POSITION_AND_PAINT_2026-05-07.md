@@ -2,7 +2,7 @@
 
 **Created:** 2026-05-07
 **Owner:** AgentA
-**Status:** in progress (PR #728)
+**Status:** in progress (PR #730)
 **Predecessor:** [`SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`](./SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md), PR #727 (size match)
 
 ## 1. Problem
