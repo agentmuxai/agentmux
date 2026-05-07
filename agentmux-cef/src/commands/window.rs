@@ -208,6 +208,41 @@ pub fn move_window_by(state: &Arc<AppState>, args: &serde_json::Value) -> Result
     Ok(serde_json::Value::Null)
 }
 
+/// Move the window to an absolute screen position (x, y).
+/// Each call is self-contained — no read-modify-write — so concurrent in-flight
+/// calls are idempotent: the last write wins, which is exactly correct for drag.
+pub fn set_window_position(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        use windows_sys::Win32::Foundation::RECT;
+        let hwnd = find_own_top_level_window();
+        if !hwnd.is_null() {
+            let mut rect: RECT = std::mem::zeroed();
+            GetWindowRect(hwnd, &mut rect);
+            let width = rect.right - rect.left;
+            let height = rect.bottom - rect.top;
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                x,
+                y,
+                width,
+                height,
+                0x0014, // SWP_NOZORDER | SWP_NOSIZE
+            );
+            return Ok(serde_json::Value::Null);
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    crate::ui_tasks::post_set_window_position(state, "main", x, y);
+    let _ = state;
+    Ok(serde_json::Value::Null)
+}
+
 /// Initiate window drag (for frameless windows).
 /// Windows: sends WM_NCLBUTTONDOWN/HTCAPTION via Win32 — find_own_top_level_window
 /// resolves the per-process HWND so multi-window works without a label.
