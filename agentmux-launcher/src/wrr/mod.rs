@@ -443,10 +443,19 @@ pub fn apply_hwnd_position_changed(state: &mut State, hwnd: u64, new_rect: Rect)
     // Resolve the mirror: collect everything we need from a scoped
     // borrow, then release it before calling `state.bump_version()`
     // (rustc E0499 — same trick as `apply_hwnd_opened`).
+    //
+    // Storm-cap snapshot: capture the prior emit-flags so the gate
+    // logic below knows whether each side-effect has fired before.
+    // `apply_hwnd_position_changed` fires per WM_MOVE during a
+    // drag — without the caps, a window dragged across an off-
+    // monitor region storms the renderer with drift + corrective
+    // events.
     struct Resolved {
         label: String,
         off_monitor: bool,
         foregrounded_since_open: bool,
+        off_monitor_drift_emitted: bool,
+        corrective_window_move_emitted: bool,
     }
     let resolved: Option<Resolved> = state
         .windows
@@ -460,6 +469,8 @@ pub fn apply_hwnd_position_changed(state: &mut State, hwnd: u64, new_rect: Rect)
                 label: label.clone(),
                 off_monitor,
                 foregrounded_since_open: mirror.foregrounded_since_open,
+                off_monitor_drift_emitted: mirror.off_monitor_drift_emitted,
+                corrective_window_move_emitted: mirror.corrective_window_move_emitted,
             }
         });
 
@@ -472,8 +483,45 @@ pub fn apply_hwnd_position_changed(state: &mut State, hwnd: u64, new_rect: Rect)
     }
 
     // Window is off all monitors. Fire drift unless we're in the
-    // open-transient sentinel state (per above).
-    if !is_sentinel {
+    // open-transient sentinel state (per above) OR the cap has
+    // already fired for this window.
+    let mut fire_drift = false;
+    let mut fire_corrective = false;
+    if !is_sentinel && !r.off_monitor_drift_emitted {
+        fire_drift = true;
+    }
+
+    // Phase B.9.2 — pure-reducer self-heal. If the window has
+    // never been foregrounded, this off-monitor state is from the
+    // open transition (NOT user action), so we emit a corrective
+    // move. The host's WRR subscriber applies it via SetWindowPos
+    // on the UI thread. The Win32 hidden sentinel is INCLUDED in
+    // the corrective trigger (we always want to move a window off
+    // the sentinel before the user notices), even though it's
+    // suppressed for drift to avoid log noise.
+    //
+    // Compute the corrective target ONCE (reagent P2 PR #722 round 2)
+    // — used both as the gate for `fire_corrective` and as the
+    // event payload below.
+    let corrective_target = if !r.foregrounded_since_open && !r.corrective_window_move_emitted {
+        pick_primary_centered(&monitors)
+    } else {
+        None
+    };
+    if corrective_target.is_some() {
+        fire_corrective = true;
+    }
+
+    if fire_drift {
+        // Mark the cap before bumping the version so re-entrant
+        // event handlers see consistent state.
+        if let Some((_, mirror)) = state
+            .windows
+            .iter_mut()
+            .find(|(_, m)| m.hwnd == Some(hwnd))
+        {
+            mirror.off_monitor_drift_emitted = true;
+        }
         let v = state.bump_version();
         events.push(Event::HwndDriftDetected {
             kind: HwndDriftKind::OffMonitor,
@@ -489,24 +537,21 @@ pub fn apply_hwnd_position_changed(state: &mut State, hwnd: u64, new_rect: Rect)
         });
     }
 
-    // Phase B.9.2 — pure-reducer self-heal. If the window has
-    // never been foregrounded, this off-monitor state is from the
-    // open transition (NOT user action), so we emit a corrective
-    // move. The host's WRR subscriber applies it via SetWindowPos
-    // on the UI thread. The Win32 hidden sentinel is INCLUDED in
-    // the corrective trigger (we always want to move a window off
-    // the sentinel before the user notices), even though it's
-    // suppressed for drift to avoid log noise.
-    if !r.foregrounded_since_open {
-        if let Some(target) = pick_primary_centered(&monitors) {
-            let v = state.bump_version();
-            events.push(Event::CorrectiveWindowMove {
-                hwnd,
-                target_rect: target,
-                reason: HwndDriftKind::OffMonitor,
-                version: v,
-            });
+    if let Some(target) = corrective_target.filter(|_| fire_corrective) {
+        if let Some((_, mirror)) = state
+            .windows
+            .iter_mut()
+            .find(|(_, m)| m.hwnd == Some(hwnd))
+        {
+            mirror.corrective_window_move_emitted = true;
         }
+        let v = state.bump_version();
+        events.push(Event::CorrectiveWindowMove {
+            hwnd,
+            target_rect: target,
+            reason: HwndDriftKind::OffMonitor,
+            version: v,
+        });
     }
 
     events
@@ -563,10 +608,17 @@ pub fn apply_monitor_topology_changed(state: &mut State, rects: Vec<Rect>) -> Ve
         return vec![];
     }
     let mut events: Vec<Event> = Vec::new();
+    // Gate emission on `off_monitor_drift_emitted` (codex P2 PR
+    // #722 round 3): without this, repeated topology changes
+    // (display hot-plug or rapid resolution change) re-emit drift
+    // for the same stranded window every event.
     let stranded: Vec<(String, u64, Rect)> = state
         .windows
         .iter()
         .filter_map(|(label, mirror)| {
+            if mirror.off_monitor_drift_emitted {
+                return None;
+            }
             let r = mirror.last_rect?;
             let h = mirror.hwnd?;
             if rect::intersects_any(&r, &monitors) {
@@ -577,6 +629,13 @@ pub fn apply_monitor_topology_changed(state: &mut State, rects: Vec<Rect>) -> Ve
         })
         .collect();
     for (label, hwnd, rect) in stranded {
+        if let Some((_, mirror)) = state
+            .windows
+            .iter_mut()
+            .find(|(l, _)| **l == label)
+        {
+            mirror.off_monitor_drift_emitted = true;
+        }
         let v = state.bump_version();
         events.push(Event::HwndDriftDetected {
             kind: HwndDriftKind::OffMonitor,

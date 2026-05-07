@@ -132,11 +132,16 @@ pub(super) fn handle_report_window_opened(
     //   window per session. A duplicate open that resets this to
     //   false would re-arm the storm cap, then the next visibility
     //   transition fires HiddenSinceOpen a second time.
-    let (prior_foregrounded, prior_hidden_emitted) = state
+    let (prior_foregrounded, prior_hidden_emitted, prior_off_monitor_emitted, prior_corrective_emitted) = state
         .windows
         .get(&label)
-        .map(|m| (m.foregrounded_since_open, m.hidden_since_open_emitted))
-        .unwrap_or((false, false));
+        .map(|m| (
+            m.foregrounded_since_open,
+            m.hidden_since_open_emitted,
+            m.off_monitor_drift_emitted,
+            m.corrective_window_move_emitted,
+        ))
+        .unwrap_or((false, false, false, false));
 
     state.windows.insert(
         label.clone(),
@@ -156,6 +161,8 @@ pub(super) fn handle_report_window_opened(
             last_foreground_at_ms: None,
             foregrounded_since_open: was_just_promoted || prior_foregrounded,
             hidden_since_open_emitted: prior_hidden_emitted,
+            off_monitor_drift_emitted: prior_off_monitor_emitted,
+            corrective_window_move_emitted: prior_corrective_emitted,
         },
     );
     let mut out = Vec::with_capacity(2);
