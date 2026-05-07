@@ -336,6 +336,12 @@ pub fn tear_off_pool_promote(
         .get("height")
         .and_then(|v| v.as_f64())
         .map(|h| (h as i32).clamp(TEAROFF_MIN_DIM, TEAROFF_MAX_DIM));
+    // Optional tab anchor — the screen point where the user grabbed
+    // the tab. Backend positions the new window so its first tab lands
+    // at that point so the cursor stays on the same visual element
+    // across the handoff (Chrome-style no-teleport tear-off).
+    let tab_anchor_x = args.get("tabAnchorX").and_then(|v| v.as_f64()).map(|n| n as i32);
+    let tab_anchor_y = args.get("tabAnchorY").and_then(|v| v.as_f64()).map(|n| n as i32);
 
     match super::window_pool::promote_pool_window(
         state,
@@ -344,6 +350,8 @@ pub fn tear_off_pool_promote(
         screen_y,
         width,
         height,
+        tab_anchor_x,
+        tab_anchor_y,
     ) {
         Some(label) => Ok(serde_json::json!(label)),
         None => {
@@ -396,9 +404,23 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
         .map(|h| (h as i32).clamp(TEAROFF_MIN_DIM, TEAROFF_MAX_DIM))
         .unwrap_or(800);
 
-    // Position so cursor lands near top-center of title bar
-    let pos_x = ((screen_x - win_w as f64 / 2.0).max(0.0)) as i32;
-    let pos_y = ((screen_y - 16.0).max(0.0)) as i32;
+    // Optional tab anchor — see warm-pool path comment.
+    let tab_anchor_x = args.get("tabAnchorX").and_then(|v| v.as_f64()).map(|n| n as i32);
+    let tab_anchor_y = args.get("tabAnchorY").and_then(|v| v.as_f64()).map(|n| n as i32);
+
+    // Position the new window. With tab anchor: place so the first
+    // tab's top-left lands at the anchor (cursor stays on the grabbed
+    // pixel). Without: cursor-centered title bar (legacy behavior).
+    let (pos_x, pos_y) = match (tab_anchor_x, tab_anchor_y) {
+        (Some(ax), Some(ay)) => (
+            (ax - super::window_pool::FIRST_TAB_INSET_X).max(0),
+            (ay - super::window_pool::TAB_STRIP_TOP_OFFSET_PX).max(0),
+        ),
+        _ => (
+            ((screen_x - win_w as f64 / 2.0).max(0.0)) as i32,
+            ((screen_y - 16.0).max(0.0)) as i32,
+        ),
+    };
 
     tracing::info!(
         label = %label, pos_x = %pos_x, pos_y = %pos_y,

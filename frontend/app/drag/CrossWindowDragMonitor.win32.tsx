@@ -26,6 +26,7 @@ import { getLayoutModelForStaticTab, LayoutTreeActionType, LayoutTreeDeleteNodeA
 import { invokeCommand } from "@/app/platform/ipc";
 import { Logger } from "@/util/logger";
 import { openTearOffWindow } from "./tear-off-pool-helper";
+import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import type { LayoutNode } from "@/layout/lib/types";
@@ -240,7 +241,22 @@ async function performTearOff(
     } else if (dragType === "tab" && payload.tabId) {
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
         if (newWsId) {
-            await openTearOffWindow(api, newWsId, screenX, screenY, window.outerWidth, window.outerHeight);
+            // Tab anchor: convert grab-offset-in-tab to a screen point
+            // so the new window's first tab lands under the cursor at
+            // the same offset (no teleport on handoff).
+            const grabOffset = getTabGrabOffset();
+            const tabAnchorX = grabOffset ? screenX - grabOffset.x : undefined;
+            const tabAnchorY = grabOffset ? screenY - grabOffset.y : undefined;
+            await openTearOffWindow(
+                api,
+                newWsId,
+                screenX,
+                screenY,
+                window.outerWidth,
+                window.outerHeight,
+                tabAnchorX,
+                tabAnchorY,
+            );
         }
     }
 }

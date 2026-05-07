@@ -12,6 +12,7 @@ import { atoms, getApi } from "@/store/global";
 import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
 import { openTearOffWindow } from "./tear-off-pool-helper";
+import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { invokeCommand } from "@/app/platform/ipc";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
@@ -136,7 +137,21 @@ async function performTearOff(
         if (newWsId) await openTearOffWindow(api, newWsId, screenX, screenY, window.outerWidth, window.outerHeight);
     } else if (dragType === "tab" && payload.tabId) {
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
-        if (newWsId) await openTearOffWindow(api, newWsId, screenX, screenY, window.outerWidth, window.outerHeight);
+        if (newWsId) {
+            const grabOffset = getTabGrabOffset();
+            const tabAnchorX = grabOffset ? screenX - grabOffset.x : undefined;
+            const tabAnchorY = grabOffset ? screenY - grabOffset.y : undefined;
+            await openTearOffWindow(
+                api,
+                newWsId,
+                screenX,
+                screenY,
+                window.outerWidth,
+                window.outerHeight,
+                tabAnchorX,
+                tabAnchorY,
+            );
+        }
     }
 }
 
