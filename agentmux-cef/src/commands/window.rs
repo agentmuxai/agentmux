@@ -419,17 +419,6 @@ pub fn list_window_instances(state: &Arc<AppState>) -> serde_json::Value {
         .map(|(l, _)| l)
         .filter(|l| !pool_labels.contains(l.as_str()) && !l.starts_with("browser-pane-"))
         .collect();
-    // Diagnostic for the v0.33.704 InstancePanel-shows-ghost-window
-    // bug. If labels.len() differs from the user's actual window
-    // count, this log identifies the ghost. Remove after RCA.
-    tracing::info!(
-        target: "window_instances",
-        count = labels.len(),
-        labels = ?labels,
-        pool_labels = ?pool_labels,
-        "[list_window_instances] returning {} labels: {:?}",
-        labels.len(), labels
-    );
     // Read backend window IDs via `state.backend_window_id()`,
     // which queries the launcher-fed `shadow_backend_window_ids`
     // (sole source of truth post-B.5e). Resolve labels OUTSIDE
