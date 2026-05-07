@@ -121,6 +121,19 @@ pub struct WindowMirror {
     /// since its `ReportWindowOpened`? Used to fire `HiddenSinceOpen`
     /// drift on the first hide event when this is still false.
     pub foregrounded_since_open: bool,
+    /// Drift-storm fix (post-PR-#720 follow-up): `HiddenSinceOpen`
+    /// drift only fires ONCE per window per session. Without this
+    /// cap, a fresh top-level window that goes through several
+    /// SetWindowPos transitions during host placement re-emits the
+    /// same drift event for every intermediate `visible=false`
+    /// snapshot — observed up to 170 events in 1 second, exhausting
+    /// the renderer's V8 stack and crashing it. Cap fires once,
+    /// subscribers still see the signal, no storm.
+    /// See `docs/specs/ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`
+    /// for the original storm context (this is the second instance
+    /// — pool-promote path was caught in PR #708, direct-open path
+    /// in this PR).
+    pub hidden_since_open_emitted: bool,
 }
 
 /// Top-level launcher state. Single Arc<Mutex<State>> owned by the

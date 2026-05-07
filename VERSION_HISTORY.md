@@ -2,7 +2,7 @@
 
 This document tracks the version history of AgentMux (forked from waveterm).
 
-## Latest Version: 0.33.685
+## Latest Version: 0.33.687
 
 **Base:** Upstream waveterm v0.12.0 + extensive custom features
 
@@ -14,6 +14,7 @@ Auto-appended by `scripts/package-cef-portable.sh`. Newest first.
 
 | Version | Date | ZIP (compressed) | Folder (uncompressed) | Note |
 |---------|------|------------------|-----------------------|------|
+| 0.33.685 | 2026-05-06 | 162.2 MiB | 340.0 MiB | |
 | 0.33.680 | 2026-05-06 | 162.2 MiB | 340.0 MiB | |
 | 0.33.660 | 2026-05-06 | 162.2 MiB | 340.0 MiB | |
 | 0.33.655 | 2026-05-06 | 162.2 MiB | 340.0 MiB | |
