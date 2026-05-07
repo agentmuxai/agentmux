@@ -6,9 +6,8 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { IconButton } from "@/app/element/iconbutton";
 import { TableBlock } from "@/app/element/table-block";
-import { ALIGN_CLASS_REGEX, rehypeAlignToClass } from "@/app/element/rehype-align-to-class";
+import { rehypeAlignToClass } from "@/app/element/rehype-align-to-class";
 import { cn, useAtomValueSafe } from "@/util/util";
-import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createEffect, createMemo, createSignal, JSX, onCleanup, Show } from "solid-js";
 import { Streamdown as StreamdownReact, defaultRehypePlugins } from "streamdown";
 // Cast to any so SolidJS JSX doesn't complain about React component type
@@ -324,27 +323,15 @@ export const WaveStreamdown = (props: WaveStreamdownProps): JSX.Element => {
                 )}
                 shikiTheme={[ShikiTheme, ShikiTheme]}
                 rehypePlugins={[
-                    defaultRehypePlugins.raw,
-                    defaultRehypePlugins.katex,
+                    // Keep streamdown's full default pipeline (raw, katex,
+                    // sanitize, harden) UNTOUCHED so KaTeX/MathML output is
+                    // not affected. Append rehypeAlignToClass AFTER sanitize
+                    // — `align` is in hast-util-sanitize's default global
+                    // allowlist (see `attributes['*']`), so it survives the
+                    // sanitize step, and our plugin then converts it to a
+                    // className that the th/td renderers below pick up.
+                    ...Object.values(defaultRehypePlugins),
                     rehypeAlignToClass,
-                    [
-                        rehypeSanitize,
-                        {
-                            ...defaultSchema,
-                            attributes: {
-                                ...defaultSchema.attributes,
-                                th: [
-                                    ...(defaultSchema.attributes?.th || []),
-                                    ["className", ALIGN_CLASS_REGEX],
-                                ],
-                                td: [
-                                    ...(defaultSchema.attributes?.td || []),
-                                    ["className", ALIGN_CLASS_REGEX],
-                                ],
-                            },
-                        },
-                    ],
-                    defaultRehypePlugins.harden,
                 ]}
                 controls={{
                     code: false,
