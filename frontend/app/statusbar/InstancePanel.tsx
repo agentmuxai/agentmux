@@ -16,7 +16,7 @@
  */
 
 import { getApi, openWindowEntriesAtom, type WindowEntry } from "@/store/global";
-import { seedKnownEntriesFromSnapshot } from "@/app/store/launcher-event-reducer";
+import { reconcileKnownEntriesFromSnapshot } from "@/app/store/launcher-event-reducer";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ObjectService } from "@/store/services";
@@ -56,19 +56,18 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     const [myLabel, setMyLabel] = createSignal<string | null>(null);
     getApi().getWindowLabel().then((l) => setMyLabel(l)).catch(() => setMyLabel(null));
 
-    // Refresh window-instance seed each time the panel mounts. In
-    // production the launcher pushes WindowOpened/Closed events to all
-    // renderers and `openWindowEntriesAtom` stays in sync. In `task dev`
-    // mode there's no launcher, so each window only knows the snapshot
-    // it was seeded with at boot — windows opened later don't appear,
-    // closed ones aren't removed. Re-querying `listWindowInstances`
-    // every time the user opens the panel papers over this for dev
-    // mode without changing prod behavior (events also arriving will
-    // overwrite the seed shortly after).
+    // Refresh window-instance state each time the panel mounts. In
+    // production the launcher pushes WindowOpened/Closed events and
+    // `openWindowEntriesAtom` stays in sync; in `task dev` there's no
+    // launcher and each window stays stuck on its boot snapshot.
+    //
+    // Uses the RECONCILE path (replaces wholesale) rather than the
+    // additive seed: closed-but-still-tracked windows must actually
+    // disappear from the panel (codex P3 PR #732).
     getApi()
         .listWindowInstances()
         .then((snapshot) => {
-            seedKnownEntriesFromSnapshot(snapshot);
+            reconcileKnownEntriesFromSnapshot(snapshot);
         })
         .catch(() => {});
 
