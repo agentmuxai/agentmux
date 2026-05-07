@@ -17,6 +17,7 @@
 
 import { getApi, openWindowEntriesAtom, type WindowEntry } from "@/store/global";
 import { reconcileKnownEntriesFromSnapshot } from "@/app/store/launcher-event-reducer";
+import { launcherEventsActive } from "@/util/launcher-events";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ObjectService } from "@/store/services";
@@ -56,20 +57,26 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     const [myLabel, setMyLabel] = createSignal<string | null>(null);
     getApi().getWindowLabel().then((l) => setMyLabel(l)).catch(() => setMyLabel(null));
 
-    // Refresh window-instance state each time the panel mounts. In
+    // Refresh window-instance state ONLY when the launcher is silent
+    // (`task dev` mode — no launcher process, no typed events). In
     // production the launcher pushes WindowOpened/Closed events and
-    // `openWindowEntriesAtom` stays in sync; in `task dev` there's no
-    // launcher and each window stays stuck on its boot snapshot.
+    // `openWindowEntriesAtom` stays in sync; reconciling against a
+    // stale `listWindowInstances()` snapshot would clobber a newer
+    // launcher event the renderer just applied — same race protection
+    // that motivates ApplySeed at boot (codex P2 PR #733).
     //
-    // Uses the RECONCILE path (replaces wholesale) rather than the
-    // additive seed: closed-but-still-tracked windows must actually
-    // disappear from the panel (codex P3 PR #732).
-    getApi()
-        .listWindowInstances()
-        .then((snapshot) => {
-            reconcileKnownEntriesFromSnapshot(snapshot);
-        })
-        .catch(() => {});
+    // `launcherEventsActive` flips true on the first typed event the
+    // renderer receives; if false here, we're in dev mode and the
+    // reconcile is the only way windows opened/closed since boot will
+    // appear/disappear in the panel.
+    if (!launcherEventsActive()) {
+        getApi()
+            .listWindowInstances()
+            .then((snapshot) => {
+                reconcileKnownEntriesFromSnapshot(snapshot);
+            })
+            .catch(() => {});
+    }
 
     // Rename mode state — keyed by host label so the row's identity
     // survives entries() reordering. Single rename at a time.
