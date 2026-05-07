@@ -499,10 +499,17 @@ pub fn apply_hwnd_position_changed(state: &mut State, hwnd: u64, new_rect: Rect)
     // the corrective trigger (we always want to move a window off
     // the sentinel before the user notices), even though it's
     // suppressed for drift to avoid log noise.
-    if !r.foregrounded_since_open && !r.corrective_window_move_emitted {
-        if pick_primary_centered(&monitors).is_some() {
-            fire_corrective = true;
-        }
+    //
+    // Compute the corrective target ONCE (reagent P2 PR #722 round 2)
+    // — used both as the gate for `fire_corrective` and as the
+    // event payload below.
+    let corrective_target = if !r.foregrounded_since_open && !r.corrective_window_move_emitted {
+        pick_primary_centered(&monitors)
+    } else {
+        None
+    };
+    if corrective_target.is_some() {
+        fire_corrective = true;
     }
 
     if fire_drift {
@@ -530,23 +537,21 @@ pub fn apply_hwnd_position_changed(state: &mut State, hwnd: u64, new_rect: Rect)
         });
     }
 
-    if fire_corrective {
-        if let Some(target) = pick_primary_centered(&monitors) {
-            if let Some((_, mirror)) = state
-                .windows
-                .iter_mut()
-                .find(|(_, m)| m.hwnd == Some(hwnd))
-            {
-                mirror.corrective_window_move_emitted = true;
-            }
-            let v = state.bump_version();
-            events.push(Event::CorrectiveWindowMove {
-                hwnd,
-                target_rect: target,
-                reason: HwndDriftKind::OffMonitor,
-                version: v,
-            });
+    if let Some(target) = corrective_target.filter(|_| fire_corrective) {
+        if let Some((_, mirror)) = state
+            .windows
+            .iter_mut()
+            .find(|(_, m)| m.hwnd == Some(hwnd))
+        {
+            mirror.corrective_window_move_emitted = true;
         }
+        let v = state.bump_version();
+        events.push(Event::CorrectiveWindowMove {
+            hwnd,
+            target_rect: target,
+            reason: HwndDriftKind::OffMonitor,
+            version: v,
+        });
     }
 
     events

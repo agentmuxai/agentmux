@@ -530,7 +530,7 @@ pub struct AppState {
     /// Bounded at 4096 keys with FIFO eviction (insertion order). A
     /// re-arrival for an evicted key bypasses dedup once but the
     /// renderer guard still catches it.
-    pub launcher_bridge_dedup: Mutex<std::collections::HashMap<String, u64>>,
+    pub launcher_bridge_dedup: Mutex<crate::launcher_event_bridge::DedupCache>,
 
     /// Linux/macOS only — registry of live top-level `CefWindow` handles,
     /// keyed by window label ("main" for the primary, otherwise the label
@@ -660,7 +660,7 @@ impl Default for AppState {
             // browsers field removed in H.2.e — see comment near struct decl.
             window_meta: Mutex::new(HashMap::new()),
             host_state: Mutex::new(crate::reducer::HostState::default()),
-            launcher_bridge_dedup: Mutex::new(std::collections::HashMap::new()),
+            launcher_bridge_dedup: Mutex::new(crate::launcher_event_bridge::DedupCache::new()),
             #[cfg(not(target_os = "windows"))]
             windows: Mutex::new(HashMap::new()),
             #[cfg(not(target_os = "windows"))]

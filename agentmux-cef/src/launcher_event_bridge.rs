@@ -21,10 +21,80 @@
 //
 // See `docs/specs/SPEC_B_7_3_LAUNCHER_EVENTS_TO_RENDERER_2026_04_29.md`.
 
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use agentmux_common::ipc::Event;
 use cef::{CefString, ImplBrowser, ImplFrame};
+
+/// Phase F.7 host-bridge dedup cache. Bounded FIFO map keyed by
+/// `"{event_kind}|{label}|{hwnd}"` → max version dispatched.
+///
+/// FIFO insertion order is tracked explicitly via `insertion_order`
+/// because std `HashMap::keys().next()` iteration order is undefined
+/// per-rebuild — the previous implementation could evict the
+/// just-inserted key (reagent P1 PR #722 round 1).
+///
+/// Reset on launcher restart sentinel (codex P1 PR #722 round 1):
+/// when the launcher's `event_version` resets to 1, any cached key
+/// holding a higher version blocks the v=1 event. Mirror the
+/// renderer-side guard's heuristic — clear the cache when we see a
+/// v=1 event AND any cached entry has a version > 0.
+#[derive(Default)]
+pub struct DedupCache {
+    seen: HashMap<String, u64>,
+    insertion_order: VecDeque<String>,
+}
+
+impl DedupCache {
+    pub fn new() -> Self {
+        Self {
+            seen: HashMap::new(),
+            insertion_order: VecDeque::new(),
+        }
+    }
+
+    /// Returns true if the event should be dispatched (strictly newer
+    /// for its key). Updates the cache as a side-effect when admitted.
+    /// Bounded at `cap`; on overflow, evicts the oldest insertion in
+    /// FIFO order.
+    pub fn check_and_record(&mut self, key: String, version: u64, cap: usize) -> bool {
+        if let Some(&seen) = self.seen.get(&key) {
+            if version <= seen {
+                return false;
+            }
+            // Update existing entry — don't reorder for this case;
+            // FIFO ordering is "first inserted, first evicted" not
+            // "least recently used".
+            self.seen.insert(key, version);
+            return true;
+        }
+        self.seen.insert(key.clone(), version);
+        self.insertion_order.push_back(key);
+        if self.seen.len() > cap {
+            if let Some(victim) = self.insertion_order.pop_front() {
+                self.seen.remove(&victim);
+            }
+        }
+        true
+    }
+
+    /// Clear the cache. Called on launcher-restart sentinel.
+    pub fn clear(&mut self) {
+        self.seen.clear();
+        self.insertion_order.clear();
+    }
+
+    /// True if any cached entry has a version above 0 — used as the
+    /// guard for the v=1 restart sentinel.
+    pub fn has_any_versioned_entry(&self) -> bool {
+        self.seen.values().any(|&v| v > 0)
+    }
+
+    pub fn len(&self) -> usize {
+        self.seen.len()
+    }
+}
 
 /// Forward a launcher event to every top-level renderer.
 ///
@@ -107,71 +177,81 @@ pub fn dispatch_to_renderers(state: &Arc<crate::state::AppState>, event: &Event)
 }
 
 /// Phase F.7 dedup gate. Returns `true` if the event is strictly
-/// newer for its `(event_kind, label, hwnd)` key and should be
-/// dispatched; `false` if a higher-or-equal version was already
-/// sent.
+/// newer for its key and should be dispatched; `false` if a
+/// higher-or-equal version was already sent.
 ///
 /// Mirrors the renderer-side `shouldDispatchLauncherEvent`. Bounded
 /// at 4096 keys with FIFO eviction so a long-running host can't
 /// leak unbounded state. Re-arrival of an evicted key bypasses the
 /// host gate but the renderer guard still catches it.
+///
+/// Restart sentinel (codex P1 PR #722 round 1): clear the cache
+/// when the launcher's event_version resets to 1 and any cached
+/// entry holds a higher version. Mirrors the renderer guard.
 fn should_dispatch(state: &Arc<crate::state::AppState>, event: &Event) -> bool {
     const MAX_DEDUP_KEYS: usize = 4096;
     let (key, version) = dedup_key(event);
     let mut cache = state.launcher_bridge_dedup.lock();
-    if let Some(&seen) = cache.get(&key) {
-        if version <= seen {
-            return false;
-        }
+    if version == 1 && cache.has_any_versioned_entry() {
+        cache.clear();
     }
-    cache.insert(key, version);
-    if cache.len() > MAX_DEDUP_KEYS {
-        // FIFO eviction — drop the first key by iteration order. Map
-        // iteration order isn't strictly insertion in std HashMap, but
-        // for this bounded-leak guard any victim is fine.
-        if let Some(victim) = cache.keys().next().cloned() {
-            cache.remove(&victim);
-        }
-    }
-    true
+    cache.check_and_record(key, version, MAX_DEDUP_KEYS)
 }
 
 /// Build the dedup cache key + extract the version for an event.
-/// Returns `("{kind}|{label}|{hwnd}", version)`. Missing label/hwnd
-/// fields contribute empty strings — kinds without those fields
-/// dedup by kind+version alone.
+/// Returns `("{kind}|{label}|{hwnd}", version)`.
+///
+/// `kind` for `HwndDriftDetected` is `"hwnd_drift_detected:{drift_kind}"`
+/// so HiddenSinceOpen and OffMonitor for the same `(label, hwnd)`
+/// don't collide (reagent P2 PR #722 round 2).
+///
+/// Unhandled variants are tagged with their serde discriminant
+/// (the `event` field of the JSON tagged-union) so different
+/// variants don't share the same `__catchall__` key (reagent P1
+/// PR #722 round 1).
 fn dedup_key(event: &Event) -> (String, u64) {
     use Event::*;
     let (kind, label, hwnd, version) = match event {
-        WindowOpened { label, version, .. } => ("window_opened", label.as_str(), 0u64, *version),
-        WindowClosed { label, version, .. } => ("window_closed", label.as_str(), 0, *version),
-        WindowInstanceAssigned { label, version, .. } => ("window_instance_assigned", label.as_str(), 0, *version),
-        WindowInstanceReleased { label, version, .. } => ("window_instance_released", label.as_str(), 0, *version),
-        BackendWindowIdRegistered { label, version, .. } => ("backend_window_id_registered", label.as_str(), 0, *version),
-        BackendWindowIdUnregistered { label, version, .. } => ("backend_window_id_unregistered", label.as_str(), 0, *version),
-        PoolWindowAdded { label, version, .. } => ("pool_window_added", label.as_str(), 0, *version),
-        PoolWindowRemoved { label, version, .. } => ("pool_window_removed", label.as_str(), 0, *version),
-        PoolWindowPromoted { label, version, .. } => ("pool_window_promoted", label.as_str(), 0, *version),
-        HwndDriftDetected { kind: _, label, hwnd, version, .. } => (
-            "hwnd_drift_detected",
+        WindowOpened { label, version, .. } => ("window_opened".to_string(), label.as_str(), 0u64, *version),
+        WindowClosed { label, version, .. } => ("window_closed".to_string(), label.as_str(), 0, *version),
+        WindowInstanceAssigned { label, version, .. } => ("window_instance_assigned".to_string(), label.as_str(), 0, *version),
+        WindowInstanceReleased { label, version, .. } => ("window_instance_released".to_string(), label.as_str(), 0, *version),
+        BackendWindowIdRegistered { label, version, .. } => ("backend_window_id_registered".to_string(), label.as_str(), 0, *version),
+        BackendWindowIdUnregistered { label, version, .. } => ("backend_window_id_unregistered".to_string(), label.as_str(), 0, *version),
+        PoolWindowAdded { label, version, .. } => ("pool_window_added".to_string(), label.as_str(), 0, *version),
+        PoolWindowRemoved { label, version, .. } => ("pool_window_removed".to_string(), label.as_str(), 0, *version),
+        PoolWindowPromoted { label, version, .. } => ("pool_window_promoted".to_string(), label.as_str(), 0, *version),
+        HwndDriftDetected { kind: drift_kind, label, hwnd, version, .. } => (
+            format!("hwnd_drift_detected:{:?}", drift_kind),
             label.as_deref().unwrap_or(""),
             hwnd.unwrap_or(0),
             *version,
         ),
-        DriftDetected { version, .. } => ("drift_detected", "", 0, *version),
-        CorrectiveWindowMove { hwnd, version, .. } => ("corrective_window_move", "", *hwnd, *version),
-        HostShouldQuit { version, .. } => ("host_should_quit", "", 0, *version),
-        // Conservative: events without obvious dedup keys still
-        // benefit from the cap. Use the variant name + version with
-        // empty label/hwnd; same-version duplicates drop.
+        DriftDetected { kind: drift_kind, version, .. } => (
+            format!("drift_detected:{:?}", drift_kind),
+            "",
+            0,
+            *version,
+        ),
+        CorrectiveWindowMove { hwnd, version, .. } => ("corrective_window_move".to_string(), "", *hwnd, *version),
+        HostShouldQuit { version, .. } => ("host_should_quit".to_string(), "", 0, *version),
+        // Catchall: extract the serde discriminant ("event" tag in
+        // the JSON tagged-union) so different unhandled variants
+        // don't collide on the same `__catchall__` key.
         other => {
-            let v = match serde_json::to_value(other).ok().and_then(|v| {
-                v.get("version").and_then(|x| x.as_u64())
-            }) {
-                Some(v) => v,
-                None => 0,
-            };
-            ("__catchall__", "", 0, v)
+            let value = serde_json::to_value(other).ok();
+            let event_tag = value
+                .as_ref()
+                .and_then(|v| v.get("event"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("__unknown__")
+                .to_string();
+            let v = value
+                .as_ref()
+                .and_then(|v| v.get("version"))
+                .and_then(|x| x.as_u64())
+                .unwrap_or(0);
+            (event_tag, "", 0, v)
         }
     };
     (format!("{}|{}|{}", kind, label, hwnd), version)
@@ -298,5 +378,120 @@ mod bridge_dedup_tests {
             }
         ));
         assert!(should_dispatch(&state, &drift_event(10, label, 100)));
+    }
+
+    #[test]
+    fn distinct_drift_kinds_dont_collide() {
+        // Reagent P2 PR #722 round 2: HwndDriftDetected key must
+        // include the drift kind, otherwise HiddenSinceOpen and
+        // OffMonitor for the same (label, hwnd) collide.
+        let state = fresh_state();
+        let label = "window-x";
+        let hwnd = 100u64;
+        let hidden = Event::HwndDriftDetected {
+            kind: HwndDriftKind::HiddenSinceOpen,
+            label: Some(label.to_string()),
+            hwnd: Some(hwnd),
+            detail: "h".into(),
+            severity: Severity::Warn,
+            version: 10,
+        };
+        let off = Event::HwndDriftDetected {
+            kind: HwndDriftKind::OffMonitor,
+            label: Some(label.to_string()),
+            hwnd: Some(hwnd),
+            detail: "o".into(),
+            severity: Severity::Warn,
+            version: 10,
+        };
+        assert!(should_dispatch(&state, &hidden));
+        assert!(
+            should_dispatch(&state, &off),
+            "different drift kinds at same (label, hwnd, version) must NOT collide"
+        );
+    }
+
+    #[test]
+    fn launcher_restart_sentinel_clears_cache() {
+        // Codex P1 PR #722 round 1: when launcher restarts and
+        // event_version resets to 1, prior cached entries with
+        // higher versions block the v=1 sentinel and subsequent
+        // low-version events. Cache must clear on the sentinel.
+        let state = fresh_state();
+        // Establish some prior-incarnation cache entries.
+        assert!(should_dispatch(&state, &drift_event(10, "window-a", 100)));
+        assert!(should_dispatch(&state, &drift_event(15, "window-b", 200)));
+        assert!(state.launcher_bridge_dedup.lock().has_any_versioned_entry());
+
+        // Launcher restarts: emits v=1 for some new window. Without
+        // the cache reset, the v=1 wouldn't necessarily collide
+        // (different label) but SUBSEQUENT low-version events for
+        // pre-existing labels would block. The reset is keyed off
+        // "v=1 with prior versions cached" — fires once, clears all.
+        let sentinel = Event::WindowOpened {
+            label: "main".into(),
+            kind: agentmux_common::ipc::WindowKind::FullInstance,
+            parent_label: None,
+            version: 1,
+        };
+        assert!(should_dispatch(&state, &sentinel));
+        // Cache should now contain only the sentinel + nothing else.
+        assert_eq!(
+            state.launcher_bridge_dedup.lock().len(),
+            1,
+            "restart sentinel clears cache before recording new entry"
+        );
+
+        // Subsequent low-version events for the same key must admit
+        // (cache no longer holds the stale higher version).
+        assert!(should_dispatch(
+            &state,
+            &Event::WindowOpened {
+                label: "window-a".into(),
+                kind: agentmux_common::ipc::WindowKind::FullInstance,
+                parent_label: None,
+                version: 2,
+            }
+        ));
+    }
+
+    #[test]
+    fn cold_v1_event_into_empty_cache_admits() {
+        // Anti-vacuity guard: a cold v=1 event with no prior cache
+        // is the first event of a fresh launcher and admits cleanly.
+        // The sentinel logic only fires when v=1 arrives WITH a
+        // pre-existing cache entry (renderer-side mirror), so a
+        // truly-empty-cache v=1 just admits without ceremony.
+        let state = fresh_state();
+        let evt = Event::WindowOpened {
+            label: "main".into(),
+            kind: agentmux_common::ipc::WindowKind::FullInstance,
+            parent_label: None,
+            version: 1,
+        };
+        assert!(should_dispatch(&state, &evt));
+        assert_eq!(state.launcher_bridge_dedup.lock().len(), 1);
+    }
+
+    #[test]
+    fn fifo_eviction_drops_oldest_not_newest() {
+        // Reagent P1 PR #722 round 1: HashMap iteration order is
+        // not insertion order, so the previous implementation could
+        // evict the just-inserted key. Now: VecDeque tracks insert
+        // order; pop_front drops the oldest.
+        let state = fresh_state();
+        // Fill cache with 5000 unique keys.
+        for i in 0..5000 {
+            let label = format!("window-{}", i);
+            assert!(should_dispatch(&state, &drift_event(1, &label, i as u64)));
+        }
+        let cache = state.launcher_bridge_dedup.lock();
+        assert!(cache.len() <= 4096, "cache bounded at 4096");
+        // First 904 keys (5000 - 4096) should have been evicted.
+        // Verify a few from the start are gone:
+        assert!(!cache.seen.contains_key("hwnd_drift_detected:HiddenSinceOpen|window-0|0"));
+        assert!(!cache.seen.contains_key("hwnd_drift_detected:HiddenSinceOpen|window-100|100"));
+        // Verify recent keys are retained:
+        assert!(cache.seen.contains_key("hwnd_drift_detected:HiddenSinceOpen|window-4999|4999"));
     }
 }
