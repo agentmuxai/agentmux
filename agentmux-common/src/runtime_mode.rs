@@ -106,6 +106,22 @@ impl RuntimeMode {
             .and_then(|s| parse_mode_string(&s))
     }
 
+    /// Path-only detection — skips the `AGENTMUX_RUNTIME_MODE` env step.
+    /// Use when the env can't be trusted (e.g., the binary was launched
+    /// as a child of a different AgentMux process that set its own
+    /// `AGENTMUX_*` vars). Mirrors the rest of [`Self::current`]'s
+    /// priority order (portable marker → dev exe path → installed).
+    pub fn current_path_only(exe_dir: &Path) -> Self {
+        if is_portable_marker_present(exe_dir) {
+            return Self::Portable;
+        }
+        if exe_dir_is_dev_build(exe_dir) {
+            let branch = detect_branch(exe_dir);
+            return Self::Dev { branch };
+        }
+        Self::Installed
+    }
+
     /// Encode for the `AGENTMUX_RUNTIME_MODE` env var. Round-trips
     /// with [`parse_mode_string`].
     pub fn to_env_string(&self) -> String {
@@ -134,6 +150,14 @@ impl RuntimeMode {
             Self::Dev { branch } => format!("dev/{}", sanitize_branch_slug(branch)),
         }
     }
+}
+
+/// True when this binary is running from one of our known dev-build
+/// output directories (`dist/cef-dev/`, `target/debug/`, `target/release/`).
+/// Walks ancestors to handle nested cases (CEF subprocesses run from a
+/// `runtime/` subdir even in dev). Path-only — does not read env.
+pub fn is_dev_build_exe(exe_dir: &Path) -> bool {
+    exe_dir_is_dev_build(exe_dir)
 }
 
 fn parse_mode_string(s: &str) -> Option<RuntimeMode> {

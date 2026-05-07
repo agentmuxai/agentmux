@@ -119,20 +119,29 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     //      used, so the disk layout is identical. This is functionally
     //      a fallback the launcher would otherwise have produced.
     let current_version = env!("CARGO_PKG_VERSION");
-    let paths = match agentmux_common::DataPaths::from_env() {
-        Some(p) => p,
-        None => {
-            // No launcher env — derive from the host's own vantage.
-            // Mode detection works at this point even though the host
-            // exe lives inside `runtime/`, because portable detection
-            // uses the `agentmux-portable.marker` (not `runtime/`).
-            let host_exe_dir = std::env::current_exe()
-                .map_err(|e| format!("current_exe() failed: {}", e))?;
-            let host_exe_dir = host_exe_dir
-                .parent()
-                .ok_or_else(|| "current_exe has no parent".to_string())?;
-            let mode = agentmux_common::RuntimeMode::current(host_exe_dir);
-            agentmux_common::DataPaths::resolve(current_version, &mode)?
+    // Mirror the env-isolation guard from main.rs: a dev build never
+    // trusts inherited AGENTMUX_* env, even on the restart_backend path
+    // where main.rs has already resolved paths once. Otherwise the
+    // sidecar would re-spawn against a stale parent's data dir.
+    let host_exe_dir = std::env::current_exe()
+        .map_err(|e| format!("current_exe() failed: {}", e))?;
+    let host_exe_dir = host_exe_dir
+        .parent()
+        .ok_or_else(|| "current_exe has no parent".to_string())?;
+    let paths = if agentmux_common::is_dev_build_exe(host_exe_dir) {
+        let mode = agentmux_common::RuntimeMode::current_path_only(host_exe_dir);
+        agentmux_common::DataPaths::resolve(current_version, &mode)?
+    } else {
+        match agentmux_common::DataPaths::from_env() {
+            Some(p) => p,
+            None => {
+                // No launcher env — derive from the host's own vantage.
+                // Mode detection works at this point even though the host
+                // exe lives inside `runtime/`, because portable detection
+                // uses the `agentmux-portable.marker` (not `runtime/`).
+                let mode = agentmux_common::RuntimeMode::current(host_exe_dir);
+                agentmux_common::DataPaths::resolve(current_version, &mode)?
+            }
         }
     };
     let version_instance_id = format!("v{}", current_version);
