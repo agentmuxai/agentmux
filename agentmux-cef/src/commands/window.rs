@@ -459,29 +459,17 @@ pub fn list_windows(state: &Arc<AppState>) -> serde_json::Value {
 }
 
 /// Focus a specific window by label.
+///
+/// Uses the CEF Views `Window::activate()` API on all platforms (via
+/// `post_focus_window` → `FocusWindowTask`). On Windows in Views mode,
+/// `browser.host().window_handle()` returns NULL — the legacy direct
+/// SetForegroundWindow path silently failed. Views' `activate()` calls
+/// SetForegroundWindow internally on the actual top-level HWND
+/// resolved through `browser_view_get_for_browser → window()`, which
+/// is the only correct way to get the HWND in Views mode.
 pub fn focus_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
-
-    #[cfg(target_os = "windows")]
-    {
-        // Phase H.2.b — reducer-aware lookup with fallback.
-        if let Some(browser) = state.get_browser(label) {
-            if let Some(host) = browser.host() {
-                let hwnd = host.window_handle();
-                if !hwnd.0.is_null() {
-                    unsafe {
-                        windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(
-                            hwnd.0 as *mut std::ffi::c_void,
-                        );
-                    }
-                    return Ok(serde_json::Value::Null);
-                }
-            }
-        }
-    }
-    #[cfg(not(target_os = "windows"))]
     crate::ui_tasks::post_focus_window(state, label);
-    let _ = (state, label);
     Ok(serde_json::Value::Null)
 }
 

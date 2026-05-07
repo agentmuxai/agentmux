@@ -16,6 +16,8 @@
  */
 
 import { getApi, openWindowEntriesAtom, type WindowEntry } from "@/store/global";
+import { reconcileKnownEntriesFromSnapshot } from "@/app/store/launcher-event-reducer";
+import { launcherEventsActive } from "@/util/launcher-events";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ObjectService } from "@/store/services";
@@ -54,6 +56,33 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     const entries = openWindowEntriesAtom;
     const [myLabel, setMyLabel] = createSignal<string | null>(null);
     getApi().getWindowLabel().then((l) => setMyLabel(l)).catch(() => setMyLabel(null));
+
+    // Refresh window-instance state ONLY when the launcher is silent
+    // (`task dev` mode — no launcher process, no typed events). In
+    // production the launcher pushes WindowOpened/Closed events and
+    // `openWindowEntriesAtom` stays in sync; reconciling against a
+    // stale `listWindowInstances()` snapshot would clobber a newer
+    // launcher event the renderer just applied — same race protection
+    // that motivates ApplySeed at boot (codex P2 PR #733).
+    //
+    // `launcherEventsActive` flips true on the first typed event the
+    // renderer receives; if false here, we're in dev mode and the
+    // reconcile is the only way windows opened/closed since boot will
+    // appear/disappear in the panel.
+    if (!launcherEventsActive()) {
+        getApi()
+            .listWindowInstances()
+            .then((snapshot) => {
+                // Re-check at resolution time. Between the sync gate
+                // above and the snapshot arriving (~ms RPC round-trip),
+                // a launcher event may have flipped launcherEventsActive
+                // true — applying the now-stale snapshot would clobber
+                // that newer state (codex P1 PR #733 round 2).
+                if (launcherEventsActive()) return;
+                reconcileKnownEntriesFromSnapshot(snapshot);
+            })
+            .catch(() => {});
+    }
 
     // Rename mode state — keyed by host label so the row's identity
     // survives entries() reordering. Single rename at a time.
@@ -257,25 +286,20 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                         e.stopPropagation();
                                         return;
                                     }
-                                    // If a focus was pending on THIS row, this is
-                                    // the second click of a dblclick — let dblClick
-                                    // handle it; cancel the pending focus.
-                                    if (pendingFocus && pendingFocus.label === entry.label) {
-                                        cancelPendingFocus();
-                                        return;
-                                    }
-                                    // Otherwise schedule a fresh focus past the
-                                    // dblclick threshold so a follow-up click can
-                                    // promote it to rename instead.
-                                    cancelPendingFocus();
-                                    const label = entry.label;
-                                    pendingFocus = {
-                                        label,
-                                        timer: window.setTimeout(() => {
-                                            pendingFocus = null;
-                                            handleFocusWindow(label);
-                                        }, dblclickDelayMs()),
-                                    };
+                                    // Focus immediately — the previous design
+                                    // deferred via setTimeout(dblclickDelayMs)
+                                    // to disambiguate from dblclick-rename, but
+                                    // the StatusBar's outside-click dismiss
+                                    // unmounts InstancePanel before the timer
+                                    // fires, and onCleanup cancels the timer.
+                                    // Result: clicks did nothing.
+                                    //
+                                    // Firing focus immediately means a
+                                    // double-click still triggers focus first
+                                    // (harmless — rename input then takes
+                                    // over). dblClick handler still runs and
+                                    // enters rename mode.
+                                    handleFocusWindow(entry.label);
                                 }}
                                 onDblClick={(e) => {
                                     e.preventDefault();

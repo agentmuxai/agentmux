@@ -16,6 +16,12 @@ use cef::{ImplBrowser, ImplBrowserHost};
 use crate::events;
 use crate::state::{AppState, DragPayload, DragSession, DragType};
 
+/// Sanity bounds for tear-off window dimensions. Frontend caps via
+/// `window.outerWidth/Height` (CSS/DIP) but a malformed or hostile
+/// arg should not be able to size the new window absurdly.
+const TEAROFF_MIN_DIM: i32 = 200;
+const TEAROFF_MAX_DIM: i32 = 8192;
+
 /// Start a cross-window drag session.
 pub fn start_cross_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let drag_type: DragType = serde_json::from_value(
@@ -321,8 +327,32 @@ pub fn tear_off_pool_promote(
         .get("screenY")
         .and_then(|v| v.as_f64())
         .ok_or_else(|| "missing screenY".to_string())? as i32;
+    // Optional source-window dimensions for size-matching tear-off.
+    let width = args
+        .get("width")
+        .and_then(|v| v.as_f64())
+        .map(|w| (w as i32).clamp(TEAROFF_MIN_DIM, TEAROFF_MAX_DIM));
+    let height = args
+        .get("height")
+        .and_then(|v| v.as_f64())
+        .map(|h| (h as i32).clamp(TEAROFF_MIN_DIM, TEAROFF_MAX_DIM));
+    // Optional tab anchor — the screen point where the user grabbed
+    // the tab. Backend positions the new window so its first tab lands
+    // at that point so the cursor stays on the same visual element
+    // across the handoff (Chrome-style no-teleport tear-off).
+    let tab_anchor_x = args.get("tabAnchorX").and_then(|v| v.as_f64()).map(|n| n as i32);
+    let tab_anchor_y = args.get("tabAnchorY").and_then(|v| v.as_f64()).map(|n| n as i32);
 
-    match super::window_pool::promote_pool_window(state, workspace_id, screen_x, screen_y) {
+    match super::window_pool::promote_pool_window(
+        state,
+        workspace_id,
+        screen_x,
+        screen_y,
+        width,
+        height,
+        tab_anchor_x,
+        tab_anchor_y,
+    ) {
         Some(label) => Ok(serde_json::json!(label)),
         None => {
             // Per spec §0 the cold path is defence-in-depth, not an
@@ -359,12 +389,35 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
     let window_id = uuid::Uuid::new_v4();
     let label = format!("window-{}", window_id.simple());
 
-    let win_w = 1200i32;
-    let win_h = 800i32;
+    // Source-window-matching tear-off size. Frontend captures
+    // window.outerWidth/Height of the dragged-from window and passes
+    // them through; cold path falls back to the historical default if
+    // the args are absent (manual host RPC, etc.).
+    let win_w = args
+        .get("width")
+        .and_then(|v| v.as_f64())
+        .map(|w| (w as i32).clamp(TEAROFF_MIN_DIM, TEAROFF_MAX_DIM))
+        .unwrap_or(1200);
+    let win_h = args
+        .get("height")
+        .and_then(|v| v.as_f64())
+        .map(|h| (h as i32).clamp(TEAROFF_MIN_DIM, TEAROFF_MAX_DIM))
+        .unwrap_or(800);
 
-    // Position so cursor lands near top-center of title bar
-    let pos_x = ((screen_x - win_w as f64 / 2.0).max(0.0)) as i32;
-    let pos_y = ((screen_y - 16.0).max(0.0)) as i32;
+    // Optional tab anchor — see warm-pool path comment.
+    let tab_anchor_x = args.get("tabAnchorX").and_then(|v| v.as_f64()).map(|n| n as i32);
+    let tab_anchor_y = args.get("tabAnchorY").and_then(|v| v.as_f64()).map(|n| n as i32);
+
+    // Anchor is the new window's outer top-left (frontend pre-computed,
+    // chrome inset already subtracted). See window_pool.rs for full
+    // rationale. Negative coords valid on multi-monitor.
+    let (pos_x, pos_y) = match (tab_anchor_x, tab_anchor_y) {
+        (Some(ax), Some(ay)) => (ax, ay),
+        _ => (
+            ((screen_x - win_w as f64 / 2.0).max(0.0)) as i32,
+            ((screen_y - 16.0).max(0.0)) as i32,
+        ),
+    };
 
     tracing::info!(
         label = %label, pos_x = %pos_x, pos_y = %pos_y,

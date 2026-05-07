@@ -31,6 +31,8 @@ export function update(
             return applyEvent(state, command.event);
         case "ApplySeed":
             return applySeed(state, command.entries);
+        case "ReconcileFromSnapshot":
+            return reconcileFromSnapshot(state, command.entries);
     }
 }
 
@@ -262,6 +264,53 @@ function applySeed(
             instances: deriveInstances(next),
         },
         events: [{ type: "seeded", addedCount: added, tombstonesSkipped }],
+    };
+}
+
+// ── ReconcileFromSnapshot ──────────────────────────────────────────────
+
+function reconcileFromSnapshot(
+    state: LauncherEventState,
+    entries: ReadonlyArray<WindowEntry>,
+): ReducerResult {
+    // Wholesale REPLACE knownEntries with the fresh snapshot. Adds new
+    // labels (like ApplySeed) AND removes labels absent from the
+    // snapshot (unlike ApplySeed). Used for steady-state refresh in
+    // dev mode where the launcher doesn't push close events. Only
+    // accepts instance labels — non-instance labels in the snapshot
+    // are filtered the same as in ApplySeed.
+    //
+    // No tombstone handling: by the time reconcile runs, the seed
+    // phase is over (`seedHasHappened: true`); pre-seed tombstones
+    // are no longer relevant.
+    const next = new Map<string, WindowEntry>();
+    for (const e of entries) {
+        if (!isInstanceLabel(e.label)) continue;
+        next.set(e.label, { label: e.label, windowId: e.windowId });
+    }
+    let added = 0;
+    for (const label of next.keys()) {
+        if (!state.knownEntries.has(label)) added++;
+    }
+    let removed = 0;
+    for (const label of state.knownEntries.keys()) {
+        if (!next.has(label)) removed++;
+    }
+    return {
+        state: {
+            knownEntries: next,
+            seedHasHappened: state.seedHasHappened,
+            closedBeforeSeed: state.closedBeforeSeed,
+            instances: deriveInstances(next),
+        },
+        events: [
+            {
+                type: "reconciled",
+                addedCount: added,
+                removedCount: removed,
+                totalAfter: next.size,
+            },
+        ],
     };
 }
 

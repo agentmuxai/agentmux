@@ -110,10 +110,6 @@ function project(): void {
  * surface will hook this once PR-C ships.
  */
 function onAuditEvent(event: LauncherEventReducerEvent): void {
-    // Preserve the pre-refactor logging fidelity — the full LauncherEvent
-    // payload carries label, window_id, coordinates etc. that are
-    // load-bearing for `muxlog host '[fe]'` triage of drift/saga issues
-    // (reagent P2 PR #684).
     if (event.type === "drift-detected") {
         console.warn("[launcher-event] drift", event.raw);
     } else if (event.type === "saga-event-observed") {
@@ -133,6 +129,24 @@ export function seedKnownEntriesFromSnapshot(
     entries: ReadonlyArray<WindowEntry>,
 ): void {
     dispatch({ type: "ApplySeed", entries });
+}
+
+/**
+ * Reconcile knownEntries against a fresh `listWindowInstances` snapshot.
+ * Differs from `seedKnownEntriesFromSnapshot` (`ApplySeed`) in that it
+ * REPLACES the known set wholesale — labels absent from the snapshot
+ * are removed from the panel.
+ *
+ * Use for periodic refresh paths (e.g. InstancePanel reopens in
+ * `task dev` mode where the launcher doesn't push WindowClosed
+ * events). Don't use at boot — `ApplySeed` is the right boot path
+ * because it's additive against typed events that may have raced
+ * the snapshot fetch (codex P1 #603).
+ */
+export function reconcileKnownEntriesFromSnapshot(
+    entries: ReadonlyArray<WindowEntry>,
+): void {
+    dispatch({ type: "ReconcileFromSnapshot", entries });
 }
 
 let started = false;

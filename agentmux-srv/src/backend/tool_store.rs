@@ -140,8 +140,10 @@ pub fn current_platform() -> Result<&'static str, String> {
 fn probe_system_path(name: &str) -> bool {
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
         std::process::Command::new("where")
             .arg(name)
+            .creation_flags(0x08000000)
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
@@ -159,7 +161,14 @@ fn probe_system_path(name: &str) -> bool {
 /// Returns the system PATH location of `name`, or None.
 fn system_path_of(name: &str) -> Option<String> {
     #[cfg(windows)]
-    let output = std::process::Command::new("where").arg(name).output().ok()?;
+    let output = {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("where")
+            .arg(name)
+            .creation_flags(0x08000000)
+            .output()
+            .ok()?
+    };
     #[cfg(not(windows))]
     let output = std::process::Command::new("which").arg(name).output().ok()?;
 
@@ -182,10 +191,14 @@ fn system_path_of(name: &str) -> Option<String> {
 /// the output contains no recognisable version token.
 fn probe_version(cmd: &str, version_arg: &Option<String>) -> Option<String> {
     let arg = version_arg.as_deref()?;
-    let output = std::process::Command::new(cmd)
-        .arg(arg)
-        .output()
-        .ok()?;
+    let mut command = std::process::Command::new(cmd);
+    command.arg(arg);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let output = command.output().ok()?;
     // Some tools write version to stderr (e.g. older jq), try both.
     let text = if !output.stdout.is_empty() {
         String::from_utf8_lossy(&output.stdout).into_owned()

@@ -12,6 +12,7 @@ import { atoms, getApi } from "@/store/global";
 import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
 import { openTearOffWindow } from "./tear-off-pool-helper";
+import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { invokeCommand } from "@/app/platform/ipc";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
@@ -133,10 +134,28 @@ async function performTearOff(
     const api = getApi();
     if (dragType === "pane" && payload.blockId) {
         const newWsId = await WorkspaceService.TearOffBlock(payload.blockId, sourceTabId, sourceWsId, true);
-        if (newWsId) await openTearOffWindow(api, newWsId, screenX, screenY);
+        if (newWsId) await openTearOffWindow(api, newWsId, screenX, screenY, window.outerWidth, window.outerHeight);
     } else if (dragType === "tab" && payload.tabId) {
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
-        if (newWsId) await openTearOffWindow(api, newWsId, screenX, screenY);
+        if (newWsId) {
+            // Tab anchor — see win32 sibling for DPI rationale. Linux
+            // host cursor coords also come from native GetCursor APIs
+            // and may be physical px; multiply DIP offset by DPR.
+            const grabOffset = getTabGrabOffset();
+            const dpr = window.devicePixelRatio || 1;
+            const tabAnchorX = grabOffset ? screenX - grabOffset.x * dpr : undefined;
+            const tabAnchorY = grabOffset ? screenY - grabOffset.y * dpr : undefined;
+            await openTearOffWindow(
+                api,
+                newWsId,
+                screenX,
+                screenY,
+                window.outerWidth,
+                window.outerHeight,
+                tabAnchorX,
+                tabAnchorY,
+            );
+        }
     }
 }
 

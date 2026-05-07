@@ -60,7 +60,7 @@ Each reducer is canonical for its domain. Cross-reducer state moves only through
 | **Frontend** | 🟨 IN-FLIGHT — slice #1 shipped (#681), #2 doc-approved, #3–#8 designed | [`frontend-reducer-architecture-2026-05-03.md`](./frontend-reducer-architecture-2026-05-03.md) | This doc, §6 |
 | **Sagas** | ✅ FOUNDATION — coordinator + 7 sagas merged | [`SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01.md`](./SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01.md) | [`saga-architecture-migration-complete-2026-05-02.md`](../retro/saga-architecture-migration-complete-2026-05-02.md) |
 | **Persistence** | ✅ Persist subscriber + event log shipped | n/a | Captured in E.2c.1–5a in phase-e-status |
-| **Phase G** | ⏸️ DEFERRED until Phase F.6+F.7 + cross-process dispatch land | n/a | [`phase-fg-roadmap-2026-05-01.md`](../retro/phase-fg-roadmap-2026-05-01.md) §4 |
+| **Phase G** | ⏸️ DEFERRED until Phase F.6 + cross-process dispatch land (F.7 ✅ host bridge dedup shipped #722; renderer reactive-leak root cause fixed #724) | n/a | [`phase-fg-roadmap-2026-05-01.md`](../retro/phase-fg-roadmap-2026-05-01.md) §4 |
 
 ---
 
@@ -313,10 +313,22 @@ Phase 4 helpers shipped. Phases 5–7 designed but not started. Open: what's the
 ### 9.7 Phase G go/no-go itself
 Roadmap defers *Phase G* until F.6+F.7+cross-process dispatch. But the decision to *do* Phase G at all is open. Cost/benefit per phase-fg-roadmap §4: Phase E validated the pattern for srv. Still need system-level validation (host reducer + cross-process dispatch) before committing to event-sourced everywhere.
 
-### 9.8 Phase F.7 — host bridge resilience
-The host's `launcher_event_bridge::dispatch_to_renderers` is currently a thin pass-through: every launcher event becomes one `Frame::ExecuteJavaScript` call per top-level browser, no de-dup, no rate limit, no batching. PR #708 added a renderer-side guard (§8.14) which catches the cross-cutting class. Open: does the **host** also need a per-`(kind, label, version)` cache + rate limiter to defend against future upstream regressions, or is the renderer-side guard sufficient? Diagnostic to drive the decision: `launcherEventDedupStats().suppressed` in production. If non-zero under normal use, the launcher is still emitting duplicates and the host should de-dup too. Pairs with §9.1 — both are about the host's role as a relay between launcher and renderer.
+### 9.8 Phase F.7 — host bridge resilience — ✅ LANDED + ROOT CAUSE FOUND DOWNSTREAM (2026-05-07)
 
-Tracked as Phase F.7 in roadmap; deferred until §9.1 (cross-process dispatch) lands, since that work also touches the same bridge layer. See [`ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`](./ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md) §4.4.
+**Three-layer defense-in-depth shipped:**
+- **Launcher (PR #708, #721):** per-window monotonic `*_emitted: bool` storm caps on `HiddenSinceOpen`, `OffMonitor`, `CorrectiveWindowMove`. PR #722 round 4 extended the `OffMonitor` cap to `apply_monitor_topology_changed` so display hot-plug doesn't bypass it.
+- **Host bridge (PR #722):** `launcher_event_bridge::DedupCache` (FIFO-evicting, 4096-key cap) on `(variant_kind, label, hwnd, version)` — same gate the renderer used (§8.14), promoted to host so a cold V8 context post-crash can't replay older versions.
+- **Renderer (PR #708):** `shouldDispatchLauncherEvent` per-key dedup in `frontend/util/launcher-events.ts`.
+
+**But the actual root cause was downstream of all three caps.** PR #724 (2026-05-07) found the storm crashes that #708/#721/#722 chased were caused by an unintentional SolidJS reactive-dep leak in `recordDispatch` (`frontend/app/store/command-source.ts`). The function read `recordsAtom()` and wrote `setRecordsAtom(...)` in the same call. The launcher-event reducer's `createEffect` (`launcher-event-reducer.ts:148`) called `dispatch → recordDispatch`; the bare getter inside the reactive context registered `recordsAtom` as a tracked dep, and the subsequent set re-fired the effect → infinite loop.
+
+**Diagnostic recipe** (worked on v0.33.695): instrument `__agentmux_launcher_event` bridge call count + `createEffect` re-run count; if effect-runs ≫ bridge-calls for the same event, the bug is renderer-side reactive, not host-side fan-out. On the failing repro: 1 bridge call → 3230+ effect re-runs → 463 console.warn → V8 stack exhaustion → Crashpad. Post-fix: 1 bridge call → 1 effect run.
+
+**Fix landed in PR #724** (merged 2026-05-07 as 6b84df2a). `recordDispatch` now wraps the read+write in `untrack()`. Regression test: `command-source.test.ts::does not register reactive deps when called from inside createEffect` (asserts effect runs exactly once per explicit trigger; fails on the un-fixed code).
+
+The host/launcher caps from #708/#721/#722 are kept as defense-in-depth — they don't hurt and they cap any future regressions in the launcher's emit cadence — but the actual amplifier was removed in #724.
+
+**Lesson for future renderer storm crashes:** look at SolidJS effect re-run counts BEFORE blaming host fan-out. See [`ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`](./ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md) §4.4 for the per-layer history.
 
 ---
 

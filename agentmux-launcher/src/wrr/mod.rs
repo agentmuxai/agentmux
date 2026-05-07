@@ -189,22 +189,32 @@ pub fn apply_hwnd_opened(
                 }];
             }
             HwndOpenedOutcome::Repaired(existing) => {
-                let v = state.bump_version();
+                // Repair is a normal self-healing path: the launcher's
+                // best-effort drain in `handle_report_window_opened`
+                // wrong-picked an HWND under burst-create concurrency,
+                // and the explicit `apply_hwnd_opened` from
+                // `client.rs::on_after_created` is now correcting it.
+                // Logging this at Error severity as a `HwndDriftDetected`
+                // event flooded the renderer with one drift per fresh
+                // top-level (6 in a clean v0.33.696 session) and made
+                // genuine drifts harder to spot.
+                //
+                // Now: log via tracing only, no event. The pure-state
+                // mutation (mirror.hwnd overwrite + drain_pending +
+                // optional steal-clear on the prior holder) still
+                // happens above. Linked + stole still emits drift —
+                // that's a different shape (clean link that had to
+                // claim a wrongly-held HWND, which the prior holder's
+                // own `apply_hwnd_opened` may not yet have repaired).
                 let stolen_suffix = stolen_from
                     .as_deref()
                     .map(|s| format!(" (stole from label={})", s))
                     .unwrap_or_default();
-                return vec![Event::HwndDriftDetected {
-                    kind: HwndDriftKind::HwndWithoutBrowser,
-                    label: Some(label.to_string()),
-                    hwnd: Some(hwnd),
-                    detail: format!(
-                        "ReportHwndOpened label_hint={} repaired stale link from hwnd={} to hwnd={}{}",
-                        label, existing, hwnd, stolen_suffix
-                    ),
-                    severity: severity_for(HwndDriftKind::HwndWithoutBrowser),
-                    version: v,
-                }];
+                crate::log(&format!(
+                    "[wrr] hwnd_repaired label={} prior_hwnd={} new_hwnd={}{}",
+                    label, existing, hwnd, stolen_suffix
+                ));
+                return vec![];
             }
             HwndOpenedOutcome::NoMatchingLabel => { /* fall through to pending */ }
         }
@@ -334,14 +344,24 @@ pub fn apply_hwnd_destroyed(state: &mut State, hwnd: u64, host_running: bool) ->
     vec![]
 }
 
+/// Placement grace window. CEF creates top-level windows hidden,
+/// runs `SetWindowPos` to place them, then shows them. The
+/// intermediate `WM_HIDE` events arrive before `WM_FOREGROUND`,
+/// which would otherwise look like `HiddenSinceOpen` drift on
+/// every fresh window. Hides occurring within this window of the
+/// host's `ReportWindowOpened` are part of normal placement and
+/// don't count.
+const HIDDEN_SINCE_OPEN_GRACE_MS: u64 = 500;
+
 /// Phase B.9.1 — handle `Command::ReportHwndVisibilityChanged`.
 /// Drift fires only on `visible=false` for a known label that has
-/// not been foregrounded since open: the user can't see this
-/// window and never has.
+/// not been foregrounded since open AND is past the post-open
+/// placement grace window.
 pub fn apply_hwnd_visibility_changed(
     state: &mut State,
     hwnd: u64,
     visible: bool,
+    now_ms: u64,
 ) -> Vec<Event> {
     let mut drift: Option<Event> = None;
     let mut version_to_bump = false;
@@ -351,9 +371,41 @@ pub fn apply_hwnd_visibility_changed(
         .find(|(_, m)| m.hwnd == Some(hwnd))
         .and_then(|(label, mirror)| {
             mirror.visible = visible;
-            if !visible && !mirror.foregrounded_since_open {
+            // Visibility=true at any time clears any deferred hide
+            // — the placement transition completed, no drift needed.
+            if visible {
+                mirror.hidden_since_open_deferred = false;
+                return None;
+            }
+            // Drift-storm cap: HiddenSinceOpen fires AT MOST ONCE per
+            // window per session. The cap flag is monotonic for the
+            // window's lifetime. The placement grace check below is
+            // additive: hides during placement set `hidden_since_open_deferred`
+            // (without arming the cap) so the next reducer call past
+            // the grace via `drain_deferred_hidden_since_open` can
+            // fire the drift. Hides past the grace fire immediately.
+            let past_grace =
+                now_ms.saturating_sub(mirror.opened_at_ms) > HIDDEN_SINCE_OPEN_GRACE_MS;
+            if past_grace
+                && !mirror.foregrounded_since_open
+                && !mirror.hidden_since_open_emitted
+            {
+                mirror.hidden_since_open_emitted = true;
+                mirror.hidden_since_open_deferred = false;
                 version_to_bump = true;
                 Some(label.clone())
+            } else if !past_grace
+                && !mirror.foregrounded_since_open
+                && !mirror.hidden_since_open_emitted
+            {
+                // Suppressed during placement grace. Mark as deferred
+                // so a later reducer call past the grace window can
+                // promote this to a drift if the window is still
+                // hidden (codex P2 PR #725 round 1 — without this,
+                // a stuck-hidden window that gets no further
+                // visibility events permanently loses the signal).
+                mirror.hidden_since_open_deferred = true;
+                None
             } else {
                 None
             }
@@ -372,6 +424,56 @@ pub fn apply_hwnd_visibility_changed(
     drift.into_iter().collect()
 }
 
+/// Sweep `hidden_since_open_deferred` mirrors and emit drift for any
+/// that have crossed the placement grace boundary while still hidden
+/// and never foregrounded. Called from `reducer::update` AFTER every
+/// command processes so any recovery event the command itself
+/// dispatched (visible=true / foreground change / window closed) has
+/// a chance to clear the deferred state first. Without the AFTER
+/// ordering, a slow placement whose first post-grace event is the
+/// recovery itself would fire a spurious drift before the recovery
+/// runs (codex P2 PR #725 round 2).
+///
+/// Even with the AFTER ordering, this pass is the heartbeat that
+/// catches stuck-hidden windows whose own `ReportHwndVisibilityChanged`
+/// was suppressed during grace: any subsequent unrelated command
+/// past the grace promotes the deferred state to a fired drift.
+///
+/// (codex P2 PR #725 round 1 — addresses the "no recheck after grace"
+/// concern. Stuck-hidden windows that produce ZERO further commands
+/// are still a hole — we'd need a periodic timer for that — but
+/// realistic launcher traffic generates events constantly, so this
+/// catches the practical cases.)
+pub fn drain_deferred_hidden_since_open(state: &mut State, now_ms: u64) -> Vec<Event> {
+    let stuck: Vec<(String, Option<u64>)> = state
+        .windows
+        .iter()
+        .filter(|(_, m)| m.hidden_since_open_deferred)
+        .filter(|(_, m)| !m.visible)
+        .filter(|(_, m)| !m.foregrounded_since_open)
+        .filter(|(_, m)| !m.hidden_since_open_emitted)
+        .filter(|(_, m)| now_ms.saturating_sub(m.opened_at_ms) > HIDDEN_SINCE_OPEN_GRACE_MS)
+        .map(|(label, m)| (label.clone(), m.hwnd))
+        .collect();
+    let mut events = Vec::with_capacity(stuck.len());
+    for (label, hwnd) in stuck {
+        if let Some(mirror) = state.windows.get_mut(&label) {
+            mirror.hidden_since_open_emitted = true;
+            mirror.hidden_since_open_deferred = false;
+        }
+        let v = state.bump_version();
+        events.push(Event::HwndDriftDetected {
+            kind: HwndDriftKind::HiddenSinceOpen,
+            label: Some(label),
+            hwnd,
+            detail: "Window hidden without ever being foregrounded since open (deferred from placement grace)".to_string(),
+            severity: severity_for(HwndDriftKind::HiddenSinceOpen),
+            version: v,
+        });
+    }
+    events
+}
+
 /// Phase B.9.1 — handle `Command::ReportHwndForegroundChanged`.
 /// Updates the "has been seen" flag. Never emits drift directly
 /// — its role is to suppress future `HiddenSinceOpen` emissions.
@@ -379,6 +481,10 @@ pub fn apply_hwnd_foreground_changed(state: &mut State, hwnd: u64, now_ms: u64) 
     if let Some((_, mirror)) = state.windows.iter_mut().find(|(_, m)| m.hwnd == Some(hwnd)) {
         mirror.foregrounded_since_open = true;
         mirror.last_foreground_at_ms = Some(now_ms);
+        // Foreground = window made it to the user. Clear any deferred
+        // hide so the drain pass doesn't fire spurious drift past the
+        // grace for a window the user actually saw.
+        mirror.hidden_since_open_deferred = false;
     }
     vec![]
 }
@@ -433,10 +539,19 @@ pub fn apply_hwnd_position_changed(state: &mut State, hwnd: u64, new_rect: Rect)
     // Resolve the mirror: collect everything we need from a scoped
     // borrow, then release it before calling `state.bump_version()`
     // (rustc E0499 — same trick as `apply_hwnd_opened`).
+    //
+    // Storm-cap snapshot: capture the prior emit-flags so the gate
+    // logic below knows whether each side-effect has fired before.
+    // `apply_hwnd_position_changed` fires per WM_MOVE during a
+    // drag — without the caps, a window dragged across an off-
+    // monitor region storms the renderer with drift + corrective
+    // events.
     struct Resolved {
         label: String,
         off_monitor: bool,
         foregrounded_since_open: bool,
+        off_monitor_drift_emitted: bool,
+        corrective_window_move_emitted: bool,
     }
     let resolved: Option<Resolved> = state
         .windows
@@ -450,6 +565,8 @@ pub fn apply_hwnd_position_changed(state: &mut State, hwnd: u64, new_rect: Rect)
                 label: label.clone(),
                 off_monitor,
                 foregrounded_since_open: mirror.foregrounded_since_open,
+                off_monitor_drift_emitted: mirror.off_monitor_drift_emitted,
+                corrective_window_move_emitted: mirror.corrective_window_move_emitted,
             }
         });
 
@@ -462,8 +579,45 @@ pub fn apply_hwnd_position_changed(state: &mut State, hwnd: u64, new_rect: Rect)
     }
 
     // Window is off all monitors. Fire drift unless we're in the
-    // open-transient sentinel state (per above).
-    if !is_sentinel {
+    // open-transient sentinel state (per above) OR the cap has
+    // already fired for this window.
+    let mut fire_drift = false;
+    let mut fire_corrective = false;
+    if !is_sentinel && !r.off_monitor_drift_emitted {
+        fire_drift = true;
+    }
+
+    // Phase B.9.2 — pure-reducer self-heal. If the window has
+    // never been foregrounded, this off-monitor state is from the
+    // open transition (NOT user action), so we emit a corrective
+    // move. The host's WRR subscriber applies it via SetWindowPos
+    // on the UI thread. The Win32 hidden sentinel is INCLUDED in
+    // the corrective trigger (we always want to move a window off
+    // the sentinel before the user notices), even though it's
+    // suppressed for drift to avoid log noise.
+    //
+    // Compute the corrective target ONCE (reagent P2 PR #722 round 2)
+    // — used both as the gate for `fire_corrective` and as the
+    // event payload below.
+    let corrective_target = if !r.foregrounded_since_open && !r.corrective_window_move_emitted {
+        pick_primary_centered(&monitors)
+    } else {
+        None
+    };
+    if corrective_target.is_some() {
+        fire_corrective = true;
+    }
+
+    if fire_drift {
+        // Mark the cap before bumping the version so re-entrant
+        // event handlers see consistent state.
+        if let Some((_, mirror)) = state
+            .windows
+            .iter_mut()
+            .find(|(_, m)| m.hwnd == Some(hwnd))
+        {
+            mirror.off_monitor_drift_emitted = true;
+        }
         let v = state.bump_version();
         events.push(Event::HwndDriftDetected {
             kind: HwndDriftKind::OffMonitor,
@@ -479,24 +633,21 @@ pub fn apply_hwnd_position_changed(state: &mut State, hwnd: u64, new_rect: Rect)
         });
     }
 
-    // Phase B.9.2 — pure-reducer self-heal. If the window has
-    // never been foregrounded, this off-monitor state is from the
-    // open transition (NOT user action), so we emit a corrective
-    // move. The host's WRR subscriber applies it via SetWindowPos
-    // on the UI thread. The Win32 hidden sentinel is INCLUDED in
-    // the corrective trigger (we always want to move a window off
-    // the sentinel before the user notices), even though it's
-    // suppressed for drift to avoid log noise.
-    if !r.foregrounded_since_open {
-        if let Some(target) = pick_primary_centered(&monitors) {
-            let v = state.bump_version();
-            events.push(Event::CorrectiveWindowMove {
-                hwnd,
-                target_rect: target,
-                reason: HwndDriftKind::OffMonitor,
-                version: v,
-            });
+    if let Some(target) = corrective_target.filter(|_| fire_corrective) {
+        if let Some((_, mirror)) = state
+            .windows
+            .iter_mut()
+            .find(|(_, m)| m.hwnd == Some(hwnd))
+        {
+            mirror.corrective_window_move_emitted = true;
         }
+        let v = state.bump_version();
+        events.push(Event::CorrectiveWindowMove {
+            hwnd,
+            target_rect: target,
+            reason: HwndDriftKind::OffMonitor,
+            version: v,
+        });
     }
 
     events
@@ -553,10 +704,17 @@ pub fn apply_monitor_topology_changed(state: &mut State, rects: Vec<Rect>) -> Ve
         return vec![];
     }
     let mut events: Vec<Event> = Vec::new();
+    // Gate emission on `off_monitor_drift_emitted` (codex P2 PR
+    // #722 round 3): without this, repeated topology changes
+    // (display hot-plug or rapid resolution change) re-emit drift
+    // for the same stranded window every event.
     let stranded: Vec<(String, u64, Rect)> = state
         .windows
         .iter()
         .filter_map(|(label, mirror)| {
+            if mirror.off_monitor_drift_emitted {
+                return None;
+            }
             let r = mirror.last_rect?;
             let h = mirror.hwnd?;
             if rect::intersects_any(&r, &monitors) {
@@ -567,6 +725,13 @@ pub fn apply_monitor_topology_changed(state: &mut State, rects: Vec<Rect>) -> Ve
         })
         .collect();
     for (label, hwnd, rect) in stranded {
+        if let Some((_, mirror)) = state
+            .windows
+            .iter_mut()
+            .find(|(l, _)| **l == label)
+        {
+            mirror.off_monitor_drift_emitted = true;
+        }
         let v = state.bump_version();
         events.push(Event::HwndDriftDetected {
             kind: HwndDriftKind::OffMonitor,

@@ -13,6 +13,18 @@ fn ctx(conn_id: u64) -> Ctx {
     }
 }
 
+/// Clone a Ctx with `now_ms` advanced. Used by tests that need to
+/// fire commands past the `HIDDEN_SINCE_OPEN_GRACE_MS` placement
+/// window without re-deriving the rest of the Ctx.
+fn ctx_advance(base: &Ctx, ms: u64) -> Ctx {
+    Ctx {
+        now_rfc3339: base.now_rfc3339.clone(),
+        conn_id: base.conn_id,
+        registered_pid: base.registered_pid,
+        now_ms: base.now_ms + ms,
+    }
+}
+
 fn ctx_with_pid(conn_id: u64, pid: u32) -> Ctx {
     Ctx {
         now_rfc3339: "2026-04-28T00:00:00Z".to_string(),
@@ -1580,6 +1592,775 @@ fn cold_open_without_promote_still_initializes_foregrounded_false() {
         !state.windows.get("window-fresh").unwrap().foregrounded_since_open,
         "non-promote open must keep foregrounded_since_open=false"
     );
+    assert!(
+        !state.windows.get("window-fresh").unwrap().hidden_since_open_emitted,
+        "fresh open starts with hidden_since_open_emitted=false (cap not yet armed)"
+    );
+}
+
+#[test]
+fn hidden_since_open_grace_suppresses_placement_hides() {
+    // CEF creates top-level windows hidden, places them, then shows.
+    // Hides arriving within HIDDEN_SINCE_OPEN_GRACE_MS of open are
+    // placement transitions and must NOT fire drift. Without this
+    // grace, every fresh top-level window emits one false-positive
+    // drift on creation. (PR #725, smoke regression on v0.33.696 showed
+    // 8 such hides for 8 fresh windows in a clean session.)
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-placing".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xEE,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("window-placing".into()),
+        },
+        &c,
+    );
+
+    // Hide within grace window (now_ms still 0, opened_at_ms=0,
+    // delta=0, < 500ms). Drift suppressed.
+    let placement_hide = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xEE, visible: false },
+        &c,
+    );
+    assert_eq!(
+        placement_hide
+            .iter()
+            .filter(|e| matches!(
+                e,
+                Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+            ))
+            .count(),
+        0,
+        "hide within placement grace must NOT fire drift"
+    );
+    assert!(
+        !state.windows.get("window-placing").unwrap().hidden_since_open_emitted,
+        "cap flag must NOT be armed by placement-grace hides — \
+         a hide PAST the grace can still fire its drift"
+    );
+
+    // Hide PAST grace → drift fires (the cap should not have been
+    // armed by the placement-grace hide).
+    let post_grace = ctx_advance(&c, 600);
+    let real_hide = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xEE, visible: false },
+        &post_grace,
+    );
+    assert_eq!(
+        real_hide
+            .iter()
+            .filter(|e| matches!(
+                e,
+                Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+            ))
+            .count(),
+        1,
+        "hide past grace fires drift (cap was not pre-armed by placement)"
+    );
+}
+
+#[test]
+fn hidden_since_open_deferred_fires_when_window_stays_hidden_past_grace() {
+    // Codex P2 PR #725 round 1: if the ONLY visible=false event arrives
+    // within the placement grace and no further visibility events fire,
+    // we MUST still emit the drift. The deferred flag + drain pass on
+    // every reducer call (heartbeat-via-traffic) catches this.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-stuck".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xFE,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("window-stuck".into()),
+        },
+        &c,
+    );
+
+    // The ONLY visibility event arrives within grace. Drift suppressed
+    // but mirror is marked deferred.
+    let placement_hide = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xFE, visible: false },
+        &c,
+    );
+    assert_eq!(
+        placement_hide
+            .iter()
+            .filter(|e| matches!(e, Event::HwndDriftDetected { .. }))
+            .count(),
+        0,
+        "hide within grace must NOT fire drift (deferred)"
+    );
+    assert!(
+        state.windows.get("window-stuck").unwrap().hidden_since_open_deferred,
+        "deferred flag must be set"
+    );
+
+    // No further visibility events. ANY subsequent reducer call past
+    // the grace promotes the deferred state to a fired drift via the
+    // drain pass. Use a Ping (cheapest unrelated command) past grace.
+    let post_grace = ctx_advance(&c, 600);
+    let drained = update(&mut state, Command::Ping { nonce: 1 }, &post_grace);
+    assert_eq!(
+        drained
+            .iter()
+            .filter(|e| matches!(
+                e,
+                Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+            ))
+            .count(),
+        1,
+        "deferred drift fires on next post-grace reducer call regardless \
+         of command kind"
+    );
+    assert!(
+        state.windows.get("window-stuck").unwrap().hidden_since_open_emitted,
+        "cap is now armed (drift was emitted)"
+    );
+    assert!(
+        !state.windows.get("window-stuck").unwrap().hidden_since_open_deferred,
+        "deferred flag cleared after drift fires"
+    );
+}
+
+#[test]
+fn hidden_since_open_deferred_cleared_by_visible_or_foreground() {
+    // The deferred flag must clear when the window completes its
+    // placement transition (becomes visible OR foregrounded). Without
+    // this, a window that hid during placement, became visible, and
+    // was never seen again would fire spurious deferred drift.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-recovers".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xFD,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("window-recovers".into()),
+        },
+        &c,
+    );
+
+    // Hide during grace → deferred set.
+    let _ = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xFD, visible: false },
+        &c,
+    );
+    assert!(state.windows.get("window-recovers").unwrap().hidden_since_open_deferred);
+
+    // Become visible → deferred cleared.
+    let _ = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xFD, visible: true },
+        &c,
+    );
+    assert!(
+        !state.windows.get("window-recovers").unwrap().hidden_since_open_deferred,
+        "visible=true clears deferred flag"
+    );
+
+    // Past-grace heartbeat must NOT fire drift since deferred was cleared.
+    let post_grace = ctx_advance(&c, 600);
+    let drained = update(&mut state, Command::Ping { nonce: 1 }, &post_grace);
+    assert!(
+        !drained
+            .iter()
+            .any(|e| matches!(e, Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. })),
+        "no spurious drift after window recovers visibility"
+    );
+}
+
+#[test]
+fn deferred_drain_runs_after_command_so_recovery_events_clear_first() {
+    // Codex P2 PR #725 round 2: if the FIRST command past grace is
+    // the recovery event itself (visible=true or foreground change),
+    // the drain MUST run AFTER the command — otherwise it sees the
+    // still-deferred mirror and fires premature HiddenSinceOpen
+    // drift on a slow-but-successful placement.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-slow-show".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xFC,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("window-slow-show".into()),
+        },
+        &c,
+    );
+
+    // Hide during grace → deferred set.
+    let _ = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xFC, visible: false },
+        &c,
+    );
+    assert!(state.windows.get("window-slow-show").unwrap().hidden_since_open_deferred);
+
+    // Slow placement: visible=true is the FIRST event past grace.
+    let post_grace = ctx_advance(&c, 600);
+    let evs = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xFC, visible: true },
+        &post_grace,
+    );
+    assert!(
+        !evs.iter().any(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+        )),
+        "recovery event must clear deferred before drain runs, no drift fires"
+    );
+    assert!(
+        !state.windows.get("window-slow-show").unwrap().hidden_since_open_emitted,
+        "cap must NOT be armed by a recovery event"
+    );
+    assert!(
+        !state.windows.get("window-slow-show").unwrap().hidden_since_open_deferred,
+        "deferred cleared by visible=true"
+    );
+}
+
+#[test]
+fn opened_at_ms_preserved_on_duplicate_open() {
+    // Codex P2 PR #725 round 1: duplicate ReportWindowOpened must NOT
+    // reset opened_at_ms. Otherwise a duplicate that arrives after
+    // the original 500ms grace and before the first hide would
+    // re-anchor the grace window, suppressing real hides for another
+    // 500ms.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-dup-open".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let original_opened_at_ms = state.windows.get("window-dup-open").unwrap().opened_at_ms;
+
+    // Duplicate open arrives MUCH later (1000ms past grace).
+    let later = ctx_advance(&c, 1000);
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-dup-open".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &later,
+    );
+    assert_eq!(
+        state.windows.get("window-dup-open").unwrap().opened_at_ms,
+        original_opened_at_ms,
+        "duplicate open must preserve original opened_at_ms (grace anchor)"
+    );
+}
+
+#[test]
+fn hidden_since_open_drift_fires_at_most_once_per_window() {
+    // Drift-storm regression guard. The smoke crash on v0.33.685
+    // ("New Window" from hamburger after a tear-off) was 170
+    // identical HiddenSinceOpen events in 1s for the same label,
+    // exhausting the renderer's V8 stack. Cap fires once per window
+    // per session — subscribers still see the signal, no storm.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-fresh".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xCC,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("window-fresh".into()),
+        },
+        &c,
+    );
+    // First hide past the placement grace → drift fires. Hides
+    // within HIDDEN_SINCE_OPEN_GRACE_MS of open are placement
+    // transitions and don't fire (separate test below).
+    let post_grace = ctx_advance(&c, 600);
+    let first = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xCC, visible: false },
+        &post_grace,
+    );
+    assert_eq!(
+        first
+            .iter()
+            .filter(|e| matches!(
+                e,
+                Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+            ))
+            .count(),
+        1,
+        "first hide emits drift exactly once"
+    );
+
+    // 100 subsequent hide/show oscillations (mimics the storm
+    // observed during placement): drift must NOT re-fire.
+    let mut subsequent_drift_count = 0;
+    for _ in 0..100 {
+        let _ = update(
+            &mut state,
+            Command::ReportHwndVisibilityChanged { hwnd: 0xCC, visible: true },
+            &post_grace,
+        );
+        let evs = update(
+            &mut state,
+            Command::ReportHwndVisibilityChanged { hwnd: 0xCC, visible: false },
+            &post_grace,
+        );
+        subsequent_drift_count += evs
+            .iter()
+            .filter(|e| matches!(
+                e,
+                Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+            ))
+            .count();
+    }
+    assert_eq!(
+        subsequent_drift_count, 0,
+        "cap suppresses ALL subsequent HiddenSinceOpen emissions"
+    );
+    assert!(
+        state
+            .windows
+            .get("window-fresh")
+            .unwrap()
+            .hidden_since_open_emitted,
+        "cap flag is set after the first emission"
+    );
+}
+
+#[test]
+fn hidden_since_open_cap_survives_duplicate_open() {
+    // The handler overwrites the mirror wholesale on every
+    // ReportWindowOpened. Without OR-ing the prior value in, a 2nd
+    // open at the same label re-arms the cap and the next hidden
+    // visibility transition fires HiddenSinceOpen a second time.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-dup".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xDD,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("window-dup".into()),
+        },
+        &c,
+    );
+    let post_grace = ctx_advance(&c, 600);
+    let first = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xDD, visible: false },
+        &post_grace,
+    );
+    assert!(
+        first.iter().any(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+        )),
+        "control: first hide emits drift"
+    );
+
+    // Duplicate open for the same label — overwrites the mirror.
+    // Cap MUST survive (OR with prior value) or the storm re-arms.
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-dup".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    assert!(
+        state
+            .windows
+            .get("window-dup")
+            .unwrap()
+            .hidden_since_open_emitted,
+        "duplicate open must preserve hidden_since_open_emitted=true"
+    );
+
+    // Subsequent hide: drift must NOT fire again.
+    let _ = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xDD, visible: true },
+        &post_grace,
+    );
+    let second = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xDD, visible: false },
+        &post_grace,
+    );
+    assert!(
+        !second.iter().any(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+        )),
+        "duplicate-open path: cap survives, no second drift"
+    );
+}
+
+#[test]
+fn off_monitor_drift_fires_at_most_once_per_window() {
+    // Companion cap to HiddenSinceOpen. apply_hwnd_position_changed
+    // fires per WM_MOVE; without the cap, dragging an off-monitor
+    // window storms the renderer.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportMonitorTopologyChanged {
+            rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "w-off".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xEE,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("w-off".into()),
+        },
+        &c,
+    );
+    // Foreground first so corrective is suppressed (we test
+    // OffMonitor drift independently).
+    let _ = update(
+        &mut state,
+        Command::ReportHwndForegroundChanged { hwnd: 0xEE },
+        &c,
+    );
+    // First off-monitor position → drift fires.
+    let first = update(
+        &mut state,
+        Command::ReportHwndPositionChanged {
+            hwnd: 0xEE,
+            rect: Rect { left: 5000, top: 5000, right: 5500, bottom: 5400 },
+        },
+        &c,
+    );
+    assert_eq!(
+        first.iter().filter(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::OffMonitor, .. }
+        )).count(),
+        1,
+        "first off-monitor position emits drift exactly once"
+    );
+
+    // 100 more off-monitor moves: drift must NOT re-fire.
+    let mut subsequent = 0;
+    for i in 0..100 {
+        let dx = i * 10;
+        let evs = update(
+            &mut state,
+            Command::ReportHwndPositionChanged {
+                hwnd: 0xEE,
+                rect: Rect {
+                    left: 5000 + dx,
+                    top: 5000,
+                    right: 5500 + dx,
+                    bottom: 5400,
+                },
+            },
+            &c,
+        );
+        subsequent += evs.iter().filter(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::OffMonitor, .. }
+        )).count();
+    }
+    assert_eq!(subsequent, 0, "cap suppresses subsequent OffMonitor drift");
+}
+
+#[test]
+fn corrective_window_move_fires_at_most_once_per_window() {
+    // Same cap shape for the self-heal corrective. Without it, a
+    // never-foregrounded window dragged through off-monitor regions
+    // emits CorrectiveWindowMove every move.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportMonitorTopologyChanged {
+            rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "w-corr".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xFF,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("w-corr".into()),
+        },
+        &c,
+    );
+    // Note: NOT foregrounded — that's the corrective trigger.
+    let first = update(
+        &mut state,
+        Command::ReportHwndPositionChanged {
+            hwnd: 0xFF,
+            rect: Rect { left: 5000, top: 5000, right: 5500, bottom: 5400 },
+        },
+        &c,
+    );
+    assert_eq!(
+        first.iter().filter(|e| matches!(e, Event::CorrectiveWindowMove { .. })).count(),
+        1,
+        "first off-monitor + never-foregrounded emits corrective"
+    );
+    // Subsequent off-monitor moves: no more corrective.
+    let mut subsequent = 0;
+    for i in 0..100 {
+        let evs = update(
+            &mut state,
+            Command::ReportHwndPositionChanged {
+                hwnd: 0xFF,
+                rect: Rect {
+                    left: 5000 + i * 10,
+                    top: 5000,
+                    right: 5500 + i * 10,
+                    bottom: 5400,
+                },
+            },
+            &c,
+        );
+        subsequent += evs.iter().filter(|e| matches!(
+            e,
+            Event::CorrectiveWindowMove { .. }
+        )).count();
+    }
+    assert_eq!(subsequent, 0, "cap suppresses subsequent corrective emissions");
+}
+
+#[test]
+fn off_monitor_cap_blocks_repeated_topology_change_emissions() {
+    // Codex P2 PR #722 round 3: display hot-plug emits
+    // ReportMonitorTopologyChanged repeatedly. If a window stays
+    // stranded across multiple topology events, drift was being
+    // re-emitted every event because apply_monitor_topology_changed
+    // didn't consult the off_monitor_drift_emitted cap.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportMonitorTopologyChanged {
+            rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "w-strand".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xCD,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("w-strand".into()),
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndForegroundChanged { hwnd: 0xCD },
+        &c,
+    );
+    // Park the window where it WILL be stranded by topology change.
+    let _ = update(
+        &mut state,
+        Command::ReportHwndPositionChanged {
+            hwnd: 0xCD,
+            rect: Rect { left: 1000, top: 100, right: 1500, bottom: 600 },
+        },
+        &c,
+    );
+    // Topology change strands the window.
+    let first = update(
+        &mut state,
+        Command::ReportMonitorTopologyChanged {
+            rects: vec![Rect { left: 0, top: 0, right: 800, bottom: 600 }],
+        },
+        &c,
+    );
+    assert_eq!(
+        first.iter().filter(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::OffMonitor, .. }
+        )).count(),
+        1,
+        "first stranding emits drift once"
+    );
+
+    // Repeated topology changes (e.g. user toggles displays multiple
+    // times). Window stays stranded but cap should suppress.
+    let mut subsequent = 0;
+    for _ in 0..50 {
+        let evs = update(
+            &mut state,
+            Command::ReportMonitorTopologyChanged {
+                rects: vec![Rect { left: 0, top: 0, right: 800, bottom: 600 }],
+            },
+            &c,
+        );
+        subsequent += evs.iter().filter(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::OffMonitor, .. }
+        )).count();
+    }
+    assert_eq!(subsequent, 0, "cap suppresses repeated topology-change OffMonitor");
+}
+
+#[test]
+fn off_monitor_drift_cap_survives_duplicate_open() {
+    // Same monotonicity discipline as hidden_since_open_emitted.
+    // After cap fires, a duplicate ReportWindowOpened must preserve
+    // the cap or the storm re-arms.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportMonitorTopologyChanged {
+            rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "w-dup-off".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xAB,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("w-dup-off".into()),
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndForegroundChanged { hwnd: 0xAB },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndPositionChanged {
+            hwnd: 0xAB,
+            rect: Rect { left: 5000, top: 5000, right: 5500, bottom: 5400 },
+        },
+        &c,
+    );
+    assert!(state.windows.get("w-dup-off").unwrap().off_monitor_drift_emitted);
+
+    // Duplicate open — cap must survive.
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "w-dup-off".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    assert!(
+        state.windows.get("w-dup-off").unwrap().off_monitor_drift_emitted,
+        "cap survives duplicate open"
+    );
 }
 
 #[test]
@@ -1782,10 +2563,21 @@ fn wrr_duplicate_hwnd_open_for_same_label_is_idempotent() {
 }
 
 #[test]
-fn wrr_double_link_with_different_hwnd_for_same_label_emits_drift() {
-    // The non-duplicate path: a second ReportHwndOpened for
-    // the same label but a DIFFERENT HWND is genuine drift —
-    // host is reporting a related popup or there's a real bug.
+fn wrr_double_link_with_different_hwnd_for_same_label_repairs_silently() {
+    // A second ReportHwndOpened for the same label but a DIFFERENT
+    // HWND is the Repaired path: the launcher's drain wrong-picked
+    // earlier and the explicit on_after_created is correcting it.
+    // This is normal self-healing — mirror.hwnd is overwritten,
+    // no drift event is emitted (logged via crate::log for visibility).
+    //
+    // Rationale: in v0.33.696 smoke this fired 6 false-positive
+    // HwndWithoutBrowser drifts in a clean session because the drain-
+    // wrong-pick happens routinely under burst create. Drift firing
+    // on every routine repair masked genuine drifts.
+    //
+    // Drift IS still fired for Linked+stole (different HWND that had
+    // to be taken from another label's mirror) — see the
+    // wrr_repair_steals_hwnd_from_other_mirror test for that case.
     let (mut state, c) = registered_host_state();
     let _ = update(
         &mut state,
@@ -1816,12 +2608,13 @@ fn wrr_double_link_with_different_hwnd_for_same_label_emits_drift() {
         },
         &c,
     );
+    assert_eq!(state.windows["w1"].hwnd, Some(0xBB), "mirror.hwnd repaired to new value");
     assert!(
-        evs.iter().any(|e| matches!(
+        !evs.iter().any(|e| matches!(
             e,
             Event::HwndDriftDetected { kind: HwndDriftKind::HwndWithoutBrowser, .. }
         )),
-        "different HWND for same label must fire drift, got {:?}", evs
+        "plain Repair must NOT emit drift event, got {:?}", evs
     );
 }
 
@@ -2082,11 +2875,15 @@ fn wrr_burst_creates_with_drain_then_repair() {
         title: "".into(), label_hint: Some("w1".into()),
     }, &c5);
     assert_eq!(state.windows["w1"].hwnd, Some(0xAA), "repair to authoritative");
+    // Repaired path (plain repair, no cross-label steal here) is a
+    // normal self-healing flow — log only, no drift event. Drift
+    // would still fire if this were a Linked+stole case (different
+    // HWND that took the slot from another label).
     assert!(
-        evs1.iter().any(|e| matches!(e, Event::HwndDriftDetected {
+        !evs1.iter().any(|e| matches!(e, Event::HwndDriftDetected {
             kind: HwndDriftKind::HwndWithoutBrowser, ..
         })),
-        "repair emits drift for diagnostic visibility, got {:?}", evs1
+        "plain Repair must NOT emit drift event (logged via crate::log instead), got {:?}", evs1
     );
 
     // on_after_created for w2 arrives with 0xBB. CRUCIAL: w1's
@@ -2247,11 +3044,15 @@ fn wrr_apply_hwnd_opened_repairs_stale_link() {
         state.windows["w1"].hwnd, Some(0xAA),
         "stale link must be REPAIRED to the authoritative HWND"
     );
+    // Repair logged via crate::log; no drift event (would otherwise
+    // fire on every routine drain wrong-pick correction). See the
+    // wrr_double_link_with_different_hwnd_for_same_label_repairs_silently
+    // test for the contract.
     assert!(
-        evs.iter().any(|e| matches!(e, Event::HwndDriftDetected {
+        !evs.iter().any(|e| matches!(e, Event::HwndDriftDetected {
             kind: HwndDriftKind::HwndWithoutBrowser, ..
         })),
-        "drift event must be emitted so the repair is visible in logs, got {:?}", evs
+        "plain Repair must NOT emit drift event, got {:?}", evs
     );
 }
 
