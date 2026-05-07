@@ -1747,6 +1747,305 @@ fn hidden_since_open_cap_survives_duplicate_open() {
 }
 
 #[test]
+fn off_monitor_drift_fires_at_most_once_per_window() {
+    // Companion cap to HiddenSinceOpen. apply_hwnd_position_changed
+    // fires per WM_MOVE; without the cap, dragging an off-monitor
+    // window storms the renderer.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportMonitorTopologyChanged {
+            rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "w-off".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xEE,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("w-off".into()),
+        },
+        &c,
+    );
+    // Foreground first so corrective is suppressed (we test
+    // OffMonitor drift independently).
+    let _ = update(
+        &mut state,
+        Command::ReportHwndForegroundChanged { hwnd: 0xEE },
+        &c,
+    );
+    // First off-monitor position → drift fires.
+    let first = update(
+        &mut state,
+        Command::ReportHwndPositionChanged {
+            hwnd: 0xEE,
+            rect: Rect { left: 5000, top: 5000, right: 5500, bottom: 5400 },
+        },
+        &c,
+    );
+    assert_eq!(
+        first.iter().filter(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::OffMonitor, .. }
+        )).count(),
+        1,
+        "first off-monitor position emits drift exactly once"
+    );
+
+    // 100 more off-monitor moves: drift must NOT re-fire.
+    let mut subsequent = 0;
+    for i in 0..100 {
+        let dx = i * 10;
+        let evs = update(
+            &mut state,
+            Command::ReportHwndPositionChanged {
+                hwnd: 0xEE,
+                rect: Rect {
+                    left: 5000 + dx,
+                    top: 5000,
+                    right: 5500 + dx,
+                    bottom: 5400,
+                },
+            },
+            &c,
+        );
+        subsequent += evs.iter().filter(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::OffMonitor, .. }
+        )).count();
+    }
+    assert_eq!(subsequent, 0, "cap suppresses subsequent OffMonitor drift");
+}
+
+#[test]
+fn corrective_window_move_fires_at_most_once_per_window() {
+    // Same cap shape for the self-heal corrective. Without it, a
+    // never-foregrounded window dragged through off-monitor regions
+    // emits CorrectiveWindowMove every move.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportMonitorTopologyChanged {
+            rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "w-corr".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xFF,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("w-corr".into()),
+        },
+        &c,
+    );
+    // Note: NOT foregrounded — that's the corrective trigger.
+    let first = update(
+        &mut state,
+        Command::ReportHwndPositionChanged {
+            hwnd: 0xFF,
+            rect: Rect { left: 5000, top: 5000, right: 5500, bottom: 5400 },
+        },
+        &c,
+    );
+    assert_eq!(
+        first.iter().filter(|e| matches!(e, Event::CorrectiveWindowMove { .. })).count(),
+        1,
+        "first off-monitor + never-foregrounded emits corrective"
+    );
+    // Subsequent off-monitor moves: no more corrective.
+    let mut subsequent = 0;
+    for i in 0..100 {
+        let evs = update(
+            &mut state,
+            Command::ReportHwndPositionChanged {
+                hwnd: 0xFF,
+                rect: Rect {
+                    left: 5000 + i * 10,
+                    top: 5000,
+                    right: 5500 + i * 10,
+                    bottom: 5400,
+                },
+            },
+            &c,
+        );
+        subsequent += evs.iter().filter(|e| matches!(
+            e,
+            Event::CorrectiveWindowMove { .. }
+        )).count();
+    }
+    assert_eq!(subsequent, 0, "cap suppresses subsequent corrective emissions");
+}
+
+#[test]
+fn off_monitor_cap_blocks_repeated_topology_change_emissions() {
+    // Codex P2 PR #722 round 3: display hot-plug emits
+    // ReportMonitorTopologyChanged repeatedly. If a window stays
+    // stranded across multiple topology events, drift was being
+    // re-emitted every event because apply_monitor_topology_changed
+    // didn't consult the off_monitor_drift_emitted cap.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportMonitorTopologyChanged {
+            rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "w-strand".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xCD,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("w-strand".into()),
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndForegroundChanged { hwnd: 0xCD },
+        &c,
+    );
+    // Park the window where it WILL be stranded by topology change.
+    let _ = update(
+        &mut state,
+        Command::ReportHwndPositionChanged {
+            hwnd: 0xCD,
+            rect: Rect { left: 1000, top: 100, right: 1500, bottom: 600 },
+        },
+        &c,
+    );
+    // Topology change strands the window.
+    let first = update(
+        &mut state,
+        Command::ReportMonitorTopologyChanged {
+            rects: vec![Rect { left: 0, top: 0, right: 800, bottom: 600 }],
+        },
+        &c,
+    );
+    assert_eq!(
+        first.iter().filter(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::OffMonitor, .. }
+        )).count(),
+        1,
+        "first stranding emits drift once"
+    );
+
+    // Repeated topology changes (e.g. user toggles displays multiple
+    // times). Window stays stranded but cap should suppress.
+    let mut subsequent = 0;
+    for _ in 0..50 {
+        let evs = update(
+            &mut state,
+            Command::ReportMonitorTopologyChanged {
+                rects: vec![Rect { left: 0, top: 0, right: 800, bottom: 600 }],
+            },
+            &c,
+        );
+        subsequent += evs.iter().filter(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::OffMonitor, .. }
+        )).count();
+    }
+    assert_eq!(subsequent, 0, "cap suppresses repeated topology-change OffMonitor");
+}
+
+#[test]
+fn off_monitor_drift_cap_survives_duplicate_open() {
+    // Same monotonicity discipline as hidden_since_open_emitted.
+    // After cap fires, a duplicate ReportWindowOpened must preserve
+    // the cap or the storm re-arms.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportMonitorTopologyChanged {
+            rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "w-dup-off".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xAB,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("w-dup-off".into()),
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndForegroundChanged { hwnd: 0xAB },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndPositionChanged {
+            hwnd: 0xAB,
+            rect: Rect { left: 5000, top: 5000, right: 5500, bottom: 5400 },
+        },
+        &c,
+    );
+    assert!(state.windows.get("w-dup-off").unwrap().off_monitor_drift_emitted);
+
+    // Duplicate open — cap must survive.
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "w-dup-off".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    assert!(
+        state.windows.get("w-dup-off").unwrap().off_monitor_drift_emitted,
+        "cap survives duplicate open"
+    );
+}
+
+#[test]
 fn promote_for_label_without_window_mirror_emits_event_idempotently() {
     // The handler's idempotency contract: ReportPoolWindowPromoted
     // can arrive without a paired ReportWindowOpened (e.g. the open

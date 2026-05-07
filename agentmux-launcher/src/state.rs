@@ -121,19 +121,32 @@ pub struct WindowMirror {
     /// since its `ReportWindowOpened`? Used to fire `HiddenSinceOpen`
     /// drift on the first hide event when this is still false.
     pub foregrounded_since_open: bool,
-    /// Drift-storm fix (post-PR-#720 follow-up): `HiddenSinceOpen`
-    /// drift only fires ONCE per window per session. Without this
-    /// cap, a fresh top-level window that goes through several
-    /// SetWindowPos transitions during host placement re-emits the
-    /// same drift event for every intermediate `visible=false`
+    /// Drift-storm fix: `HiddenSinceOpen` / `OffMonitor` /
+    /// `CorrectiveWindowMove` each fire AT MOST ONCE per window per
+    /// session. Without these caps, a fresh top-level window that
+    /// goes through several SetWindowPos transitions during host
+    /// placement re-emits the same event for every intermediate
     /// snapshot — observed up to 170 events in 1 second, exhausting
-    /// the renderer's V8 stack and crashing it. Cap fires once,
+    /// the renderer's V8 stack and crashing it. The cap fires once;
     /// subscribers still see the signal, no storm.
+    ///
+    /// `OffMonitor` shares the same risk as `HiddenSinceOpen` because
+    /// `apply_hwnd_position_changed` fires per WM_MOVE — dragging an
+    /// already-off-monitor window emits drift on every pixel.
+    /// `CorrectiveWindowMove` rides with it (fires per position
+    /// change while `!foregrounded_since_open`).
+    ///
+    /// All three flags are monotonic for a window's lifetime: once
+    /// true, never reset (preserve via OR-with-prior on duplicate
+    /// `ReportWindowOpened`, codex P2 PR #708 round 3).
+    ///
     /// See `docs/specs/ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`
-    /// for the original storm context (this is the second instance
-    /// — pool-promote path was caught in PR #708, direct-open path
-    /// in this PR).
+    /// for storm context.
     pub hidden_since_open_emitted: bool,
+    /// See `hidden_since_open_emitted` doc above.
+    pub off_monitor_drift_emitted: bool,
+    /// See `hidden_since_open_emitted` doc above.
+    pub corrective_window_move_emitted: bool,
 }
 
 /// Top-level launcher state. Single Arc<Mutex<State>> owned by the
