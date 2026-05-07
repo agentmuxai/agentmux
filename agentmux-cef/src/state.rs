@@ -512,6 +512,26 @@ pub struct AppState {
     /// `docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`.
     pub host_state: Mutex<crate::reducer::HostState>,
 
+    /// Phase F.7 host-bridge dedup. Keyed by `"{event_kind}|{label}|{hwnd}"`,
+    /// value is the highest launcher-event version dispatched to renderers
+    /// for that key. The bridge skips dispatch if the incoming event's
+    /// version is `<=` the cached version — preserving subscriber
+    /// idempotency under §8.14 even if the renderer-side guard fails
+    /// (multiple V8 contexts, fresh-renderer post-crash, race during
+    /// init, etc.).
+    ///
+    /// Originally proposed in `ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`
+    /// §4.4 / master spec §9.8 as Phase F.7. Implementation forced when
+    /// v0.33.688 smoke surfaced a 164× amplification of a single
+    /// `HiddenSinceOpen` drift event v=78 — launcher cap (PR #721)
+    /// prevented multi-emit but the bridge fanned the one event into
+    /// many V8 contexts, exhausting the renderer.
+    ///
+    /// Bounded at 4096 keys with FIFO eviction (insertion order). A
+    /// re-arrival for an evicted key bypasses dedup once but the
+    /// renderer guard still catches it.
+    pub launcher_bridge_dedup: Mutex<std::collections::HashMap<String, u64>>,
+
     /// Linux/macOS only — registry of live top-level `CefWindow` handles,
     /// keyed by window label ("main" for the primary, otherwise the label
     /// CreateWindowTask assigns to a sub-window). Populated by
@@ -640,6 +660,7 @@ impl Default for AppState {
             // browsers field removed in H.2.e — see comment near struct decl.
             window_meta: Mutex::new(HashMap::new()),
             host_state: Mutex::new(crate::reducer::HostState::default()),
+            launcher_bridge_dedup: Mutex::new(std::collections::HashMap::new()),
             #[cfg(not(target_os = "windows"))]
             windows: Mutex::new(HashMap::new()),
             #[cfg(not(target_os = "windows"))]
