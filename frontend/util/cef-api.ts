@@ -586,11 +586,35 @@ export function buildCefApi(): AppApi {
         cancelCrossDrag: async (dragId: string) => {
             await invokeCommand("cancel_cross_drag", { dragId });
         },
-        openWindowAtPosition: async (screenX: number, screenY: number, workspaceId?: string) => {
-            return await invokeCommand<string>("open_window_at_position", { screenX, screenY, workspaceId: workspaceId ?? "" });
+        openWindowAtPosition: async (
+            screenX: number,
+            screenY: number,
+            workspaceId?: string,
+            width?: number,
+            height?: number,
+        ) => {
+            return await invokeCommand<string>("open_window_at_position", {
+                screenX,
+                screenY,
+                workspaceId: workspaceId ?? "",
+                width,
+                height,
+            });
         },
-        tearOffPoolPromote: async (workspaceId: string, screenX: number, screenY: number) => {
-            return await invokeCommand<string>("tear_off_pool_promote", { workspaceId, screenX, screenY });
+        tearOffPoolPromote: async (
+            workspaceId: string,
+            screenX: number,
+            screenY: number,
+            width?: number,
+            height?: number,
+        ) => {
+            return await invokeCommand<string>("tear_off_pool_promote", {
+                workspaceId,
+                screenX,
+                screenY,
+                width,
+                height,
+            });
         },
         tearOffSCMoveHandshake: async (args) => {
             return await invokeCommand<{ handshakeMs: number; totalMs: number }>(
