@@ -20,6 +20,7 @@ import {
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { getApi } from "@/store/global";
 import { createSignal } from "solid-js";
+import { setTabGrabOffset } from "./tab-grab-offset";
 
 export interface DroppableTabProps {
     tabId: string;
@@ -67,6 +68,32 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 tabIndex: props.tabIndex,
                 type: tabItemType,
             }),
+            onGenerateDragPreview: ({ location, source }) => {
+                // Capture grab offset here (rather than onDragStart)
+                // because pragmatic-dnd's DragLocation is on this event;
+                // onDragStart only carries `source`. Used by tear-off to
+                // anchor the new window so the cursor stays on the same
+                // pixel of the same tab across the handoff.
+                //
+                // Note: we DO NOT suppress the OS drag image even though
+                // the spec drafted it. SC_MOVE doesn't actually engage
+                // during the HTML5 drag (pragmatic-dnd's OLE capture
+                // blocks the modal move-loop), so the new window only
+                // appears on mouseup. Suppressing the OS ghost leaves
+                // the user with a no-drop cursor and zero visual
+                // feedback during drag — strictly worse. Spec §4.5
+                // updated to reflect this.
+                const tabRect = tabWrapRef.getBoundingClientRect();
+                setTabGrabOffset({
+                    x: location.current.input.clientX - tabRect.left,
+                    y: location.current.input.clientY - tabRect.top,
+                });
+                Logger.info("dnd", "tab-drag preview generated", {
+                    tabId: source.data.tabId,
+                    grabX: location.current.input.clientX - tabRect.left,
+                    grabY: location.current.input.clientY - tabRect.top,
+                });
+            },
             onDragStart: () => {
                 setGlobalDragTabId(props.tabId);
                 setInsertionPoint(null);
@@ -82,6 +109,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
             onDrop: () => {
                 setGlobalDragTabId(null);
                 setIsDragging(false);
+                setTabGrabOffset(null);
                 getApi().setJsDragActive(false).catch(() => {});
                 // Do NOT clear currentDragPayload here — this fires for ALL drops including
                 // out-of-window. Payload is cleared in the monitorForElements onDrop in
