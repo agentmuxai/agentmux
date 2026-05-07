@@ -51,13 +51,27 @@ const SHELL_INPUT_CH_SIZE: usize = 32;
 ///   3. Fall back to `cmd.exe`
 #[cfg(windows)]
 fn detect_local_shell_path_windows() -> String {
+    use std::os::windows::process::CommandExt;
     use std::process::Command;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
     // Try pwsh (PowerShell 7)
-    if Command::new("where").arg("pwsh").output().map(|o| o.status.success()).unwrap_or(false) {
+    if Command::new("where")
+        .arg("pwsh")
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
         return "pwsh".to_string();
     }
     // Try powershell (Windows PowerShell 5.x)
-    if Command::new("where").arg("powershell").output().map(|o| o.status.success()).unwrap_or(false) {
+    if Command::new("where")
+        .arg("powershell")
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
         return "powershell".to_string();
     }
     "cmd.exe".to_string()
