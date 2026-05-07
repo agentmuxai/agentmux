@@ -71,19 +71,13 @@ const POOL_HEIGHT: i32 = 800;
 /// of the title bar after promotion.
 const TITLE_BAR_OFFSET_PX: i32 = 16;
 
-/// Tab-anchor placement constants. When the frontend supplies
-/// `tabAnchorX/Y` (the screen point where the user grabbed the tab),
-/// the new window is positioned so its FIRST TAB's top-left lands at
-/// that anchor — cursor stays on the same visual element across the
-/// handoff. Spec: SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md §4.4.
-///
-/// `FIRST_TAB_INSET_X` is the left-edge gap from the window's outer
-/// frame to where the first tab actually starts (tab strip leading
-/// padding). `TAB_STRIP_TOP_OFFSET_PX` is the vertical distance from
-/// the window's outer top to the top of the tab strip — title bar
-/// sits above it.
-pub(super) const FIRST_TAB_INSET_X: i32 = 8;
-pub(super) const TAB_STRIP_TOP_OFFSET_PX: i32 = TITLE_BAR_OFFSET_PX;
+// Tab-anchor placement: PR #730 hardcoded FIRST_TAB_INSET_X /
+// TAB_STRIP_TOP_OFFSET_PX as best-effort window-chrome offsets.
+// Smoke on v0.33.704 showed they were inaccurate (new window's
+// first tab not landing where the dragged tab was). The frontend
+// now measures the source window's chrome dynamically and computes
+// the new window's outer top-left position itself; backend just
+// uses the supplied anchor verbatim. The constants are gone.
 
 /// Spawn a single pool window. Called at startup (N times) and
 /// after each promote (1 refill). Idempotent against the
@@ -728,11 +722,17 @@ pub fn promote_pool_window(
     // left of or above the primary, screen coords can legitimately be
     // negative, and clamping to 0 would yank the window back onto the
     // primary monitor. The legacy fallback also doesn't clamp.
+    //
+    // Anchor semantics (refined post-PR #730 smoke): tab_anchor_{x,y}
+    // is now the OUTER TOP-LEFT of the new window, not the screen
+    // position of the grabbed tab. Frontend computes
+    //   anchor = cursor_screen - grab_offset - source_chrome_inset
+    // so its hardcoded chrome inset (was FIRST_TAB_INSET_X /
+    // TAB_STRIP_TOP_OFFSET_PX) is gone — frontend measures the source
+    // window's actual chrome dynamically. Backend just places the
+    // window at anchor with no further offset.
     let (pos_x, pos_y) = match (tab_anchor_x, tab_anchor_y) {
-        (Some(ax), Some(ay)) => (
-            ax - FIRST_TAB_INSET_X,
-            ay - TAB_STRIP_TOP_OFFSET_PX,
-        ),
+        (Some(ax), Some(ay)) => (ax, ay),
         _ => (
             screen_x - win_w / 2,
             screen_y - TITLE_BAR_OFFSET_PX,

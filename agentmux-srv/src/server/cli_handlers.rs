@@ -94,8 +94,16 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 {
                     // Verify npm is available before attempting install.
                     let npm_available = if cfg!(windows) {
-                        tokio::process::Command::new("where").arg("npm").output().await
-                            .map(|o| o.status.success()).unwrap_or(false)
+                        // CREATE_NO_WINDOW (0x08000000) suppresses cmd flash —
+                        // see broader fix in this file's other spawns.
+                        let mut probe = tokio::process::Command::new("where");
+                        probe.arg("npm");
+                        #[cfg(windows)]
+                        {
+                            use std::os::windows::process::CommandExt;
+                            probe.creation_flags(0x08000000);
+                        }
+                        probe.output().await.map(|o| o.status.success()).unwrap_or(false)
                     } else {
                         tokio::process::Command::new("which").arg("npm").output().await
                             .map(|o| o.status.success()).unwrap_or(false)
@@ -398,7 +406,14 @@ pub(crate) async fn resolve_cli_on_path(cli_command: &str) -> Option<String> {
         cli_command.to_string()
     };
     let which_result = if cfg!(windows) {
-        tokio::process::Command::new("where").arg(&path_cmd).output().await
+        let mut probe = tokio::process::Command::new("where");
+        probe.arg(&path_cmd);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            probe.creation_flags(0x08000000);
+        }
+        probe.output().await
     } else {
         tokio::process::Command::new("which").arg(&path_cmd).output().await
     };

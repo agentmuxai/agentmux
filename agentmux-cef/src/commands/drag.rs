@@ -408,18 +408,11 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
     let tab_anchor_x = args.get("tabAnchorX").and_then(|v| v.as_f64()).map(|n| n as i32);
     let tab_anchor_y = args.get("tabAnchorY").and_then(|v| v.as_f64()).map(|n| n as i32);
 
-    // Position the new window. With tab anchor: place so the first
-    // tab's top-left lands at the anchor (cursor stays on the grabbed
-    // pixel). Without: cursor-centered title bar (legacy behavior).
-    //
-    // No `.max(0)` clamp on the anchor branch (codex P2 PR #730
-    // round 2): negative coords are valid on multi-monitor setups
-    // where a secondary display is left/above primary.
+    // Anchor is the new window's outer top-left (frontend pre-computed,
+    // chrome inset already subtracted). See window_pool.rs for full
+    // rationale. Negative coords valid on multi-monitor.
     let (pos_x, pos_y) = match (tab_anchor_x, tab_anchor_y) {
-        (Some(ax), Some(ay)) => (
-            ax - super::window_pool::FIRST_TAB_INSET_X,
-            ay - super::window_pool::TAB_STRIP_TOP_OFFSET_PX,
-        ),
+        (Some(ax), Some(ay)) => (ax, ay),
         _ => (
             ((screen_x - win_w as f64 / 2.0).max(0.0)) as i32,
             ((screen_y - 16.0).max(0.0)) as i32,
