@@ -419,6 +419,17 @@ pub fn list_window_instances(state: &Arc<AppState>) -> serde_json::Value {
         .map(|(l, _)| l)
         .filter(|l| !pool_labels.contains(l.as_str()) && !l.starts_with("browser-pane-"))
         .collect();
+    // Diagnostic for the v0.33.704 InstancePanel-shows-ghost-window
+    // bug. If labels.len() differs from the user's actual window
+    // count, this log identifies the ghost. Remove after RCA.
+    tracing::info!(
+        target: "window_instances",
+        count = labels.len(),
+        labels = ?labels,
+        pool_labels = ?pool_labels,
+        "[list_window_instances] returning {} labels: {:?}",
+        labels.len(), labels
+    );
     // Read backend window IDs via `state.backend_window_id()`,
     // which queries the launcher-fed `shadow_backend_window_ids`
     // (sole source of truth post-B.5e). Resolve labels OUTSIDE
@@ -459,29 +470,17 @@ pub fn list_windows(state: &Arc<AppState>) -> serde_json::Value {
 }
 
 /// Focus a specific window by label.
+///
+/// Uses the CEF Views `Window::activate()` API on all platforms (via
+/// `post_focus_window` → `FocusWindowTask`). On Windows in Views mode,
+/// `browser.host().window_handle()` returns NULL — the legacy direct
+/// SetForegroundWindow path silently failed. Views' `activate()` calls
+/// SetForegroundWindow internally on the actual top-level HWND
+/// resolved through `browser_view_get_for_browser → window()`, which
+/// is the only correct way to get the HWND in Views mode.
 pub fn focus_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
-
-    #[cfg(target_os = "windows")]
-    {
-        // Phase H.2.b — reducer-aware lookup with fallback.
-        if let Some(browser) = state.get_browser(label) {
-            if let Some(host) = browser.host() {
-                let hwnd = host.window_handle();
-                if !hwnd.0.is_null() {
-                    unsafe {
-                        windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(
-                            hwnd.0 as *mut std::ffi::c_void,
-                        );
-                    }
-                    return Ok(serde_json::Value::Null);
-                }
-            }
-        }
-    }
-    #[cfg(not(target_os = "windows"))]
     crate::ui_tasks::post_focus_window(state, label);
-    let _ = (state, label);
     Ok(serde_json::Value::Null)
 }
 
