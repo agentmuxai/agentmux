@@ -4325,11 +4325,10 @@ mod tests {
 
     #[test]
     fn layout_insert_node_event_echoes_parent_id_and_index() {
-        // event
-        // hardcoded `parent_id: None, index: None`; subscribers had
-        // no record of what the caller asked for. Tree pre-populated
-        // with a group so the explicit-parent path doesn't take the
-        // empty-tree rejection branch (codex round 6).
+        // The emitted event must echo the command's parent_id /
+        // index so subscribers see what was requested. Tree pre-
+        // populated with a group so the explicit-parent path
+        // doesn't take the empty-tree rejection branch.
         let (mut state, tab_id) = fresh_tab();
         let mut group = leaf_node("group", "");
         group.data = None;
