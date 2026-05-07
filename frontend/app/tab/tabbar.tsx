@@ -5,6 +5,7 @@ import { atoms, createBlock, createTab, getApi, setActiveTab } from "@/store/glo
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
 import { invokeCommand } from "@/app/platform/ipc";
 import { fireAndForget } from "@/util/util";
+import { getTabGrabOffset } from "./tab-grab-offset";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { createMemo, For, onCleanup, onMount, Show } from "solid-js";
@@ -38,7 +39,12 @@ interface TabBarProps {
 // to filter out brief excursions while the user is still hunting for
 // the drop position; small enough that the tear feels intentional.
 // See docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26 §4.1.
-const TEAR_PAST_PX = 24;
+// Pixels past the tab bar's bottom edge before tear-off triggers. Was
+// 24px historically, which left a ~24-pixel zone where the user saw
+// only the OS drag image with no real window. Lowered to 5 to match
+// Chrome's perceived-instant tear-off (just enough to filter trembles).
+// Spec: SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md §4.2.
+const TEAR_PAST_PX = 5;
 
 function TabBar(props: TabBarProps): JSX.Element {
     const activeTabId = atoms.activeTabId;
@@ -158,13 +164,35 @@ function TabBar(props: TabBarProps): JSX.Element {
                         // (works across multi-monitor setups).
                         const screenX = window.screenX + input.clientX;
                         const screenY = window.screenY + input.clientY;
+                        // Tab anchor: where the user grabbed the tab,
+                        // expressed as a screen point. Backend places the
+                        // new window's first tab at that point so the
+                        // cursor stays on the same pixel of the same
+                        // visual element across the handoff (no teleport).
+                        // Spec: SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md §4.3.
+                        const grabOffset = getTabGrabOffset();
+                        const tabAnchorX = grabOffset
+                            ? screenX - grabOffset.x
+                            : undefined;
+                        const tabAnchorY = grabOffset
+                            ? screenY - grabOffset.y
+                            : undefined;
                         // Phase 2: real tear-off (sidecar TearOffTab +
                         // host openWindowAtPosition + Win32 SC_MOVE).
                         // Fire-and-forget — the user is mid-drag and the
                         // host's SC_MOVE handshake will take over the
                         // cursor synchronously from Windows' point of view.
                         fireAndForget(() =>
-                            requestTearOff(draggedTabId, wsId, screenX, screenY, originalTabIndex, wasPinned),
+                            requestTearOff(
+                                draggedTabId,
+                                wsId,
+                                screenX,
+                                screenY,
+                                originalTabIndex,
+                                wasPinned,
+                                tabAnchorX,
+                                tabAnchorY,
+                            ),
                         );
                     }
                     // Continue updating insertionPoint below — until the
@@ -637,6 +665,8 @@ async function requestTearOff(
     cursorY: number,
     originalTabIndex: number,
     wasPinned: boolean,
+    tabAnchorX?: number,
+    tabAnchorY?: number,
 ): Promise<void> {
     const t0 = performance.now();
     // F1.B — orphan-cleanup state. We only restore the tab when we
@@ -686,6 +716,8 @@ async function requestTearOff(
                 cursorY,
                 sourceWidth,
                 sourceHeight,
+                tabAnchorX,
+                tabAnchorY,
             );
             Logger.info("dnd", "tear-off used warm pool", { destWindowLabel });
         } catch (poolErr) {
@@ -699,6 +731,8 @@ async function requestTearOff(
                     newWsId,
                     sourceWidth,
                     sourceHeight,
+                    tabAnchorX,
+                    tabAnchorY,
                 );
             } catch (coldErr) {
                 // F1.B safe-restore signal: cold-path API itself

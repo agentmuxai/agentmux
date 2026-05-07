@@ -592,6 +592,8 @@ export function buildCefApi(): AppApi {
             workspaceId?: string,
             width?: number,
             height?: number,
+            tabAnchorX?: number,
+            tabAnchorY?: number,
         ) => {
             return await invokeCommand<string>("open_window_at_position", {
                 screenX,
@@ -599,6 +601,8 @@ export function buildCefApi(): AppApi {
                 workspaceId: workspaceId ?? "",
                 width,
                 height,
+                tabAnchorX,
+                tabAnchorY,
             });
         },
         tearOffPoolPromote: async (
@@ -607,6 +611,8 @@ export function buildCefApi(): AppApi {
             screenY: number,
             width?: number,
             height?: number,
+            tabAnchorX?: number,
+            tabAnchorY?: number,
         ) => {
             return await invokeCommand<string>("tear_off_pool_promote", {
                 workspaceId,
@@ -614,6 +620,8 @@ export function buildCefApi(): AppApi {
                 screenY,
                 width,
                 height,
+                tabAnchorX,
+                tabAnchorY,
             });
         },
         tearOffSCMoveHandshake: async (args) => {
