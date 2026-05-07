@@ -249,6 +249,36 @@ pub fn post_move_window(state: &Arc<AppState>, label: &str, dx: i32, dy: i32) {
     post_task(ThreadId::UI, Some(&mut task));
 }
 
+// ── Set window to absolute position ──────────────────────────────────────
+
+wrap_task! {
+    pub struct SetWindowPositionTask {
+        state: Arc<AppState>,
+        label: String,
+        x: i32,
+        y: i32,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            if let Some(window) = get_window_on_ui(&self.state, &self.label) {
+                let bounds = window.bounds();
+                window.set_bounds(Some(&Rect {
+                    x: self.x,
+                    y: self.y,
+                    width: bounds.width,
+                    height: bounds.height,
+                }));
+            }
+        }
+    }
+}
+
+pub fn post_set_window_position(state: &Arc<AppState>, label: &str, x: i32, y: i32) {
+    let mut task = SetWindowPositionTask::new(state.clone(), label.to_string(), x, y);
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
 // ── Phase B.9.2 (WRR) — corrective absolute-position move ─────────────────
 //
 // Reducer-driven self-heal. Triggered by `Event::CorrectiveWindowMove` when

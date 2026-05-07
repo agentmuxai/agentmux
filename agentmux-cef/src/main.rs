@@ -173,10 +173,25 @@ fn main() {
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_default();
-    let common_paths = agentmux_common::DataPaths::from_env().or_else(|| {
-        let mode = agentmux_common::RuntimeMode::current(&host_exe_dir);
+    // Dev builds NEVER inherit AGENTMUX_* env vars from a parent process.
+    // `task dev` is routinely launched from inside an AgentMux terminal
+    // pane, which means the child host inherits the parent instance's
+    // AGENTMUX_DATA_DIR pointing at the parent's version-isolated dir.
+    // Without this guard the dev build would resolve its data dir to the
+    // running portable's path and trip CEF's process-singleton lock,
+    // routing every "open" back to the existing window — the user would
+    // never see the dev code run. Path-based detection is authoritative
+    // for dev builds; for installed/portable we still honor the
+    // launcher-provided env (it's the launcher's job to publish them).
+    let common_paths = if agentmux_common::is_dev_build_exe(&host_exe_dir) {
+        let mode = agentmux_common::RuntimeMode::current_path_only(&host_exe_dir);
         agentmux_common::DataPaths::resolve(version, &mode).ok()
-    });
+    } else {
+        agentmux_common::DataPaths::from_env().or_else(|| {
+            let mode = agentmux_common::RuntimeMode::current(&host_exe_dir);
+            agentmux_common::DataPaths::resolve(version, &mode).ok()
+        })
+    };
     let is_dev = match &common_paths {
         Some(p) => matches!(p.mode, agentmux_common::RuntimeMode::Dev { .. }),
         None => false,
@@ -235,9 +250,18 @@ fn main() {
     // shared path. Falls back to the cef cache dir only when the env
     // is unset (`task dev` mode without launcher), where forwarding
     // wouldn't be wired anyway.
-    let port_file_dir = std::env::var_os("AGENTMUX_DATA_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| data_dir.clone());
+    // Dev builds inherit AGENTMUX_DATA_DIR from the parent pane they were
+    // launched from. Writing ipc-port there would overwrite the parent
+    // instance's port:token and break its single-instance forwarding.
+    // In dev mode there is no launcher so port forwarding isn't wired
+    // anyway — use the dev data dir directly.
+    let port_file_dir = if agentmux_common::is_dev_build_exe(&host_exe_dir) {
+        data_dir.clone()
+    } else {
+        std::env::var_os("AGENTMUX_DATA_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| data_dir.clone())
+    };
     let _ = std::fs::create_dir_all(&port_file_dir);
     let port_file = port_file_dir.join("ipc-port");
 
@@ -259,7 +283,18 @@ fn main() {
     // lifetime — dropping it closes the pipe (logged by launcher).
     // Failure to connect is non-fatal in B.2 (host can still run);
     // B.5+ will tighten when the host depends on IPC for state.
-    let _launcher_ipc = runtime.block_on(launcher_ipc::connect_to_launcher(app_state.clone()));
+    //
+    // Dev-build env-isolation guard: a dev build inheriting
+    // `AGENTMUX_LAUNCHER_PIPE` from a parent AgentMux pane it was
+    // launched from would connect to the PARENT's launcher pipe and
+    // route its host events into the parent's launcher state.
+    // Skip the connection in dev mode — `task dev` has no launcher
+    // process anyway.
+    let _launcher_ipc = if agentmux_common::is_dev_build_exe(&host_exe_dir) {
+        None
+    } else {
+        runtime.block_on(launcher_ipc::connect_to_launcher(app_state.clone()))
+    };
 
     // Phase E.2c.5a — connect to the srv reducer's pipe. Forwards
     // srv events (workspace / tab / block lifecycle) to every
@@ -268,7 +303,15 @@ fn main() {
     // if absent: `task dev` mode doesn't run the launcher and so
     // doesn't set `AGENTMUX_SRV_PIPE_PATH` — host runs without the
     // bridge, frontend uses the legacy waveobj:update path.
-    let _srv_ipc = runtime.block_on(srv_ipc::connect_to_srv(app_state.clone()));
+    //
+    // Same dev-build guard as launcher_ipc above — a dev build
+    // inheriting `AGENTMUX_SRV_PIPE_PATH` would bridge its srv
+    // events into the parent's renderer fan-out.
+    let _srv_ipc = if agentmux_common::is_dev_build_exe(&host_exe_dir) {
+        None
+    } else {
+        runtime.block_on(srv_ipc::connect_to_srv(app_state.clone()))
+    };
 
     // Phase B.1: if launcher already spawned srv (the normal portable
     // / installed path post-PR-#570 + B.1), populate state from the
@@ -282,7 +325,15 @@ fn main() {
     // frontend before the backend is available, which causes a "raw
     // browser" appearance on slow machines or first launch.
     let backend_ready = runtime.block_on(async {
-        let launcher_provided = sidecar::use_launcher_endpoints(&app_state);
+        // Dev builds inherit AGENTMUX_BACKEND_WS from the parent pane.
+        // Consuming it would connect to the parent's srv instead of
+        // spawning our own, so the dev frontend runs against the wrong
+        // (parent's) backend and no dev-version srv is ever started.
+        let launcher_provided = if agentmux_common::is_dev_build_exe(&host_exe_dir) {
+            None
+        } else {
+            sidecar::use_launcher_endpoints(&app_state)
+        };
         let result = match launcher_provided {
             Some(Ok(r)) => {
                 tracing::info!(

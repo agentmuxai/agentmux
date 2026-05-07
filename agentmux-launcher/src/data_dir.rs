@@ -56,7 +56,14 @@ pub struct DataPaths {
 /// parameter from the pre-PR-#695 signature has been removed; callers
 /// no longer need to compute it.
 pub fn resolve_paths(launcher_exe_dir: &Path, version: &str) -> Result<DataPaths, String> {
-    let mode = RuntimeMode::current(launcher_exe_dir);
+    // Path-only when the exe is a dev build — see SPEC_DEV_ENV_ISOLATION.
+    // Prevents inheriting AGENTMUX_RUNTIME_MODE from a parent AgentMux
+    // process when `task dev` is launched from inside an existing pane.
+    let mode = if agentmux_common::is_dev_build_exe(launcher_exe_dir) {
+        RuntimeMode::current_path_only(launcher_exe_dir)
+    } else {
+        RuntimeMode::current(launcher_exe_dir)
+    };
     let common = CommonDataPaths::resolve(version, &mode)?;
 
     let portable_root = if mode == RuntimeMode::Portable {
