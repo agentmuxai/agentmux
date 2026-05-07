@@ -73,6 +73,12 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         getApi()
             .listWindowInstances()
             .then((snapshot) => {
+                // Re-check at resolution time. Between the sync gate
+                // above and the snapshot arriving (~ms RPC round-trip),
+                // a launcher event may have flipped launcherEventsActive
+                // true — applying the now-stale snapshot would clobber
+                // that newer state (codex P1 PR #733 round 2).
+                if (launcherEventsActive()) return;
                 reconcileKnownEntriesFromSnapshot(snapshot);
             })
             .catch(() => {});
