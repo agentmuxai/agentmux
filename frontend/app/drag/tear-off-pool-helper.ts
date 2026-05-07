@@ -34,13 +34,15 @@ export async function openTearOffWindow(
     newWsId: string,
     screenX: number,
     screenY: number,
+    width?: number,
+    height?: number,
 ): Promise<void> {
     try {
-        await api.tearOffPoolPromote(newWsId, screenX, screenY);
+        await api.tearOffPoolPromote(newWsId, screenX, screenY, width, height);
     } catch (poolErr) {
         Logger.warn("dnd:cross", "pool promote failed, cold-pathing", {
             error: String(poolErr),
         });
-        await api.openWindowAtPosition(screenX, screenY, newWsId);
+        await api.openWindowAtPosition(screenX, screenY, newWsId, width, height);
     }
 }
