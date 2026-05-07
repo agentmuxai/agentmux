@@ -351,7 +351,17 @@ pub fn apply_hwnd_visibility_changed(
         .find(|(_, m)| m.hwnd == Some(hwnd))
         .and_then(|(label, mirror)| {
             mirror.visible = visible;
-            if !visible && !mirror.foregrounded_since_open {
+            // Drift-storm cap: HiddenSinceOpen fires AT MOST ONCE per
+            // window per session. A fresh top-level window goes
+            // through several SetWindowPos transitions during host
+            // placement; without the cap, each intermediate
+            // `visible=false` re-emits the same drift event and the
+            // renderer's V8 stack runs out (see `hidden_since_open_emitted`
+            // doc on `WindowMirror`). The flag set below is monotonic
+            // — once we've reported the drift, never report it again
+            // for the same label. Subscribers still see the signal.
+            if !visible && !mirror.foregrounded_since_open && !mirror.hidden_since_open_emitted {
+                mirror.hidden_since_open_emitted = true;
                 version_to_bump = true;
                 Some(label.clone())
             } else {

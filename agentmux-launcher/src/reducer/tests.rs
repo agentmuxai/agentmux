@@ -1580,6 +1580,91 @@ fn cold_open_without_promote_still_initializes_foregrounded_false() {
         !state.windows.get("window-fresh").unwrap().foregrounded_since_open,
         "non-promote open must keep foregrounded_since_open=false"
     );
+    assert!(
+        !state.windows.get("window-fresh").unwrap().hidden_since_open_emitted,
+        "fresh open starts with hidden_since_open_emitted=false (cap not yet armed)"
+    );
+}
+
+#[test]
+fn hidden_since_open_drift_fires_at_most_once_per_window() {
+    // Drift-storm regression guard. The smoke crash on v0.33.685
+    // ("New Window" from hamburger after a tear-off) was 170
+    // identical HiddenSinceOpen events in 1s for the same label,
+    // exhausting the renderer's V8 stack. Cap fires once per window
+    // per session — subscribers still see the signal, no storm.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-fresh".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xCC,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("window-fresh".into()),
+        },
+        &c,
+    );
+    // First hide → drift fires.
+    let first = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xCC, visible: false },
+        &c,
+    );
+    assert_eq!(
+        first
+            .iter()
+            .filter(|e| matches!(
+                e,
+                Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+            ))
+            .count(),
+        1,
+        "first hide emits drift exactly once"
+    );
+
+    // 100 subsequent hide/show oscillations (mimics the storm
+    // observed during placement): drift must NOT re-fire.
+    let mut subsequent_drift_count = 0;
+    for _ in 0..100 {
+        let _ = update(
+            &mut state,
+            Command::ReportHwndVisibilityChanged { hwnd: 0xCC, visible: true },
+            &c,
+        );
+        let evs = update(
+            &mut state,
+            Command::ReportHwndVisibilityChanged { hwnd: 0xCC, visible: false },
+            &c,
+        );
+        subsequent_drift_count += evs
+            .iter()
+            .filter(|e| matches!(
+                e,
+                Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+            ))
+            .count();
+    }
+    assert_eq!(
+        subsequent_drift_count, 0,
+        "cap suppresses ALL subsequent HiddenSinceOpen emissions"
+    );
+    assert!(
+        state
+            .windows
+            .get("window-fresh")
+            .unwrap()
+            .hidden_since_open_emitted,
+        "cap flag is set after the first emission"
+    );
 }
 
 #[test]
