@@ -283,7 +283,18 @@ fn main() {
     // lifetime — dropping it closes the pipe (logged by launcher).
     // Failure to connect is non-fatal in B.2 (host can still run);
     // B.5+ will tighten when the host depends on IPC for state.
-    let _launcher_ipc = runtime.block_on(launcher_ipc::connect_to_launcher(app_state.clone()));
+    //
+    // Dev-build env-isolation guard: a dev build inheriting
+    // `AGENTMUX_LAUNCHER_PIPE` from a parent AgentMux pane it was
+    // launched from would connect to the PARENT's launcher pipe and
+    // route its host events into the parent's launcher state.
+    // Skip the connection in dev mode — `task dev` has no launcher
+    // process anyway.
+    let _launcher_ipc = if agentmux_common::is_dev_build_exe(&host_exe_dir) {
+        None
+    } else {
+        runtime.block_on(launcher_ipc::connect_to_launcher(app_state.clone()))
+    };
 
     // Phase E.2c.5a — connect to the srv reducer's pipe. Forwards
     // srv events (workspace / tab / block lifecycle) to every
@@ -292,7 +303,15 @@ fn main() {
     // if absent: `task dev` mode doesn't run the launcher and so
     // doesn't set `AGENTMUX_SRV_PIPE_PATH` — host runs without the
     // bridge, frontend uses the legacy waveobj:update path.
-    let _srv_ipc = runtime.block_on(srv_ipc::connect_to_srv(app_state.clone()));
+    //
+    // Same dev-build guard as launcher_ipc above — a dev build
+    // inheriting `AGENTMUX_SRV_PIPE_PATH` would bridge its srv
+    // events into the parent's renderer fan-out.
+    let _srv_ipc = if agentmux_common::is_dev_build_exe(&host_exe_dir) {
+        None
+    } else {
+        runtime.block_on(srv_ipc::connect_to_srv(app_state.clone()))
+    };
 
     // Phase B.1: if launcher already spawned srv (the normal portable
     // / installed path post-PR-#570 + B.1), populate state from the
