@@ -70,6 +70,44 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         Command::SetMagnifiedNode { tab_id, node_id } => {
             handle_set_magnified_node(state, tab_id, node_id)
         }
+        // Phase E.4.B Phase 5 — layout tree mutation arms. Currently
+        // dormant scaffolding (no production callers; Phase 7 migrates
+        // the wcore-direct writers to dispatch through these). 4 of 11
+        // arms shipped in this PR; remaining 7 (insert_at_index, move,
+        // swap, resize, replace, split_horizontal, split_vertical) are
+        // structurally identical and follow in subsequent PRs.
+        Command::LayoutClear {
+            tab_id,
+            correlation_id,
+        } => handle_layout_clear(state, tab_id, correlation_id),
+        Command::LayoutSetTree {
+            tab_id,
+            new_tree,
+            correlation_id,
+        } => handle_layout_set_tree(state, tab_id, new_tree, correlation_id),
+        Command::LayoutInsertNode {
+            tab_id,
+            node,
+            parent_id,
+            index,
+            focus_after,
+            magnify_after,
+            correlation_id,
+        } => handle_layout_insert_node(
+            state,
+            tab_id,
+            node,
+            parent_id,
+            index,
+            focus_after,
+            magnify_after,
+            correlation_id,
+        ),
+        Command::LayoutDeleteNode {
+            tab_id,
+            node_id,
+            correlation_id,
+        } => handle_layout_delete_node(state, tab_id, node_id, correlation_id),
         Command::CreateWindow {
             window_id,
             workspace_id,
@@ -386,6 +424,7 @@ fn handle_create_tab(state: &mut State, workspace_id: String, name: String) -> V
             block_ids: Vec::new(),
             focused_node_id: String::new(),
             magnified_node_id: String::new(),
+            rootnode: None,
         },
     );
     let workspace = state.workspaces.get_mut(&workspace_id).expect("checked");
@@ -695,6 +734,266 @@ fn handle_set_magnified_node(state: &mut State, tab_id: String, node_id: String)
     vec![Event::MagnifiedNodeChanged {
         tab_id,
         node_id,
+        version: v,
+    }]
+}
+
+// ── Phase E.4.B Phase 5 — layout tree reducer arms ──────────────────
+//
+// 4 of 11 arms shipped in this PR (clear, set_tree, insert_node,
+// delete_node). Pattern uniform across all 11:
+//   1. Look up tab; emit Event::Error on missing.
+//   2. Mutate `tab.rootnode` via the pure helpers in
+//      `crate::backend::layout::*` (shipped in Phase 4 / PRs #691, #692).
+//   3. Emit the matching Event::Layout* variant carrying the
+//      correlation_id and a fresh version.
+//
+// **No production callers yet** — wcore-direct writers continue to be
+// authoritative until Phase 7 migrates them. These arms are the
+// destination, not the source; tests below exercise them in isolation.
+
+fn handle_layout_clear(
+    state: &mut State,
+    tab_id: String,
+    correlation_id: String,
+) -> Vec<Event> {
+    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("LayoutClear: unknown tab {}", tab_id),
+            fatal: false,
+            version: v,
+        }];
+    };
+    tab.rootnode = None;
+    tab.focused_node_id = String::new();
+    tab.magnified_node_id = String::new();
+    let v = state.bump_version();
+    vec![Event::LayoutCleared {
+        tab_id,
+        correlation_id,
+        version: v,
+    }]
+}
+
+fn handle_layout_set_tree(
+    state: &mut State,
+    tab_id: String,
+    new_tree: Option<agentmux_common::LayoutNode>,
+    correlation_id: String,
+) -> Vec<Event> {
+    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("LayoutSetTree: unknown tab {}", tab_id),
+            fatal: false,
+            version: v,
+        }];
+    };
+    tab.rootnode = new_tree.clone();
+    // Reagent P1 PR #715 round 1: when the tree is wiped, focused/
+    // magnified ids would point at non-existent nodes. Match
+    // `handle_layout_clear`'s contract for the empty-tree case.
+    if new_tree.is_none() {
+        tab.focused_node_id = String::new();
+        tab.magnified_node_id = String::new();
+    }
+    let v = state.bump_version();
+    vec![Event::LayoutTreeReplaced {
+        tab_id,
+        new_tree,
+        correlation_id,
+        version: v,
+    }]
+}
+
+fn handle_layout_insert_node(
+    state: &mut State,
+    tab_id: String,
+    node: agentmux_common::LayoutNode,
+    parent_id: Option<String>,
+    index: Option<usize>,
+    focus_after: bool,
+    magnify_after: bool,
+    correlation_id: String,
+) -> Vec<Event> {
+    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("LayoutInsertNode: unknown tab {}", tab_id),
+            fatal: false,
+            version: v,
+        }];
+    };
+    // Three insert paths, in priority order:
+    //   1. Empty tree → promote new node to root.
+    //   2. parent_id given → insert under that specific parent at
+    //      `index` (or append if None). If parent_id is given but
+    //      doesn't resolve to a group node, REJECT with
+    //      Event::Error rather than fall back to the heuristic —
+    //      Codex P2 PR #715 round 5 flagged the silent-fallback
+    //      path as a consistency hole: the emitted event would
+    //      echo the requested parent_id while the actual mutation
+    //      went elsewhere, diverging the persist subscriber and
+    //      replay consumers from the reducer.
+    //   3. parent_id None → `findNextInsertLocation` heuristic.
+    let empty_tree = tab.rootnode.is_none();
+    if empty_tree {
+        tab.rootnode = Some(node.clone());
+    } else if let Some(pid) = parent_id.as_deref() {
+        let root = tab.rootnode.as_mut().expect("non-empty checked above");
+        match crate::backend::layout::find_node_by_id_mut(root, pid) {
+            Some(parent_node) if parent_node.data.is_none() => {
+                let len = parent_node.children.len();
+                let target = index.map(|i| i.min(len)).unwrap_or(len);
+                parent_node.children.insert(target, node.clone());
+            }
+            Some(_) => {
+                // parent_id resolves to a leaf — can't host children.
+                let v = state.bump_version();
+                return vec![Event::Error {
+                    code: ErrorCode::InvalidCommand,
+                    message: format!(
+                        "LayoutInsertNode: parent_id {:?} is a leaf node, cannot host children (tab {})",
+                        pid, tab_id
+                    ),
+                    fatal: false,
+                    version: v,
+                }];
+            }
+            None => {
+                let v = state.bump_version();
+                return vec![Event::Error {
+                    code: ErrorCode::InvalidCommand,
+                    message: format!(
+                        "LayoutInsertNode: parent_id {:?} not found in tree (tab {})",
+                        pid, tab_id
+                    ),
+                    fatal: false,
+                    version: v,
+                }];
+            }
+        }
+    } else {
+        let root = tab.rootnode.as_mut().expect("non-empty checked above");
+        crate::backend::layout::insert_node(root, node.clone());
+    }
+    // Codex P2 PR #715 round 1: honour focus_after / magnify_after.
+    // The schema documents these as the side effects callers rely on
+    // for "insert + activate" flows; ignoring them desyncs the snapshot
+    // from the event the caller's handler observed.
+    //
+    // Codex P2 PR #715 round 4: a magnified node must also be the
+    // focused one. Without this, a `magnify_after=true,
+    // focus_after=false` insert leaves `focused_node_id` pointing at
+    // the prior pane while `magnified_node_id` points at the new one
+    // — a UI invariant violation (frontend treats magnify-implies-
+    // focus). Treat magnify as implying focus.
+    if focus_after || magnify_after {
+        tab.focused_node_id = node.id.clone();
+    }
+    if magnify_after {
+        tab.magnified_node_id = node.id.clone();
+    }
+    let v = state.bump_version();
+    vec![Event::LayoutNodeInserted {
+        tab_id,
+        node,
+        // Reagent P2 (kimi) PR #715 round 3: pass the command's
+        // parent_id / index through to the event so subscribers see
+        // what the caller asked for, not a hardcoded `None, None`.
+        // The pure helper currently uses the `findNextInsertLocation`
+        // heuristic and ignores these hints — but the event is the
+        // record of what was *requested*; subscribers can correlate
+        // with the resulting tree by inspecting `node` itself.
+        parent_id,
+        index,
+        correlation_id,
+        version: v,
+    }]
+}
+
+fn handle_layout_delete_node(
+    state: &mut State,
+    tab_id: String,
+    node_id: String,
+    correlation_id: String,
+) -> Vec<Event> {
+    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("LayoutDeleteNode: unknown tab {}", tab_id),
+            fatal: false,
+            version: v,
+        }];
+    };
+    // Snapshot pre-delete focus/magnify so we can both detect
+    // direct-target hits AND post-walk for indirect orphaning.
+    let pre_focused = tab.focused_node_id.clone();
+    let pre_magnified = tab.magnified_node_id.clone();
+    let Some(root) = tab.rootnode.as_mut() else {
+        // Empty tree — nothing to delete; idempotent no-op (no event).
+        return Vec::new();
+    };
+    // Codex P2 PR #715 round 1: `backend::layout::delete_node` leaves
+    // root deletion to the caller (returns Ok(()) with the root
+    // unmodified). Detect the root case here and clear the tree
+    // wholesale so the reducer state matches the
+    // `LayoutNodeDeleted` event we emit.
+    if root.id == node_id {
+        tab.rootnode = None;
+    } else if let Err(e) = crate::backend::layout::delete_node(root, &node_id) {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("LayoutDeleteNode: {} (tab {})", e, tab_id),
+            fatal: false,
+            version: v,
+        }];
+    }
+
+    // Reagent P2 PR #715 round 3 (finding B) and Codex P2 round 3
+    // (finding C): both involve focus/magnify ids referencing nodes
+    // that no longer exist in the tree post-delete:
+    //   - B: `delete_recursive` collapse-sole-child rewrites a
+    //        parent's id to the promoted child's id. If
+    //        focused/magnified was the parent's original id, that
+    //        id is gone from the tree even though the same physical
+    //        node remains.
+    //   - C: deleting a container removes all descendants. If
+    //        focused/magnified was a descendant, it's gone too.
+    // Direct-target match (`pre_focused == node_id`) doesn't catch
+    // either case. Reconcile by walking the post-delete tree and
+    // clearing any focus/magnify id that no longer resolves.
+    let id_resolves = |id: &str| -> bool {
+        if id.is_empty() {
+            return true;
+        }
+        match tab.rootnode.as_ref() {
+            None => false,
+            Some(root) => crate::backend::layout::find_node_by_id(root, id).is_some(),
+        }
+    };
+    let was_focused = !pre_focused.is_empty() && !id_resolves(&pre_focused);
+    let was_magnified = !pre_magnified.is_empty() && !id_resolves(&pre_magnified);
+    if was_focused {
+        tab.focused_node_id = String::new();
+    }
+    if was_magnified {
+        tab.magnified_node_id = String::new();
+    }
+
+    let v = state.bump_version();
+    vec![Event::LayoutNodeDeleted {
+        tab_id,
+        node_id,
+        was_focused,
+        was_magnified,
+        correlation_id,
         version: v,
     }]
 }
@@ -3361,5 +3660,649 @@ mod tests {
             // And invariants hold on the empty state.
             assert_invariants(&state);
         }
+    }
+
+    // ── Phase E.4.B Phase 5 — layout reducer arms ─────────────────
+    //
+    // Tests for the 4 arms shipped in this PR. All arms share the
+    // same shape (lookup tab → mutate `tab.rootnode` via pure helper
+    // → emit Event::Layout*); the unit tests below verify state
+    // mutation and event shape per arm. The pure helpers themselves
+    // have their own ~40 tests in `agentmux-srv/src/backend/layout/`.
+
+    fn leaf_node(id: &str, block_id: &str) -> agentmux_common::LayoutNode {
+        agentmux_common::LayoutNode {
+            id: id.to_string(),
+            size: 1.0,
+            data: Some(agentmux_common::LayoutNodeData {
+                block_id: block_id.to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn fresh_tab() -> (State, String) {
+        let mut state = State::default();
+        let ws = create_workspace(&mut state, "w");
+        let tab = create_tab(&mut state, &ws, "t");
+        (state, tab)
+    }
+
+    #[test]
+    fn layout_clear_wipes_rootnode_focus_magnify_and_emits_event() {
+        let (mut state, tab_id) = fresh_tab();
+        // Pre-load some state.
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("n1", "b1"));
+        state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "n1".into();
+        state.tabs.get_mut(&tab_id).unwrap().magnified_node_id = "n1".into();
+
+        let events = update(
+            &mut state,
+            Command::LayoutClear {
+                tab_id: tab_id.clone(),
+                correlation_id: "corr-1".into(),
+            },
+            &ctx(1),
+        );
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::LayoutCleared { correlation_id, .. } if correlation_id == "corr-1"
+        ));
+        let tab = &state.tabs[&tab_id];
+        assert!(tab.rootnode.is_none(), "rootnode wiped");
+        assert_eq!(tab.focused_node_id, "");
+        assert_eq!(tab.magnified_node_id, "");
+    }
+
+    #[test]
+    fn layout_clear_unknown_tab_emits_error() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::LayoutClear {
+                tab_id: "nope".into(),
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::Error { code: ErrorCode::InvalidCommand, .. }));
+    }
+
+    #[test]
+    fn layout_set_tree_replaces_rootnode_wholesale() {
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("old", "b1"));
+
+        let new_tree = Some(leaf_node("new", "b2"));
+        let events = update(
+            &mut state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: new_tree.clone(),
+                correlation_id: "corr-set".into(),
+            },
+            &ctx(1),
+        );
+
+        assert!(matches!(&events[0], Event::LayoutTreeReplaced { .. }));
+        assert_eq!(state.tabs[&tab_id].rootnode, new_tree);
+    }
+
+    #[test]
+    fn layout_set_tree_to_none_clears_rootnode() {
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("n", "b"));
+
+        let _ = update(
+            &mut state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: None,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(state.tabs[&tab_id].rootnode.is_none());
+    }
+
+    #[test]
+    fn layout_insert_node_into_empty_tree_promotes_to_root() {
+        let (mut state, tab_id) = fresh_tab();
+        let node = leaf_node("first", "b1");
+        let events = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: node.clone(),
+                parent_id: None,
+                index: None,
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr-ins".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::LayoutNodeInserted { .. }));
+        assert_eq!(state.tabs[&tab_id].rootnode.as_ref().map(|n| n.id.as_str()), Some("first"));
+    }
+
+    #[test]
+    fn layout_insert_node_into_existing_tree_uses_helper() {
+        let (mut state, tab_id) = fresh_tab();
+        // Pre-load a single-leaf tree.
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("root", "b1"));
+        let new_node = leaf_node("added", "b2");
+        let events = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: new_node,
+                parent_id: None,
+                index: None,
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::LayoutNodeInserted { .. }));
+        // Helper turned the leaf root into a group with both leaves;
+        // exact shape is the helper's contract — we just assert the
+        // tree changed and contains both block ids.
+        let root = state.tabs[&tab_id].rootnode.as_ref().expect("rootnode set");
+        let collected = collect_block_ids(root);
+        assert!(collected.contains(&"b1".to_string()));
+        assert!(collected.contains(&"b2".to_string()));
+    }
+
+    fn collect_block_ids(node: &agentmux_common::LayoutNode) -> Vec<String> {
+        let mut ids = Vec::new();
+        if let Some(d) = &node.data {
+            if !d.block_id.is_empty() {
+                ids.push(d.block_id.clone());
+            }
+        }
+        for c in &node.children {
+            ids.extend(collect_block_ids(c));
+        }
+        ids
+    }
+
+    #[test]
+    fn layout_delete_node_on_empty_tree_is_noop() {
+        let (mut state, tab_id) = fresh_tab();
+        let events = update(
+            &mut state,
+            Command::LayoutDeleteNode {
+                tab_id: tab_id.clone(),
+                node_id: "ghost".into(),
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(events.is_empty(), "no event for delete on empty tree");
+        assert!(state.tabs[&tab_id].rootnode.is_none());
+    }
+
+    #[test]
+    fn layout_set_tree_to_none_also_clears_focused_and_magnified() {
+        // Reagent P1 PR #715 round 1: empty-tree set must match
+        // `LayoutClear`'s contract — focused/magnified ids would
+        // otherwise dangle past the wipe.
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("n", "b"));
+        state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "n".into();
+        state.tabs.get_mut(&tab_id).unwrap().magnified_node_id = "n".into();
+        let _ = update(
+            &mut state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: None,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        let tab = &state.tabs[&tab_id];
+        assert!(tab.rootnode.is_none());
+        assert_eq!(tab.focused_node_id, "");
+        assert_eq!(tab.magnified_node_id, "");
+    }
+
+    #[test]
+    fn layout_set_tree_with_some_preserves_focused_and_magnified() {
+        // Symmetry guard: Some(new_tree) must NOT clear focused/
+        // magnified — caller may have set them deliberately.
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "n".into();
+        state.tabs.get_mut(&tab_id).unwrap().magnified_node_id = "n".into();
+        let _ = update(
+            &mut state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: Some(leaf_node("n", "b")),
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        let tab = &state.tabs[&tab_id];
+        assert_eq!(tab.focused_node_id, "n");
+        assert_eq!(tab.magnified_node_id, "n");
+    }
+
+    #[test]
+    fn layout_insert_node_honours_focus_after() {
+        // Codex P2 PR #715 round 1: focus_after=true must update
+        // focused_node_id so the snapshot matches the event.
+        let (mut state, tab_id) = fresh_tab();
+        let node = leaf_node("new", "b1");
+        let _ = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node,
+                parent_id: None,
+                index: None,
+                focus_after: true,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert_eq!(state.tabs[&tab_id].focused_node_id, "new");
+        assert_eq!(state.tabs[&tab_id].magnified_node_id, "");
+    }
+
+    #[test]
+    fn layout_insert_node_magnify_after_implies_focus() {
+        // Codex P2 PR #715 round 4: magnify-implies-focus. Even when
+        // focus_after=false, setting magnify_after=true must also
+        // update focused_node_id so it doesn't dangle on the prior
+        // pane (UI invariant: a magnified pane is the focused pane).
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "prev".into();
+        let node = leaf_node("new", "b1");
+        let _ = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node,
+                parent_id: None,
+                index: None,
+                focus_after: false,
+                magnify_after: true,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert_eq!(
+            state.tabs[&tab_id].focused_node_id, "new",
+            "magnify_after must imply focus_after"
+        );
+        assert_eq!(state.tabs[&tab_id].magnified_node_id, "new");
+    }
+
+    #[test]
+    fn layout_insert_node_honours_explicit_parent_id_and_index() {
+        // Codex P2 PR #715 round 4: with parent_id given, insert at
+        // that node at the requested index instead of running the
+        // heuristic helper.
+        let (mut state, tab_id) = fresh_tab();
+        let mut group = leaf_node("group", "");
+        group.data = None;
+        group.children = vec![leaf_node("a", "ba"), leaf_node("c", "bc")];
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(group);
+
+        let _ = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: leaf_node("b", "bb"),
+                parent_id: Some("group".into()),
+                index: Some(1), // between a and c
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+
+        let root = state.tabs[&tab_id].rootnode.as_ref().expect("root");
+        let ids: Vec<_> = root.children.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "b", "c"], "explicit index honoured");
+    }
+
+    #[test]
+    fn layout_insert_node_index_clamps_when_out_of_range() {
+        // Out-of-range index clamps to the end (matches frontend
+        // `findNextInsertLocation` defensive semantics).
+        let (mut state, tab_id) = fresh_tab();
+        let mut group = leaf_node("group", "");
+        group.data = None;
+        group.children = vec![leaf_node("a", "ba")];
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(group);
+
+        let _ = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: leaf_node("b", "bb"),
+                parent_id: Some("group".into()),
+                index: Some(99),
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        let root = state.tabs[&tab_id].rootnode.as_ref().expect("root");
+        let ids: Vec<_> = root.children.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "b"], "out-of-range index clamps to end");
+    }
+
+    #[test]
+    fn layout_insert_node_with_unknown_parent_id_emits_error() {
+        // Codex P2 PR #715 round 5: silent fallback to heuristic
+        // diverges the event from the actual mutation. Reject
+        // explicit-but-invalid parent_id with Event::Error so
+        // subscribers (especially the persist subscriber, future)
+        // see a consistent record.
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("only", "b1"));
+
+        let events = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: leaf_node("added", "b2"),
+                parent_id: Some("does-not-exist".into()),
+                index: None,
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(
+            &events[0],
+            Event::Error { code: ErrorCode::InvalidCommand, .. }
+        ));
+        // Tree must be unchanged.
+        let root = state.tabs[&tab_id].rootnode.as_ref().expect("root");
+        assert_eq!(root.id, "only");
+        assert!(root.children.is_empty());
+    }
+
+    #[test]
+    fn layout_insert_node_with_leaf_parent_id_emits_error() {
+        // parent_id resolves to a leaf (has data) — leaf can't host
+        // children, so treat as invalid the same as a missing parent.
+        let (mut state, tab_id) = fresh_tab();
+        let mut root = leaf_node("group", "");
+        root.data = None;
+        root.children = vec![leaf_node("a", "ba")];
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(root);
+
+        let events = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: leaf_node("b", "bb"),
+                parent_id: Some("a".into()), // leaf, not a group
+                index: None,
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(
+            &events[0],
+            Event::Error { code: ErrorCode::InvalidCommand, .. }
+        ));
+    }
+
+    #[test]
+    fn layout_insert_node_with_neither_flag_leaves_state_alone() {
+        // Anti-vacuity guard: confirm the false-flag path is the
+        // baseline (otherwise the focus_after/magnify_after tests
+        // wouldn't be measuring anything).
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "prev".into();
+        let _ = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: leaf_node("new", "b1"),
+                parent_id: None,
+                index: None,
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert_eq!(state.tabs[&tab_id].focused_node_id, "prev");
+    }
+
+    #[test]
+    fn layout_delete_node_on_root_clears_the_tree() {
+        // Codex P2 PR #715 round 1: backend::layout::delete_node leaves
+        // root deletion to the caller. Without the root-detection
+        // branch, we'd emit LayoutNodeDeleted while rootnode still
+        // contains the supposedly-deleted tree.
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode =
+            Some(leaf_node("solitary-root", "b1"));
+        let events = update(
+            &mut state,
+            Command::LayoutDeleteNode {
+                tab_id: tab_id.clone(),
+                node_id: "solitary-root".into(),
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::LayoutNodeDeleted { .. }));
+        assert!(
+            state.tabs[&tab_id].rootnode.is_none(),
+            "root deletion must wipe the tree"
+        );
+    }
+
+    #[test]
+    fn layout_delete_node_clears_magnified_when_target_was_magnified() {
+        // Reagent P1 PR #715 round 1: magnified must be cleared
+        // alongside focused; same staleness concern.
+        let (mut state, tab_id) = fresh_tab();
+        let mut root = leaf_node("group", "");
+        root.data = None;
+        root.children = vec![leaf_node("a", "b1"), leaf_node("b", "b2")];
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(root);
+        state.tabs.get_mut(&tab_id).unwrap().magnified_node_id = "a".into();
+        let _ = update(
+            &mut state,
+            Command::LayoutDeleteNode {
+                tab_id: tab_id.clone(),
+                node_id: "a".into(),
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert_eq!(state.tabs[&tab_id].magnified_node_id, "");
+    }
+
+    #[test]
+    fn layout_node_deleted_event_carries_was_magnified() {
+        // Reagent P1 (kimi+sonnet) PR #715 round 3: subscribers need
+        // the was_magnified field to refresh their UI when the
+        // magnified node is deleted.
+        let (mut state, tab_id) = fresh_tab();
+        let mut root = leaf_node("group", "");
+        root.data = None;
+        root.children = vec![leaf_node("a", "b1"), leaf_node("b", "b2")];
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(root);
+        state.tabs.get_mut(&tab_id).unwrap().magnified_node_id = "a".into();
+
+        let events = update(
+            &mut state,
+            Command::LayoutDeleteNode {
+                tab_id: tab_id.clone(),
+                node_id: "a".into(),
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        match &events[0] {
+            Event::LayoutNodeDeleted { was_magnified, was_focused, .. } => {
+                assert!(*was_magnified, "was_magnified must be true");
+                assert!(!*was_focused, "was_focused stays false");
+            }
+            other => panic!("expected LayoutNodeDeleted, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn layout_delete_node_clears_focused_when_collapse_replaces_parent_id() {
+        // Reagent P2 (kimi+sonnet) PR #715 round 3 (finding B):
+        // `backend::layout::delete_node`'s collapse-sole-child path
+        // promotes the surviving child and rewrites the parent's id
+        // to the child's id. If focused/magnified pointed at the
+        // ORIGINAL parent id, that id is gone from the tree even
+        // though the same physical layout slot exists. Reducer must
+        // clear the dangling reference.
+        let (mut state, tab_id) = fresh_tab();
+        let mut group = leaf_node("group-id", "");
+        group.data = None;
+        group.children = vec![leaf_node("only-child", "b1"), leaf_node("sibling", "b2")];
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(group);
+        // Focus the group (the parent that will get its id rewritten
+        // when "sibling" is deleted and "only-child" is the sole
+        // survivor of the now-1-child group).
+        state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "group-id".into();
+
+        let events = update(
+            &mut state,
+            Command::LayoutDeleteNode {
+                tab_id: tab_id.clone(),
+                node_id: "sibling".into(),
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        match &events[0] {
+            Event::LayoutNodeDeleted { was_focused, .. } => {
+                assert!(
+                    *was_focused,
+                    "collapse rewrote parent id; reducer must report focus loss"
+                );
+            }
+            other => panic!("expected LayoutNodeDeleted, got {:?}", other),
+        }
+        assert_eq!(
+            state.tabs[&tab_id].focused_node_id, "",
+            "stale focus cleared post-collapse"
+        );
+    }
+
+    #[test]
+    fn layout_delete_node_clears_focused_when_target_subtree_contains_focus() {
+        // Codex P2 PR #715 round 3 (finding C): deleting a container
+        // wipes its descendants, but a direct-id-match check on
+        // focused/magnified misses descendants — they stay dangling.
+        let (mut state, tab_id) = fresh_tab();
+        // Tree:
+        //   root-group (children: group-A, leaf-z)
+        //     group-A (children: leaf-x, leaf-y)
+        let mut leaf_x = leaf_node("leaf-x", "bx");
+        leaf_x.data = Some(agentmux_common::LayoutNodeData {
+            block_id: "bx".into(),
+            ..Default::default()
+        });
+        let mut group_a = leaf_node("group-A", "");
+        group_a.data = None;
+        group_a.children = vec![leaf_x, leaf_node("leaf-y", "by")];
+        let mut root = leaf_node("root-group", "");
+        root.data = None;
+        root.children = vec![group_a, leaf_node("leaf-z", "bz")];
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(root);
+        // Focus a descendant of group-A, then delete group-A.
+        state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "leaf-x".into();
+        state.tabs.get_mut(&tab_id).unwrap().magnified_node_id = "leaf-y".into();
+
+        let events = update(
+            &mut state,
+            Command::LayoutDeleteNode {
+                tab_id: tab_id.clone(),
+                node_id: "group-A".into(),
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        match &events[0] {
+            Event::LayoutNodeDeleted { was_focused, was_magnified, .. } => {
+                assert!(*was_focused, "descendant focus must be cleared");
+                assert!(*was_magnified, "descendant magnify must be cleared");
+            }
+            other => panic!("expected LayoutNodeDeleted, got {:?}", other),
+        }
+        assert_eq!(state.tabs[&tab_id].focused_node_id, "");
+        assert_eq!(state.tabs[&tab_id].magnified_node_id, "");
+    }
+
+    #[test]
+    fn layout_insert_node_event_echoes_parent_id_and_index() {
+        // Reagent P2 (kimi only) PR #715 round 3 (finding D): event
+        // hardcoded `parent_id: None, index: None`; subscribers had
+        // no record of what the caller asked for.
+        let (mut state, tab_id) = fresh_tab();
+        let events = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: leaf_node("new", "b1"),
+                parent_id: Some("explicit-parent".into()),
+                index: Some(3),
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        match &events[0] {
+            Event::LayoutNodeInserted { parent_id, index, .. } => {
+                assert_eq!(parent_id.as_deref(), Some("explicit-parent"));
+                assert_eq!(*index, Some(3));
+            }
+            other => panic!("expected LayoutNodeInserted, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn layout_delete_node_clears_focused_when_target_was_focused() {
+        let (mut state, tab_id) = fresh_tab();
+        // Tree: group with two leaves.
+        let mut root = leaf_node("root-group", "");
+        root.data = None;
+        root.children = vec![leaf_node("a", "b1"), leaf_node("b", "b2")];
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(root);
+        state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "a".into();
+
+        let events = update(
+            &mut state,
+            Command::LayoutDeleteNode {
+                tab_id: tab_id.clone(),
+                node_id: "a".into(),
+                correlation_id: "corr-del".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(
+            &events[0],
+            Event::LayoutNodeDeleted { was_focused: true, .. }
+        ));
+        assert_eq!(state.tabs[&tab_id].focused_node_id, "");
     }
 }

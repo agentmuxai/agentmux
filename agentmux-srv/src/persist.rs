@@ -131,12 +131,23 @@ pub async fn bootstrap_state_from_wstore(state: &Arc<Mutex<State>>, wstore: &Wav
         // the tab's LayoutState row so the reducer's view matches what
         // the user last saw on disk. Empty when the layout row isn't
         // found or has no value (matches `LayoutState` defaults).
-        let (focused_node_id, magnified_node_id) = if tab.layoutstate.is_empty() {
-            (String::new(), String::new())
+        //
+        // Phase E.4.B — also bootstrap `rootnode` (the layout tree).
+        // Until the wcore-direct writers migrate to dispatch through
+        // the new layout reducer arms (Phase 7), the reducer's
+        // rootnode is a passive shadow — refreshed on startup, never
+        // diverging from disk because no reducer-arm writers exist
+        // yet at runtime.
+        let (focused_node_id, magnified_node_id, rootnode) = if tab.layoutstate.is_empty() {
+            (String::new(), String::new(), None)
         } else {
             match wstore.get::<crate::backend::obj::LayoutState>(&tab.layoutstate) {
-                Ok(Some(layout)) => (layout.focusednodeid, layout.magnifiednodeid),
-                _ => (String::new(), String::new()),
+                Ok(Some(layout)) => (
+                    layout.focusednodeid,
+                    layout.magnifiednodeid,
+                    layout.rootnode,
+                ),
+                _ => (String::new(), String::new(), None),
             }
         };
         state.tabs.insert(
@@ -148,6 +159,7 @@ pub async fn bootstrap_state_from_wstore(state: &Arc<Mutex<State>>, wstore: &Wav
                 block_ids,
                 focused_node_id,
                 magnified_node_id,
+                rootnode,
             },
         );
     }
