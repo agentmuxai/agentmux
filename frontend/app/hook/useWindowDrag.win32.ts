@@ -62,11 +62,41 @@ function installCefDragListener() {
         }
     }, true);
 
+    // One-in-flight + coalesce. Native mousemove fires at ~120Hz; the
+    // IPC round-trip can be slower under load. If two requests overlap
+    // and the older one resolves AFTER the newer (e.g. transient host
+    // jitter), the window snaps backward to the older absolute position.
+    // Codex P2 PR #734 round 3.
+    //
+    // Strategy: at most one set_window_position in flight. If more
+    // mousemoves arrive while in flight, stash the latest pending
+    // position; on completion, fire that. Older positions are dropped
+    // — they're stale by definition. Keeps the window tracking the
+    // most recent cursor without ordering hazards.
+    let setPosInFlight = false;
+    let pendingPos: { x: number; y: number } | null = null;
+    const sendPos = (x: number, y: number): void => {
+        if (setPosInFlight) {
+            pendingPos = { x, y };
+            return;
+        }
+        setPosInFlight = true;
+        invokeCommand("set_window_position", { x, y })
+            .catch(() => {})
+            .finally(() => {
+                setPosInFlight = false;
+                if (pendingPos) {
+                    const { x: nx, y: ny } = pendingPos;
+                    pendingPos = null;
+                    sendPos(nx, ny);
+                }
+            });
+    };
     document.addEventListener("mousemove", (e: MouseEvent) => {
         if (!dragging) return;
         const tx = initWinX + (e.screenX - clickScreenX);
         const ty = initWinY + (e.screenY - clickScreenY);
-        invokeCommand("set_window_position", { x: tx, y: ty }).catch(() => {});
+        sendPos(tx, ty);
     });
 
     document.addEventListener("mouseup", () => {
@@ -75,6 +105,9 @@ function installCefDragListener() {
         // fires when they resolve.
         currentMouseDownId += 1;
         dragging = false;
+        // Drop any queued post-drag position so a stray pendingPos
+        // doesn't fire after release.
+        pendingPos = null;
     });
 
     document.addEventListener("dblclick", (e: MouseEvent) => {
