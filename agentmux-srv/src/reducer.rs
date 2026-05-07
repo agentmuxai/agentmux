@@ -831,37 +831,55 @@ fn handle_layout_insert_node(
     // Three insert paths, in priority order:
     //   1. Empty tree → promote new node to root.
     //   2. parent_id given → insert under that specific parent at
-    //      `index` (or append if None). Codex P2 PR #715 round 4
-    //      flagged that the prior code ignored explicit parent_id/
-    //      index; the schema documents these as the request location.
-    //   3. parent_id None → use the `findNextInsertLocation`
-    //      heuristic via the pure helper.
-    match tab.rootnode.as_mut() {
-        None => tab.rootnode = Some(node.clone()),
-        Some(root) => {
-            let placed = match parent_id.as_deref() {
-                Some(pid) => match crate::backend::layout::find_node_by_id_mut(root, pid) {
-                    Some(parent_node) if parent_node.data.is_none() => {
-                        // Group node — insert into children at `index`,
-                        // clamped into [0, len].
-                        let len = parent_node.children.len();
-                        let target = index.map(|i| i.min(len)).unwrap_or(len);
-                        parent_node.children.insert(target, node.clone());
-                        true
-                    }
-                    _ => {
-                        // parent_id missing or points at a leaf (data set);
-                        // fall through to the heuristic so the insert isn't
-                        // dropped silently.
-                        false
-                    }
-                },
-                None => false,
-            };
-            if !placed {
-                crate::backend::layout::insert_node(root, node.clone());
+    //      `index` (or append if None). If parent_id is given but
+    //      doesn't resolve to a group node, REJECT with
+    //      Event::Error rather than fall back to the heuristic —
+    //      Codex P2 PR #715 round 5 flagged the silent-fallback
+    //      path as a consistency hole: the emitted event would
+    //      echo the requested parent_id while the actual mutation
+    //      went elsewhere, diverging the persist subscriber and
+    //      replay consumers from the reducer.
+    //   3. parent_id None → `findNextInsertLocation` heuristic.
+    let empty_tree = tab.rootnode.is_none();
+    if empty_tree {
+        tab.rootnode = Some(node.clone());
+    } else if let Some(pid) = parent_id.as_deref() {
+        let root = tab.rootnode.as_mut().expect("non-empty checked above");
+        match crate::backend::layout::find_node_by_id_mut(root, pid) {
+            Some(parent_node) if parent_node.data.is_none() => {
+                let len = parent_node.children.len();
+                let target = index.map(|i| i.min(len)).unwrap_or(len);
+                parent_node.children.insert(target, node.clone());
+            }
+            Some(_) => {
+                // parent_id resolves to a leaf — can't host children.
+                let v = state.bump_version();
+                return vec![Event::Error {
+                    code: ErrorCode::InvalidCommand,
+                    message: format!(
+                        "LayoutInsertNode: parent_id {:?} is a leaf node, cannot host children (tab {})",
+                        pid, tab_id
+                    ),
+                    fatal: false,
+                    version: v,
+                }];
+            }
+            None => {
+                let v = state.bump_version();
+                return vec![Event::Error {
+                    code: ErrorCode::InvalidCommand,
+                    message: format!(
+                        "LayoutInsertNode: parent_id {:?} not found in tree (tab {})",
+                        pid, tab_id
+                    ),
+                    fatal: false,
+                    version: v,
+                }];
             }
         }
+    } else {
+        let root = tab.rootnode.as_mut().expect("non-empty checked above");
+        crate::backend::layout::insert_node(root, node.clone());
     }
     // Codex P2 PR #715 round 1: honour focus_after / magnify_after.
     // The schema documents these as the side effects callers rely on
@@ -3985,13 +4003,16 @@ mod tests {
     }
 
     #[test]
-    fn layout_insert_node_falls_back_to_heuristic_when_parent_id_missing() {
-        // parent_id refers to a non-existent node → fall back to the
-        // heuristic helper so the insert isn't dropped silently.
+    fn layout_insert_node_with_unknown_parent_id_emits_error() {
+        // Codex P2 PR #715 round 5: silent fallback to heuristic
+        // diverges the event from the actual mutation. Reject
+        // explicit-but-invalid parent_id with Event::Error so
+        // subscribers (especially the persist subscriber, future)
+        // see a consistent record.
         let (mut state, tab_id) = fresh_tab();
         state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("only", "b1"));
 
-        let _ = update(
+        let events = update(
             &mut state,
             Command::LayoutInsertNode {
                 tab_id: tab_id.clone(),
@@ -4004,11 +4025,43 @@ mod tests {
             },
             &ctx(1),
         );
-        // Heuristic ran — both leaves are in the tree somewhere.
+        assert!(matches!(
+            &events[0],
+            Event::Error { code: ErrorCode::InvalidCommand, .. }
+        ));
+        // Tree must be unchanged.
         let root = state.tabs[&tab_id].rootnode.as_ref().expect("root");
-        let collected = collect_block_ids(root);
-        assert!(collected.contains(&"b1".to_string()));
-        assert!(collected.contains(&"b2".to_string()));
+        assert_eq!(root.id, "only");
+        assert!(root.children.is_empty());
+    }
+
+    #[test]
+    fn layout_insert_node_with_leaf_parent_id_emits_error() {
+        // parent_id resolves to a leaf (has data) — leaf can't host
+        // children, so treat as invalid the same as a missing parent.
+        let (mut state, tab_id) = fresh_tab();
+        let mut root = leaf_node("group", "");
+        root.data = None;
+        root.children = vec![leaf_node("a", "ba")];
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(root);
+
+        let events = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: leaf_node("b", "bb"),
+                parent_id: Some("a".into()), // leaf, not a group
+                index: None,
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(
+            &events[0],
+            Event::Error { code: ErrorCode::InvalidCommand, .. }
+        ));
     }
 
     #[test]
