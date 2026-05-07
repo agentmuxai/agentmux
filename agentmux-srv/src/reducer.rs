@@ -793,7 +793,7 @@ fn handle_layout_set_tree(
         }];
     };
     tab.rootnode = new_tree.clone();
-    // Reagent P1 PR #715 round 1: when the tree is wiped, focused/
+    // when the tree is wiped, focused/
     // magnified ids would point at non-existent nodes. Match
     // `handle_layout_clear`'s contract for the empty-tree case.
     if new_tree.is_none() {
@@ -833,15 +833,34 @@ fn handle_layout_insert_node(
     //   2. parent_id given → insert under that specific parent at
     //      `index` (or append if None). If parent_id is given but
     //      doesn't resolve to a group node, REJECT with
-    //      Event::Error rather than fall back to the heuristic —
-    //      Codex P2 PR #715 round 5 flagged the silent-fallback
-    //      path as a consistency hole: the emitted event would
-    //      echo the requested parent_id while the actual mutation
+    //      Event::Error rather than fall back to the heuristic.
+    //      A silent-fallback path is a consistency hole: the
+    //      emitted event would echo the requested parent_id while
+    //      the actual mutation
     //      went elsewhere, diverging the persist subscriber and
     //      replay consumers from the reducer.
     //   3. parent_id None → `findNextInsertLocation` heuristic.
     let empty_tree = tab.rootnode.is_none();
     if empty_tree {
+        // Empty-tree promotion must reject any explicit `parent_id`/
+        // `index` for the same divergence reason as the explicit-
+        // parent path below — the event would echo a target the
+        // tree cannot resolve, and a replay consumer or the persist
+        // subscriber would diverge from the reducer. Per
+        // `srv-phase-e4b-formal-spec-2026-05-03.md` §7.1, both
+        // fields must be `None` for empty-tree promote.
+        if parent_id.is_some() || index.is_some() {
+            let v = state.bump_version();
+            return vec![Event::Error {
+                code: ErrorCode::InvalidCommand,
+                message: format!(
+                    "LayoutInsertNode: empty tree cannot honour explicit parent_id={:?} / index={:?} (tab {})",
+                    parent_id, index, tab_id
+                ),
+                fatal: false,
+                version: v,
+            }];
+        }
         tab.rootnode = Some(node.clone());
     } else if let Some(pid) = parent_id.as_deref() {
         let root = tab.rootnode.as_mut().expect("non-empty checked above");
@@ -881,12 +900,12 @@ fn handle_layout_insert_node(
         let root = tab.rootnode.as_mut().expect("non-empty checked above");
         crate::backend::layout::insert_node(root, node.clone());
     }
-    // Codex P2 PR #715 round 1: honour focus_after / magnify_after.
+    // honour focus_after / magnify_after.
     // The schema documents these as the side effects callers rely on
     // for "insert + activate" flows; ignoring them desyncs the snapshot
     // from the event the caller's handler observed.
     //
-    // Codex P2 PR #715 round 4: a magnified node must also be the
+    // a magnified node must also be the
     // focused one. Without this, a `magnify_after=true,
     // focus_after=false` insert leaves `focused_node_id` pointing at
     // the prior pane while `magnified_node_id` points at the new one
@@ -902,7 +921,7 @@ fn handle_layout_insert_node(
     vec![Event::LayoutNodeInserted {
         tab_id,
         node,
-        // Reagent P2 (kimi) PR #715 round 3: pass the command's
+        // pass the command's
         // parent_id / index through to the event so subscribers see
         // what the caller asked for, not a hardcoded `None, None`.
         // The pure helper currently uses the `findNextInsertLocation`
@@ -939,7 +958,7 @@ fn handle_layout_delete_node(
         // Empty tree — nothing to delete; idempotent no-op (no event).
         return Vec::new();
     };
-    // Codex P2 PR #715 round 1: `backend::layout::delete_node` leaves
+    // `backend::layout::delete_node` leaves
     // root deletion to the caller (returns Ok(()) with the root
     // unmodified). Detect the root case here and clear the tree
     // wholesale so the reducer state matches the
@@ -956,15 +975,14 @@ fn handle_layout_delete_node(
         }];
     }
 
-    // Reagent P2 PR #715 round 3 (finding B) and Codex P2 round 3
-    // (finding C): both involve focus/magnify ids referencing nodes
-    // that no longer exist in the tree post-delete:
-    //   - B: `delete_recursive` collapse-sole-child rewrites a
+    // Two ways focus/magnify ids can reference nodes that no longer
+    // exist in the tree post-delete; both must be cleared:
+    //   - `delete_recursive` collapse-sole-child rewrites a
     //        parent's id to the promoted child's id. If
     //        focused/magnified was the parent's original id, that
     //        id is gone from the tree even though the same physical
     //        node remains.
-    //   - C: deleting a container removes all descendants. If
+    //   - Deleting a container removes all descendants. If
     //        focused/magnified was a descendant, it's gone too.
     // Direct-target match (`pre_focused == node_id`) doesn't catch
     // either case. Reconcile by walking the post-delete tree and
@@ -3849,7 +3867,7 @@ mod tests {
 
     #[test]
     fn layout_set_tree_to_none_also_clears_focused_and_magnified() {
-        // Reagent P1 PR #715 round 1: empty-tree set must match
+        // empty-tree set must match
         // `LayoutClear`'s contract — focused/magnified ids would
         // otherwise dangle past the wipe.
         let (mut state, tab_id) = fresh_tab();
@@ -3894,7 +3912,7 @@ mod tests {
 
     #[test]
     fn layout_insert_node_honours_focus_after() {
-        // Codex P2 PR #715 round 1: focus_after=true must update
+        // focus_after=true must update
         // focused_node_id so the snapshot matches the event.
         let (mut state, tab_id) = fresh_tab();
         let node = leaf_node("new", "b1");
@@ -3917,7 +3935,7 @@ mod tests {
 
     #[test]
     fn layout_insert_node_magnify_after_implies_focus() {
-        // Codex P2 PR #715 round 4: magnify-implies-focus. Even when
+        // magnify-implies-focus. Even when
         // focus_after=false, setting magnify_after=true must also
         // update focused_node_id so it doesn't dangle on the prior
         // pane (UI invariant: a magnified pane is the focused pane).
@@ -3946,7 +3964,7 @@ mod tests {
 
     #[test]
     fn layout_insert_node_honours_explicit_parent_id_and_index() {
-        // Codex P2 PR #715 round 4: with parent_id given, insert at
+        // with parent_id given, insert at
         // that node at the requested index instead of running the
         // heuristic helper.
         let (mut state, tab_id) = fresh_tab();
@@ -4003,8 +4021,62 @@ mod tests {
     }
 
     #[test]
+    fn layout_insert_node_into_empty_tree_with_explicit_parent_id_emits_error() {
+        // empty-tree
+        // promotion must reject explicit parent_id — otherwise the
+        // event echoes a target that subscribers can't resolve.
+        let (mut state, tab_id) = fresh_tab();
+        let events = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: leaf_node("first", "b1"),
+                parent_id: Some("does-not-exist".into()),
+                index: None,
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(
+            &events[0],
+            Event::Error { code: ErrorCode::InvalidCommand, .. }
+        ));
+        assert!(
+            state.tabs[&tab_id].rootnode.is_none(),
+            "tree must stay empty on rejection"
+        );
+    }
+
+    #[test]
+    fn layout_insert_node_into_empty_tree_with_explicit_index_emits_error() {
+        // Same rationale but with `index` only — the spec §7.1
+        // requires both fields be `None` for empty-tree promote.
+        let (mut state, tab_id) = fresh_tab();
+        let events = update(
+            &mut state,
+            Command::LayoutInsertNode {
+                tab_id: tab_id.clone(),
+                node: leaf_node("first", "b1"),
+                parent_id: None,
+                index: Some(0),
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(
+            &events[0],
+            Event::Error { code: ErrorCode::InvalidCommand, .. }
+        ));
+        assert!(state.tabs[&tab_id].rootnode.is_none());
+    }
+
+    #[test]
     fn layout_insert_node_with_unknown_parent_id_emits_error() {
-        // Codex P2 PR #715 round 5: silent fallback to heuristic
+        // silent fallback to heuristic
         // diverges the event from the actual mutation. Reject
         // explicit-but-invalid parent_id with Event::Error so
         // subscribers (especially the persist subscriber, future)
@@ -4089,7 +4161,7 @@ mod tests {
 
     #[test]
     fn layout_delete_node_on_root_clears_the_tree() {
-        // Codex P2 PR #715 round 1: backend::layout::delete_node leaves
+        // backend::layout::delete_node leaves
         // root deletion to the caller. Without the root-detection
         // branch, we'd emit LayoutNodeDeleted while rootnode still
         // contains the supposedly-deleted tree.
@@ -4114,7 +4186,7 @@ mod tests {
 
     #[test]
     fn layout_delete_node_clears_magnified_when_target_was_magnified() {
-        // Reagent P1 PR #715 round 1: magnified must be cleared
+        // magnified must be cleared
         // alongside focused; same staleness concern.
         let (mut state, tab_id) = fresh_tab();
         let mut root = leaf_node("group", "");
@@ -4136,7 +4208,7 @@ mod tests {
 
     #[test]
     fn layout_node_deleted_event_carries_was_magnified() {
-        // Reagent P1 (kimi+sonnet) PR #715 round 3: subscribers need
+        // subscribers need
         // the was_magnified field to refresh their UI when the
         // magnified node is deleted.
         let (mut state, tab_id) = fresh_tab();
@@ -4166,7 +4238,6 @@ mod tests {
 
     #[test]
     fn layout_delete_node_clears_focused_when_collapse_replaces_parent_id() {
-        // Reagent P2 (kimi+sonnet) PR #715 round 3 (finding B):
         // `backend::layout::delete_node`'s collapse-sole-child path
         // promotes the surviving child and rewrites the parent's id
         // to the child's id. If focused/magnified pointed at the
@@ -4209,7 +4280,7 @@ mod tests {
 
     #[test]
     fn layout_delete_node_clears_focused_when_target_subtree_contains_focus() {
-        // Codex P2 PR #715 round 3 (finding C): deleting a container
+        // deleting a container
         // wipes its descendants, but a direct-id-match check on
         // focused/magnified misses descendants — they stay dangling.
         let (mut state, tab_id) = fresh_tab();
@@ -4254,17 +4325,23 @@ mod tests {
 
     #[test]
     fn layout_insert_node_event_echoes_parent_id_and_index() {
-        // Reagent P2 (kimi only) PR #715 round 3 (finding D): event
-        // hardcoded `parent_id: None, index: None`; subscribers had
-        // no record of what the caller asked for.
+        // The emitted event must echo the command's parent_id /
+        // index so subscribers see what was requested. Tree pre-
+        // populated with a group so the explicit-parent path
+        // doesn't take the empty-tree rejection branch.
         let (mut state, tab_id) = fresh_tab();
+        let mut group = leaf_node("group", "");
+        group.data = None;
+        group.children = vec![leaf_node("a", "ba")];
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(group);
+
         let events = update(
             &mut state,
             Command::LayoutInsertNode {
                 tab_id: tab_id.clone(),
                 node: leaf_node("new", "b1"),
-                parent_id: Some("explicit-parent".into()),
-                index: Some(3),
+                parent_id: Some("group".into()),
+                index: Some(0),
                 focus_after: false,
                 magnify_after: false,
                 correlation_id: "corr".into(),
@@ -4273,8 +4350,8 @@ mod tests {
         );
         match &events[0] {
             Event::LayoutNodeInserted { parent_id, index, .. } => {
-                assert_eq!(parent_id.as_deref(), Some("explicit-parent"));
-                assert_eq!(*index, Some(3));
+                assert_eq!(parent_id.as_deref(), Some("group"));
+                assert_eq!(*index, Some(0));
             }
             other => panic!("expected LayoutNodeInserted, got {:?}", other),
         }
