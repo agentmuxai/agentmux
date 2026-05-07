@@ -5,6 +5,7 @@ import { CopyButton } from "@/app/element/copybutton";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { IconButton } from "@/app/element/iconbutton";
+import { TableBlock } from "@/app/element/table-block";
 import { cn, useAtomValueSafe } from "@/util/util";
 import { createEffect, createMemo, createSignal, JSX, onCleanup, Show } from "solid-js";
 import { Streamdown as StreamdownReact } from "streamdown";
@@ -256,12 +257,25 @@ export const WaveStreamdown = (props: WaveStreamdownProps): JSX.Element => {
         h4: (hProps: any) => <h4 {...hProps} class="text-base font-semibold text-primary mt-3 mb-1" />,
         h5: (hProps: any) => <h5 {...hProps} class="text-sm font-semibold text-primary mt-2 mb-1" />,
         h6: (hProps: any) => <h6 {...hProps} class="text-sm text-primary mt-2 mb-1" />,
-        table: (tProps: any) => <table {...tProps} class="w-full border-collapse my-4" />,
-        thead: (thProps: any) => <thead {...thProps} class="border-b border-border" />,
+        table: (tProps: any) => <TableBlock>{tProps.children}</TableBlock>,
+        thead: (thProps: any) => <thead {...thProps} class="border-b border-border bg-white/[0.03]" />,
         tbody: (tbProps: any) => <tbody {...tbProps} />,
-        tr: (trProps: any) => <tr {...trProps} class="border-b border-border/50 last:border-0" />,
-        th: (thProps: any) => <th {...thProps} class="text-left font-semibold px-2 py-1.5 text-sm text-primary" />,
-        td: (tdProps: any) => <td {...tdProps} class="px-2 py-1.5 text-sm text-secondary" />,
+        tr: (trProps: any) => <tr {...trProps} class="border-b border-border/40 last:border-0" />,
+        th: (thProps: any) => (
+            <th
+                class={cn(
+                    "px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-primary",
+                    thProps.className
+                )}
+            >
+                {thProps.children}
+            </th>
+        ),
+        td: (tdProps: any) => (
+            <td class={cn("px-3 py-2 text-sm text-secondary", tdProps.className)}>
+                {tdProps.children}
+            </td>
+        ),
         ul: (ulProps: any) => (
             <ul
                 {...ulProps}
