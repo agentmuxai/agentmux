@@ -7,6 +7,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, getApi, WOS } from "@/app/store/global";
 import { SignalAtom } from "@/util/util";
 import { AgentViewWrapper } from "./agent-view";
+import { buildAgentPaneIcon } from "./components/AgentPaneIcon";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
 import { Logger } from "@/util/logger";
 import { buildInstanceSlug } from "./defaults/instance-slug";
@@ -20,7 +21,7 @@ export class AgentViewModel implements ViewModel {
     nodeModel: BlockNodeModel;
     blockAtom: SignalAtom<Block>;
 
-    viewIcon: () => string;
+    viewIcon: () => string | IconButtonDecl;
     viewName: () => string;
     setViewName: (name: string) => Promise<void>;
     viewText: () => string | HeaderElem[];
@@ -47,8 +48,18 @@ export class AgentViewModel implements ViewModel {
         // them up via the blockAtom subscription. Before this, the title
         // was the literal string "Agent" regardless of which agent ran.
         // See SPEC_AGENT_PANE_FOLLOWUPS item #8.
-        this.viewIcon = () => {
+        this.viewIcon = (): string | IconButtonDecl => {
             const meta = this.blockAtom()?.meta;
+            const provider = meta?.["agentProvider"];
+            if (typeof provider === "string" && provider.length > 0) {
+                return buildAgentPaneIcon(provider);
+            }
+            // Quick-launch path (`launchAgent`) writes `agentId` as the
+            // provider key — show the brand logo for that path too.
+            const agentId = meta?.["agentId"];
+            if (typeof agentId === "string" && PROVIDERS[agentId]) {
+                return buildAgentPaneIcon(agentId);
+            }
             const icon = meta?.["agentIcon"];
             if (typeof icon === "string" && icon.length > 0) return icon;
             return "sparkles";
