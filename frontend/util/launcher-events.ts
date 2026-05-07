@@ -186,21 +186,8 @@ export function __resetDedupForTests(): void {
 export function installLauncherEventBridge(): void {
     if (installed) return;
     installed = true;
-    let bridgeCallCount = 0;
-    let dedupBlockCount = 0;
     (window as any).__agentmux_launcher_event = (evt: LauncherEvent) => {
-        bridgeCallCount++;
-        const before = dedupSuppressedCount;
-        if (!shouldDispatchLauncherEvent(evt)) {
-            dedupBlockCount++;
-            const k = (evt as any)?.event ?? "??";
-            const v = (evt as any)?.version ?? "??";
-            (window as any).console.error(`[diag] BRIDGE BLOCKED #${bridgeCallCount} (blocks=${dedupBlockCount} suppressed=${dedupSuppressedCount}) key=${k} v=${v}`);
-            return;
-        }
-        const k = (evt as any)?.event ?? "??";
-        const v = (evt as any)?.version ?? "??";
-        (window as any).console.error(`[diag] BRIDGE PASSED #${bridgeCallCount} key=${k} v=${v} (suppressed_before=${before})`);
+        if (!shouldDispatchLauncherEvent(evt)) return;
         tracker.deliver(evt);
     };
     console.log("[launcher-events] bridge installed; window.__agentmux_launcher_event ready");
