@@ -10,6 +10,13 @@ const ALIGN_CLASS: Record<string, string> = {
     right: "text-right",
 };
 
+// Sanitize allowlist for the classes this plugin emits. Both markdown.tsx
+// (which configures rehype-sanitize directly) and streamdown.tsx (which
+// replaces streamdown's default sanitize plugin) must merge this into their
+// schema; otherwise sanitize strips the className before custom th/td
+// renderers can read it (codex P2 PR #718).
+export const ALIGN_CLASS_REGEX = /^text-(left|center|right)$/;
+
 // Rehype plugin: converts remark-gfm's deprecated `align` attribute on <th>/<td>
 // into a Tailwind class before rehype-sanitize strips it. Must run before sanitize.
 export function rehypeAlignToClass() {
