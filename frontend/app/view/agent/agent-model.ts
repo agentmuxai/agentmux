@@ -52,7 +52,9 @@ export class AgentViewModel implements ViewModel {
             const meta = this.blockAtom()?.meta;
             const provider = meta?.["agentProvider"];
             if (typeof provider === "string" && provider.length > 0) {
-                return buildAgentPaneIcon(provider);
+                // Forge agents may store an alias (e.g. "kimi-cli") rather
+                // than the canonical provider key ProviderLogo matches on.
+                return buildAgentPaneIcon(resolveProviderAlias(provider));
             }
             // Quick-launch path (`launchAgent`) writes `agentId` as the
             // provider key — show the brand logo for that path too.

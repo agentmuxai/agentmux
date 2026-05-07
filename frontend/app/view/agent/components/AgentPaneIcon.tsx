@@ -3,12 +3,7 @@
 
 import { ProviderLogo } from "@/element/ProviderLogo";
 
-/**
- * Builds the IconButtonDecl rendered in the agent pane's frame header.
- * When the block has an `agentProvider` meta key, the icon becomes the
- * provider's brand logo so users can tell Claude / Codex / Gemini panes
- * apart at a glance (issue #680).
- */
+// noAction so the IconButton renders as a decorative icon, not a button.
 export function buildAgentPaneIcon(provider: string): IconButtonDecl {
     return {
         elemtype: "iconbutton",
