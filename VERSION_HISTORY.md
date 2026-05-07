@@ -2,7 +2,7 @@
 
 This document tracks the version history of AgentMux (forked from waveterm).
 
-## Latest Version: 0.33.687
+## Latest Version: 0.33.688
 
 **Base:** Upstream waveterm v0.12.0 + extensive custom features
 
