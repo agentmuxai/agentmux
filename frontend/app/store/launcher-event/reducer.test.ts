@@ -286,6 +286,83 @@ describe("launcher-event reducer", () => {
         });
     });
 
+    describe("ReconcileFromSnapshot", () => {
+        it("removes labels absent from snapshot (closed windows actually disappear)", () => {
+            // Codex P3 PR #732: ApplySeed is additive (doesn't remove
+            // labels missing from the snapshot) so the previous
+            // InstancePanel-on-open-refresh path left closed windows
+            // visible in dev mode. Reconcile REPLACES wholesale.
+            const seeded = update(initialState(), {
+                type: "ApplySeed",
+                entries: [
+                    { label: "window-a", windowId: null },
+                    { label: "window-b", windowId: null },
+                    { label: "window-c", windowId: null },
+                ],
+            }).state;
+            expect(seeded.knownEntries.size).toBe(3);
+
+            // window-c was closed in the host; snapshot only has a, b.
+            const r = update(seeded, {
+                type: "ReconcileFromSnapshot",
+                entries: [
+                    { label: "window-a", windowId: null },
+                    { label: "window-b", windowId: null },
+                ],
+            });
+            expect(r.state.knownEntries.has("window-c")).toBe(false);
+            expect(r.state.knownEntries.size).toBe(2);
+            expect(r.events[0]).toMatchObject({
+                type: "reconciled",
+                addedCount: 0,
+                removedCount: 1,
+                totalAfter: 2,
+            });
+        });
+
+        it("adds new labels and removes missing ones in one pass", () => {
+            const seeded = update(initialState(), {
+                type: "ApplySeed",
+                entries: [{ label: "window-a", windowId: null }],
+            }).state;
+            const r = update(seeded, {
+                type: "ReconcileFromSnapshot",
+                entries: [
+                    { label: "window-b", windowId: null },
+                    { label: "window-c", windowId: null },
+                ],
+            });
+            expect(r.state.knownEntries.has("window-a")).toBe(false);
+            expect(r.state.knownEntries.has("window-b")).toBe(true);
+            expect(r.state.knownEntries.has("window-c")).toBe(true);
+            expect(r.events[0]).toMatchObject({
+                type: "reconciled",
+                addedCount: 2,
+                removedCount: 1,
+                totalAfter: 2,
+            });
+        });
+
+        it("filters non-instance labels (parity with ApplySeed)", () => {
+            // `window-pool-*` IS an instance label at this layer
+            // (promoted pool windows keep the prefix and ARE user-
+            // visible; unpromoted ones are filtered host-side in
+            // list_window_instances). Only browser-pane-* is rejected.
+            const r = update(initialState(), {
+                type: "ReconcileFromSnapshot",
+                entries: [
+                    { label: "window-a", windowId: null },
+                    { label: "window-pool-promoted", windowId: null },
+                    { label: "browser-pane-x", windowId: null },
+                ],
+            });
+            expect(r.state.knownEntries.size).toBe(2);
+            expect(r.state.knownEntries.has("window-a")).toBe(true);
+            expect(r.state.knownEntries.has("window-pool-promoted")).toBe(true);
+            expect(r.state.knownEntries.has("browser-pane-x")).toBe(false);
+        });
+    });
+
     describe("saga + drift + unknown variants", () => {
         it("hwnd_drift_detected emits drift-detected audit event", () => {
             const start = initialState();
