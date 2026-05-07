@@ -842,13 +842,12 @@ fn handle_layout_insert_node(
     //   3. parent_id None → `findNextInsertLocation` heuristic.
     let empty_tree = tab.rootnode.is_none();
     if empty_tree {
-        // Codex P2 PR #715 round 6 (post-merge follow-up): empty-tree
-        // promotion must reject any explicit `parent_id`/`index` for
-        // the same divergence reason path #2 rejects them — the
-        // event would echo a target that no caller can possibly
-        // resolve to (the tree is empty), and a replay consumer or
-        // the persist subscriber would diverge from the reducer.
-        // Per `srv-phase-e4b-formal-spec-2026-05-03.md` §7.1, both
+        // Empty-tree promotion must reject any explicit `parent_id`/
+        // `index` for the same divergence reason as the explicit-
+        // parent path below — the event would echo a target the
+        // tree cannot resolve, and a replay consumer or the persist
+        // subscriber would diverge from the reducer. Per
+        // `srv-phase-e4b-formal-spec-2026-05-03.md` §7.1, both
         // fields must be `None` for empty-tree promote.
         if parent_id.is_some() || index.is_some() {
             let v = state.bump_version();
