@@ -662,8 +662,25 @@ pub fn promote_pool_window(
     // Use the source window's dimensions when provided (tear-off
     // UX: new window matches the frame the user dragged from). Fall
     // back to the pool default otherwise.
-    let win_w = width.unwrap_or(POOL_WIDTH);
-    let win_h = height.unwrap_or(POOL_HEIGHT);
+    //
+    // DPI conversion (codex P2 PR #727 round 1): the frontend sends
+    // `window.outerWidth/Height`, which are CSS/DIP pixels. Win32
+    // `SetWindowPos` expects PHYSICAL pixels for a DPI-aware process,
+    // so on a scaled display (DPR > 1) the window would shrink by the
+    // monitor scale (e.g. 1200 DIP → 960 physical px at 125%). Convert
+    // using the destination HWND's DPI before SetWindowPos. The
+    // cold-path uses CEF's `set_bounds` which is DIP-aware natively,
+    // so only this Win32 path needs the conversion.
+    let dpi_scale: f32 = unsafe {
+        use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+        let dpi = GetDpiForWindow(raw_hwnd);
+        if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 }
+    };
+    let to_physical = |dip: i32| -> i32 { (dip as f32 * dpi_scale).round() as i32 };
+    let win_w_dip = width.unwrap_or(POOL_WIDTH);
+    let win_h_dip = height.unwrap_or(POOL_HEIGHT);
+    let win_w = if width.is_some() { to_physical(win_w_dip) } else { win_w_dip };
+    let win_h = if height.is_some() { to_physical(win_h_dip) } else { win_h_dip };
     let pos_x = screen_x - win_w / 2;
     let pos_y = screen_y - TITLE_BAR_OFFSET_PX;
 
