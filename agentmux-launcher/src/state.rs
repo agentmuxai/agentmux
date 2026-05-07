@@ -99,6 +99,13 @@ pub struct WindowMirror {
     /// has the parent linkage.
     pub parent_label: Option<String>,
     pub opened_at: String,
+    /// Milliseconds-since-launcher-start at which the host's
+    /// `ReportWindowOpened` arrived. Used by `apply_hwnd_visibility_changed`
+    /// to suppress `HiddenSinceOpen` drift during the post-create
+    /// placement grace window — CEF creates windows hidden, places
+    /// them, then shows them, and the intermediate `WM_HIDE` events
+    /// would otherwise fire spurious drift on every fresh window.
+    pub opened_at_ms: u64,
     /// Phase B.9.1 — Win32 HWND linked to this label by the WRR
     /// reducer arm (via `ReportHwndOpened` with matching
     /// `label_hint` or via the post-hoc reconciliation against
@@ -143,6 +150,15 @@ pub struct WindowMirror {
     /// See `docs/specs/ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`
     /// for storm context.
     pub hidden_since_open_emitted: bool,
+    /// Set when `apply_hwnd_visibility_changed` sees `visible=false`
+    /// during the placement grace window. Marks "we suppressed a
+    /// hide; if it persists past the grace, drift fires on the next
+    /// reducer call via `drain_deferred_hidden_since_open`". Cleared
+    /// when the window subsequently becomes visible or is foregrounded.
+    /// Without this, a window that goes hidden during grace and
+    /// receives no further visibility events would permanently lose
+    /// its `HiddenSinceOpen` drift signal (codex P2 PR #725 round 1).
+    pub hidden_since_open_deferred: bool,
     /// See `hidden_since_open_emitted` doc above.
     pub off_monitor_drift_emitted: bool,
     /// See `hidden_since_open_emitted` doc above.

@@ -83,7 +83,8 @@ mod connection;
 /// (panics are reserved for internal invariant violations).
 pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
     let _ = ctx.conn_id; // reserved for B.4 routing
-    match cmd {
+
+    let mut cmd_events = match cmd {
         Command::Register {
             kind,
             pid,
@@ -258,7 +259,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHwndVisibilityChanged") {
                 return vec![err];
             }
-            crate::wrr::apply_hwnd_visibility_changed(state, hwnd, visible)
+            crate::wrr::apply_hwnd_visibility_changed(state, hwnd, visible, ctx.now_ms)
         }
         Command::ReportHwndForegroundChanged { hwnd } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHwndForegroundChanged") {
@@ -535,7 +536,21 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
                 version: v,
             }]
         }
-    }
+    };
+
+    // Heartbeat-via-traffic: drain any deferred hidden-since-open
+    // drifts AFTER the command processes. Running this AFTER (not
+    // before) is critical — the command itself may legitimately clear
+    // the deferred state (visible=true / foreground / window closed),
+    // and a pre-command drain would fire spurious drift on an event
+    // whose own purpose is the recovery (codex P2 PR #725 round 2).
+    //
+    // Catches windows that hid during placement and produced no
+    // further visibility events: any subsequent unrelated command
+    // past the grace promotes the deferred state to a fired drift.
+    let mut deferred = crate::wrr::drain_deferred_hidden_since_open(state, ctx.now_ms);
+    cmd_events.append(&mut deferred);
+    cmd_events
 }
 
 
