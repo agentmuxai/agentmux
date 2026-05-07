@@ -1668,6 +1668,85 @@ fn hidden_since_open_drift_fires_at_most_once_per_window() {
 }
 
 #[test]
+fn hidden_since_open_cap_survives_duplicate_open() {
+    // The handler overwrites the mirror wholesale on every
+    // ReportWindowOpened. Without OR-ing the prior value in, a 2nd
+    // open at the same label re-arms the cap and the next hidden
+    // visibility transition fires HiddenSinceOpen a second time.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-dup".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xDD,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("window-dup".into()),
+        },
+        &c,
+    );
+    let first = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xDD, visible: false },
+        &c,
+    );
+    assert!(
+        first.iter().any(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+        )),
+        "control: first hide emits drift"
+    );
+
+    // Duplicate open for the same label — overwrites the mirror.
+    // Cap MUST survive (OR with prior value) or the storm re-arms.
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-dup".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    assert!(
+        state
+            .windows
+            .get("window-dup")
+            .unwrap()
+            .hidden_since_open_emitted,
+        "duplicate open must preserve hidden_since_open_emitted=true"
+    );
+
+    // Subsequent hide: drift must NOT fire again.
+    let _ = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xDD, visible: true },
+        &c,
+    );
+    let second = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xDD, visible: false },
+        &c,
+    );
+    assert!(
+        !second.iter().any(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+        )),
+        "duplicate-open path: cap survives, no second drift"
+    );
+}
+
+#[test]
 fn promote_for_label_without_window_mirror_emits_event_idempotently() {
     // The handler's idempotency contract: ReportPoolWindowPromoted
     // can arrive without a paired ReportWindowOpened (e.g. the open

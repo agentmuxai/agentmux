@@ -117,16 +117,26 @@ pub(super) fn handle_report_window_opened(
     // corrective logic doesn't re-fire `HiddenSinceOpen` on the
     // subsequent HWND repositioning. See state.rs::just_promoted_labels.
     let was_just_promoted = state.just_promoted_labels.remove(&label);
-    // Duplicate-open monotonicity (codex P2 PR #708 round 3):
-    // `foregrounded_since_open` is monotonic (false → true, never
-    // resets within a window's lifetime). On duplicate opens (the
-    // existing handler overwrites the mirror wholesale), OR the prior
-    // value in so the flag isn't reset.
-    let prior_foregrounded = state
+    // Duplicate-open monotonicity. The handler overwrites the mirror
+    // wholesale on every `ReportWindowOpened`; without the OR-with-
+    // prior here, a 2nd open at the same label re-arms both the
+    // open-transient drift detector and the storm cap. Both flags
+    // are monotonic for a window's lifetime: once true, never reset.
+    //
+    // - `foregrounded_since_open`: monotonic per its own contract
+    //   ("has this label been foregrounded at any point since
+    //   ReportWindowOpened"). Preserved against duplicate opens
+    //   since codex P2 PR #708 round 3.
+    // - `hidden_since_open_emitted`: monotonic for the same reason
+    //   the cap exists — fire the drift signal AT MOST ONCE per
+    //   window per session. A duplicate open that resets this to
+    //   false would re-arm the storm cap, then the next visibility
+    //   transition fires HiddenSinceOpen a second time.
+    let (prior_foregrounded, prior_hidden_emitted) = state
         .windows
         .get(&label)
-        .map(|m| m.foregrounded_since_open)
-        .unwrap_or(false);
+        .map(|m| (m.foregrounded_since_open, m.hidden_since_open_emitted))
+        .unwrap_or((false, false));
 
     state.windows.insert(
         label.clone(),
@@ -145,7 +155,7 @@ pub(super) fn handle_report_window_opened(
             last_rect: None,
             last_foreground_at_ms: None,
             foregrounded_since_open: was_just_promoted || prior_foregrounded,
-            hidden_since_open_emitted: false,
+            hidden_since_open_emitted: prior_hidden_emitted,
         },
     );
     let mut out = Vec::with_capacity(2);
