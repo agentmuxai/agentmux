@@ -85,8 +85,14 @@
             color: color-mix(in srgb, var(--accent-color), white 25%);
         }
 
-        i {
-            font-size: 12px;
+        // Inline SVG (replaces fa-bars icon font). Icon fonts rasterize
+        // each glyph independently at the zoomed size; tiny sub-pixel
+        // boundary differences caused one of the three hamburger bars
+        // to render thinner than the other two, with a different bar
+        // affected at each zoom level. SVG rectangles fill uniformly
+        // and scale predictably with parent zoom.
+        svg {
+            display: block;
         }
     }
 
