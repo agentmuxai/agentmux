@@ -6,8 +6,9 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { IconButton } from "@/app/element/iconbutton";
 import { TableBlock } from "@/app/element/table-block";
-import { rehypeAlignToClass } from "@/app/element/rehype-align-to-class";
+import { ALIGN_CLASS_REGEX, rehypeAlignToClass } from "@/app/element/rehype-align-to-class";
 import { cn, useAtomValueSafe } from "@/util/util";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createEffect, createMemo, createSignal, JSX, onCleanup, Show } from "solid-js";
 import { Streamdown as StreamdownReact, defaultRehypePlugins } from "streamdown";
 // Cast to any so SolidJS JSX doesn't complain about React component type
@@ -326,7 +327,23 @@ export const WaveStreamdown = (props: WaveStreamdownProps): JSX.Element => {
                     defaultRehypePlugins.raw,
                     defaultRehypePlugins.katex,
                     rehypeAlignToClass,
-                    defaultRehypePlugins.sanitize,
+                    [
+                        rehypeSanitize,
+                        {
+                            ...defaultSchema,
+                            attributes: {
+                                ...defaultSchema.attributes,
+                                th: [
+                                    ...(defaultSchema.attributes?.th || []),
+                                    ["className", ALIGN_CLASS_REGEX],
+                                ],
+                                td: [
+                                    ...(defaultSchema.attributes?.td || []),
+                                    ["className", ALIGN_CLASS_REGEX],
+                                ],
+                            },
+                        },
+                    ],
                     defaultRehypePlugins.harden,
                 ]}
                 controls={{

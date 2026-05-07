@@ -11,7 +11,7 @@ import {
     resolveSrcSet,
     transformBlocks,
 } from "@/app/element/markdown-util";
-import { rehypeAlignToClass } from "@/app/element/rehype-align-to-class";
+import { ALIGN_CLASS_REGEX, rehypeAlignToClass } from "@/app/element/rehype-align-to-class";
 import remarkMermaidToTag from "@/app/element/remark-mermaid-to-tag";
 import { TableBlock } from "@/app/element/table-block";
 import { boundNumber, useAtomValueSafe, cn } from "@/util/util";
@@ -459,11 +459,11 @@ const Markdown = ({
                               ],
                               th: [
                                   ...(defaultSchema.attributes?.th || []),
-                                  ["className", /^text-(?:left|center|right)$/],
+                                  ["className", ALIGN_CLASS_REGEX],
                               ],
                               td: [
                                   ...(defaultSchema.attributes?.td || []),
-                                  ["className", /^text-(?:left|center|right)$/],
+                                  ["className", ALIGN_CLASS_REGEX],
                               ],
                               waveblock: [["blockkey"]],
                           },
