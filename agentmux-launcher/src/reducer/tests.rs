@@ -1604,7 +1604,7 @@ fn hidden_since_open_grace_suppresses_placement_hides() {
     // Hides arriving within HIDDEN_SINCE_OPEN_GRACE_MS of open are
     // placement transitions and must NOT fire drift. Without this
     // grace, every fresh top-level window emits one false-positive
-    // drift on creation. (PR #?, smoke regression on v0.33.696 showed
+    // drift on creation. (PR #725, smoke regression on v0.33.696 showed
     // 8 such hides for 8 fresh windows in a clean session.)
     let (mut state, c) = registered_host_state();
     let _ = update(
@@ -1800,6 +1800,66 @@ fn hidden_since_open_deferred_cleared_by_visible_or_foreground() {
             .iter()
             .any(|e| matches!(e, Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. })),
         "no spurious drift after window recovers visibility"
+    );
+}
+
+#[test]
+fn deferred_drain_runs_after_command_so_recovery_events_clear_first() {
+    // Codex P2 PR #725 round 2: if the FIRST command past grace is
+    // the recovery event itself (visible=true or foreground change),
+    // the drain MUST run AFTER the command — otherwise it sees the
+    // still-deferred mirror and fires premature HiddenSinceOpen
+    // drift on a slow-but-successful placement.
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "window-slow-show".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xFC,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("window-slow-show".into()),
+        },
+        &c,
+    );
+
+    // Hide during grace → deferred set.
+    let _ = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xFC, visible: false },
+        &c,
+    );
+    assert!(state.windows.get("window-slow-show").unwrap().hidden_since_open_deferred);
+
+    // Slow placement: visible=true is the FIRST event past grace.
+    let post_grace = ctx_advance(&c, 600);
+    let evs = update(
+        &mut state,
+        Command::ReportHwndVisibilityChanged { hwnd: 0xFC, visible: true },
+        &post_grace,
+    );
+    assert!(
+        !evs.iter().any(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::HiddenSinceOpen, .. }
+        )),
+        "recovery event must clear deferred before drain runs, no drift fires"
+    );
+    assert!(
+        !state.windows.get("window-slow-show").unwrap().hidden_since_open_emitted,
+        "cap must NOT be armed by a recovery event"
+    );
+    assert!(
+        !state.windows.get("window-slow-show").unwrap().hidden_since_open_deferred,
+        "deferred cleared by visible=true"
     );
 }
 
