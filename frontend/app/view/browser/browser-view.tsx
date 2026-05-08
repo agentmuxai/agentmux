@@ -10,7 +10,14 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
     const model = props.model;
     const _diagTag = `[browser-pane:diag][${model.blockId.slice(0, 7)}]`;
     const diag = (msg: string): void => { console.log(`${_diagTag} ${msg}`); };
-    diag(`view-mount initial-urlAtom=${JSON.stringify(model.urlAtom())}`);
+    // Captured once at mount — same window_label that createPane uses
+    // for browser_pane_create. Required so main_window_focus reclaims
+    // OS focus to the WINDOW that sent the IPC (otherwise the host's
+    // handler defaults to "main" and misroutes in multi-window setups,
+    // creating a 200 Hz focus bounce — ipc.rs:424-428 documents this).
+    const windowLabel =
+        new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+    diag(`view-mount window_label=${windowLabel} initial-urlAtom=${JSON.stringify(model.urlAtom())}`);
     const [addressBar, setAddressBar] = createSignal(model.urlAtom() || "");
     let addressInputRef: HTMLInputElement | undefined;
     // Reactively mirror the model's URL into the address-bar input whenever
@@ -62,13 +69,8 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
     const createPane = async (url: string) => {
         if (!placeholderRef) return;
         try {
-            // window_label tells the Rust Views path which CefWindow to attach
-            // the pane overlay to. Without it, panes opened in a non-main
-            // window were silently routed to the main window. Same
-            // ?windowLabel=… URL convention as cef-api.ts (defaults to "main"
-            // for the primary window).
-            const windowLabel =
-                new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+            // windowLabel hoisted at component scope — same value used by
+            // both createPane and main_window_focus IPC dispatch.
             diag(`createPane url=${JSON.stringify(url)} window_label=${windowLabel}`);
             await invokeCommand("browser_pane_create", {
                 block_id: model.blockId,
@@ -179,9 +181,28 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                             const id = (el as HTMLElement).id ?? "";
                             return `${t}${id ? `#${id}` : ""}${cls ? `.${cls}` : ""}`;
                         };
-                        diag(`input-focus value=${JSON.stringify(addressBar())} prev-active=${tag(document.activeElement)} same-target=${e.currentTarget === document.activeElement} relatedTarget=${tag((e as any).relatedTarget ?? null)}`);
+                        const wasAlreadyFocused = document.activeElement === e.currentTarget;
+                        const realTransition = !!(e as any).relatedTarget;
+                        diag(`input-focus value=${JSON.stringify(addressBar())} prev-active=${tag(document.activeElement)} same-target=${e.currentTarget === document.activeElement} relatedTarget=${tag((e as any).relatedTarget ?? null)} wasAlreadyFocused=${wasAlreadyFocused} realTransition=${realTransition}`);
                         e.currentTarget.select();
-                        invokeCommand("main_window_focus", {}).catch(() => {});
+                        // Skip the main_window_focus IPC on synthetic re-fires.
+                        // Chromium dispatches a synthetic focus/blur cycle on
+                        // the DOM-focused input whenever a Win32 HWND focus
+                        // shift happens upstream — we observed the input
+                        // staying focused (now-active=this same input) across
+                        // the whole bounce, with relatedTarget=null. Real
+                        // user-initiated focus has relatedTarget set OR
+                        // arrives at an element that wasn't already focused.
+                        // Without this guard, every IPC triggers another
+                        // synthetic event, which triggers another IPC — a
+                        // ~200 Hz loop in multi-window setups (the IPC
+                        // misroutes to the wrong window without window_label,
+                        // see ipc.rs:424-428).
+                        if (wasAlreadyFocused && !realTransition) {
+                            diag(`input-focus skip-ipc reason=synthetic-refire`);
+                            return;
+                        }
+                        invokeCommand("main_window_focus", { window_label: windowLabel }).catch(() => {});
                     }}
                     onBlur={(e) => {
                         const tag = (el: Element | null) => {
