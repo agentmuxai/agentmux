@@ -124,6 +124,18 @@ export class BrowserViewModel implements ViewModel {
             );
             this.setError(result.state.error);
         }
+        if (result.state.canGoBack !== prev.canGoBack) {
+            this.diag(
+                `state-write key=canGoBack value=${result.state.canGoBack} src=${src}`,
+            );
+            this.setCanGoBack(result.state.canGoBack);
+        }
+        if (result.state.canGoForward !== prev.canGoForward) {
+            this.diag(
+                `state-write key=canGoForward value=${result.state.canGoForward} src=${src}`,
+            );
+            this.setCanGoForward(result.state.canGoForward);
+        }
         for (const e of result.events) {
             if (e.type === "post-close-command-dropped") {
                 this.diag(
@@ -185,15 +197,19 @@ export class BrowserViewModel implements ViewModel {
             // authoritative values come from `on_loading_state_change_pane`
             // which CEF invokes with direct params. Skip touching the
             // back/forward atoms on `url_only` events.
-            if (!payload.url_only) {
-                if (payload.can_go_back !== undefined) {
-                    this.diag(`state-write key=canGoBack value=${payload.can_go_back}`);
-                    this.setCanGoBack(payload.can_go_back);
-                }
-                if (payload.can_go_forward !== undefined) {
-                    this.diag(`state-write key=canGoForward value=${payload.can_go_forward}`);
-                    this.setCanGoForward(payload.can_go_forward);
-                }
+            if (
+                !payload.url_only &&
+                (payload.can_go_back !== undefined ||
+                    payload.can_go_forward !== undefined)
+            ) {
+                this._dispatch(
+                    {
+                        type: "HistoryUpdated",
+                        canGoBack: payload.can_go_back,
+                        canGoForward: payload.can_go_forward,
+                    },
+                    "nav-state",
+                );
             }
             this._dispatch({ type: "LoadFinished" }, "nav-state");
             // Persist the real URL to block meta so pane restore lands
