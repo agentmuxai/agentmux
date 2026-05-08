@@ -741,6 +741,56 @@ class RpcApiType {
         return client.rpcCall("deletememory", data, opts);
     }
 
+    // ── Workflows pane (issue #753) ─────────────────────────────────
+
+    ListWorkflowsCommand(
+        client: RpcClient,
+        data: Record<string, never> = {},
+        opts?: RpcOpts,
+    ): Promise<WorkflowDefinition[]> {
+        return client.rpcCall("listworkflows", data, opts);
+    }
+
+    GetWorkflowCommand(
+        client: RpcClient,
+        data: { id: string },
+        opts?: RpcOpts,
+    ): Promise<WorkflowDefinition | null> {
+        return client.rpcCall("getworkflow", data, opts);
+    }
+
+    UpsertWorkflowCommand(
+        client: RpcClient,
+        data: WorkflowDefinition,
+        opts?: RpcOpts,
+    ): Promise<WorkflowDefinition> {
+        return client.rpcCall("upsertworkflow", data, opts);
+    }
+
+    DeleteWorkflowCommand(
+        client: RpcClient,
+        data: { id: string },
+        opts?: RpcOpts,
+    ): Promise<{ deleted: boolean }> {
+        return client.rpcCall("deleteworkflow", data, opts);
+    }
+
+    RunWorkflowCommand(
+        client: RpcClient,
+        data: { workflow_id: string },
+        opts?: RpcOpts,
+    ): Promise<{ run_id: string }> {
+        return client.rpcCall("runworkflow", data, opts);
+    }
+
+    ListWorkflowRunsCommand(
+        client: RpcClient,
+        data: { workflow_id: string; limit?: number },
+        opts?: RpcOpts,
+    ): Promise<WorkflowRun[]> {
+        return client.rpcCall("listworkflowruns", data, opts);
+    }
+
     // command "listagentinstances" [call]
     ListAgentInstancesCommand(
         client: RpcClient,

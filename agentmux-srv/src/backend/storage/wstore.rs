@@ -39,6 +39,14 @@ impl WaveStore {
         Self::configure_and_migrate(conn)
     }
 
+    /// Crate-internal accessor for sibling modules that maintain their
+    /// own per-table CRUD via the `WorkflowStore` extension trait
+    /// pattern (see `agentmux-srv/src/workflows/storage.rs`). Outside
+    /// callers must use the typed methods on this impl.
+    pub(crate) fn conn(&self) -> &Mutex<Connection> {
+        &self.conn
+    }
+
     fn configure_and_migrate(conn: Connection) -> Result<Self, StoreError> {
         conn.execute_batch(
             // `foreign_keys=ON` is per-connection and defaults to OFF in

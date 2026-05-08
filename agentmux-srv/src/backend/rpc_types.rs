@@ -330,6 +330,14 @@ pub const COMMAND_DELETE_AGENT_INSTANCE: &str = "deleteagentinstance";
 // Agent definition branching
 pub const COMMAND_FORK_AGENT_DEFINITION: &str = "forkagentdefinition";
 
+// Workflows pane (v8 — issue #753 Phase 1)
+pub const COMMAND_LIST_WORKFLOWS: &str = "listworkflows";
+pub const COMMAND_GET_WORKFLOW: &str = "getworkflow";
+pub const COMMAND_UPSERT_WORKFLOW: &str = "upsertworkflow";
+pub const COMMAND_DELETE_WORKFLOW: &str = "deleteworkflow";
+pub const COMMAND_RUN_WORKFLOW: &str = "runworkflow";
+pub const COMMAND_LIST_WORKFLOW_RUNS: &str = "listworkflowruns";
+
 // App API Tier 1 — agent lifecycle commands
 pub const COMMAND_AGENT_OPEN: &str = "agent.open";
 pub const COMMAND_AGENT_SEND: &str = "agent.send";

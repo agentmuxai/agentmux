@@ -1125,6 +1125,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
     // Forge handlers (agents, content, skills, history, import, reseed)
     super::forge_handlers::register_forge_handlers(engine, &state);
 
+    // Workflow handlers (issue #753 — Workflows pane DAG executor)
+    super::workflow_handlers::register_workflow_handlers(engine, &state);
+
     // App API handlers (agent.open, agent.send, agent.stop, agent.status, agent.list, agent.output)
     super::app_api::register_app_api_handlers(engine, &state);
 }

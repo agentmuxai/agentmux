@@ -323,6 +323,52 @@ declare global {
         updated_at: number;
     };
 
+    /** Workflows pane (issue #753 Phase 1). Mirrors the Rust types in
+     *  agentmux-srv/src/workflows/types.rs. */
+    type WorkflowDefinition = {
+        id: string;
+        name: string;
+        description: string;
+        graph: { nodes: WorkflowFlowNode[]; edges: WorkflowFlowEdge[] };
+        viewport: { x: number; y: number; zoom: number };
+        created_at: number;
+        updated_at: number;
+    };
+
+    type WorkflowFlowNode = {
+        id: string;
+        position: { x: number; y: number };
+        data: Record<string, unknown> & { kind: string };
+        type?: string;
+    };
+
+    type WorkflowFlowEdge = {
+        id: string;
+        source: string;
+        target: string;
+        sourceHandle?: string;
+        targetHandle?: string;
+    };
+
+    type WorkflowRun = {
+        id: string;
+        workflow_id: string;
+        status: string;
+        started_at: number;
+        ended_at: number;
+        block_states: Record<string, WorkflowBlockState>;
+        output: string;
+        error: string;
+    };
+
+    type WorkflowBlockState = {
+        status: "pending" | "running" | "done" | "error" | "skipped";
+        output?: unknown;
+        error?: string;
+        started_at?: number;
+        completed_at?: number;
+    };
+
     type AgentInstanceStatus = "running" | "paused" | "stopped" | "crashed" | "detached";
 
     type GitHubContext = {

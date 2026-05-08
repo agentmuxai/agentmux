@@ -100,6 +100,18 @@
             }
         }
     },
+    "defwidget@workflows": {
+        "display:order": 8,
+        "icon": "diagram-project",
+        "color": "#06b6d4",
+        "label": "workflows",
+        "description": "Visual DAG-of-blocks workflow engine (Sim-modeled, issue #753)",
+        "blockdef": {
+            "meta": {
+                "view": "workflows"
+            }
+        }
+    },
     "defwidget@help": {
         "display:order": 9,
         "icon": "circle-question",
