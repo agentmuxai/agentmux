@@ -7,9 +7,8 @@ import type { BrowserViewModel } from "./browser-model";
 import "./browser-view.scss";
 
 // Compact tag for an Element — used by diag log lines to identify the
-// previous/next active element across focus transitions. Hoisted to
-// module scope so onFocus and onBlur use the same implementation
-// (reagent P2 on PR #739).
+// previous/next active element across focus transitions. Module-scope
+// so onFocus and onBlur share one implementation.
 function tagElement(el: Element | null): string {
     if (!el) return "null";
     const t = el.tagName?.toLowerCase() ?? "?";
@@ -188,10 +187,11 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                     onFocus={(e) => {
                         // relatedTarget = the element that LOST focus to us
                         // (or null if focus came from outside the document,
-                        // e.g. from the embedded CEF browser pane). Logging
-                        // document.activeElement here would be misleading
-                        // since it's already this input by the time onFocus
-                        // fires (reagent P2 PR #739).
+                        // e.g. from the embedded CEF browser pane).
+                        // document.activeElement is intentionally NOT logged
+                        // here — by the time onFocus fires it's already this
+                        // input, so it would only ever read as the input
+                        // itself.
                         const related = e.relatedTarget as Element | null;
                         diag(`input-focus value=${JSON.stringify(addressBar())} relatedTarget=${tagElement(related)}`);
                         e.currentTarget.select();
