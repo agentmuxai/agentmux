@@ -34,22 +34,17 @@ vi.mock("@/app/store/wos", () => ({
 
 import { invokeCommand } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
-import { __resetAllSlots } from "@/app/store/browser-pane-state-store";
 import { BrowserViewModel } from "./browser-model";
 
-let __vmSeq = 0;
-function makeVM(): BrowserViewModel {
+function makeVM() {
     // BlockNodeModel is used only by blockAtom construction — a minimal
-    // placeholder is enough for the gating tests. Each test gets a
-    // unique blockId so the slice store doesn't collide on register
-    // across tests in the same describe block.
-    return new BrowserViewModel(`test-block-${++__vmSeq}`, {} as never);
+    // placeholder is enough for the gating tests.
+    return new BrowserViewModel("test-block-id", {} as never);
 }
 
 describe("BrowserViewModel lifecycle gating", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        __resetAllSlots();
     });
 
     it("is not closed after construction", () => {
