@@ -28,6 +28,7 @@ import { deleteLayoutModelForTab, getLayoutModelForStaticTab, NavigateDirection 
 import * as keyutil from "@/util/keyutil";
 import { CHORD_TIMEOUT } from "@/util/sharedconst";
 import { fireAndForget } from "@/util/util";
+import { getVoiceSession } from "@/app/hook/useVoiceInput";
 import { createSignal } from "solid-js";
 import { modalsModel } from "./modalmodel";
 
@@ -556,6 +557,10 @@ function registerGlobalKeys() {
             return true;
         }
         setIsTermMultiInput(!curMI);
+        return true;
+    });
+    globalKeyMap.set("Ctrl:Shift:v", () => {
+        getVoiceSession().toggleListening();
         return true;
     });
     for (let idx = 1; idx <= 9; idx++) {
