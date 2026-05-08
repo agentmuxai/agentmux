@@ -11,6 +11,7 @@ import {
     type BrowserPaneCommand,
     type BrowserPaneState,
     initialState as browserPaneInitialState,
+    TITLE_FALLBACK,
     update as browserPaneUpdate,
 } from "@/app/store/browser-pane-state";
 import { refocusNode } from "@/app/store/global";
@@ -45,7 +46,7 @@ export class BrowserViewModel implements ViewModel {
     urlAtom: Accessor<string> = this._url[0];
     setUrl = this._url[1];
 
-    private _title = createSignal<string>("Browser");
+    private _title = createSignal<string>(TITLE_FALLBACK);
     titleAtom: Accessor<string> = this._title[0];
     setTitle = this._title[1];
 
@@ -168,10 +169,7 @@ export class BrowserViewModel implements ViewModel {
         const ctorMetaUrl = (this.blockAtom()?.meta?.["url"] as string | undefined) ?? "";
         console.log(`[browser-pane:diag][${blockId.slice(0, 7)}] ctor meta.url=${JSON.stringify(ctorMetaUrl)}`);
 
-        this.viewName = createMemo(() => {
-            const title = this.titleAtom();
-            return title || "Browser";
-        });
+        this.viewName = createMemo(() => this.titleAtom());
 
         // Subscribe to nav-state updates fired by the backend on every
         // `on_load_end_pane`. This is the source of truth for address bar +
