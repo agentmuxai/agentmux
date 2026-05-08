@@ -6,6 +6,18 @@ import { invokeCommand } from "@/app/platform/ipc";
 import type { BrowserViewModel } from "./browser-model";
 import "./browser-view.scss";
 
+// Compact tag for an Element — used by diag log lines to identify the
+// previous/next active element across focus transitions. Hoisted to
+// module scope so onFocus and onBlur use the same implementation
+// (reagent P2 on PR #739).
+function tagElement(el: Element | null): string {
+    if (!el) return "null";
+    const t = el.tagName?.toLowerCase() ?? "?";
+    const cls = (el as HTMLElement).className?.toString().split(/\s+/).find((c) => c) ?? "";
+    const id = (el as HTMLElement).id ?? "";
+    return `${t}${id ? `#${id}` : ""}${cls ? `.${cls}` : ""}`;
+}
+
 export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>): JSX.Element {
     const model = props.model;
     const _diagTag = `[browser-pane:diag][${model.blockId.slice(0, 7)}]`;
@@ -174,47 +186,22 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                     onInput={(e) => setAddressBar(e.currentTarget.value)}
                     onKeyDown={handleAddressKeyDown}
                     onFocus={(e) => {
-                        const tag = (el: Element | null) => {
-                            if (!el) return "null";
-                            const t = el.tagName?.toLowerCase() ?? "?";
-                            const cls = (el as HTMLElement).className?.toString().split(/\s+/).find((c) => c) ?? "";
-                            const id = (el as HTMLElement).id ?? "";
-                            return `${t}${id ? `#${id}` : ""}${cls ? `.${cls}` : ""}`;
-                        };
-                        const wasAlreadyFocused = document.activeElement === e.currentTarget;
-                        const realTransition = !!(e as any).relatedTarget;
-                        diag(`input-focus value=${JSON.stringify(addressBar())} prev-active=${tag(document.activeElement)} same-target=${e.currentTarget === document.activeElement} relatedTarget=${tag((e as any).relatedTarget ?? null)} wasAlreadyFocused=${wasAlreadyFocused} realTransition=${realTransition}`);
+                        const related = e.relatedTarget as Element | null;
+                        diag(`input-focus value=${JSON.stringify(addressBar())} prev-active=${tagElement(document.activeElement)} relatedTarget=${tagElement(related)}`);
                         e.currentTarget.select();
-                        // Skip the main_window_focus IPC on synthetic re-fires.
-                        // Chromium dispatches a synthetic focus/blur cycle on
-                        // the DOM-focused input whenever a Win32 HWND focus
-                        // shift happens upstream — we observed the input
-                        // staying focused (now-active=this same input) across
-                        // the whole bounce, with relatedTarget=null. Real
-                        // user-initiated focus has relatedTarget set OR
-                        // arrives at an element that wasn't already focused.
-                        // Without this guard, every IPC triggers another
-                        // synthetic event, which triggers another IPC — a
-                        // ~200 Hz loop in multi-window setups (the IPC
-                        // misroutes to the wrong window without window_label,
-                        // see ipc.rs:424-428).
-                        if (wasAlreadyFocused && !realTransition) {
-                            diag(`input-focus skip-ipc reason=synthetic-refire`);
-                            return;
-                        }
+                        // Always fire main_window_focus with window_label —
+                        // the IPC misrouting was the root cause of the bounce
+                        // (see ipc.rs:424-428). With the correct window_label
+                        // the IPC is a no-op when the target window is
+                        // already foreground, so it's safe to send on every
+                        // legitimate focus event without triggering loops.
                         invokeCommand("main_window_focus", { window_label: windowLabel }).catch(() => {});
                     }}
                     onBlur={(e) => {
-                        const tag = (el: Element | null) => {
-                            if (!el) return "null";
-                            const t = el.tagName?.toLowerCase() ?? "?";
-                            const cls = (el as HTMLElement).className?.toString().split(/\s+/).find((c) => c) ?? "";
-                            return `${t}${cls ? `.${cls}` : ""}`;
-                        };
+                        const next = e.relatedTarget as Element | null;
                         // Microtask-deferred so we can see what landed focus AFTER the blur.
-                        const next = (e as any).relatedTarget ?? null;
                         queueMicrotask(() => {
-                            diag(`input-blur value=${JSON.stringify(addressBar())} relatedTarget=${tag(next)} now-active=${tag(document.activeElement)}`);
+                            diag(`input-blur value=${JSON.stringify(addressBar())} relatedTarget=${tagElement(next)} now-active=${tagElement(document.activeElement)}`);
                         });
                     }}
                     placeholder="Enter URL or search..."
