@@ -26,7 +26,7 @@
 
 import { For, Show, type JSX } from "solid-js";
 
-import type { MemoryViewModel } from "./memory-model";
+import type { MemoryDraft, MemoryViewModel } from "./memory-model";
 
 import "./memory-view.scss";
 
@@ -58,9 +58,9 @@ export const MemoryView = (props: MemoryViewProps): JSX.Element => {
         void model.deleteMemory(id);
     };
 
-    const updateDraft = <K extends keyof MemoryDraftExternal>(
+    const updateDraft = <K extends keyof MemoryDraft>(
         key: K,
-        value: MemoryDraftExternal[K],
+        value: MemoryDraft[K],
     ) => {
         const current = model.draftAtom();
         if (!current) return;
@@ -265,18 +265,7 @@ export const MemoryView = (props: MemoryViewProps): JSX.Element => {
     );
 };
 
-// Local alias so the type-narrow `updateDraft` helper has a name to refer to;
-// importing the interface from the model would create a TS-circular reference
-// because the barrel imports from both files. The shape mirrors `MemoryDraft`
-// exactly — keep them in sync.
-type MemoryDraftExternal = {
-    id?: string;
-    name: string;
-    description: string;
-    provider: string;
-    model: string;
-    instructions: string;
-    context_files: Array<{ path: string; content: string }>;
-    mcp_servers: string;
-    skills: string;
-};
+// MemoryDraft is imported from ./memory-model. The previous local
+// duplicate (`MemoryDraftExternal`) was a footgun: if MemoryDraft
+// gained a required field, the local alias would silently narrow
+// `updateDraft`'s key type. Reagent P2 (PR #749).

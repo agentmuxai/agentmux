@@ -82,10 +82,16 @@ export function draftFromMemory(m: Memory): MemoryDraft {
     };
 }
 
-/** Serialize a draft into the wire shape for `upsertmemory`. */
-export function draftToWire(d: MemoryDraft): Partial<Memory> {
+/** Serialize a draft into the wire shape for `upsertmemory`.
+ *
+ *  The backend deserializes directly into the Rust `Memory` struct,
+ *  which has no serde defaults for `created_at` / `updated_at`. Send
+ *  0 for both — the upsert handler server-sets `created_at = now`
+ *  when it sees 0 and always overwrites `updated_at` with now. Codex
+ *  P1 (PR #749). */
+export function draftToWire(d: MemoryDraft): Memory {
     return {
-        id: d.id,
+        id: d.id ?? "",
         name: d.name.trim(),
         description: d.description.trim(),
         provider: d.provider,
@@ -96,6 +102,8 @@ export function draftToWire(d: MemoryDraft): Partial<Memory> {
         // Same JSON-array invariant as mcp_servers — never write an
         // empty string to the skills column. Reagent P1 (PR #747).
         skills: d.skills || "[]",
+        created_at: 0,
+        updated_at: 0,
     };
 }
 
@@ -214,8 +222,13 @@ export class MemoryViewModel implements ViewModel {
         try {
             const saved = await RpcApi.UpsertMemoryCommand(TabRpcClient, draftToWire(draft));
             this.setDraft(null);
-            this.setSelectedId(saved.id);
+            // Refresh BEFORE setSelectedId so the list contains the
+            // saved row when selectedAtom resolves it. Otherwise on
+            // create, selectedAtom returns null for one tick and the
+            // empty-state ("Select a Memory bundle…") flashes briefly.
+            // Reagent P2 (PR #749).
             await this.refresh();
+            this.setSelectedId(saved.id);
         } catch (e) {
             this.setError(`Save failed: ${(e as Error).message ?? e}`);
         } finally {
