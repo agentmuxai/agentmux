@@ -87,13 +87,13 @@ Widgets are defined in `agentmux-srv/src/config/widgets.json`. These are the **o
 | Widget Key | View | Label | Opens in Pane? |
 |------------|------|-------|----------------|
 | `defwidget@agent` | `agent` | agent | Yes |
-| `defwidget@forge` | `forge` | forge | Yes |
-| `defwidget@identity` | `identity` | identity | Yes |
+| `defwidget@browser` | `browser` | browser | Yes |
+| `defwidget@editor` | `editor` | editor | Yes |
 | `defwidget@swarm` | `swarm` | swarm | Yes (hidden by default) |
 | `defwidget@terminal` | `term` | terminal | Yes |
 | `defwidget@sysinfo` | `sysinfo` | sysinfo | Yes |
+| `defwidget@memory` | `memory` | memory | Yes |
 | `defwidget@help` | `help` | help | Yes |
-| `defwidget@settings` | `settings` | settings | No — opens external editor |
 | `defwidget@devtools` | `devtools` | devtools | No — toggles browser inspector |
 
 ---

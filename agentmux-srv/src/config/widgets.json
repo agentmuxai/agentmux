@@ -78,6 +78,17 @@
             }
         }
     },
+    "defwidget@memory": {
+        "display:order": 7,
+        "icon": "brain",
+        "label": "memory",
+        "description": "Manage Memory bundles — agent personality + capability stacks",
+        "blockdef": {
+            "meta": {
+                "view": "memory"
+            }
+        }
+    },
     "defwidget@help": {
         "display:order": 8,
         "icon": "circle-question",

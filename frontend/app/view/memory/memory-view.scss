@@ -1,0 +1,252 @@
+// Memory pane — matches the swarm/forge SCSS conventions for layout
+// (left rail + right detail). Colors come from the global theme tokens.
+
+.memory-view {
+    display: flex;
+    flex-direction: row;
+    height: 100%;
+    overflow: hidden;
+    background: var(--main-bg-color);
+    color: var(--main-text-color);
+
+    .memory-view-rail {
+        flex: 0 0 240px;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid var(--border-color);
+        overflow: hidden;
+    }
+
+    .memory-view-rail-header {
+        padding: 8px;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .memory-view-new-btn {
+        width: 100%;
+        padding: 6px 10px;
+        background: var(--accent-color);
+        color: var(--accent-text-color, #fff);
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+
+        &:hover {
+            filter: brightness(1.1);
+        }
+    }
+
+    .memory-view-list {
+        flex: 1 1 auto;
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        overflow-y: auto;
+    }
+
+    .memory-view-list-item {
+        padding: 10px 12px;
+        cursor: pointer;
+        border-bottom: 1px solid var(--border-color-faint, rgba(255, 255, 255, 0.06));
+
+        &:hover {
+            background: var(--hover-bg-color, rgba(255, 255, 255, 0.04));
+        }
+
+        &.is-selected {
+            background: var(--selected-bg-color, rgba(255, 255, 255, 0.08));
+        }
+
+        &.is-blank {
+            font-style: italic;
+            color: var(--secondary-text-color, rgba(255, 255, 255, 0.6));
+        }
+    }
+
+    .memory-view-list-item-name {
+        font-size: 13px;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .memory-view-list-item-provider {
+        font-size: 11px;
+        color: var(--secondary-text-color, rgba(255, 255, 255, 0.6));
+        margin-top: 2px;
+    }
+
+    .memory-view-detail {
+        flex: 1 1 auto;
+        padding: 16px 24px;
+        overflow-y: auto;
+    }
+
+    .memory-view-error {
+        padding: 8px 12px;
+        margin-bottom: 12px;
+        background: var(--error-bg-color, rgba(255, 80, 80, 0.15));
+        color: var(--error-text-color, #ff8080);
+        border-radius: 4px;
+        font-size: 13px;
+    }
+
+    .memory-view-empty {
+        max-width: 460px;
+        color: var(--secondary-text-color, rgba(255, 255, 255, 0.7));
+        line-height: 1.5;
+    }
+
+    .memory-view-empty-hint {
+        font-size: 13px;
+        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.5));
+        margin-top: 8px;
+    }
+
+    // ── Read-only detail ────────────────────────────────────────────
+    .memory-view-readonly {
+        max-width: 720px;
+    }
+
+    .memory-view-name {
+        font-size: 20px;
+        margin: 0 0 4px;
+    }
+
+    .memory-view-description {
+        margin: 0 0 16px;
+        color: var(--secondary-text-color);
+    }
+
+    .memory-view-fields {
+        display: grid;
+        grid-template-columns: 140px 1fr;
+        column-gap: 16px;
+        row-gap: 8px;
+        margin: 0 0 16px;
+
+        dt {
+            color: var(--secondary-text-color);
+            font-size: 13px;
+        }
+
+        dd {
+            margin: 0;
+            font-size: 13px;
+        }
+    }
+
+    .memory-view-instructions-readonly pre {
+        margin: 0;
+        padding: 8px;
+        background: var(--code-bg-color, rgba(0, 0, 0, 0.2));
+        border-radius: 4px;
+        white-space: pre-wrap;
+        font-family: var(--mono-font, "JetBrains Mono", monospace);
+        font-size: 12px;
+        max-height: 240px;
+        overflow-y: auto;
+    }
+
+    .memory-view-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 16px;
+    }
+
+    .memory-view-edit-btn,
+    .memory-view-delete-btn,
+    .memory-view-cancel-btn,
+    .memory-view-save-btn {
+        padding: 6px 14px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: transparent;
+        color: var(--main-text-color);
+        cursor: pointer;
+        font-size: 13px;
+
+        &:hover:not(:disabled) {
+            background: var(--hover-bg-color, rgba(255, 255, 255, 0.04));
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    }
+
+    .memory-view-save-btn {
+        background: var(--accent-color);
+        color: var(--accent-text-color, #fff);
+        border-color: transparent;
+    }
+
+    .memory-view-delete-btn {
+        color: var(--error-text-color, #ff8080);
+        border-color: var(--error-text-color, #ff8080);
+    }
+
+    // ── Edit form ───────────────────────────────────────────────────
+    .memory-view-form {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        max-width: 720px;
+    }
+
+    .memory-view-form-title {
+        font-size: 18px;
+        margin: 0 0 4px;
+    }
+
+    .memory-view-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .memory-view-field-label {
+        font-size: 12px;
+        color: var(--secondary-text-color);
+    }
+
+    .memory-view-input,
+    .memory-view-textarea {
+        padding: 6px 10px;
+        background: var(--input-bg-color, rgba(0, 0, 0, 0.2));
+        color: var(--main-text-color);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        font-size: 13px;
+        font-family: inherit;
+
+        &:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+    }
+
+    .memory-view-textarea {
+        font-family: var(--mono-font, "JetBrains Mono", monospace);
+        font-size: 12px;
+        resize: vertical;
+        min-height: 120px;
+    }
+
+    .memory-view-form-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        margin-top: 8px;
+    }
+
+    .memory-view-form-hint {
+        font-size: 11px;
+        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.5));
+        margin: 4px 0 0;
+        font-style: italic;
+    }
+}
