@@ -1286,7 +1286,12 @@ fn register_v7_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             Box::pin(async move {
                 let mut bundle: Identity = serde_json::from_value(data)
                     .map_err(|e| format!("upsertidentitybundle: {e}"))?;
-                if bundle.is_blank {
+                // Guard on BOTH client-supplied is_blank AND id == "blank".
+                // Without the id check a caller could send
+                // {id:"blank", is_blank:false, name:"evil"} and the
+                // ON CONFLICT(id) DO UPDATE path would rename/re-describe
+                // the seeded singleton. (reagent P1, 2026-05-08).
+                if bundle.is_blank || bundle.id == "blank" {
                     return Err(
                         "upsertidentitybundle: cannot mutate the blank singleton".to_string(),
                     );
@@ -1459,7 +1464,10 @@ fn register_v7_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             Box::pin(async move {
                 let mut memory: Memory = serde_json::from_value(data)
                     .map_err(|e| format!("upsertmemory: {e}"))?;
-                if memory.is_blank {
+                // Guard on BOTH client-supplied is_blank AND id == "blank".
+                // Same bypass as upsertidentitybundle — see that comment.
+                // (reagent P1, 2026-05-08).
+                if memory.is_blank || memory.id == "blank" {
                     return Err("upsertmemory: cannot mutate the blank singleton".to_string());
                 }
                 if memory.id.is_empty() {

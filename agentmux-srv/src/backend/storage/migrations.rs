@@ -550,24 +550,55 @@ pub fn run_forge_v7_migrations(conn: &Connection) -> Result<(), StoreError> {
     // applicable; for simplicity in this migration we leave them empty and
     // let users re-attach via the Memory pane. (Forge content rows are not
     // dropped — they remain readable until v8.)
+    //
+    // **Name disambiguation (codex P1, 2026-05-08):**
+    // db_forge_agents.name allows duplicates (only `slug` is collision-
+    // resolved by the v4 migration). db_memories.name has a UNIQUE
+    // constraint, so a naive `INSERT OR IGNORE ... SELECT name` would
+    // silently drop all but one duplicate; the later memory_id backfill
+    // would then leave instances of the dropped definitions pointing at
+    // a non-existent memory_id. We disambiguate explicitly:
+    //
+    //   - If the forge agent's name is unique among forge agents AND no
+    //     existing db_memories row has the same name (e.g. user manually
+    //     created a memory before the migration), keep the original.
+    //   - Otherwise append " [<id-prefix>]" — first 8 chars of the agent
+    //     id, which IS unique because id is the primary key. The suffix
+    //     is deterministic so re-running the migration after a v8
+    //     downgrade-then-re-upgrade produces the same name.
+    //
+    // The OR IGNORE on the INSERT remains as belt-and-braces against the
+    // edge case where the user has both a forge agent "X" AND a memory
+    // "X [<same-prefix>]" pre-existing; in that case we accept silent
+    // skip rather than fail the whole migration.
     conn.execute_batch(
         "INSERT OR IGNORE INTO db_memories
             (id, name, description, is_blank, provider, model, instructions,
              context_files, mcp_servers, skills, created_at, updated_at)
          SELECT
-            id,
-            name,
-            COALESCE(description, ''),
+            fa.id,
+            CASE
+                WHEN EXISTS (
+                    SELECT 1 FROM db_forge_agents fb
+                    WHERE fb.name = fa.name AND fb.id != fa.id
+                ) OR EXISTS (
+                    SELECT 1 FROM db_memories m WHERE m.name = fa.name
+                )
+                THEN fa.name || ' [' || substr(fa.id, 1, 8) || ']'
+                ELSE fa.name
+            END,
+            COALESCE(fa.description, ''),
             0,
-            COALESCE(provider, ''),
+            COALESCE(fa.provider, ''),
             '',
             '',
             '[]',
             '[]',
             '[]',
-            COALESCE(created_at, 0),
-            COALESCE(created_at, 0)
-         FROM db_forge_agents;",
+            COALESCE(fa.created_at, 0),
+            COALESCE(fa.created_at, 0)
+         FROM db_forge_agents fa
+         WHERE NOT EXISTS (SELECT 1 FROM db_memories m WHERE m.id = fa.id);",
     )?;
 
     // ---- Backfill memory_id on existing instances ----
@@ -913,6 +944,109 @@ mod tests {
             )
             .unwrap();
         assert_eq!(migrated_name, "My Coder");
+    }
+
+    #[test]
+    fn test_forge_v7_disambiguates_duplicate_forge_agent_names() {
+        // codex P1, 2026-05-08: db_forge_agents.name allows duplicates
+        // (only slug is collision-resolved). Before this fix the migration
+        // used INSERT OR IGNORE ... SELECT name, silently dropping all but
+        // one duplicate; instances of the dropped definitions were left
+        // pointing at a non-existent memory_id.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+
+        run_forge_migrations(&conn).unwrap();
+        conn.execute_batch(
+            "DELETE FROM db_memories;
+             INSERT INTO db_forge_agents
+                (id, slug, name, icon, provider, description, created_at)
+             VALUES
+                ('forge-aaaaaaaa', 'duplicate-a', 'Duplicate', '✦', 'claude', '', 100),
+                ('forge-bbbbbbbb', 'duplicate-b', 'Duplicate', '✦', 'codex',  '', 200);",
+        )
+        .unwrap();
+
+        run_forge_v7_migrations(&conn).unwrap();
+
+        // Both forge agents should have a corresponding memory row
+        // (plus the blank singleton — DELETE FROM db_memories above
+        // wiped that, but v7 re-seeds it via INSERT OR IGNORE).
+        let migrated: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_memories WHERE is_blank = 0",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            migrated, 2,
+            "both duplicate-named forge agents should migrate"
+        );
+
+        // The names should be disambiguated with the id-prefix suffix.
+        let name_a: String = conn
+            .query_row(
+                "SELECT name FROM db_memories WHERE id='forge-aaaaaaaa'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let name_b: String = conn
+            .query_row(
+                "SELECT name FROM db_memories WHERE id='forge-bbbbbbbb'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(name_a, "Duplicate [forge-aa]");
+        assert_eq!(name_b, "Duplicate [forge-bb]");
+        assert_ne!(name_a, name_b, "disambiguated names must be unique");
+    }
+
+    #[test]
+    fn test_forge_v7_disambiguates_against_existing_memory_name() {
+        // If a user manually created a Memory bundle named "X" before this
+        // migration, and then has an old forge agent named "X", the
+        // migration must rename the migrated row to avoid a UNIQUE
+        // constraint failure.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+
+        run_forge_migrations(&conn).unwrap();
+        conn.execute_batch(
+            "DELETE FROM db_memories;
+             INSERT INTO db_memories
+                (id, name, description, is_blank, created_at, updated_at)
+             VALUES ('user-mem', 'Coder', '', 0, 0, 0);
+             INSERT INTO db_forge_agents
+                (id, slug, name, icon, provider, description, created_at)
+             VALUES ('forge-cccccccc', 'coder', 'Coder', '✦', 'claude', '', 100);",
+        )
+        .unwrap();
+
+        run_forge_v7_migrations(&conn).unwrap();
+
+        let migrated_name: String = conn
+            .query_row(
+                "SELECT name FROM db_memories WHERE id='forge-cccccccc'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migrated_name, "Coder [forge-cc]");
+
+        // Original user memory remains intact.
+        let user_name: String = conn
+            .query_row(
+                "SELECT name FROM db_memories WHERE id='user-mem'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(user_name, "Coder");
     }
 
     #[test]
