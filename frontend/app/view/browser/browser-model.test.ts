@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // vi.mock is hoisted, so the mocks are in place when browser-model imports them.
 vi.mock("@/app/platform/ipc", () => ({
     invokeCommand: vi.fn(() => Promise.resolve()),
+    listenEvent: vi.fn(() => Promise.resolve(() => {})),
 }));
 
 vi.mock("@/app/store/rpc-api", () => ({
@@ -136,5 +137,57 @@ describe("BrowserViewModel lifecycle gating", () => {
         vm.dispose();
         vm.dispose();
         expect(vm.closed).toBe(true);
+    });
+});
+
+describe("BrowserViewModel title + favicon", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it("viewName falls back to 'Browser' when title is empty", () => {
+        const vm = makeVM();
+        vm.setTitle("");
+        expect(vm.viewName()).toBe("Browser");
+    });
+
+    it("viewName reflects the current title", () => {
+        const vm = makeVM();
+        vm.setTitle("Example — Test Page");
+        expect(vm.viewName()).toBe("Example — Test Page");
+    });
+
+    it("viewIcon returns 'globe' string when no favicon set", () => {
+        const vm = makeVM();
+        expect(vm.viewIcon()).toBe("globe");
+    });
+
+    it("viewIcon returns IconButtonDecl when a favicon is set", () => {
+        const vm = makeVM();
+        vm.setFaviconUrl("https://example.com/favicon.ico");
+        const icon = vm.viewIcon();
+        expect(typeof icon).toBe("object");
+        expect((icon as { elemtype: string }).elemtype).toBe("iconbutton");
+    });
+
+    it("viewIcon reverts to 'globe' after favicon is cleared", () => {
+        const vm = makeVM();
+        vm.setFaviconUrl("https://example.com/favicon.ico");
+        vm.setFaviconUrl("");
+        expect(vm.viewIcon()).toBe("globe");
+    });
+
+    it("navigate() clears the favicon (loading state shows globe)", () => {
+        const vm = makeVM();
+        vm.setFaviconUrl("https://stale.example.com/favicon.ico");
+        vm.navigate("https://new.example.com/page");
+        expect(vm.faviconUrlAtom()).toBe("");
+    });
+
+    it("navigate() preserves the title (avoids 'Browser' flash mid-load)", () => {
+        const vm = makeVM();
+        vm.setTitle("Previous Page");
+        vm.navigate("https://new.example.com/page");
+        expect(vm.titleAtom()).toBe("Previous Page");
     });
 });

@@ -11,6 +11,7 @@ import { refocusNode } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
+import { buildBrowserHeaderIcon } from "@/app/view/browser/components/BrowserHeaderIcon";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 
 /**
@@ -26,7 +27,7 @@ export class BrowserViewModel implements ViewModel {
     blockId: string;
     nodeModel: BlockNodeModel;
 
-    viewIcon: Accessor<string> = () => "globe";
+    viewIcon: Accessor<string | IconButtonDecl>;
     viewName: Accessor<string>;
     viewText: Accessor<string | HeaderElem[]> = () => [];
     noPadding: Accessor<boolean> = () => true;
@@ -42,6 +43,16 @@ export class BrowserViewModel implements ViewModel {
     private _title = createSignal<string>("Browser");
     titleAtom: Accessor<string> = this._title[0];
     setTitle = this._title[1];
+
+    // Favicon URL surfaced from CEF's DisplayHandler::OnFaviconUrlChange
+    // event. Empty string → header falls back to the "globe" font icon.
+    // Cleared at the start of every navigate() so the loading state
+    // doesn't show the previous page's favicon. The new favicon URL
+    // arrives mid-load via `browser-pane-favicon-change` and re-renders
+    // the header icon. See docs/specs/browser-pane-title-favicon.md.
+    private _faviconUrl = createSignal<string>("");
+    faviconUrlAtom: Accessor<string> = this._faviconUrl[0];
+    setFaviconUrl = this._faviconUrl[1];
 
     private _loading = createSignal<boolean>(false);
     loadingAtom: Accessor<boolean> = this._loading[0];
@@ -75,6 +86,8 @@ export class BrowserViewModel implements ViewModel {
      */
     private _clickUnsub: (() => void) | null = null;
 
+    private _titleUnsub: (() => void) | null = null;
+
     blockAtom: Accessor<Block | undefined>;
 
     // Flipped in dispose() so late callers see the pane is gone and no-op
@@ -92,6 +105,17 @@ export class BrowserViewModel implements ViewModel {
         this.viewName = createMemo(() => {
             const title = this.titleAtom();
             return title || "Browser";
+        });
+
+        // Header icon: live favicon when set, otherwise the globe.
+        // Wrapping the favicon in an IconButtonDecl with noAction=true
+        // matches the agent pane pattern (see AgentPaneIcon) so the
+        // blockframe renders our <img> instead of treating viewIcon as
+        // a font-icon name.
+        this.viewIcon = createMemo<string | IconButtonDecl>(() => {
+            const fav = this.faviconUrlAtom();
+            if (fav) return buildBrowserHeaderIcon(fav, this.titleAtom());
+            return "globe";
         });
 
         // Subscribe to nav-state updates fired by the backend on every
@@ -112,6 +136,22 @@ export class BrowserViewModel implements ViewModel {
             if (this._closed) return;
             if (payload.block_id !== this.blockId) return;
             this.setUrl(payload.url);
+            // Derive favicon from the URL origin. `${origin}/favicon.ico`
+            // is the convention every browser falls back to, so it
+            // covers most sites without needing the host to wire CEF's
+            // OnFaviconURLChange. Sites that don't serve at this path
+            // gracefully degrade to the globe via FaviconImg's onError.
+            // about: / file: / chrome: URLs produce origin "null" → clear.
+            try {
+                const origin = new URL(payload.url).origin;
+                if (origin && origin !== "null") {
+                    this.setFaviconUrl(`${origin}/favicon.ico`);
+                } else {
+                    this.setFaviconUrl("");
+                }
+            } catch {
+                this.setFaviconUrl("");
+            }
             // `url_only` events come from `on_load_end_pane` — they arrive
             // before the navigation controller has fully committed, so the
             // `can_go_back` / `can_go_forward` values from that hook would
@@ -150,6 +190,20 @@ export class BrowserViewModel implements ViewModel {
             else this._clickUnsub = unsub;
         });
 
+        // Page <title> updates. CEF fires on_title_change every time the
+        // top-level frame's document.title changes (initial load + later
+        // mutations). Updating titleAtom drives the viewName memo that
+        // renders the pane header label.
+        void listenEvent<{ block_id: string; title: string }>("browser-pane-title-change", (payload) => {
+            if (this._closed) return;
+            if (payload.block_id !== this.blockId) return;
+            this.setTitle(payload.title || "Browser");
+        }).then((unsub) => {
+            if (this._closed) unsub();
+            else this._titleUnsub = unsub;
+        });
+
+
         // Load URL from block meta on init. An empty/missing `url` falls
         // back to DEFAULT_BROWSER_URL so fresh panes aren't blank (the
         // widget definition in widgets.json also ships this URL, but the
@@ -176,6 +230,11 @@ export class BrowserViewModel implements ViewModel {
         this.setUrl(normalized);
         this.setError(null);
         this.setLoading(true);
+        // Clear the previous page's favicon so the loading state shows
+        // the globe instead of the stale icon. Title is intentionally
+        // NOT cleared — the new title arrives via on_title_change soon
+        // after, and clearing here would briefly flash "Browser".
+        this.setFaviconUrl("");
         // can_go_back / can_go_forward are set by the `browser-pane-nav-state`
         // event subscription; we don't touch them here. CEF is the source of
         // truth for history state.
@@ -257,6 +316,10 @@ export class BrowserViewModel implements ViewModel {
         if (this._clickUnsub) {
             this._clickUnsub();
             this._clickUnsub = null;
+        }
+        if (this._titleUnsub) {
+            this._titleUnsub();
+            this._titleUnsub = null;
         }
     }
 }

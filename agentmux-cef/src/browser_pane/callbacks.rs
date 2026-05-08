@@ -214,7 +214,7 @@ pub fn on_loading_state_change_browser_pane(
 /// `state.browsers` under labels like `browser-pane-<uuid>-<seq>`. Find the
 /// label whose browser handle matches the given one by `is_same`, then
 /// strip the prefix and the trailing `-<seq>` to recover the uuid.
-fn resolve_pane_block_id(state: &Arc<AppState>, browser: &Browser) -> Option<String> {
+pub fn resolve_pane_block_id(state: &Arc<AppState>, browser: &Browser) -> Option<String> {
     // Phase H.2.b — reducer-aware iteration with fallback.
     state
         .list_browsers()

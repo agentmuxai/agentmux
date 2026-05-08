@@ -136,7 +136,28 @@ impl AgentMuxHandler {
                 }
             }
         }
+
+        // Forward to the renderer for browser panes so their pane header
+        // shows the live page title instead of the static "Browser".
+        // See docs/specs/browser-pane-title-favicon.md.
+        if self.is_browser_pane {
+            if let (Some(b), Some(t)) = (browser.as_ref(), title) {
+                if let Some(block_id) =
+                    crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b)
+                {
+                    crate::events::emit_event_from_state(
+                        &self.state,
+                        "browser-pane-title-change",
+                        &serde_json::json!({
+                            "block_id": block_id,
+                            "title": t.to_string(),
+                        }),
+                    );
+                }
+            }
+        }
     }
+
 
     fn on_after_created(&mut self, browser: Option<&mut Browser>) {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
