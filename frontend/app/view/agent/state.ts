@@ -16,6 +16,7 @@ import {
     StreamingState,
     TurnTokens,
 } from "./types";
+import type { InitPhase } from "@/app/store/agent-pane-state/types";
 
 /**
  * A signal pair: [getter, setter]
@@ -51,6 +52,12 @@ export interface AgentAtoms {
      * "accepted" signal. FIFO, matches the backend's `VecDeque` queue.
      */
     pendingMessagesAtom: SignalPair<PendingMessage[]>;
+    /**
+     * Init lifecycle — `loading` until the initial history fetch resolves
+     * (or fails). Drives a "Loading history…" hint and gates `TurnStart`.
+     * Issue #728 gap 1.
+     */
+    initPhaseAtom: SignalPair<InitPhase>;
 }
 
 /**
@@ -95,5 +102,6 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         turnActiveAtom: createSignal<boolean>(false),
         stoppingAtom: createSignal<boolean>(false),
         pendingMessagesAtom: createSignal<PendingMessage[]>([]),
+        initPhaseAtom: createSignal<InitPhase>("loading"),
     };
 }

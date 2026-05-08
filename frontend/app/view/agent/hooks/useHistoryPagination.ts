@@ -35,6 +35,7 @@ import { createSignal, onMount, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { dispatch as dispatchDoc } from "@/app/store/agent-document-store";
+import { dispatch as dispatchPane } from "@/app/store/agent-pane-state-store";
 import { parseHistoryLines } from "../parseHistoryLines";
 
 import type { LogFn } from "../types";
@@ -109,6 +110,11 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
     // during a reconnect (where in-flight turns can briefly appear in
     // both the persisted ring buffer and the live stream).
     onMount(() => {
+        // Init lifecycle (issue #728 gap 1): dispatch InitStart before the
+        // fetch, InitReady on success, InitFailed on error. The reducer
+        // gates TurnStart on initPhase === "ready" so we don't accept
+        // sends while history is still loading.
+        dispatchPane(opts.blockId, { type: "InitStart" });
         (async () => {
             try {
                 const countResp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
@@ -117,7 +123,10 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 }, { timeout: 5000 });
 
                 const total = countResp?.count ?? 0;
-                if (total === 0) return;
+                if (total === 0) {
+                    dispatchPane(opts.blockId, { type: "InitReady" });
+                    return;
+                }
 
                 const offset = Math.max(0, total - PAGE_SIZE);
                 const limit = total - offset;
@@ -144,9 +153,18 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 setHistoryTotal(available);
 
                 opts.log("history", `loaded ${nodes.length} of ${available} previous messages`);
+                dispatchPane(opts.blockId, { type: "InitReady" });
             } catch (err: any) {
-                // Non-fatal — fresh session or backend not ready yet
-                opts.log("history", `could not load history: ${err?.message ?? String(err)}`, "warn");
+                // Non-fatal — fresh session or backend not ready yet.
+                // Surface the failure to the reducer so it can gate
+                // turn-start and the UI can render an error state, then
+                // flip to ready so the user can still send (best-effort).
+                const reason = err?.message ?? String(err);
+                opts.log("history", `could not load history: ${reason}`, "warn");
+                // Reducer fails open on `error` — TurnStart is only
+                // suppressed while `loading`. Surfacing the failure
+                // captures it for diagnostics without blocking sends.
+                dispatchPane(opts.blockId, { type: "InitFailed", reason });
             }
         })();
     });

@@ -37,6 +37,14 @@ import type { SignalPair } from "../state";
 import type { DocumentNode } from "../types";
 import type { LogFn } from "./useAgentControllerStatus";
 
+/**
+ * How long a pending message can sit unacknowledged before the reducer
+ * gives up and removes it. 30s covers normal backend turnaround
+ * (typically <2s on local sockets) with margin for transient hiccups.
+ * Issue #728 gap 2.
+ */
+const PENDING_TIMEOUT_MS = 30_000;
+
 export interface UseAgentCommandsOptions {
     blockId: string;
     block: Accessor<{ meta?: Record<string, any> } | undefined>;
@@ -238,6 +246,18 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             },
             "user",
         );
+
+        // Pending acceptance timeout (issue #728 gap 2). If the backend
+        // never echoes `agent-message-accepted` for this id within
+        // PENDING_TIMEOUT_MS, the reducer removes the ghost entry. Idempotent
+        // when the message lands first — the entry is already gone and
+        // PendingMessageExpired is a no-op.
+        setTimeout(() => {
+            dispatchPane(opts.blockId, {
+                type: "PendingMessageExpired",
+                id: messageId,
+            });
+        }, PENDING_TIMEOUT_MS);
 
         // Defer the scroll-to-bottom by one animation frame so the
         // pending row has a chance to mount before the scroll math runs.

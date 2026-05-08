@@ -10,16 +10,27 @@
 import { getFileSubject, waveEventSubscribe } from "@/app/store/wps";
 import * as WOS from "@/app/store/wos";
 import { base64ToArray } from "@/util/util";
-import { createEffect, onCleanup, onMount, untrack } from "solid-js";
+import { createEffect, onCleanup, onMount } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import type { PendingMessage, SignalPair } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { DocumentNode, SessionStats, StreamingState, TurnTokens, UserMessageNode } from "./types";
 import { recordTurn } from "@/store/token-usage";
-import { dispatch as dispatchDoc } from "@/app/store/agent-document-store";
+import {
+    dispatch as dispatchDoc,
+    getNodeIdSet,
+} from "@/app/store/agent-document-store";
 import { dispatch as dispatchPane } from "@/app/store/agent-pane-state-store";
 
 const OutputFileName = "output";
+
+/**
+ * Watchdog tick rate. Every 5s the hook dispatches a StreamWatchdogTick
+ * to the pane-state reducer; the reducer compares against
+ * `STUCK_THRESHOLD_MS` (45s) and emits a `stream-stuck` event when the
+ * subscribed stream has been silent that long. Issue #728 gap 3.
+ */
+const WATCHDOG_INTERVAL_MS = 5_000;
 
 interface UseAgentStreamOpts {
     blockId: string;
@@ -131,8 +142,6 @@ export function useAgentStream({
         nodeIdSet = new Set();
         pendingNew = [];
         pendingUpdates = [];
-
-        const [doc] = documentAtom;
 
         /**
          * Shared finalization for "the turn is over." Called by both the
@@ -265,12 +274,12 @@ export function useAgentStream({
             onCleanup(() => acceptedUnsub());
         }
 
-        // Seed the local in-batch dedup set from any history that was
-        // already loaded into the document before the hook mounted. The
-        // reducer owns authoritative dedup; this set just avoids enqueuing
-        // already-known nodes into pendingNew, saving a redundant flush.
-        nodeIdSet = new Set();
-        for (const n of untrack(() => doc())) nodeIdSet.add(n.id);
+        // Seed the in-batch dedup cache from the reducer-maintained
+        // index. Issue #728 gap 4 — replaces the per-mount scan of
+        // `doc()` that could miss in-flight events arriving between
+        // mount and scan. The reducer keeps `nodeIdSet` in lockstep
+        // with `nodes[]` so this read is always current.
+        nodeIdSet = new Set(getNodeIdSet(blockId));
 
         // Two reducers signaled in lockstep: pane-state owns the streaming
         // metadata (active flag), agent-document owns the session phase
@@ -278,6 +287,18 @@ export function useAgentStream({
         const subscribedAt = Date.now();
         dispatchPane(blockId, { type: "StreamSubscribe", at: subscribedAt });
         dispatchDoc(blockId, { type: "SessionStart", at: subscribedAt });
+
+        // Stuck-stream watchdog (issue #728 gap 3). The reducer evaluates
+        // each tick against `lastEventMs` and emits a `stream-stuck`
+        // event when the gap exceeds `STUCK_THRESHOLD_MS`. The interval
+        // cleans up via the same effect cleanup as the subscription.
+        const watchdogId = setInterval(() => {
+            dispatchPane(blockId, {
+                type: "StreamWatchdogTick",
+                nowMs: Date.now(),
+            });
+        }, WATCHDOG_INTERVAL_MS);
+        onCleanup(() => clearInterval(watchdogId));
 
         const fileSubject = getFileSubject(blockId, OutputFileName);
 
