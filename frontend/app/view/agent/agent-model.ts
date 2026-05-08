@@ -458,6 +458,11 @@ export class AgentViewModel implements ViewModel {
                 const inst = await RpcApi.CreateAgentInstanceCommand(TabRpcClient, {
                     definition_id: agent.id,
                     block_id: blockId,
+                    // PR-F.3: launch modal carries the user's bundle
+                    // picks. Empty / "blank" → backend resolver short-
+                    // circuits so the agent inherits ambient creds.
+                    identity_id: overrides?.identityId,
+                    memory_id: overrides?.memoryId,
                 });
                 await RpcApi.SetMetaCommand(TabRpcClient, {
                     oref,
