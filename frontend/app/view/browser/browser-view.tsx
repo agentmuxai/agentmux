@@ -186,8 +186,14 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                     onInput={(e) => setAddressBar(e.currentTarget.value)}
                     onKeyDown={handleAddressKeyDown}
                     onFocus={(e) => {
+                        // relatedTarget = the element that LOST focus to us
+                        // (or null if focus came from outside the document,
+                        // e.g. from the embedded CEF browser pane). Logging
+                        // document.activeElement here would be misleading
+                        // since it's already this input by the time onFocus
+                        // fires (reagent P2 PR #739).
                         const related = e.relatedTarget as Element | null;
-                        diag(`input-focus value=${JSON.stringify(addressBar())} prev-active=${tagElement(document.activeElement)} relatedTarget=${tagElement(related)}`);
+                        diag(`input-focus value=${JSON.stringify(addressBar())} relatedTarget=${tagElement(related)}`);
                         e.currentTarget.select();
                         // Always fire main_window_focus with window_label —
                         // the IPC misrouting was the root cause of the bounce
