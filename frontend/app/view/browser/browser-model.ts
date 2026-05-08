@@ -1,9 +1,11 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// NOTE: Browser is a pane-level view for embedded web browsing.
-// Phase 1 uses an iframe (works for most sites). Phase 2 will add
-// native CefBrowserView for sites that block iframes.
+// BrowserViewModel — thin saga shell over the pure browser-pane reducer.
+// All state transitions live in `frontend/app/store/browser-pane-state`;
+// this file translates IPC events → commands, runs the reducer, and
+// fans emitted events out to side effects (IPC calls, meta persist,
+// focus). See docs/specs/browser-pane-reducer.md for the design.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
@@ -11,6 +13,13 @@ import { refocusNode } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
+import {
+    initialState,
+    update,
+    type BrowserPaneCommand,
+    type BrowserPaneEvent,
+    type BrowserPaneState,
+} from "@/app/store/browser-pane-state/reducer";
 import { buildBrowserHeaderIcon } from "@/app/view/browser/components/BrowserHeaderIcon";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 
@@ -36,66 +45,31 @@ export class BrowserViewModel implements ViewModel {
         return null; // overridden by barrel via Object.defineProperty
     }
 
-    private _url = createSignal<string>("");
-    urlAtom: Accessor<string> = this._url[0];
-    setUrl = this._url[1];
+    // Single state signal driven by the reducer. All other "atom"
+    // accessors below are memos derived from this — keeps reactivity
+    // fine-grained while preserving the previous public API shape.
+    private _state: ReturnType<typeof createSignal<BrowserPaneState>>;
+    private get state(): BrowserPaneState { return this._state[0](); }
 
-    private _title = createSignal<string>("Browser");
-    titleAtom: Accessor<string> = this._title[0];
-    setTitle = this._title[1];
+    urlAtom: Accessor<string>;
+    titleAtom: Accessor<string>;
+    faviconUrlAtom: Accessor<string>;
+    loadingAtom: Accessor<boolean>;
+    canGoBackAtom: Accessor<boolean>;
+    canGoForwardAtom: Accessor<boolean>;
+    errorAtom: Accessor<string | null>;
 
-    // Favicon URL — derived from the page URL's origin in the
-    // `browser-pane-nav-state` handler (`${origin}/favicon.ico`), not
-    // from a separate CEF callback. See docs/specs/browser-pane-title-favicon.md
-    // (favicon tradeoff section). Empty string → the viewIcon memo
-    // returns "globe" for the fallback. Cleared at navigate() start
-    // so the loading state shows the globe instead of the prior page's
-    // icon; the new derived URL is set when the nav-state event lands.
-    private _faviconUrl = createSignal<string>("");
-    faviconUrlAtom: Accessor<string> = this._faviconUrl[0];
-    setFaviconUrl = this._faviconUrl[1];
-
-    private _loading = createSignal<boolean>(false);
-    loadingAtom: Accessor<boolean> = this._loading[0];
-    setLoading = this._loading[1];
-
-    private _canGoBack = createSignal<boolean>(false);
-    canGoBackAtom: Accessor<boolean> = this._canGoBack[0];
-    setCanGoBack = this._canGoBack[1];
-
-    private _canGoForward = createSignal<boolean>(false);
-    canGoForwardAtom: Accessor<boolean> = this._canGoForward[0];
-    setCanGoForward = this._canGoForward[1];
-
-    private _error = createSignal<string | null>(null);
-    errorAtom: Accessor<string | null> = this._error[0];
-    setError = this._error[1];
-
-    /**
-     * Unsubscribe from the backend's `browser-pane-nav-state` event.
-     * Nulled in `dispose()` so we don't leak listeners when the pane
-     * closes and the ViewModel is GC'd.
-     */
+    /** Unsubscribers from listenEvent registrations. Released on
+     *  `shutdown` event (Disposed command). */
     private _navUnsub: (() => void) | null = null;
-
-    /**
-     * Unsubscribe from the backend's `browser-pane-clicked` event.
-     * Fired when the user clicks inside the pane content (which the
-     * DOM never sees because the pane HWND intercepts the click at
-     * Win32 level). We use it to drive `refocusNode` so the block
-     * shows the blue focus border and keyboard shortcuts target it.
-     */
     private _clickUnsub: (() => void) | null = null;
-
     private _titleUnsub: (() => void) | null = null;
 
     blockAtom: Accessor<Block | undefined>;
 
-    // Flipped in dispose() so late callers see the pane is gone and no-op
-    // instead of firing IPC against a Browser that CEF is mid-destruction.
-    // See docs/specs/SPEC_BROWSER_PANE_LIFECYCLE.md §9 step 4.
-    private _closed = false;
-    get closed(): boolean { return this._closed; }
+    /** Mirrors `state.closed` for backwards-compat with callers that
+     *  reach for `model.closed` directly. */
+    get closed(): boolean { return this.state.closed; }
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
@@ -103,38 +77,33 @@ export class BrowserViewModel implements ViewModel {
 
         this.blockAtom = getWaveObjectAtom<Block>(makeORef("block", blockId));
 
-        this.viewName = createMemo(() => {
-            const title = this.titleAtom();
-            return title || "Browser";
-        });
+        // Read the initial URL up-front; the reducer is seeded with
+        // an empty url and we dispatch NavigateRequested with the real
+        // value once subscriptions are registered (race fix).
+        const meta = this.blockAtom()?.meta;
+        const initialUrl = ((meta?.["url"] as string | undefined) ?? "").trim() || DEFAULT_BROWSER_URL;
+        this._state = createSignal<BrowserPaneState>(initialState(blockId));
 
-        // Header icon: live favicon when set, otherwise the globe.
-        // Wrapping the favicon in an IconButtonDecl with noAction=true
-        // matches the agent pane pattern (see AgentPaneIcon) so the
-        // blockframe renders our <img> instead of treating viewIcon as
-        // a font-icon name.
+        this.urlAtom = createMemo(() => this.state.url);
+        this.titleAtom = createMemo(() => this.state.title);
+        this.faviconUrlAtom = createMemo(() => this.state.faviconUrl);
+        this.loadingAtom = createMemo(() => this.state.loading);
+        this.canGoBackAtom = createMemo(() => this.state.canGoBack);
+        this.canGoForwardAtom = createMemo(() => this.state.canGoForward);
+        this.errorAtom = createMemo(() => this.state.error);
+
+        this.viewName = createMemo(() => this.state.title || "Browser");
         this.viewIcon = createMemo<string | IconButtonDecl>(() => {
-            const fav = this.faviconUrlAtom();
-            if (fav) return buildBrowserHeaderIcon(fav, this.titleAtom());
+            const fav = this.state.faviconUrl;
+            if (fav) return buildBrowserHeaderIcon(fav, this.state.title);
             return "globe";
         });
 
-        // Subscribe to nav-state updates fired by the backend on every
-        // `on_load_end_pane`. This is the source of truth for address bar +
-        // back/forward state: CEF knows the real history (including
-        // in-pane link clicks and popup-intercept redirects), and the
-        // local fake history array we used before diverged the moment
-        // the user clicked any link inside the pane. See
-        // specs/SPEC_BROWSER_PANE_Z_ORDER_2026_04_21.md (unrelated but
-        // adjacent) and the nav-state wiring added alongside this PR.
-        //
-        // Registration race: `listenEvent` returns a Promise that resolves
-        // only after the host has acknowledged the registration. The
-        // construction-time `navigate()` below is therefore deferred until
-        // all three subscriptions are live, otherwise a fast on_load_end
-        // can fire its first nav-state event before the renderer is
-        // listening, and the URL bar / favicon / title stay stuck on the
-        // pre-load defaults until the user manually navigates again.
+        // Subscribe to host IPC events. Each subscription's promise
+        // resolves once the host has acked the registration; we gate
+        // the construction-time NavigateRequested on all three to
+        // avoid the registration race where a fast on_load_end fires
+        // before the renderer is listening.
         const navSubP = listenEvent<{
             block_id: string;
             url: string;
@@ -142,172 +111,116 @@ export class BrowserViewModel implements ViewModel {
             can_go_forward?: boolean;
             url_only?: boolean;
         }>("browser-pane-nav-state", (payload) => {
-            if (this._closed) return;
             if (payload.block_id !== this.blockId) return;
-            this.setUrl(payload.url);
-            // Derive favicon from the URL origin. `${origin}/favicon.ico`
-            // is the convention every browser falls back to, so it
-            // covers most sites without needing the host to wire CEF's
-            // OnFaviconURLChange. Sites that don't serve at this path
-            // gracefully degrade to the globe via FaviconImg's onError.
-            // about: / file: / chrome: URLs produce origin "null" → clear.
-            try {
-                const origin = new URL(payload.url).origin;
-                if (origin && origin !== "null") {
-                    this.setFaviconUrl(`${origin}/favicon.ico`);
-                } else {
-                    this.setFaviconUrl("");
-                }
-            } catch {
-                this.setFaviconUrl("");
-            }
-            // `url_only` events come from `on_load_end_pane` — they arrive
-            // before the navigation controller has fully committed, so the
-            // `can_go_back` / `can_go_forward` values from that hook would
-            // be stale (kimi's investigation identified this race). The
-            // authoritative values come from `on_loading_state_change_pane`
-            // which CEF invokes with direct params. Skip touching the
-            // back/forward atoms on `url_only` events.
-            if (!payload.url_only) {
-                if (payload.can_go_back !== undefined) this.setCanGoBack(payload.can_go_back);
-                if (payload.can_go_forward !== undefined) this.setCanGoForward(payload.can_go_forward);
-            }
-            this.setLoading(false);
-            // Persist the real URL to block meta so pane restore lands
-            // on the last page, not whatever was passed at create time.
-            RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: makeORef("block", this.blockId),
-                meta: { url: payload.url },
-            }).catch(() => {});
+            this.dispatch({
+                type: "NavStateReceived",
+                url: payload.url,
+                canGoBack: payload.can_go_back,
+                canGoForward: payload.can_go_forward,
+                urlOnly: payload.url_only ?? false,
+            });
         }).then((unsub) => {
-            if (this._closed) unsub();
+            if (this.state.closed) unsub();
             else this._navUnsub = unsub;
             return unsub;
         });
 
-        // Click-to-focus: the pane HWND captures clicks at the Win32 level,
-        // so the DOM onMouseDown on `.browser-placeholder` never fires. The
-        // backend emits this event directly from its WndProc's WM_LBUTTONDOWN
-        // handler (see `pane/hwnd.rs`) using a HWND→block_id map registered
-        // at pane creation. We drive refocusNode so the layout marks this
-        // block as focused (blue border + keyboard shortcut target).
         const clickSubP = listenEvent<{ block_id: string }>("browser-pane-clicked", (payload) => {
-            if (this._closed) return;
             if (payload.block_id !== this.blockId) return;
-            refocusNode(this.blockId);
+            this.dispatch({ type: "Clicked" });
         }).then((unsub) => {
-            if (this._closed) unsub();
+            if (this.state.closed) unsub();
             else this._clickUnsub = unsub;
             return unsub;
         });
 
-        // Page <title> updates. CEF fires on_title_change every time the
-        // top-level frame's document.title changes (initial load + later
-        // mutations). Updating titleAtom drives the viewName memo that
-        // renders the pane header label.
         const titleSubP = listenEvent<{ block_id: string; title: string }>("browser-pane-title-change", (payload) => {
-            if (this._closed) return;
             if (payload.block_id !== this.blockId) return;
-            this.setTitle(payload.title || "Browser");
+            this.dispatch({ type: "TitleChangeReceived", title: payload.title });
         }).then((unsub) => {
-            if (this._closed) unsub();
+            if (this.state.closed) unsub();
             else this._titleUnsub = unsub;
             return unsub;
         });
 
-        // Load URL from block meta on init. An empty/missing `url` falls
-        // back to DEFAULT_BROWSER_URL so fresh panes aren't blank (the
-        // widget definition in widgets.json also ships this URL, but the
-        // fallback covers panes created through the API with no meta.url).
-        //
-        // Defer the navigate until all three subscriptions are confirmed
-        // registered with the host. Otherwise a fast on_load_end firing
-        // before the registration ack would deliver the first nav-state
-        // event into the void — the URL bar / favicon / title would stay
-        // at their pre-load defaults and the user has to navigate again
-        // to recover.
-        const meta = this.blockAtom()?.meta;
-        const initialUrl = ((meta?.["url"] as string | undefined) ?? "").trim() || DEFAULT_BROWSER_URL;
         Promise.allSettled([navSubP, clickSubP, titleSubP]).then(() => {
-            if (this._closed) return;
-            this.navigate(initialUrl);
+            if (this.state.closed) return;
+            this.dispatch({ type: "NavigateRequested", url: initialUrl });
         });
     }
 
-    navigate(url: string): void {
-        if (this._closed) return;
-        // Normalize URL
-        let normalized = url.trim();
-        if (!normalized) return;
-        if (!normalized.match(/^https?:\/\//i) && !normalized.startsWith("about:")) {
-            if (normalized.includes(".") && !normalized.includes(" ")) {
-                normalized = `https://${normalized}`;
-            } else {
-                // Treat as search query
-                normalized = `https://www.google.com/search?q=${encodeURIComponent(normalized)}`;
-            }
+    private dispatch(cmd: BrowserPaneCommand): void {
+        const result = update(this.state, cmd);
+        if (result.state !== this.state) this._state[1](result.state);
+        for (const ev of result.events) this.handleEvent(ev);
+    }
+
+    private handleEvent(ev: BrowserPaneEvent): void {
+        switch (ev.type) {
+            case "ipc-navigate":
+                invokeCommand("browser_pane_navigate", { block_id: this.blockId, url: ev.url }).catch(() => {});
+                break;
+            case "ipc-back":
+                invokeCommand("browser_pane_go_back", { block_id: this.blockId }).catch(() => {});
+                break;
+            case "ipc-forward":
+                invokeCommand("browser_pane_go_forward", { block_id: this.blockId }).catch(() => {});
+                break;
+            case "meta-persist-url":
+                RpcApi.SetMetaCommand(TabRpcClient, {
+                    oref: makeORef("block", this.blockId),
+                    meta: { url: ev.url },
+                }).catch(() => {});
+                break;
+            case "focus-block":
+                refocusNode(this.blockId);
+                break;
+            case "shutdown":
+                if (this._navUnsub) { this._navUnsub(); this._navUnsub = null; }
+                if (this._clickUnsub) { this._clickUnsub(); this._clickUnsub = null; }
+                if (this._titleUnsub) { this._titleUnsub(); this._titleUnsub = null; }
+                break;
         }
+    }
 
-        this.setUrl(normalized);
-        this.setError(null);
-        this.setLoading(true);
-        // Clear the previous page's favicon so the loading state shows
-        // the globe instead of the stale icon. Title is intentionally
-        // NOT cleared — the new title arrives via on_title_change soon
-        // after, and clearing here would briefly flash "Browser".
-        this.setFaviconUrl("");
-        // can_go_back / can_go_forward are set by the `browser-pane-nav-state`
-        // event subscription; we don't touch them here. CEF is the source of
-        // truth for history state.
+    // -------- public API (unchanged shape — just routes to reducer) --------
 
-        // Persist the requested URL to block meta immediately so a quick
-        // pane restore before load_end still has something. The nav-state
-        // event will overwrite this with the post-redirect final URL.
-        RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: makeORef("block", this.blockId),
-            meta: { url: normalized },
-        }).catch(() => {});
+    navigate(url: string): void {
+        this.dispatch({ type: "NavigateRequested", url });
     }
 
     goBack(): void {
-        if (this._closed) return;
-        // CEF owns the history — we just fire the IPC. The button's
-        // enabled/disabled state came from `can_go_back` in the nav-state
-        // event, so if we got here the browser has somewhere to go.
-        this.setLoading(true);
-        invokeCommand("browser_pane_go_back", { block_id: this.blockId }).catch(() => {});
+        this.dispatch({ type: "BackRequested" });
     }
 
     goForward(): void {
-        if (this._closed) return;
-        this.setLoading(true);
-        invokeCommand("browser_pane_go_forward", { block_id: this.blockId }).catch(() => {});
+        this.dispatch({ type: "ForwardRequested" });
     }
 
+    /**
+     * Reload the current page. The reducer emits ipc-navigate with
+     * the existing URL; CEF re-loads. The previous "clear url then
+     * rAF restore" gymnastic was needed for an iframe-based render
+     * path that no longer exists in pane mode.
+     */
     reload(): void {
-        if (this._closed) return;
-        const url = this.urlAtom();
-        if (url) {
-            this.setUrl("");
-            // Force iframe reload by briefly clearing then re-setting
-            requestAnimationFrame(() => {
-                this.setUrl(url);
-                this.setLoading(true);
-            });
-        }
+        this.dispatch({ type: "ReloadRequested" });
     }
 
     onLoad(): void {
-        this.setLoading(false);
+        // CEF's load completion arrives via browser-pane-nav-state;
+        // this handler is kept for the legacy iframe path's onLoad
+        // callback wiring in browser-view.tsx, where it drove
+        // setLoading(false). The reducer now handles this via
+        // NavStateReceived.
     }
 
     onError(msg: string): void {
-        this.setLoading(false);
-        this.setError(msg);
+        this.dispatch({ type: "LoadError", message: msg });
     }
 
     giveFocus(): boolean {
-        if (this._closed) return false;
+        if (this.state.closed) return false;
         // If a main-window input inside this block (e.g. the URL bar) is
         // already focused, keep it — the user is interacting with the block's
         // chrome, not the embedded page. Also tell the host to move OS-level
@@ -322,25 +235,11 @@ export class BrowserViewModel implements ViewModel {
             invokeCommand("main_window_focus", {}).catch(() => {});
             return true;
         }
-        // Otherwise the user wants to interact with the embedded page — tell
-        // the host to move Windows-level keyboard focus to the pane's HWND.
         invokeCommand("browser_pane_focus", { block_id: this.blockId }).catch(() => {});
         return true;
     }
 
     dispose(): void {
-        this._closed = true;
-        if (this._navUnsub) {
-            this._navUnsub();
-            this._navUnsub = null;
-        }
-        if (this._clickUnsub) {
-            this._clickUnsub();
-            this._clickUnsub = null;
-        }
-        if (this._titleUnsub) {
-            this._titleUnsub();
-            this._titleUnsub = null;
-        }
+        this.dispatch({ type: "Disposed" });
     }
 }
