@@ -279,6 +279,50 @@ declare global {
         provider: string;
     };
 
+    // ── v7 — Identity bundles + Memory bundles ────────────────────────
+
+    /** A named credential bundle. Aggregates accounts (one per provider)
+     *  via IdentityBinding rows. The blank singleton (id = "blank",
+     *  is_blank = true) is always present and undeletable; it represents
+     *  "use ambient credentials" in the launch dropdown. */
+    type IdentityBundle = {
+        id: string;
+        name: string;
+        description?: string;
+        is_blank?: boolean;
+        created_at: number;
+        updated_at: number;
+    };
+
+    /** Junction row binding an account to an Identity bundle for a given
+     *  provider. Each (identity_id, provider) pair has at most one account. */
+    type IdentityBinding = {
+        identity_id: string;
+        provider: string;
+        account_id: string;
+    };
+
+    /** A Memory bundle — the agent's personality and capability stack:
+     *  provider/CLI choice, model, system instructions, context files,
+     *  MCP servers, skills. The blank singleton represents "vanilla CLI". */
+    type Memory = {
+        id: string;
+        name: string;
+        description?: string;
+        is_blank?: boolean;
+        provider?: string;            // "claude" | "codex" | "gemini" | ""
+        model?: string;
+        instructions?: string;
+        /** JSON-encoded array of `{ path, content }`. */
+        context_files?: string;
+        /** JSON-encoded array of MCP server configs. */
+        mcp_servers?: string;
+        /** JSON-encoded array of skill IDs. */
+        skills?: string;
+        created_at: number;
+        updated_at: number;
+    };
+
     type AgentInstanceStatus = "running" | "paused" | "stopped" | "crashed" | "detached";
 
     type GitHubContext = {
@@ -301,6 +345,10 @@ declare global {
         started_at: number;
         ended_at?: number;
         created_at: number;
+        /** v7 — FK to db_identities. Empty string = blank singleton. */
+        identity_id?: string;
+        /** v7 — FK to db_memories. Empty string = blank singleton. */
+        memory_id?: string;
     };
 
     // ForgeContent
