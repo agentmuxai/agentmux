@@ -226,14 +226,24 @@ export class MemoryViewModel implements ViewModel {
         this.setError(null);
         try {
             const saved = await RpcApi.UpsertMemoryCommand(TabRpcClient, draftToWire(draft));
-            this.setDraft(null);
-            // Refresh BEFORE setSelectedId so the list contains the
-            // saved row when selectedAtom resolves it. Otherwise on
-            // create, selectedAtom returns null for one tick and the
-            // empty-state ("Select a Memory bundle…") flashes briefly.
-            // Reagent P2 (PR #749).
+            // Race-condition guard: if the user clicked another list
+            // item while the save was in flight, handleSelect would have
+            // already called cancelDraft (draftAtom = null) AND
+            // setSelectedId to the new row. Skip the post-save selection
+            // override so the user's new selection is preserved. Reagent
+            // P1 (PR #749).
+            const draftStillOpen = this.draftAtom() !== null;
+            // Refresh the list either way — the saved row should appear.
             await this.refresh();
-            this.setSelectedId(saved.id);
+            if (draftStillOpen) {
+                // The draft was still active when we returned (no
+                // mid-flight cancel). Clear it now and select the saved
+                // row. The refresh ran first so selectedAtom resolves to
+                // the saved memory immediately, no empty-state flash.
+                // Reagent P2 (PR #749).
+                this.setDraft(null);
+                this.setSelectedId(saved.id);
+            }
         } catch (e) {
             this.setError(`Save failed: ${(e as Error).message ?? e}`);
         } finally {
