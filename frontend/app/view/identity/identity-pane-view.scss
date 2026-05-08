@@ -1,0 +1,249 @@
+// Identity pane — same shape as memory-view.scss (left rail + detail).
+
+.identity-pane {
+    display: flex;
+    flex-direction: row;
+    height: 100%;
+    overflow: hidden;
+    background: var(--main-bg-color);
+    color: var(--main-text-color);
+
+    .identity-pane-rail {
+        flex: 0 0 240px;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid var(--border-color);
+        overflow: hidden;
+    }
+
+    .identity-pane-rail-header {
+        padding: 8px;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .identity-pane-new-btn {
+        width: 100%;
+        padding: 6px 10px;
+        background: var(--accent-color);
+        color: var(--accent-text-color, #fff);
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+
+        &:hover {
+            filter: brightness(1.1);
+        }
+    }
+
+    .identity-pane-list {
+        flex: 1 1 auto;
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        overflow-y: auto;
+    }
+
+    .identity-pane-list-item {
+        padding: 10px 12px;
+        cursor: pointer;
+        border-bottom: 1px solid var(--border-color-faint, rgba(255, 255, 255, 0.06));
+
+        &:hover {
+            background: var(--hover-bg-color, rgba(255, 255, 255, 0.04));
+        }
+
+        &.is-selected {
+            background: var(--selected-bg-color, rgba(255, 255, 255, 0.08));
+        }
+
+        &.is-blank {
+            font-style: italic;
+            color: var(--secondary-text-color, rgba(255, 255, 255, 0.6));
+        }
+    }
+
+    .identity-pane-list-item-name {
+        font-size: 13px;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .identity-pane-list-item-desc {
+        font-size: 11px;
+        color: var(--secondary-text-color, rgba(255, 255, 255, 0.6));
+        margin-top: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .identity-pane-detail {
+        flex: 1 1 auto;
+        padding: 16px 24px;
+        overflow-y: auto;
+    }
+
+    .identity-pane-error {
+        padding: 8px 12px;
+        margin-bottom: 12px;
+        background: var(--error-bg-color, rgba(255, 80, 80, 0.15));
+        color: var(--error-text-color, #ff8080);
+        border-radius: 4px;
+        font-size: 13px;
+    }
+
+    .identity-pane-empty {
+        max-width: 460px;
+        color: var(--secondary-text-color, rgba(255, 255, 255, 0.7));
+        line-height: 1.5;
+    }
+
+    .identity-pane-empty-hint {
+        font-size: 13px;
+        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.5));
+        margin-top: 8px;
+    }
+
+    // ── Read-only detail ───────────────────────────────────────────
+    .identity-pane-readonly {
+        max-width: 720px;
+    }
+
+    .identity-pane-name {
+        font-size: 20px;
+        margin: 0 0 4px;
+    }
+
+    .identity-pane-description {
+        margin: 0 0 16px;
+        color: var(--secondary-text-color);
+    }
+
+    .identity-pane-section-title {
+        font-size: 14px;
+        margin: 16px 0 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--secondary-text-color);
+    }
+
+    .identity-pane-bindings {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+
+        thead th {
+            text-align: left;
+            padding: 4px 8px;
+            font-weight: 500;
+            color: var(--secondary-text-color);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        tbody td {
+            padding: 6px 8px;
+            border-bottom: 1px solid var(--border-color-faint, rgba(255, 255, 255, 0.04));
+            vertical-align: middle;
+        }
+
+        tbody td:first-child {
+            font-weight: 500;
+            width: 140px;
+        }
+    }
+
+    .identity-pane-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 16px;
+    }
+
+    .identity-pane-edit-btn,
+    .identity-pane-delete-btn,
+    .identity-pane-cancel-btn,
+    .identity-pane-save-btn {
+        padding: 6px 14px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: transparent;
+        color: var(--main-text-color);
+        cursor: pointer;
+        font-size: 13px;
+
+        &:hover:not(:disabled) {
+            background: var(--hover-bg-color, rgba(255, 255, 255, 0.04));
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    }
+
+    .identity-pane-save-btn {
+        background: var(--accent-color);
+        color: var(--accent-text-color, #fff);
+        border-color: transparent;
+    }
+
+    .identity-pane-delete-btn {
+        color: var(--error-text-color, #ff8080);
+        border-color: var(--error-text-color, #ff8080);
+    }
+
+    // ── Edit form ──────────────────────────────────────────────────
+    .identity-pane-form {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        max-width: 720px;
+    }
+
+    .identity-pane-form-title {
+        font-size: 18px;
+        margin: 0 0 4px;
+    }
+
+    .identity-pane-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .identity-pane-field-label {
+        font-size: 12px;
+        color: var(--secondary-text-color);
+    }
+
+    .identity-pane-input {
+        padding: 6px 10px;
+        background: var(--input-bg-color, rgba(0, 0, 0, 0.2));
+        color: var(--main-text-color);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        font-size: 13px;
+        font-family: inherit;
+
+        &:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+    }
+
+    .identity-pane-form-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        margin-top: 8px;
+    }
+
+    .identity-pane-form-hint {
+        font-size: 11px;
+        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.5));
+        margin: 4px 0 0;
+        font-style: italic;
+    }
+}
