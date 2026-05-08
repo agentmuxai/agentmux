@@ -5,9 +5,12 @@ import { CopyButton } from "@/app/element/copybutton";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { IconButton } from "@/app/element/iconbutton";
+import { TableBlock } from "@/app/element/table-block";
+import { ALIGN_CLASS_REGEX, rehypeAlignToClass } from "@/app/element/rehype-align-to-class";
 import { cn, useAtomValueSafe } from "@/util/util";
 import { createEffect, createMemo, createSignal, JSX, onCleanup, Show } from "solid-js";
-import { Streamdown as StreamdownReact } from "streamdown";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import { Streamdown as StreamdownReact, defaultRehypePlugins } from "streamdown";
 // Cast to any so SolidJS JSX doesn't complain about React component type
 const Streamdown = StreamdownReact as any;
 import { throttle } from "throttle-debounce";
@@ -256,12 +259,41 @@ export const WaveStreamdown = (props: WaveStreamdownProps): JSX.Element => {
         h4: (hProps: any) => <h4 {...hProps} class="text-base font-semibold text-primary mt-3 mb-1" />,
         h5: (hProps: any) => <h5 {...hProps} class="text-sm font-semibold text-primary mt-2 mb-1" />,
         h6: (hProps: any) => <h6 {...hProps} class="text-sm text-primary mt-2 mb-1" />,
-        table: (tProps: any) => <table {...tProps} class="w-full border-collapse my-4" />,
-        thead: (thProps: any) => <thead {...thProps} class="border-b border-border" />,
+        table: (tProps: any) => <TableBlock>{tProps.children}</TableBlock>,
+        thead: (thProps: any) => <thead {...thProps} class="border-b border-border bg-white/[0.03]" />,
         tbody: (tbProps: any) => <tbody {...tbProps} />,
-        tr: (trProps: any) => <tr {...trProps} class="border-b border-border/50 last:border-0" />,
-        th: (thProps: any) => <th {...thProps} class="text-left font-semibold px-2 py-1.5 text-sm text-primary" />,
-        td: (tdProps: any) => <td {...tdProps} class="px-2 py-1.5 text-sm text-secondary" />,
+        tr: (trProps: any) => <tr {...trProps} class="border-b border-border/40 last:border-0" />,
+        th: (thProps: any) => {
+            // Spread sanitizer-survived attributes (colspan, rowspan,
+            // scope, etc.) onto the cell, then override className so
+            // alignment/typography classes win. Codex P2 on PR #754:
+            // the prior version dropped every prop except children +
+            // className, breaking raw HTML tables that used <th
+            // colspan="2">.
+            const { children, className, ...rest } = thProps;
+            return (
+                <th
+                    {...rest}
+                    class={cn(
+                        "px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-primary",
+                        className,
+                    )}
+                >
+                    {children}
+                </th>
+            );
+        },
+        td: (tdProps: any) => {
+            const { children, className, ...rest } = tdProps;
+            return (
+                <td
+                    {...rest}
+                    class={cn("px-3 py-2 text-sm text-secondary", className)}
+                >
+                    {children}
+                </td>
+            );
+        },
         ul: (ulProps: any) => (
             <ul
                 {...ulProps}
@@ -312,6 +344,47 @@ export const WaveStreamdown = (props: WaveStreamdownProps): JSX.Element => {
                     props.className
                 )}
                 shikiTheme={[ShikiTheme, ShikiTheme]}
+                rehypePlugins={[
+                    // Streamdown's default pipeline order is:
+                    //   raw → sanitize → katex → harden
+                    // We need rehypeAlignToClass to run BEFORE sanitize
+                    // (the spec calls this out — defaultSchema strips
+                    // `align`, so converting align→className must happen
+                    // upstream of sanitize). We also need a sanitize step
+                    // that allows our alignment classes on th/td, so we
+                    // replace streamdown's default sanitize with one that
+                    // extends defaultSchema with the th/td className
+                    // allowlist. Reagent P1 on PR #754 caught the prior
+                    // ordering — the comment claimed `align` was in the
+                    // global allowlist, but defaultSchema strips it.
+                    //
+                    // Order built below:
+                    //   raw → rehypeAlignToClass → sanitize (custom
+                    //   schema) → katex → harden
+                    //
+                    // KaTeX is left in place after our custom sanitize,
+                    // matching streamdown's own ordering, so KaTeX/MathML
+                    // output round-trips unchanged.
+                    defaultRehypePlugins.raw,
+                    rehypeAlignToClass,
+                    () =>
+                        rehypeSanitize({
+                            ...defaultSchema,
+                            attributes: {
+                                ...defaultSchema.attributes,
+                                th: [
+                                    ...(defaultSchema.attributes?.th || []),
+                                    ["className", ALIGN_CLASS_REGEX],
+                                ],
+                                td: [
+                                    ...(defaultSchema.attributes?.td || []),
+                                    ["className", ALIGN_CLASS_REGEX],
+                                ],
+                            },
+                        }),
+                    defaultRehypePlugins.katex,
+                    defaultRehypePlugins.harden,
+                ]}
                 controls={{
                     code: false,
                     table: false,
