@@ -11,7 +11,9 @@ import {
     resolveSrcSet,
     transformBlocks,
 } from "@/app/element/markdown-util";
+import { ALIGN_CLASS_REGEX, rehypeAlignToClass } from "@/app/element/rehype-align-to-class";
 import remarkMermaidToTag from "@/app/element/remark-mermaid-to-tag";
+import { TableBlock } from "@/app/element/table-block";
 import { boundNumber, useAtomValueSafe, cn } from "@/util/util";
 import clsx from "clsx";
 import { toJsxRuntime } from "hast-util-to-jsx-runtime";
@@ -401,6 +403,40 @@ const Markdown = ({
         source: (props: any) => <MarkdownSource props={props} resolveOpts={resolveOpts} />,
         code: Code,
         pre: (props: any) => <CodeBlock children={props.children} onClickExecute={onClickExecute} />,
+        table: (props: any) => <TableBlock>{props.children}</TableBlock>,
+        thead: (props: any) => <thead class="border-b border-border bg-white/[0.03]">{props.children}</thead>,
+        tbody: (props: any) => <tbody>{props.children}</tbody>,
+        tr: (props: any) => <tr class="border-b border-border/40 last:border-0">{props.children}</tr>,
+        th: (props: any) => {
+            // Spread sanitizer-survived attributes (colspan, rowspan,
+            // scope) so raw HTML tables retain their structure. Codex
+            // P2 on PR #754. Override className so alignment classes
+            // from rehypeAlignToClass + the cell's typography classes
+            // both apply.
+            const { children, className, ...rest } = props;
+            return (
+                <th
+                    {...rest}
+                    class={cn(
+                        "px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-primary",
+                        className,
+                    )}
+                >
+                    {children}
+                </th>
+            );
+        },
+        td: (props: any) => {
+            const { children, className, ...rest } = props;
+            return (
+                <td
+                    {...rest}
+                    class={cn("px-3 py-2 text-sm text-secondary", className)}
+                >
+                    {children}
+                </td>
+            );
+        },
         waveblock: (props: any) => <WaveBlock {...props} blockmap={contentBlocksMap()} />,
         mermaidblock: (props: any) => {
             const getTextContent = (children: any): string => {
@@ -428,6 +464,7 @@ const Markdown = ({
             ? [
                   rehypeRaw,
                   rehypeHighlight,
+                  rehypeAlignToClass,
                   () =>
                       rehypeSanitize({
                           ...defaultSchema,
@@ -439,6 +476,14 @@ const Markdown = ({
                                   ["srcset"],
                                   ["media"],
                                   ["type"],
+                              ],
+                              th: [
+                                  ...(defaultSchema.attributes?.th || []),
+                                  ["className", ALIGN_CLASS_REGEX],
+                              ],
+                              td: [
+                                  ...(defaultSchema.attributes?.td || []),
+                                  ["className", ALIGN_CLASS_REGEX],
                               ],
                               waveblock: [["blockkey"]],
                           },
