@@ -610,8 +610,25 @@ fn init_logging(log_dir: &std::path::Path) -> tracing_appender::non_blocking::Wo
     // Uses UTC to match tracing_appender::rolling::daily's date suffix.
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let current_filename = format!("{}.{}", log_prefix, today);
+    let absolute_path = log_dir.join(&current_filename);
     let pointer_name = format!("current-host-v{}.path", version);
+
+    // Pointer #1: local — inside the instance's log dir. The basename
+    // is enough here since the reader is colocated.
     let _ = std::fs::write(log_dir.join(&pointer_name), &current_filename);
+
+    // Pointer #2: global — at `<root>/logs/<pointer_name>`. Writes the
+    // ABSOLUTE PATH so legacy tooling (`muxlog host`) that lives outside
+    // the instance dir can `cat $pointer | xargs tail -f` and reach the
+    // real file. Skipped silently if the global dir can't be derived
+    // (e.g. AGENTMUX_HOME_OVERRIDE unset in some test setups).
+    if let Some(global_logs_dir) = log_dir.parent().and_then(|p| p.parent()).and_then(|p| p.parent()).map(|p| p.join("logs")) {
+        let _ = std::fs::create_dir_all(&global_logs_dir);
+        let _ = std::fs::write(
+            global_logs_dir.join(&pointer_name),
+            absolute_path.to_string_lossy().as_bytes(),
+        );
+    }
 
     // Synchronous init sentinel: append a single line directly to the
     // expected log path BEFORE the tracing subscriber is wired up. Without

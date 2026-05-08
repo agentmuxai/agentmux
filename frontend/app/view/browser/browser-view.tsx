@@ -8,6 +8,9 @@ import "./browser-view.scss";
 
 export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>): JSX.Element {
     const model = props.model;
+    const _diagTag = `[browser-pane:diag][${model.blockId.slice(0, 7)}]`;
+    const diag = (msg: string): void => { console.log(`${_diagTag} ${msg}`); };
+    diag(`view-mount initial-urlAtom=${JSON.stringify(model.urlAtom())}`);
     const [addressBar, setAddressBar] = createSignal(model.urlAtom() || "");
     let addressInputRef: HTMLInputElement | undefined;
     // Reactively mirror the model's URL into the address-bar input whenever
@@ -20,7 +23,10 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
     // this on PR #484 review.
     createEffect(() => {
         const modelUrl = model.urlAtom();
-        if (document.activeElement === addressInputRef) return;
+        const focused = document.activeElement === addressInputRef;
+        const willUpdate = !focused && modelUrl !== addressBar();
+        diag(`sync urlAtom=${JSON.stringify(modelUrl)} addressBar=${JSON.stringify(addressBar())} focused=${focused} willUpdate=${willUpdate}`);
+        if (focused) return;
         if (modelUrl !== addressBar()) setAddressBar(modelUrl);
     });
     let placeholderRef: HTMLDivElement | undefined;
@@ -63,6 +69,7 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
             // for the primary window).
             const windowLabel =
                 new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+            diag(`createPane url=${JSON.stringify(url)} window_label=${windowLabel}`);
             await invokeCommand("browser_pane_create", {
                 block_id: model.blockId,
                 url: url || "about:blank",
@@ -70,6 +77,7 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                 ...paneRect(),
             });
             setPaneCreated(true);
+            diag(`paneCreated=true`);
             model.onLoad();
         } catch (e) {
             model.onError(`Failed to create browser pane: ${e}`);
@@ -78,6 +86,7 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
 
     const handleNavigate = () => {
         const url = addressBar().trim();
+        diag(`input-submit value=${JSON.stringify(url)}`);
         if (!url) return;
 
         let normalized = url;
@@ -120,6 +129,7 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
     });
 
     onCleanup(() => {
+        diag(`view-unmount paneCreated=${paneCreated()}`);
         // Fire close IPC BEFORE disconnecting observers — the IPC flips the
         // backend pane to Closing, so any in-flight resize/focus/nav calls
         // that haven't reached the backend yet get no-op'd there instead of
@@ -162,6 +172,7 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                     onInput={(e) => setAddressBar(e.currentTarget.value)}
                     onKeyDown={handleAddressKeyDown}
                     onFocus={(e) => {
+                        diag(`input-focus value=${JSON.stringify(addressBar())}`);
                         e.currentTarget.select();
                         // Take OS-level keyboard focus away from the pane so
                         // keystrokes reach this address-bar input. The pane
@@ -171,6 +182,7 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                         // the user clicks inside the pane again.
                         invokeCommand("main_window_focus", {}).catch(() => {});
                     }}
+                    onBlur={() => diag(`input-blur value=${JSON.stringify(addressBar())}`)}
                     placeholder="Enter URL or search..."
                 />
                 <button class="browser-nav-btn browser-go-btn" onClick={handleNavigate}>Go</button>

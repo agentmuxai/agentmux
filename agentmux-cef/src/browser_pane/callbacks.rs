@@ -145,6 +145,11 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
                 .map(|f| cef::CefString::from(&cef::ImplFrame::url(&f)).to_string())
                 .unwrap_or_default()
         };
+        let block_id_short: String = block_id.chars().take(7).collect();
+        tracing::info!(
+            "[browser-pane:diag][{}] emit-nav-state url={:?} url_only=true",
+            block_id_short, url,
+        );
         crate::events::emit_event_from_state(
             state,
             "browser-pane-nav-state",
@@ -188,12 +193,10 @@ pub fn on_loading_state_change_browser_pane(
                 .map(|f| cef::CefString::from(&cef::ImplFrame::url(&f)).to_string())
                 .unwrap_or_default()
         };
+        let block_id_short: String = block_id.chars().take(7).collect();
         tracing::info!(
-            block_id = %block_id,
-            can_back = can_go_back,
-            can_forward = can_go_forward,
-            url = %url,
-            "[pane-nav-state] emitting",
+            "[browser-pane:diag][{}] emit-nav-state url={:?} url_only=false can_back={} can_forward={}",
+            block_id_short, url, can_go_back, can_go_forward,
         );
         crate::events::emit_event_from_state(
             state,
