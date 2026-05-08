@@ -84,13 +84,14 @@ export class BrowserViewModel implements ViewModel {
     blockAtom: Accessor<Block | undefined>;
 
     /**
-     * Slice #9 (Phase 3a + 3b) reducer state — owns `closed`, `loading`,
-     * `error`. The signals above are projections of this state so the
-     * SolidJS view layer keeps reactive parity. Per the roadmap at
-     * `docs/specs/browser-pane-reducer-roadmap.md`, the remaining cells
-     * (url, title, faviconUrl, canGoBack, canGoForward) migrate one at
-     * a time in follow-up PRs; the slot store + recordDispatch audit
-     * lands in Phase 4.
+     * Slice #9 (Phases 3a + 3b + 3c) reducer state — owns `closed`,
+     * `loading`, `error`, `canGoBack`, `canGoForward`. The signals
+     * above are projections of this state so the SolidJS view layer
+     * keeps reactive parity. Per the roadmap at
+     * `docs/specs/browser-pane-reducer-roadmap.md`, the remaining
+     * cells (url, title, faviconUrl) migrate one at a time in
+     * follow-up PRs; the slot store + recordDispatch audit lands in
+     * Phase 4.
      */
     private _paneState: BrowserPaneState = browserPaneInitialState();
     /** Late callers (IPC handlers landing post-dispose, defensive guards
@@ -101,12 +102,13 @@ export class BrowserViewModel implements ViewModel {
 
     /**
      * Single sync point between the reducer's pure transitions and the
-     * SolidJS signals the view subscribes to. Projects the new
-     * `loading` and `error` cells onto their signals only when the
-     * value actually changed (avoids spurious reactive churn that
-     * could leak into the address-bar typing path that PR #737
-     * regressed). Diag logs preserve the prior `state-write key=...`
-     * shape so Phase-1 grep recipes still work.
+     * SolidJS signals the view subscribes to. Projects every reducer
+     * cell currently in scope (`loading`, `error`, `canGoBack`,
+     * `canGoForward`) onto its signal, but only when the value actually
+     * changed — avoiding spurious reactive churn that could leak into
+     * the address-bar typing path that PR #737 regressed. Diag logs
+     * preserve the prior `state-write key=...` shape so Phase-1 grep
+     * recipes still work.
      */
     private _dispatch(cmd: BrowserPaneCommand, src: string): void {
         const prev = this._paneState;

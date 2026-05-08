@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { update } from "./reducer";
 import { initialState } from "./types";
 
-describe("browser-pane-state reducer (slice #9, Phase 3a + 3b)", () => {
+describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c)", () => {
     describe("Navigate", () => {
         it("sets loading=true and clears any prior error", () => {
             const s0 = update(initialState(), {
