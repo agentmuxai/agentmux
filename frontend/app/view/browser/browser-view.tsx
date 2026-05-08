@@ -172,17 +172,30 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                     onInput={(e) => setAddressBar(e.currentTarget.value)}
                     onKeyDown={handleAddressKeyDown}
                     onFocus={(e) => {
-                        diag(`input-focus value=${JSON.stringify(addressBar())}`);
+                        const tag = (el: Element | null) => {
+                            if (!el) return "null";
+                            const t = el.tagName?.toLowerCase() ?? "?";
+                            const cls = (el as HTMLElement).className?.toString().split(/\s+/).find((c) => c) ?? "";
+                            const id = (el as HTMLElement).id ?? "";
+                            return `${t}${id ? `#${id}` : ""}${cls ? `.${cls}` : ""}`;
+                        };
+                        diag(`input-focus value=${JSON.stringify(addressBar())} prev-active=${tag(document.activeElement)} same-target=${e.currentTarget === document.activeElement} relatedTarget=${tag((e as any).relatedTarget ?? null)}`);
                         e.currentTarget.select();
-                        // Take OS-level keyboard focus away from the pane so
-                        // keystrokes reach this address-bar input. The pane
-                        // grabs focus explicitly on click (onMouseDown on
-                        // .browser-placeholder), not on hover, so releasing
-                        // here is sufficient — nothing will re-steal until
-                        // the user clicks inside the pane again.
                         invokeCommand("main_window_focus", {}).catch(() => {});
                     }}
-                    onBlur={() => diag(`input-blur value=${JSON.stringify(addressBar())}`)}
+                    onBlur={(e) => {
+                        const tag = (el: Element | null) => {
+                            if (!el) return "null";
+                            const t = el.tagName?.toLowerCase() ?? "?";
+                            const cls = (el as HTMLElement).className?.toString().split(/\s+/).find((c) => c) ?? "";
+                            return `${t}${cls ? `.${cls}` : ""}`;
+                        };
+                        // Microtask-deferred so we can see what landed focus AFTER the blur.
+                        const next = (e as any).relatedTarget ?? null;
+                        queueMicrotask(() => {
+                            diag(`input-blur value=${JSON.stringify(addressBar())} relatedTarget=${tag(next)} now-active=${tag(document.activeElement)}`);
+                        });
+                    }}
                     placeholder="Enter URL or search..."
                 />
                 <button class="browser-nav-btn browser-go-btn" onClick={handleNavigate}>Go</button>
