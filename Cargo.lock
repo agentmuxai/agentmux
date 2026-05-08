@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux-cef"
-version = "0.33.726"
+version = "0.33.727"
 dependencies = [
  "agentmux-common",
  "axum 0.8.9",
@@ -38,7 +38,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-common"
-version = "0.33.726"
+version = "0.33.727"
 dependencies = [
  "dirs",
  "serde",
@@ -50,7 +50,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.33.726"
+version = "0.33.727"
 dependencies = [
  "agentmux-common",
  "chrono",
@@ -70,7 +70,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-srv"
-version = "0.33.726"
+version = "0.33.727"
 dependencies = [
  "agentmux-common",
  "async-stream",
@@ -901,13 +901,12 @@ dependencies = [
 
 [[package]]
 name = "filetime"
-version = "0.2.27"
+version = "0.2.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f98844151eee8917efc50bd9e8318cb963ae8b297431495d3f758616ea5c57db"
+checksum = "2d5b2eef6fafbf69f877e55509ce5b11a760690ac9700a2921be067aa6afaef6"
 dependencies = [
  "cfg-if",
  "libc",
- "libredox",
 ]
 
 [[package]]
