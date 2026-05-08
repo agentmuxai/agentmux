@@ -161,9 +161,10 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 // flip to ready so the user can still send (best-effort).
                 const reason = err?.message ?? String(err);
                 opts.log("history", `could not load history: ${reason}`, "warn");
-                // Reducer fails open on `error` — TurnStart is only
-                // suppressed while `loading`. Surfacing the failure
-                // captures it for diagnostics without blocking sends.
+                // Surface the failure for diagnostics. The reducer's
+                // TurnStart guard treats `error` as fail-open (only
+                // `loading` blocks sends), so no follow-up InitReady
+                // is needed — the user can still send.
                 dispatchPane(opts.blockId, { type: "InitFailed", reason });
             }
         })();

@@ -23,7 +23,7 @@
  * flags (permission mode, model, effort) take effect on this turn.
  */
 
-import { type Accessor, createMemo, createSignal } from "solid-js";
+import { type Accessor, createMemo, createSignal, onCleanup } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
@@ -146,6 +146,15 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     // registered first and can't be shadowed (see registry.register).
     const registry = createMemo(() => buildRegistry(opts.provider()));
 
+    // Pending-message expiry timers — cleared on pane unmount so the
+    // delayed dispatch doesn't hit an unregistered slot and throw.
+    // Issue #728 gap 2 / PR #742 ReAgent P1.
+    const pendingExpiryTimers = new Set<ReturnType<typeof setTimeout>>();
+    onCleanup(() => {
+        for (const id of pendingExpiryTimers) clearTimeout(id);
+        pendingExpiryTimers.clear();
+    });
+
     // ── Inline picker state ───────────────────────────────────────────
     // The dispatcher calls `ctx.openPicker(spec)` for required enum/
     // dynamic args; this hook hands back a Promise that resolves when
@@ -252,12 +261,16 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // PENDING_TIMEOUT_MS, the reducer removes the ghost entry. Idempotent
         // when the message lands first — the entry is already gone and
         // PendingMessageExpired is a no-op.
-        setTimeout(() => {
+        // Tracked + cleared on pane unmount to avoid dispatching against
+        // an unregistered slot (which throws). PR #742 ReAgent P1.
+        const expiryId = setTimeout(() => {
+            pendingExpiryTimers.delete(expiryId);
             dispatchPane(opts.blockId, {
                 type: "PendingMessageExpired",
                 id: messageId,
             });
         }, PENDING_TIMEOUT_MS);
+        pendingExpiryTimers.add(expiryId);
 
         // Defer the scroll-to-bottom by one animation frame so the
         // pending row has a chance to mount before the scroll math runs.
