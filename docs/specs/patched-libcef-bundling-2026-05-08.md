@@ -88,37 +88,42 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-candidates=()
-if [ -n "${AGENTMUX_CEF_RUNTIME_DIR:-}" ]; then
-    candidates+=("$AGENTMUX_CEF_RUNTIME_DIR")
-fi
-candidates+=("$HOME/cef-build/chromium_git/chromium/src/out/Release_GN_x64")
-# cef-dll-sys cache — find first match (debug or release).
-while IFS= read -r d; do
-    candidates+=("$d")
-done < <(find "$REPO_ROOT/target" -maxdepth 6 -type d -name 'cef_linux_x86_64' 2>/dev/null)
-
-for dir in "${candidates[@]}"; do
-    if [ -f "$dir/libcef.so" ] && [ -f "$dir/icudtl.dat" ]; then
-        # Sanity: warn if libcef.so is suspiciously large (>1GB suggests
-        # unstripped upstream debug build, almost certainly unpatched).
-        size_bytes=$(stat -c %s "$dir/libcef.so" 2>/dev/null || stat -f %z "$dir/libcef.so")
-        size_mb=$((size_bytes / 1024 / 1024))
-        if [ "$size_bytes" -gt 1073741824 ]; then
-            echo "WARNING: libcef.so at $dir is ${size_mb} MB (>1 GB) — this is likely the unpatched upstream debug build." >&2
-            echo "         AgentMux's BeginWindowDrag FFI override will silently no-op (left-click drag broken)." >&2
-            echo "         Build the patched libcef per docs/cef-build/build-patched-libcef.md, then set" >&2
-            echo "         AGENTMUX_CEF_RUNTIME_DIR=/path/to/your/Release_GN_x64 to override." >&2
-            # Don't exit — let the caller decide. (CI can re-check by passing --strict.)
-        fi
-        echo "$dir"
-        exit 0
+# Validate: print path + exit 0 if libcef.so + icudtl.dat are present;
+# also warn on suspiciously large libcef (likely unpatched upstream debug).
+validate_dir() {
+    local dir="$1"
+    [ -f "$dir/libcef.so" ] && [ -f "$dir/icudtl.dat" ] || return 1
+    local size_bytes
+    size_bytes=$(stat -c %s "$dir/libcef.so" 2>/dev/null || stat -f %z "$dir/libcef.so" 2>/dev/null || echo 0)
+    local size_mb=$((size_bytes / 1024 / 1024))
+    if [ "$size_bytes" -gt 1073741824 ]; then
+        echo "WARNING: libcef.so at $dir is ${size_mb} MB — likely unpatched upstream debug build." >&2
+        # ... + drag-broken-warning + build doc + env var hint ...
     fi
+    echo "$dir"
+    return 0
+}
+
+# 1. Explicit override — STRICT (see D1). Set-but-invalid env var is a hard
+#    error, not a silent fallthrough, because in CI / release packaging the
+#    env var is the only way to inject the patched libcef and a typo would
+#    silently regress to upstream.
+if [ -n "${AGENTMUX_CEF_RUNTIME_DIR:-}" ]; then
+    if validate_dir "$AGENTMUX_CEF_RUNTIME_DIR"; then exit 0; fi
+    echo "ERROR: AGENTMUX_CEF_RUNTIME_DIR=$AGENTMUX_CEF_RUNTIME_DIR is set but invalid." >&2
+    exit 1
+fi
+
+# 2 + 3. Auto-detect. Default path first; cef-dll-sys cache as floor.
+candidates=("$HOME/cef-build/chromium_git/chromium/src/out/Release_GN_x64")
+while IFS= read -r d; do candidates+=("$d"); done \
+    < <(find "$REPO_ROOT/target" -maxdepth 6 -type d -name 'cef_linux_x86_64' 2>/dev/null)
+for dir in "${candidates[@]}"; do
+    if validate_dir "$dir"; then exit 0; fi
 done
 
-echo "ERROR: could not find libcef.so in any of these locations:" >&2
+echo "ERROR: could not find libcef.so + icudtl.dat in any of these locations:" >&2
 for c in "${candidates[@]}"; do echo "  - $c" >&2; done
-echo "Build the patched libcef (docs/cef-build/build-patched-libcef.md) or run \`cargo build\` to populate cef-dll-sys cache." >&2
 exit 1
 ```
 
