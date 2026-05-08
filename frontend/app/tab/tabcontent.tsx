@@ -14,7 +14,7 @@ import { createMemo, Show } from "solid-js";
 import type { JSX } from "solid-js";
 
 /** Non-pane widget views excluded from the empty-tab context menu. */
-const nonPaneViews = new Set(["devtools", "settings"]);
+const nonPaneViews = new Set(["devtools"]);
 
 /** Build a flat widget menu for right-clicking an empty tab (no panes). */
 function buildEmptyTabMenu(): ContextMenuItem[] {
