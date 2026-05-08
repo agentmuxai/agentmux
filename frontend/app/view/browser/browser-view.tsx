@@ -6,11 +6,29 @@ import { invokeCommand } from "@/app/platform/ipc";
 import type { BrowserViewModel } from "./browser-model";
 import "./browser-view.scss";
 
+// Compact tag for an Element — used by diag log lines to identify the
+// previous/next active element across focus transitions. Module-scope
+// so onFocus and onBlur share one implementation.
+function tagElement(el: Element | null): string {
+    if (!el) return "null";
+    const t = el.tagName?.toLowerCase() ?? "?";
+    const cls = (el as HTMLElement).className?.toString().split(/\s+/).find((c) => c) ?? "";
+    const id = (el as HTMLElement).id ?? "";
+    return `${t}${id ? `#${id}` : ""}${cls ? `.${cls}` : ""}`;
+}
+
 export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>): JSX.Element {
     const model = props.model;
     const _diagTag = `[browser-pane:diag][${model.blockId.slice(0, 7)}]`;
     const diag = (msg: string): void => { console.log(`${_diagTag} ${msg}`); };
-    diag(`view-mount initial-urlAtom=${JSON.stringify(model.urlAtom())}`);
+    // Captured once at mount — same window_label that createPane uses
+    // for browser_pane_create. Required so main_window_focus reclaims
+    // OS focus to the WINDOW that sent the IPC (otherwise the host's
+    // handler defaults to "main" and misroutes in multi-window setups,
+    // creating a 200 Hz focus bounce — ipc.rs:424-428 documents this).
+    const windowLabel =
+        new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+    diag(`view-mount window_label=${windowLabel} initial-urlAtom=${JSON.stringify(model.urlAtom())}`);
     const [addressBar, setAddressBar] = createSignal(model.urlAtom() || "");
     let addressInputRef: HTMLInputElement | undefined;
     // Reactively mirror the model's URL into the address-bar input whenever
@@ -62,13 +80,8 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
     const createPane = async (url: string) => {
         if (!placeholderRef) return;
         try {
-            // window_label tells the Rust Views path which CefWindow to attach
-            // the pane overlay to. Without it, panes opened in a non-main
-            // window were silently routed to the main window. Same
-            // ?windowLabel=… URL convention as cef-api.ts (defaults to "main"
-            // for the primary window).
-            const windowLabel =
-                new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+            // windowLabel hoisted at component scope — same value used by
+            // both createPane and main_window_focus IPC dispatch.
             diag(`createPane url=${JSON.stringify(url)} window_label=${windowLabel}`);
             await invokeCommand("browser_pane_create", {
                 block_id: model.blockId,
@@ -172,17 +185,31 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                     onInput={(e) => setAddressBar(e.currentTarget.value)}
                     onKeyDown={handleAddressKeyDown}
                     onFocus={(e) => {
-                        diag(`input-focus value=${JSON.stringify(addressBar())}`);
+                        // relatedTarget = the element that LOST focus to us
+                        // (or null if focus came from outside the document,
+                        // e.g. from the embedded CEF browser pane).
+                        // document.activeElement is intentionally NOT logged
+                        // here — by the time onFocus fires it's already this
+                        // input, so it would only ever read as the input
+                        // itself.
+                        const related = e.relatedTarget as Element | null;
+                        diag(`input-focus value=${JSON.stringify(addressBar())} relatedTarget=${tagElement(related)}`);
                         e.currentTarget.select();
-                        // Take OS-level keyboard focus away from the pane so
-                        // keystrokes reach this address-bar input. The pane
-                        // grabs focus explicitly on click (onMouseDown on
-                        // .browser-placeholder), not on hover, so releasing
-                        // here is sufficient — nothing will re-steal until
-                        // the user clicks inside the pane again.
-                        invokeCommand("main_window_focus", {}).catch(() => {});
+                        // Always fire main_window_focus with window_label —
+                        // the IPC misrouting was the root cause of the bounce
+                        // (see ipc.rs:424-428). With the correct window_label
+                        // the IPC is a no-op when the target window is
+                        // already foreground, so it's safe to send on every
+                        // legitimate focus event without triggering loops.
+                        invokeCommand("main_window_focus", { window_label: windowLabel }).catch(() => {});
                     }}
-                    onBlur={() => diag(`input-blur value=${JSON.stringify(addressBar())}`)}
+                    onBlur={(e) => {
+                        const next = e.relatedTarget as Element | null;
+                        // Microtask-deferred so we can see what landed focus AFTER the blur.
+                        queueMicrotask(() => {
+                            diag(`input-blur value=${JSON.stringify(addressBar())} relatedTarget=${tagElement(next)} now-active=${tagElement(document.activeElement)}`);
+                        });
+                    }}
                     placeholder="Enter URL or search..."
                 />
                 <button class="browser-nav-btn browser-go-btn" onClick={handleNavigate}>Go</button>
