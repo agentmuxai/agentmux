@@ -449,18 +449,21 @@ tasks:
         platforms: [linux]
         cmds:
             - |
-                CEF_DIR=$(find target -name "libcef.so" -path "*/cef-dll-sys*/out/*" -printf '%h' -quit 2>/dev/null)
-                if [ -z "$CEF_DIR" ]; then
-                  echo "❌ libcef.so not found in target/ — run build:host first"
-                  exit 1
-                fi
-                echo "Found runtime binaries in: $CEF_DIR"
+                # Resolve CEF runtime via shell helper. Three-tier order:
+                #   1. $AGENTMUX_CEF_RUNTIME_DIR (explicit override)
+                #   2. ~/cef-build/chromium_git/chromium/src/out/Release_GN_x64 (default)
+                #   3. cef-dll-sys cargo cache (fallback — upstream, drag broken)
+                # See docs/specs/patched-libcef-bundling-2026-05-08.md.
+                CEF_DIR="$(bash scripts/resolve-cef-runtime.sh)"
+                echo "Using CEF runtime from: $CEF_DIR"
                 mkdir -p dist/cef/locales
                 cp -f "$CEF_DIR/libcef.so" dist/cef/
                 cp -f "$CEF_DIR/libEGL.so" dist/cef/ 2>/dev/null || true
                 cp -f "$CEF_DIR/libGLESv2.so" dist/cef/ 2>/dev/null || true
                 cp -f "$CEF_DIR/chrome-sandbox" dist/cef/ 2>/dev/null || true
+                cp -f "$CEF_DIR/chrome_crashpad_handler" dist/cef/ 2>/dev/null || true
                 cp -f "$CEF_DIR/icudtl.dat" dist/cef/
+                cp -f "$CEF_DIR/snapshot_blob.bin" dist/cef/ 2>/dev/null || true
                 cp -f "$CEF_DIR/v8_context_snapshot.bin" dist/cef/ 2>/dev/null || true
                 cp -f "$CEF_DIR"/*.pak dist/cef/
                 cp -f "$CEF_DIR/locales/en-US.pak" dist/cef/locales/ 2>/dev/null || true
