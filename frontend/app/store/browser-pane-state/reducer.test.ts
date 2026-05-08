@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { update } from "./reducer";
 import { initialState } from "./types";
 
-describe("browser-pane-state reducer (slice #9, Phase 3a + 3b)", () => {
+describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c)", () => {
     describe("Navigate", () => {
         it("sets loading=true and clears any prior error", () => {
             const s0 = update(initialState(), {
@@ -107,6 +107,88 @@ describe("browser-pane-state reducer (slice #9, Phase 3a + 3b)", () => {
         });
     });
 
+    describe("HistoryUpdated", () => {
+        it("co-updates both flags in one transition", () => {
+            const r = update(initialState(), {
+                type: "HistoryUpdated",
+                canGoBack: true,
+                canGoForward: true,
+            });
+            expect(r.state.canGoBack).toBe(true);
+            expect(r.state.canGoForward).toBe(true);
+            expect(r.events).toEqual([
+                {
+                    type: "history-updated",
+                    canGoBack: true,
+                    canGoForward: true,
+                },
+            ]);
+        });
+
+        it("leaves an omitted field alone", () => {
+            const s0 = update(initialState(), {
+                type: "HistoryUpdated",
+                canGoBack: true,
+                canGoForward: true,
+            }).state;
+            const r = update(s0, {
+                type: "HistoryUpdated",
+                canGoForward: false,
+            });
+            expect(r.state.canGoBack).toBe(true);
+            expect(r.state.canGoForward).toBe(false);
+            expect(r.events).toEqual([
+                {
+                    type: "history-updated",
+                    canGoBack: true,
+                    canGoForward: false,
+                },
+            ]);
+        });
+
+        it("is idempotent when both fields match current state", () => {
+            const s0 = update(initialState(), {
+                type: "HistoryUpdated",
+                canGoBack: true,
+                canGoForward: false,
+            }).state;
+            const r = update(s0, {
+                type: "HistoryUpdated",
+                canGoBack: true,
+                canGoForward: false,
+            });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([]);
+        });
+
+        it("is idempotent when only the supplied field matches", () => {
+            const s0 = update(initialState(), {
+                type: "HistoryUpdated",
+                canGoBack: true,
+            }).state;
+            const r = update(s0, {
+                type: "HistoryUpdated",
+                canGoBack: true,
+            });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([]);
+        });
+
+        it("does not interact with loading or error cells", () => {
+            const s0 = update(initialState(), {
+                type: "Navigate",
+                url: "https://x",
+            }).state;
+            const r = update(s0, {
+                type: "HistoryUpdated",
+                canGoBack: true,
+                canGoForward: true,
+            });
+            expect(r.state.loading).toBe(true);
+            expect(r.state.error).toBeNull();
+        });
+    });
+
     describe("Disposed", () => {
         it("flips closed=true and emits disposed event once", () => {
             const r = update(initialState(), { type: "Disposed" });
@@ -158,6 +240,22 @@ describe("browser-pane-state reducer (slice #9, Phase 3a + 3b)", () => {
                 },
             ]);
         });
+
+        it("HistoryUpdated after dispose is dropped", () => {
+            const s0 = closed();
+            const r = update(s0, {
+                type: "HistoryUpdated",
+                canGoBack: true,
+                canGoForward: true,
+            });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([
+                {
+                    type: "post-close-command-dropped",
+                    commandType: "HistoryUpdated",
+                },
+            ]);
+        });
     });
 
     describe("invariants across sequences", () => {
@@ -193,6 +291,8 @@ describe("browser-pane-state reducer (slice #9, Phase 3a + 3b)", () => {
                 { type: "LoadStarted" },
                 { type: "LoadFinished" },
                 { type: "LoadFailed", reason: "e2" },
+                { type: "HistoryUpdated", canGoBack: true, canGoForward: true },
+                { type: "HistoryUpdated", canGoBack: false },
                 { type: "Disposed" },
             ];
             for (const mk of starts) {
