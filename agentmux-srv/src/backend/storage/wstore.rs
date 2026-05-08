@@ -1061,6 +1061,69 @@ pub struct ForgeAgentIdentity {
     pub provider: String,
 }
 
+// ====================================================================
+// v7 — Identity bundles (named credential bundles) + Memory bundles
+// ====================================================================
+
+/// A named credential bundle. Contains zero or more accounts via the
+/// `db_identity_bindings` junction. `is_blank` tags the seeded singleton
+/// row that the launch UI uses as the default option.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Identity {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub is_blank: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Junction row binding an account to an identity for a given provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdentityBinding {
+    pub identity_id: String,
+    pub provider: String,
+    pub account_id: String,
+}
+
+/// A Memory bundle — the agent's personality and capability stack.
+/// Provider, model, instructions, and JSON-encoded arrays of context
+/// files / MCP servers / skills. Forge agents shadow-migrate into this
+/// table during the v7 migration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Memory {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub is_blank: bool,
+    /// "claude" | "codex" | "gemini" | empty string
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub instructions: String,
+    /// JSON-encoded array; the renderer types it as `[{path, content}]`.
+    #[serde(default = "default_json_array_string")]
+    pub context_files: String,
+    /// JSON-encoded array of MCP server configs.
+    #[serde(default = "default_json_array_string")]
+    pub mcp_servers: String,
+    /// JSON-encoded array of skill IDs.
+    #[serde(default = "default_json_array_string")]
+    pub skills: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+fn default_json_array_string() -> String {
+    "[]".to_string()
+}
+
 /// Instance lifecycle status. Serialised lowercase to match the DB text.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -1484,6 +1547,257 @@ impl WaveStore {
         let rows = conn.execute("DELETE FROM db_agent_instances WHERE id = ?1", params![id])?;
         Ok(rows > 0)
     }
+
+    // ====================================================================
+    // v7 — Identity bundles (named credential bundles) + Memory bundles
+    // ====================================================================
+
+    // ---- Identity bundle CRUD ----
+
+    /// List all Identity bundles, blank singleton last so the picker shows
+    /// user-defined bundles first.
+    pub fn bundle_identity_list(&self) -> Result<Vec<Identity>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, description, is_blank, created_at, updated_at
+             FROM db_identities
+             ORDER BY is_blank ASC, updated_at DESC",
+        )?;
+        let iter = stmt.query_map([], |row| {
+            Ok(Identity {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                is_blank: row.get::<_, i64>(3)? != 0,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in iter {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn bundle_identity_get(&self, id: &str) -> Result<Option<Identity>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, description, is_blank, created_at, updated_at
+             FROM db_identities WHERE id = ?1",
+        )?;
+        let result = stmt.query_row(params![id], |row| {
+            Ok(Identity {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                is_blank: row.get::<_, i64>(3)? != 0,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        });
+        match result {
+            Ok(i) => Ok(Some(i)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Upsert an Identity bundle. Caller mints the id (no silent generation).
+    /// The `is_blank` flag is reserved for the seeded singleton — callers
+    /// should pass `false` for user-created identities.
+    pub fn bundle_identity_upsert(&self, identity: &Identity) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO db_identities
+                (id, name, description, is_blank, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                description = excluded.description,
+                updated_at = excluded.updated_at",
+            params![
+                identity.id,
+                identity.name,
+                identity.description,
+                identity.is_blank as i64,
+                identity.created_at,
+                identity.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Delete an Identity bundle. Refuses to delete the blank singleton —
+    /// the launch UI depends on it as the always-present default option.
+    pub fn bundle_identity_delete(&self, id: &str) -> Result<bool, StoreError> {
+        if id == "blank" {
+            return Err(StoreError::Other(
+                "cannot delete the blank Identity singleton".to_string(),
+            ));
+        }
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute("DELETE FROM db_identities WHERE id = ?1", params![id])?;
+        Ok(rows > 0)
+    }
+
+    // ---- Identity bundle bindings (junction with accounts) ----
+
+    /// Set the account for `(identity_id, provider)`. Overwrites any
+    /// existing binding for the same (identity, provider).
+    pub fn bundle_identity_bind(
+        &self,
+        identity_id: &str,
+        provider: &str,
+        account_id: &str,
+    ) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO db_identity_bindings (identity_id, provider, account_id)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(identity_id, provider) DO UPDATE SET account_id = excluded.account_id",
+            params![identity_id, provider, account_id],
+        )?;
+        Ok(())
+    }
+
+    /// Remove the binding for `(identity_id, provider)`. Returns whether a
+    /// row was deleted.
+    pub fn bundle_identity_unbind(
+        &self,
+        identity_id: &str,
+        provider: &str,
+    ) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "DELETE FROM db_identity_bindings WHERE identity_id = ?1 AND provider = ?2",
+            params![identity_id, provider],
+        )?;
+        Ok(rows > 0)
+    }
+
+    /// List bindings for an Identity bundle.
+    pub fn bundle_identity_bindings(
+        &self,
+        identity_id: &str,
+    ) -> Result<Vec<IdentityBinding>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT identity_id, provider, account_id
+             FROM db_identity_bindings
+             WHERE identity_id = ?1
+             ORDER BY provider ASC",
+        )?;
+        let iter = stmt.query_map(params![identity_id], |row| {
+            Ok(IdentityBinding {
+                identity_id: row.get(0)?,
+                provider: row.get(1)?,
+                account_id: row.get(2)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in iter {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    // ---- Memory bundle CRUD ----
+
+    pub fn bundle_memory_list(&self) -> Result<Vec<Memory>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, description, is_blank, provider, model, instructions,
+                    context_files, mcp_servers, skills, created_at, updated_at
+             FROM db_memories
+             ORDER BY is_blank ASC, updated_at DESC",
+        )?;
+        let iter = stmt.query_map([], map_memory_row)?;
+        let mut out = Vec::new();
+        for r in iter {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn bundle_memory_get(&self, id: &str) -> Result<Option<Memory>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, description, is_blank, provider, model, instructions,
+                    context_files, mcp_servers, skills, created_at, updated_at
+             FROM db_memories WHERE id = ?1",
+        )?;
+        let result = stmt.query_row(params![id], map_memory_row);
+        match result {
+            Ok(m) => Ok(Some(m)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn bundle_memory_upsert(&self, memory: &Memory) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO db_memories
+                (id, name, description, is_blank, provider, model, instructions,
+                 context_files, mcp_servers, skills, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                description = excluded.description,
+                provider = excluded.provider,
+                model = excluded.model,
+                instructions = excluded.instructions,
+                context_files = excluded.context_files,
+                mcp_servers = excluded.mcp_servers,
+                skills = excluded.skills,
+                updated_at = excluded.updated_at",
+            params![
+                memory.id,
+                memory.name,
+                memory.description,
+                memory.is_blank as i64,
+                memory.provider,
+                memory.model,
+                memory.instructions,
+                memory.context_files,
+                memory.mcp_servers,
+                memory.skills,
+                memory.created_at,
+                memory.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Delete a Memory bundle. Refuses to delete the blank singleton.
+    pub fn bundle_memory_delete(&self, id: &str) -> Result<bool, StoreError> {
+        if id == "blank" {
+            return Err(StoreError::Other(
+                "cannot delete the blank Memory singleton".to_string(),
+            ));
+        }
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute("DELETE FROM db_memories WHERE id = ?1", params![id])?;
+        Ok(rows > 0)
+    }
+}
+
+fn map_memory_row(row: &rusqlite::Row) -> rusqlite::Result<Memory> {
+    Ok(Memory {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        description: row.get(2)?,
+        is_blank: row.get::<_, i64>(3)? != 0,
+        provider: row.get(4)?,
+        model: row.get(5)?,
+        instructions: row.get(6)?,
+        context_files: row.get(7)?,
+        mcp_servers: row.get(8)?,
+        skills: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+    })
 }
 
 // ====================================================================
@@ -2075,5 +2389,205 @@ mod tests {
             assert_eq!(Some(*s), InstanceStatus::parse(s.as_str()));
         }
         assert_eq!(None, InstanceStatus::parse("nonsense"));
+    }
+
+    // ── v7 — Identity bundle accessors ───────────────────────────────────
+
+    #[test]
+    fn test_bundle_identity_lifecycle() {
+        let store = make_store();
+
+        // Blank singleton always present.
+        let initial = store.bundle_identity_list().unwrap();
+        assert_eq!(initial.len(), 1);
+        assert!(initial[0].is_blank);
+        assert_eq!(initial[0].id, "blank");
+
+        // Upsert a user identity.
+        let work = Identity {
+            id: "id-work".to_string(),
+            name: "Work".to_string(),
+            description: "Office laptop credentials".to_string(),
+            is_blank: false,
+            created_at: 100,
+            updated_at: 100,
+        };
+        store.bundle_identity_upsert(&work).unwrap();
+
+        // List orders user identities first, blank last.
+        let listed = store.bundle_identity_list().unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].id, "id-work");
+        assert_eq!(listed[1].id, "blank");
+
+        // Get round-trip.
+        let fetched = store.bundle_identity_get("id-work").unwrap().unwrap();
+        assert_eq!(fetched.name, "Work");
+
+        // Refuse to delete the blank singleton.
+        let blank_delete = store.bundle_identity_delete("blank");
+        assert!(blank_delete.is_err());
+
+        // Delete the user identity.
+        assert!(store.bundle_identity_delete("id-work").unwrap());
+        assert_eq!(store.bundle_identity_list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_bundle_identity_bindings_round_trip() {
+        let store = make_store();
+
+        // Need an account to bind.
+        let acct = IdentityAccount {
+            id: "acct-1".to_string(),
+            name: "asaf-github".to_string(),
+            provider: "github".to_string(),
+            kind: "pat".to_string(),
+            display_name: String::new(),
+            secret_ref: SecretRef::Env {
+                env_var: "GITHUB_TOKEN".to_string(),
+            },
+            context: serde_json::json!({}),
+            status: "unknown".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.identity_upsert(&acct).unwrap();
+
+        let identity = Identity {
+            id: "id-work".to_string(),
+            name: "Work".to_string(),
+            description: String::new(),
+            is_blank: false,
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.bundle_identity_upsert(&identity).unwrap();
+
+        // Bind, list, unbind.
+        store
+            .bundle_identity_bind("id-work", "github", "acct-1")
+            .unwrap();
+        let bindings = store.bundle_identity_bindings("id-work").unwrap();
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0].provider, "github");
+        assert_eq!(bindings[0].account_id, "acct-1");
+
+        // Re-bind same provider replaces the account.
+        let acct2 = IdentityAccount {
+            id: "acct-2".to_string(),
+            name: "asaf-github-2".to_string(),
+            provider: "github".to_string(),
+            kind: "pat".to_string(),
+            display_name: String::new(),
+            secret_ref: SecretRef::Env {
+                env_var: "GITHUB_TOKEN_ALT".to_string(),
+            },
+            context: serde_json::json!({}),
+            status: "unknown".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.identity_upsert(&acct2).unwrap();
+        store
+            .bundle_identity_bind("id-work", "github", "acct-2")
+            .unwrap();
+        let rebound = store.bundle_identity_bindings("id-work").unwrap();
+        assert_eq!(rebound.len(), 1);
+        assert_eq!(rebound[0].account_id, "acct-2");
+
+        // Unbind.
+        assert!(store.bundle_identity_unbind("id-work", "github").unwrap());
+        assert_eq!(
+            store.bundle_identity_bindings("id-work").unwrap().len(),
+            0
+        );
+    }
+
+    #[test]
+    fn test_bundle_identity_bindings_cascade_on_account_delete() {
+        let store = make_store();
+
+        let acct = IdentityAccount {
+            id: "acct-1".to_string(),
+            name: "asaf-github".to_string(),
+            provider: "github".to_string(),
+            kind: "pat".to_string(),
+            display_name: String::new(),
+            secret_ref: SecretRef::Env {
+                env_var: "GITHUB_TOKEN".to_string(),
+            },
+            context: serde_json::json!({}),
+            status: "unknown".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.identity_upsert(&acct).unwrap();
+
+        let identity = Identity {
+            id: "id-work".to_string(),
+            name: "Work".to_string(),
+            description: String::new(),
+            is_blank: false,
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.bundle_identity_upsert(&identity).unwrap();
+        store
+            .bundle_identity_bind("id-work", "github", "acct-1")
+            .unwrap();
+
+        // Deleting the account cascades the binding row.
+        store.identity_delete("acct-1").unwrap();
+        assert_eq!(
+            store.bundle_identity_bindings("id-work").unwrap().len(),
+            0
+        );
+    }
+
+    // ── v7 — Memory bundle accessors ─────────────────────────────────────
+
+    #[test]
+    fn test_bundle_memory_lifecycle() {
+        let store = make_store();
+
+        // Blank singleton always present.
+        let initial = store.bundle_memory_list().unwrap();
+        assert_eq!(initial.len(), 1);
+        assert!(initial[0].is_blank);
+        assert_eq!(initial[0].id, "blank");
+
+        // Upsert a user memory.
+        let coder = Memory {
+            id: "mem-coder".to_string(),
+            name: "Claude-coder".to_string(),
+            description: "Pair-programming setup".to_string(),
+            is_blank: false,
+            provider: "claude".to_string(),
+            model: "claude-sonnet-4-6".to_string(),
+            instructions: "You are a careful refactorer.".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            created_at: 100,
+            updated_at: 100,
+        };
+        store.bundle_memory_upsert(&coder).unwrap();
+
+        let listed = store.bundle_memory_list().unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].id, "mem-coder");
+        assert_eq!(listed[1].id, "blank");
+
+        let fetched = store.bundle_memory_get("mem-coder").unwrap().unwrap();
+        assert_eq!(fetched.provider, "claude");
+        assert_eq!(fetched.instructions, "You are a careful refactorer.");
+
+        // Refuse to delete the blank singleton.
+        assert!(store.bundle_memory_delete("blank").is_err());
+
+        // Delete the user memory.
+        assert!(store.bundle_memory_delete("mem-coder").unwrap());
+        assert_eq!(store.bundle_memory_list().unwrap().len(), 1);
     }
 }
