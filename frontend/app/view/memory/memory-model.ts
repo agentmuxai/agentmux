@@ -38,7 +38,12 @@ export interface MemoryDraft {
     skills: string;
 }
 
-/** Empty draft for the "+ New Memory" flow. */
+/** Empty draft for the "+ New Memory" flow.
+ *
+ *  All JSON-array fields default to `"[]"` (not `""`). The backend's
+ *  `db_memories.skills` column is JSON-encoded; a literal `""` would
+ *  trip downstream `JSON.parse(skills)` readers. Reagent P1 on
+ *  PR #747 (2026-05-08). */
 export function emptyDraft(): MemoryDraft {
     return {
         id: undefined,
@@ -49,7 +54,7 @@ export function emptyDraft(): MemoryDraft {
         instructions: "",
         context_files: [],
         mcp_servers: "[]",
-        skills: "",
+        skills: "[]",
     };
 }
 
@@ -73,7 +78,7 @@ export function draftFromMemory(m: Memory): MemoryDraft {
         instructions: m.instructions ?? "",
         context_files,
         mcp_servers: m.mcp_servers ?? "[]",
-        skills: m.skills ?? "",
+        skills: m.skills && m.skills.trim().length > 0 ? m.skills : "[]",
     };
 }
 
@@ -88,7 +93,9 @@ export function draftToWire(d: MemoryDraft): Partial<Memory> {
         instructions: d.instructions,
         context_files: JSON.stringify(d.context_files),
         mcp_servers: d.mcp_servers || "[]",
-        skills: d.skills,
+        // Same JSON-array invariant as mcp_servers — never write an
+        // empty string to the skills column. Reagent P1 (PR #747).
+        skills: d.skills || "[]",
     };
 }
 
@@ -160,8 +167,10 @@ export class MemoryViewModel implements ViewModel {
         }
     }
 
-    /** Open the form for a new memory. */
+    /** Open the form for a new memory. Clears any stale error so the
+     *  user starts on a clean banner. */
     startNew(): void {
+        this.setError(null);
         this.setDraft(emptyDraft());
         this.setSelectedId(null);
     }
@@ -169,12 +178,16 @@ export class MemoryViewModel implements ViewModel {
     /** Open the form for editing an existing memory. Refuses on the blank
      *  singleton because the backend rejects mutations to it anyway —
      *  better to show a disabled UI than to surface a backend error after
-     *  the user types. */
+     *  the user types. Successful entry clears any stale error from a
+     *  previous failed action (e.g. clicking the blank singleton, then
+     *  clicking a real memory should not leave the "system-managed"
+     *  banner showing alongside the new edit form). Reagent P2 (#747). */
     startEdit(memory: Memory): void {
         if (memory.is_blank) {
             this.setError("The blank Memory is system-managed and cannot be edited.");
             return;
         }
+        this.setError(null);
         this.setDraft(draftFromMemory(memory));
         this.setSelectedId(memory.id);
     }
