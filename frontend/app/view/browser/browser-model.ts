@@ -11,6 +11,7 @@ import {
     type BrowserPaneCommand,
     type BrowserPaneState,
     initialState as browserPaneInitialState,
+    TITLE_FALLBACK,
     update as browserPaneUpdate,
 } from "@/app/store/browser-pane-state";
 import { refocusNode } from "@/app/store/global";
@@ -45,7 +46,7 @@ export class BrowserViewModel implements ViewModel {
     urlAtom: Accessor<string> = this._url[0];
     setUrl = this._url[1];
 
-    private _title = createSignal<string>("Browser");
+    private _title = createSignal<string>(TITLE_FALLBACK);
     titleAtom: Accessor<string> = this._title[0];
     setTitle = this._title[1];
 
@@ -84,14 +85,14 @@ export class BrowserViewModel implements ViewModel {
     blockAtom: Accessor<Block | undefined>;
 
     /**
-     * Slice #9 (Phases 3a + 3b + 3c) reducer state — owns `closed`,
-     * `loading`, `error`, `canGoBack`, `canGoForward`. The signals
-     * above are projections of this state so the SolidJS view layer
-     * keeps reactive parity. Per the roadmap at
+     * Slice #9 (Phases 3a + 3b + 3c + 3e) reducer state — owns
+     * `closed`, `loading`, `error`, `canGoBack`, `canGoForward`,
+     * `title`. The signals above are projections of this state so the
+     * SolidJS view layer keeps reactive parity. Per the roadmap at
      * `docs/specs/browser-pane-reducer-roadmap.md`, the remaining
-     * cells (url, title, faviconUrl) migrate one at a time in
-     * follow-up PRs; the slot store + recordDispatch audit lands in
-     * Phase 4.
+     * cells (url, faviconUrl) migrate in follow-up PRs (faviconUrl
+     * is derived from url, so it lands together with §3d); the slot
+     * store + recordDispatch audit lands in Phase 4.
      */
     private _paneState: BrowserPaneState = browserPaneInitialState();
     /** Late callers (IPC handlers landing post-dispose, defensive guards
@@ -104,11 +105,11 @@ export class BrowserViewModel implements ViewModel {
      * Single sync point between the reducer's pure transitions and the
      * SolidJS signals the view subscribes to. Projects every reducer
      * cell currently in scope (`loading`, `error`, `canGoBack`,
-     * `canGoForward`) onto its signal, but only when the value actually
-     * changed — avoiding spurious reactive churn that could leak into
-     * the address-bar typing path that PR #737 regressed. Diag logs
-     * preserve the prior `state-write key=...` shape so Phase-1 grep
-     * recipes still work.
+     * `canGoForward`, `title`) onto its signal, but only when the
+     * value actually changed — avoiding spurious reactive churn that
+     * could leak into the address-bar typing path that PR #737
+     * regressed. Diag logs preserve the prior `state-write key=...`
+     * shape so Phase-1 grep recipes still work.
      */
     private _dispatch(cmd: BrowserPaneCommand, src: string): void {
         const prev = this._paneState;
@@ -138,6 +139,12 @@ export class BrowserViewModel implements ViewModel {
             );
             this.setCanGoForward(result.state.canGoForward);
         }
+        if (result.state.title !== prev.title) {
+            this.diag(
+                `state-write key=title value=${JSON.stringify(result.state.title)} src=${src}`,
+            );
+            this.setTitle(result.state.title);
+        }
         for (const e of result.events) {
             if (e.type === "post-close-command-dropped") {
                 this.diag(
@@ -162,10 +169,7 @@ export class BrowserViewModel implements ViewModel {
         const ctorMetaUrl = (this.blockAtom()?.meta?.["url"] as string | undefined) ?? "";
         console.log(`[browser-pane:diag][${blockId.slice(0, 7)}] ctor meta.url=${JSON.stringify(ctorMetaUrl)}`);
 
-        this.viewName = createMemo(() => {
-            const title = this.titleAtom();
-            return title || "Browser";
-        });
+        this.viewName = createMemo(() => this.titleAtom());
 
         // Subscribe to nav-state updates fired by the backend on every
         // `on_load_end_pane`. This is the source of truth for address bar +

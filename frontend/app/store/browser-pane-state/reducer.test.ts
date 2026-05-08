@@ -3,9 +3,9 @@
 
 import { describe, expect, it } from "vitest";
 import { update } from "./reducer";
-import { initialState } from "./types";
+import { initialState, TITLE_FALLBACK } from "./types";
 
-describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c)", () => {
+describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c + 3e)", () => {
     describe("Navigate", () => {
         it("sets loading=true and clears any prior error", () => {
             const s0 = update(initialState(), {
@@ -189,6 +189,82 @@ describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c)", () => {
         });
     });
 
+    describe("TitleChanged", () => {
+        it("initial state has the fallback title", () => {
+            expect(initialState().title).toBe(TITLE_FALLBACK);
+        });
+
+        it("sets a non-empty title verbatim", () => {
+            const r = update(initialState(), {
+                type: "TitleChanged",
+                title: "Example Domain",
+            });
+            expect(r.state.title).toBe("Example Domain");
+            expect(r.events).toEqual([
+                { type: "title-changed", title: "Example Domain" },
+            ]);
+        });
+
+        it("folds empty title to the fallback", () => {
+            const s0 = update(initialState(), {
+                type: "TitleChanged",
+                title: "Example",
+            }).state;
+            const r = update(s0, { type: "TitleChanged", title: "" });
+            expect(r.state.title).toBe(TITLE_FALLBACK);
+            expect(r.events).toEqual([
+                { type: "title-changed", title: TITLE_FALLBACK },
+            ]);
+        });
+
+        it("folds whitespace-only title to the fallback", () => {
+            const s0 = initialState();
+            const r = update(s0, {
+                type: "TitleChanged",
+                title: "   \t\n",
+            });
+            // Already at fallback so no event fires (idempotent post-fold).
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([]);
+            // Force a non-fallback state then fold back.
+            const s1 = update(initialState(), {
+                type: "TitleChanged",
+                title: "Real",
+            }).state;
+            const r2 = update(s1, { type: "TitleChanged", title: "  " });
+            expect(r2.state.title).toBe(TITLE_FALLBACK);
+        });
+
+        it("is idempotent on identical post-fold values", () => {
+            const s0 = update(initialState(), {
+                type: "TitleChanged",
+                title: "Same",
+            }).state;
+            const r = update(s0, { type: "TitleChanged", title: "Same" });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([]);
+        });
+
+        it("does not interact with loading, error, or history cells", () => {
+            const s0 = update(initialState(), {
+                type: "Navigate",
+                url: "https://x",
+            }).state;
+            const s1 = update(s0, {
+                type: "HistoryUpdated",
+                canGoBack: true,
+            }).state;
+            const r = update(s1, {
+                type: "TitleChanged",
+                title: "Page",
+            });
+            expect(r.state.loading).toBe(s1.loading);
+            expect(r.state.error).toBe(s1.error);
+            expect(r.state.canGoBack).toBe(s1.canGoBack);
+            expect(r.state.canGoForward).toBe(s1.canGoForward);
+        });
+    });
+
     describe("Disposed", () => {
         it("flips closed=true and emits disposed event once", () => {
             const r = update(initialState(), { type: "Disposed" });
@@ -256,6 +332,21 @@ describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c)", () => {
                 },
             ]);
         });
+
+        it("TitleChanged after dispose is dropped", () => {
+            const s0 = closed();
+            const r = update(s0, {
+                type: "TitleChanged",
+                title: "Late title",
+            });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([
+                {
+                    type: "post-close-command-dropped",
+                    commandType: "TitleChanged",
+                },
+            ]);
+        });
     });
 
     describe("invariants across sequences", () => {
@@ -293,6 +384,8 @@ describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c)", () => {
                 { type: "LoadFailed", reason: "e2" },
                 { type: "HistoryUpdated", canGoBack: true, canGoForward: true },
                 { type: "HistoryUpdated", canGoBack: false },
+                { type: "TitleChanged", title: "Page" },
+                { type: "TitleChanged", title: "" },
                 { type: "Disposed" },
             ];
             for (const mk of starts) {
