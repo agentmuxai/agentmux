@@ -127,7 +127,15 @@ export class BrowserViewModel implements ViewModel {
         // the user clicked any link inside the pane. See
         // specs/SPEC_BROWSER_PANE_Z_ORDER_2026_04_21.md (unrelated but
         // adjacent) and the nav-state wiring added alongside this PR.
-        void listenEvent<{
+        //
+        // Registration race: `listenEvent` returns a Promise that resolves
+        // only after the host has acknowledged the registration. The
+        // construction-time `navigate()` below is therefore deferred until
+        // all three subscriptions are live, otherwise a fast on_load_end
+        // can fire its first nav-state event before the renderer is
+        // listening, and the URL bar / favicon / title stay stuck on the
+        // pre-load defaults until the user manually navigates again.
+        const navSubP = listenEvent<{
             block_id: string;
             url: string;
             can_go_back?: boolean;
@@ -174,6 +182,7 @@ export class BrowserViewModel implements ViewModel {
         }).then((unsub) => {
             if (this._closed) unsub();
             else this._navUnsub = unsub;
+            return unsub;
         });
 
         // Click-to-focus: the pane HWND captures clicks at the Win32 level,
@@ -182,36 +191,47 @@ export class BrowserViewModel implements ViewModel {
         // handler (see `pane/hwnd.rs`) using a HWND→block_id map registered
         // at pane creation. We drive refocusNode so the layout marks this
         // block as focused (blue border + keyboard shortcut target).
-        void listenEvent<{ block_id: string }>("browser-pane-clicked", (payload) => {
+        const clickSubP = listenEvent<{ block_id: string }>("browser-pane-clicked", (payload) => {
             if (this._closed) return;
             if (payload.block_id !== this.blockId) return;
             refocusNode(this.blockId);
         }).then((unsub) => {
             if (this._closed) unsub();
             else this._clickUnsub = unsub;
+            return unsub;
         });
 
         // Page <title> updates. CEF fires on_title_change every time the
         // top-level frame's document.title changes (initial load + later
         // mutations). Updating titleAtom drives the viewName memo that
         // renders the pane header label.
-        void listenEvent<{ block_id: string; title: string }>("browser-pane-title-change", (payload) => {
+        const titleSubP = listenEvent<{ block_id: string; title: string }>("browser-pane-title-change", (payload) => {
             if (this._closed) return;
             if (payload.block_id !== this.blockId) return;
             this.setTitle(payload.title || "Browser");
         }).then((unsub) => {
             if (this._closed) unsub();
             else this._titleUnsub = unsub;
+            return unsub;
         });
-
 
         // Load URL from block meta on init. An empty/missing `url` falls
         // back to DEFAULT_BROWSER_URL so fresh panes aren't blank (the
         // widget definition in widgets.json also ships this URL, but the
         // fallback covers panes created through the API with no meta.url).
+        //
+        // Defer the navigate until all three subscriptions are confirmed
+        // registered with the host. Otherwise a fast on_load_end firing
+        // before the registration ack would deliver the first nav-state
+        // event into the void — the URL bar / favicon / title would stay
+        // at their pre-load defaults and the user has to navigate again
+        // to recover.
         const meta = this.blockAtom()?.meta;
         const initialUrl = ((meta?.["url"] as string | undefined) ?? "").trim() || DEFAULT_BROWSER_URL;
-        this.navigate(initialUrl);
+        Promise.allSettled([navSubP, clickSubP, titleSubP]).then(() => {
+            if (this._closed) return;
+            this.navigate(initialUrl);
+        });
     }
 
     navigate(url: string): void {
