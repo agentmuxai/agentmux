@@ -59,14 +59,19 @@ db_identities (
   updated_at      TEXT NOT NULL
 )
 
-db_identity_accounts (
+db_identity_bindings (
   identity_id     TEXT NOT NULL,
   account_id      TEXT NOT NULL,
   provider        TEXT NOT NULL,
   PRIMARY KEY (identity_id, provider),
   FOREIGN KEY (identity_id) REFERENCES db_identities(id) ON DELETE CASCADE,
-  FOREIGN KEY (account_id)  REFERENCES db_accounts(id)
+  FOREIGN KEY (account_id)  REFERENCES db_identity_accounts(id) ON DELETE CASCADE
 )
+-- The junction is named `db_identity_bindings` (not `db_identity_accounts`) so it
+-- doesn't collide with the v6 individual-credentials table that the agent
+-- pane's Identity tab already uses. The FK target for account_id is the
+-- existing `db_identity_accounts` table — we don't introduce a new
+-- `db_accounts` table.
 
 db_memories (
   id              TEXT PRIMARY KEY,
@@ -103,7 +108,7 @@ DROP TABLE db_forge_agents;             -- after migration into db_memories
 
 New migration v8 runs in this order:
 
-1. Create `db_identities`, `db_identity_accounts`, `db_memories`.
+1. Create `db_identities`, `db_identity_bindings`, `db_memories`.
 2. Insert the singleton blank Identity (`name = '__blank__'`, `is_blank = 1`).
 3. Insert the singleton blank Memory (`name = '__blank__'`, `is_blank = 1`).
 4. Migrate existing data:
@@ -176,7 +181,7 @@ Two buttons on the Identity tab:
 
 **Export Vault**
 - File: `agentmux-vault-<timestamp>.agentmux-vault`.
-- Contents: all `db_identities` rows + their `db_identity_accounts` rows + the referenced `db_accounts` rows + resolved `secret_ref` plaintext values.
+- Contents: all `db_identities` rows + their `db_identity_bindings` rows + the referenced `db_identity_accounts` rows + resolved `secret_ref` plaintext values.
 - Crypto: Argon2id-derived key (params: m=64MB, t=3, p=4 — OWASP 2023 minimums), AES-256-GCM, random 12-byte nonce. Header: magic + version + salt + nonce.
 - Passphrase prompt every time. No caching.
 

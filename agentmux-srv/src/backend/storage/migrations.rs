@@ -539,17 +539,19 @@ pub fn run_forge_v7_migrations(conn: &Connection) -> Result<(), StoreError> {
     )?;
 
     // ---- Shadow-migrate existing forge agents into memories ----
-    // Forge agents (db_forge_agents) carry the same provider / model /
-    // instructions data we want in Memory. Copy each one into db_memories
-    // with the SAME id so existing references (e.g. db_agent_instances
-    // .definition_id) can be resolved by either reader during the
-    // transition window.
+    // Of the Memory shape, only `provider` lives directly on
+    // db_forge_agents — the v6 schema doesn't have `model` or
+    // `instructions` columns. Forge stored those in db_forge_content
+    // rows keyed by content_type ("soul", "agentmd", etc.); importing
+    // them is deferred to a follow-up so this migration stays small.
+    // db_forge_content rows remain readable on disk until v8.
     //
-    // Provider, model, and instructions come from db_forge_agents directly.
-    // context_files / mcp_servers / skills come from db_forge_content where
-    // applicable; for simplicity in this migration we leave them empty and
-    // let users re-attach via the Memory pane. (Forge content rows are not
-    // dropped — they remain readable until v8.)
+    // What this SELECT does copy: id (preserved so existing
+    // db_agent_instances.definition_id references resolve via either
+    // reader during the transition window), name (with
+    // disambiguation, see below), description, provider, created_at.
+    // model / instructions / context_files / mcp_servers / skills are
+    // seeded empty; users fill them in via the Memory pane.
     //
     // **Name disambiguation (codex P1, 2026-05-08):**
     // db_forge_agents.name allows duplicates (only `slug` is collision-
