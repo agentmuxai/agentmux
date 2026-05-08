@@ -105,21 +105,21 @@ Reducer behavior:
 Add to `AgentPaneCommand`:
 
 ```ts
-| { type: "PendingMessageExpired"; localId: string }
+| { type: "PendingMessageExpired"; id: string }
 ```
 
 Add to `AgentPaneEvent`:
 
 ```ts
-| { type: "pending-message-expired"; localId: string; queuedAt: number; ageMs: number }
+| { type: "pending-expired"; id: string; queuedAt: number; ageMs: number; wasPresent: boolean }
 ```
 
 Reducer behavior for `PendingMessageExpired`:
-- Find entry in `pending[]` by `localId`; if not found, emit nothing (idempotent).
-- Remove entry; emit `pending-message-expired` event.
+- Find entry in `pending[]` by `id`; if not found, emit `pending-expired` with `wasPresent: false` (idempotent — caller may have already processed accept/reject).
+- Remove entry; emit `pending-expired` event with `wasPresent: true`.
 
 **Caller responsibility** (`useAgentCommands.ts`):
-- On `PendingMessageQueued`, schedule a `setTimeout(PENDING_TIMEOUT_MS)` that dispatches `PendingMessageExpired(localId)` if the entry is still in `state.pending`.
+- After the `AgentInputCommand` RPC is kicked off, schedule a `setTimeout(PENDING_TIMEOUT_MS)` that dispatches `PendingMessageExpired(id)`. Scheduling AFTER the send (not at queue time) means a slow runtime-args metadata update can't pre-empt the timer.
 - `PENDING_TIMEOUT_MS = 30_000` (30 s; configurable via `AgentRuntimeConfig`).
 
 ### 3. Stuck-stream watchdog (`agent-pane-state`)
@@ -237,13 +237,13 @@ lastEventMs: number | null;
 | { type: "InitStart" }
 | { type: "InitReady" }
 | { type: "InitFailed"; reason: string }
-| { type: "PendingMessageExpired"; localId: string }
+| { type: "PendingMessageExpired"; id: string }
 | { type: "StreamWatchdogTick"; nowMs: number }
 ```
 
 **New events:**
 ```ts
-| { type: "pending-message-expired"; localId: string; queuedAt: number; ageMs: number }
+| { type: "pending-expired"; id: string; queuedAt: number; ageMs: number; wasPresent: boolean }
 | { type: "stream-stuck"; idleSinceMs: number; thresholdMs: number }
 ```
 
@@ -307,7 +307,7 @@ All reducer additions are pure functions and should have unit tests:
 // agent-pane-state reducer
 it("suppresses TurnStart when initPhase is loading")
 it("PendingMessageExpired removes entry and emits event")
-it("PendingMessageExpired is a no-op when localId not found")
+it("PendingMessageExpired emits wasPresent:false when id not found")
 it("StreamWatchdogTick emits stream-stuck when idle >= threshold")
 it("StreamWatchdogTick is a no-op when stream not active")
 

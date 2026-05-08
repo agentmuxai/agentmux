@@ -27,7 +27,7 @@ import { type Accessor, createMemo, createSignal, onCleanup } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
-import { dispatch as dispatchPane, snapshot as panePaneSnapshot } from "@/app/store/agent-pane-state-store";
+import { dispatch as dispatchPane, snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import { buildRuntimeArgs, getRuntimeConfig } from "../buildRuntimeArgs";
 import { dispatchSlashCommand } from "../commands/dispatch";
 import { buildRegistry } from "../commands/registry";
@@ -243,7 +243,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // is also suppressed, leaving the UI showing no active turn
         // while the agent IS processing. Bail early here so neither
         // happens.
-        const ps = panePaneSnapshot(opts.blockId);
+        const ps = paneSnapshot(opts.blockId);
         if (ps?.initPhase === "loading") {
             opts.log("send", "send blocked: history still loading", "warn");
             return;
@@ -271,22 +271,6 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             "user",
         );
 
-        // Pending acceptance timeout (issue #728 gap 2). If the backend
-        // never echoes `agent-message-accepted` for this id within
-        // PENDING_TIMEOUT_MS, the reducer removes the ghost entry. Idempotent
-        // when the message lands first — the entry is already gone and
-        // PendingMessageExpired is a no-op.
-        // Tracked + cleared on pane unmount to avoid dispatching against
-        // an unregistered slot (which throws). PR #742 ReAgent P1.
-        const expiryId = setTimeout(() => {
-            pendingExpiryTimers.delete(expiryId);
-            dispatchPane(opts.blockId, {
-                type: "PendingMessageExpired",
-                id: messageId,
-            });
-        }, PENDING_TIMEOUT_MS);
-        pendingExpiryTimers.add(expiryId);
-
         // Defer the scroll-to-bottom by one animation frame so the
         // pending row has a chance to mount before the scroll math runs.
         if (opts.onSent) {
@@ -311,6 +295,13 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             }
         }
 
+        // Kick off the send AND start the expiry clock together, so the
+        // 30s timer measures backend acceptance time only — not the
+        // pre-send cmd:args metadata round-trip. Codex P2 on PR #752
+        // caught the prior order: a slow runtime-args update could
+        // burn most of the 30s before AgentInputCommand even fired,
+        // so the expiry would remove the pending entry minutes before
+        // the agent had a chance to accept it.
         RpcApi.AgentInputCommand(TabRpcClient, {
             blockid: opts.blockId,
             message,
@@ -325,6 +316,21 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 id: messageId,
             });
         });
+
+        // Pending acceptance timeout (issue #728 gap 2). The reducer
+        // removes the ghost entry if the backend doesn't echo
+        // `agent-message-accepted` within PENDING_TIMEOUT_MS of the
+        // send. Idempotent when the message lands first.
+        // Tracked + cleared on pane unmount to avoid dispatching against
+        // an unregistered slot (which throws).
+        const expiryId = setTimeout(() => {
+            pendingExpiryTimers.delete(expiryId);
+            dispatchPane(opts.blockId, {
+                type: "PendingMessageExpired",
+                id: messageId,
+            });
+        }, PENDING_TIMEOUT_MS);
+        pendingExpiryTimers.add(expiryId);
     };
 
     // Delegate to the model so the pane-frame header button and any other
