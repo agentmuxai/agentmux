@@ -100,7 +100,16 @@ muxlog() {
             | sed 's|.*/current-||;s|\.path||' >&2
         return 1
     fi
-    local logfile="$AGENTMUX_LOG_DIR/$(cat "$ptr")"
+    local ptr_content="$(cat "$ptr")"
+    # Pointer content may be a basename (legacy: resolve under
+    # AGENTMUX_LOG_DIR) or an absolute path (post-2026-05 host fix:
+    # the global pointer at <root>/logs/ writes the absolute path so
+    # discovery works from outside the instance dir).
+    local logfile
+    case "$ptr_content" in
+        /* | ?:[/\\]*) logfile="$ptr_content" ;;
+        *)            logfile="$AGENTMUX_LOG_DIR/$ptr_content" ;;
+    esac
     case "$action" in
         tail) tail -f "$logfile" ;;
         cat)  cat "$logfile" ;;

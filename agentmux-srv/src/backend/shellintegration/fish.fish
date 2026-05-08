@@ -63,7 +63,17 @@ function muxlog
         echo "Unknown log target '$target'. Check $AGENTMUX_LOG_DIR for current-*.path files." >&2
         return 1
     end
-    set -l logfile "$AGENTMUX_LOG_DIR/"(cat "$ptr")
+    set -l ptr_content (cat "$ptr")
+    # Pointer content may be a basename (legacy: resolve under
+    # AGENTMUX_LOG_DIR) or an absolute path (post-2026-05 host fix:
+    # global pointer writes the absolute path so discovery works
+    # from outside the instance dir).
+    set -l logfile
+    if string match -q '/*' "$ptr_content"; or string match -q '?:[/\\]*' "$ptr_content"
+        set logfile "$ptr_content"
+    else
+        set logfile "$AGENTMUX_LOG_DIR/$ptr_content"
+    end
     switch $action
         case tail
             tail -f "$logfile"
