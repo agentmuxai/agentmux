@@ -1005,6 +1005,12 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     started_at: now,
                     ended_at: 0,
                     created_at: now,
+                    // identity_id / memory_id default to empty (= blank
+                    // singleton) until the launch modal wires user picks
+                    // through to this handler. PR-F.3 will add the
+                    // command fields and pass them here.
+                    identity_id: String::new(),
+                    memory_id: String::new(),
                 };
                 wstore
                     .instance_create(&inst)
@@ -1046,6 +1052,11 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     started_at: existing.started_at,
                     ended_at: cmd.ended_at.unwrap_or(existing.ended_at),
                     created_at: existing.created_at,
+                    // identity_id / memory_id are immutable post-create
+                    // (mid-session credential rotation is out of scope —
+                    // launch a new instance with a different bundle).
+                    identity_id: existing.identity_id.clone(),
+                    memory_id: existing.memory_id.clone(),
                 };
                 wstore
                     .instance_update(&merged)

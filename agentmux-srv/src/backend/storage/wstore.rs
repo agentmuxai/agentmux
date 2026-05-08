@@ -1196,6 +1196,16 @@ pub struct AgentInstance {
     #[serde(default)]
     pub ended_at: i64,
     pub created_at: i64,
+    /// FK to `db_identities.id`. Empty string means "use the blank
+    /// singleton" (= ambient creds, no env-var injection). Set at
+    /// instantiation via the launch modal's Identity dropdown.
+    #[serde(default)]
+    pub identity_id: String,
+    /// FK to `db_memories.id`. Empty string means "use the blank
+    /// singleton" (= vanilla CLI, no instructions). Set at
+    /// instantiation via the launch modal's Memory dropdown.
+    #[serde(default)]
+    pub memory_id: String,
 }
 
 impl WaveStore {
@@ -1417,7 +1427,8 @@ impl WaveStore {
         // can't reuse a single prepared statement across filter combos.
         let mut sql = String::from(
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
-                    status, github_context, started_at, ended_at, created_at
+                    status, github_context, started_at, ended_at, created_at,
+                    identity_id, memory_id
              FROM db_agent_instances",
         );
         let mut clauses: Vec<&str> = Vec::new();
@@ -1444,20 +1455,7 @@ impl WaveStore {
         if let Some(s) = status {
             param_vals.push(s.to_string());
         }
-        let iter = stmt.query_map(rusqlite::params_from_iter(param_vals.iter()), |row| {
-            Ok(AgentInstance {
-                id: row.get(0)?,
-                definition_id: row.get(1)?,
-                parent_instance_id: row.get(2)?,
-                block_id: row.get(3)?,
-                session_id: row.get(4)?,
-                status: row.get(5)?,
-                github_context: row.get(6)?,
-                started_at: row.get(7)?,
-                ended_at: row.get(8)?,
-                created_at: row.get(9)?,
-            })
-        })?;
+        let iter = stmt.query_map(rusqlite::params_from_iter(param_vals.iter()), map_instance_row)?;
         let mut out = Vec::new();
         for r in iter {
             out.push(r?);
@@ -1469,23 +1467,11 @@ impl WaveStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
-                    status, github_context, started_at, ended_at, created_at
+                    status, github_context, started_at, ended_at, created_at,
+                    identity_id, memory_id
              FROM db_agent_instances WHERE id = ?1",
         )?;
-        let result = stmt.query_row(params![id], |row| {
-            Ok(AgentInstance {
-                id: row.get(0)?,
-                definition_id: row.get(1)?,
-                parent_instance_id: row.get(2)?,
-                block_id: row.get(3)?,
-                session_id: row.get(4)?,
-                status: row.get(5)?,
-                github_context: row.get(6)?,
-                started_at: row.get(7)?,
-                ended_at: row.get(8)?,
-                created_at: row.get(9)?,
-            })
-        });
+        let result = stmt.query_row(params![id], map_instance_row);
         match result {
             Ok(a) => Ok(Some(a)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -1499,8 +1485,9 @@ impl WaveStore {
         conn.execute(
             "INSERT INTO db_agent_instances
                 (id, definition_id, parent_instance_id, block_id, session_id, status,
-                 github_context, started_at, ended_at, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                 github_context, started_at, ended_at, created_at,
+                 identity_id, memory_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 inst.id,
                 inst.definition_id,
@@ -1512,6 +1499,8 @@ impl WaveStore {
                 inst.started_at,
                 inst.ended_at,
                 inst.created_at,
+                inst.identity_id,
+                inst.memory_id,
             ],
         )?;
         Ok(())
@@ -1797,6 +1786,23 @@ fn map_memory_row(row: &rusqlite::Row) -> rusqlite::Result<Memory> {
         skills: row.get(9)?,
         created_at: row.get(10)?,
         updated_at: row.get(11)?,
+    })
+}
+
+fn map_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
+    Ok(AgentInstance {
+        id: row.get(0)?,
+        definition_id: row.get(1)?,
+        parent_instance_id: row.get(2)?,
+        block_id: row.get(3)?,
+        session_id: row.get(4)?,
+        status: row.get(5)?,
+        github_context: row.get(6)?,
+        started_at: row.get(7)?,
+        ended_at: row.get(8)?,
+        created_at: row.get(9)?,
+        identity_id: row.get(10)?,
+        memory_id: row.get(11)?,
     })
 }
 
@@ -2329,6 +2335,8 @@ mod tests {
             started_at: 1000,
             ended_at: 0,
             created_at: 1000,
+            identity_id: String::new(),
+            memory_id: String::new(),
         };
         store.instance_create(&inst).unwrap();
 
@@ -2370,6 +2378,8 @@ mod tests {
             started_at: 0,
             ended_at: 0,
             created_at: 0,
+            identity_id: String::new(),
+            memory_id: String::new(),
         };
         store.instance_create(&inst).unwrap();
 
