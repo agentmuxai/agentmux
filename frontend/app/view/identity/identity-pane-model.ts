@@ -18,12 +18,14 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
-import { createMemo, createResource, createSignal, type Accessor } from "solid-js";
+import { createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
 
 import {
     type Account,
+    loadAccounts,
     PROVIDER_LABELS,
     refreshAccountCache,
+    subscribeAccountChanges,
 } from "./identity-model";
 
 /** Form-state shape for editing an Identity bundle. */
@@ -90,13 +92,23 @@ export class IdentityPaneViewModel implements ViewModel {
     errorAtom: Accessor<string | null> = this._error[0];
     setError = this._error[1];
 
-    /** All accounts (cached); used to populate per-provider binding pickers. */
-    accountsResource: ReturnType<typeof createResource<Account[]>>;
+    /** All accounts (cached); used to populate per-provider binding pickers.
+     *  Subscribed to identity-model's account-change broadcaster so that
+     *  accounts created externally (e.g. via the agent-pane Identity tab)
+     *  appear immediately. Reagent + codex P1 (#748). */
+    private _accounts = createSignal<Account[]>([]);
+    accountsAtom: Accessor<Account[]> = this._accounts[0];
+    setAccounts = this._accounts[1];
 
     /** Bindings for the currently-selected Identity bundle. */
-    bindingsResource: ReturnType<typeof createResource<IdentityBinding[], string>>;
+    private _bindings = createSignal<IdentityBinding[]>([]);
+    bindingsAtom: Accessor<IdentityBinding[]> = this._bindings[0];
+    setBindings = this._bindings[1];
 
     selectedBundleAtom: Accessor<IdentityBundle | null>;
+
+    /** Unsubscribe handle for the account-change subscription. */
+    private _unsubscribeAccounts: (() => void) | null = null;
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
@@ -113,27 +125,33 @@ export class IdentityPaneViewModel implements ViewModel {
             return this.bundlesAtom().find((b) => b.id === id) ?? null;
         });
 
-        // Load all accounts once at mount; refresh on demand.
-        this.accountsResource = createResource<Account[]>(async () => {
-            await refreshAccountCache();
-            return (await import("./identity-model")).loadAccounts();
+        // Refresh bindings whenever the selection changes. Solid memos
+        // run lazily, so use a tracked effect-style helper: we pull the
+        // selected id via createMemo and refetch on change.
+        createMemo(() => {
+            const id = this.selectedIdAtom();
+            void this.refreshBindings(id);
         });
 
-        // Bindings refresh whenever the selection changes.
-        this.bindingsResource = createResource<IdentityBinding[], string>(
-            () => this.selectedIdAtom() ?? undefined,
-            async (identity_id) => {
-                if (!identity_id) return [];
-                try {
-                    return await RpcApi.ListIdentityBindingsCommand(TabRpcClient, {
-                        identity_id,
-                    });
-                } catch (e) {
-                    this.setError(`Failed to load bindings: ${(e as Error).message ?? e}`);
-                    return [];
-                }
-            },
-        );
+        // Hydrate the account list from the shared cache, then subscribe
+        // to changes so externally-created accounts (via the agent-pane
+        // Identity tab) appear instantly without a remount.
+        void (async () => {
+            try {
+                await refreshAccountCache();
+            } catch {
+                // Cache refresh errors are non-fatal — we still subscribe
+                // and any later refresh by another consumer will populate.
+            }
+            this.setAccounts(loadAccounts());
+        })();
+        this._unsubscribeAccounts = subscribeAccountChanges((accounts) => {
+            this.setAccounts(accounts);
+        });
+        onCleanup(() => {
+            this._unsubscribeAccounts?.();
+            this._unsubscribeAccounts = null;
+        });
 
         void this.refreshBundles();
     }
@@ -227,17 +245,34 @@ export class IdentityPaneViewModel implements ViewModel {
                     account_id,
                 });
             }
-            this.bindingsResource[1].refetch();
+            await this.refreshBindings(id);
         } catch (e) {
             this.setError(`Binding update failed: ${(e as Error).message ?? e}`);
+        }
+    }
+
+    /** Re-fetch bindings for a specific identity_id. Pulls into the
+     *  bindings signal so memos that read it react. */
+    async refreshBindings(identity_id: string | null): Promise<void> {
+        if (!identity_id) {
+            this.setBindings([]);
+            return;
+        }
+        try {
+            const list = await RpcApi.ListIdentityBindingsCommand(TabRpcClient, {
+                identity_id,
+            });
+            this.setBindings(list);
+        } catch (e) {
+            this.setError(`Failed to load bindings: ${(e as Error).message ?? e}`);
+            this.setBindings([]);
         }
     }
 
     /** Account list grouped by provider, for the per-provider binding rows. */
     accountsByProvider = createMemo<Map<string, Account[]>>(() => {
         const m = new Map<string, Account[]>();
-        const accounts = this.accountsResource[0]() ?? [];
-        for (const a of accounts) {
+        for (const a of this.accountsAtom()) {
             if (!m.has(a.provider)) m.set(a.provider, []);
             m.get(a.provider)!.push(a);
         }
@@ -251,8 +286,7 @@ export class IdentityPaneViewModel implements ViewModel {
     providersForBindingRows = createMemo<string[]>(() => {
         const set = new Set<string>();
         for (const provider of this.accountsByProvider().keys()) set.add(provider);
-        const bindings = this.bindingsResource[0]() ?? [];
-        for (const b of bindings) set.add(b.provider);
+        for (const b of this.bindingsAtom()) set.add(b.provider);
         return Array.from(set).sort();
     });
 
@@ -261,6 +295,7 @@ export class IdentityPaneViewModel implements ViewModel {
     }
 
     dispose(): void {
-        // Solid resources GC with the model instance.
+        this._unsubscribeAccounts?.();
+        this._unsubscribeAccounts = null;
     }
 }
