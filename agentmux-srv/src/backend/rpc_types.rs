@@ -305,6 +305,21 @@ pub const COMMAND_LINK_AGENT_IDENTITY: &str = "linkagentidentity";
 pub const COMMAND_UNLINK_AGENT_IDENTITY: &str = "unlinkagentidentity";
 pub const COMMAND_LIST_AGENT_IDENTITIES: &str = "listagentidentities";
 
+// Identity bundles (v7 — named credential bundles)
+pub const COMMAND_LIST_IDENTITY_BUNDLES: &str = "listidentitybundles";
+pub const COMMAND_GET_IDENTITY_BUNDLE: &str = "getidentitybundle";
+pub const COMMAND_UPSERT_IDENTITY_BUNDLE: &str = "upsertidentitybundle";
+pub const COMMAND_DELETE_IDENTITY_BUNDLE: &str = "deleteidentitybundle";
+pub const COMMAND_BIND_IDENTITY_ACCOUNT: &str = "bindidentityaccount";
+pub const COMMAND_UNBIND_IDENTITY_ACCOUNT: &str = "unbindidentityaccount";
+pub const COMMAND_LIST_IDENTITY_BINDINGS: &str = "listidentitybindings";
+
+// Memory bundles (v7 — agent personality / capability stack)
+pub const COMMAND_LIST_MEMORIES: &str = "listmemories";
+pub const COMMAND_GET_MEMORY: &str = "getmemory";
+pub const COMMAND_UPSERT_MEMORY: &str = "upsertmemory";
+pub const COMMAND_DELETE_MEMORY: &str = "deletememory";
+
 // Agent instances
 pub const COMMAND_LIST_AGENT_INSTANCES: &str = "listagentinstances";
 pub const COMMAND_GET_AGENT_INSTANCE: &str = "getagentinstance";
@@ -1529,6 +1544,48 @@ pub struct CommandUnlinkAgentIdentityData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandListAgentIdentitiesData {
     pub agent_id: String,
+}
+
+// ---- v7 Identity bundle command shapes ----
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandGetIdentityBundleData {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandDeleteIdentityBundleData {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandBindIdentityAccountData {
+    pub identity_id: String,
+    pub provider: String,
+    pub account_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandUnbindIdentityAccountData {
+    pub identity_id: String,
+    pub provider: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandListIdentityBindingsData {
+    pub identity_id: String,
+}
+
+// ---- v7 Memory bundle command shapes ----
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandGetMemoryData {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandDeleteMemoryData {
+    pub id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
