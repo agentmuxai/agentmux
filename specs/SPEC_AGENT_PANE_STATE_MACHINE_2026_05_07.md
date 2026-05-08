@@ -134,7 +134,6 @@ Add to `AgentPaneState`:
 
 ```ts
 lastEventMs: number | null;   // updated on every stream event dispatch
-streamStuckMs: number | null; // ms since last event; set by watchdog
 ```
 
 Add to `AgentPaneEvent`:
@@ -146,7 +145,9 @@ Add to `AgentPaneEvent`:
 Reducer behavior for `StreamWatchdogTick`:
 - If `!state.streaming.active` or `lastEventMs == null`, no-op.
 - Compute `idleMs = nowMs - lastEventMs`.
-- If `idleMs >= STUCK_THRESHOLD_MS` (default 45 000 ms), set `streamStuckMs = idleMs`, emit `stream-stuck` event.
+- If `idleMs >= STUCK_THRESHOLD_MS` (default 45 000 ms), emit `stream-stuck` event with `idleSinceMs` and `thresholdMs`.
+
+**Note (event-only design):** earlier drafts of this spec proposed a `streamStuckMs: number | null` field on `AgentPaneState`. The implementation chose to skip the persistent state and emit only the event — UI consumers subscribe to the event for the same information without redundant state mutation on every tick. The state listing below reflects this.
 
 **Caller responsibility** (`useAgentStream.ts`):
 - On `StreamSubscribe`, start a `setInterval(WATCHDOG_INTERVAL_MS = 5_000)` that dispatches `StreamWatchdogTick(Date.now())`.
@@ -227,7 +228,8 @@ Callers in tests can pass `{ truncateGraceMs: 0 }` to disable suppression. The p
 initPhase: "loading" | "ready" | "error";
 initError?: string;
 lastEventMs: number | null;
-streamStuckMs: number | null;
+// `streamStuckMs` was in an earlier draft but the implementation
+// emits the stuck-stream signal as an event only (see §3 above).
 ```
 
 **New commands:**

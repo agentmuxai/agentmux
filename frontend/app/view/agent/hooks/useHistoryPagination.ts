@@ -31,7 +31,7 @@
  *                       user scrolls near the top
  */
 
-import { createSignal, onMount, type Accessor } from "solid-js";
+import { createSignal, onCleanup, onMount, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { dispatch as dispatchDoc } from "@/app/store/agent-document-store";
@@ -110,6 +110,19 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
     // during a reconnect (where in-flight turns can briefly appear in
     // both the persisted ring buffer and the live stream).
     onMount(() => {
+        // Mounted guard (codex P2 on PR #742). If the pane is closed
+        // while either RPC round-trip is in flight, AgentPresentationView
+        // unregisters the pane-state slot in its own onCleanup, and any
+        // post-await `dispatchPane` below would throw because the
+        // store rejects dispatches against unregistered panes. Track
+        // mounted via a closure flag and bail before each post-await
+        // dispatch. Both the success path (InitReady + HistoryLoaded)
+        // and the error path (InitFailed) need the guard.
+        let mounted = true;
+        onCleanup(() => {
+            mounted = false;
+        });
+
         // Init lifecycle (issue #728 gap 1): dispatch InitStart before the
         // fetch, InitReady on success, InitFailed on error. The reducer
         // gates TurnStart on initPhase === "ready" so we don't accept
@@ -121,6 +134,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     block_id: opts.blockId,
                     filename: "output",
                 }, { timeout: 5000 });
+                if (!mounted) return;
 
                 const total = countResp?.count ?? 0;
                 if (total === 0) {
@@ -137,6 +151,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     offset,
                     limit,
                 }, { timeout: 15000 });
+                if (!mounted) return;
 
                 const nodes = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat());
                 if (nodes.length > 0) {
@@ -155,6 +170,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 opts.log("history", `loaded ${nodes.length} of ${available} previous messages`);
                 dispatchPane(opts.blockId, { type: "InitReady" });
             } catch (err: any) {
+                if (!mounted) return;
                 // Non-fatal — fresh session or backend not ready yet.
                 // Surface the failure to the reducer so it can gate
                 // turn-start and the UI can render an error state, then

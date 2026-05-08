@@ -27,7 +27,7 @@ import { type Accessor, createMemo, createSignal, onCleanup } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
-import { dispatch as dispatchPane } from "@/app/store/agent-pane-state-store";
+import { dispatch as dispatchPane, snapshot as panePaneSnapshot } from "@/app/store/agent-pane-state-store";
 import { buildRuntimeArgs, getRuntimeConfig } from "../buildRuntimeArgs";
 import { dispatchSlashCommand } from "../commands/dispatch";
 import { buildRegistry } from "../commands/registry";
@@ -232,6 +232,21 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         if (trimmed.startsWith("/")) {
             const outcome = await dispatchSlashCommand(trimmed, registry(), buildCommandContext());
             if (outcome.kind === "handled") return;
+        }
+
+        // Init guard (issue #728 gap 1, codex P2 on PR #742). The
+        // reducer's TurnStart handler already suppresses turnActive
+        // while initPhase === "loading", but that only stops the local
+        // UI state — without this check, the message still gets queued
+        // into pending AND sent over AgentInputCommand. If the backend
+        // accepts before InitReady fires, the accepted-event TurnStart
+        // is also suppressed, leaving the UI showing no active turn
+        // while the agent IS processing. Bail early here so neither
+        // happens.
+        const ps = panePaneSnapshot(opts.blockId);
+        if (ps?.initPhase === "loading") {
+            opts.log("send", "send blocked: history still loading", "warn");
+            return;
         }
 
         // Stable id shared between the pending entry and the backend's
