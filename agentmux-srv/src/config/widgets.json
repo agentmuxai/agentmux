@@ -89,6 +89,17 @@
             }
         }
     },
+    "defwidget@identity": {
+        "display:order": 8,
+        "icon": "user",
+        "label": "identity",
+        "description": "Manage Identity bundles — named credential sets selectable at launch",
+        "blockdef": {
+            "meta": {
+                "view": "identity"
+            }
+        }
+    },
     "defwidget@help": {
         "display:order": 8,
         "icon": "circle-question",
