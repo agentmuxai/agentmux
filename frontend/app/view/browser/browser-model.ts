@@ -44,12 +44,13 @@ export class BrowserViewModel implements ViewModel {
     titleAtom: Accessor<string> = this._title[0];
     setTitle = this._title[1];
 
-    // Favicon URL surfaced from CEF's DisplayHandler::OnFaviconUrlChange
-    // event. Empty string → header falls back to the "globe" font icon.
-    // Cleared at the start of every navigate() so the loading state
-    // doesn't show the previous page's favicon. The new favicon URL
-    // arrives mid-load via `browser-pane-favicon-change` and re-renders
-    // the header icon. See docs/specs/browser-pane-title-favicon.md.
+    // Favicon URL — derived from the page URL's origin in the
+    // `browser-pane-nav-state` handler (`${origin}/favicon.ico`), not
+    // from a separate CEF callback. See docs/specs/browser-pane-title-favicon.md
+    // (favicon tradeoff section). Empty string → the viewIcon memo
+    // returns "globe" for the fallback. Cleared at navigate() start
+    // so the loading state shows the globe instead of the prior page's
+    // icon; the new derived URL is set when the nav-state event lands.
     private _faviconUrl = createSignal<string>("");
     faviconUrlAtom: Accessor<string> = this._faviconUrl[0];
     setFaviconUrl = this._faviconUrl[1];

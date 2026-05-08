@@ -10,9 +10,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock every platform-layer module the model touches BEFORE import.
 // vi.mock is hoisted, so the mocks are in place when browser-model imports them.
+// Capture every listenEvent registration keyed by event name, so tests
+// can simulate backend events arriving (favicon derivation, title push).
+const __eventHandlers: Record<string, ((payload: any) => void)[]> = {};
+function __dispatch(eventName: string, payload: any): void {
+    for (const h of __eventHandlers[eventName] ?? []) h(payload);
+}
+function __resetHandlers(): void {
+    for (const k of Object.keys(__eventHandlers)) delete __eventHandlers[k];
+}
 vi.mock("@/app/platform/ipc", () => ({
     invokeCommand: vi.fn(() => Promise.resolve()),
-    listenEvent: vi.fn(() => Promise.resolve(() => {})),
+    listenEvent: vi.fn((eventName: string, cb: (payload: any) => void) => {
+        (__eventHandlers[eventName] ??= []).push(cb);
+        return Promise.resolve(() => {
+            __eventHandlers[eventName] = (__eventHandlers[eventName] ?? []).filter((h) => h !== cb);
+        });
+    }),
 }));
 
 vi.mock("@/app/store/rpc-api", () => ({
@@ -143,6 +157,7 @@ describe("BrowserViewModel lifecycle gating", () => {
 describe("BrowserViewModel title + favicon", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        __resetHandlers();
     });
 
     it("viewName falls back to 'Browser' when title is empty", () => {
@@ -189,5 +204,85 @@ describe("BrowserViewModel title + favicon", () => {
         vm.setTitle("Previous Page");
         vm.navigate("https://new.example.com/page");
         expect(vm.titleAtom()).toBe("Previous Page");
+    });
+
+    it("nav-state event derives favicon from URL origin", () => {
+        const vm = makeVM();
+        __dispatch("browser-pane-nav-state", {
+            block_id: "test-block-id",
+            url: "https://example.com/some/deep/path?q=1",
+        });
+        expect(vm.faviconUrlAtom()).toBe("https://example.com/favicon.ico");
+        expect(vm.urlAtom()).toBe("https://example.com/some/deep/path?q=1");
+    });
+
+    it("nav-state event for a subdomain uses that subdomain's origin", () => {
+        const vm = makeVM();
+        __dispatch("browser-pane-nav-state", {
+            block_id: "test-block-id",
+            url: "https://docs.example.com/foo",
+        });
+        expect(vm.faviconUrlAtom()).toBe("https://docs.example.com/favicon.ico");
+    });
+
+    it("nav-state event with about:blank clears favicon (origin === 'null')", () => {
+        const vm = makeVM();
+        vm.setFaviconUrl("https://stale.example.com/favicon.ico");
+        __dispatch("browser-pane-nav-state", {
+            block_id: "test-block-id",
+            url: "about:blank",
+        });
+        expect(vm.faviconUrlAtom()).toBe("");
+    });
+
+    it("nav-state event with malformed URL clears favicon and does not throw", () => {
+        const vm = makeVM();
+        vm.setFaviconUrl("https://stale.example.com/favicon.ico");
+        expect(() =>
+            __dispatch("browser-pane-nav-state", {
+                block_id: "test-block-id",
+                url: "::not-a-url::",
+            })
+        ).not.toThrow();
+        expect(vm.faviconUrlAtom()).toBe("");
+    });
+
+    it("nav-state event for a different block_id is ignored", () => {
+        const vm = makeVM();
+        vm.setFaviconUrl("https://before.example.com/favicon.ico");
+        __dispatch("browser-pane-nav-state", {
+            block_id: "some-other-block",
+            url: "https://other.example.com/",
+        });
+        expect(vm.faviconUrlAtom()).toBe("https://before.example.com/favicon.ico");
+    });
+
+    it("title-change event sets the title atom", () => {
+        const vm = makeVM();
+        __dispatch("browser-pane-title-change", {
+            block_id: "test-block-id",
+            title: "Live Page Title",
+        });
+        expect(vm.titleAtom()).toBe("Live Page Title");
+    });
+
+    it("title-change event with empty title falls back to 'Browser'", () => {
+        const vm = makeVM();
+        vm.setTitle("Stale");
+        __dispatch("browser-pane-title-change", {
+            block_id: "test-block-id",
+            title: "",
+        });
+        expect(vm.viewName()).toBe("Browser");
+    });
+
+    it("title-change event for a different block_id is ignored", () => {
+        const vm = makeVM();
+        vm.setTitle("Mine");
+        __dispatch("browser-pane-title-change", {
+            block_id: "some-other-block",
+            title: "Theirs",
+        });
+        expect(vm.titleAtom()).toBe("Mine");
     });
 });
