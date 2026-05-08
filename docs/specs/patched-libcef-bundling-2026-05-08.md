@@ -168,9 +168,11 @@ For non-maintainers contributing without local libcef builds, the resolver's fal
 
 ## Design decisions
 
-### D1. Three-tier resolution order, env var first
+### D1. Three-tier resolution order, env var first, env var is STRICT
 
-Env var wins so a maintainer with multiple cef builds can switch between them without moving directories. Default path (`~/cef-build/...`) wins when env var is unset because that's the canonical layout the build doc produces. cef-dll-sys cache is the floor — anyone who runs `cargo build` gets *something* that boots, even if drag is broken.
+Env var wins so a maintainer with multiple cef builds can switch between them without moving directories. **A set-but-invalid env var is a hard error, not a soft signal.** The original draft of this spec treated `AGENTMUX_CEF_RUNTIME_DIR=/typo/path` as falling through to the next candidate — that was wrong: in CI / release packaging the env var is the only signal that the patched libcef should be used, and a silent fallback would produce a successful but drag-broken bundle. Codex P2 on PR #743 caught the regression risk; the implementation now exits 1 on a set-but-unusable env var.
+
+Default path (`~/cef-build/...`) wins when env var is unset because that's the canonical layout the build doc produces. cef-dll-sys cache is the floor — anyone who runs `cargo build` gets *something* that boots, even if drag is broken.
 
 ### D2. Warn, don't fail, on size heuristic
 
@@ -222,7 +224,7 @@ Today the patched libcef has no version of its own — it's whatever `5ab41b6` o
 
 ## Test plan
 
-- [ ] `bash scripts/resolve-cef-runtime.sh` with `AGENTMUX_CEF_RUNTIME_DIR=/tmp/no-such-dir` falls through to next candidate (silently — env var pointing at a nonexistent dir is a soft signal, treat as unset).
+- [ ] `bash scripts/resolve-cef-runtime.sh` with `AGENTMUX_CEF_RUNTIME_DIR=/tmp/no-such-dir` exits 1 with a clear error pointing at the typo. **Does not silently fall through** — Codex P2 on #743 (a set-but-invalid env var would otherwise produce a drag-broken bundle in CI).
 - [ ] With env var set to a valid patched build dir, resolver prints that path and exits 0.
 - [ ] Without env var, resolver finds `~/cef-build/.../Release_GN_x64` and prints it.
 - [ ] After `cargo clean -p agentmux-cef && cargo build --release -p agentmux-cef && task bundle`, dist/cef/libcef.so is the patched 613 MB version, not cef-dll-sys's 1.3 GB upstream.
