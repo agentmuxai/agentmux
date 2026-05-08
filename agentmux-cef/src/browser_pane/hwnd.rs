@@ -228,9 +228,10 @@ pub unsafe fn install_browser_pane_focus_redirect(
             // no CEF focus callback, leaving a flag armed forever.
             if let Some(ctx) = find_context(hwnd) {
                 if let Some(state) = ctx.state.upgrade() {
+                    let block_id_short: String = ctx.block_id.chars().take(7).collect();
                     tracing::info!(
-                        block_id = %ctx.block_id,
-                        "[pane-wndproc] WM_LBUTTONDOWN — emitting browser-pane-clicked",
+                        "[browser-pane:diag][{}] emit-clicked",
+                        block_id_short,
                     );
                     crate::events::emit_event_from_state(
                         &state,

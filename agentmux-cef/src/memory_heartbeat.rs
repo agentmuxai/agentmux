@@ -26,6 +26,13 @@ pub fn start() {
 /// Update the host log pointer file when the UTC date changes (midnight rollover).
 /// tracing_appender::rolling::daily creates a new file at UTC midnight, so the
 /// pointer must track the new date suffix.
+///
+/// Two pointers are written, matching `main::init_logging`:
+///   1. Local: `<log_dir>/<pointer_name>` with just the basename.
+///   2. Global: `<root>/logs/<pointer_name>` with the absolute path so
+///      legacy tooling (`muxlog host`) can resolve from outside the
+///      instance dir. Works for portable, installed, and dev modes —
+///      log_dir comes from `AGENTMUX_LOG_DIR`, set by data_paths.rs.
 fn refresh_log_pointer(last_date: &mut String) {
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     if *last_date == today {
@@ -33,13 +40,36 @@ fn refresh_log_pointer(last_date: &mut String) {
     }
     *last_date = today.clone();
     let version = env!("CARGO_PKG_VERSION");
-    let log_dir = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".agentmux")
-        .join("logs");
+    // Use the AGENTMUX_LOG_DIR exported by data_paths.rs. Falls back to
+    // the legacy hardcoded location only as a safety net — by the time
+    // memory_heartbeat starts, init_logging has already run with the
+    // resolved log_dir, so this env var should always be present.
+    let log_dir = std::env::var_os("AGENTMUX_LOG_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_default()
+                .join(".agentmux")
+                .join("logs")
+        });
     let current_filename = format!("agentmux-host-v{}.log.{}", version, today);
+    let absolute_path = log_dir.join(&current_filename);
     let pointer_name = format!("current-host-v{}.path", version);
+
     let _ = std::fs::write(log_dir.join(&pointer_name), &current_filename);
+
+    if let Some(global_logs_dir) = log_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+        .map(|p| p.join("logs"))
+    {
+        let _ = std::fs::create_dir_all(&global_logs_dir);
+        let _ = std::fs::write(
+            global_logs_dir.join(&pointer_name),
+            absolute_path.to_string_lossy().as_bytes(),
+        );
+    }
 }
 
 #[cfg(target_os = "windows")]
