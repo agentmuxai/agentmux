@@ -41,6 +41,7 @@ export function TableBlock(props: TableBlockProps): JSX.Element {
     return (
         <div class="table-block group relative my-4 overflow-x-auto rounded-lg border border-border">
             <button
+                type="button"
                 class={cn(
                     "absolute right-2 top-2 z-10 rounded border border-border px-2 py-0.5",
                     "text-xs text-muted opacity-0 transition-opacity group-hover:opacity-100",
