@@ -21,6 +21,7 @@ import {
     AgentPaneCommand,
     AgentPaneEvent,
     AgentPaneState,
+    type InitPhase,
     initialState,
 } from "./agent-pane-state/types";
 import { type CommandSource, recordDispatch } from "./command-source";
@@ -39,6 +40,8 @@ export interface AgentPaneProjections {
     turnActive: (next: boolean) => void;
     stopping: (next: boolean) => void;
     pending: (next: PendingMessage[]) => void;
+    /** Init phase — drives the "Loading history…" overlay (issue #728 gap 1). */
+    initPhase?: (next: InitPhase) => void;
 }
 
 interface Slot {
@@ -106,6 +109,7 @@ export function dispatch(
     if (slot.state.turnActive !== prev.turnActive) slot.proj.turnActive(slot.state.turnActive);
     if (slot.state.stopping !== prev.stopping) slot.proj.stopping(slot.state.stopping);
     if (slot.state.pending !== prev.pending) slot.proj.pending(slot.state.pending);
+    if (slot.state.initPhase !== prev.initPhase) slot.proj.initPhase?.(slot.state.initPhase);
 
     for (const ev of result.events) eventSink(blockId, ev);
     recordDispatch({

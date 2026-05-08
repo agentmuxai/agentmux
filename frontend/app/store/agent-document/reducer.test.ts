@@ -13,6 +13,18 @@ const md = (id: string, content = id): DocumentNode => ({
     timestamp: 0,
 });
 
+/**
+ * Build a state with `nodes` AND a matching `nodeIdSet`. Required since
+ * issue #728 gap 4 made `nodeIdSet` part of `AgentDocumentState` — bare
+ * `{ ...initialState(), nodes: [...] }` would leave the index empty
+ * and break dedup invariants.
+ */
+const seed = (nodes: DocumentNode[]) => ({
+    ...initialState(),
+    nodes,
+    nodeIdSet: new Set(nodes.map((n) => n.id)),
+});
+
 describe("agent document reducer", () => {
     describe("HistoryLoaded", () => {
         it("prepends nodes onto an empty document", () => {
@@ -24,14 +36,14 @@ describe("agent document reducer", () => {
         });
 
         it("dedups against existing IDs", () => {
-            const start = { ...initialState(), nodes: [md("a"), md("b")] };
+            const start = seed([md("a"), md("b")]);
             const r = update(start, { type: "HistoryLoaded", nodes: [md("a"), md("h1")] });
             expect(r.state.nodes.map((n) => n.id)).toEqual(["h1", "a", "b"]);
             expect(r.events[0]).toMatchObject({ addedCount: 1, duplicatesDropped: 1 });
         });
 
         it("is a no-op when all incoming nodes are duplicates", () => {
-            const start = { ...initialState(), nodes: [md("a")] };
+            const start = seed([md("a")]);
             const r = update(start, { type: "HistoryLoaded", nodes: [md("a")] });
             expect(r.state).toBe(start); // referentially unchanged
         });
@@ -118,7 +130,7 @@ describe("agent document reducer", () => {
 
     describe("StreamTruncate suppression", () => {
         it("honors truncate when not yet started (loading-history phase)", () => {
-            const start = { ...initialState(), nodes: [md("h1")] };
+            const start = seed([md("h1")]);
             const r = update(start, { type: "StreamTruncate", reason: "fileop" }, 1000);
             expect(r.state.nodes).toEqual([]);
             expect(r.events[0]).toMatchObject({ type: "truncate-applied", clearedCount: 1 });
@@ -216,16 +228,129 @@ describe("agent document reducer", () => {
         });
     });
 
+    describe("nodeIdSet invariant (gap 4)", () => {
+        it("StreamFlush adds new node ids to nodeIdSet", () => {
+            const r = update(initialState(), {
+                type: "StreamFlush",
+                newNodes: [md("a"), md("b")],
+                updatedNodes: [],
+            });
+            expect([...r.state.nodeIdSet].sort()).toEqual(["a", "b"]);
+        });
+
+        it("HistoryLoaded adds prepended node ids to nodeIdSet", () => {
+            const r = update(initialState(), {
+                type: "HistoryLoaded",
+                nodes: [md("h1"), md("h2")],
+            });
+            expect([...r.state.nodeIdSet].sort()).toEqual(["h1", "h2"]);
+        });
+
+        it("UserClear resets nodeIdSet", () => {
+            const s0 = update(initialState(), {
+                type: "StreamFlush",
+                newNodes: [md("a"), md("b")],
+                updatedNodes: [],
+            }).state;
+            expect(s0.nodeIdSet.size).toBe(2);
+            const r = update(s0, { type: "UserClear" });
+            expect(r.state.nodeIdSet.size).toBe(0);
+        });
+
+        it("StreamTruncate (when honored) resets nodeIdSet", () => {
+            const s0 = update(initialState(), {
+                type: "StreamFlush",
+                newNodes: [md("a")],
+                updatedNodes: [],
+            }).state;
+            // Truncate before any session-active grace would kick in →
+            // honored unconditionally (sessionPhase still loading-history).
+            const r = update(s0, { type: "StreamTruncate", reason: "fileop" });
+            expect(r.state.nodeIdSet.size).toBe(0);
+        });
+
+        it("StreamFlush updates do not double-add to nodeIdSet on collision", () => {
+            const s0 = update(initialState(), {
+                type: "StreamFlush",
+                newNodes: [md("a")],
+                updatedNodes: [],
+            }).state;
+            const r = update(s0, {
+                type: "StreamFlush",
+                newNodes: [md("a", "v2")], // collides → in-place update
+                updatedNodes: [],
+            });
+            expect(r.state.nodeIdSet.size).toBe(1);
+        });
+    });
+
+    describe("Injectable truncate grace (gap 6)", () => {
+        it("respects opts.truncateGraceMs override", () => {
+            const start = update(initialState(), { type: "SessionStart", at: 0 }).state;
+            const withNodes = update(start, {
+                type: "StreamFlush",
+                newNodes: [md("a")],
+                updatedNodes: [],
+            }).state;
+            // With a 100ms grace override, a truncate at t=200 should
+            // suppress (200 > 100).
+            const r = update(
+                withNodes,
+                { type: "StreamTruncate", reason: "fileop" },
+                200,
+                { truncateGraceMs: 100 },
+            );
+            expect(r.events[0].type).toBe("truncate-suppressed");
+            expect(r.state.nodes).toHaveLength(1);
+        });
+
+        it("0ms grace makes any active truncate suppress immediately", () => {
+            const start = update(initialState(), { type: "SessionStart", at: 0 }).state;
+            const withNodes = update(start, {
+                type: "StreamFlush",
+                newNodes: [md("a")],
+                updatedNodes: [],
+            }).state;
+            const r = update(
+                withNodes,
+                { type: "StreamTruncate", reason: "fileop" },
+                1,
+                { truncateGraceMs: 0 },
+            );
+            expect(r.events[0].type).toBe("truncate-suppressed");
+        });
+
+        it("falls back to default grace when opts omitted", () => {
+            const start = update(initialState(), { type: "SessionStart", at: 1000 }).state;
+            const withNodes = update(start, {
+                type: "StreamFlush",
+                newNodes: [md("a")],
+                updatedNodes: [],
+            }).state;
+            // No opts → uses TRUNCATE_GRACE_MS default. Within window → honored.
+            const r = update(
+                withNodes,
+                { type: "StreamTruncate", reason: "fileop" },
+                1000 + TRUNCATE_GRACE_MS - 100,
+            );
+            expect(r.events[0].type).toBe("truncate-applied");
+        });
+    });
+
     describe("Purity", () => {
         it("does not mutate the input state", () => {
-            const start = { ...initialState(), nodes: [md("a")] };
-            const snapshot = JSON.parse(JSON.stringify(start));
+            const start = seed([md("a")]);
+            const snapshot = {
+                nodes: start.nodes.slice(),
+                ids: [...start.nodeIdSet],
+            };
             update(start, { type: "StreamFlush", newNodes: [md("b")], updatedNodes: [] });
-            expect(start).toEqual(snapshot);
+            expect(start.nodes).toEqual(snapshot.nodes);
+            expect([...start.nodeIdSet]).toEqual(snapshot.ids);
         });
 
         it("returns referentially same state when no work to do", () => {
-            const start = { ...initialState(), nodes: [md("a")] };
+            const start = seed([md("a")]);
             const r = update(start, { type: "StreamFlush", newNodes: [], updatedNodes: [] });
             expect(r.state).toBe(start);
         });

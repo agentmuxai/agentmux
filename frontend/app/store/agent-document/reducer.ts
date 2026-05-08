@@ -8,15 +8,16 @@
  * function, no I/O, snapshot input, return new state + audit events.
  * See docs/specs/agent-pane-document-reducer-2026-05-03.md.
  *
- * Indices (id → position) are derived per-command, not stored.
- * Doc sizes are bounded (~50–500 nodes typical, ~5k worst case) so
- * the rebuild cost is negligible vs. the simplicity of immutable state.
+ * `nodeIdSet` is maintained as a sibling to `nodes[]` so consumers
+ * (useAgentStream) can dedup new events without rebuilding the index
+ * on every mount. Issue #728 gap 4.
  */
 
 import type { DocumentNode } from "../../view/agent/types";
 import {
     AgentDocumentCommand,
     AgentDocumentState,
+    ReducerOptions,
     ReducerResult,
     TRUNCATE_GRACE_MS,
 } from "./types";
@@ -26,6 +27,8 @@ export function update(
     command: AgentDocumentCommand,
     /** Time injection for testability; defaults to Date.now(). */
     nowMs: number = Date.now(),
+    /** Optional reducer knobs (gap 6 — injectable truncate grace). */
+    opts?: ReducerOptions,
 ): ReducerResult {
     switch (command.type) {
         case "SessionStart":
@@ -48,15 +51,15 @@ export function update(
             if (command.nodes.length === 0) {
                 return { state, events: [] };
             }
-            const existingIds = idSet(state.nodes);
+            const nextIdSet = new Set(state.nodeIdSet);
             const fresh: DocumentNode[] = [];
             let duplicates = 0;
             for (const n of command.nodes) {
-                if (existingIds.has(n.id)) {
+                if (nextIdSet.has(n.id)) {
                     duplicates++;
                     continue;
                 }
-                existingIds.add(n.id);
+                nextIdSet.add(n.id);
                 fresh.push(n);
             }
             if (fresh.length === 0) {
@@ -68,7 +71,11 @@ export function update(
                 };
             }
             return {
-                state: { ...state, nodes: [...fresh, ...state.nodes] },
+                state: {
+                    ...state,
+                    nodes: [...fresh, ...state.nodes],
+                    nodeIdSet: nextIdSet,
+                },
                 events: [
                     {
                         type: "history-loaded",
@@ -118,6 +125,7 @@ export function update(
             // against the rebuild-while-pending race).
             let appendedNew = 0;
             let collidedAndUpdated = 0;
+            let nextIdSet: Set<string> | null = null;
             for (const n of command.newNodes) {
                 const idx = indexById.get(n.id);
                 if (idx != null) {
@@ -129,6 +137,8 @@ export function update(
                 const arr = ensureClone();
                 arr.push(n);
                 indexById.set(n.id, arr.length - 1);
+                if (!nextIdSet) nextIdSet = new Set(state.nodeIdSet);
+                nextIdSet.add(n.id);
                 appendedNew++;
             }
 
@@ -136,7 +146,11 @@ export function update(
                 return { state, events: [] };
             }
             return {
-                state: { ...state, nodes: next },
+                state: {
+                    ...state,
+                    nodes: next,
+                    nodeIdSet: nextIdSet ?? state.nodeIdSet,
+                },
                 events: [
                     {
                         type: "stream-flushed",
@@ -150,7 +164,8 @@ export function update(
         }
 
         case "StreamTruncate": {
-            if (shouldSuppressTruncate(state, nowMs)) {
+            const graceMs = opts?.truncateGraceMs ?? TRUNCATE_GRACE_MS;
+            if (shouldSuppressTruncate(state, nowMs, graceMs)) {
                 return {
                     state,
                     events: [
@@ -170,7 +185,7 @@ export function update(
                 return { state, events: [] };
             }
             return {
-                state: { ...state, nodes: [] },
+                state: { ...state, nodes: [], nodeIdSet: new Set<string>() },
                 events: [
                     { type: "truncate-applied", reason: command.reason, clearedCount: cleared },
                 ],
@@ -180,17 +195,14 @@ export function update(
         case "UserClear": {
             const cleared = state.nodes.length;
             return {
-                state: cleared === 0 ? state : { ...state, nodes: [] },
+                state:
+                    cleared === 0
+                        ? state
+                        : { ...state, nodes: [], nodeIdSet: new Set<string>() },
                 events: [{ type: "user-cleared", clearedCount: cleared }],
             };
         }
     }
-}
-
-function idSet(nodes: DocumentNode[]): Set<string> {
-    const s = new Set<string>();
-    for (const n of nodes) s.add(n.id);
-    return s;
 }
 
 /**
@@ -205,9 +217,13 @@ function idSet(nodes: DocumentNode[]): Set<string> {
  * default is to ignore it and keep the conversation visible. /clear is
  * the explicit way to wipe.
  */
-function shouldSuppressTruncate(state: AgentDocumentState, now: number): boolean {
+function shouldSuppressTruncate(
+    state: AgentDocumentState,
+    now: number,
+    graceMs: number,
+): boolean {
     if (state.sessionPhase !== "active") return false;
     if (state.nodes.length === 0) return false;
     if (state.sessionStartedAt == null) return false;
-    return now - state.sessionStartedAt > TRUNCATE_GRACE_MS;
+    return now - state.sessionStartedAt > graceMs;
 }

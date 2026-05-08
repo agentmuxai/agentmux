@@ -124,6 +124,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             turnActive: a.turnActiveAtom[1],
             stopping: a.stoppingAtom[1],
             pending: a.pendingMessagesAtom[1],
+            initPhase: a.initPhaseAtom[1],
         });
         onCleanup(() => unregisterAgentPaneStatePane(model.blockId));
     }
