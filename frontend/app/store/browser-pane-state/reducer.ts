@@ -3,9 +3,9 @@
 
 /**
  * Pure reducer for the browser-pane state slice (slice #9, Phases 3a +
- * 3b + 3c). See `docs/specs/browser-pane-reducer-roadmap.md` and the
- * conventions doc `frontend-reducer-conventions-2026-05-03.md`. This
- * module is the exact mirror of slice #4's reducer pattern
+ * 3b + 3c + 3e). See `docs/specs/browser-pane-reducer-roadmap.md` and
+ * the conventions doc `frontend-reducer-conventions-2026-05-03.md`.
+ * This module is the exact mirror of slice #4's reducer pattern
  * (agent-pane-state) — same `update(state, command) → { state, events }`
  * shape, same idempotency rules, same no-throw policy.
  *
@@ -24,12 +24,16 @@
  *      the current state, return the unchanged state with no event.
  *      An omitted field leaves its cell alone (the host can emit
  *      partial updates).
+ *   6. `TitleChanged` folds empty/whitespace input to
+ *      `TITLE_FALLBACK` so `state.title` is never blank.
+ *      Idempotent on identical (post-fold) values.
  */
 
 import {
     BrowserPaneCommand,
     BrowserPaneState,
     ReducerResult,
+    TITLE_FALLBACK,
 } from "./types";
 
 export function update(
@@ -108,6 +112,15 @@ export function update(
                         canGoForward: nextForward,
                     },
                 ],
+            };
+        }
+
+        case "TitleChanged": {
+            const next = command.title.trim() === "" ? TITLE_FALLBACK : command.title;
+            if (next === state.title) return { state, events: [] };
+            return {
+                state: { ...state, title: next },
+                events: [{ type: "title-changed", title: next }],
             };
         }
 
