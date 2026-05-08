@@ -3,9 +3,18 @@
 
 import { describe, expect, it } from "vitest";
 import { update } from "./reducer";
-import { initialState } from "./types";
+import { initialState, STUCK_THRESHOLD_MS } from "./types";
 
 const mk = () => initialState("test-agent");
+/**
+ * Convenience: bring a fresh state up to the "ready + subscribed" baseline
+ * that most turn-related tests assume. Issue #728 introduced an init-phase
+ * gate, so subscribing alone no longer permits `TurnStart`.
+ */
+const ready = (atMs = 100) => {
+    const s0 = update(mk(), { type: "InitReady" }).state;
+    return update(s0, { type: "StreamSubscribe", at: atMs }).state;
+};
 
 describe("agent-pane-state reducer", () => {
     describe("Stream lifecycle", () => {
@@ -17,7 +26,7 @@ describe("agent-pane-state reducer", () => {
         });
 
         it("StreamUnsubscribe clears active and force-clears turnActive", () => {
-            const s0 = update(mk(), { type: "StreamSubscribe", at: 100 }).state;
+            const s0 = ready(100);
             const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
             expect(s1.turnActive).toBe(true);
             const r = update(s1, { type: "StreamUnsubscribe", at: 200 });
@@ -51,7 +60,7 @@ describe("agent-pane-state reducer", () => {
         });
 
         it("TurnStart while active sets turnActive + clears stale stats", () => {
-            const s0 = update(mk(), { type: "StreamSubscribe", at: 100 }).state;
+            const s0 = ready(100);
             const sWithStats = { ...s0, sessionStats: { input_tokens: 50, output_tokens: 100 } };
             const r = update(sWithStats, { type: "TurnStart", at: 110 });
             expect(r.state.turnActive).toBe(true);
@@ -59,7 +68,7 @@ describe("agent-pane-state reducer", () => {
         });
 
         it("TurnEnd clears tool/tokens/turnActive AND stopping in one shot", () => {
-            const s0 = update(mk(), { type: "StreamSubscribe", at: 100 }).state;
+            const s0 = ready(100);
             const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
             const s2 = update(s1, { type: "ToolStart", name: "Read" }).state;
             const s3 = update(s2, { type: "TokensIn", input: 50 }).state;
@@ -83,7 +92,7 @@ describe("agent-pane-state reducer", () => {
         });
 
         it("TurnEnd with explicit stats merges live token totals", () => {
-            const s0 = update(mk(), { type: "StreamSubscribe", at: 100 }).state;
+            const s0 = ready(100);
             const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
             const s2 = update(s1, { type: "TokensIn", input: 80 }).state;
             const r = update(s2, {
@@ -98,7 +107,7 @@ describe("agent-pane-state reducer", () => {
         });
 
         it("TurnReset clears turn-scoped state but keeps streaming + pending", () => {
-            const s0 = update(mk(), { type: "StreamSubscribe", at: 100 }).state;
+            const s0 = ready(100);
             const s1 = update(s0, {
                 type: "PendingMessageQueued",
                 id: "p1",
@@ -155,7 +164,7 @@ describe("agent-pane-state reducer", () => {
         });
 
         it("TurnEnd clears stopping (the normal path — no explicit StopApplied needed)", () => {
-            const s0 = update(mk(), { type: "StreamSubscribe", at: 100 }).state;
+            const s0 = ready(100);
             const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
             const s2 = update(s1, { type: "RequestStop", at: 120 }).state;
             const r = update(s2, { type: "TurnEnd", stats: null });
@@ -217,6 +226,148 @@ describe("agent-pane-state reducer", () => {
             expect(s2.pending.map((m) => m.id)).toEqual(["a", "b", "c"]);
             const r = update(s2, { type: "PendingMessageAccepted", id: "b" });
             expect(r.state.pending.map((m) => m.id)).toEqual(["a", "c"]);
+        });
+    });
+
+    describe("Init phase (gap 1)", () => {
+        it("starts in 'loading'", () => {
+            expect(mk().initPhase).toBe("loading");
+            expect(mk().initError).toBe(null);
+        });
+
+        it("InitReady advances to ready and clears error", () => {
+            const s0 = update(mk(), { type: "InitFailed", reason: "boom" }).state;
+            expect(s0.initPhase).toBe("error");
+            expect(s0.initError).toBe("boom");
+            const r = update(s0, { type: "InitReady" });
+            expect(r.state.initPhase).toBe("ready");
+            expect(r.state.initError).toBe(null);
+            expect(r.events[0]).toMatchObject({ type: "init-ready" });
+        });
+
+        it("InitFailed captures reason", () => {
+            const r = update(mk(), { type: "InitFailed", reason: "RPC timeout" });
+            expect(r.state.initPhase).toBe("error");
+            expect(r.state.initError).toBe("RPC timeout");
+            expect(r.events[0]).toMatchObject({ type: "init-failed", reason: "RPC timeout" });
+        });
+
+        it("InitStart while already loading is a no-op (same ref)", () => {
+            const start = mk();
+            const r = update(start, { type: "InitStart" });
+            expect(r.state).toBe(start);
+            expect(r.events).toEqual([]);
+        });
+
+        it("TurnStart suppressed while initPhase === 'loading'", () => {
+            // Subscribed but not InitReady — gap 1 invariant.
+            const s0 = update(mk(), { type: "StreamSubscribe", at: 100 }).state;
+            const r = update(s0, { type: "TurnStart", at: 110 });
+            expect(r.state.turnActive).toBe(false);
+            expect(r.events[0]).toMatchObject({
+                type: "turn-start-suppressed",
+                reason: "init still loading",
+            });
+        });
+
+        it("TurnStart permitted on init error (fail-open)", () => {
+            const s0 = update(mk(), { type: "InitFailed", reason: "load failed" }).state;
+            const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
+            const r = update(s1, { type: "TurnStart", at: 110 });
+            expect(r.state.turnActive).toBe(true);
+        });
+    });
+
+    describe("Stream watchdog (gap 3)", () => {
+        it("StreamWatchdogTick is no-op when stream inactive", () => {
+            const start = mk();
+            const r = update(start, { type: "StreamWatchdogTick", nowMs: 100_000 });
+            expect(r.state).toBe(start);
+            expect(r.events).toEqual([]);
+        });
+
+        it("StreamWatchdogTick is no-op when no event seen yet", () => {
+            // StreamSubscribe sets lastEventMs, so manually clear it to
+            // exercise the "stream active but no events" branch.
+            const s0 = update(mk(), { type: "StreamSubscribe", at: 100 }).state;
+            const cleared = { ...s0, lastEventMs: null };
+            const r = update(cleared, { type: "StreamWatchdogTick", nowMs: 200_000 });
+            expect(r.state).toBe(cleared);
+            expect(r.events).toEqual([]);
+        });
+
+        it("StreamWatchdogTick below threshold is silent", () => {
+            const s0 = ready(1_000); // lastEventMs = 1000 from StreamSubscribe
+            const r = update(s0, { type: "StreamWatchdogTick", nowMs: 10_000 });
+            expect(r.events).toEqual([]);
+        });
+
+        it("StreamWatchdogTick at threshold emits stream-stuck", () => {
+            const s0 = ready(0);
+            const tick = STUCK_THRESHOLD_MS + 1_000;
+            const r = update(s0, { type: "StreamWatchdogTick", nowMs: tick });
+            expect(r.events).toHaveLength(1);
+            expect(r.events[0]).toMatchObject({
+                type: "stream-stuck",
+                idleSinceMs: tick,
+                thresholdMs: STUCK_THRESHOLD_MS,
+            });
+            // Watchdog never mutates state.
+            expect(r.state).toBe(s0);
+        });
+
+        it("ToolStart bumps lastEventMs (resets watchdog clock)", () => {
+            const s0 = ready(1_000);
+            const r = update(s0, { type: "ToolStart", name: "Read" }, 5_000);
+            expect(r.state.lastEventMs).toBe(5_000);
+        });
+    });
+
+    describe("Pending message expiry (gap 2)", () => {
+        it("PendingMessageExpired removes the entry by id", () => {
+            const s0 = update(mk(), {
+                type: "PendingMessageQueued",
+                id: "x",
+                text: "hi",
+                at: 1_000,
+            }).state;
+            const r = update(s0, { type: "PendingMessageExpired", id: "x" }, 31_000);
+            expect(r.state.pending).toHaveLength(0);
+            expect(r.events[0]).toMatchObject({
+                type: "pending-expired",
+                id: "x",
+                queuedAt: 1_000,
+                ageMs: 30_000,
+                wasPresent: true,
+            });
+        });
+
+        it("PendingMessageExpired for unknown id is idempotent no-op", () => {
+            const start = mk();
+            const r = update(start, { type: "PendingMessageExpired", id: "ghost" });
+            expect(r.state).toBe(start);
+            expect(r.events[0]).toMatchObject({
+                type: "pending-expired",
+                id: "ghost",
+                wasPresent: false,
+            });
+        });
+
+        it("PendingMessageExpired after Accepted is harmless (already removed)", () => {
+            const s0 = update(mk(), {
+                type: "PendingMessageQueued",
+                id: "y",
+                text: "hi",
+                at: 100,
+            }).state;
+            const s1 = update(s0, { type: "PendingMessageAccepted", id: "y" }).state;
+            // Race: timeout fires after acceptance.
+            const r = update(s1, { type: "PendingMessageExpired", id: "y" });
+            expect(r.state.pending).toHaveLength(0);
+            expect(r.events[0]).toMatchObject({
+                type: "pending-expired",
+                wasPresent: false,
+            });
         });
     });
 

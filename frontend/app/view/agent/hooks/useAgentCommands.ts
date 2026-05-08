@@ -23,11 +23,11 @@
  * flags (permission mode, model, effort) take effect on this turn.
  */
 
-import { type Accessor, createMemo, createSignal } from "solid-js";
+import { type Accessor, createMemo, createSignal, onCleanup } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
-import { dispatch as dispatchPane } from "@/app/store/agent-pane-state-store";
+import { dispatch as dispatchPane, snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import { buildRuntimeArgs, getRuntimeConfig } from "../buildRuntimeArgs";
 import { dispatchSlashCommand } from "../commands/dispatch";
 import { buildRegistry } from "../commands/registry";
@@ -36,6 +36,14 @@ import type { ProviderDefinition } from "../providers";
 import type { SignalPair } from "../state";
 import type { DocumentNode } from "../types";
 import type { LogFn } from "./useAgentControllerStatus";
+
+/**
+ * How long a pending message can sit unacknowledged before the reducer
+ * gives up and removes it. 30s covers normal backend turnaround
+ * (typically <2s on local sockets) with margin for transient hiccups.
+ * Issue #728 gap 2.
+ */
+const PENDING_TIMEOUT_MS = 30_000;
 
 export interface UseAgentCommandsOptions {
     blockId: string;
@@ -138,6 +146,15 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     // registered first and can't be shadowed (see registry.register).
     const registry = createMemo(() => buildRegistry(opts.provider()));
 
+    // Pending-message expiry timers — cleared on pane unmount so the
+    // delayed dispatch doesn't hit an unregistered slot and throw.
+    // Issue #728 gap 2 / PR #742 ReAgent P1.
+    const pendingExpiryTimers = new Set<ReturnType<typeof setTimeout>>();
+    onCleanup(() => {
+        for (const id of pendingExpiryTimers) clearTimeout(id);
+        pendingExpiryTimers.clear();
+    });
+
     // ── Inline picker state ───────────────────────────────────────────
     // The dispatcher calls `ctx.openPicker(spec)` for required enum/
     // dynamic args; this hook hands back a Promise that resolves when
@@ -217,6 +234,21 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             if (outcome.kind === "handled") return;
         }
 
+        // Init guard (issue #728 gap 1, codex P2 on PR #742). The
+        // reducer's TurnStart handler already suppresses turnActive
+        // while initPhase === "loading", but that only stops the local
+        // UI state — without this check, the message still gets queued
+        // into pending AND sent over AgentInputCommand. If the backend
+        // accepts before InitReady fires, the accepted-event TurnStart
+        // is also suppressed, leaving the UI showing no active turn
+        // while the agent IS processing. Bail early here so neither
+        // happens.
+        const ps = paneSnapshot(opts.blockId);
+        if (ps?.initPhase === "loading") {
+            opts.log("send", "send blocked: history still loading", "warn");
+            return;
+        }
+
         // Stable id shared between the pending entry and the backend's
         // `message_id` field on `AgentInputCommand`. The backend echoes
         // it via `agent-message-accepted` when it picks up this config,
@@ -263,6 +295,13 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             }
         }
 
+        // Kick off the send AND start the expiry clock together, so the
+        // 30s timer measures backend acceptance time only — not the
+        // pre-send cmd:args metadata round-trip. Codex P2 on PR #752
+        // caught the prior order: a slow runtime-args update could
+        // burn most of the 30s before AgentInputCommand even fired,
+        // so the expiry would remove the pending entry minutes before
+        // the agent had a chance to accept it.
         RpcApi.AgentInputCommand(TabRpcClient, {
             blockid: opts.blockId,
             message,
@@ -277,6 +316,21 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 id: messageId,
             });
         });
+
+        // Pending acceptance timeout (issue #728 gap 2). The reducer
+        // removes the ghost entry if the backend doesn't echo
+        // `agent-message-accepted` within PENDING_TIMEOUT_MS of the
+        // send. Idempotent when the message lands first.
+        // Tracked + cleared on pane unmount to avoid dispatching against
+        // an unregistered slot (which throws).
+        const expiryId = setTimeout(() => {
+            pendingExpiryTimers.delete(expiryId);
+            dispatchPane(opts.blockId, {
+                type: "PendingMessageExpired",
+                id: messageId,
+            });
+        }, PENDING_TIMEOUT_MS);
+        pendingExpiryTimers.add(expiryId);
     };
 
     // Delegate to the model so the pane-frame header button and any other

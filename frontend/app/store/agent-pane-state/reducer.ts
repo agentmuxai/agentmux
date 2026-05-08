@@ -8,23 +8,59 @@
  *
  * Invariants enforced:
  *   1. turnActive cannot be set while streaming inactive (suppressed).
- *   2. stopping clears automatically on TurnEnd / TurnReset.
- *   3. currentTool and turnTokens clear on TurnEnd / TurnReset.
- *   4. pending FIFO; accepting/rejecting unknown ids is idempotent no-op.
- *   5. StreamFlushObserved is a no-op when streaming inactive.
+ *   2. turnActive cannot be set while initPhase !== "ready" (suppressed).
+ *   3. stopping clears automatically on TurnEnd / TurnReset.
+ *   4. currentTool and turnTokens clear on TurnEnd / TurnReset.
+ *   5. pending FIFO; accepting/rejecting/expiring unknown ids is no-op.
+ *   6. StreamFlushObserved is a no-op when streaming inactive.
+ *   7. StreamWatchdogTick is a no-op when streaming inactive or
+ *      lastEventMs is null (no events seen yet).
  */
 
 import {
     AgentPaneCommand,
     AgentPaneState,
     ReducerResult,
+    STUCK_THRESHOLD_MS,
 } from "./types";
 
 export function update(
     state: AgentPaneState,
     command: AgentPaneCommand,
+    /**
+     * Time injection for testability + watchdog determinism. Used by
+     * tool/token transitions to bump `lastEventMs` (the stuck-stream
+     * watchdog clock). Defaults to `Date.now()` so existing callers
+     * don't need to thread a timestamp.
+     */
+    nowMs: number = Date.now(),
 ): ReducerResult {
     switch (command.type) {
+        // ── Init lifecycle (gap 1) ─────────────────────────────────
+        case "InitStart": {
+            if (state.initPhase === "loading") return { state, events: [] };
+            return {
+                state: { ...state, initPhase: "loading", initError: null },
+                events: [{ type: "init-started" }],
+            };
+        }
+
+        case "InitReady": {
+            if (state.initPhase === "ready") return { state, events: [] };
+            return {
+                state: { ...state, initPhase: "ready", initError: null },
+                events: [{ type: "init-ready" }],
+            };
+        }
+
+        case "InitFailed": {
+            return {
+                state: { ...state, initPhase: "error", initError: command.reason },
+                events: [{ type: "init-failed", reason: command.reason }],
+            };
+        }
+
+        // ── Stream lifecycle ───────────────────────────────────────
         case "StreamSubscribe":
             return {
                 state: {
@@ -34,6 +70,7 @@ export function update(
                         active: true,
                         lastEventTime: command.at,
                     },
+                    lastEventMs: command.at,
                 },
                 events: [{ type: "stream-subscribed", at: command.at }],
             };
@@ -45,6 +82,7 @@ export function update(
                     streaming: { ...state.streaming, active: false },
                     // Defensive: subscription gone → no turn can be active.
                     turnActive: false,
+                    lastEventMs: null,
                 },
                 events: [{ type: "stream-unsubscribed", at: command.at }],
             };
@@ -61,9 +99,31 @@ export function update(
                         bufferSize: state.streaming.bufferSize + command.addedCount,
                         lastEventTime: command.at,
                     },
+                    lastEventMs: command.at,
                 },
                 events: [
                     { type: "stream-flush-observed", addedCount: command.addedCount },
+                ],
+            };
+        }
+
+        case "StreamWatchdogTick": {
+            // No-op when stream inactive or no event has ever been seen.
+            if (!state.streaming.active || state.lastEventMs == null) {
+                return { state, events: [] };
+            }
+            const idleSinceMs = command.nowMs - state.lastEventMs;
+            if (idleSinceMs < STUCK_THRESHOLD_MS) {
+                return { state, events: [] };
+            }
+            return {
+                state,
+                events: [
+                    {
+                        type: "stream-stuck",
+                        idleSinceMs,
+                        thresholdMs: STUCK_THRESHOLD_MS,
+                    },
                 ],
             };
         }
@@ -81,11 +141,27 @@ export function update(
                     ],
                 };
             }
+            // Invariant 2: can't start a turn while still loading history.
+            // After init failure we fail open — the live stream may still
+            // work even if history fetch hung, and blocking the user
+            // would be worse than silently dropping a stale send.
+            if (state.initPhase === "loading") {
+                return {
+                    state,
+                    events: [
+                        {
+                            type: "turn-start-suppressed",
+                            reason: "init still loading",
+                        },
+                    ],
+                };
+            }
             return {
                 state: {
                     ...state,
                     turnActive: true,
                     sessionStats: null, // clear stale stats from prior turn
+                    lastEventMs: command.at,
                 },
                 events: [{ type: "turn-started", at: command.at }],
             };
@@ -131,13 +207,13 @@ export function update(
 
         case "ToolStart":
             return {
-                state: { ...state, currentTool: command.name },
+                state: bumpEvent({ ...state, currentTool: command.name }, nowMs),
                 events: [{ type: "tool-started", name: command.name }],
             };
 
         case "ToolEnd":
             return {
-                state: { ...state, currentTool: null },
+                state: bumpEvent({ ...state, currentTool: null }, nowMs),
                 events: [{ type: "tool-ended" }],
             };
 
@@ -147,7 +223,7 @@ export function update(
                 output: state.turnTokens?.output ?? 0,
             };
             return {
-                state: { ...state, turnTokens: next },
+                state: bumpEvent({ ...state, turnTokens: next }, nowMs),
                 events: [{ type: "tokens-updated", input: command.input, output: null }],
             };
         }
@@ -158,7 +234,7 @@ export function update(
                 output: command.output,
             };
             return {
-                state: { ...state, turnTokens: next },
+                state: bumpEvent({ ...state, turnTokens: next }, nowMs),
                 events: [{ type: "tokens-updated", input: null, output: command.output }],
             };
         }
@@ -220,7 +296,51 @@ export function update(
                 events: [{ type: "pending-rejected", id: command.id, wasPresent: true }],
             };
         }
+
+        case "PendingMessageExpired": {
+            const entry = state.pending.find((m) => m.id === command.id);
+            if (!entry) {
+                return {
+                    state,
+                    events: [
+                        {
+                            type: "pending-expired",
+                            id: command.id,
+                            queuedAt: 0,
+                            ageMs: 0,
+                            wasPresent: false,
+                        },
+                    ],
+                };
+            }
+            return {
+                state: {
+                    ...state,
+                    pending: state.pending.filter((m) => m.id !== command.id),
+                },
+                events: [
+                    {
+                        type: "pending-expired",
+                        id: command.id,
+                        queuedAt: entry.createdAt,
+                        ageMs: nowMs - entry.createdAt,
+                        wasPresent: true,
+                    },
+                ],
+            };
+        }
     }
+}
+
+/**
+ * Bump `lastEventMs` to "now" only while the stream is subscribed. Used
+ * by tool/token transitions which are observable stream activity. Skip
+ * the bump when streaming is inactive — those would correspond to stale
+ * commands and shouldn't reset the watchdog clock.
+ */
+function bumpEvent(state: AgentPaneState, nowMs: number): AgentPaneState {
+    if (!state.streaming.active) return state;
+    return { ...state, lastEventMs: nowMs };
 }
 
 /**
