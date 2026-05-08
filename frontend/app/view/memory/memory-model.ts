@@ -192,9 +192,13 @@ export class MemoryViewModel implements ViewModel {
         this.setSelectedId(memory.id);
     }
 
-    /** Discard the current draft. */
+    /** Discard the current draft AND clear any stale error. The save
+     *  path leaves an error banner up if it failed; cancelling the
+     *  form should also clear it so the read-only view comes back
+     *  clean. Reagent P2 (#747). */
     cancelDraft(): void {
         this.setDraft(null);
+        this.setError(null);
     }
 
     /** Persist the current draft (creates if id is empty, else updates). */
