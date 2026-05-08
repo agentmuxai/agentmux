@@ -817,13 +817,24 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let working_dir = crate::backend::obj::meta_get_string(
                     &block.meta, "cmd:cwd", "",
                 );
-                let env_vars: std::collections::HashMap<String, String> = match block.meta.get("cmd:env") {
+                let mut env_vars: std::collections::HashMap<String, String> = match block.meta.get("cmd:env") {
                     Some(serde_json::Value::Object(obj)) => obj
                         .iter()
                         .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
                         .collect(),
                     _ => std::collections::HashMap::new(),
                 };
+                // Identity injection: look up the active AgentInstance for
+                // this block, resolve its identity_id's bindings, and merge
+                // each per-provider env var into the spawn map. Failures
+                // are logged and skipped — the agent CLI launches with
+                // whatever resolved cleanly plus the static cmd:env block.
+                // See agentmux-srv/src/identity/resolver.rs.
+                crate::identity::inject_identity_env(
+                    wstore.clone(),
+                    &cmd.blockid,
+                    &mut env_vars,
+                );
                 let session_id_field = crate::backend::obj::meta_get_string(
                     &block.meta, "agent:session_id_field", "session_id",
                 );

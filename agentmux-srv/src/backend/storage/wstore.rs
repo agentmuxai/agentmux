@@ -1537,6 +1537,33 @@ impl WaveStore {
         Ok(rows > 0)
     }
 
+    /// Look up the most-recently-created running instance for a block.
+    /// Used at CLI spawn time to find the AgentInstance row whose
+    /// identity_id / memory_id should be applied to the new
+    /// subprocess's env. Returns None if no row matches — callers
+    /// fall back to ambient credentials.
+    pub fn instance_get_active_for_block(
+        &self,
+        block_id: &str,
+    ) -> Result<Option<AgentInstance>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
+                    status, github_context, started_at, ended_at, created_at,
+                    identity_id, memory_id
+             FROM db_agent_instances
+             WHERE block_id = ?1
+             ORDER BY created_at DESC
+             LIMIT 1",
+        )?;
+        let result = stmt.query_row(params![block_id], map_instance_row);
+        match result {
+            Ok(a) => Ok(Some(a)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     // ====================================================================
     // v7 — Identity bundles (named credential bundles) + Memory bundles
     // ====================================================================

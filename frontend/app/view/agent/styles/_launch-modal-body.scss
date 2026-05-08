@@ -190,3 +190,26 @@
     opacity: 0.6;
 }
 
+// v7 — Identity + Memory bundle pickers. Two compact dropdown rows
+// rendered between the runtime fieldset and the advanced disclosure.
+// Layout mirrors the rest of the modal; the leading label keeps the
+// rows self-explanatory at a glance.
+.agent-launch-modal-bundles {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+}
+
+.agent-launch-modal-bundle-row {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.agent-launch-modal-bundle-row-label {
+    font-size: 12px;
+    color: var(--main-text-color);
+    font-weight: 500;
+}
+

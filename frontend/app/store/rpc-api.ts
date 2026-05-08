@@ -762,7 +762,15 @@ class RpcApiType {
     // command "createagentinstance" [call]
     CreateAgentInstanceCommand(
         client: RpcClient,
-        data: { definition_id: string; block_id?: string; parent_instance_id?: string },
+        data: {
+            definition_id: string;
+            block_id?: string;
+            parent_instance_id?: string;
+            /** v7 — Identity bundle FK. Empty = blank singleton (no creds override). */
+            identity_id?: string;
+            /** v7 — Memory bundle FK. Empty = blank singleton. */
+            memory_id?: string;
+        },
         opts?: RpcOpts,
     ): Promise<AgentInstance> {
         return client.rpcCall("createagentinstance", data, opts);
