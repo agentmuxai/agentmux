@@ -21,7 +21,18 @@ interface IdentityPaneViewProps {
 export const IdentityPaneView = (props: IdentityPaneViewProps): JSX.Element => {
     const { model } = props;
 
-    const handleSelect = (bundle: IdentityBundle) => model.startEdit(bundle);
+    // Clicking a list item SELECTS the bundle so the binding table
+    // becomes visible. The metadata draft (name + description) opens
+    // only via the explicit "Edit name / description" button on the
+    // detail view. Reagent + codex P1 / P2 (#748): the previous
+    // handler called startEdit which auto-opened the form, blocking
+    // the binding table; clicking the blank singleton would surface
+    // an error and leave the right panel in the empty state.
+    const handleSelect = (bundle: IdentityBundle) => {
+        model.setError(null);
+        model.cancelDraft();
+        model.setSelectedId(bundle.id);
+    };
     const handleNew = () => model.startNew();
     const handleSave = () => void model.saveDraft();
     const handleCancel = () => model.cancelDraft();
@@ -129,8 +140,8 @@ export const IdentityPaneView = (props: IdentityPaneViewProps): JSX.Element => {
                                                                     class="identity-pane-input"
                                                                     value={
                                                                         model
-                                                                            .bindingsResource[0]()
-                                                                            ?.find(
+                                                                            .bindingsAtom()
+                                                                            .find(
                                                                                 (b) =>
                                                                                     b.provider ===
                                                                                     provider,
