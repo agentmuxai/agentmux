@@ -6,7 +6,8 @@
  * docs/specs/frontend-reducer-architecture-2026-05-03.md and the
  * roadmap at docs/specs/browser-pane-reducer-roadmap.md).
  *
- * **Phases 3a + 3b + 3c.** This reducer owns five cells today:
+ * **Phases 3a + 3b + 3c + 3e (title).** This reducer owns six cells
+ * today:
  *   - `closed` — terminal flag set by `dispose()`. All post-close
  *     commands are no-ops.
  *   - `loading` — page-load-in-flight flag. Mutually exclusive with
@@ -16,12 +17,19 @@
  *   - `canGoBack` / `canGoForward` — history navigability flags
  *     mirrored from CEF's `on_loading_state_change_pane` events
  *     (forwarded as `browser-pane-nav-state` with `url_only=false`).
+ *   - `title` — page title. Falls back to `"Browser"` when the host
+ *     emits empty/whitespace (mirrors the per-catalog rule that the
+ *     view should never display a blank pane title).
  *
  * Cells not yet migrated: `url` (the danger cell — its own PR with
- * extra observability per roadmap §3d), `title`, `faviconUrl`, plus
- * the address-bar typing buffer that lives in the view. The slot
- * store + `recordDispatch` audit lands in Phase 4 once every cell
- * is reducer-backed.
+ * extra observability per roadmap §3d) and `faviconUrl` (derived
+ * from `url`, so blocked on §3d), plus the address-bar typing buffer
+ * that lives in the view. The slot store + `recordDispatch` audit
+ * lands in Phase 4 once every cell is reducer-backed.
+ *
+ * Note: Phase 6 of the roadmap is when host-side title-change events
+ * (`browser-pane-title-change`) actually start emitting. Until then,
+ * the reducer's `title` cell stays at its initial fallback.
  */
 
 /** Reducer state. Mutually-exclusive invariant on (loading, error). */
@@ -50,7 +58,18 @@ export interface BrowserPaneState {
      *  CEF's `can_go_forward`, same delivery + ownership notes as
      *  `canGoBack`. */
     canGoForward: boolean;
+    /** Page title. Always non-empty — empty/whitespace input from
+     *  `TitleChanged` is folded to `TITLE_FALLBACK` so the view
+     *  never has to know about the empty case. */
+    title: string;
 }
+
+/** The string the reducer projects when `TitleChanged` arrives with
+ *  empty or whitespace-only content. The view binds to `state.title`
+ *  directly, so the fallback is enforced at write time, not at read
+ *  time. Matches the catalog's "falls back to 'Browser' when empty"
+ *  rule (`docs/specs/browser-pane-state-catalog.md` row 1.titleAtom). */
+export const TITLE_FALLBACK = "Browser";
 
 export const initialState = (): BrowserPaneState => ({
     closed: false,
@@ -58,6 +77,7 @@ export const initialState = (): BrowserPaneState => ({
     error: null,
     canGoBack: false,
     canGoForward: false,
+    title: TITLE_FALLBACK,
 });
 
 export type BrowserPaneCommand =
@@ -99,6 +119,13 @@ export type BrowserPaneCommand =
           canGoForward?: boolean;
       }
     /**
+     * Host emitted a title change for this pane. The reducer folds
+     * empty/whitespace input to `TITLE_FALLBACK` so the view never
+     * sees a blank title. Idempotent — same title yields no event.
+     * After dispose, a no-op.
+     */
+    | { type: "TitleChanged"; title: string }
+    /**
      * The pane is being torn down. After this command runs, every
      * subsequent command on this state is a no-op. Idempotent —
      * dispatching `Disposed` twice is a no-op the second time.
@@ -115,6 +142,7 @@ export type BrowserPaneEvent =
           canGoBack: boolean;
           canGoForward: boolean;
       }
+    | { type: "title-changed"; title: string }
     | { type: "disposed" }
     /** Invariant fire — emitted instead of mutating state when a
      *  command targets a closed pane. Surfaced for diagnostics so
