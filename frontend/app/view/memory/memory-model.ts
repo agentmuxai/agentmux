@@ -226,21 +226,22 @@ export class MemoryViewModel implements ViewModel {
         this.setError(null);
         try {
             const saved = await RpcApi.UpsertMemoryCommand(TabRpcClient, draftToWire(draft));
-            // Race-condition guard: if the user clicked another list
-            // item while the save was in flight, handleSelect would have
-            // already called cancelDraft (draftAtom = null) AND
-            // setSelectedId to the new row. Skip the post-save selection
-            // override so the user's new selection is preserved. Reagent
-            // P1 (PR #749).
-            const draftStillOpen = this.draftAtom() !== null;
             // Refresh the list either way — the saved row should appear.
             await this.refresh();
-            if (draftStillOpen) {
-                // The draft was still active when we returned (no
-                // mid-flight cancel). Clear it now and select the saved
-                // row. The refresh ran first so selectedAtom resolves to
-                // the saved memory immediately, no empty-state flash.
-                // Reagent P2 (PR #749).
+            // Race-condition guard: read draftAtom AFTER both awaits.
+            // If the user clicked another list item at any point during
+            // the upsert OR the refresh, handleSelect would have
+            // cancelDraft'd (draftAtom = null) AND setSelectedId to the
+            // new row. Skip the post-save selection override so the
+            // user's new selection wins. Reagent P1 (PR #749, round 5):
+            // the previous version captured this before refresh, leaving
+            // a window during refresh where a cancel was still possible
+            // but we'd already decided to override.
+            if (this.draftAtom() !== null) {
+                // Draft still active = no mid-flight cancel. Clear it
+                // and select the saved row. The refresh ran first so
+                // selectedAtom resolves to the saved memory immediately,
+                // no empty-state flash. Reagent P2 (PR #749).
                 this.setDraft(null);
                 this.setSelectedId(saved.id);
             }
