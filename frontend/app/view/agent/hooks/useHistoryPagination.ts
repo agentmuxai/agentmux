@@ -31,10 +31,11 @@
  *                       user scrolls near the top
  */
 
-import { createSignal, onMount, type Accessor } from "solid-js";
+import { createSignal, onCleanup, onMount, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { dispatch as dispatchDoc } from "@/app/store/agent-document-store";
+import { dispatch as dispatchPane } from "@/app/store/agent-pane-state-store";
 import { parseHistoryLines } from "../parseHistoryLines";
 
 import type { LogFn } from "../types";
@@ -109,15 +110,37 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
     // during a reconnect (where in-flight turns can briefly appear in
     // both the persisted ring buffer and the live stream).
     onMount(() => {
+        // Mounted guard (codex P2 on PR #742). If the pane is closed
+        // while either RPC round-trip is in flight, AgentPresentationView
+        // unregisters the pane-state slot in its own onCleanup, and any
+        // post-await `dispatchPane` below would throw because the
+        // store rejects dispatches against unregistered panes. Track
+        // mounted via a closure flag and bail before each post-await
+        // dispatch. Both the success path (InitReady + HistoryLoaded)
+        // and the error path (InitFailed) need the guard.
+        let mounted = true;
+        onCleanup(() => {
+            mounted = false;
+        });
+
+        // Init lifecycle (issue #728 gap 1): dispatch InitStart before the
+        // fetch, InitReady on success, InitFailed on error. The reducer
+        // gates TurnStart on initPhase === "ready" so we don't accept
+        // sends while history is still loading.
+        dispatchPane(opts.blockId, { type: "InitStart" });
         (async () => {
             try {
                 const countResp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
                     block_id: opts.blockId,
                     filename: "output",
                 }, { timeout: 5000 });
+                if (!mounted) return;
 
                 const total = countResp?.count ?? 0;
-                if (total === 0) return;
+                if (total === 0) {
+                    dispatchPane(opts.blockId, { type: "InitReady" });
+                    return;
+                }
 
                 const offset = Math.max(0, total - PAGE_SIZE);
                 const limit = total - offset;
@@ -128,6 +151,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     offset,
                     limit,
                 }, { timeout: 15000 });
+                if (!mounted) return;
 
                 const nodes = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat());
                 if (nodes.length > 0) {
@@ -144,9 +168,20 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 setHistoryTotal(available);
 
                 opts.log("history", `loaded ${nodes.length} of ${available} previous messages`);
+                dispatchPane(opts.blockId, { type: "InitReady" });
             } catch (err: any) {
-                // Non-fatal — fresh session or backend not ready yet
-                opts.log("history", `could not load history: ${err?.message ?? String(err)}`, "warn");
+                if (!mounted) return;
+                // Non-fatal — fresh session or backend not ready yet.
+                // Surface the failure to the reducer so it can gate
+                // turn-start and the UI can render an error state, then
+                // flip to ready so the user can still send (best-effort).
+                const reason = err?.message ?? String(err);
+                opts.log("history", `could not load history: ${reason}`, "warn");
+                // Surface the failure for diagnostics. The reducer's
+                // TurnStart guard treats `error` as fail-open (only
+                // `loading` blocks sends), so no follow-up InitReady
+                // is needed — the user can still send.
+                dispatchPane(opts.blockId, { type: "InitFailed", reason });
             }
         })();
     });

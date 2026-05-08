@@ -21,6 +21,7 @@ import {
     AgentDocumentCommand,
     AgentDocumentEvent,
     AgentDocumentState,
+    type ReducerOptions,
     initialState,
 } from "./agent-document/types";
 import { type CommandSource, recordDispatch } from "./command-source";
@@ -99,6 +100,7 @@ export function dispatch(
     blockId: string,
     command: AgentDocumentCommand,
     source: CommandSource = "system",
+    opts?: ReducerOptions,
 ): AgentDocumentEvent[] {
     const slot = slots.get(blockId);
     if (!slot) {
@@ -106,7 +108,7 @@ export function dispatch(
             `[agent-document-store] dispatch for unregistered pane ${blockId.slice(0, 7)} (cmd=${command.type}). registerPane must be called synchronously in the component body.`,
         );
     }
-    const result = update(slot.state, command);
+    const result = update(slot.state, command, Date.now(), opts);
     const prevNodes = slot.state.nodes;
     slot.state = result.state;
     // Push to atom only if nodes changed (referential equality).
@@ -129,6 +131,15 @@ export function dispatch(
 /** Snapshot a pane's reducer state. Diagnostics + tests only. */
 export function snapshot(blockId: string): AgentDocumentState | null {
     return slots.get(blockId)?.state ?? null;
+}
+
+/**
+ * Read the reducer-maintained dedup index for a pane. Returns an empty
+ * set if the pane isn't registered (e.g. very early during mount).
+ * Issue #728 gap 4 — replaces the per-mount rebuild in useAgentStream.
+ */
+export function getNodeIdSet(blockId: string): Set<string> {
+    return slots.get(blockId)?.state.nodeIdSet ?? new Set<string>();
 }
 
 /** Test/dev helper — wipe all slots. Never call in production. */
