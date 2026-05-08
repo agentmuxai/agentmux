@@ -26,6 +26,9 @@
 
     &.no-action {
         cursor: default;
+        // Decorative icons (brand logos, favicons) shouldn't carry the
+        // interactive 0.7 dim — they're identity glyphs, not buttons.
+        opacity: 1;
     }
 
     // `&:hover` (above) raises opacity to 1; `&.disabled:hover`
