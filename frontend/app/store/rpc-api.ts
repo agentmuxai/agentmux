@@ -638,6 +638,109 @@ class RpcApiType {
         return client.rpcCall("listagentidentities", data, opts);
     }
 
+    // ────────────────────────────────────────────────────────────────────
+    // v7 — Identity bundles + Memory bundles
+    // ────────────────────────────────────────────────────────────────────
+
+    // command "listidentitybundles" [call]
+    ListIdentityBundlesCommand(
+        client: RpcClient,
+        data: Record<string, never> = {},
+        opts?: RpcOpts,
+    ): Promise<IdentityBundle[]> {
+        return client.rpcCall("listidentitybundles", data, opts);
+    }
+
+    // command "getidentitybundle" [call]
+    GetIdentityBundleCommand(
+        client: RpcClient,
+        data: { id: string },
+        opts?: RpcOpts,
+    ): Promise<IdentityBundle> {
+        return client.rpcCall("getidentitybundle", data, opts);
+    }
+
+    // command "upsertidentitybundle" [call]
+    UpsertIdentityBundleCommand(
+        client: RpcClient,
+        data: Partial<IdentityBundle>,
+        opts?: RpcOpts,
+    ): Promise<IdentityBundle> {
+        return client.rpcCall("upsertidentitybundle", data, opts);
+    }
+
+    // command "deleteidentitybundle" [call]
+    DeleteIdentityBundleCommand(
+        client: RpcClient,
+        data: { id: string },
+        opts?: RpcOpts,
+    ): Promise<{ deleted: boolean }> {
+        return client.rpcCall("deleteidentitybundle", data, opts);
+    }
+
+    // command "bindidentityaccount" [call]
+    BindIdentityAccountCommand(
+        client: RpcClient,
+        data: { identity_id: string; provider: string; account_id: string },
+        opts?: RpcOpts,
+    ): Promise<void> {
+        return client.rpcCall("bindidentityaccount", data, opts);
+    }
+
+    // command "unbindidentityaccount" [call]
+    UnbindIdentityAccountCommand(
+        client: RpcClient,
+        data: { identity_id: string; provider: string },
+        opts?: RpcOpts,
+    ): Promise<{ unbound: boolean }> {
+        return client.rpcCall("unbindidentityaccount", data, opts);
+    }
+
+    // command "listidentitybindings" [call]
+    ListIdentityBindingsCommand(
+        client: RpcClient,
+        data: { identity_id: string },
+        opts?: RpcOpts,
+    ): Promise<IdentityBinding[]> {
+        return client.rpcCall("listidentitybindings", data, opts);
+    }
+
+    // command "listmemories" [call]
+    ListMemoriesCommand(
+        client: RpcClient,
+        data: Record<string, never> = {},
+        opts?: RpcOpts,
+    ): Promise<Memory[]> {
+        return client.rpcCall("listmemories", data, opts);
+    }
+
+    // command "getmemory" [call]
+    GetMemoryCommand(
+        client: RpcClient,
+        data: { id: string },
+        opts?: RpcOpts,
+    ): Promise<Memory> {
+        return client.rpcCall("getmemory", data, opts);
+    }
+
+    // command "upsertmemory" [call]
+    UpsertMemoryCommand(
+        client: RpcClient,
+        data: Partial<Memory>,
+        opts?: RpcOpts,
+    ): Promise<Memory> {
+        return client.rpcCall("upsertmemory", data, opts);
+    }
+
+    // command "deletememory" [call]
+    DeleteMemoryCommand(
+        client: RpcClient,
+        data: { id: string },
+        opts?: RpcOpts,
+    ): Promise<{ deleted: boolean }> {
+        return client.rpcCall("deletememory", data, opts);
+    }
+
     // command "listagentinstances" [call]
     ListAgentInstancesCommand(
         client: RpcClient,
