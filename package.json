@@ -6,7 +6,7 @@
   "productName": "AgentMux",
   "description": "Open-Source AI-Native Terminal Built for Seamless Workflows",
   "license": "Apache-2.0",
-  "version": "0.33.725",
+  "version": "0.33.726",
   "homepage": "https://github.com/agentmuxai/agentmux",
   "build": {
     "appId": "ai.agentmux.app"
@@ -73,6 +73,7 @@
     "@codemirror/lang-rust": "^6.0.2",
     "@codemirror/search": "^6.6.0",
     "@codemirror/theme-one-dark": "^6.1.3",
+    "@dschz/solid-flow": "^0.1.4",
     "@floating-ui/dom": "^1.6.13",
     "@lobehub/icons-static-svg": "^1.90.0",
     "@observablehq/plot": "^0.6.17",
