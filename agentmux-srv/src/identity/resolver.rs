@@ -204,6 +204,7 @@ pub fn inject_identity_env(
             }
         };
 
+        let env_key_count = env_keys.len();
         for key in env_keys {
             env_vars.insert(key.to_string(), secret.clone());
         }
@@ -211,7 +212,7 @@ pub fn inject_identity_env(
         tracing::info!(
             target: "identity",
             "injected {} env var(s) for provider {} (identity={}, account={})",
-            provider_env_vars(&binding.provider).len(),
+            env_key_count,
             binding.provider,
             instance.identity_id,
             binding.account_id,
@@ -276,6 +277,14 @@ mod tests {
         assert!(provider_env_vars("unknown").is_empty());
     }
 
+    // PlaintextDev-using tests are gated behind cfg(debug_assertions)
+    // because release builds reject PlaintextDev with
+    // ResolverError::PlaintextDevDisabledInRelease, so the assertions
+    // below would fail under `cargo test --release`. Reagent P2
+    // (PR #751). The Env / SecretsManager / unknown-provider paths
+    // are tested separately and have no debug-only dependency.
+
+    #[cfg(debug_assertions)]
     #[test]
     fn resolve_plaintext_dev() {
         let s = resolve_secret(&SecretRef::PlaintextDev {
@@ -347,6 +356,7 @@ mod tests {
         assert!(env.is_empty());
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     fn inject_full_round_trip_plaintext_dev() {
         let store = make_store();
@@ -430,6 +440,7 @@ mod tests {
         );
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     fn inject_partial_success_skips_failed_bindings() {
         let store = make_store();
@@ -507,6 +518,7 @@ mod tests {
         assert!(env.get("ANTHROPIC_API_KEY").is_none());
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     fn inject_unknown_provider_is_skipped() {
         let store = make_store();
