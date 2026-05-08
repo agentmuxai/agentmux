@@ -454,13 +454,20 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     _ => vec![],
                 };
                 let working_dir = obj::meta_get_string(&block.meta, "cmd:cwd", "");
-                let env_vars: std::collections::HashMap<String, String> = match block.meta.get("cmd:env") {
+                let mut env_vars: std::collections::HashMap<String, String> = match block.meta.get("cmd:env") {
                     Some(serde_json::Value::Object(obj)) => obj
                         .iter()
                         .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
                         .collect(),
                     _ => std::collections::HashMap::new(),
                 };
+                // Identity injection — same path as websocket.rs's
+                // AgentInputCommand. See identity/resolver.rs.
+                crate::identity::inject_identity_env(
+                    wstore.clone(),
+                    &cmd.block_id,
+                    &mut env_vars,
+                );
                 let session_id_field = obj::meta_get_string(
                     &block.meta, "agent:session_id_field", "session_id",
                 );

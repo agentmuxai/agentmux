@@ -1,6 +1,7 @@
 mod backend;
 mod config;
 mod event_log;
+mod identity;
 mod persist;
 mod persist_subscriber;
 mod reducer;

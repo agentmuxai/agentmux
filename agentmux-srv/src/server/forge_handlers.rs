@@ -1018,12 +1018,12 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     started_at: now,
                     ended_at: 0,
                     created_at: now,
-                    // identity_id / memory_id default to empty (= blank
-                    // singleton) until the launch modal wires user picks
-                    // through to this handler. PR-F.3 will add the
-                    // command fields and pass them here.
-                    identity_id: String::new(),
-                    memory_id: String::new(),
+                    // PR-F.3: launch modal passes through Identity +
+                    // Memory bundle picks. Empty string = blank
+                    // singleton (no override; the resolver returns
+                    // immediately on either "" or "blank").
+                    identity_id: cmd.identity_id,
+                    memory_id: cmd.memory_id,
                 };
                 wstore
                     .instance_create(&inst)

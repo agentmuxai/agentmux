@@ -1608,6 +1608,15 @@ pub struct CommandCreateAgentInstanceData {
     pub block_id: String,
     #[serde(default)]
     pub parent_instance_id: String,
+    /// FK to db_identities. Empty = blank singleton (no env-var
+    /// injection; agent inherits ambient creds). Set by the launch
+    /// modal's Identity dropdown.
+    #[serde(default)]
+    pub identity_id: String,
+    /// FK to db_memories. Empty = blank singleton. Set by the launch
+    /// modal's Memory dropdown.
+    #[serde(default)]
+    pub memory_id: String,
 }
 
 /// Mutable subset of AgentInstance for PATCH-style updates. Every field is

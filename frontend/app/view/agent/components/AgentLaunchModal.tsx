@@ -13,9 +13,11 @@
  * panel only. See docs/specs/launch-modal-rearchitecture-2026-05-01.md.
  */
 
-import { createMemo, createSignal, Show, type JSX } from "solid-js";
+import { createMemo, createResource, createSignal, For, Show, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { buildInstanceSlug, slugifyInstanceName } from "../defaults/instance-slug";
@@ -31,6 +33,10 @@ export interface LaunchOverrides {
     environment: "local" | "docker";
     /** Only set when agentType === "container". */
     containerImage?: string;
+    /** v7 — selected Identity bundle. "blank" = use ambient creds. */
+    identityId?: string;
+    /** v7 — selected Memory bundle. "blank" = vanilla CLI. */
+    memoryId?: string;
 }
 
 interface AgentLaunchModalPanelProps {
@@ -49,6 +55,28 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     const [submitting, setSubmitting] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
     const [showAdvanced, setShowAdvanced] = createSignal(false);
+
+    // v7 — Identity + Memory bundle pickers. Both default to "blank"
+    // which the resolver short-circuits as "no override". Lists fetched
+    // once at mount; the blank singleton is always present. See
+    // docs/specs/identity-forge-integration-and-vault-2026-05-08.md.
+    const [identityId, setIdentityId] = createSignal<string>("blank");
+    const [memoryId, setMemoryId] = createSignal<string>("blank");
+
+    const [identities] = createResource<IdentityBundle[]>(async () => {
+        try {
+            return await RpcApi.ListIdentityBundlesCommand(TabRpcClient, {});
+        } catch {
+            return [];
+        }
+    });
+    const [memories] = createResource<Memory[]>(async () => {
+        try {
+            return await RpcApi.ListMemoriesCommand(TabRpcClient, {});
+        } catch {
+            return [];
+        }
+    });
 
     const hasName = () => name().trim().length > 0;
     const canSubmit = () => !submitting() && slugifyInstanceName(name()).length > 0;
@@ -70,6 +98,8 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                 agentType: runtime(),
                 environment: runtime() === "container" ? "docker" : "local",
                 containerImage: runtime() === "container" ? resolvedImage() : undefined,
+                identityId: identityId(),
+                memoryId: memoryId(),
             });
             // Success: layer closes the panel; we leave `submitting`
             // true so the button keeps its "Launching…" label until
@@ -160,6 +190,72 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                         : "Not available for this agent."}
                                 </span>
                             </span>
+                        </label>
+                    </fieldset>
+
+                    <fieldset class="agent-launch-modal-field agent-launch-modal-bundles">
+                        <legend class="agent-launch-modal-label">Identity</legend>
+                        <span class="agent-launch-modal-hint">
+                            Identity bundles credentials per provider. Pick a bundle to
+                            inject its accounts as env vars at launch (e.g. GITHUB_TOKEN,
+                            ANTHROPIC_API_KEY); pick blank to use whatever's already in
+                            your environment.
+                        </span>
+
+                        <label class="agent-launch-modal-bundle-row">
+                            <span class="agent-launch-modal-bundle-row-label">Identity</span>
+                            <select
+                                class="agent-launch-modal-input"
+                                value={identityId()}
+                                onChange={(e) => setIdentityId(e.currentTarget.value)}
+                                disabled={submitting()}
+                                aria-label="Identity bundle"
+                            >
+                                <For each={identities() ?? []}>
+                                    {(bundle) => (
+                                        <option value={bundle.id}>
+                                            {bundle.is_blank
+                                                ? "— Blank (no creds) —"
+                                                : bundle.name}
+                                        </option>
+                                    )}
+                                </For>
+                            </select>
+                        </label>
+
+                        {/*
+                         * Memory dropdown is parked here pending the
+                         * spawn-time content-injection layer (provider
+                         * override, instructions, context files, MCP
+                         * servers, skills). Until that lands, picking
+                         * a non-blank Memory would be cosmetic — codex
+                         * P2 on PR #751 caught this. The state hooks
+                         * below stay in place; memoryId is forced to
+                         * "blank" on the wire so the backend writes a
+                         * blank reference. The Memory pane is still
+                         * usable for managing bundles; the launch
+                         * picker comes back in PR-F.4.
+                         */}
+
+                        <label class="agent-launch-modal-bundle-row" style={{ display: "none" }}>
+                            <span class="agent-launch-modal-bundle-row-label">Memory</span>
+                            <select
+                                class="agent-launch-modal-input"
+                                value={memoryId()}
+                                onChange={(e) => setMemoryId(e.currentTarget.value)}
+                                disabled={submitting()}
+                                aria-label="Memory bundle"
+                            >
+                                <For each={memories() ?? []}>
+                                    {(memory) => (
+                                        <option value={memory.id}>
+                                            {memory.is_blank
+                                                ? "— Blank (vanilla CLI) —"
+                                                : memory.name}
+                                        </option>
+                                    )}
+                                </For>
+                            </select>
                         </label>
                     </fieldset>
 
