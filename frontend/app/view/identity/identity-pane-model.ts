@@ -18,7 +18,7 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
-import { createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
 
 import {
     type Account,
@@ -125,10 +125,13 @@ export class IdentityPaneViewModel implements ViewModel {
             return this.bundlesAtom().find((b) => b.id === id) ?? null;
         });
 
-        // Refresh bindings whenever the selection changes. Solid memos
-        // run lazily, so use a tracked effect-style helper: we pull the
-        // selected id via createMemo and refetch on change.
-        createMemo(() => {
+        // Refresh bindings whenever the selection changes. Use
+        // createEffect (not createMemo) — the previous version used
+        // createMemo whose return value is discarded; createMemo is
+        // lazy and only re-runs when its return value is consumed,
+        // so the effect fired exactly once at construction. Reagent
+        // P1 (PR #748).
+        createEffect(() => {
             const id = this.selectedIdAtom();
             void this.refreshBindings(id);
         });
