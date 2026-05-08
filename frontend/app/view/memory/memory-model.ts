@@ -228,17 +228,19 @@ export class MemoryViewModel implements ViewModel {
             const saved = await RpcApi.UpsertMemoryCommand(TabRpcClient, draftToWire(draft));
             // Refresh the list either way — the saved row should appear.
             await this.refresh();
-            // Race-condition guard: read draftAtom AFTER both awaits.
-            // If the user clicked another list item at any point during
-            // the upsert OR the refresh, handleSelect would have
-            // cancelDraft'd (draftAtom = null) AND setSelectedId to the
-            // new row. Skip the post-save selection override so the
-            // user's new selection wins. Reagent P1 (PR #749, round 5):
-            // the previous version captured this before refresh, leaving
-            // a window during refresh where a cancel was still possible
-            // but we'd already decided to override.
-            if (this.draftAtom() !== null) {
-                // Draft still active = no mid-flight cancel. Clear it
+            // Race-condition guard (reagent P1, PR #749 round 6): use
+            // OBJECT IDENTITY (=== draft) rather than `!== null`. The
+            // user can replace the draft mid-flight by:
+            //   - clicking another list item   → cancelDraft → null
+            //   - clicking "+ New Memory"      → startNew → fresh draft
+            //   - clicking the Edit button     → startEdit → other draft
+            // All three cases must skip the post-save navigation. Only
+            // identity-equal-to-our-snapshot means the user is still
+            // looking at this save. Round 5 used `!== null` which let
+            // the New-Memory and Edit-other cases through, silently
+            // discarding the user's new draft.
+            if (this.draftAtom() === draft) {
+                // Draft still active = no mid-flight replace. Clear it
                 // and select the saved row. The refresh ran first so
                 // selectedAtom resolves to the saved memory immediately,
                 // no empty-state flash. Reagent P2 (PR #749).
