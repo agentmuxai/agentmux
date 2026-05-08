@@ -6,9 +6,10 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { IconButton } from "@/app/element/iconbutton";
 import { TableBlock } from "@/app/element/table-block";
-import { rehypeAlignToClass } from "@/app/element/rehype-align-to-class";
+import { ALIGN_CLASS_REGEX, rehypeAlignToClass } from "@/app/element/rehype-align-to-class";
 import { cn, useAtomValueSafe } from "@/util/util";
 import { createEffect, createMemo, createSignal, JSX, onCleanup, Show } from "solid-js";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { Streamdown as StreamdownReact, defaultRehypePlugins } from "streamdown";
 // Cast to any so SolidJS JSX doesn't complain about React component type
 const Streamdown = StreamdownReact as any;
@@ -344,15 +345,45 @@ export const WaveStreamdown = (props: WaveStreamdownProps): JSX.Element => {
                 )}
                 shikiTheme={[ShikiTheme, ShikiTheme]}
                 rehypePlugins={[
-                    // Keep streamdown's full default pipeline (raw, katex,
-                    // sanitize, harden) UNTOUCHED so KaTeX/MathML output is
-                    // not affected. Append rehypeAlignToClass AFTER sanitize
-                    // — `align` is in hast-util-sanitize's default global
-                    // allowlist (see `attributes['*']`), so it survives the
-                    // sanitize step, and our plugin then converts it to a
-                    // className that the th/td renderers below pick up.
-                    ...Object.values(defaultRehypePlugins),
+                    // Streamdown's default pipeline order is:
+                    //   raw → sanitize → katex → harden
+                    // We need rehypeAlignToClass to run BEFORE sanitize
+                    // (the spec calls this out — defaultSchema strips
+                    // `align`, so converting align→className must happen
+                    // upstream of sanitize). We also need a sanitize step
+                    // that allows our alignment classes on th/td, so we
+                    // replace streamdown's default sanitize with one that
+                    // extends defaultSchema with the th/td className
+                    // allowlist. Reagent P1 on PR #754 caught the prior
+                    // ordering — the comment claimed `align` was in the
+                    // global allowlist, but defaultSchema strips it.
+                    //
+                    // Order built below:
+                    //   raw → rehypeAlignToClass → sanitize (custom
+                    //   schema) → katex → harden
+                    //
+                    // KaTeX is left in place after our custom sanitize,
+                    // matching streamdown's own ordering, so KaTeX/MathML
+                    // output round-trips unchanged.
+                    defaultRehypePlugins.raw,
                     rehypeAlignToClass,
+                    () =>
+                        rehypeSanitize({
+                            ...defaultSchema,
+                            attributes: {
+                                ...defaultSchema.attributes,
+                                th: [
+                                    ...(defaultSchema.attributes?.th || []),
+                                    ["className", ALIGN_CLASS_REGEX],
+                                ],
+                                td: [
+                                    ...(defaultSchema.attributes?.td || []),
+                                    ["className", ALIGN_CLASS_REGEX],
+                                ],
+                            },
+                        }),
+                    defaultRehypePlugins.katex,
+                    defaultRehypePlugins.harden,
                 ]}
                 controls={{
                     code: false,
