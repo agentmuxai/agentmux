@@ -7,6 +7,12 @@
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import {
+    type BrowserPaneCommand,
+    type BrowserPaneState,
+    initialState as browserPaneInitialState,
+    update as browserPaneUpdate,
+} from "@/app/store/browser-pane-state";
 import { refocusNode } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -77,11 +83,55 @@ export class BrowserViewModel implements ViewModel {
 
     blockAtom: Accessor<Block | undefined>;
 
-    // Flipped in dispose() so late callers see the pane is gone and no-op
-    // instead of firing IPC against a Browser that CEF is mid-destruction.
-    // See docs/specs/SPEC_BROWSER_PANE_LIFECYCLE.md §9 step 4.
-    private _closed = false;
-    get closed(): boolean { return this._closed; }
+    /**
+     * Slice #9 (Phase 3a + 3b) reducer state — owns `closed`, `loading`,
+     * `error`. The signals above are projections of this state so the
+     * SolidJS view layer keeps reactive parity. Per the roadmap at
+     * `docs/specs/browser-pane-reducer-roadmap.md`, the remaining cells
+     * (url, title, faviconUrl, canGoBack, canGoForward) migrate one at
+     * a time in follow-up PRs; the slot store + recordDispatch audit
+     * lands in Phase 4.
+     */
+    private _paneState: BrowserPaneState = browserPaneInitialState();
+    /** Late callers (IPC handlers landing post-dispose, defensive guards
+     *  in goBack/Forward/reload) read this to no-op instead of firing
+     *  IPC against a Browser CEF is mid-destruction. See
+     *  docs/specs/SPEC_BROWSER_PANE_LIFECYCLE.md §9 step 4. */
+    get closed(): boolean { return this._paneState.closed; }
+
+    /**
+     * Single sync point between the reducer's pure transitions and the
+     * SolidJS signals the view subscribes to. Projects the new
+     * `loading` and `error` cells onto their signals only when the
+     * value actually changed (avoids spurious reactive churn that
+     * could leak into the address-bar typing path that PR #737
+     * regressed). Diag logs preserve the prior `state-write key=...`
+     * shape so Phase-1 grep recipes still work.
+     */
+    private _dispatch(cmd: BrowserPaneCommand, src: string): void {
+        const prev = this._paneState;
+        const result = browserPaneUpdate(prev, cmd);
+        this._paneState = result.state;
+        if (result.state.loading !== prev.loading) {
+            this.diag(
+                `state-write key=loading value=${result.state.loading} src=${src}`,
+            );
+            this.setLoading(result.state.loading);
+        }
+        if (result.state.error !== prev.error) {
+            this.diag(
+                `state-write key=error value=${JSON.stringify(result.state.error)} src=${src}`,
+            );
+            this.setError(result.state.error);
+        }
+        for (const e of result.events) {
+            if (e.type === "post-close-command-dropped") {
+                this.diag(
+                    `post-close-command-dropped commandType=${e.commandType} src=${src}`,
+                );
+            }
+        }
+    }
 
     /** Tag every diag log with the block prefix so multi-pane sessions
      *  are greppable per pane. See docs/specs/browser-pane-reducer-roadmap.md
@@ -118,7 +168,7 @@ export class BrowserViewModel implements ViewModel {
             can_go_forward?: boolean;
             url_only?: boolean;
         }>("browser-pane-nav-state", (payload) => {
-            if (this._closed) {
+            if (this.closed) {
                 this.diag(`post-close-event-dropped name=browser-pane-nav-state url=${payload.url}`);
                 return;
             }
@@ -145,8 +195,7 @@ export class BrowserViewModel implements ViewModel {
                     this.setCanGoForward(payload.can_go_forward);
                 }
             }
-            this.diag(`state-write key=loading value=false`);
-            this.setLoading(false);
+            this._dispatch({ type: "LoadFinished" }, "nav-state");
             // Persist the real URL to block meta so pane restore lands
             // on the last page, not whatever was passed at create time.
             RpcApi.SetMetaCommand(TabRpcClient, {
@@ -155,7 +204,7 @@ export class BrowserViewModel implements ViewModel {
             }).catch(() => {});
         }).then((unsub) => {
             this.diag(`sub-registered name=browser-pane-nav-state`);
-            if (this._closed) unsub();
+            if (this.closed) unsub();
             else this._navUnsub = unsub;
         });
 
@@ -166,7 +215,7 @@ export class BrowserViewModel implements ViewModel {
         // at pane creation. We drive refocusNode so the layout marks this
         // block as focused (blue border + keyboard shortcut target).
         void listenEvent<{ block_id: string }>("browser-pane-clicked", (payload) => {
-            if (this._closed) {
+            if (this.closed) {
                 this.diag(`post-close-event-dropped name=browser-pane-clicked`);
                 return;
             }
@@ -175,7 +224,7 @@ export class BrowserViewModel implements ViewModel {
             refocusNode(this.blockId);
         }).then((unsub) => {
             this.diag(`sub-registered name=browser-pane-clicked`);
-            if (this._closed) unsub();
+            if (this.closed) unsub();
             else this._clickUnsub = unsub;
         });
 
@@ -189,8 +238,8 @@ export class BrowserViewModel implements ViewModel {
     }
 
     navigate(url: string): void {
-        this.diag(`navigate(url=${JSON.stringify(url)}) closed=${this._closed}`);
-        if (this._closed) return;
+        this.diag(`navigate(url=${JSON.stringify(url)}) closed=${this.closed}`);
+        if (this.closed) return;
         // Normalize URL
         let normalized = url.trim();
         if (!normalized) return;
@@ -205,10 +254,7 @@ export class BrowserViewModel implements ViewModel {
 
         this.diag(`state-write key=url value=${JSON.stringify(normalized)} src=navigate`);
         this.setUrl(normalized);
-        this.diag(`state-write key=error value=null src=navigate`);
-        this.setError(null);
-        this.diag(`state-write key=loading value=true src=navigate`);
-        this.setLoading(true);
+        this._dispatch({ type: "Navigate", url: normalized }, "navigate");
         // can_go_back / can_go_forward are set by the `browser-pane-nav-state`
         // event subscription; we don't touch them here. CEF is the source of
         // truth for history state.
@@ -223,27 +269,25 @@ export class BrowserViewModel implements ViewModel {
     }
 
     goBack(): void {
-        this.diag(`goBack closed=${this._closed}`);
-        if (this._closed) return;
+        this.diag(`goBack closed=${this.closed}`);
+        if (this.closed) return;
         // CEF owns the history — we just fire the IPC. The button's
         // enabled/disabled state came from `can_go_back` in the nav-state
         // event, so if we got here the browser has somewhere to go.
-        this.diag(`state-write key=loading value=true src=goBack`);
-        this.setLoading(true);
+        this._dispatch({ type: "LoadStarted" }, "goBack");
         invokeCommand("browser_pane_go_back", { block_id: this.blockId }).catch(() => {});
     }
 
     goForward(): void {
-        this.diag(`goForward closed=${this._closed}`);
-        if (this._closed) return;
-        this.diag(`state-write key=loading value=true src=goForward`);
-        this.setLoading(true);
+        this.diag(`goForward closed=${this.closed}`);
+        if (this.closed) return;
+        this._dispatch({ type: "LoadStarted" }, "goForward");
         invokeCommand("browser_pane_go_forward", { block_id: this.blockId }).catch(() => {});
     }
 
     reload(): void {
-        this.diag(`reload closed=${this._closed}`);
-        if (this._closed) return;
+        this.diag(`reload closed=${this.closed}`);
+        if (this.closed) return;
         const url = this.urlAtom();
         if (url) {
             this.diag(`state-write key=url value="" src=reload-clear`);
@@ -252,28 +296,24 @@ export class BrowserViewModel implements ViewModel {
             requestAnimationFrame(() => {
                 this.diag(`state-write key=url value=${JSON.stringify(url)} src=reload-restore`);
                 this.setUrl(url);
-                this.diag(`state-write key=loading value=true src=reload-restore`);
-                this.setLoading(true);
+                this._dispatch({ type: "Navigate", url }, "reload-restore");
             });
         }
     }
 
     onLoad(): void {
-        this.diag(`onLoad state-write key=loading value=false`);
-        this.setLoading(false);
+        this.diag(`onLoad`);
+        this._dispatch({ type: "LoadFinished" }, "onLoad");
     }
 
     onError(msg: string): void {
         this.diag(`onError msg=${JSON.stringify(msg)}`);
-        this.diag(`state-write key=loading value=false src=onError`);
-        this.setLoading(false);
-        this.diag(`state-write key=error value=${JSON.stringify(msg)} src=onError`);
-        this.setError(msg);
+        this._dispatch({ type: "LoadFailed", reason: msg }, "onError");
     }
 
     giveFocus(): boolean {
-        this.diag(`giveFocus closed=${this._closed}`);
-        if (this._closed) return false;
+        this.diag(`giveFocus closed=${this.closed}`);
+        if (this.closed) return false;
         // If a main-window input inside this block (e.g. the URL bar) is
         // already focused, keep it — the user is interacting with the block's
         // chrome, not the embedded page. Also tell the host to move OS-level
@@ -296,7 +336,7 @@ export class BrowserViewModel implements ViewModel {
 
     dispose(): void {
         this.diag(`dispose`);
-        this._closed = true;
+        this._dispatch({ type: "Disposed" }, "dispose");
         if (this._navUnsub) {
             this._navUnsub();
             this._navUnsub = null;

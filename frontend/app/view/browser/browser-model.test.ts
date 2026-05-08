@@ -12,6 +12,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // vi.mock is hoisted, so the mocks are in place when browser-model imports them.
 vi.mock("@/app/platform/ipc", () => ({
     invokeCommand: vi.fn(() => Promise.resolve()),
+    // Pane subscribes to `browser-pane-nav-state` and `browser-pane-clicked`
+    // in the constructor; both are stubbed here so test VMs don't spawn real
+    // listeners. The returned promise resolves with a no-op unsubscribe.
+    listenEvent: vi.fn(() => Promise.resolve(() => {})),
+}));
+
+vi.mock("@/app/store/global", () => ({
+    refocusNode: vi.fn(),
 }));
 
 vi.mock("@/app/store/rpc-api", () => ({
@@ -27,6 +35,10 @@ vi.mock("@/app/store/rpc-util", () => ({
 vi.mock("@/app/store/wos", () => ({
     makeORef: (type: string, id: string) => `${type}:${id}`,
     getWaveObjectAtom: () => () => ({ meta: {} }),
+    // global.ts evaluates a `tabAtom` createMemo at module-init that calls
+    // WOS.getObjectValue; without this stub the import chain crashes during
+    // test setup before any BrowserViewModel test can run.
+    getObjectValue: () => ({}),
 }));
 
 import { invokeCommand } from "@/app/platform/ipc";
@@ -36,7 +48,13 @@ import { BrowserViewModel } from "./browser-model";
 function makeVM() {
     // BlockNodeModel is used only by blockAtom construction — a minimal
     // placeholder is enough for the gating tests.
-    return new BrowserViewModel("test-block-id", {} as never);
+    const vm = new BrowserViewModel("test-block-id", {} as never);
+    // The constructor calls `navigate(DEFAULT_BROWSER_URL)` and registers
+    // two `listenEvent` subscriptions. Tests below assert call counts on
+    // operations performed AFTER construction, so clear the mock history
+    // here to keep the assertions readable.
+    vi.clearAllMocks();
+    return vm;
 }
 
 describe("BrowserViewModel lifecycle gating", () => {
@@ -57,10 +75,13 @@ describe("BrowserViewModel lifecycle gating", () => {
 
     it("navigate() is a no-op after dispose", () => {
         const vm = makeVM();
+        // Capture the pre-dispose URL (the ctor auto-navigates to
+        // DEFAULT_BROWSER_URL); a post-dispose navigate must not change it.
+        const urlBefore = vm.urlAtom();
         vm.dispose();
         vm.navigate("https://example.com");
         expect(RpcApi.SetMetaCommand).not.toHaveBeenCalled();
-        expect(vm.urlAtom()).toBe("");
+        expect(vm.urlAtom()).toBe(urlBefore);
     });
 
     it("navigate() works before dispose", () => {
