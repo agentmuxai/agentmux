@@ -47,12 +47,23 @@ export function bundleDraftFrom(b: IdentityBundle): IdentityBundleDraft {
     };
 }
 
-/** Wire shape for `upsertidentitybundle`. */
-export function bundleDraftToWire(d: IdentityBundleDraft): Partial<IdentityBundle> {
+/** Wire shape for `upsertidentitybundle`.
+ *
+ *  The backend deserializes directly into the Rust `Identity` struct,
+ *  which has no serde defaults for `id`, `is_blank`, `created_at`, or
+ *  `updated_at`. Send all required fields — empty string for id (the
+ *  upsert handler mints a UUID when blank), `false` for is_blank, 0
+ *  for both timestamps (the handler server-sets created_at = now
+ *  when zero and always overwrites updated_at). Codex P1 (PR #750):
+ *  same bug as Memory upsert had on PR #749. */
+export function bundleDraftToWire(d: IdentityBundleDraft): IdentityBundle {
     return {
-        id: d.id,
+        id: d.id ?? "",
         name: d.name.trim(),
         description: d.description.trim(),
+        is_blank: false,
+        created_at: 0,
+        updated_at: 0,
     };
 }
 
@@ -255,7 +266,13 @@ export class IdentityPaneViewModel implements ViewModel {
     }
 
     /** Re-fetch bindings for a specific identity_id. Pulls into the
-     *  bindings signal so memos that read it react. */
+     *  bindings signal so memos that read it react.
+     *
+     *  Stale-response guard: rapid selection changes can land
+     *  responses out of order. After the await, drop the result if
+     *  the user has selected a different identity in the meantime —
+     *  otherwise we'd display bindings for an earlier selection on
+     *  the currently-selected identity. Reagent P1 (PR #750). */
     async refreshBindings(identity_id: string | null): Promise<void> {
         if (!identity_id) {
             this.setBindings([]);
@@ -265,10 +282,19 @@ export class IdentityPaneViewModel implements ViewModel {
             const list = await RpcApi.ListIdentityBindingsCommand(TabRpcClient, {
                 identity_id,
             });
-            this.setBindings(list);
+            // The user might have switched selection during the
+            // round-trip. Only commit if our identity_id is still the
+            // selected one.
+            if (this.selectedIdAtom() === identity_id) {
+                this.setBindings(list);
+            }
         } catch (e) {
-            this.setError(`Failed to load bindings: ${(e as Error).message ?? e}`);
-            this.setBindings([]);
+            // Same staleness guard on the error path: don't surface
+            // an error for a non-current identity.
+            if (this.selectedIdAtom() === identity_id) {
+                this.setError(`Failed to load bindings: ${(e as Error).message ?? e}`);
+                this.setBindings([]);
+            }
         }
     }
 
