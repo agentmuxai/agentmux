@@ -19,13 +19,32 @@ export interface AgentDocumentState {
     sessionPhase: SessionPhase;
     /** ms epoch of the most recent SessionStart, or null if never started. */
     sessionStartedAt: number | null;
+    /**
+     * Authoritative dedup index, kept in lockstep with `nodes`. Replaces
+     * the per-mount rebuild in useAgentStream that scanned `nodes[]` and
+     * could miss in-flight events arriving between mount and scan. The
+     * stream-side cache still exists for in-batch dedup but is now seeded
+     * from this set rather than rebuilt. Issue #728 gap 4.
+     */
+    nodeIdSet: Set<string>;
 }
 
 export const initialState = (): AgentDocumentState => ({
     nodes: [],
     sessionPhase: "loading-history",
     sessionStartedAt: null,
+    nodeIdSet: new Set<string>(),
 });
+
+/** Optional knobs the dispatcher can pass through to the reducer. */
+export interface ReducerOptions {
+    /**
+     * Override for `TRUNCATE_GRACE_MS`. Issue #728 gap 6 — makes the grace
+     * window injectable for unit tests + lets the diagnostics panel tune
+     * it under load without rebuilding.
+     */
+    truncateGraceMs?: number;
+}
 
 /**
  * Hooks emit these. The reducer decides what to do based on current
