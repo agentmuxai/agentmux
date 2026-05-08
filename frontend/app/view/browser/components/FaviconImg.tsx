@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignal, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, Show, type JSX } from "solid-js";
 
 export interface FaviconImgProps {
     src: string;
@@ -13,6 +13,13 @@ export interface FaviconImgProps {
 // header doesn't render a broken-image glyph.
 export const FaviconImg = (props: FaviconImgProps): JSX.Element => {
     const [errored, setErrored] = createSignal(false);
+    // Reset errored state whenever src changes — SolidJS re-uses the
+    // same component instance across prop changes, so without this the
+    // fallback persists for every URL after the first failure.
+    createEffect(() => {
+        props.src;
+        setErrored(false);
+    });
     const size = () => props.size ?? 16;
     return (
         <span
