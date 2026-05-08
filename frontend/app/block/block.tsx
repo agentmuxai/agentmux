@@ -17,6 +17,7 @@ import { SwarmViewModel } from "@/app/view/swarm/swarm";
 import { EditorViewModel } from "@/app/view/editor/editor";
 import { BrowserViewModel } from "@/app/view/browser/browser";
 import { MemoryViewModel } from "@/app/view/memory/memory";
+import { IdentityPaneViewModel } from "@/app/view/identity/identity-pane";
 import { invokeCommand } from "@/app/platform/ipc";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
@@ -51,14 +52,17 @@ BlockRegistry.set("swarm", SwarmViewModel as any);
 BlockRegistry.set("editor", EditorViewModel as any);
 BlockRegistry.set("browser", BrowserViewModel as any);
 BlockRegistry.set("memory", MemoryViewModel as any);
+BlockRegistry.set("identity", IdentityPaneViewModel as any);
 
 function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel): ViewModel {
-    // Migration shim (v0.33.197): forge and identity are no longer standalone
-    // panes — they live inside the agent pane's floating settings panel.
-    // Old databases may still have blocks with view: "forge" or "identity";
-    // redirect them to "agent" so the user gets the picker with ⚙/👤 buttons.
-    // TODO: remove this shim after v0.34.x when all databases have been migrated.
-    const effectiveView = (blockView === "forge" || blockView === "identity") ? "agent" : blockView;
+    // Migration shim (v0.33.197): forge was folded into the agent pane;
+    // redirect old "forge" blocks to "agent" so they keep rendering.
+    //
+    // "identity" was previously redirected here too, but as of PR-F.2
+    // (#748) Identity is once again a first-class pane — `view: "identity"`
+    // resolves to IdentityPaneViewModel via the BlockRegistry above. The
+    // shim only handles "forge" now.
+    const effectiveView = blockView === "forge" ? "agent" : blockView;
     const ctor = BlockRegistry.get(effectiveView);
     if (ctor != null) {
         return new ctor(blockId, nodeModel as any);
