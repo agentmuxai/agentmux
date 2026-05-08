@@ -78,17 +78,6 @@
             }
         }
     },
-    "defwidget@settings": {
-        "display:order": 7,
-        "icon": "cog",
-        "label": "settings",
-        "description": "Open Settings (external editor)",
-        "blockdef": {
-            "meta": {
-                "view": "settings"
-            }
-        }
-    },
     "defwidget@help": {
         "display:order": 8,
         "icon": "circle-question",

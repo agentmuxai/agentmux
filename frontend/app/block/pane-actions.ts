@@ -101,7 +101,7 @@ export async function handleSplitPane(blockData: Block, direction: SplitDirectio
 // ─── Replace With submenu ─────────────────────────────────────────────────────
 
 /** Non-pane widget views that should be excluded from the Replace submenu. */
-const nonPaneViews = new Set(["devtools", "settings"]);
+const nonPaneViews = new Set(["devtools"]);
 
 /**
  * Build a "Replace With..." submenu listing all pane-based widgets.

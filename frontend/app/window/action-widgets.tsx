@@ -79,15 +79,6 @@ async function handleWidgetSelect(widget: WidgetConfigType) {
         getApi().toggleDevtools();
         return;
     }
-    if (widget.blockdef?.meta?.view === "settings") {
-        try {
-            const path = await invokeCommand<string>("ensure_settings_file");
-            await invokeCommand("open_in_editor", { path });
-        } catch (e) {
-            console.error("Failed to open settings:", e);
-        }
-        return;
-    }
     createBlock(widget.blockdef, widget.magnified);
 }
 
