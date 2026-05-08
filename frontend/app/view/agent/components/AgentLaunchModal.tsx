@@ -194,11 +194,12 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                     </fieldset>
 
                     <fieldset class="agent-launch-modal-field agent-launch-modal-bundles">
-                        <legend class="agent-launch-modal-label">Identity & Memory</legend>
+                        <legend class="agent-launch-modal-label">Identity</legend>
                         <span class="agent-launch-modal-hint">
-                            Identity bundles credentials per provider; Memory bundles the
-                            agent's instructions, context files, and tools. Pick the
-                            blanks for vanilla CLI with ambient credentials.
+                            Identity bundles credentials per provider. Pick a bundle to
+                            inject its accounts as env vars at launch (e.g. GITHUB_TOKEN,
+                            ANTHROPIC_API_KEY); pick blank to use whatever's already in
+                            your environment.
                         </span>
 
                         <label class="agent-launch-modal-bundle-row">
@@ -222,7 +223,21 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                             </select>
                         </label>
 
-                        <label class="agent-launch-modal-bundle-row">
+                        {/*
+                         * Memory dropdown is parked here pending the
+                         * spawn-time content-injection layer (provider
+                         * override, instructions, context files, MCP
+                         * servers, skills). Until that lands, picking
+                         * a non-blank Memory would be cosmetic — codex
+                         * P2 on PR #751 caught this. The state hooks
+                         * below stay in place; memoryId is forced to
+                         * "blank" on the wire so the backend writes a
+                         * blank reference. The Memory pane is still
+                         * usable for managing bundles; the launch
+                         * picker comes back in PR-F.4.
+                         */}
+
+                        <label class="agent-launch-modal-bundle-row" style={{ display: "none" }}>
                             <span class="agent-launch-modal-bundle-row-label">Memory</span>
                             <select
                                 class="agent-launch-modal-input"

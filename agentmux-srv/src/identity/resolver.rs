@@ -29,6 +29,9 @@ pub enum ResolverError {
     #[error("AWS Secrets Manager backend not yet supported (Phase 3)")]
     SecretsManagerUnsupported,
 
+    #[error("PlaintextDev secrets are disabled in release builds")]
+    PlaintextDevDisabledInRelease,
+
     #[error("storage error: {0}")]
     Storage(#[from] StoreError),
 }
@@ -57,16 +60,30 @@ pub fn provider_env_vars(provider: &str) -> Vec<&'static str> {
 /// - **Env**: read `env_var` from the srv process's own environment.
 ///   Caller is expected to have set this in their shell or a
 ///   .env-style loader before launching AgentMux.
-/// - **PlaintextDev**: return the literal stored string. Dev-only —
-///   intentionally rough so it's obvious why the password is in the
-///   DB. Shipping a vault is Phase 3.
+/// - **PlaintextDev**: return the literal stored string. **Debug
+///   builds only** — guarded behind `cfg(debug_assertions)`. In
+///   release builds, the same call returns
+///   [`ResolverError::PlaintextDevDisabledInRelease`] so a forgotten
+///   dev-secret never leaks into a packaged binary. Reagent P1 on
+///   PR #751 caught the missing guard. Phase 3's encrypted vault is
+///   the production path.
 /// - **SecretsManager**: deferred. Returns
 ///   [`ResolverError::SecretsManagerUnsupported`].
 pub fn resolve_secret(secret_ref: &SecretRef) -> Result<String, ResolverError> {
     match secret_ref {
         SecretRef::Env { env_var } => std::env::var(env_var)
             .map_err(|_| ResolverError::EnvVarMissing(env_var.clone())),
-        SecretRef::PlaintextDev { plaintext_dev } => Ok(plaintext_dev.clone()),
+        SecretRef::PlaintextDev { plaintext_dev } => {
+            #[cfg(debug_assertions)]
+            {
+                Ok(plaintext_dev.clone())
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                let _ = plaintext_dev;
+                Err(ResolverError::PlaintextDevDisabledInRelease)
+            }
+        }
         SecretRef::SecretsManager { .. } => Err(ResolverError::SecretsManagerUnsupported),
     }
 }
