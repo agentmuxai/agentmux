@@ -9,6 +9,8 @@ import { Show, createEffect, createMemo, createSignal, onCleanup, type JSX } fro
 import type { SlashCommand } from "../commands/types";
 import type { SessionStats, TurnTokens } from "../types";
 import { SlashAutocomplete } from "./SlashAutocomplete";
+import { MicButton } from "./MicButton";
+import { getVoiceSession } from "@/app/hook/useVoiceInput";
 
 // ── AgentStatusLine ───────────────────────────────────────────────────────────
 // Displayed above the control bar. Shows a cycling thinking phrase while the
@@ -208,6 +210,8 @@ interface AgentFooterProps {
      * If absent, autocomplete is disabled.
      */
     getCompletions?: (prefix: string) => SlashCommand[];
+    /** Called when this footer becomes the active voice input target. */
+    onFocused?: () => void;
 }
 
 export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
@@ -232,6 +236,36 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // per-keystroke cost: <2ms. See
     // specs/SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md §3.4.
     let textareaRef: HTMLTextAreaElement | undefined;
+
+    // ── Voice input ───────────────────────────────────────────────────
+    const voice = getVoiceSession();
+
+    // Tracks committed text length so interim transcript appends after it
+    // without overwriting text the user typed manually.
+    let voiceBaseLength = 0;
+
+    const voiceHandle = {
+        appendFinal: (text: string) => {
+            if (!textareaRef) return;
+            const current = textareaRef.value;
+            const separator = current.length > 0 && !current.endsWith(" ") ? " " : "";
+            textareaRef.value = current + separator + text.trimStart();
+            voiceBaseLength = textareaRef.value.length;
+            props.onTyping?.();
+        },
+        setInterim: (text: string) => {
+            if (!textareaRef) return;
+            const base = textareaRef.value.slice(0, voiceBaseLength);
+            textareaRef.value = text ? base + " " + text : base;
+            props.onTyping?.();
+        },
+    };
+
+    const handleFocusIn = () => {
+        voice.registerPane(voiceHandle);
+        voiceBaseLength = textareaRef?.value.length ?? 0;
+        props.onFocused?.();
+    };
 
     // ── Slash autocomplete state ──────────────────────────────────────
     // Tracks the current `/prefix` (without the leading slash) when the
@@ -295,6 +329,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         if (props.onSendMessage) {
             props.onSendMessage(message);
             textareaRef.value = "";
+            voiceBaseLength = 0;
             setAutocompletePrefix(null);
             // Scroll the new user message into view. SolidJS flushes the
             // document signal synchronously before this point, so jumpToBottom
@@ -355,6 +390,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             if (textareaRef.value.trim().length > 0) {
                 e.preventDefault();
                 textareaRef.value = "";
+                voiceBaseLength = 0;
                 // Kick the RAF-debounced typing scroll so the footer's
                 // auto-grow collapses and the document stays anchored.
                 props.onTyping?.();
@@ -370,7 +406,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             {/* "Send now" now renders inside PendingMessagesPanel (right
                 of the queue header) so it sits next to the messages it
                 accelerates, not above the composer. */}
-            <div class="agent-input-container">
+            <div class="agent-input-container" onFocusIn={handleFocusIn}>
                 <Show when={autocompletePrefix() !== null && completions().length > 0}>
                     <SlashAutocomplete
                         completions={completions()}
@@ -379,14 +415,22 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                         onSelect={acceptCompletion}
                     />
                 </Show>
-                <textarea
-                    ref={textareaRef}
-                    class="agent-input"
-                    placeholder={`Send message to ${props.agentId}...`}
-                    onKeyDown={handleKeyDown}
-                    onInput={handleInput}
-                    rows={1}
-                />
+                <div class="agent-input-row">
+                    <MicButton />
+                    <textarea
+                        ref={textareaRef}
+                        class="agent-input"
+                        classList={{ "voice-active": voice.isListening() }}
+                        placeholder={`Send message to ${props.agentId}...`}
+                        onKeyDown={handleKeyDown}
+                        onInput={(e) => {
+                            // User typed: update voiceBaseLength so interim appends correctly.
+                            voiceBaseLength = (e.target as HTMLTextAreaElement).value.length;
+                            handleInput();
+                        }}
+                        rows={1}
+                    />
+                </div>
                 <div class="agent-input-hint">
                     <span>Enter to send • Shift+Enter for newline • Esc to clear / stop</span>
                 </div>

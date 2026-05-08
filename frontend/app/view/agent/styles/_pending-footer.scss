@@ -108,8 +108,15 @@
             gap: 1px;
             position: relative;
 
+            .agent-input-row {
+                display: flex;
+                align-items: flex-start;
+                gap: var(--space-0-5);
+            }
+
             .agent-input {
-                width: 100%;
+                flex: 1;
+                min-width: 0;
                 padding: 3px var(--space-1);
                 background: var(--main-bg-color);
                 border: 1px solid var(--border-color);
@@ -133,6 +140,12 @@
                 &:focus {
                     outline: none;
                     border-color: var(--accent-color);
+                }
+
+                &.voice-active {
+                    border-color: var(--color-primary, var(--accent-color));
+                    box-shadow: 0 0 0 1px var(--color-primary, var(--accent-color));
+                    transition: border-color 0.2s, box-shadow 0.2s;
                 }
             }
 
