@@ -262,16 +262,37 @@ export const WaveStreamdown = (props: WaveStreamdownProps): JSX.Element => {
         thead: (thProps: any) => <thead {...thProps} class="border-b border-border bg-white/[0.03]" />,
         tbody: (tbProps: any) => <tbody {...tbProps} />,
         tr: (trProps: any) => <tr {...trProps} class="border-b border-border/40 last:border-0" />,
-        th: (thProps: any) => (
-            <th class={cn("px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-primary", thProps.className)}>
-                {thProps.children}
-            </th>
-        ),
-        td: (tdProps: any) => (
-            <td class={cn("px-3 py-2 text-sm text-secondary", tdProps.className)}>
-                {tdProps.children}
-            </td>
-        ),
+        th: (thProps: any) => {
+            // Spread sanitizer-survived attributes (colspan, rowspan,
+            // scope, etc.) onto the cell, then override className so
+            // alignment/typography classes win. Codex P2 on PR #754:
+            // the prior version dropped every prop except children +
+            // className, breaking raw HTML tables that used <th
+            // colspan="2">.
+            const { children, className, ...rest } = thProps;
+            return (
+                <th
+                    {...rest}
+                    class={cn(
+                        "px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-primary",
+                        className,
+                    )}
+                >
+                    {children}
+                </th>
+            );
+        },
+        td: (tdProps: any) => {
+            const { children, className, ...rest } = tdProps;
+            return (
+                <td
+                    {...rest}
+                    class={cn("px-3 py-2 text-sm text-secondary", className)}
+                >
+                    {children}
+                </td>
+            );
+        },
         ul: (ulProps: any) => (
             <ul
                 {...ulProps}

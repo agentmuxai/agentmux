@@ -407,16 +407,36 @@ const Markdown = ({
         thead: (props: any) => <thead class="border-b border-border bg-white/[0.03]">{props.children}</thead>,
         tbody: (props: any) => <tbody>{props.children}</tbody>,
         tr: (props: any) => <tr class="border-b border-border/40 last:border-0">{props.children}</tr>,
-        th: (props: any) => (
-            <th class={cn("px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-primary", props.className)}>
-                {props.children}
-            </th>
-        ),
-        td: (props: any) => (
-            <td class={cn("px-3 py-2 text-sm text-secondary", props.className)}>
-                {props.children}
-            </td>
-        ),
+        th: (props: any) => {
+            // Spread sanitizer-survived attributes (colspan, rowspan,
+            // scope) so raw HTML tables retain their structure. Codex
+            // P2 on PR #754. Override className so alignment classes
+            // from rehypeAlignToClass + the cell's typography classes
+            // both apply.
+            const { children, className, ...rest } = props;
+            return (
+                <th
+                    {...rest}
+                    class={cn(
+                        "px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-primary",
+                        className,
+                    )}
+                >
+                    {children}
+                </th>
+            );
+        },
+        td: (props: any) => {
+            const { children, className, ...rest } = props;
+            return (
+                <td
+                    {...rest}
+                    class={cn("px-3 py-2 text-sm text-secondary", className)}
+                >
+                    {children}
+                </td>
+            );
+        },
         waveblock: (props: any) => <WaveBlock {...props} blockmap={contentBlocksMap()} />,
         mermaidblock: (props: any) => {
             const getTextContent = (children: any): string => {
