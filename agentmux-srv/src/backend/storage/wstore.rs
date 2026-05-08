@@ -1133,6 +1133,22 @@ pub struct AgentInstance {
     #[serde(default)]
     pub ended_at: i64,
     pub created_at: i64,
+    /// Per-instance identity overrides (issue #678 Phase 2). Snapshot
+    /// taken at launch — independent of the live
+    /// `db_forge_agent_identities` (definition-level) junction so two
+    /// instances of the same definition can use different accounts.
+    /// Empty vec means "fall back to definition default at spawn time."
+    #[serde(default)]
+    pub identities: Vec<InstanceIdentity>,
+}
+
+/// One per-provider identity binding owned by an `AgentInstance`. The
+/// `account_id` references `db_identity_accounts`, the `provider`
+/// scopes the binding (one identity per provider per instance).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InstanceIdentity {
+    pub account_id: String,
+    pub provider: String,
 }
 
 impl WaveStore {
@@ -1354,7 +1370,7 @@ impl WaveStore {
         // can't reuse a single prepared statement across filter combos.
         let mut sql = String::from(
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
-                    status, github_context, started_at, ended_at, created_at
+                    status, github_context, started_at, ended_at, created_at, identities
              FROM db_agent_instances",
         );
         let mut clauses: Vec<&str> = Vec::new();
@@ -1382,6 +1398,7 @@ impl WaveStore {
             param_vals.push(s.to_string());
         }
         let iter = stmt.query_map(rusqlite::params_from_iter(param_vals.iter()), |row| {
+            let identities_json: String = row.get(10).unwrap_or_else(|_| "[]".to_string());
             Ok(AgentInstance {
                 id: row.get(0)?,
                 definition_id: row.get(1)?,
@@ -1393,6 +1410,7 @@ impl WaveStore {
                 started_at: row.get(7)?,
                 ended_at: row.get(8)?,
                 created_at: row.get(9)?,
+                identities: serde_json::from_str(&identities_json).unwrap_or_default(),
             })
         })?;
         let mut out = Vec::new();
@@ -1402,14 +1420,25 @@ impl WaveStore {
         Ok(out)
     }
 
-    pub fn instance_get(&self, id: &str) -> Result<Option<AgentInstance>, StoreError> {
+    /// Find the most recently-created running instance for a block.
+    /// Used at subprocess spawn time to look up per-instance identity
+    /// overrides (issue #678 Phase 2). Returns `None` for blocks that
+    /// have no active instance — falls back to ambient host credentials.
+    pub fn instance_get_active_for_block(
+        &self,
+        block_id: &str,
+    ) -> Result<Option<AgentInstance>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
-                    status, github_context, started_at, ended_at, created_at
-             FROM db_agent_instances WHERE id = ?1",
+                    status, github_context, started_at, ended_at, created_at, identities
+             FROM db_agent_instances
+             WHERE block_id = ?1 AND status = 'running'
+             ORDER BY created_at DESC
+             LIMIT 1",
         )?;
-        let result = stmt.query_row(params![id], |row| {
+        let result = stmt.query_row(params![block_id], |row| {
+            let identities_json: String = row.get(10).unwrap_or_else(|_| "[]".to_string());
             Ok(AgentInstance {
                 id: row.get(0)?,
                 definition_id: row.get(1)?,
@@ -1421,6 +1450,37 @@ impl WaveStore {
                 started_at: row.get(7)?,
                 ended_at: row.get(8)?,
                 created_at: row.get(9)?,
+                identities: serde_json::from_str(&identities_json).unwrap_or_default(),
+            })
+        });
+        match result {
+            Ok(a) => Ok(Some(a)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn instance_get(&self, id: &str) -> Result<Option<AgentInstance>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
+                    status, github_context, started_at, ended_at, created_at, identities
+             FROM db_agent_instances WHERE id = ?1",
+        )?;
+        let result = stmt.query_row(params![id], |row| {
+            let identities_json: String = row.get(10).unwrap_or_else(|_| "[]".to_string());
+            Ok(AgentInstance {
+                id: row.get(0)?,
+                definition_id: row.get(1)?,
+                parent_instance_id: row.get(2)?,
+                block_id: row.get(3)?,
+                session_id: row.get(4)?,
+                status: row.get(5)?,
+                github_context: row.get(6)?,
+                started_at: row.get(7)?,
+                ended_at: row.get(8)?,
+                created_at: row.get(9)?,
+                identities: serde_json::from_str(&identities_json).unwrap_or_default(),
             })
         });
         match result {
@@ -1433,11 +1493,13 @@ impl WaveStore {
     /// Insert a new instance row. Caller is responsible for the id (UUID).
     pub fn instance_create(&self, inst: &AgentInstance) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
+        let identities_json =
+            serde_json::to_string(&inst.identities).unwrap_or_else(|_| "[]".to_string());
         conn.execute(
             "INSERT INTO db_agent_instances
                 (id, definition_id, parent_instance_id, block_id, session_id, status,
-                 github_context, started_at, ended_at, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                 github_context, started_at, ended_at, created_at, identities)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 inst.id,
                 inst.definition_id,
@@ -1449,6 +1511,7 @@ impl WaveStore {
                 inst.started_at,
                 inst.ended_at,
                 inst.created_at,
+                identities_json,
             ],
         )?;
         Ok(())
@@ -2015,12 +2078,19 @@ mod tests {
             started_at: 1000,
             ended_at: 0,
             created_at: 1000,
+            identities: vec![InstanceIdentity {
+                account_id: "acc1".to_string(),
+                provider: "github".to_string(),
+            }],
         };
         store.instance_create(&inst).unwrap();
 
         let fetched = store.instance_get("inst1").unwrap().expect("row");
         assert_eq!(fetched.block_id, "block-abc");
         assert_eq!(fetched.status, "running");
+        assert_eq!(fetched.identities.len(), 1);
+        assert_eq!(fetched.identities[0].account_id, "acc1");
+        assert_eq!(fetched.identities[0].provider, "github");
 
         // Update status → stopped
         let mut updated = fetched.clone();
@@ -2056,6 +2126,7 @@ mod tests {
             started_at: 0,
             ended_at: 0,
             created_at: 0,
+            identities: vec![],
         };
         store.instance_create(&inst).unwrap();
 

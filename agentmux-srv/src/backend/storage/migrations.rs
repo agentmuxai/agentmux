@@ -124,6 +124,7 @@ pub fn run_forge_migrations(conn: &Connection) -> Result<(), StoreError> {
     run_forge_v4_migrations(conn)?;
     run_forge_v5_migrations(conn)?;
     run_forge_v6_migrations(conn)?;
+    run_forge_v7_migrations(conn)?;
     Ok(())
 }
 
@@ -432,6 +433,42 @@ pub fn run_forge_v6_migrations(conn: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// v7 — per-instance identity overrides (issue #678 Phase 2).
+///
+/// Adds an `identities` JSON column to `db_agent_instances`. Each row
+/// encodes the agent definition's identity assignments AT LAUNCH TIME,
+/// independent of the live `db_forge_agent_identities` (definition-level)
+/// junction. This is what makes per-instance credential isolation work:
+/// two simultaneously-running instances of the same definition can use
+/// different accounts.
+///
+/// Shape of the JSON value:
+///   `[{"account_id": "<uuid>", "provider": "github"}, ...]`
+///
+/// Empty array means "fall back to the definition-level junction at
+/// spawn time" (Phase 1 behavior). Non-empty array means "use exactly
+/// these identities for this instance, ignoring the definition default."
+pub fn run_forge_v7_migrations(conn: &Connection) -> Result<(), StoreError> {
+    match conn.execute_batch(
+        "ALTER TABLE db_agent_instances ADD COLUMN identities TEXT NOT NULL DEFAULT '[]'",
+    ) {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("duplicate column") {
+                Ok(())
+            } else {
+                Err(StoreError::Sqlite(match e {
+                    rusqlite::Error::SqliteFailure(code, _) => {
+                        rusqlite::Error::SqliteFailure(code, Some(msg))
+                    }
+                    other => other,
+                }))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -639,5 +676,57 @@ mod tests {
             )
             .unwrap();
         assert_eq!(remaining, 0, "junction row should cascade-delete");
+    }
+
+    #[test]
+    fn test_forge_v7_migrations_adds_identities_column() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+        run_forge_migrations(&conn).unwrap();
+
+        let cols: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(db_agent_instances)").unwrap();
+            stmt.query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(
+            cols.contains(&"identities".to_string()),
+            "db_agent_instances must have identities column after v7"
+        );
+
+        // Default value applies on insert: existing INSERT without identities column
+        // should still work and produce '[]'.
+        conn.execute(
+            "INSERT INTO db_forge_agents (id, name, provider, description, slug)
+             VALUES ('ag1', 'AgentX', 'claude', '', 'agentx')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO db_agent_instances (id, definition_id, status, started_at)
+             VALUES ('inst1', 'ag1', 'running', 0)",
+            [],
+        )
+        .unwrap();
+        let identities: String = conn
+            .query_row(
+                "SELECT identities FROM db_agent_instances WHERE id='inst1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(identities, "[]");
+    }
+
+    #[test]
+    fn test_forge_v7_migrations_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+        run_forge_migrations(&conn).unwrap();
+        run_forge_migrations(&conn).unwrap(); // second pass must not error
     }
 }

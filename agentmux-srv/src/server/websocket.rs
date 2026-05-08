@@ -817,13 +817,17 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let working_dir = crate::backend::obj::meta_get_string(
                     &block.meta, "cmd:cwd", "",
                 );
-                let env_vars: std::collections::HashMap<String, String> = match block.meta.get("cmd:env") {
+                let mut env_vars: std::collections::HashMap<String, String> = match block.meta.get("cmd:env") {
                     Some(serde_json::Value::Object(obj)) => obj
                         .iter()
                         .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
                         .collect(),
                     _ => std::collections::HashMap::new(),
                 };
+                // Issue #678 Phase 2 — resolve identity-bound secrets and
+                // merge into the env map at spawn time. Secrets never
+                // enter `cmd:env` (block metadata) or the JSON IPC bus.
+                crate::identity::inject_identity_env(&wstore, &cmd.blockid, &mut env_vars);
                 let session_id_field = crate::backend::obj::meta_get_string(
                     &block.meta, "agent:session_id_field", "session_id",
                 );

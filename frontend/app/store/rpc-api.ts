@@ -659,7 +659,15 @@ class RpcApiType {
     // command "createagentinstance" [call]
     CreateAgentInstanceCommand(
         client: RpcClient,
-        data: { definition_id: string; block_id?: string; parent_instance_id?: string },
+        data: {
+            definition_id: string;
+            block_id?: string;
+            parent_instance_id?: string;
+            /** Per-instance identity overrides (issue #678 Phase 2). Empty
+             *  array (or absent) → backend falls back to the agent
+             *  definition's db_forge_agent_identities bindings. */
+            identities?: InstanceIdentity[];
+        },
         opts?: RpcOpts,
     ): Promise<AgentInstance> {
         return client.rpcCall("createagentinstance", data, opts);

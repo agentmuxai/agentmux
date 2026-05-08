@@ -190,3 +190,25 @@
     opacity: 0.6;
 }
 
+
+// Identity picker (issue #678 Phase 2). Sits between the runtime
+// fieldset and the advanced details. One row per provider with at
+// least one account.
+.agent-launch-modal-identities {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.agent-launch-modal-identity-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.agent-launch-modal-identity-provider {
+    text-transform: capitalize;
+    min-width: 80px;
+    font-size: 12px;
+    color: var(--secondary-text-color);
+}

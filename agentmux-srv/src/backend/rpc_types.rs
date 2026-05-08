@@ -1551,6 +1551,12 @@ pub struct CommandCreateAgentInstanceData {
     pub block_id: String,
     #[serde(default)]
     pub parent_instance_id: String,
+    /// Per-instance identity overrides (issue #678 Phase 2). Each entry
+    /// references one `db_identity_accounts` row scoped to one provider.
+    /// Empty (or absent) → backend falls back to the agent definition's
+    /// `db_forge_agent_identities` (definition-level) bindings at spawn.
+    #[serde(default)]
+    pub identities: Vec<crate::backend::storage::wstore::InstanceIdentity>,
 }
 
 /// Mutable subset of AgentInstance for PATCH-style updates. Every field is

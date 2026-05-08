@@ -301,6 +301,15 @@ declare global {
         started_at: number;
         ended_at?: number;
         created_at: number;
+        /** Per-instance identity overrides (issue #678 Phase 2).
+         *  Empty array → backend falls back to db_forge_agent_identities. */
+        identities?: InstanceIdentity[];
+    };
+
+    /** One per-provider identity binding owned by an AgentInstance. */
+    type InstanceIdentity = {
+        account_id: string;
+        provider: string;
     };
 
     // ForgeContent

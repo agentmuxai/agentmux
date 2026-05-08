@@ -458,6 +458,10 @@ export class AgentViewModel implements ViewModel {
                 const inst = await RpcApi.CreateAgentInstanceCommand(TabRpcClient, {
                     definition_id: agent.id,
                     block_id: blockId,
+                    // Per-instance identity overrides (issue #678 Phase 2).
+                    // Empty array → backend falls back to definition-level
+                    // db_forge_agent_identities at spawn time.
+                    identities: overrides?.identities ?? [],
                 });
                 await RpcApi.SetMetaCommand(TabRpcClient, {
                     oref,

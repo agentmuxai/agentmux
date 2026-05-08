@@ -13,9 +13,13 @@
  * panel only. See docs/specs/launch-modal-rearchitecture-2026-05-01.md.
  */
 
-import { createMemo, createSignal, Show, type JSX } from "solid-js";
+import { createMemo, createResource, createSignal, For, Show, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
+import type { Account } from "@/app/view/identity/identity-model";
+import { loadAccounts } from "@/app/view/identity/identity-model";
 
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { buildInstanceSlug, slugifyInstanceName } from "../defaults/instance-slug";
@@ -31,6 +35,10 @@ export interface LaunchOverrides {
     environment: "local" | "docker";
     /** Only set when agentType === "container". */
     containerImage?: string;
+    /** Per-instance identity overrides (issue #678 Phase 2). One entry
+     *  per provider; absence means "use the definition default" (the
+     *  backend falls back to db_forge_agent_identities). */
+    identities?: { account_id: string; provider: string }[];
 }
 
 interface AgentLaunchModalPanelProps {
@@ -49,6 +57,68 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     const [submitting, setSubmitting] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
     const [showAdvanced, setShowAdvanced] = createSignal(false);
+
+    // ── Identity picker (issue #678 Phase 2) ──────────────────────────
+    // Per-provider account selection. `null` for a provider means "use
+    // the definition default" (backend falls back to
+    // db_forge_agent_identities). The map key is the provider id.
+    const [identityChoice, setIdentityChoice] = createSignal<Record<string, string | null>>({});
+
+    // Load the definition-level bindings so we can pre-fill the picker.
+    // The list is small (one row per provider) so the call is cheap.
+    const [agentBindings] = createResource(
+        () => props.agent.id,
+        async (agentId) => {
+            try {
+                return await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentId });
+            } catch {
+                return [] as ForgeAgentIdentity[];
+            }
+        },
+    );
+
+    const allAccounts = createMemo<Account[]>(() => loadAccounts());
+
+    // Group accounts by provider — drives the picker rows. We only
+    // render rows for providers that have at least one account; users
+    // who want a provider that has no accounts go to the identity
+    // widget to add one.
+    const accountsByProvider = createMemo<Map<string, Account[]>>(() => {
+        const m = new Map<string, Account[]>();
+        for (const a of allAccounts()) {
+            if (!m.has(a.provider)) m.set(a.provider, []);
+            m.get(a.provider)!.push(a);
+        }
+        return m;
+    });
+
+    // Pre-fill identityChoice from agent bindings whenever they load.
+    // We only initialize entries we haven't already touched (so the
+    // resource refresh doesn't clobber a user's pick).
+    createMemo(() => {
+        const bindings = agentBindings();
+        if (!bindings) return;
+        const current = identityChoice();
+        const next: Record<string, string | null> = { ...current };
+        let changed = false;
+        for (const b of bindings) {
+            if (next[b.provider] === undefined) {
+                next[b.provider] = b.account_id;
+                changed = true;
+            }
+        }
+        if (changed) setIdentityChoice(next);
+    });
+
+    /** Build the LaunchOverrides.identities array from the picker state. */
+    const collectIdentities = (): { account_id: string; provider: string }[] => {
+        const choice = identityChoice();
+        const out: { account_id: string; provider: string }[] = [];
+        for (const [provider, account_id] of Object.entries(choice)) {
+            if (account_id) out.push({ account_id, provider });
+        }
+        return out;
+    };
 
     const hasName = () => name().trim().length > 0;
     const canSubmit = () => !submitting() && slugifyInstanceName(name()).length > 0;
@@ -70,6 +140,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                 agentType: runtime(),
                 environment: runtime() === "container" ? "docker" : "local",
                 containerImage: runtime() === "container" ? resolvedImage() : undefined,
+                identities: collectIdentities(),
             });
             // Success: layer closes the panel; we leave `submitting`
             // true so the button keeps its "Launching…" label until
@@ -162,6 +233,47 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                             </span>
                         </label>
                     </fieldset>
+
+                    <Show when={accountsByProvider().size > 0}>
+                        <fieldset class="agent-launch-modal-field agent-launch-modal-identities">
+                            <legend class="agent-launch-modal-label">Identity</legend>
+                            <span class="agent-launch-modal-hint">
+                                Credentials to inject when this instance launches. Pre-filled
+                                from the agent's defaults; override per-launch as needed.
+                            </span>
+                            <For each={Array.from(accountsByProvider().entries())}>
+                                {([provider, accounts]) => (
+                                    <div class="agent-launch-modal-identity-row">
+                                        <label class="agent-launch-modal-identity-provider">
+                                            {provider}
+                                        </label>
+                                        <select
+                                            class="agent-launch-modal-input"
+                                            value={identityChoice()[provider] ?? ""}
+                                            onChange={(e) => {
+                                                const v = e.currentTarget.value;
+                                                setIdentityChoice((prev) => ({
+                                                    ...prev,
+                                                    [provider]: v === "" ? null : v,
+                                                }));
+                                            }}
+                                            disabled={submitting()}
+                                            aria-label={`Identity for ${provider}`}
+                                        >
+                                            <option value="">— None (use ambient) —</option>
+                                            <For each={accounts}>
+                                                {(acc) => (
+                                                    <option value={acc.id}>
+                                                        {acc.display_name?.trim() || acc.name}
+                                                    </option>
+                                                )}
+                                            </For>
+                                        </select>
+                                    </div>
+                                )}
+                            </For>
+                        </fieldset>
+                    </Show>
 
                     <Show when={error()}>
                         <div class="agent-launch-modal-error">{error()}</div>

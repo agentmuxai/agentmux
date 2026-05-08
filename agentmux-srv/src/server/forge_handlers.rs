@@ -1005,6 +1005,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     started_at: now,
                     ended_at: 0,
                     created_at: now,
+                    identities: cmd.identities,
                 };
                 wstore
                     .instance_create(&inst)
@@ -1046,6 +1047,9 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     started_at: existing.started_at,
                     ended_at: cmd.ended_at.unwrap_or(existing.ended_at),
                     created_at: existing.created_at,
+                    // Identities are immutable for the lifetime of an instance
+                    // (issue #678 spec — "mid-session rotation not supported").
+                    identities: existing.identities,
                 };
                 wstore
                     .instance_update(&merged)
