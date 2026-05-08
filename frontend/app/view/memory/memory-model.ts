@@ -77,7 +77,12 @@ export function draftFromMemory(m: Memory): MemoryDraft {
         model: m.model ?? "",
         instructions: m.instructions ?? "",
         context_files,
-        mcp_servers: m.mcp_servers ?? "[]",
+        // Both JSON-array fields use the same empty-string-aware
+        // fallback. A legacy row with mcp_servers = "" would
+        // otherwise load empty into the textarea, looking
+        // unconfigured. Reagent P2 (PR #749).
+        mcp_servers:
+            m.mcp_servers && m.mcp_servers.trim().length > 0 ? m.mcp_servers : "[]",
         skills: m.skills && m.skills.trim().length > 0 ? m.skills : "[]",
     };
 }

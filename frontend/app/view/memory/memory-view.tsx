@@ -37,8 +37,17 @@ interface MemoryViewProps {
 export const MemoryView = (props: MemoryViewProps): JSX.Element => {
     const { model } = props;
 
+    // Clicking a list item SELECTS the memory so the read-only detail
+    // view appears (including for the blank singleton, which can't be
+    // edited but should still be inspectable). The edit form opens via
+    // the explicit "Edit" button on the read-only view. Reagent P2
+    // (#749) — previously this called startEdit which refused on the
+    // blank singleton with an error and left the detail pane showing
+    // the previously-selected memory, mismatching the banner.
     const handleSelect = (memory: Memory) => {
-        model.startEdit(memory);
+        model.setError(null);
+        model.cancelDraft();
+        model.setSelectedId(memory.id);
     };
 
     const handleNew = () => model.startNew();
