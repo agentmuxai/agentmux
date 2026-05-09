@@ -25,6 +25,7 @@ import {
 } from "./tabbar-dnd";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { Logger } from "@/util/logger";
+import { markEnd, markStart } from "@/perf";
 import "./tabbar.scss";
 
 export { tabItemType } from "./tabbar-dnd";
@@ -64,7 +65,9 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     const handleSelect = (tabId: string) => {
         if (tabId === activeTabId()) return;
+        markStart("tab-switch", { from: activeTabId(), to: tabId });
         setActiveTab(tabId);
+        requestAnimationFrame(() => markEnd("tab-switch"));
     };
 
     const handleClose = (tabId: string) => {

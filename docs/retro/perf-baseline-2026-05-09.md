@@ -22,15 +22,22 @@ The harness path `tools/tests/authfile.ps1::Get-AgentMuxAuthFile` was extended i
 
 The numerical capture (P50/P75/P95 for tab switch, pane resize) is **blocked** on three instrumentation gaps that the first measurement run revealed. The retro's value is documenting these gaps so the fix is bounded; the numbers come after.
 
-### Finding 1 — `handleSelect` mark misses programmatic tab switches
+### Finding 1 — `handleSelect` mark misses programmatic tab switches; reactive marks don't help
 
-**Symptom:** drove 10 tab switches via `Invoke-AgentMuxService -Service workspace -Method SetActiveTab`. Service-side acks all 12 SetActiveTab calls (10 trials + 2 setup). Zero `[fe] [perf] tab-switch …` lines in the host log.
+**Symptom:** drove 10 tab switches via `Invoke-AgentMuxService -Service workspace -Method SetActiveTab`. Service-side acks all 12 SetActiveTab calls. Zero `[fe] [perf] tab-switch …` lines in the host log.
 
-**Root cause:** Phase 0 placed `markStart("tab-switch")` in `frontend/app/tab/tabbar.tsx::handleSelect`, which only fires on a user click on the tab strip. The service API path (sidecar writes to `workspace.activetabid` → frontend reactively subscribes via `getWaveObjectAtom` → `atoms.activeTabId` updates → all per-tab effects re-run) bypasses `handleSelect` entirely.
+**First-pass theory (wrong):** move the mark from imperative (`handleSelect` onClick) to reactive (`createEffect` on `atoms.activeTabId`). Should catch every code path uniformly.
 
-**Fix (Phase 0.5):** move the mark from imperative (`handleSelect` onClick) to reactive (`createEffect(() => { atoms.activeTabId(); markStart("tab-switch"); /* in microtask, markEnd */ })`). One reactive observer in `workspace.tsx` or similar catches every code path uniformly: human click, programmatic API, keyboard shortcut. ~30 LOC.
+**Why it doesn't work** (codex + reagent on PR #766 round 4): SolidJS schedules `createEffect` runs **after** all memo recomputations and JSX flushes have already completed synchronously. By the time `markStart` fires inside the effect, the reactive fan-out (`display:none` toggle on every tab content div, downstream effects) has already run. The `markStart → rAF markEnd` window measures only the browser's frame-scheduling interval — **not** the JS cost of the fan-out. Reverted; imperative `handleSelect` mark restored.
 
-This is a **general lesson** for Phase 0 instrumentation: imperative marks at the click handler miss programmatic / reactive / keyboard paths. Reactive marks tied to the underlying state atom catch all callers. Same pattern likely applies to `pane-resize-tick` (currently in `onResizeMove`, misses any non-mouse resize trigger), and to whatever Tier-2 interactions get instrumented next.
+**Real lesson:** imperative marks are correct for measuring user-driven interactions because they fire BEFORE the signal mutation that triggers the reactive flush. The service-API path has no equivalent client-side "before the mutation" moment — the workspace mirror update arrives async, and there's no hook between "wave-object subscription receives the update" and "Solid memos recompute." A reactive observer doesn't help because Solid's batching guarantees the observer runs at the END of the flush, not the start.
+
+**Real fix paths:**
+- User clicks: imperative `markStart` in `handleSelect` is correct and stays.
+- Service-API path: needs lower-level instrumentation in the wave-object mirror receiver (deeper than Phase 0; future work).
+- Keyboard shortcuts: imperative mark in the shortcut handler.
+
+**Practical implication:** drive the perf retro via user clicks (manually) until lower-level WOS instrumentation lands. Per memory `feedback_user_drives_ui_for_baseline.md`, the user-driven path is the right default for measurement runs anyway.
 
 ### Finding 2 — frontend logs not reaching host log in this run
 

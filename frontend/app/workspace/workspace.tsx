@@ -8,8 +8,7 @@ import { StatusBar } from "@/app/statusbar/StatusBar";
 import { WindowHeader } from "@/app/window/window-header";
 import { TabContent } from "@/app/tab/tabcontent";
 import { atoms } from "@/store/global";
-import { markEnd, markStart } from "@/perf";
-import { createEffect, For, Show, createMemo } from "solid-js";
+import { For, Show, createMemo } from "solid-js";
 import type { JSX } from "solid-js";
 
 function WorkspaceElem(): JSX.Element {
@@ -25,16 +24,6 @@ function WorkspaceElem(): JSX.Element {
         return [...(w.pinnedtabids ?? []), ...(w.tabids ?? [])];
     });
 
-    let prevTabId: string | undefined;
-    createEffect(() => {
-        const next = tabId();
-        if (prevTabId === undefined) { prevTabId = next; return; }
-        if (next === prevTabId) return;
-        markStart("tab-switch", { from: prevTabId, to: next });
-        prevTabId = next;
-        // rAF catches the next paint commit so the measure spans the fan-out.
-        requestAnimationFrame(() => markEnd("tab-switch"));
-    });
 
     return (
         <div class="flex flex-col w-full flex-grow overflow-hidden">
