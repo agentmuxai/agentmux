@@ -8,4 +8,4 @@ export type {
     BrowserPaneState,
     ReducerResult,
 } from "./types";
-export { initialState, TITLE_FALLBACK } from "./types";
+export { deriveFaviconUrl, initialState, TITLE_FALLBACK } from "./types";

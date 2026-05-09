@@ -6,8 +6,10 @@
  * docs/specs/frontend-reducer-architecture-2026-05-03.md and the
  * roadmap at docs/specs/browser-pane-reducer-roadmap.md).
  *
- * **Phases 3a + 3b + 3c + 3e (title) + 3d.** This reducer owns seven
- * cells today:
+ * **Phases 3a + 3b + 3c + 3d + 3e (complete).** This reducer owns
+ * eight cells today — every per-pane data cell from the catalog is
+ * now reducer-backed. Slot store + `recordDispatch` audit (Phase 4)
+ * is the next milestone.
  *   - `closed` — terminal flag set by `dispose()`. All post-close
  *     commands are no-ops.
  *   - `loading` — page-load-in-flight flag. Mutually exclusive with
@@ -28,10 +30,11 @@
  *     createPane, the placeholder `<Show>` gate); migration must
  *     preserve every consumer's semantics verbatim.
  *
- * Cells not yet migrated: `faviconUrl` (will be a derived projection
- * of `url`'s origin in a follow-up PR) plus the address-bar typing
- * buffer in the view. The slot store + `recordDispatch` audit lands
- * in Phase 4.
+ * The `faviconUrl` cell is a **derived projection** of `url` — its
+ * value is computed inside every transition that touches `url`, so
+ * there's no `FaviconChanged` command. The address-bar typing buffer
+ * stays in the view (the catalog rule: DOM is the source of truth
+ * for live-typing UX).
  *
  * Note: Phase 6 of the roadmap is when host-side title-change events
  * (`browser-pane-title-change`) actually start emitting. Until then,
@@ -77,6 +80,35 @@ export interface BrowserPaneState {
      *  and superseded by `UrlConfirmed` (host's `browser-pane-nav-state`
      *  reporting the post-redirect final URL). */
     url: string;
+    /** Pane favicon URL — derived from `url`'s origin via
+     *  `${origin}/favicon.ico`. Empty string when `url` is empty or
+     *  unparseable; the view falls back to a globe icon in that case.
+     *  Computed by `deriveFaviconUrl` inside every transition that
+     *  writes `url` (Navigate, UrlConfirmed, UrlCleared) — there is
+     *  no `FaviconChanged` command, since the cell isn't an
+     *  independent input. Catalog reference: row 1.faviconUrlAtom in
+     *  `docs/specs/browser-pane-state-catalog.md`. */
+    faviconUrl: string;
+}
+
+/**
+ * Derive the favicon URL from a pane URL. Empty string when the URL
+ * is empty or unparseable — the view interprets that as "no favicon,
+ * show the globe icon" per the catalog. Pure function so it's safe to
+ * call inside reducer transitions and from tests directly.
+ */
+export function deriveFaviconUrl(url: string): string {
+    if (url === "") return "";
+    try {
+        const origin = new URL(url).origin;
+        // about:blank, file://, and other schemes that produce an
+        // origin of "null" don't have a meaningful favicon — return
+        // empty so the view shows the globe.
+        if (origin === "null" || origin === "") return "";
+        return `${origin}/favicon.ico`;
+    } catch {
+        return "";
+    }
 }
 
 /** The string the reducer projects when `TitleChanged` arrives with
@@ -94,6 +126,7 @@ export const initialState = (): BrowserPaneState => ({
     canGoForward: false,
     title: TITLE_FALLBACK,
     url: "",
+    faviconUrl: "",
 });
 
 export type BrowserPaneCommand =

@@ -43,28 +43,20 @@ export class BrowserViewModel implements ViewModel {
     }
 
     private _url = createSignal<string>("");
-    /**
-     * `urlAtom` is wrapped (not the bare signal getter) for slice #9
-     * Phase 3d observability: every consumer read is logged so we can
-     * verify the migration didn't change consumer call patterns. Per
-     * the roadmap this instrumentation is **temporary** — remove
-     * after Phase 3d ships and the log baseline is recorded.
-     *
-     * Do NOT change the accessor's reactive shape — Solid tracks the
-     * underlying signal read (`this._url[0]()`), so consumers'
-     * createEffect dependency tracking remains identical to the bare
-     * signal accessor.
-     */
-    urlAtom: Accessor<string> = () => {
-        const v = this._url[0]();
-        this.diag(`urlAtom-read value=${JSON.stringify(v)}`);
-        return v;
-    };
+    urlAtom: Accessor<string> = this._url[0];
     setUrl = this._url[1];
 
     private _title = createSignal<string>(TITLE_FALLBACK);
     titleAtom: Accessor<string> = this._title[0];
     setTitle = this._title[1];
+
+    private _favicon = createSignal<string>("");
+    /** Pane favicon URL. Derived projection of `state.url` per the
+     *  reducer (slice #9 §3e completion). Empty when the URL is
+     *  empty or unparseable; the view shows the globe icon in that
+     *  case. */
+    faviconUrlAtom: Accessor<string> = this._favicon[0];
+    private setFavicon = this._favicon[1];
 
     private _loading = createSignal<boolean>(false);
     loadingAtom: Accessor<boolean> = this._loading[0];
@@ -101,14 +93,13 @@ export class BrowserViewModel implements ViewModel {
     blockAtom: Accessor<Block | undefined>;
 
     /**
-     * Slice #9 (Phases 3a + 3b + 3c + 3e + 3d) reducer state — owns
-     * `closed`, `loading`, `error`, `canGoBack`, `canGoForward`,
-     * `title`, `url`. The signals above are projections of this state
-     * so the SolidJS view layer keeps reactive parity. Per the
-     * roadmap at `docs/specs/browser-pane-reducer-roadmap.md`, the
-     * remaining cell (`faviconUrl`, derived from `url`) migrates in
-     * a follow-up PR; the slot store + recordDispatch audit lands in
-     * Phase 4.
+     * Slice #9 reducer state — owns every per-pane data cell from
+     * the catalog: `closed`, `loading`, `error`, `canGoBack`,
+     * `canGoForward`, `title`, `url`, `faviconUrl` (derived from
+     * `url`). The signals above are projections of this state so
+     * the SolidJS view layer keeps reactive parity. Cell-by-cell
+     * migration is **complete** with this PR; Phase 4 (slot store +
+     * `recordDispatch` audit) is the next milestone.
      */
     private _paneState: BrowserPaneState = browserPaneInitialState();
     /** Late callers (IPC handlers landing post-dispose, defensive guards
@@ -166,6 +157,12 @@ export class BrowserViewModel implements ViewModel {
                 `state-write key=url value=${JSON.stringify(result.state.url)} src=${src}`,
             );
             this.setUrl(result.state.url);
+        }
+        if (result.state.faviconUrl !== prev.faviconUrl) {
+            this.diag(
+                `state-write key=faviconUrl value=${JSON.stringify(result.state.faviconUrl)} src=${src}`,
+            );
+            this.setFavicon(result.state.faviconUrl);
         }
         for (const e of result.events) {
             if (e.type === "post-close-command-dropped") {
