@@ -71,9 +71,9 @@ function Get-AgentMuxAuthFile {
     if ($candidates.Count -eq 0) {
         throw @"
 No authkey.dev found under any known dev/portable path:
-  - %APPDATA%\ai.agentmux.cef.*\authkey.dev
-  - %USERPROFILE%\.agentmux\dev\<branch>\data\authkey.dev
-  - %USERPROFILE%\.agentmux\versions\<ver>\data\authkey.dev
+  - %APPDATA%\ai.agentmux.cef.*\authkey.dev (Windows portable / installed)
+  - $HOME/.agentmux/dev/<branch>/data/authkey.dev (task dev — all platforms)
+  - $HOME/.agentmux/versions/<ver>/data/authkey.dev (portable per-version)
 Start a dev instance first: ``task dev``. The file is written only by
 debug builds (see docs/specs/SPEC_TEST_API_ACCESS.md §5).
 "@

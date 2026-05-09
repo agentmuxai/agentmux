@@ -65,9 +65,15 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     const handleSelect = (tabId: string) => {
         if (tabId === activeTabId()) return;
+        // Phase 0 perf instrumentation A1: time the tab-switch
+        // interaction. The `markEnd` lands one microtask after
+        // `setActiveTab` commits — it captures the synchronous
+        // dispatch path; reactive fan-out (Solid effects, IPC for
+        // pane HWND show/hide) is observed separately via the Long
+        // Tasks API and the IPC roundtrip clock.
         markStart("tab-switch", { from: activeTabId(), to: tabId });
         setActiveTab(tabId);
-        requestAnimationFrame(() => markEnd("tab-switch"));
+        queueMicrotask(() => markEnd("tab-switch"));
     };
 
     const handleClose = (tabId: string) => {

@@ -24,7 +24,6 @@ function WorkspaceElem(): JSX.Element {
         return [...(w.pinnedtabids ?? []), ...(w.tabids ?? [])];
     });
 
-
     return (
         <div class="flex flex-col w-full flex-grow overflow-hidden">
             <WindowHeader workspace={ws()} />

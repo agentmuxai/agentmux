@@ -101,20 +101,17 @@ The four hypotheses from the spec stand. Without numerical capture they remain a
 
 ## Action items (in priority order)
 
-1. **Phase 0.5 — reactive mark migration** (~30 LOC, 2 hours).
-   - Move `tab-switch` mark from `handleSelect` to a `createEffect` on `atoms.activeTabId` so the mark fires regardless of which code path drives the switch (user click, service API, keyboard shortcut).
-   - Apply the same pattern to `pane-resize-tick` if any non-mouse resize trigger exists today (none today, but ride the convention).
-   - Single PR; small enough to ride alongside the next perf-related code change.
+1. **Drive the baseline via user clicks** (no code change). Phase 0's imperative `markStart` in `handleSelect` is correct for user-driven measurements. Open the dev instance, click between tabs 10× while tailing `muxlog host '\[fe\] \[perf\]'`. This unblocks the click-driven baseline immediately.
 
 2. **Diagnose frontend log-pipe gap** (Finding 2). Open the dev instance, confirm React UI loaded, tail the log-pipe at construction time. If it's a startup race (initLogPipe runs before IPC is ready), the queue-and-flush pattern likely needs a fix.
 
-3. **Re-run the baseline** after #1 lands. Now expecting non-zero `[fe] [perf]` lines.
+3. **For service-API-driven measurements, instrument lower** — at the wave-object mirror receiver in `wos.ts`, BEFORE the atom mutation triggers Solid's reactive flush. Out of scope for Phase 0. The reactive `createEffect` approach was tried and failed (see Finding 1).
 
-4. **Implement Tab primitives from the App API automation spec** (~0.5 day, 5 endpoints). Replaces the raw service API calls with `tab.list` / `tab.create` (await consistency) / `tab.switch`, simplifying every future harness.
+4. **Implement Tab primitives from the App API automation spec** (~0.5 day, 5 endpoints). Lets the harness instrument at the API call site (`tab.switch` records its own start mark before invoking the service).
 
 5. **Implement Pane primitives** (~1 day) so `pane.resize` is drivable programmatically. Unblocks the pane-resize half of this baseline.
 
-The numbers come after #1 + #2 are resolved. Until then this retro is the reference for what's blocking measurement, not the measurement itself.
+The click-driven numbers come after #2 (log pipe). Service-API numbers come after #3 or #4.
 
 ---
 
