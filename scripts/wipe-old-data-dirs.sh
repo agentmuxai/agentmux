@@ -174,14 +174,7 @@ for d in \
     [ -e "$d" ] && DELETE_LIST+=("$d")
 done
 
-# 3. Pre-unification ~/.agentmux/<version>/ subdirs (CLI shell config).
-# Match ONLY the legacy version-keyed pattern (e.g. 0.33.644/) — the
-# unified layout (PR #695, SPEC_DATA_DIR_UNIFICATION_2026-05-05.md)
-# uses ~/.agentmux/versions/<v>/ and ~/.agentmux/dev/<branch>/. The
-# top-level `versions/`, `dev/`, `shared/`, `agents/`, `shell/`,
-# `logs/`, `tool-build-cache/` dirs are the CURRENT layout — never
-# touch them. The earlier wildcard glob would have wiped every
-# instance's state.
+# 3. Pre-unification ~/.agentmux/<semver>/ — only the version-keyed glob.
 if [ -d "$DOTAGENTMUX_DIR" ]; then
     for d in "$DOTAGENTMUX_DIR"/[0-9]*.[0-9]*.[0-9]*/; do
         DELETE_LIST+=("${d%/}")
