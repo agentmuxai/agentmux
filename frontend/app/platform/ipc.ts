@@ -7,6 +7,8 @@
 // CEF host: HTTP POST to localhost IPC server for commands (JS→Rust),
 //           CustomEvent dispatch for events (Rust→JS).
 
+import { recordIpcRoundtrip } from "@/perf";
+
 /**
  * Detect the current host environment.
  */
@@ -27,6 +29,11 @@ export function detectHost(): HostType {
  */
 export async function invokeCommand<T = any>(cmd: string, args?: Record<string, any>): Promise<T> {
     const host = detectHost();
+    // Component C1 of perf phase 0 — record the IPC roundtrip (start
+    // → host response). 16 ms = one frame at 60 Hz; the recorder
+    // logs anything over that. Cost is one perf.now() pair plus a
+    // map insert, well under perf budget at our call rates.
+    const t0 = typeof performance !== "undefined" ? performance.now() : 0;
 
     switch (host) {
         case "cef": {
@@ -44,9 +51,11 @@ export async function invokeCommand<T = any>(cmd: string, args?: Record<string, 
                 body: JSON.stringify({ cmd, args: args ?? {} }),
             });
             if (!resp.ok) {
+                recordIpcRoundtrip(cmd, performance.now() - t0);
                 throw new Error(`IPC HTTP error: ${resp.status} ${resp.statusText}`);
             }
             const parsed = await resp.json();
+            recordIpcRoundtrip(cmd, performance.now() - t0);
             if (parsed.success) {
                 return parsed.data as T;
             }
