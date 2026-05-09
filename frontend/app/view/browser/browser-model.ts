@@ -43,7 +43,23 @@ export class BrowserViewModel implements ViewModel {
     }
 
     private _url = createSignal<string>("");
-    urlAtom: Accessor<string> = this._url[0];
+    /**
+     * `urlAtom` is wrapped (not the bare signal getter) for slice #9
+     * Phase 3d observability: every consumer read is logged so we can
+     * verify the migration didn't change consumer call patterns. Per
+     * the roadmap this instrumentation is **temporary** — remove
+     * after Phase 3d ships and the log baseline is recorded.
+     *
+     * Do NOT change the accessor's reactive shape — Solid tracks the
+     * underlying signal read (`this._url[0]()`), so consumers'
+     * createEffect dependency tracking remains identical to the bare
+     * signal accessor.
+     */
+    urlAtom: Accessor<string> = () => {
+        const v = this._url[0]();
+        this.diag(`urlAtom-read value=${JSON.stringify(v)}`);
+        return v;
+    };
     setUrl = this._url[1];
 
     private _title = createSignal<string>(TITLE_FALLBACK);
@@ -85,14 +101,14 @@ export class BrowserViewModel implements ViewModel {
     blockAtom: Accessor<Block | undefined>;
 
     /**
-     * Slice #9 (Phases 3a + 3b + 3c + 3e) reducer state — owns
+     * Slice #9 (Phases 3a + 3b + 3c + 3e + 3d) reducer state — owns
      * `closed`, `loading`, `error`, `canGoBack`, `canGoForward`,
-     * `title`. The signals above are projections of this state so the
-     * SolidJS view layer keeps reactive parity. Per the roadmap at
-     * `docs/specs/browser-pane-reducer-roadmap.md`, the remaining
-     * cells (url, faviconUrl) migrate in follow-up PRs (faviconUrl
-     * is derived from url, so it lands together with §3d); the slot
-     * store + recordDispatch audit lands in Phase 4.
+     * `title`, `url`. The signals above are projections of this state
+     * so the SolidJS view layer keeps reactive parity. Per the
+     * roadmap at `docs/specs/browser-pane-reducer-roadmap.md`, the
+     * remaining cell (`faviconUrl`, derived from `url`) migrates in
+     * a follow-up PR; the slot store + recordDispatch audit lands in
+     * Phase 4.
      */
     private _paneState: BrowserPaneState = browserPaneInitialState();
     /** Late callers (IPC handlers landing post-dispose, defensive guards
@@ -105,9 +121,9 @@ export class BrowserViewModel implements ViewModel {
      * Single sync point between the reducer's pure transitions and the
      * SolidJS signals the view subscribes to. Projects every reducer
      * cell currently in scope (`loading`, `error`, `canGoBack`,
-     * `canGoForward`, `title`) onto its signal, but only when the
-     * value actually changed — avoiding spurious reactive churn that
-     * could leak into the address-bar typing path that PR #737
+     * `canGoForward`, `title`, `url`) onto its signal, but only when
+     * the value actually changed — avoiding spurious reactive churn
+     * that could leak into the address-bar typing path that PR #737
      * regressed. Diag logs preserve the prior `state-write key=...`
      * shape so Phase-1 grep recipes still work.
      */
@@ -144,6 +160,12 @@ export class BrowserViewModel implements ViewModel {
                 `state-write key=title value=${JSON.stringify(result.state.title)} src=${src}`,
             );
             this.setTitle(result.state.title);
+        }
+        if (result.state.url !== prev.url) {
+            this.diag(
+                `state-write key=url value=${JSON.stringify(result.state.url)} src=${src}`,
+            );
+            this.setUrl(result.state.url);
         }
         for (const e of result.events) {
             if (e.type === "post-close-command-dropped") {
@@ -194,8 +216,7 @@ export class BrowserViewModel implements ViewModel {
             this.diag(
                 `nav-state recv url=${JSON.stringify(payload.url)} url_only=${!!payload.url_only} can_back=${payload.can_go_back} can_forward=${payload.can_go_forward}`,
             );
-            this.diag(`state-write key=url value=${JSON.stringify(payload.url)}`);
-            this.setUrl(payload.url);
+            this._dispatch({ type: "UrlConfirmed", url: payload.url }, "nav-state");
             // `url_only` events come from `on_load_end_pane` — they arrive
             // before the navigation controller has fully committed, so the
             // `can_go_back` / `can_go_forward` values from that hook would
@@ -295,8 +316,6 @@ export class BrowserViewModel implements ViewModel {
             }
         }
 
-        this.diag(`state-write key=url value=${JSON.stringify(normalized)} src=navigate`);
-        this.setUrl(normalized);
         this._dispatch({ type: "Navigate", url: normalized }, "navigate");
         // can_go_back / can_go_forward are set by the `browser-pane-nav-state`
         // event subscription; we don't touch them here. CEF is the source of
@@ -333,12 +352,9 @@ export class BrowserViewModel implements ViewModel {
         if (this.closed) return;
         const url = this.urlAtom();
         if (url) {
-            this.diag(`state-write key=url value="" src=reload-clear`);
-            this.setUrl("");
+            this._dispatch({ type: "UrlCleared" }, "reload-clear");
             // Force iframe reload by briefly clearing then re-setting
             requestAnimationFrame(() => {
-                this.diag(`state-write key=url value=${JSON.stringify(url)} src=reload-restore`);
-                this.setUrl(url);
                 this._dispatch({ type: "Navigate", url }, "reload-restore");
             });
         }
