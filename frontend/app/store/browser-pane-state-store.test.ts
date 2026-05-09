@@ -71,11 +71,17 @@ describe("browser-pane-state-store (slice #9 Phase 4)", () => {
         registerPane("blk-1", proj);
         dispatch("blk-1", { type: "Navigate", url: "https://x" });
         dispatch("blk-1", { type: "Navigate", url: "https://x" });
-        // Second dispatch had identical url + already-loading, but
-        // Navigate always sets loading=true (idempotent on signal write,
-        // not on reducer state). So loading should fire twice — but
-        // url is identical and faviconUrl is identical, so those
-        // shouldn't fire again.
+        // Both dispatches had reducer state.loading=true on entry from
+        // the first call onward, so the second Navigate's transition
+        // is loading=true → loading=true (no change). The slot store's
+        // projection-on-change discipline (`slot.state.loading !==
+        // prev.loading`) means loading fires exactly ONCE total — on
+        // the false → true edge from the first dispatch. Same for url
+        // and faviconUrl: first dispatch sets them, second sees
+        // identical values and skips the projection. This is the
+        // exact discipline that prevents the address-bar typing
+        // clobber PR #737 introduced.
+        expect(proj.calls.loading).toEqual([true]);
         expect(proj.calls.url).toEqual(["https://x"]);
         expect(proj.calls.faviconUrl).toEqual(["https://x/favicon.ico"]);
     });
