@@ -49,20 +49,36 @@ function Get-AgentMuxAuthFile {
         $p = Join-Path $DataDir 'authkey.dev'
         if (Test-Path -LiteralPath $p) { $candidates += Get-Item -LiteralPath $p }
     } else {
-        $base = Join-Path $env:APPDATA 'ai.agentmux.cef.*'
-        # Wrap with @(...) so a single match doesn't collapse into a
-        # bare object — `.Count` and `foreach` both need an array under
-        # Set-StrictMode -Version Latest, which this module enables.
-        $candidates = @(Get-ChildItem -Path $base -Directory -ErrorAction SilentlyContinue |
-            ForEach-Object { Join-Path $_.FullName 'authkey.dev' } |
-            Where-Object { Test-Path -LiteralPath $_ } |
-            Get-Item |
-            Sort-Object LastWriteTime -Descending)
+        # Search every location task dev / portable / installed builds
+        # might write authkey.dev. The historical assumption was that
+        # only %APPDATA%\ai.agentmux.cef.* counted, but task dev (the
+        # primary harness target) writes to the per-branch dev path
+        # ~/.agentmux/dev/<branch>/data/authkey.dev. Add it here so
+        # the harness works against any live debug instance without
+        # the operator having to copy files around. Wrap with @(...)
+        # so a single match doesn't collapse into a bare object —
+        # `.Count` and `foreach` both need an array under
+        # Set-StrictMode -Version Latest.
+        $searchPaths = @(
+            (Join-Path $env:APPDATA 'ai.agentmux.cef.*'),                         # portable / installed
+            (Join-Path $env:USERPROFILE '.agentmux\dev\*\data'),                  # task dev (per-branch)
+            (Join-Path $env:USERPROFILE '.agentmux\versions\*\data')              # portable build (per-version)
+        )
+        $allFiles = foreach ($pattern in $searchPaths) {
+            Get-ChildItem -Path $pattern -Directory -ErrorAction SilentlyContinue |
+                ForEach-Object { Join-Path $_.FullName 'authkey.dev' } |
+                Where-Object { Test-Path -LiteralPath $_ } |
+                Get-Item
+        }
+        $candidates = @($allFiles | Sort-Object LastWriteTime -Descending)
     }
 
     if ($candidates.Count -eq 0) {
         throw @"
-No authkey.dev found under %APPDATA%\ai.agentmux.cef.*\.
+No authkey.dev found under any known dev/portable path:
+  - %APPDATA%\ai.agentmux.cef.*\authkey.dev
+  - %USERPROFILE%\.agentmux\dev\<branch>\data\authkey.dev
+  - %USERPROFILE%\.agentmux\versions\<ver>\data\authkey.dev
 Start a dev instance first: ``task dev``. The file is written only by
 debug builds (see docs/specs/SPEC_TEST_API_ACCESS.md §5).
 "@
