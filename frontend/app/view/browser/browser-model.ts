@@ -243,6 +243,27 @@ export class BrowserViewModel implements ViewModel {
             }
             if (payload.block_id !== this.blockId) return;
             this.diag(`clicked recv`);
+            // The pane HWND captured this click at Win32 level so React never
+            // saw it — `document.activeElement` is whatever it was before
+            // (typically the address bar, since the user usually clicks
+            // there first). If we leave that stale DOM focus, the
+            // subsequent `giveFocus()` flow sees `isMainInput=true` and
+            // tells the host to keep OS focus on the main window —
+            // bouncing focus back from the pane HWND we just gave it.
+            // The user's click on the pane is unambiguous "I want to
+            // interact with the page, not chrome" intent; explicitly blur
+            // whatever main-window input has DOM focus so giveFocus's
+            // activeElement check resolves to "not a main input" and
+            // OS focus stays on the pane HWND.
+            const active = document.activeElement as HTMLElement | null;
+            if (
+                active != null &&
+                (active.tagName === "INPUT" || active.tagName === "TEXTAREA") &&
+                !active.classList.contains("dummy-focus")
+            ) {
+                this.diag(`pane-click blur active=${active.tagName.toLowerCase()}.${active.className}`);
+                active.blur();
+            }
             refocusNode(this.blockId);
         }).then((unsub) => {
             this.diag(`sub-registered name=browser-pane-clicked`);

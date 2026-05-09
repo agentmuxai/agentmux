@@ -184,6 +184,23 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                     value={addressBar()}
                     onInput={(e) => setAddressBar(e.currentTarget.value)}
                     onKeyDown={handleAddressKeyDown}
+                    onMouseDown={() => {
+                        // Fire main_window_focus on mousedown — BEFORE focus
+                        // moves — so OS keyboard focus reclaims from the pane
+                        // HWND at the start of the click. Without this, the
+                        // first click on the address bar after the pane HWND
+                        // grabbed OS focus only moves DOM focus; OS focus
+                        // stays on the pane HWND and keystrokes route there
+                        // instead of reaching React. Subsequent clicks work
+                        // because OS focus has already transitioned.
+                        //
+                        // Buttons in the same nav bar work without this
+                        // because CEF/Chromium internally calls SetFocus on
+                        // <button> click; <input> doesn't get the same
+                        // treatment when the parent webview HWND lacks focus.
+                        diag(`input-mousedown value=${JSON.stringify(addressBar())}`);
+                        invokeCommand("main_window_focus", { window_label: windowLabel }).catch(() => {});
+                    }}
                     onFocus={(e) => {
                         // relatedTarget = the element that LOST focus to us
                         // (or null if focus came from outside the document,
