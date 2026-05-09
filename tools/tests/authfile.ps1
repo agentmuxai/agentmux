@@ -49,20 +49,33 @@ function Get-AgentMuxAuthFile {
         $p = Join-Path $DataDir 'authkey.dev'
         if (Test-Path -LiteralPath $p) { $candidates += Get-Item -LiteralPath $p }
     } else {
-        $base = Join-Path $env:APPDATA 'ai.agentmux.cef.*'
-        # Wrap with @(...) so a single match doesn't collapse into a
-        # bare object — `.Count` and `foreach` both need an array under
-        # Set-StrictMode -Version Latest, which this module enables.
-        $candidates = @(Get-ChildItem -Path $base -Directory -ErrorAction SilentlyContinue |
-            ForEach-Object { Join-Path $_.FullName 'authkey.dev' } |
-            Where-Object { Test-Path -LiteralPath $_ } |
-            Get-Item |
-            Sort-Object LastWriteTime -Descending)
+        $homeDir = if ($HOME) { $HOME } else { $env:USERPROFILE }
+        if (-not $homeDir) {
+            throw "Cannot resolve home directory: neither `$HOME nor `$env:USERPROFILE is set."
+        }
+        $searchPaths = @(
+            (Join-Path $homeDir '.agentmux/dev/*/data'),
+            (Join-Path $homeDir '.agentmux/versions/*/data')
+        )
+        # Pre-unification fallback for stale dev installs.
+        if ($env:APPDATA) {
+            $searchPaths += (Join-Path $env:APPDATA 'ai.agentmux.cef.*')
+        }
+        $allFiles = foreach ($pattern in $searchPaths) {
+            Get-ChildItem -Path $pattern -Directory -ErrorAction SilentlyContinue |
+                ForEach-Object { Join-Path $_.FullName 'authkey.dev' } |
+                Where-Object { Test-Path -LiteralPath $_ } |
+                ForEach-Object { Get-Item -LiteralPath $_ }
+        }
+        $candidates = @($allFiles | Sort-Object LastWriteTime -Descending)
     }
 
     if ($candidates.Count -eq 0) {
         throw @"
-No authkey.dev found under %APPDATA%\ai.agentmux.cef.*\.
+No authkey.dev found under any known dev/portable path:
+  - `$HOME/.agentmux/dev/<branch>/data/authkey.dev (task dev)
+  - `$HOME/.agentmux/versions/<ver>/data/authkey.dev (portable per-version)
+  - %APPDATA%/ai.agentmux.cef.*/authkey.dev (pre-unification, stale)
 Start a dev instance first: ``task dev``. The file is written only by
 debug builds (see docs/specs/SPEC_TEST_API_ACCESS.md §5).
 "@
