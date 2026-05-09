@@ -9,10 +9,17 @@ import { initLogPipe } from "./log/log-pipe";
 import { setupCefApi } from "./cef-init";
 import { initApp } from "./app-init";
 import { benchMark } from "@/util/startup-bench";
+import { initPerf } from "@/perf";
 
 // Pipe all console.log/warn/error to the Rust host log file.
 // Must run before any other code so early messages are captured.
 initLogPipe();
+
+// Phase 0 perf instrumentation: Long Tasks observer + INP/event
+// observer. Must run before any user-interactive code so we never
+// miss a "first interaction" sample. See
+// docs/specs/SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION.md.
+initPerf();
 
 // ── GPU context loss recovery ───────────────────────────────────────────────
 // Recover from GPU context loss (driver reset, DXGI device removal, display

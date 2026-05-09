@@ -20,6 +20,7 @@ import { CrossWindowDragMonitor } from "./drag/CrossWindowDragMonitor.platform";
 import { DragOverlay } from "./drag/DragOverlay";
 import { CenteredDiv } from "./element/quickelems";
 import { ZoomIndicator } from "./element/zoomindicator";
+import { PerfHud } from "@/perf/hud";
 import { checkSeparatorParity, setupDprTracking } from "./init/dpr";
 import { NotificationBubbles } from "./notification/notificationbubbles";
 
@@ -361,6 +362,9 @@ const AppInner = () => {
                     <NotificationBubbles />
                 </Show>
                 <ZoomIndicator />
+                <Show when={isDev()}>
+                    <PerfHud />
+                </Show>
             </div>
         </Show>
     );
