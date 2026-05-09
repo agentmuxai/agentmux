@@ -174,13 +174,9 @@ for d in \
     [ -e "$d" ] && DELETE_LIST+=("$d")
 done
 
-# 3. ~/.agentmux/<version>/ subdirs (CLI shell config, agent workspaces).
-# Per CLAUDE.md "Multiple Instances Run in Parallel" the running portables
-# all write to <portable-root>/data, so ~/.agentmux/<v>/ is per-version
-# CLI config that's only ever appended to. Safe to wipe — torch & restart.
+# 3. Pre-unification ~/.agentmux/<semver>/ — only the version-keyed glob.
 if [ -d "$DOTAGENTMUX_DIR" ]; then
-    for d in "$DOTAGENTMUX_DIR"/*/; do
-        # Strip trailing slash for grep
+    for d in "$DOTAGENTMUX_DIR"/[0-9]*.[0-9]*.[0-9]*/; do
         DELETE_LIST+=("${d%/}")
     done
 fi
