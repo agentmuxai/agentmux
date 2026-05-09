@@ -9,16 +9,68 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import {
     type BrowserPaneCommand,
-    type BrowserPaneState,
-    initialState as browserPaneInitialState,
+    type BrowserPaneEvent,
     TITLE_FALLBACK,
-    update as browserPaneUpdate,
 } from "@/app/store/browser-pane-state";
+import {
+    type BrowserPaneProjections,
+    dispatch as bpDispatch,
+    registerPane as bpRegisterPane,
+    setEventSink as bpSetEventSink,
+    snapshot as bpSnapshot,
+    unregisterPane as bpUnregisterPane,
+} from "@/app/store/browser-pane-state-store";
 import { refocusNode } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, createSignal, type Accessor } from "solid-js";
+
+/**
+ * One-time install of the slice #9 event sink. Hands `pane-clicked`
+ * (and any future view-effecting events) to the DOM side-effect:
+ * blur whatever main-window input held DOM focus, then call
+ * `refocusNode(blockId)` so the layout marks the block as focused.
+ *
+ * This was inline in the `browser-pane-clicked` IPC handler before
+ * Phase 4. Routing through the reducer's event sink puts the click
+ * in the audit ring (visible in Phase 5's diag panel) without
+ * changing the side-effect itself — same blur+refocus, just plumbed
+ * differently.
+ *
+ * Idempotent — checked via a module-level flag because `setEventSink`
+ * is a global setter that the last caller wins. We don't want every
+ * BrowserViewModel construction to clobber a sink the previous one
+ * just installed.
+ */
+let eventSinkInstalled = false;
+function installEventSinkOnce(): void {
+    if (eventSinkInstalled) return;
+    eventSinkInstalled = true;
+    bpSetEventSink((blockId, event: BrowserPaneEvent) => {
+        if (event.type === "pane-clicked") {
+            // The pane HWND captured this click at Win32 level so React
+            // never saw it — `document.activeElement` is whatever it was
+            // before (typically the address bar). Without blurring it,
+            // the subsequent `giveFocus()` flow sees `isMainInput=true`
+            // and tells the host to keep OS focus on the main window —
+            // bouncing focus back from the pane HWND we just gave it.
+            // See PR #760 for the full diagnosis.
+            const active = document.activeElement as HTMLElement | null;
+            if (
+                active != null &&
+                (active.tagName === "INPUT" || active.tagName === "TEXTAREA") &&
+                !active.classList.contains("dummy-focus")
+            ) {
+                console.log(
+                    `[browser-pane:diag][${blockId.slice(0, 7)}] pane-click blur active=${active.tagName.toLowerCase()}.${active.className}`,
+                );
+                active.blur();
+            }
+            refocusNode(blockId);
+        }
+    });
+}
 
 /**
  * Fallback URL for browser panes created without an explicit `meta.url`.
@@ -92,85 +144,47 @@ export class BrowserViewModel implements ViewModel {
 
     blockAtom: Accessor<Block | undefined>;
 
-    /**
-     * Slice #9 reducer state — owns every per-pane data cell from
-     * the catalog: `closed`, `loading`, `error`, `canGoBack`,
-     * `canGoForward`, `title`, `url`, `faviconUrl` (derived from
-     * `url`). The signals above are projections of this state so
-     * the SolidJS view layer keeps reactive parity. Cell-by-cell
-     * migration is **complete** with this PR; Phase 4 (slot store +
-     * `recordDispatch` audit) is the next milestone.
-     */
-    private _paneState: BrowserPaneState = browserPaneInitialState();
     /** Late callers (IPC handlers landing post-dispose, defensive guards
      *  in goBack/Forward/reload) read this to no-op instead of firing
      *  IPC against a Browser CEF is mid-destruction. See
-     *  docs/specs/SPEC_BROWSER_PANE_LIFECYCLE.md §9 step 4. */
-    get closed(): boolean { return this._paneState.closed; }
+     *  docs/specs/SPEC_BROWSER_PANE_LIFECYCLE.md §9 step 4.
+     *
+     *  Reads the slot store snapshot. Treats unregistered (post-dispose
+     *  or never-registered) as `true` so a stale reference never fires
+     *  IPC. */
+    get closed(): boolean {
+        return bpSnapshot(this.blockId)?.closed ?? true;
+    }
 
     /**
-     * Single sync point between the reducer's pure transitions and the
-     * SolidJS signals the view subscribes to. Projects every reducer
-     * cell currently in scope (`loading`, `error`, `canGoBack`,
-     * `canGoForward`, `title`, `url`) onto its signal, but only when
-     * the value actually changed — avoiding spurious reactive churn
-     * that could leak into the address-bar typing path that PR #737
-     * regressed. Diag logs preserve the prior `state-write key=...`
-     * shape so Phase-1 grep recipes still work.
+     * Wrapper around the slice's slot-store dispatch. Records the `src`
+     * tag in a per-call diag log so Phase-1 grep recipes
+     * (`muxlog host '\[browser-pane:diag\]'`) keep showing the
+     * intent-bearing source ("navigate", "nav-state", "goBack", etc.).
+     * The slot store handles state diff + projections + recordDispatch
+     * audit — the model just ferries the command in.
+     *
+     * Guards against double-dispose / post-unregister calls: the slot
+     * store throws on unregistered dispatch (no-silent-drops rule),
+     * and `dispose()` drops the slot as its final step. Calling
+     * `_dispatch` after unregister would throw — same semantics as
+     * the reducer's `post-close-command-dropped` event, just at the
+     * model layer instead of the reducer. The `closed` snapshot
+     * returns `true` for unregistered slots (the `?? true` fallback),
+     * so the same check covers both "slot exists with closed=true"
+     * and "slot unregistered" cases uniformly.
      */
     private _dispatch(cmd: BrowserPaneCommand, src: string): void {
-        const prev = this._paneState;
-        const result = browserPaneUpdate(prev, cmd);
-        this._paneState = result.state;
-        if (result.state.loading !== prev.loading) {
-            this.diag(
-                `state-write key=loading value=${result.state.loading} src=${src}`,
-            );
-            this.setLoading(result.state.loading);
+        // Drop if the slot was already unregistered (post-dispose).
+        // `bpDispatch` would throw — same semantics as the reducer's
+        // `post-close-command-dropped` event, just enforced at the
+        // model layer because the slot is gone entirely.
+        if (bpSnapshot(this.blockId) == null) {
+            this.diag(`post-close-event-dropped name=${cmd.type} src=${src}`);
+            return;
         }
-        if (result.state.error !== prev.error) {
-            this.diag(
-                `state-write key=error value=${JSON.stringify(result.state.error)} src=${src}`,
-            );
-            this.setError(result.state.error);
-        }
-        if (result.state.canGoBack !== prev.canGoBack) {
-            this.diag(
-                `state-write key=canGoBack value=${result.state.canGoBack} src=${src}`,
-            );
-            this.setCanGoBack(result.state.canGoBack);
-        }
-        if (result.state.canGoForward !== prev.canGoForward) {
-            this.diag(
-                `state-write key=canGoForward value=${result.state.canGoForward} src=${src}`,
-            );
-            this.setCanGoForward(result.state.canGoForward);
-        }
-        if (result.state.title !== prev.title) {
-            this.diag(
-                `state-write key=title value=${JSON.stringify(result.state.title)} src=${src}`,
-            );
-            this.setTitle(result.state.title);
-        }
-        if (result.state.url !== prev.url) {
-            this.diag(
-                `state-write key=url value=${JSON.stringify(result.state.url)} src=${src}`,
-            );
-            this.setUrl(result.state.url);
-        }
-        if (result.state.faviconUrl !== prev.faviconUrl) {
-            this.diag(
-                `state-write key=faviconUrl value=${JSON.stringify(result.state.faviconUrl)} src=${src}`,
-            );
-            this.setFavicon(result.state.faviconUrl);
-        }
-        for (const e of result.events) {
-            if (e.type === "post-close-command-dropped") {
-                this.diag(
-                    `post-close-command-dropped commandType=${e.commandType} src=${src}`,
-                );
-            }
-        }
+        this.diag(`dispatch type=${cmd.type} src=${src}`);
+        bpDispatch(this.blockId, cmd, "system");
     }
 
     /** Tag every diag log with the block prefix so multi-pane sessions
@@ -187,6 +201,51 @@ export class BrowserViewModel implements ViewModel {
 
         const ctorMetaUrl = (this.blockAtom()?.meta?.["url"] as string | undefined) ?? "";
         console.log(`[browser-pane:diag][${blockId.slice(0, 7)}] ctor meta.url=${JSON.stringify(ctorMetaUrl)}`);
+
+        // Register the pane in the slice's slot store SYNCHRONOUSLY before
+        // any IPC subscription can dispatch. The store throws on
+        // unregistered dispatch (silent drops would defeat the audit
+        // ring); registering here covers every code path that calls
+        // `_dispatch` after construction. Re-registering on hot reload
+        // is fine — `registerPane` resets the state to initial.
+        const projections: BrowserPaneProjections = {
+            closed: (next) => {
+                this.diag(`state-write key=closed value=${next}`);
+                // No view-side signal — `model.closed` reads the slot
+                // store snapshot directly. The diag log is the only
+                // observable of this projection.
+            },
+            loading: (next) => {
+                this.diag(`state-write key=loading value=${next}`);
+                this.setLoading(next);
+            },
+            error: (next) => {
+                this.diag(`state-write key=error value=${JSON.stringify(next)}`);
+                this.setError(next);
+            },
+            canGoBack: (next) => {
+                this.diag(`state-write key=canGoBack value=${next}`);
+                this.setCanGoBack(next);
+            },
+            canGoForward: (next) => {
+                this.diag(`state-write key=canGoForward value=${next}`);
+                this.setCanGoForward(next);
+            },
+            title: (next) => {
+                this.diag(`state-write key=title value=${JSON.stringify(next)}`);
+                this.setTitle(next);
+            },
+            url: (next) => {
+                this.diag(`state-write key=url value=${JSON.stringify(next)}`);
+                this.setUrl(next);
+            },
+            faviconUrl: (next) => {
+                this.diag(`state-write key=faviconUrl value=${JSON.stringify(next)}`);
+                this.setFavicon(next);
+            },
+        };
+        bpRegisterPane(blockId, projections);
+        installEventSinkOnce();
 
         this.viewName = createMemo(() => this.titleAtom());
 
@@ -261,28 +320,13 @@ export class BrowserViewModel implements ViewModel {
             }
             if (payload.block_id !== this.blockId) return;
             this.diag(`clicked recv`);
-            // The pane HWND captured this click at Win32 level so React never
-            // saw it — `document.activeElement` is whatever it was before
-            // (typically the address bar, since the user usually clicks
-            // there first). If we leave that stale DOM focus, the
-            // subsequent `giveFocus()` flow sees `isMainInput=true` and
-            // tells the host to keep OS focus on the main window —
-            // bouncing focus back from the pane HWND we just gave it.
-            // The user's click on the pane is unambiguous "I want to
-            // interact with the page, not chrome" intent; explicitly blur
-            // whatever main-window input has DOM focus so giveFocus's
-            // activeElement check resolves to "not a main input" and
-            // OS focus stays on the pane HWND.
-            const active = document.activeElement as HTMLElement | null;
-            if (
-                active != null &&
-                (active.tagName === "INPUT" || active.tagName === "TEXTAREA") &&
-                !active.classList.contains("dummy-focus")
-            ) {
-                this.diag(`pane-click blur active=${active.tagName.toLowerCase()}.${active.className}`);
-                active.blur();
-            }
-            refocusNode(this.blockId);
+            // Phase 4: route the click through the slice reducer as a
+            // `PaneClicked` command. The slot store fires the event
+            // sink, which performs the blur-stale-main-input +
+            // refocusNode side-effect. Both the dispatch and the
+            // event land in the audit ring, so multi-pane focus
+            // investigations can see the exact click sequence.
+            this._dispatch({ type: "PaneClicked" }, "browser-pane-clicked");
         }).then((unsub) => {
             this.diag(`sub-registered name=browser-pane-clicked`);
             if (this.closed) unsub();
@@ -401,5 +445,12 @@ export class BrowserViewModel implements ViewModel {
             this._clickUnsub();
             this._clickUnsub = null;
         }
+        // Drop the slot AFTER the Disposed dispatch — the projection
+        // for `closed:true` runs first, so any consumer reading
+        // `model.closed` mid-dispose still sees true. The unregister
+        // is the final step so future post-dispose `_dispatch` calls
+        // will throw a clear "unregistered pane" error rather than
+        // silently no-oping (the slot store's no-silent-drops rule).
+        bpUnregisterPane(this.blockId);
     }
 }
