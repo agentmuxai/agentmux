@@ -5,6 +5,10 @@ import { describe, expect, it } from "vitest";
 import { update } from "./reducer";
 import { deriveFaviconUrl, initialState, TITLE_FALLBACK } from "./types";
 
+// Pure-function tests for the URL→favicon helper. Kept separate from
+// the reducer suite because the helper is reused by future consumers
+// (e.g. the view's globe-fallback decision) and should be testable
+// without bringing the reducer along.
 describe("deriveFaviconUrl", () => {
     it("returns empty for empty input", () => {
         expect(deriveFaviconUrl("")).toBe("");
