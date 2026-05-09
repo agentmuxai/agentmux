@@ -46,11 +46,15 @@ export function initPerf(): void {
  * stays dependency-free and the perf store is the single sink for
  * all timing telemetry.
  */
+// Skip the log-pipe and other perf-self IPCs; warning on these would
+// trigger another fe_log_structured IPC, which would warn, which would
+// trigger another. Feedback loop saturates the IPC server; observed
+// 283k storm in dev mode, 700-1500ms ambient IPC latency, drag broken.
+const PERF_IPC_BLOCKLIST = new Set(["fe_log_structured", "fe_log"]);
+
 export function recordIpcRoundtrip(command: string, durationMs: number): void {
+    if (PERF_IPC_BLOCKLIST.has(command)) return;
     perfStore.recordIpc(command, durationMs);
-    // 16 ms = one frame at 60 Hz. Anything over is a frame-budget
-    // threat — surface immediately to the host log so investigators
-    // don't have to wait for the HUD's 1 Hz refresh.
     if (durationMs > 16) {
         console.warn(`[perf] ipc ${command} ${durationMs.toFixed(1)}ms`);
     }
