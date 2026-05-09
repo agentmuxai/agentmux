@@ -39,16 +39,24 @@ The numerical capture (P50/P75/P95 for tab switch, pane resize) is **blocked** o
 
 **Practical implication:** drive the perf retro via user clicks (manually) until lower-level WOS instrumentation lands. Per memory `feedback_user_drives_ui_for_baseline.md`, the user-driven path is the right default for measurement runs anyway.
 
-### Finding 2 — frontend logs not reaching host log in this run
+### Finding 2 — frontend logs not reaching host log: Vite resolver failed on `@/perf`
 
 **Symptom:** zero lines tagged `[fe]` in the host log over a 5+ minute window with the dev instance up. Per `CLAUDE.md`, ALL frontend `console.log` should pipe to host via `fe_log_structured` — but during this run, nothing.
 
-**Possible causes** (not yet root-caused):
-1. The CEF window opened but the React app failed to load (Vite dev server connection lag / crash). The agentmux-cef.exe process exists but the page is blank or stuck on bootstrap.
-2. `initLogPipe()` ran but the IPC bridge wasn't yet available, and the early console-pipe queue didn't get flushed.
-3. The default workspace had 0 tabs (we saw `tabs(start)=1` after first creating, then went up to 2) — possibly the workspace was in a partial-init state where the React app hadn't fully mounted.
+**Root cause** (diagnosed 2026-05-09, post-investigation): `curl -s http://localhost:5173/frontend/bootstrap.ts` returned HTTP 500 with `Failed to resolve import "@/perf" from "frontend/bootstrap.ts"`. The page got Vite's HTML shell + the `<script type="module" src="/frontend/bootstrap.ts">` tag, but the bootstrap module itself failed to transform. With bootstrap dead, `initLogPipe()` never ran → every `console.log` stayed renderer-only → nothing reached the host log via `fe_log_structured`.
 
-**Diagnostic next step:** open the agentmux-cef window manually, observe whether the React UI is rendered. If not, that's the primary issue; if yes, the log-pipe has a bug. Either way, **not a baseline blocker** — once the frontend is reachable, the measurement repeats.
+The `@/perf` alias was added to `tsconfig.json` in PR #762 (`"@/perf": ["frontend/perf/index.ts"]`). The alias is correct — `task build:frontend` from CLI resolves it cleanly. But the running `task dev` Vite instance had a stale `vite-tsconfig-paths` cache from when its server first booted (during a tsconfig-in-flux moment in this session), and the plugin doesn't always re-read on file changes.
+
+**Fix:** kill + restart `task dev`. Fresh Vite startup re-reads tsconfig and the alias resolves. Verified the fix is "restart, not edit" by:
+- `frontend/perf/index.ts` exists on disk ✓
+- `tsconfig.json` contains `"@/perf"` and `"@/perf/*"` paths ✓
+- `task build:frontend` (production) succeeds repeatedly with the same alias ✓
+
+The dev instance was killed at the end of this investigation. The next `task dev` should bootstrap correctly.
+
+**Class lesson:** when `[fe]` logs go silent, **ALWAYS check Vite first** — `curl http://localhost:5173/frontend/bootstrap.ts` is the canary. A 200 means the module is being served; a 500 with an `error.message` field means the resolver bombed. Add this as a one-liner debug step to the troubleshooting section of CLAUDE.md or a future debugging doc.
+
+**Action item:** investigate whether `vite-tsconfig-paths` should be configured with `loose: false` + an explicit `projects` arg, OR whether we should switch to a manually-defined `resolve.alias` map in `vite.config.ts` so the resolver isn't dependent on the plugin's tsconfig watch behavior. (The latter is more robust for hot-reload scenarios but loses the tsconfig single-source.)
 
 ### Finding 3 — service API path is the right driver, but workspaces start empty
 
