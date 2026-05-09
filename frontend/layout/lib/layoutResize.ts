@@ -11,6 +11,7 @@ import {
     ResizeHandleProps,
 } from "./types";
 import type { LayoutModel } from "./layoutModel";
+import { markEnd, markStart } from "@/perf";
 
 export interface ResizeContext {
     handleId: string;
@@ -52,6 +53,14 @@ export function createStopContainerResizing(model: LayoutModel) {
  * @param y The Y coordinate of the pointer device, in CSS pixels.
  */
 export function onResizeMove(model: LayoutModel, resizeHandle: ResizeHandleProps, x: number, y: number) {
+    // Phase 0 perf instrumentation A1: time the splitter-drag hot
+    // path. Each call is one mousemove → tree-size-recompute pass;
+    // hypothesis H1 in the perf spec is that this is where pane
+    // resize feels slow because every iteration fires a
+    // browser_pane_resize IPC per pane via the model's effect chain.
+    // The Long Tasks observer + IPC roundtrip clock cover the
+    // downstream cost; this mark covers the synchronous compute.
+    markStart("pane-resize-tick");
     const parentIsRow = resizeHandle.flexDirection === FlexDirection.Row;
 
     // If the resize context is out of date, update it and save it for future events.
@@ -114,6 +123,7 @@ export function onResizeMove(model: LayoutModel, resizeHandle: ResizeHandleProps
 
     model.treeReducer(setPendingAction);
     model.updateTree(false);
+    markEnd("pane-resize-tick");
 }
 
 /**

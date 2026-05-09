@@ -22,7 +22,9 @@
             "@/store/*": ["frontend/app/store/*"],
             "@/view/*": ["frontend/app/view/*"],
             "@/element/*": ["frontend/app/element/*"],
-            "@/shadcn/*": ["frontend/app/shadcn/*"]
+            "@/shadcn/*": ["frontend/app/shadcn/*"],
+            "@/perf": ["frontend/perf/index.ts"],
+            "@/perf/*": ["frontend/perf/*"]
         },
         "lib": ["dom", "dom.iterable", "es6"],
         "types": ["vite/client"],
