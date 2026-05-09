@@ -64,12 +64,6 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     const handleSelect = (tabId: string) => {
         if (tabId === activeTabId()) return;
-        // The `tab-switch` perf mark lives in `workspace.tsx` as a
-        // reactive `createEffect` on `atoms.activeTabId` — Phase 0.5
-        // moved it there from this onClick so programmatic
-        // (service API) and keyboard-driven switches also get
-        // recorded, not just user clicks. See the perf-baseline-retro
-        // doc for the lesson.
         setActiveTab(tabId);
     };
 

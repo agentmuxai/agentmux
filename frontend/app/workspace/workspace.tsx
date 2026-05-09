@@ -25,40 +25,14 @@ function WorkspaceElem(): JSX.Element {
         return [...(w.pinnedtabids ?? []), ...(w.tabids ?? [])];
     });
 
-    // Phase 0.5 reactive perf mark for tab switches. The Phase-0 mark
-    // lived in `tabbar.tsx::handleSelect` — only fired on a user click
-    // on the tab strip. Programmatic switches (`workspace.SetActiveTab`
-    // via the service API), keyboard-shortcut switches, and any other
-    // path that writes `workspace.activetabid` bypassed the click
-    // handler entirely. Same lesson surfaced by the Phase 1 baseline
-    // retro: imperative marks at the click site miss every alternate
-    // entry point.
-    //
-    // This `createEffect` subscribes to `atoms.activeTabId` (a
-    // createMemo over `workspace.activetabid`) and emits the
-    // `tab-switch` measure on every change regardless of source. The
-    // first run establishes the baseline tabId; only subsequent
-    // changes count as switches.
+    // Reactive so programmatic / keyboard switches mark too, not just clicks.
     let prevTabId: string | undefined;
     createEffect(() => {
         const next = tabId();
-        if (prevTabId === undefined) {
-            // First run on mount — record the initial tabId without
-            // emitting a switch measure. The very first reactive read
-            // is a subscription, not a transition.
-            prevTabId = next;
-            return;
-        }
+        if (prevTabId === undefined) { prevTabId = next; return; }
         if (next === prevTabId) return;
         markStart("tab-switch", { from: prevTabId, to: next });
         prevTabId = next;
-        // markEnd in the next microtask captures the synchronous
-        // dispatch path: the workspace atom write, the activeTabId
-        // memo recomputation, this effect's run, and any other
-        // effects that subscribe to activeTabId. Reactive fan-out
-        // beyond microtask boundaries (IPC for pane HWND show/hide,
-        // for example) is observed separately via the Long Tasks
-        // observer + IPC roundtrip clock.
         queueMicrotask(() => markEnd("tab-switch"));
     });
 
