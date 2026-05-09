@@ -21,6 +21,7 @@ import { DragOverlay } from "./drag/DragOverlay";
 import { CenteredDiv } from "./element/quickelems";
 import { ZoomIndicator } from "./element/zoomindicator";
 import { PerfHud } from "@/perf/hud";
+import { DiagPanel } from "./devtools/diag-panel";
 import { checkSeparatorParity, setupDprTracking } from "./init/dpr";
 import { NotificationBubbles } from "./notification/notificationbubbles";
 
@@ -364,6 +365,7 @@ const AppInner = () => {
                 <ZoomIndicator />
                 <Show when={isDev()}>
                     <PerfHud />
+                    <DiagPanel />
                 </Show>
             </div>
         </Show>
