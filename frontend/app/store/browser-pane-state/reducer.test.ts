@@ -3,9 +3,36 @@
 
 import { describe, expect, it } from "vitest";
 import { update } from "./reducer";
-import { initialState, TITLE_FALLBACK } from "./types";
+import { deriveFaviconUrl, initialState, TITLE_FALLBACK } from "./types";
 
-describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c + 3e + 3d)", () => {
+describe("deriveFaviconUrl", () => {
+    it("returns empty for empty input", () => {
+        expect(deriveFaviconUrl("")).toBe("");
+    });
+
+    it("returns origin/favicon.ico for a normal https URL", () => {
+        expect(deriveFaviconUrl("https://example.com/path?q=1")).toBe(
+            "https://example.com/favicon.ico",
+        );
+    });
+
+    it("preserves port + scheme on the origin", () => {
+        expect(deriveFaviconUrl("http://localhost:3000/foo")).toBe(
+            "http://localhost:3000/favicon.ico",
+        );
+    });
+
+    it("returns empty for unparseable URLs", () => {
+        expect(deriveFaviconUrl("not a url")).toBe("");
+        expect(deriveFaviconUrl("://broken")).toBe("");
+    });
+
+    it("returns empty for about:blank (origin is 'null')", () => {
+        expect(deriveFaviconUrl("about:blank")).toBe("");
+    });
+});
+
+describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c + 3d + 3e complete)", () => {
     describe("Navigate", () => {
         it("sets loading=true and clears any prior error", () => {
             const s0 = update(initialState(), {
@@ -44,6 +71,48 @@ describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c + 3e + 3d)",
             }).state;
             const r = update(s0, { type: "Navigate", url: "https://b.com" });
             expect(r.state.url).toBe("https://b.com");
+        });
+    });
+
+    describe("faviconUrl derivation", () => {
+        it("Navigate sets faviconUrl from url's origin", () => {
+            const r = update(initialState(), {
+                type: "Navigate",
+                url: "https://example.com/some/page",
+            });
+            expect(r.state.faviconUrl).toBe("https://example.com/favicon.ico");
+        });
+
+        it("UrlConfirmed updates faviconUrl when origin changes (post-redirect)", () => {
+            const s0 = update(initialState(), {
+                type: "Navigate",
+                url: "https://typed-by-user.com",
+            }).state;
+            const r = update(s0, {
+                type: "UrlConfirmed",
+                url: "https://final-redirect-target.com/page",
+            });
+            expect(r.state.faviconUrl).toBe(
+                "https://final-redirect-target.com/favicon.ico",
+            );
+        });
+
+        it("UrlCleared clears faviconUrl alongside url", () => {
+            const s0 = update(initialState(), {
+                type: "Navigate",
+                url: "https://example.com",
+            }).state;
+            expect(s0.faviconUrl).toBe("https://example.com/favicon.ico");
+            const r = update(s0, { type: "UrlCleared" });
+            expect(r.state.faviconUrl).toBe("");
+        });
+
+        it("Navigate to an unparseable URL leaves faviconUrl empty", () => {
+            const r = update(initialState(), {
+                type: "Navigate",
+                url: "not a url",
+            });
+            expect(r.state.faviconUrl).toBe("");
         });
     });
 

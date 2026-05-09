@@ -3,8 +3,9 @@
 
 /**
  * Pure reducer for the browser-pane state slice (slice #9, Phases 3a +
- * 3b + 3c + 3e + 3d). See `docs/specs/browser-pane-reducer-roadmap.md`
- * and the conventions doc `frontend-reducer-conventions-2026-05-03.md`.
+ * 3b + 3c + 3d + 3e complete). See
+ * `docs/specs/browser-pane-reducer-roadmap.md` and the conventions
+ * doc `frontend-reducer-conventions-2026-05-03.md`.
  * This module is the exact mirror of slice #4's reducer pattern
  * (agent-pane-state) — same `update(state, command) → { state, events }`
  * shape, same idempotency rules, same no-throw policy.
@@ -34,9 +35,16 @@
  *      typically accompany the same nav-state IPC event).
  *      Idempotent on identical url.
  *   8. `UrlCleared` sets `state.url = ""` without touching any
- *      other cell — distinct from `UrlConfirmed { url: "" }` so the
- *      audit ring distinguishes the reload force-reload pattern from
- *      a host-confirmed empty URL. Idempotent (already empty → no-op).
+ *      other cell except `faviconUrl` (which derives from `url`).
+ *      Distinct from `UrlConfirmed { url: "" }` so the audit ring
+ *      distinguishes the reload force-reload pattern from a
+ *      host-confirmed empty URL. Idempotent (already empty → no-op).
+ *   9. `faviconUrl` is a **derived projection** of `url` — every
+ *      transition that writes `url` also writes
+ *      `faviconUrl = deriveFaviconUrl(url)`. There is no
+ *      `FaviconChanged` command; the cell is not an independent
+ *      input. Empty / unparseable URL → empty faviconUrl (view falls
+ *      back to globe icon).
  */
 
 import {
@@ -44,6 +52,7 @@ import {
     BrowserPaneState,
     ReducerResult,
     TITLE_FALLBACK,
+    deriveFaviconUrl,
 } from "./types";
 
 export function update(
@@ -70,6 +79,7 @@ export function update(
                     loading: true,
                     error: null,
                     url: command.url,
+                    faviconUrl: deriveFaviconUrl(command.url),
                 },
                 events: [{ type: "navigate", url: command.url }],
             };
@@ -133,7 +143,11 @@ export function update(
         case "UrlConfirmed": {
             if (state.url === command.url) return { state, events: [] };
             return {
-                state: { ...state, url: command.url },
+                state: {
+                    ...state,
+                    url: command.url,
+                    faviconUrl: deriveFaviconUrl(command.url),
+                },
                 events: [{ type: "url-confirmed", url: command.url }],
             };
         }
@@ -141,7 +155,7 @@ export function update(
         case "UrlCleared": {
             if (state.url === "") return { state, events: [] };
             return {
-                state: { ...state, url: "" },
+                state: { ...state, url: "", faviconUrl: "" },
                 events: [{ type: "url-cleared" }],
             };
         }
