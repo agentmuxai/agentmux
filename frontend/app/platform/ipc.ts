@@ -33,7 +33,13 @@ export async function invokeCommand<T = any>(cmd: string, args?: Record<string, 
     // → host response). 16 ms = one frame at 60 Hz; the recorder
     // logs anything over that. Cost is one perf.now() pair plus a
     // map insert, well under perf budget at our call rates.
-    const t0 = typeof performance !== "undefined" ? performance.now() : 0;
+    //
+    // No `typeof performance` guard: every CEF browser AgentMux
+    // bundles ships the Performance API, and the prior half-guarded
+    // form (guarded `t0` but unguarded `.now()` calls below) made
+    // the guard a footgun rather than a safety net. If we ever ship
+    // a runtime without it, fail visibly here, not silently.
+    const t0 = performance.now();
 
     switch (host) {
         case "cef": {

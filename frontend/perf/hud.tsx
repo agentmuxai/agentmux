@@ -14,7 +14,7 @@
  * stylesheet.
  */
 
-import { createSignal, onCleanup, onMount, Show, type JSX, For } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, Show, type JSX, For } from "solid-js";
 import { perfStore } from "./store";
 
 interface HudSnapshot {
@@ -63,14 +63,31 @@ export function PerfHud(): JSX.Element {
 
     onMount(() => {
         window.addEventListener("keydown", onKey);
-        pollInterval = setInterval(() => {
-            if (visible()) setSnap(flatten(perfStore.snapshot()));
-        }, 1000);
+    });
+
+    // Only run the 1 Hz poll when the HUD is visible. Otherwise the
+    // timer fires every second forever for a panel nobody can see —
+    // small individually but the kind of waste this very HUD exists
+    // to surface. createEffect re-runs whenever `visible()` flips,
+    // setting up / tearing down the interval cleanly.
+    createEffect(() => {
+        if (visible()) {
+            // Refresh once immediately so the panel doesn't show stale
+            // data on the first toggle-on after a long hidden period.
+            setSnap(flatten(perfStore.snapshot()));
+            pollInterval = setInterval(
+                () => setSnap(flatten(perfStore.snapshot())),
+                1000,
+            );
+        } else if (pollInterval != null) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+        }
     });
 
     onCleanup(() => {
         window.removeEventListener("keydown", onKey);
-        if (pollInterval) clearInterval(pollInterval);
+        if (pollInterval != null) clearInterval(pollInterval);
     });
 
     return (
