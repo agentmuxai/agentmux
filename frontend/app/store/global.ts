@@ -5,6 +5,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { markEnd, markStart } from "@/perf";
 import {
     getLayoutModelForStaticTab,
     LayoutTreeActionType,
@@ -866,7 +867,24 @@ export function createTab() {
 export async function setActiveTab(tabId: string): Promise<void> {
     const ws = workspace();
     if (ws == null) return;
-    await WorkspaceService.SetActiveTab(ws.oid, tabId);
+    const fromTabId = activeTabId();
+    if (fromTabId === tabId) return;
+    // Canonical chokepoint for tab-switch perf marks. Wraps every entry
+    // path: click (tabbar), keyboard (Ctrl+Tab/1..9 in keymodel),
+    // palette (command-registry), test app API (cef-api). markEnd lands
+    // two rAFs after the IPC so the duration captures user-perceived
+    // switch cost — IPC + Solid fan-out + layout + paint — not just IPC.
+    // Backend-driven switches (tearoff merge, cross-drag) bypass this
+    // function and are not measured here; they're rare and observable
+    // via the long-task timeline.
+    markStart("tab-switch", { from: fromTabId, to: tabId });
+    try {
+        await WorkspaceService.SetActiveTab(ws.oid, tabId);
+    } finally {
+        requestAnimationFrame(() =>
+            requestAnimationFrame(() => markEnd("tab-switch"))
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
