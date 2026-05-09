@@ -6,6 +6,8 @@
 **Supersedes:** earlier draft of this file (the per-provider Forge-form picker plan)
 **Status:** Proposed — rewrites the model after user feedback
 
+> **Status update (2026-05-09):** the §"Identity Pane / Memory Pane as first-class block-views with widget-bar entries" portion of this spec is **superseded** by `specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md` §7.4. Identity and Memory are Agent-pane subsections, **not** widget-bar entries. The `view: "identity"` and `view: "memory"` registrations remain (so `pane.open` RPC and right-click pane menus can still reach them), but the `defwidget@identity` and `defwidget@memory` entries have been removed from `agentmux-srv/src/config/widgets.json`. The bundle model itself (Identity = credentials, Memory = personality/capability) and the launch-modal bundle picker are unchanged.
+
 ---
 
 ## The model
