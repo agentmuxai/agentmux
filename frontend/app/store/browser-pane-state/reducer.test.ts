@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { update } from "./reducer";
 import { initialState, TITLE_FALLBACK } from "./types";
 
-describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c + 3e)", () => {
+describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c + 3e + 3d)", () => {
     describe("Navigate", () => {
         it("sets loading=true and clears any prior error", () => {
             const s0 = update(initialState(), {
@@ -26,6 +26,118 @@ describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c + 3e)", () =
                 url: "https://x",
             });
             expect(r.state.loading && r.state.error !== null).toBe(false);
+        });
+
+        it("sets state.url atomically with the loading flip", () => {
+            const r = update(initialState(), {
+                type: "Navigate",
+                url: "https://example.com",
+            });
+            expect(r.state.url).toBe("https://example.com");
+            expect(r.state.loading).toBe(true);
+        });
+
+        it("supersedes a prior url", () => {
+            const s0 = update(initialState(), {
+                type: "Navigate",
+                url: "https://a.com",
+            }).state;
+            const r = update(s0, { type: "Navigate", url: "https://b.com" });
+            expect(r.state.url).toBe("https://b.com");
+        });
+    });
+
+    describe("UrlConfirmed", () => {
+        it("updates state.url to the host-confirmed value", () => {
+            const s0 = update(initialState(), {
+                type: "Navigate",
+                url: "https://typed-by-user",
+            }).state;
+            const r = update(s0, {
+                type: "UrlConfirmed",
+                url: "https://post-redirect-final",
+            });
+            expect(r.state.url).toBe("https://post-redirect-final");
+            expect(r.events).toEqual([
+                { type: "url-confirmed", url: "https://post-redirect-final" },
+            ]);
+        });
+
+        it("does NOT touch loading, error, or history", () => {
+            const s0 = update(initialState(), {
+                type: "Navigate",
+                url: "https://x",
+            }).state;
+            const s1 = update(s0, {
+                type: "HistoryUpdated",
+                canGoBack: true,
+            }).state;
+            const r = update(s1, {
+                type: "UrlConfirmed",
+                url: "https://final",
+            });
+            expect(r.state.loading).toBe(s1.loading);
+            expect(r.state.error).toBe(s1.error);
+            expect(r.state.canGoBack).toBe(s1.canGoBack);
+            expect(r.state.canGoForward).toBe(s1.canGoForward);
+        });
+
+        it("is idempotent on identical url", () => {
+            const s0 = update(initialState(), {
+                type: "UrlConfirmed",
+                url: "https://x",
+            }).state;
+            const r = update(s0, { type: "UrlConfirmed", url: "https://x" });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([]);
+        });
+    });
+
+    describe("UrlCleared", () => {
+        it("clears state.url to empty string", () => {
+            const s0 = update(initialState(), {
+                type: "Navigate",
+                url: "https://x",
+            }).state;
+            const r = update(s0, { type: "UrlCleared" });
+            expect(r.state.url).toBe("");
+            expect(r.events).toEqual([{ type: "url-cleared" }]);
+        });
+
+        it("does NOT touch loading, error, history, or title", () => {
+            const s0 = update(initialState(), {
+                type: "Navigate",
+                url: "https://x",
+            }).state;
+            const r = update(s0, { type: "UrlCleared" });
+            expect(r.state.loading).toBe(s0.loading);
+            expect(r.state.error).toBe(s0.error);
+            expect(r.state.canGoBack).toBe(s0.canGoBack);
+            expect(r.state.canGoForward).toBe(s0.canGoForward);
+            expect(r.state.title).toBe(s0.title);
+        });
+
+        it("is idempotent when url is already empty", () => {
+            const s0 = initialState();
+            expect(s0.url).toBe("");
+            const r = update(s0, { type: "UrlCleared" });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([]);
+        });
+
+        it("models reload's force-reload pattern (clear → restore)", () => {
+            const s0 = update(initialState(), {
+                type: "Navigate",
+                url: "https://page",
+            }).state;
+            const sCleared = update(s0, { type: "UrlCleared" }).state;
+            expect(sCleared.url).toBe("");
+            const sRestored = update(sCleared, {
+                type: "Navigate",
+                url: "https://page",
+            }).state;
+            expect(sRestored.url).toBe("https://page");
+            expect(sRestored.loading).toBe(true);
         });
     });
 
@@ -347,6 +459,33 @@ describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c + 3e)", () =
                 },
             ]);
         });
+
+        it("UrlConfirmed after dispose is dropped", () => {
+            const s0 = closed();
+            const r = update(s0, {
+                type: "UrlConfirmed",
+                url: "https://late",
+            });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([
+                {
+                    type: "post-close-command-dropped",
+                    commandType: "UrlConfirmed",
+                },
+            ]);
+        });
+
+        it("UrlCleared after dispose is dropped", () => {
+            const s0 = closed();
+            const r = update(s0, { type: "UrlCleared" });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([
+                {
+                    type: "post-close-command-dropped",
+                    commandType: "UrlCleared",
+                },
+            ]);
+        });
     });
 
     describe("invariants across sequences", () => {
@@ -386,6 +525,8 @@ describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c + 3e)", () =
                 { type: "HistoryUpdated", canGoBack: false },
                 { type: "TitleChanged", title: "Page" },
                 { type: "TitleChanged", title: "" },
+                { type: "UrlConfirmed", url: "https://final" },
+                { type: "UrlCleared" },
                 { type: "Disposed" },
             ];
             for (const mk of starts) {

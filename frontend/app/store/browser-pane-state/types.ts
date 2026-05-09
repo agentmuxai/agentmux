@@ -6,8 +6,8 @@
  * docs/specs/frontend-reducer-architecture-2026-05-03.md and the
  * roadmap at docs/specs/browser-pane-reducer-roadmap.md).
  *
- * **Phases 3a + 3b + 3c + 3e (title).** This reducer owns six cells
- * today:
+ * **Phases 3a + 3b + 3c + 3e (title) + 3d.** This reducer owns seven
+ * cells today:
  *   - `closed` — terminal flag set by `dispose()`. All post-close
  *     commands are no-ops.
  *   - `loading` — page-load-in-flight flag. Mutually exclusive with
@@ -20,12 +20,18 @@
  *   - `title` — page title. Falls back to `"Browser"` when the host
  *     emits empty/whitespace (mirrors the per-catalog rule that the
  *     view should never display a blank pane title).
+ *   - `url` — committed/loading URL (NOT the address-bar's
+ *     unsubmitted typing buffer — that stays in the view). The
+ *     **danger cell** that broke PR #737 — six downstream consumers
+ *     (reload's clear+restore, view-mount diag, initial addressBar,
+ *     the sync createEffect that syncs urlAtom→addressBar, onMount's
+ *     createPane, the placeholder `<Show>` gate); migration must
+ *     preserve every consumer's semantics verbatim.
  *
- * Cells not yet migrated: `url` (the danger cell — its own PR with
- * extra observability per roadmap §3d) and `faviconUrl` (derived
- * from `url`, so blocked on §3d), plus the address-bar typing buffer
- * that lives in the view. The slot store + `recordDispatch` audit
- * lands in Phase 4 once every cell is reducer-backed.
+ * Cells not yet migrated: `faviconUrl` (will be a derived projection
+ * of `url`'s origin in a follow-up PR) plus the address-bar typing
+ * buffer in the view. The slot store + `recordDispatch` audit lands
+ * in Phase 4.
  *
  * Note: Phase 6 of the roadmap is when host-side title-change events
  * (`browser-pane-title-change`) actually start emitting. Until then,
@@ -62,6 +68,15 @@ export interface BrowserPaneState {
      *  `TitleChanged` is folded to `TITLE_FALLBACK` so the view
      *  never has to know about the empty case. */
     title: string;
+    /** Committed/loading URL. Distinct from the address-bar `<input>`
+     *  typing buffer (which stays in `browser-view.tsx` per the
+     *  catalog — DOM is the source of truth for live-typing UX).
+     *  Initial `""` matches the prior signal initial value. Set by
+     *  `Navigate` (intent-bearing user/programmatic nav), cleared
+     *  transiently by `UrlCleared` (reload's force-reload pattern),
+     *  and superseded by `UrlConfirmed` (host's `browser-pane-nav-state`
+     *  reporting the post-redirect final URL). */
+    url: string;
 }
 
 /** The string the reducer projects when `TitleChanged` arrives with
@@ -78,6 +93,7 @@ export const initialState = (): BrowserPaneState => ({
     canGoBack: false,
     canGoForward: false,
     title: TITLE_FALLBACK,
+    url: "",
 });
 
 export type BrowserPaneCommand =
@@ -126,6 +142,22 @@ export type BrowserPaneCommand =
      */
     | { type: "TitleChanged"; title: string }
     /**
+     * Host's `browser-pane-nav-state` reported the post-redirect
+     * confirmed URL. Updates `state.url` only; does NOT touch
+     * loading/error (those transition via `LoadFinished`/`LoadFailed`
+     * in the same event handler). Idempotent on identical values.
+     * After dispose, a no-op.
+     */
+    | { type: "UrlConfirmed"; url: string }
+    /**
+     * Transient URL clear used by `reload()` to force an iframe
+     * reload via clear-then-restore across one frame. Sets
+     * `state.url = ""` without touching loading/error/title.
+     * Idempotent (already-empty url yields no event). After dispose,
+     * a no-op.
+     */
+    | { type: "UrlCleared" }
+    /**
      * The pane is being torn down. After this command runs, every
      * subsequent command on this state is a no-op. Idempotent —
      * dispatching `Disposed` twice is a no-op the second time.
@@ -143,6 +175,8 @@ export type BrowserPaneEvent =
           canGoForward: boolean;
       }
     | { type: "title-changed"; title: string }
+    | { type: "url-confirmed"; url: string }
+    | { type: "url-cleared" }
     | { type: "disposed" }
     /** Invariant fire — emitted instead of mutating state when a
      *  command targets a closed pane. Surfaced for diagnostics so
