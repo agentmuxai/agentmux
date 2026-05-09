@@ -48,8 +48,11 @@ const DEFAULT_DISPLAY_LIMIT = 80;
 interface DisplayRow {
     /** Index into the live records array — used for stable keys. */
     idx: number;
-    /** Wall-clock relative offset (e.g. "1.2s ago"). */
-    age: string;
+    /** Original record's wall-clock timestamp. The `age` string is
+     *  computed inline in the render so it doesn't pollute the
+     *  `rows` memo with a time dependency — see the createMemo
+     *  comment for why that matters. */
+    at: number;
     slice: string;
     /** Per-pane key, truncated to 7 chars when present. */
     keyShort: string;
@@ -75,10 +78,10 @@ function ageMs(now: number, at: number): string {
     return `${(dt / 60_000).toFixed(1)}min ago`;
 }
 
-function toRow(now: number, idx: number, rec: DispatchRecord): DisplayRow {
+function toRow(idx: number, rec: DispatchRecord): DisplayRow {
     return {
         idx,
-        age: ageMs(now, rec.at),
+        at: rec.at,
         slice: rec.slice,
         keyShort: rec.key ? rec.key.slice(0, 7) : "—",
         cmdType: commandType(rec.command),
@@ -140,12 +143,19 @@ export function DiagPanel(): JSX.Element {
     // DEFAULT_DISPLAY_LIMIT rows so a runaway dispatch (which the
     // audit ring is precisely there to catch) doesn't wedge the
     // panel itself.
+    //
+    // **Important:** this memo deliberately does NOT depend on `now()`.
+    // If it did, the 1 Hz age-tick interval would force a rebuild of
+    // every DisplayRow and `<For>` would re-create every <tr> on
+    // each tick — exactly the kind of inefficiency the panel exists
+    // to surface. The `age` cell reads `now()` inline in the render
+    // (Solid's fine-grained reactivity isolates the update to that
+    // single text node).
     const rows = createMemo<DisplayRow[]>(() => {
         const all = dispatchRecordsAtom();
         const slice = sliceFilter();
         const key = keyFilter().trim().toLowerCase();
         const filtered: DisplayRow[] = [];
-        const t = now();
         // Walk newest-to-oldest so we can stop once we've collected
         // the display limit — saves work on large rings.
         for (let i = all.length - 1; i >= 0 && filtered.length < DEFAULT_DISPLAY_LIMIT; i--) {
@@ -155,7 +165,7 @@ export function DiagPanel(): JSX.Element {
                 const recKey = (r.key ?? "").toLowerCase();
                 if (!recKey.includes(key)) continue;
             }
-            filtered.push(toRow(t, i, r));
+            filtered.push(toRow(i, r));
         }
         return filtered;
     });
@@ -296,7 +306,11 @@ export function DiagPanel(): JSX.Element {
                                 <For each={rows()}>
                                     {(row) => (
                                         <tr>
-                                            <td style={cellStyle}>{row.age}</td>
+                                            {/* Age is computed inline so only the cell
+                                                re-renders on the 1 Hz tick — the row
+                                                identity stays stable across ticks (see
+                                                the rows memo's comment). */}
+                                            <td style={cellStyle}>{ageMs(now(), row.at)}</td>
                                             <td style={cellStyle}>
                                                 <span style={{ color: "#aaa" }}>{row.slice}</span>
                                             </td>
