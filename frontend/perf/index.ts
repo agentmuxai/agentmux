@@ -40,17 +40,21 @@ export function initPerf(): void {
     console.info("[perf] phase-0 instrumentation initialized");
 }
 
+/** Self-IPCs that must not be measured — see PERF_IPC_BLOCKLIST. */
+const PERF_IPC_BLOCKLIST = new Set(["fe_log_structured", "fe_log"]);
+
 /**
- * Called by the `invokeCommand` wrapper in `frontend/app/platform/ipc.ts`
- * after each completed roundtrip. Centralized here so the wrapper
- * stays dependency-free and the perf store is the single sink for
- * all timing telemetry.
+ * Called by the `invokeCommand` wrapper after each completed
+ * roundtrip. Records timing into `perfStore` and warns when the
+ * frame budget (16 ms) is exceeded.
+ *
+ * Blocklisted commands skip both recording AND warning — the log
+ * pipe's own IPCs would feed back through the warn → console.warn
+ * → log-pipe → invokeCommand cycle.
  */
 export function recordIpcRoundtrip(command: string, durationMs: number): void {
+    if (PERF_IPC_BLOCKLIST.has(command)) return;
     perfStore.recordIpc(command, durationMs);
-    // 16 ms = one frame at 60 Hz. Anything over is a frame-budget
-    // threat — surface immediately to the host log so investigators
-    // don't have to wait for the HUD's 1 Hz refresh.
     if (durationMs > 16) {
         console.warn(`[perf] ipc ${command} ${durationMs.toFixed(1)}ms`);
     }
