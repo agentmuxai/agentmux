@@ -40,18 +40,18 @@ export function initPerf(): void {
     console.info("[perf] phase-0 instrumentation initialized");
 }
 
-/**
- * Called by the `invokeCommand` wrapper in `frontend/app/platform/ipc.ts`
- * after each completed roundtrip. Centralized here so the wrapper
- * stays dependency-free and the perf store is the single sink for
- * all timing telemetry.
- */
-// Skip the log-pipe and other perf-self IPCs; warning on these would
-// trigger another fe_log_structured IPC, which would warn, which would
-// trigger another. Feedback loop saturates the IPC server; observed
-// 283k storm in dev mode, 700-1500ms ambient IPC latency, drag broken.
+/** Self-IPCs that must not be measured — see PERF_IPC_BLOCKLIST. */
 const PERF_IPC_BLOCKLIST = new Set(["fe_log_structured", "fe_log"]);
 
+/**
+ * Called by the `invokeCommand` wrapper after each completed
+ * roundtrip. Records timing into `perfStore` and warns when the
+ * frame budget (16 ms) is exceeded.
+ *
+ * Blocklisted commands skip both recording AND warning — the log
+ * pipe's own IPCs would feed back through the warn → console.warn
+ * → log-pipe → invokeCommand cycle.
+ */
 export function recordIpcRoundtrip(command: string, durationMs: number): void {
     if (PERF_IPC_BLOCKLIST.has(command)) return;
     perfStore.recordIpc(command, durationMs);
