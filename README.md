@@ -28,9 +28,12 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF ho
 - **Live agent monitoring** — Watch every tool call and decision step as it happens. Catch an agent undoing correct work mid-task and redirect it before the damage compounds.
 - **Multi-agent orchestration** — Run parallel agents and see all of them at once. Spot conflicts before synthesis. Redirect any agent without killing the others.
 - **Guardrail observability** — See which constraints are active and firing. Tune your agent system from live signal, not post-mortem guesswork.
-- **Multi-provider agent support** — Claude Code, Codex CLI, and Gemini CLI as first-class providers, alongside terminals, editor, browser, and system metrics.
-- **Forge widget** — Agent picker wired to live Forge data for orchestration workflows.
-- **App API** — Local WebSocket RPC so external tools and agents can open panes, send messages, and read output. See [`docs/api/getting-started.md`](./docs/api/getting-started.md).
+- **Multi-provider agent support** — Claude Code, Codex CLI, Gemini CLI, OpenClaw, Kimi Code CLI, GitHub Copilot CLI, and Pi as first-class providers, alongside terminals, editor, browser, and system metrics.
+- **Identity bundles** — Named credential sets (GitHub PAT, AWS profile, Anthropic key, etc.) that you assign per agent at launch. Survives renames; swappable without restart.
+- **Memory bundles** — Reusable agent personality + capability stacks (provider, model, instructions, MCP, skills) selectable at launch.
+- **Browser pane** — Native `CefBrowserView` embedded as a child window of the AgentMux frame — full Chromium fidelity (links, popups, DRM) without iframe limitations.
+- **App API** — Local WebSocket RPC with both an intent-based layer (`agent.open`, `agent.send`, `pane.open`) and a low-level command catalog (block, file, event, conn). External tools and agents can drive the host directly.
+- **Audited dispatch** — 4-layer reducer stack (launcher / host / sidecar / frontend slices) with structured event logs at every layer, so "what mutated this state?" has exactly one place to look.
 - **Drag and drop** — Rearrange panes by dragging headers, reorder tabs, drag panes and tabs across windows.
 - **Per-pane zoom** — Independent zoom level per pane, plus global chrome zoom.
 - **Real PTY support** — Authentic terminal emulation via xterm.js and portable-pty.
@@ -71,18 +74,27 @@ task package:msix      # Windows MSIX installer
 
 ## Widgets
 
-Available from the top bar (right side) or the window header right-click menu:
+The widget bar shows pinned widgets directly; the rest live in a **More** dropdown. Pin/unpin any widget by right-clicking it. The canonical list is `agentmux-srv/src/config/widgets.json`.
 
-| Widget | Icon | Description |
-|--------|------|-------------|
-| **Agent** | sparkles | AI agent with streaming output and tool execution |
-| **Forge** | hammer | Create and manage your agents |
-| **Swarm** | bee | Multi-agent orchestration |
-| **Terminal** | square-terminal | Terminal with xterm.js and real PTY |
-| **Sysinfo** | chart-line | Live system metrics (CPU, memory, network, disk) |
-| **Settings** | cog | Open settings in external editor |
-| **Help** | circle-question | Built-in documentation and help |
-| **DevTools** | code | Toggle WebView developer tools |
+| Widget | Icon | View | Description | Tier |
+|--------|------|------|-------------|------|
+| **Agent** | sparkles | `agent` | AI agent with streaming output and tool execution | Pinned |
+| **Browser** | globe | `browser` | Embedded native `CefBrowserView` | Pinned |
+| **Terminal** | square-terminal | `term` | Terminal with xterm.js and real PTY | Pinned |
+| **Sysinfo** | chart-line | `sysinfo` | Live system metrics (CPU, memory, network, disk) | Pinned |
+| **DevTools** | code | `devtools` | Toggle Chromium DevTools (does not open a pane) | Pinned |
+| **Editor** | file-code | `editor` | Code editor with syntax highlighting | More |
+| **Swarm** | bee | `swarm` | Multi-agent orchestration overview | More |
+| **Help** | circle-question | `help` | Built-in documentation and help | More |
+
+### Not widgets — opened from elsewhere
+
+| Surface | How to reach it |
+|---|---|
+| **Forge** | Tab inside an Agent pane (cog → settings → Forge). Configure the agent's provider, soul, instructions, MCP, env. |
+| **Identity** | Tab inside an Agent pane (cog → settings → Identity). Manage the credential bundle assigned to this instance. |
+| **Memory** | Tab inside an Agent pane (cog → settings → Memory). Manage the personality / capability bundle. |
+| **Settings** | Hamburger menu (≡) in the top tab bar → Settings. Opens `settings.json` in your default editor. |
 
 ## Agents
 
@@ -124,29 +136,48 @@ ws.send(JSON.stringify({
 
 ## Architecture
 
+AgentMux is a four-process desktop app. Each process owns one concern, end-to-end. See [Architecture overview](https://docs.agentmux.ai/architecture-overview/) for the full topology.
+
 ```
-                    ┌─────────────────────────────────┐
-                    │           Frontend               │
-                    │   SolidJS + xterm.js             │
-                    └──────────────────┬───────────────┘
-                                       │
-                    ┌──────────────────▼───────────────┐
-                    │           CEF Host                │
-                    │   Bundled Chromium 146 (cef-rs)   │
-                    │   IPC bridge + window management  │
-                    └──────────────────┬───────────────┘
-                                       │
-                    ┌──────────────────▼───────────────┐
-                    │       Backend Sidecar             │
-                    │   agentmux-srv (Rust)           │
-                    │   Tokio + Axum + SQLite           │
-                    │   terminals, WebSocket, RPC       │
-                    └──────────────────────────────────┘
+┌──────────────────┐        named pipe        ┌──────────────────┐
+│  agentmux-       │ ◀────────────────────────▶│  agentmux-cef    │
+│  launcher        │                          │  (the "host")    │
+│  (≈325 KB shim)  │                          │                  │
+└────────┬─────────┘                          └────────┬─────────┘
+         │ spawns                                      │ embeds
+         │                                             ▼
+         │                                      ┌──────────────────┐
+         │                                      │  Chromium 146    │
+         │                                      │  (CEF renderer)  │
+         │                                      └────────┬─────────┘
+         │                                               │ JS bridge
+         │                                               ▼
+         │                                      ┌──────────────────┐
+         │                                      │  SolidJS app     │
+         │                                      │  (the frontend)  │
+         │                                      └────────┬─────────┘
+         │                                               │ websocket
+         ▼                                               ▼
+┌─────────────────────────────────────────────────────────┐
+│                     agentmux-srv                         │
+│                       (sidecar)                          │
+│   • RPC engine (websocket)   • SQLite persistence        │
+│   • saga coordinator         • event bus                 │
+└─────────────────────────────────────────────────────────┘
 ```
 
+| Process | Crate | Role |
+|---|---|---|
+| **launcher** | `agentmux-launcher` | Sets DLL search path; spawns the host; tracks Window Reality Reconciliation; durable event log for OS-level facts. |
+| **host** | `agentmux-cef` | Embeds Chromium via CEF; owns the OS window, the browser panes, the JS bridge, and IPC fan-out to the renderer. |
+| **sidecar** | `agentmux-srv` | App domain: workspaces, tabs, blocks, layouts, agents, identity. Persists to SQLite. Auto-spawned by the host on a dynamic port. |
+| **renderer** | `frontend/` | SolidJS UI running inside CEF. Stateless — projects what the sidecar/host expose, dispatches user actions back through them. |
+
+A fifth crate, `agentmux-common`, provides shared utilities (path resolution, runtime mode detection) consumed by all the above.
+
 **Stack:**
-- **Frontend:** SolidJS + TypeScript + Vite (state via SolidJS signals)
-- **Desktop:** CEF 146 via cef-rs — bundles its own Chromium (~148 MB ZIP, ~150 ms startup)
+- **Frontend:** SolidJS + TypeScript + Vite (state via SolidJS signals + a 4-layer reducer stack)
+- **Desktop:** CEF 146 via cef-rs — bundles its own Chromium (~148 MB ZIP package, ~150 ms startup, 150–350 MB resident)
 - **Backend:** Rust (Tokio + Axum + SQLite + portable-pty)
 - **Terminal:** xterm.js
 
@@ -168,6 +199,9 @@ ws.send(JSON.stringify({
 | Platform | Artifact |
 |----------|----------|
 | **Windows** | `dist/agentmux-cef-*-x64-portable.zip` |
+| **macOS** (Apple Silicon) | `dist/AgentMux_*_aarch64.dmg` |
+| **Linux** (AppImage) | `dist/AgentMux_*_amd64.AppImage` |
+| **Linux** (.deb) | `dist/AgentMux_*_amd64.deb` |
 
 ## Version Management
 
