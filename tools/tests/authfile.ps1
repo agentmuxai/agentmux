@@ -64,11 +64,19 @@ function Get-AgentMuxAuthFile {
             (Join-Path $env:USERPROFILE '.agentmux\dev\*\data'),                  # task dev (per-branch)
             (Join-Path $env:USERPROFILE '.agentmux\versions\*\data')              # portable build (per-version)
         )
+        # Branch / version slugs can contain PowerShell wildcard
+        # metacharacters (e.g. `feature[123]`); without `-LiteralPath`
+        # at the final read, Get-Item would silently treat brackets
+        # as wildcards and either resolve to nothing or to the wrong
+        # file. Test-Path and Get-Item BOTH need `-LiteralPath` once
+        # we've concretized the path. Get-ChildItem -Path stays
+        # wildcard-aware because that's where we expand the `*` glob
+        # in `~/.agentmux/dev/*/data`. (Codex P2 on PR #766.)
         $allFiles = foreach ($pattern in $searchPaths) {
             Get-ChildItem -Path $pattern -Directory -ErrorAction SilentlyContinue |
                 ForEach-Object { Join-Path $_.FullName 'authkey.dev' } |
                 Where-Object { Test-Path -LiteralPath $_ } |
-                Get-Item
+                ForEach-Object { Get-Item -LiteralPath $_ }
         }
         $candidates = @($allFiles | Sort-Object LastWriteTime -Descending)
     }
