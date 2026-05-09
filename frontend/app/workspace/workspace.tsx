@@ -25,7 +25,6 @@ function WorkspaceElem(): JSX.Element {
         return [...(w.pinnedtabids ?? []), ...(w.tabids ?? [])];
     });
 
-    // Reactive so programmatic / keyboard switches mark too, not just clicks.
     let prevTabId: string | undefined;
     createEffect(() => {
         const next = tabId();
@@ -33,7 +32,8 @@ function WorkspaceElem(): JSX.Element {
         if (next === prevTabId) return;
         markStart("tab-switch", { from: prevTabId, to: next });
         prevTabId = next;
-        queueMicrotask(() => markEnd("tab-switch"));
+        // rAF catches the next paint commit so the measure spans the fan-out.
+        requestAnimationFrame(() => markEnd("tab-switch"));
     });
 
     return (

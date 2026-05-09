@@ -49,29 +49,16 @@ function Get-AgentMuxAuthFile {
         $p = Join-Path $DataDir 'authkey.dev'
         if (Test-Path -LiteralPath $p) { $candidates += Get-Item -LiteralPath $p }
     } else {
-        # Search every location task dev / portable / installed builds
-        # might write authkey.dev. The historical assumption was that
-        # only %APPDATA%\ai.agentmux.cef.* counted, but task dev (the
-        # primary harness target) writes to the per-branch dev path
-        # ~/.agentmux/dev/<branch>/data/authkey.dev. Add it here so
-        # the harness works against any live debug instance without
-        # the operator having to copy files around. Wrap with @(...)
-        # so a single match doesn't collapse into a bare object —
-        # `.Count` and `foreach` both need an array under
-        # Set-StrictMode -Version Latest.
-        $searchPaths = @(
-            (Join-Path $env:APPDATA 'ai.agentmux.cef.*'),                         # portable / installed
-            (Join-Path $env:USERPROFILE '.agentmux\dev\*\data'),                  # task dev (per-branch)
-            (Join-Path $env:USERPROFILE '.agentmux\versions\*\data')              # portable build (per-version)
-        )
-        # Branch / version slugs can contain PowerShell wildcard
-        # metacharacters (e.g. `feature[123]`); without `-LiteralPath`
-        # at the final read, Get-Item would silently treat brackets
-        # as wildcards and either resolve to nothing or to the wrong
-        # file. Test-Path and Get-Item BOTH need `-LiteralPath` once
-        # we've concretized the path. Get-ChildItem -Path stays
-        # wildcard-aware because that's where we expand the `*` glob
-        # in `~/.agentmux/dev/*/data`. (Codex P2 on PR #766.)
+        # $HOME is cross-platform; $env:APPDATA is Windows-only.
+        $homeDir = if ($HOME) { $HOME } else { $env:USERPROFILE }
+        $searchPaths = @()
+        if ($env:APPDATA) {
+            $searchPaths += (Join-Path $env:APPDATA 'ai.agentmux.cef.*')
+        }
+        if ($homeDir) {
+            $searchPaths += (Join-Path $homeDir '.agentmux/dev/*/data')
+            $searchPaths += (Join-Path $homeDir '.agentmux/versions/*/data')
+        }
         $allFiles = foreach ($pattern in $searchPaths) {
             Get-ChildItem -Path $pattern -Directory -ErrorAction SilentlyContinue |
                 ForEach-Object { Join-Path $_.FullName 'authkey.dev' } |
