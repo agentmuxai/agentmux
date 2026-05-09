@@ -3,8 +3,8 @@
 
 /**
  * Pure reducer for the browser-pane state slice (slice #9, Phases 3a +
- * 3b + 3c + 3e). See `docs/specs/browser-pane-reducer-roadmap.md` and
- * the conventions doc `frontend-reducer-conventions-2026-05-03.md`.
+ * 3b + 3c + 3e + 3d). See `docs/specs/browser-pane-reducer-roadmap.md`
+ * and the conventions doc `frontend-reducer-conventions-2026-05-03.md`.
  * This module is the exact mirror of slice #4's reducer pattern
  * (agent-pane-state) — same `update(state, command) → { state, events }`
  * shape, same idempotency rules, same no-throw policy.
@@ -16,7 +16,8 @@
  *   2. `loading` and `error` are mutually exclusive — at most one of
  *      the two is truthy at any time.
  *   3. `Navigate` always clears any prior `error` (a fresh attempt
- *      supersedes the prior failure).
+ *      supersedes the prior failure) AND updates `state.url` to the
+ *      target URL atomically with the loading flip.
  *   4. `LoadFinished` is a no-op if `loading` was already false AND
  *      `error` was already null (nothing to clear; avoids a spurious
  *      load-finished event on a steady-state pane).
@@ -27,6 +28,15 @@
  *   6. `TitleChanged` folds empty/whitespace input to
  *      `TITLE_FALLBACK` so `state.title` is never blank.
  *      Idempotent on identical (post-fold) values.
+ *   7. `UrlConfirmed` updates `state.url` only — does NOT touch
+ *      loading/error/history (those transition via the
+ *      LoadFinished/LoadFailed/HistoryUpdated dispatches that
+ *      typically accompany the same nav-state IPC event).
+ *      Idempotent on identical url.
+ *   8. `UrlCleared` sets `state.url = ""` without touching any
+ *      other cell — distinct from `UrlConfirmed { url: "" }` so the
+ *      audit ring distinguishes the reload force-reload pattern from
+ *      a host-confirmed empty URL. Idempotent (already empty → no-op).
  */
 
 import {
@@ -55,7 +65,12 @@ export function update(
     switch (command.type) {
         case "Navigate": {
             return {
-                state: { ...state, loading: true, error: null },
+                state: {
+                    ...state,
+                    loading: true,
+                    error: null,
+                    url: command.url,
+                },
                 events: [{ type: "navigate", url: command.url }],
             };
         }
@@ -112,6 +127,22 @@ export function update(
                         canGoForward: nextForward,
                     },
                 ],
+            };
+        }
+
+        case "UrlConfirmed": {
+            if (state.url === command.url) return { state, events: [] };
+            return {
+                state: { ...state, url: command.url },
+                events: [{ type: "url-confirmed", url: command.url }],
+            };
+        }
+
+        case "UrlCleared": {
+            if (state.url === "") return { state, events: [] };
+            return {
+                state: { ...state, url: "" },
+                events: [{ type: "url-cleared" }],
             };
         }
 
