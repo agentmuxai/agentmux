@@ -49,16 +49,15 @@ function Get-AgentMuxAuthFile {
         $p = Join-Path $DataDir 'authkey.dev'
         if (Test-Path -LiteralPath $p) { $candidates += Get-Item -LiteralPath $p }
     } else {
-        # $HOME is cross-platform; $env:APPDATA is Windows-only.
+        # $HOME is cross-platform; $env:USERPROFILE is the Windows fallback.
         $homeDir = if ($HOME) { $HOME } else { $env:USERPROFILE }
-        $searchPaths = @()
-        if ($env:APPDATA) {
-            $searchPaths += (Join-Path $env:APPDATA 'ai.agentmux.cef.*')
+        if (-not $homeDir) {
+            throw "Cannot resolve home directory: neither `$HOME nor `$env:USERPROFILE is set."
         }
-        if ($homeDir) {
-            $searchPaths += (Join-Path $homeDir '.agentmux/dev/*/data')
-            $searchPaths += (Join-Path $homeDir '.agentmux/versions/*/data')
-        }
+        $searchPaths = @(
+            (Join-Path $homeDir '.agentmux/dev/*/data'),
+            (Join-Path $homeDir '.agentmux/versions/*/data')
+        )
         $allFiles = foreach ($pattern in $searchPaths) {
             Get-ChildItem -Path $pattern -Directory -ErrorAction SilentlyContinue |
                 ForEach-Object { Join-Path $_.FullName 'authkey.dev' } |
@@ -71,9 +70,8 @@ function Get-AgentMuxAuthFile {
     if ($candidates.Count -eq 0) {
         throw @"
 No authkey.dev found under any known dev/portable path:
-  - %APPDATA%\ai.agentmux.cef.*\authkey.dev (Windows portable / installed)
-  - $HOME/.agentmux/dev/<branch>/data/authkey.dev (task dev — all platforms)
-  - $HOME/.agentmux/versions/<ver>/data/authkey.dev (portable per-version)
+  - `$HOME/.agentmux/dev/<branch>/data/authkey.dev (task dev)
+  - `$HOME/.agentmux/versions/<ver>/data/authkey.dev (portable per-version)
 Start a dev instance first: ``task dev``. The file is written only by
 debug builds (see docs/specs/SPEC_TEST_API_ACCESS.md §5).
 "@
