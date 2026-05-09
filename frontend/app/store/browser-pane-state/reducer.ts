@@ -160,6 +160,15 @@ export function update(
             };
         }
 
+        case "PaneClicked": {
+            // Pure event — no state change. The reducer doesn't track
+            // DOM/Win32 focus (catalog rule §3); the view's event
+            // sink performs the blur+refocus side-effect when the
+            // `pane-clicked` event is delivered. Recording through
+            // dispatch lands the click in the audit ring.
+            return { state, events: [{ type: "pane-clicked" }] };
+        }
+
         case "TitleChanged": {
             const next = command.title.trim() === "" ? TITLE_FALLBACK : command.title;
             if (next === state.title) return { state, events: [] };

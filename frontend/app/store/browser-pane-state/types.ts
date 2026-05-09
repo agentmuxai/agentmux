@@ -191,6 +191,20 @@ export type BrowserPaneCommand =
      */
     | { type: "UrlCleared" }
     /**
+     * The pane HWND captured a click at the Win32 level (the
+     * `browser-pane-clicked` IPC fired). Doesn't change any reducer
+     * state — DOM focus and Win32 OS focus are owned outside the
+     * reducer per the catalog rule. Emits a `pane-clicked` event
+     * whose handler performs the side-effects we ship today: blur
+     * any stale main-window input that holds DOM focus, then call
+     * `refocusNode(blockId)`. Routing through the reducer makes the
+     * click visible in the audit ring (Phase 4) so multi-pane focus
+     * investigations can see the exact sequence of clicks vs other
+     * dispatches. After dispose, a no-op (the generic post-close
+     * gate handles this).
+     */
+    | { type: "PaneClicked" }
+    /**
      * The pane is being torn down. After this command runs, every
      * subsequent command on this state is a no-op. Idempotent —
      * dispatching `Disposed` twice is a no-op the second time.
@@ -210,6 +224,7 @@ export type BrowserPaneEvent =
     | { type: "title-changed"; title: string }
     | { type: "url-confirmed"; url: string }
     | { type: "url-cleared" }
+    | { type: "pane-clicked" }
     | { type: "disposed" }
     /** Invariant fire — emitted instead of mutating state when a
      *  command targets a closed pane. Surfaced for diagnostics so

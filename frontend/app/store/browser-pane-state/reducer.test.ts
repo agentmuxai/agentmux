@@ -450,6 +450,23 @@ describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c + 3d + 3e co
         });
     });
 
+    describe("PaneClicked", () => {
+        it("emits pane-clicked event without changing state", () => {
+            const s0 = update(initialState(), {
+                type: "Navigate",
+                url: "https://x",
+            }).state;
+            const r = update(s0, { type: "PaneClicked" });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([{ type: "pane-clicked" }]);
+        });
+
+        it("does NOT touch focus-related state (DOM/OS focus is owned outside the reducer per catalog)", () => {
+            const r = update(initialState(), { type: "PaneClicked" });
+            expect(r.state).toEqual(initialState());
+        });
+    });
+
     describe("Disposed", () => {
         it("flips closed=true and emits disposed event once", () => {
             const r = update(initialState(), { type: "Disposed" });
@@ -559,6 +576,18 @@ describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c + 3d + 3e co
                 },
             ]);
         });
+
+        it("PaneClicked after dispose is dropped", () => {
+            const s0 = closed();
+            const r = update(s0, { type: "PaneClicked" });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([
+                {
+                    type: "post-close-command-dropped",
+                    commandType: "PaneClicked",
+                },
+            ]);
+        });
     });
 
     describe("invariants across sequences", () => {
@@ -600,6 +629,7 @@ describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c + 3d + 3e co
                 { type: "TitleChanged", title: "" },
                 { type: "UrlConfirmed", url: "https://final" },
                 { type: "UrlCleared" },
+                { type: "PaneClicked" },
                 { type: "Disposed" },
             ];
             for (const mk of starts) {
