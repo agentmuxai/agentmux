@@ -42,6 +42,7 @@ import {
     type DispatchRecord,
     __resetDispatchLog,
 } from "@/store/command-source";
+import { AgentPanePerfSection } from "./agent-pane-perf-section";
 
 const DEFAULT_DISPLAY_LIMIT = 80;
 
@@ -327,6 +328,7 @@ export function DiagPanel(): JSX.Element {
                         </table>
                     </Show>
                 </div>
+                <AgentPanePerfSection />
             </div>
         </Show>
     );

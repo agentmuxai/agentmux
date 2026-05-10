@@ -14,7 +14,7 @@
  * docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md.
  */
 
-import { Show, type Accessor, type JSX } from "solid-js";
+import { onMount, Show, type Accessor, type JSX } from "solid-js";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
 import { MarkdownBlock } from "../components/MarkdownBlock";
@@ -22,6 +22,7 @@ import { NodeHoverStrip } from "../components/NodeHoverStrip";
 import { SubagentLinkBlock } from "../components/SubagentLinkBlock";
 import { ToolBlock } from "../components/ToolBlock";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
+import { markRowMount } from "./perf-probe";
 
 export interface DocumentRowProps {
     /**
@@ -61,6 +62,13 @@ const TOGGLEABLE_KINDS: ReadonlySet<DocumentNode["type"]> = new Set([
 ]);
 
 export function DocumentRow(props: DocumentRowProps): JSX.Element {
+    // Phase 3: per-kind row mount perf probe. markRowMount returns a
+    // closer that we invoke after onMount fires (i.e., after the row
+    // is in the DOM and its initial paint has been queued).
+    // No-op in production builds.
+    const close = markRowMount(props.node().type);
+    onMount(() => close());
+
     const isBookmarked = (): boolean => {
         const n = props.node();
         return props.bookmarkedNodeIds?.().has(n.id) ?? false;
@@ -200,62 +208,73 @@ interface DocumentNodeBodyProps {
  * ToolBlock uses props.pinned correctly. See PR #346 reagent.
  */
 function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
+    // SolidJS <Show> with keyed:false (the default) calls the child
+    // factory ONCE when `when` first becomes truthy and never re-runs
+    // it. The previous version of this function was:
+    //
+    //   <Show when={props.node()}>{(n) => { const node = n(); switch ...}}
+    //
+    // which captured a one-time `node = n()` snapshot. Streaming token
+    // updates and tool transitions (running → success, etc.) silently
+    // failed to propagate to ToolBlock / AgentMessageBlock until the
+    // row remounted — defeating the whole streaming buffer.
+    //
+    // Use separate <Show when={node.type === "X"}> branches per kind.
+    // Each branch reads props.node() reactively at every prop site, so
+    // the matching branch's children update when the underlying node
+    // changes. This was committed on the Phase 2 PR but landed after
+    // the squash-merge cutoff — adding back as a follow-up.
     return (
-        <Show when={props.node()}>
-            {(n) => {
-                const node = n();
-                switch (node.type) {
-                    case "markdown":
-                        return <MarkdownBlock node={node} />;
-                    case "tool":
-                        return (
-                            <ToolBlock
-                                node={node}
-                                pinned={props.documentState().pinnedNodes.has(node.id)}
-                                onTogglePin={() => props.onTogglePin(node.id)}
-                            />
-                        );
-                    case "agent_message":
-                        return (
-                            <AgentMessageBlock
-                                node={node}
-                                collapsed={props.documentState().collapsedNodes.has(node.id)}
-                                onToggle={() => props.onToggleCollapse(node.id)}
-                            />
-                        );
-                    case "user_message":
-                        return (
-                            <div
-                                class="agent-user-message"
-                                classList={{
-                                    "agent-user-message--collapsed":
-                                        props.documentState().collapsedNodes.has(node.id),
-                                }}
-                            >
-                                <div class="agent-user-message-content">
-                                    <pre>{node.message}</pre>
-                                </div>
-                            </div>
-                        );
-                    case "subagent_link":
-                        return (
-                            <SubagentLinkBlock
-                                node={node}
-                                onClick={props.onSubagentClick ?? (() => { })}
-                            />
-                        );
-                    case "section":
-                        return (
-                            <div class={`agent-section level-${node.level}`}>
-                                <Show when={node.level === 1}><h1>{node.title}</h1></Show>
-                                <Show when={node.level === 2}><h2>{node.title}</h2></Show>
-                                <Show when={node.level === 3}><h3>{node.title}</h3></Show>
-                            </div>
-                        );
-                    default:
-                        return null;
-                }
-            }}
-        </Show>
+        <>
+            <Show when={props.node() && props.node().type === "markdown"}>
+                <MarkdownBlock node={props.node() as Extract<DocumentNode, { type: "markdown" }>} />
+            </Show>
+            <Show when={props.node() && props.node().type === "tool"}>
+                <ToolBlock
+                    node={props.node() as Extract<DocumentNode, { type: "tool" }>}
+                    pinned={props.documentState().pinnedNodes.has(props.node().id)}
+                    onTogglePin={() => props.onTogglePin(props.node().id)}
+                />
+            </Show>
+            <Show when={props.node() && props.node().type === "agent_message"}>
+                <AgentMessageBlock
+                    node={props.node() as Extract<DocumentNode, { type: "agent_message" }>}
+                    collapsed={props.documentState().collapsedNodes.has(props.node().id)}
+                    onToggle={() => props.onToggleCollapse(props.node().id)}
+                />
+            </Show>
+            <Show when={props.node() && props.node().type === "user_message"}>
+                <div
+                    class="agent-user-message"
+                    classList={{
+                        "agent-user-message--collapsed":
+                            props.documentState().collapsedNodes.has(props.node().id),
+                    }}
+                >
+                    <div class="agent-user-message-content">
+                        <pre>{(props.node() as Extract<DocumentNode, { type: "user_message" }>).message}</pre>
+                    </div>
+                </div>
+            </Show>
+            <Show when={props.node() && props.node().type === "subagent_link"}>
+                <SubagentLinkBlock
+                    node={props.node() as Extract<DocumentNode, { type: "subagent_link" }>}
+                    onClick={props.onSubagentClick ?? (() => { })}
+                />
+            </Show>
+            <Show when={props.node() && props.node().type === "section"}>
+                <div class={`agent-section level-${(props.node() as Extract<DocumentNode, { type: "section" }>).level}`}>
+                    <Show when={(props.node() as Extract<DocumentNode, { type: "section" }>).level === 1}>
+                        <h1>{(props.node() as Extract<DocumentNode, { type: "section" }>).title}</h1>
+                    </Show>
+                    <Show when={(props.node() as Extract<DocumentNode, { type: "section" }>).level === 2}>
+                        <h2>{(props.node() as Extract<DocumentNode, { type: "section" }>).title}</h2>
+                    </Show>
+                    <Show when={(props.node() as Extract<DocumentNode, { type: "section" }>).level === 3}>
+                        <h3>{(props.node() as Extract<DocumentNode, { type: "section" }>).title}</h3>
+                    </Show>
+                </div>
+            </Show>
+        </>
     );
 }
