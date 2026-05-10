@@ -864,6 +864,15 @@ export function createTab() {
     });
 }
 
+// Tracks an in-flight tab-switch measurement so rapid back-to-back
+// switches (held Ctrl+Tab, programmatic bursts) don't collide on the
+// shared `tab-switch:start` mark name. performance.mark throws on
+// duplicates and the second call would silently drop its measurement.
+// Sequence guard ensures the prior switch's pending double-rAF
+// markEnd doesn't close the new switch's measurement instead.
+let tabSwitchInFlight = false;
+let tabSwitchSeq = 0;
+
 export async function setActiveTab(tabId: string): Promise<void> {
     const ws = workspace();
     if (ws == null) return;
@@ -877,12 +886,25 @@ export async function setActiveTab(tabId: string): Promise<void> {
     // Backend-driven switches (tearoff merge, cross-drag) bypass this
     // function and are not measured here; they're rare and observable
     // via the long-task timeline.
+    if (tabSwitchInFlight) {
+        // Close prior measurement (truncated) so the new markStart
+        // doesn't collide. The prior call's pending rAF markEnd will
+        // see its sequence is stale and skip.
+        markEnd("tab-switch", "interrupted");
+    }
+    const mySeq = ++tabSwitchSeq;
+    tabSwitchInFlight = true;
     markStart("tab-switch", { from: fromTabId, to: tabId });
     try {
         await WorkspaceService.SetActiveTab(ws.oid, tabId);
     } finally {
         requestAnimationFrame(() =>
-            requestAnimationFrame(() => markEnd("tab-switch"))
+            requestAnimationFrame(() => {
+                if (mySeq === tabSwitchSeq) {
+                    markEnd("tab-switch");
+                    tabSwitchInFlight = false;
+                }
+            })
         );
     }
 }
