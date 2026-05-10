@@ -92,7 +92,6 @@ Widgets are defined in `agentmux-srv/src/config/widgets.json`. These are the **o
 | `defwidget@swarm` | `swarm` | swarm | Yes (hidden by default) |
 | `defwidget@terminal` | `term` | terminal | Yes |
 | `defwidget@sysinfo` | `sysinfo` | sysinfo | Yes |
-| `defwidget@memory` | `memory` | memory | Yes |
 | `defwidget@help` | `help` | help | Yes |
 | `defwidget@devtools` | `devtools` | devtools | No — toggles browser inspector |
 

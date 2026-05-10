@@ -78,30 +78,8 @@
             }
         }
     },
-    "defwidget@memory": {
-        "display:order": 7,
-        "icon": "brain",
-        "label": "memory",
-        "description": "Manage Memory bundles — agent personality + capability stacks",
-        "blockdef": {
-            "meta": {
-                "view": "memory"
-            }
-        }
-    },
-    "defwidget@identity": {
-        "display:order": 8,
-        "icon": "user",
-        "label": "identity",
-        "description": "Manage Identity bundles — named credential sets selectable at launch",
-        "blockdef": {
-            "meta": {
-                "view": "identity"
-            }
-        }
-    },
     "defwidget@help": {
-        "display:order": 9,
+        "display:order": 7,
         "icon": "circle-question",
         "label": "help",
         "description": "Help and documentation",
@@ -112,7 +90,7 @@
         }
     },
     "defwidget@devtools": {
-        "display:order": 10,
+        "display:order": 8,
         "display:pinned": true,
         "icon": "code",
         "label": "devtools",
