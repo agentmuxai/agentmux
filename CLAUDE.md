@@ -84,16 +84,30 @@ This means:
 
 Widgets are defined in `agentmux-srv/src/config/widgets.json`. These are the **only** widget types — do not invent or reference widgets that don't exist here.
 
-| Widget Key | View | Label | Opens in Pane? |
-|------------|------|-------|----------------|
-| `defwidget@agent` | `agent` | agent | Yes |
-| `defwidget@browser` | `browser` | browser | Yes |
-| `defwidget@editor` | `editor` | editor | Yes |
-| `defwidget@swarm` | `swarm` | swarm | Yes (hidden by default) |
-| `defwidget@terminal` | `term` | terminal | Yes |
-| `defwidget@sysinfo` | `sysinfo` | sysinfo | Yes |
-| `defwidget@help` | `help` | help | Yes |
-| `defwidget@devtools` | `devtools` | devtools | No — toggles browser inspector |
+The widget bar's visibility logic is in `frontend/app/window/action-widgets.tsx`: pinned widgets (`"display:pinned": true`) appear directly in the bar; everything else lives in the **More** dropdown. Both tiers are user-facing.
+
+| Widget Key | View | Label | Tier |
+|------------|------|-------|------|
+| `defwidget@agent` | `agent` | agent | Pinned |
+| `defwidget@browser` | `browser` | browser | Pinned |
+| `defwidget@terminal` | `term` | terminal | Pinned |
+| `defwidget@sysinfo` | `sysinfo` | sysinfo | Pinned |
+| `defwidget@devtools` | `devtools` | devtools | Pinned (toggles Chromium DevTools — does not open a pane) |
+| `defwidget@editor` | `editor` | editor | More dropdown |
+| `defwidget@swarm` | `swarm` | swarm | More dropdown |
+| `defwidget@help` | `help` | help | More dropdown |
+
+### Not widgets
+
+These views exist in the codebase but are **not** widget-bar entries — do not describe them as widgets to users:
+
+| Surface | How it's reached |
+|---|---|
+| **Forge** | Tab inside an Agent pane (cog → settings panel → Forge tab). Folded into the agent pane in v0.33.197 — old `forge` blocks are redirected to `agent` by `block.tsx`. |
+| **Identity** | Tab inside an Agent pane (cog → settings panel → Identity tab). The `view: "identity"` registration and `IdentityPaneViewModel` exist for `pane.open` RPC and right-click menu paths; no widget-bar entry. |
+| **Memory** | Same shape as Identity — tab inside an Agent pane, view registered for programmatic access only. |
+| **Settings** | Hamburger menu (≡) in the top tab bar → Settings. Opens `settings.json` in the user's default editor. |
+| **Subagent** | Spawned by clicking a sub-agent in the Swarm pane's overview. Not a top-level pane type the user opens directly. |
 
 ---
 
