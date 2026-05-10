@@ -378,11 +378,20 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, authUrl, au
             >
                 <For each={virtualizer.getVirtualItems()}>
                     {(virtualItem) => {
-                        const node = document()[virtualItem.index];
-                        if (!node) return null;
-                        const isBookmarked = () => bookmarkedNodeIds?.().has(node.id) ?? false;
+                        // Reactive accessor — re-reads document() on every
+                        // call so streaming updates (StreamFlush replacing a
+                        // node at the same index) reach the row even when
+                        // the row stays mounted across renders. Capturing
+                        // node as a const here would freeze the row's view
+                        // of the document at first render. (codex P1)
+                        const node = () => document()[virtualItem.index];
+                        const isBookmarked = () => {
+                            const n = node();
+                            return n ? (bookmarkedNodeIds?.().has(n.id) ?? false) : false;
+                        };
                         const canExpand = () => {
-                            switch (node.type) {
+                            const t = node()?.type;
+                            switch (t) {
                                 case "tool":
                                 case "agent_message":
                                 case "user_message":
@@ -393,17 +402,23 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, authUrl, au
                             }
                         };
                         const isExpanded = () => {
-                            if (node.type === "tool") return documentState().pinnedNodes.has(node.id);
-                            return !documentState().collapsedNodes.has(node.id);
+                            const n = node();
+                            if (n == null) return false;
+                            if (n.type === "tool") return documentState().pinnedNodes.has(n.id);
+                            return !documentState().collapsedNodes.has(n.id);
                         };
                         const onExpand = () => {
-                            if (node.type === "tool") togglePin(node.id);
-                            else toggleCollapse(node.id);
+                            const n = node();
+                            if (n == null) return;
+                            if (n.type === "tool") togglePin(n.id);
+                            else toggleCollapse(n.id);
                         };
                         // Phase 6: "new pane" for tool rows — deferred until a scratch view exists.
-                        const onOpenInNewPane = node.type === "tool"
-                            ? () => console.warn("[hover-strip] open in new pane — not yet implemented")
-                            : undefined;
+                        const onOpenInNewPane = () => {
+                            if (node()?.type === "tool") {
+                                console.warn("[hover-strip] open in new pane — not yet implemented");
+                            }
+                        };
                         const onOpenInNewWindow = () =>
                             console.warn("[hover-strip] open in new window — not yet implemented");
                         const onNewAgentFromHere = () =>
@@ -411,15 +426,17 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, authUrl, au
 
                         const handleRowKey = (e: KeyboardEvent): void => {
                             if (e.metaKey || e.ctrlKey || e.altKey) return;
+                            const n = node();
+                            if (n == null) return;
                             switch (e.key.toLowerCase()) {
                                 case "e":
                                     if (canExpand()) { onExpand(); e.preventDefault(); }
                                     break;
                                 case "b":
-                                    if (onBookmark != null) { onBookmark(node); e.preventDefault(); }
+                                    if (onBookmark != null) { onBookmark(n); e.preventDefault(); }
                                     break;
                                 case "p":
-                                    if (onOpenInNewPane) { onOpenInNewPane(); e.preventDefault(); }
+                                    if (n.type === "tool") { onOpenInNewPane(); e.preventDefault(); }
                                     break;
                                 case "w":
                                     onOpenInNewWindow(); e.preventDefault();
@@ -438,13 +455,15 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, authUrl, au
                             if (!onBookmark) return;
                             const sel = window.getSelection()?.toString();
                             if (sel) return;
+                            const n = node();
+                            if (n == null) return;
                             e.preventDefault();
                             e.stopPropagation();
                             ContextMenuModel.showContextMenu(
                                 [
                                     {
                                         label: isBookmarked() ? "Remove bookmark" : "Bookmark this message",
-                                        click: () => onBookmark(node),
+                                        click: () => onBookmark(n),
                                     },
                                 ],
                                 e,
@@ -455,43 +474,57 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, authUrl, au
                             <div
                                 ref={(el) => virtualizer.measureElement(el)}
                                 data-index={virtualItem.index}
-                                data-node-id={node.id}
+                                data-node-id={node()?.id}
                                 class="hover-strip-host agent-document-node-wrapper"
                                 classList={{
                                     "agent-node-bookmarked": isBookmarked(),
-                                    "agent-node-search-match": highlightNodeId?.() === node.id,
+                                    "agent-node-search-match": (() => {
+                                        const id = node()?.id;
+                                        return id != null && highlightNodeId?.() === id;
+                                    })(),
                                 }}
                                 style={{
                                     position: "absolute",
                                     top: "0",
                                     left: "0",
                                     width: "100%",
-                                    transform: `translateY(${virtualItem.start}px)`,
+                                    // Subtract scrollMargin so when an
+                                    // auth box / loading-older banner pushes
+                                    // the virtualizer container down,
+                                    // virtualItem.start (which already
+                                    // includes the margin) lands rows at the
+                                    // right offset within the container.
+                                    // (codex P2)
+                                    transform: `translateY(${virtualItem.start - virtualizer.options.scrollMargin}px)`,
                                 }}
                                 tabindex="0"
                                 onKeyDown={handleRowKey}
                                 onContextMenu={handleContextMenu}
                             >
+                                <Show when={node()}>
+                                    {(n) => (<>
                                 <DocumentNodeRenderer
-                                    node={node}
-                                    collapsed={documentState().collapsedNodes.has(node.id)}
-                                    onToggle={() => toggleCollapse(node.id)}
-                                    toolPinned={documentState().pinnedNodes.has(node.id)}
-                                    onToggleToolPin={() => togglePin(node.id)}
+                                    node={n()}
+                                    collapsed={documentState().collapsedNodes.has(n().id)}
+                                    onToggle={() => toggleCollapse(n().id)}
+                                    toolPinned={documentState().pinnedNodes.has(n().id)}
+                                    onToggleToolPin={() => togglePin(n().id)}
                                     onSubagentClick={onSubagentClick}
                                 />
                                 <NodeHoverStrip
-                                    timestamp={(node as any).timestamp}
-                                    nodeId={node.id}
+                                    timestamp={(n() as any).timestamp}
+                                    nodeId={n().id}
                                     isBookmarked={isBookmarked()}
-                                    onBookmark={onBookmark != null ? () => onBookmark(node) : undefined}
+                                    onBookmark={onBookmark != null ? () => onBookmark(n()) : undefined}
                                     canExpand={canExpand()}
                                     isExpanded={isExpanded()}
                                     onExpand={onExpand}
-                                    onOpenInNewPane={onOpenInNewPane}
+                                    onOpenInNewPane={n().type === "tool" ? onOpenInNewPane : undefined}
                                     onOpenInNewWindow={onOpenInNewWindow}
                                     onNewAgentFromHere={onNewAgentFromHere}
                                 />
+                                    </>)}
+                                </Show>
                             </div>
                         );
                     }}
