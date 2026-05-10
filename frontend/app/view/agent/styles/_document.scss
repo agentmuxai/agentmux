@@ -21,6 +21,14 @@
         // mutations inside the scroll container don't invalidate layout
         // outside it.
         contain: layout style paint;
+        // overflow-anchor on the actual scroll container (this element).
+        // Chromium auto-pins a visible anchor element when content above
+        // it changes height (e.g., async image/font loads, tool block
+        // expand). The JS layer in AgentDocumentVirtualList handles the
+        // cases CSS can't (programmatic scroll, remount).
+        // Spec: docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md
+        //       §"Anchor — CSS + JS belt-and-suspenders"
+        overflow-anchor: auto;
     }
 
     // Shared hover-strip anchor. Any element that renders a `.node-strip`
@@ -99,16 +107,9 @@
     }
 
     // === Virtualization (Phase 2 redesign) ===
-    //
-    // overflow-anchor on the scroll container is the CSS half of the
-    // anchor model — Chromium auto-pins a visible anchor element when
-    // content above it changes height (e.g., async image/font loads,
-    // tool block expand). The JS layer in AgentDocumentVirtualList
-    // handles the cases CSS can't (programmatic scroll, remount).
-    //
-    // Spec: docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md
-    //       §"Anchor — CSS + JS belt-and-suspenders"
-    overflow-anchor: auto;
+    // (overflow-anchor lives on .agent-document above — the actual
+    // scroll container — not here at the .agent-view level. reagent
+    // P2 on #784 caught the wrong nesting.)
 
     .agent-document-virtualizer {
         // Container for the virtualized region. Children are
