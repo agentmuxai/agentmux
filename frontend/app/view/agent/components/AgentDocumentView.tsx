@@ -12,6 +12,7 @@
  */
 
 import { createEffect, createSignal, For, Show, type Accessor, type JSX, onCleanup } from "solid-js";
+import { createVirtualizer } from "@tanstack/solid-virtual";
 import type { SignalPair } from "../state";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
@@ -58,9 +59,35 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, authUrl, au
     const [document] = documentAtom;
     const [documentState, setDocumentState] = documentStateAtom;
     let scrollRef!: HTMLDivElement;
+    let virtualContainerRef: HTMLDivElement | undefined;
     let autoScroll = true;
     // Guard against concurrent older-history fetches triggered by scroll
     let loadingOlderInFlight = false;
+
+    // Virtualizer over the document nodes. Replaces the old <For> that
+    // mounted every node in flow with content-visibility: auto. With
+    // long sessions (500-2000+ nodes) the layout tree alone was 8MB+ per
+    // pane and a tab-switch reflow stalled for 200ms+. Virtualization
+    // keeps only ~visible-window + overscan items in the DOM.
+    //
+    // estimateSize = 80 matches the old contain-intrinsic-size hint;
+    // measureElement re-measures actual heights via ResizeObserver as
+    // each item paints, so dynamic content (tool blocks, code diffs)
+    // settles to its real size after one frame.
+    //
+    // scrollMargin reads the virtual container's offsetTop so the
+    // loading-older banner and auth-url box (rendered as siblings above
+    // the virtualizer container) don't break scroll math.
+    const virtualizer = createVirtualizer({
+        get count() { return document().length; },
+        getScrollElement: () => scrollRef,
+        estimateSize: () => 80,
+        overscan: 5,
+        getItemKey: (index) => document()[index]?.id ?? index,
+        get scrollMargin() {
+            return virtualContainerRef?.offsetTop ?? 0;
+        },
+    });
 
     // Scroll to a node by its data-node-id attribute.
     // Exposed to the parent via scrollToNodeRef so BookmarksPanel can call it.
@@ -80,16 +107,12 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, authUrl, au
     // See docs/analysis/agent-pane-rich-features-structure-2026-04-13.md §1.
     const scrollToNode = (nodeId: string) => {
         if (!scrollRef) return;
-        const el = scrollRef.querySelector(`[data-node-id="${nodeId}"]`) as HTMLElement | null;
-        if (!el) return;
-        const elRect = el.getBoundingClientRect();
-        const containerRect = scrollRef.getBoundingClientRect();
-        // Top of el relative to scrollRef's content origin
-        const offsetWithinContainer = elRect.top - containerRect.top + scrollRef.scrollTop;
-        // Center the element in the visible region
-        const centerOffset =
-            offsetWithinContainer - scrollRef.clientHeight / 2 + el.clientHeight / 2;
-        scrollRef.scrollTo({ top: Math.max(0, centerOffset), behavior: "smooth" });
+        // Under virtualization the target node may not be in the DOM
+        // until we scroll its index into the virtual window. Look up the
+        // index first; align="center" matches the old centering math.
+        const idx = document().findIndex((n) => n.id === nodeId);
+        if (idx < 0) return;
+        virtualizer.scrollToIndex(idx, { align: "center", behavior: "smooth" });
         // Disable auto-scroll after a manual jump
         autoScroll = false;
     };
@@ -120,7 +143,9 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, authUrl, au
     const jumpToBottom = () => {
         if (!scrollRef) return;
         autoScroll = true;
-        scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "instant" });
+        const last = document().length - 1;
+        if (last < 0) return;
+        virtualizer.scrollToIndex(last, { align: "end", behavior: "auto" });
     };
 
     if (scrollToBottomRef) scrollToBottomRef(jumpToBottom);
@@ -179,9 +204,10 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, authUrl, au
     let scrollRafId: number | null = null;
 
     const scrollToBottom = () => {
-        if (autoScroll && scrollRef) {
-            scrollRef.scrollTop = scrollRef.scrollHeight;
-        }
+        if (!autoScroll || !scrollRef) return;
+        const last = document().length - 1;
+        if (last < 0) return;
+        virtualizer.scrollToIndex(last, { align: "end", behavior: "auto" });
     };
 
     // Scroll when the document changes — throttled to one RAF per batch.
@@ -214,17 +240,26 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, authUrl, au
             !loadingOlderInFlight &&
             !(loadingOlder?.())
         ) {
-            // Snapshot scroll anchor before content is prepended
-            const snapshotScrollHeight = scrollHeight;
-            const snapshotScrollTop = scrollTop;
+            // Anchor by node id, not pixels. Pre-virtualization we
+            // computed the new scrollTop from the snapshot scrollHeight
+            // delta — but with measured virtual heights that delta is
+            // unreliable until every newly-rendered item has been laid
+            // out by the ResizeObserver. Re-anchoring to the same node's
+            // index after prepend is exact regardless of measurement
+            // settle time.
+            const items = virtualizer.getVirtualItems();
+            const anchorId = items.length > 0 ? document()[items[0].index]?.id : null;
             loadingOlderInFlight = true;
             onLoadOlder().then(() => {
-                // Restore scroll position so the user's viewport doesn't jump.
-                // Use a RAF so the DOM has updated with the new nodes first.
                 requestAnimationFrame(() => {
-                    if (scrollRef) {
-                        scrollRef.scrollTop =
-                            scrollRef.scrollHeight - snapshotScrollHeight + snapshotScrollTop;
+                    if (anchorId != null) {
+                        const newIdx = document().findIndex((n) => n.id === anchorId);
+                        if (newIdx >= 0) {
+                            virtualizer.scrollToIndex(newIdx, {
+                                align: "start",
+                                behavior: "auto",
+                            });
+                        }
                     }
                     loadingOlderInFlight = false;
                 });
@@ -324,120 +359,177 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, authUrl, au
                 }}
             </Show>
 
-            {/* Document nodes render below log lines.
-                `content-visibility: auto` on the wrapper lets the browser
-                skip layout/paint for off-screen nodes — critical for
-                long sessions where thousands of DOM elements accumulate. */}
-            <For each={document()}>
-                {(node) => {
-                    const isBookmarked = () => bookmarkedNodeIds?.().has(node.id) ?? false;
-                    const canExpand = () => {
-                        switch (node.type) {
-                            case "tool":
-                            case "agent_message":
-                            case "user_message":
-                            case "section":
-                                return true;
-                            default:
-                                return false;
-                        }
-                    };
-                    const isExpanded = () => {
-                        if (node.type === "tool") return documentState().pinnedNodes.has(node.id);
-                        return !documentState().collapsedNodes.has(node.id);
-                    };
-                    const onExpand = () => {
-                        if (node.type === "tool") togglePin(node.id);
-                        else toggleCollapse(node.id);
-                    };
-                    // Phase 6: "new pane" for tool rows — deferred until a scratch view exists.
-                    const onOpenInNewPane = node.type === "tool"
-                        ? () => console.warn("[hover-strip] open in new pane — not yet implemented")
-                        : undefined;
-                    const onOpenInNewWindow = () =>
-                        console.warn("[hover-strip] open in new window — not yet implemented");
-                    const onNewAgentFromHere = () =>
-                        console.warn("[hover-strip] new agent from here — not yet implemented");
-
-                    const handleRowKey = (e: KeyboardEvent): void => {
-                        if (e.metaKey || e.ctrlKey || e.altKey) return;
-                        switch (e.key.toLowerCase()) {
-                            case "e":
-                                if (canExpand()) { onExpand(); e.preventDefault(); }
-                                break;
-                            case "b":
-                                if (onBookmark != null) { onBookmark(node); e.preventDefault(); }
-                                break;
-                            case "p":
-                                if (onOpenInNewPane) { onOpenInNewPane(); e.preventDefault(); }
-                                break;
-                            case "w":
-                                onOpenInNewWindow(); e.preventDefault();
-                                break;
-                            case "n":
-                                onNewAgentFromHere(); e.preventDefault();
-                                break;
-                            case "escape":
-                                (e.currentTarget as HTMLElement).blur();
-                                e.preventDefault();
-                                break;
-                        }
-                    };
-
-                    const handleContextMenu = (e: MouseEvent) => {
-                        if (!onBookmark) return;
-                        // Don't show bookmark menu on top of text selections — let the parent handle those.
-                        const sel = window.getSelection()?.toString();
-                        if (sel) return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        ContextMenuModel.showContextMenu(
-                            [
-                                {
-                                    label: isBookmarked() ? "Remove bookmark" : "Bookmark this message",
-                                    click: () => onBookmark(node),
-                                },
-                            ],
-                            e,
-                        );
-                    };
-
-                    return (
-                        <div
-                            class="hover-strip-host agent-document-node-wrapper"
-                            classList={{
-                                "agent-node-bookmarked": isBookmarked(),
-                                "agent-node-search-match": highlightNodeId?.() === node.id,
-                            }}
-                            data-node-id={node.id}
-                            tabindex="0"
-                            onKeyDown={handleRowKey}
-                            onContextMenu={handleContextMenu}
-                        >
-                            <DocumentNodeRenderer
-                                node={node}
-                                collapsed={documentState().collapsedNodes.has(node.id)}
-                                onToggle={() => toggleCollapse(node.id)}
-                                toolPinned={documentState().pinnedNodes.has(node.id)}
-                                onToggleToolPin={() => togglePin(node.id)}
-                                onSubagentClick={onSubagentClick}
-                            />
-                            <NodeHoverStrip
-                                timestamp={(node as any).timestamp}
-                                nodeId={node.id}
-                                isBookmarked={isBookmarked()}
-                                onBookmark={onBookmark != null ? () => onBookmark(node) : undefined}
-                                canExpand={canExpand()}
-                                isExpanded={isExpanded()}
-                                onExpand={onExpand}
-                                onOpenInNewPane={onOpenInNewPane}
-                                onOpenInNewWindow={onOpenInNewWindow}
-                                onNewAgentFromHere={onNewAgentFromHere}
-                            />
-                        </div>
-                    );
+            {/* Virtualized document nodes. The container takes the full
+                virtual height (sum of all measured/estimated item sizes)
+                so the native scrollbar reflects total content. Each item
+                is absolute-positioned via translateY; only the visible
+                window + overscan are mounted in the DOM. measureElement
+                hooks ResizeObserver to re-measure dynamic-height items
+                (tool blocks expanding, code diffs, etc.) after first
+                paint, so the estimate (80px) is just the initial guess. */}
+            <div
+                ref={(el) => { virtualContainerRef = el; }}
+                class="agent-document-virtualizer"
+                style={{
+                    height: `${virtualizer.getTotalSize()}px`,
+                    position: "relative",
+                    width: "100%",
                 }}
-            </For>
+            >
+                <For each={virtualizer.getVirtualItems()}>
+                    {(virtualItem) => {
+                        // Reactive accessor — re-reads document() on every
+                        // call so streaming updates (StreamFlush replacing a
+                        // node at the same index) reach the row even when
+                        // the row stays mounted across renders. Capturing
+                        // node as a const here would freeze the row's view
+                        // of the document at first render. (codex P1)
+                        const node = () => document()[virtualItem.index];
+                        const isBookmarked = () => {
+                            const n = node();
+                            return n ? (bookmarkedNodeIds?.().has(n.id) ?? false) : false;
+                        };
+                        const canExpand = () => {
+                            const t = node()?.type;
+                            switch (t) {
+                                case "tool":
+                                case "agent_message":
+                                case "user_message":
+                                case "section":
+                                    return true;
+                                default:
+                                    return false;
+                            }
+                        };
+                        const isExpanded = () => {
+                            const n = node();
+                            if (n == null) return false;
+                            if (n.type === "tool") return documentState().pinnedNodes.has(n.id);
+                            return !documentState().collapsedNodes.has(n.id);
+                        };
+                        const onExpand = () => {
+                            const n = node();
+                            if (n == null) return;
+                            if (n.type === "tool") togglePin(n.id);
+                            else toggleCollapse(n.id);
+                        };
+                        // Phase 6: "new pane" for tool rows — deferred until a scratch view exists.
+                        const onOpenInNewPane = () => {
+                            if (node()?.type === "tool") {
+                                console.warn("[hover-strip] open in new pane — not yet implemented");
+                            }
+                        };
+                        const onOpenInNewWindow = () =>
+                            console.warn("[hover-strip] open in new window — not yet implemented");
+                        const onNewAgentFromHere = () =>
+                            console.warn("[hover-strip] new agent from here — not yet implemented");
+
+                        const handleRowKey = (e: KeyboardEvent): void => {
+                            if (e.metaKey || e.ctrlKey || e.altKey) return;
+                            const n = node();
+                            if (n == null) return;
+                            switch (e.key.toLowerCase()) {
+                                case "e":
+                                    if (canExpand()) { onExpand(); e.preventDefault(); }
+                                    break;
+                                case "b":
+                                    if (onBookmark != null) { onBookmark(n); e.preventDefault(); }
+                                    break;
+                                case "p":
+                                    if (n.type === "tool") { onOpenInNewPane(); e.preventDefault(); }
+                                    break;
+                                case "w":
+                                    onOpenInNewWindow(); e.preventDefault();
+                                    break;
+                                case "n":
+                                    onNewAgentFromHere(); e.preventDefault();
+                                    break;
+                                case "escape":
+                                    (e.currentTarget as HTMLElement).blur();
+                                    e.preventDefault();
+                                    break;
+                            }
+                        };
+
+                        const handleContextMenu = (e: MouseEvent) => {
+                            if (!onBookmark) return;
+                            const sel = window.getSelection()?.toString();
+                            if (sel) return;
+                            const n = node();
+                            if (n == null) return;
+                            e.preventDefault();
+                            e.stopPropagation();
+                            ContextMenuModel.showContextMenu(
+                                [
+                                    {
+                                        label: isBookmarked() ? "Remove bookmark" : "Bookmark this message",
+                                        click: () => onBookmark(n),
+                                    },
+                                ],
+                                e,
+                            );
+                        };
+
+                        return (
+                            <div
+                                ref={(el) => virtualizer.measureElement(el)}
+                                data-index={virtualItem.index}
+                                data-node-id={node()?.id}
+                                class="hover-strip-host agent-document-node-wrapper"
+                                classList={{
+                                    "agent-node-bookmarked": isBookmarked(),
+                                    "agent-node-search-match": (() => {
+                                        const id = node()?.id;
+                                        return id != null && highlightNodeId?.() === id;
+                                    })(),
+                                }}
+                                style={{
+                                    position: "absolute",
+                                    top: "0",
+                                    left: "0",
+                                    width: "100%",
+                                    // Subtract scrollMargin so when an
+                                    // auth box / loading-older banner pushes
+                                    // the virtualizer container down,
+                                    // virtualItem.start (which already
+                                    // includes the margin) lands rows at the
+                                    // right offset within the container.
+                                    // (codex P2)
+                                    transform: `translateY(${virtualItem.start - virtualizer.options.scrollMargin}px)`,
+                                }}
+                                tabindex="0"
+                                onKeyDown={handleRowKey}
+                                onContextMenu={handleContextMenu}
+                            >
+                                <Show when={node()}>
+                                    {(n) => (<>
+                                <DocumentNodeRenderer
+                                    node={n()}
+                                    collapsed={documentState().collapsedNodes.has(n().id)}
+                                    onToggle={() => toggleCollapse(n().id)}
+                                    toolPinned={documentState().pinnedNodes.has(n().id)}
+                                    onToggleToolPin={() => togglePin(n().id)}
+                                    onSubagentClick={onSubagentClick}
+                                />
+                                <NodeHoverStrip
+                                    timestamp={(n() as any).timestamp}
+                                    nodeId={n().id}
+                                    isBookmarked={isBookmarked()}
+                                    onBookmark={onBookmark != null ? () => onBookmark(n()) : undefined}
+                                    canExpand={canExpand()}
+                                    isExpanded={isExpanded()}
+                                    onExpand={onExpand}
+                                    onOpenInNewPane={n().type === "tool" ? onOpenInNewPane : undefined}
+                                    onOpenInNewWindow={onOpenInNewWindow}
+                                    onNewAgentFromHere={onNewAgentFromHere}
+                                />
+                                    </>)}
+                                </Show>
+                            </div>
+                        );
+                    }}
+                </For>
+            </div>
         </div>
     );
 };
