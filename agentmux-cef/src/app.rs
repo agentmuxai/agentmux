@@ -74,6 +74,31 @@ wrap_window_delegate! {
                     window_label = %label,
                     "[browser-pane] registered Window in state.windows for pane attachment"
                 );
+
+                // Startup pool fill — Windows uses the launcher saga path
+                // (saga_dispatch.rs::LiveActionRunner is cfg(windows) only).
+                //
+                // On Linux/Wayland: DISABLED. POOL_OFFSCREEN_X = -32000 in
+                // window_pool.rs is a Win32/X11-era hack that the Wayland
+                // compositor ignores — pool windows appear ON SCREEN as
+                // blank/empty windows because Wayland doesn't let clients
+                // dictate position. Until pool windows can be properly
+                // hidden on Wayland (xdg_toplevel.set_minimized? transparent
+                // surfaces? a separate `--headless` renderer pool?), spawning
+                // them at startup creates visible blank windows that consume
+                // CPU/RAM and confuse the user. Tear-off takes the cold path
+                // on first use as a result. See
+                // docs/specs/linux-pool-startup-fill-2026-05-08.md
+                // (open question now answered: Wayland positioning).
+                //
+                // On macOS: enabled. NSWindow off-screen positioning works.
+                // (Untested by the same operator who tested Linux; revisit
+                // if the macOS build shows visible pool windows too.)
+                #[cfg(target_os = "macos")]
+                if label == "main" {
+                    tracing::info!("[pool] kicking off startup pool fill (macOS)");
+                    crate::commands::window_pool::spawn_pool_window(state);
+                }
             }
 
             // Chrome-style windows (DevTools popups) are shown immediately.
@@ -360,12 +385,16 @@ wrap_app! {
                 // the app in a zombie white-screen state on GPU context loss with
                 // no recovery path. Removed in v0.33.66.
 
-                // Cap renderer subprocesses. In Alloy mode the frontend runs
-                // in the browser process (no renderer spawned), but DevTools
-                // popups can spawn additional renderers at ~100GB VA each.
-                let rpl_key = CefString::from("renderer-process-limit");
-                let rpl_val = CefString::from("1");
-                cmd.append_switch_with_value(Some(&rpl_key), Some(&rpl_val));
+                // NOTE: `--renderer-process-limit=1` was previously set here to
+                // protect against DevTools popups spawning extra renderers under
+                // an Alloy-mode assumption. The current Linux CEF build is NOT
+                // Alloy-mode for the user-visible UI: main window, every pool
+                // window, every tear-off window, and every browser-pane gets
+                // its own renderer process. Capping all of them to ONE shared
+                // renderer process serializes their JS event loops on a single
+                // thread, which manifests as hover/animation lag in the user-
+                // visible UI when pool windows are doing idle work. Removed
+                // 2026-05-09. See docs/specs/linux-cef-flags-audit-2026-05-08.md.
             }
         }
 
