@@ -29,7 +29,7 @@
  */
 
 import { createVirtualizer } from "@tanstack/solid-virtual";
-import { createEffect, createMemo, For, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, For, Index, type Accessor, type JSX } from "solid-js";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import {
@@ -300,25 +300,33 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 </For>
             </div>
 
-            {/* Streaming buffer — always-mounted trailing nodes */}
+            {/* Streaming buffer — always-mounted trailing nodes.
+                Uses <Index> not <For> because Solid's <For> reconciles
+                by item REFERENCE: each streaming token replaces the
+                active node's object (immutable update preserves id but
+                gives a new ref), and <For> would treat that as a new
+                item and unmount/remount the row on every token —
+                exactly the regression we wanted the streaming buffer
+                to prevent. <Index> keys by position and passes the
+                item as a Solid signal accessor, so the same
+                DocumentRow stays mounted while its `props.node()`
+                reactively re-reads the current value. (reagent P1 on
+                #784.) */}
             <div class="agent-document-streaming-buffer">
-                <For each={partition().streamingNodes as DocumentNode[]}>
-                    {(node) => {
-                        const nodeAccessor = (): DocumentNode => node;
-                        return (
-                            <DocumentRow
-                                node={nodeAccessor}
-                                documentState={props.documentState}
-                                bookmarkedNodeIds={props.bookmarkedNodeIds}
-                                onBookmark={props.onBookmark}
-                                onSubagentClick={props.onSubagentClick}
-                                highlightNodeId={props.highlightNodeId}
-                                onToggleCollapse={props.onToggleCollapse}
-                                onTogglePin={props.onTogglePin}
-                            />
-                        );
-                    }}
-                </For>
+                <Index each={partition().streamingNodes as DocumentNode[]}>
+                    {(nodeAccessor) => (
+                        <DocumentRow
+                            node={nodeAccessor}
+                            documentState={props.documentState}
+                            bookmarkedNodeIds={props.bookmarkedNodeIds}
+                            onBookmark={props.onBookmark}
+                            onSubagentClick={props.onSubagentClick}
+                            highlightNodeId={props.highlightNodeId}
+                            onToggleCollapse={props.onToggleCollapse}
+                            onTogglePin={props.onTogglePin}
+                        />
+                    )}
+                </Index>
             </div>
         </div>
     );
