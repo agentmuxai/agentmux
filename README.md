@@ -91,9 +91,8 @@ The widget bar shows pinned widgets directly; the rest live in a **More** dropdo
 
 | Surface | How to reach it |
 |---|---|
-| **Forge** | Tab inside an Agent pane (cog → settings → Forge). Configure the agent's provider, soul, instructions, MCP, env. |
 | **Identity** | Tab inside an Agent pane (cog → settings → Identity). Manage the credential bundle assigned to this instance. |
-| **Memory** | Tab inside an Agent pane (cog → settings → Memory). Manage the personality / capability bundle. |
+| **Memory** | Tab inside an Agent pane (cog → settings → Memory). Manage the personality / capability bundle (provider, model, instructions, MCP, skills). Replaces the old Forge concept — `db_forge_agents` rows migrated into `db_memories` in the v7 schema. |
 | **Settings** | Hamburger menu (≡) in the top tab bar → Settings. Opens `settings.json` in your default editor. |
 
 ## Agents
@@ -107,7 +106,7 @@ Each agent has two names:
 
 ### How to rename an agent
 
-1. Open the **Forge** widget (or hover an agent card in the Agent picker).
+1. Hover an agent card in the Agent picker.
 2. Click the ✏ pencil icon next to the agent's name.
 3. Type the new display name and press **Enter** (or click ✓). Press **Esc** to cancel.
 4. The picker card and any open pane titles update immediately.
