@@ -98,13 +98,21 @@
         }
     }
 
+    .agent-document-virtualizer {
+        // Container for the @tanstack/solid-virtual list. Children are
+        // absolute-positioned via translateY; the height equals the
+        // virtualizer's getTotalSize() so the native scrollbar reflects
+        // the full virtual content. See AgentDocumentView.tsx.
+        position: relative;
+        width: 100%;
+    }
+
     .agent-document-node-wrapper {
-        // Each document node gets its own containment box. Off-screen nodes
-        // are skipped by the browser via content-visibility.
-        // contain-intrinsic-size gives the browser a size estimate so scroll
-        // position stays stable when content is virtualized in/out.
-        content-visibility: auto;
-        contain-intrinsic-size: auto 80px;
+        // Each document node is absolute-positioned by the virtualizer;
+        // `contain: layout style` isolates layout work to the item's box
+        // so a single message expanding (markdown image load, code-diff
+        // measure) doesn't reflow neighbors. content-visibility is no
+        // longer needed because off-screen items aren't in the DOM at all.
         contain: layout style;
 
         &:focus {
