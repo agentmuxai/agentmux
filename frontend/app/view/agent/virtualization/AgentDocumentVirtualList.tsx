@@ -119,8 +119,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                     agentPerfStore.recordEstimatorMeasurement(node.type, estimated, measured);
                 }
             }
-            // Return the measured height. (reagent P2 on #785: dead
-            // ternary removed — both branches returned `measured`.)
             return measured;
         },
     });
