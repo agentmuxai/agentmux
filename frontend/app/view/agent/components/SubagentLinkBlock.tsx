@@ -15,8 +15,13 @@ interface SubagentLinkBlockProps {
     onClick: (node: SubagentLinkNode) => void;
 }
 
-export const SubagentLinkBlock = ({ node, onClick }: SubagentLinkBlockProps): JSX.Element => {
-    const isActive = () => node.status === "active";
+export const SubagentLinkBlock = (props: SubagentLinkBlockProps): JSX.Element => {
+    // Don't destructure \u2014 see family of fixes on virt redesign:
+    // AgentMessageBlock, MarkdownBlock have the same change. The
+    // streaming buffer's <Index> keeps the row mounted across status
+    // transitions (active \u2192 completed); a destructured node would
+    // freeze the active class. (codex P2 on PR #786.)
+    const isActive = () => props.node.status === "active";
 
     return (
         <div
@@ -24,12 +29,12 @@ export const SubagentLinkBlock = ({ node, onClick }: SubagentLinkBlockProps): JS
                 active: isActive(),
                 completed: !isActive(),
             })}
-            onClick={() => onClick(node)}
+            onClick={() => props.onClick(props.node)}
         >
             <span class="agent-subagent-link-icon">{isActive() ? "\u{26A1}" : "\u2714"}</span>
             <span class="agent-subagent-link-info">
-                <span class="agent-subagent-link-slug">{node.slug || node.subagentId.substring(0, 7)}</span>
-                <span class="agent-subagent-link-id">{node.subagentId.substring(0, 7)}</span>
+                <span class="agent-subagent-link-slug">{props.node.slug || props.node.subagentId.substring(0, 7)}</span>
+                <span class="agent-subagent-link-id">{props.node.subagentId.substring(0, 7)}</span>
             </span>
             <span class="agent-subagent-link-action">{"\u2192"}</span>
         </div>
