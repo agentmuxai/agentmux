@@ -14,7 +14,7 @@
  * docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md.
  */
 
-import { Show, type Accessor, type JSX } from "solid-js";
+import { onMount, Show, type Accessor, type JSX } from "solid-js";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
 import { MarkdownBlock } from "../components/MarkdownBlock";
@@ -22,6 +22,7 @@ import { NodeHoverStrip } from "../components/NodeHoverStrip";
 import { SubagentLinkBlock } from "../components/SubagentLinkBlock";
 import { ToolBlock } from "../components/ToolBlock";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
+import { markRowMount } from "./perf-probe";
 
 export interface DocumentRowProps {
     /**
@@ -61,6 +62,13 @@ const TOGGLEABLE_KINDS: ReadonlySet<DocumentNode["type"]> = new Set([
 ]);
 
 export function DocumentRow(props: DocumentRowProps): JSX.Element {
+    // Phase 3: per-kind row mount perf probe. markRowMount returns a
+    // closer that we invoke after onMount fires (i.e., after the row
+    // is in the DOM and its initial paint has been queued).
+    // No-op in production builds.
+    const close = markRowMount(props.node().type);
+    onMount(() => close());
+
     const isBookmarked = (): boolean => {
         const n = props.node();
         return props.bookmarkedNodeIds?.().has(n.id) ?? false;

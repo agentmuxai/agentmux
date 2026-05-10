@@ -29,9 +29,10 @@
  */
 
 import { createVirtualizer } from "@tanstack/solid-virtual";
-import { createEffect, createMemo, For, Index, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, For, Index, onMount, type Accessor, type JSX } from "solid-js";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
+import { agentPerfStore, startAgentLayoutShiftObserver } from "./perf-probe";
 import {
     captureTopmostAnchor,
     isNearBottom,
@@ -103,6 +104,31 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         get scrollMargin() {
             return virtualContainerRef?.offsetTop ?? 0;
         },
+        // Phase 3 perf probe: validate the per-kind estimator against
+        // the measured size after every measurement. The HUD surfaces
+        // any kind whose miss-rate stays high so we recalibrate.
+        // No-op in production builds (agentPerfStore short-circuits).
+        measureElement: (element) => {
+            const measured = element.getBoundingClientRect().height;
+            const indexAttr = element.getAttribute("data-index");
+            if (indexAttr != null) {
+                const idx = Number(indexAttr);
+                const node = partition().virtualizedNodes[idx];
+                if (node) {
+                    const estimated = estimateNode(node, props.documentState());
+                    agentPerfStore.recordEstimatorMeasurement(node.type, estimated, measured);
+                }
+            }
+            // Return the measured height. (reagent P2 on #785: dead
+            // ternary removed — both branches returned `measured`.)
+            return measured;
+        },
+    });
+
+    // Layout-shift observer scoped to .agent-document. Idempotent —
+    // subsequent mounts are no-ops. Production: short-circuits.
+    onMount(() => {
+        startAgentLayoutShiftObserver();
     });
 
     // Project stickToBottom into scroll position. When the document
