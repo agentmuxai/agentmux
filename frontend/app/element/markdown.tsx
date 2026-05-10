@@ -345,20 +345,28 @@ type MarkdownProps = {
     fixedFontSizeOverride?: number;
 };
 
-const Markdown = ({
-    text,
-    textAtom,
-    showTocAtom,
-    style,
-    class: className,
-    contentClass: contentClassName,
-    resolveOpts,
-    fontSizeOverride,
-    fixedFontSizeOverride,
-    scrollable = true,
-    rehype = true,
-    onClickExecute,
-}: MarkdownProps) => {
+const Markdown = (props: MarkdownProps) => {
+    // `text` is read via props.text inside the resolvedText memo so
+    // streaming markdown (where the parent passes a continuously
+    // growing string) re-renders. Other props are mostly static (atom
+    // refs, style, class) — destructure those for terseness without
+    // losing reactivity on the one prop that needs it.
+    // (codex P1 on PR #786 — the streaming buffer keeps MarkdownBlock
+    // mounted across token deltas, but Markdown's own destructuring
+    // froze the captured `text` value at first mount.)
+    const {
+        textAtom,
+        showTocAtom,
+        style,
+        class: className,
+        contentClass: contentClassName,
+        resolveOpts,
+        fontSizeOverride,
+        fixedFontSizeOverride,
+        scrollable = true,
+        rehype = true,
+        onClickExecute,
+    } = props;
     const textAtomValue = useAtomValueSafe<string>(textAtom as any);
     const tocItems: TocItem[] = [];
     const showToc = useAtomValueSafe(showTocAtom) ?? false;
@@ -371,7 +379,7 @@ const Markdown = ({
 
     const [idPrefix] = createSignal<string>(crypto.randomUUID());
 
-    const resolvedText = createMemo(() => textAtomValue ?? text ?? "");
+    const resolvedText = createMemo(() => textAtomValue ?? props.text ?? "");
 
     const transformedOutput = createMemo(() => transformBlocks(resolvedText()));
     const transformedText = createMemo(() => transformedOutput().content);
