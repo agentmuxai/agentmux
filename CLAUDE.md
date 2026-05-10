@@ -103,9 +103,8 @@ These views exist in the codebase but are **not** widget-bar entries — do not 
 
 | Surface | How it's reached |
 |---|---|
-| **Forge** | Tab inside an Agent pane (cog → settings panel → Forge tab). Folded into the agent pane in v0.33.197 — old `forge` blocks are redirected to `agent` by `block.tsx`. |
 | **Identity** | Tab inside an Agent pane (cog → settings panel → Identity tab). The `view: "identity"` registration and `IdentityPaneViewModel` exist for `pane.open` RPC and right-click menu paths; no widget-bar entry. |
-| **Memory** | Same shape as Identity — tab inside an Agent pane, view registered for programmatic access only. |
+| **Memory** | Tab inside an Agent pane (cog → settings panel → Memory tab). Same shape as Identity — view registered for programmatic access only. Replaces the old Forge concept; `db_forge_agents` rows migrated into `db_memories` in the v7 schema. The `block.tsx` migration shim still redirects `view: "forge"` blocks to `view: "agent"` for backward compatibility. |
 | **Settings** | Hamburger menu (≡) in the top tab bar → Settings. Opens `settings.json` in the user's default editor. |
 | **Subagent** | Spawned by clicking a sub-agent in the Swarm pane's overview. Not a top-level pane type the user opens directly. |
 
