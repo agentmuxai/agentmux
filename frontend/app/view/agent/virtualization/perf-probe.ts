@@ -49,13 +49,14 @@ export const ESTIMATOR_MISS_THRESHOLD = 0.30;
 const SAMPLE_RING_SIZE = 64;
 
 /** True when probing should record. False suppresses all recording
- *  to keep production builds cost-free. */
+ *  to keep production builds cost-free. Uses the bare
+ *  `import.meta.env.DEV` form so Vite's static-replace plugin can
+ *  fold it to a literal at build time and dead-code-eliminate the
+ *  surrounding branches. Optional-chaining or any cast that produces
+ *  `import.meta.env?.DEV` defeats the static replace and ships the
+ *  full probe code in production. */
 function isProbingEnabled(): boolean {
-    // Vite injects import.meta.env.DEV at build time. The check is
-    // tree-shaken in production builds, so the cost-paths below are
-    // dropped entirely.
-    return typeof import.meta !== "undefined"
-        && (import.meta as { env?: { DEV?: boolean } }).env?.DEV === true;
+    return import.meta.env.DEV === true;
 }
 
 class AgentPerfStore {
