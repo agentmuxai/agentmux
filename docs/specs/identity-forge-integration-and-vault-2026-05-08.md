@@ -6,7 +6,12 @@
 **Supersedes:** earlier draft of this file (the per-provider Forge-form picker plan)
 **Status:** Proposed — rewrites the model after user feedback
 
-> **Status update (2026-05-09):** the §"Identity Pane / Memory Pane as first-class block-views with widget-bar entries" portion of this spec is **superseded** by `specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md` §7.4. Identity and Memory are Agent-pane subsections, **not** widget-bar entries. The `view: "identity"` and `view: "memory"` registrations remain (so `pane.open` RPC and right-click pane menus can still reach them), but the `defwidget@identity` and `defwidget@memory` entries have been removed from `agentmux-srv/src/config/widgets.json`. The bundle model itself (Identity = credentials, Memory = personality/capability) and the launch-modal bundle picker are unchanged.
+> **Status update (2026-05-09):** the §"Identity Pane / Memory Pane as first-class block-views with widget-bar entries" portion of this spec is **superseded** by `specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md` §7.4. Identity and Memory are Agent-pane subsections, **not** widget-bar entries. The `view: "identity"` and `view: "memory"` view-type registrations in `frontend/app/block/block.tsx` and the `IdentityPaneViewModel` / Memory ViewModel remain unchanged, but the `defwidget@identity` and `defwidget@memory` entries have been removed from `agentmux-srv/src/config/widgets.json`. Reach them via:
+>
+> - **Primary:** the cog → settings panel inside an active Agent pane (`AgentIdentityPanel.tsx`, etc.). This path doesn't read `widgets.json`, so it's unaffected.
+> - **Programmatic:** `pane.open` RPC with `view: "identity"` / `view: "memory"`.
+>
+> Removing the defs **does** remove Memory/Identity from the right-click pane "Replace With" submenu (`frontend/app/block/pane-actions.ts:buildReplaceSubmenu` builds that list from `widgets.json`). That's intentional — Replace With is a widget-bar surface, and Memory/Identity aren't widget-bar surfaces. The bundle model itself (Identity = credentials, Memory = personality/capability) and the launch-modal Identity picker are unchanged. The launch-modal Memory picker remains hidden (`display: none`) pending the spawn-time content-injection layer in PR-F.4.
 
 ---
 
