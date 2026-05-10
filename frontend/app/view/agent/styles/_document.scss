@@ -103,8 +103,16 @@
         // absolute-positioned via translateY; the height equals the
         // virtualizer's getTotalSize() so the native scrollbar reflects
         // the full virtual content. See AgentDocumentView.tsx.
+        //
+        // flex-shrink: 0 — the parent .agent-document is a column flex
+        // container, so without this the wrapper would shrink to fit
+        // the viewport when getTotalSize() exceeds it. Absolutely-
+        // positioned children don't establish a content min-height to
+        // push back, so the scrollbar would lose access to off-screen
+        // messages. (codex P1)
         position: relative;
         width: 100%;
+        flex-shrink: 0;
     }
 
     .agent-document-node-wrapper {
