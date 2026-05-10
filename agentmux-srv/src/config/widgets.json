@@ -79,7 +79,7 @@
         }
     },
     "defwidget@help": {
-        "display:order": 9,
+        "display:order": 7,
         "icon": "circle-question",
         "label": "help",
         "description": "Help and documentation",
@@ -90,7 +90,7 @@
         }
     },
     "defwidget@devtools": {
-        "display:order": 10,
+        "display:order": 8,
         "display:pinned": true,
         "icon": "code",
         "label": "devtools",
