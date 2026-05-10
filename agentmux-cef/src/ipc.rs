@@ -342,6 +342,10 @@ async fn route_command(
             let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
             let w = args.get("width").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
             let h = args.get("height").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            tracing::info!(
+                "[ipc] browser_pane_resize block_id={} rect=({},{},{},{})",
+                block_id, x, y, w, h
+            );
             state.browser_panes.resize(block_id, cef::Rect { x, y, width: w, height: h }, state);
             Ok(serde_json::json!(true))
         }

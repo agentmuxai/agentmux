@@ -314,12 +314,22 @@ impl BrowserPaneManager {
         );
         tracing::info!(block_id, label, "browser pane closed");
 
-        // PR #6 H.7 kick — the pane is fully closed; if any pool refill
-        // was deferred by `any_browser_pane_closing()` while we were mid-close,
-        // top up now. `spawn_pool_window` is internally idempotent
-        // (single-flight semaphore + below-target check via reducer), so
-        // calling it always-on-pane-close is safe even when no refill is
-        // needed.
+        // PR #6 H.7 kick — top up the pool now that this pane has closed.
+        // `spawn_pool_window` is internally idempotent (single-flight +
+        // below-target check), so calling on every pane close is safe.
+        //
+        // Windows-only path: HWND was destroyed synchronously above so the
+        // pane really is fully gone here. Refill immediately.
+        //
+        // Linux/macOS: the Views detach is async-queued (line above), and
+        // creating a new pool window in the same UI tick caused a Chromium
+        // `weak_ptr.h:250` FATAL — Views' focus chain still holds tasks
+        // referencing the destroyed OverlayController while the new pool
+        // browser's focus traversal also runs. Skip the immediate refill;
+        // `drain_closed_label` (called from `on_before_close_browser_pane`
+        // after the Browser is fully torn down) already calls
+        // `spawn_pool_window` for us, with no race.
+        #[cfg(target_os = "windows")]
         crate::commands::window_pool::spawn_pool_window(state);
     }
 

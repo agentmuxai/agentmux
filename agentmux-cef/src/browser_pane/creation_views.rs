@@ -273,22 +273,25 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
     );
 }
 
-/// Detach + drop a Views-based browser pane (Linux/macOS only).
+/// Detach a Views-based browser pane (Linux/macOS only).
 ///
 /// Called from `BrowserPaneManager::close` on non-Windows. Order matters:
 ///
-///   1. Look up the underlying `Browser` for this label and call
-///      `BrowserHost::close_browser(force=1)`. Empirically `OverlayController::destroy`
-///      DOES eventually trigger `on_before_close`, but per CEF's documentation
-///      the destroy path is layout-tracking only and the Browser's lifecycle
-///      is independent — without the explicit close request a Browser can
-///      survive its overlay's destruction and stay registered in `state.browsers`
-///      with stale callbacks (PR #682 codex P2).
-///   2. Destroy the OverlayController to remove the overlay from the parent.
-///   3. Drop the cached handle. `on_before_close` fires asynchronously on the
-///      Browser and the existing `callbacks::on_before_close_browser_pane`
-///      drains state.browsers + the reducer's pane map. If close_browser
-///      fails (already-gone race), the destroy still cleans up the overlay.
+///   1. Pop the controller out of `state.browser_pane_overlays` so future
+///      resize / focus / overlay-clip calls become no-ops.
+///   2. Stash the controller in `state.pending_overlay_destroy`. Keeping it
+///      alive here is critical: dropping or destroying it now would yank
+///      the BrowserView out of its parent Window's hierarchy while
+///      Chromium still has UI-thread tasks holding `WeakPtr<View>` to it,
+///      tripping `weak_ptr.h:250 Check failed: ref_.IsValid()` and FATALing
+///      the host. Reproducers: pane-close-then-pool-spawn (0.33.721) and
+///      tab tear-off (0.33.722).
+///   3. Call `BrowserHost::close_browser(force=1)`. This triggers async
+///      Browser teardown; CEF will eventually call our `on_before_close`
+///      handler, which drains `pending_overlay_destroy[label]` and runs
+///      the actual `controller.destroy()` — by that point the Browser is
+///      fully gone and any queued WeakPtr-bearing tasks have drained, so
+///      destroy can no longer race.
 ///
 /// Must run on the CEF UI thread.
 pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
@@ -301,24 +304,28 @@ pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
         return;
     };
 
-    // Step 1: ask the Browser to close BEFORE destroying its overlay.
+    // Stash the controller BEFORE close_browser. Although close_browser is
+    // async (it queues a task; on_before_close fires later), keeping the
+    // ordering "stash → close" makes the contract trivially correct: by
+    // the time on_before_close runs, the entry is guaranteed present.
+    state
+        .pending_overlay_destroy
+        .lock()
+        .insert(label.to_string(), controller);
+
+    // Ask the Browser to die. force=1 skips beforeunload; pane is going.
     if let Some(browser) = state.get_browser(label) {
         if let Some(host) = browser.host() {
-            host.close_browser(1); // force=1 — pane is going away regardless
-            tracing::debug!(label = %label, "[browser-pane] views: close_browser(force=1) requested");
+            host.close_browser(1);
+            tracing::info!(
+                label = %label,
+                "[browser-pane] views: close_browser(force=1) requested; OverlayController stashed for deferred destroy"
+            );
         }
     } else {
-        tracing::debug!(
+        tracing::warn!(
             label = %label,
-            "[browser-pane] views: no Browser registered at detach (already drained?)"
+            "[browser-pane] views: no Browser registered at detach — controller stashed but on_before_close may not fire (potential overlay leak)"
         );
     }
-
-    // Step 2: destroy the overlay.
-    controller.destroy();
-    tracing::info!(
-        label = %label,
-        "[browser-pane] views: OverlayController destroyed"
-    );
-    drop(controller);
 }
