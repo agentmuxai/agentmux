@@ -13,7 +13,7 @@
  * subscribe to these signals and project them into the virtualizer.
  */
 
-import { createMemo, createSignal, type Accessor, type Setter } from "solid-js";
+import { batch, createMemo, createSignal, type Accessor, type Setter } from "solid-js";
 import type { DocumentNode } from "../types";
 import type { SignalPair } from "../state";
 import type { ScrollAnchor } from "./anchor";
@@ -101,19 +101,28 @@ export function createAgentViewState(documentAtom: SignalPair<DocumentNode[]>): 
     const [headAnchor, setHeadAnchor] = createSignal<ScrollAnchor | null>(null);
     const [streamingNodeId, setStreamingNodeId] = createSignal<string | null>(null);
 
+    // Both two-signal mutations wrap in batch() so subscribers don't
+    // observe the inconsistent intermediate state — without batch, an
+    // effect listening to `headAnchor` would fire while
+    // `stickToBottom` was still its old value, breaking the documented
+    // atomic-pair invariant. (reagent P1 on PR #783 fix push.)
     const captureHeadAnchor = (anchor: ScrollAnchor) => {
-        setHeadAnchor(anchor);
-        setStickToBottom(false);
+        batch(() => {
+            setHeadAnchor(anchor);
+            setStickToBottom(false);
+        });
     };
 
     const clearHeadAnchor = () => setHeadAnchor(null);
 
     // Engaging stick MUST clear any captured head anchor — otherwise
     // a later remount would restore from the stale anchor instead of
-    // sticking to the latest. Atomic.
+    // sticking to the latest. Atomic via batch().
     const engageStickToBottom = () => {
-        setHeadAnchor(null);
-        setStickToBottom(true);
+        batch(() => {
+            setHeadAnchor(null);
+            setStickToBottom(true);
+        });
     };
 
     const disengageStickToBottom = () => {

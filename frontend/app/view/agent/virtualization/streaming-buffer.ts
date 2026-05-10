@@ -21,6 +21,14 @@ import type { DocumentNode } from "../types";
  */
 export const STREAMING_BUFFER_SIZE = 50;
 
+/**
+ * Module-level empty array reused on the short-path branch. Returning
+ * the same reference each call lets reactive memos compare by
+ * reference and skip re-runs when the document hasn't grown past the
+ * buffer threshold. (reagent P2 on PR #783 fix push.)
+ */
+const EMPTY_NODES: readonly DocumentNode[] = Object.freeze([]);
+
 export interface VirtualizationPartition {
     /** Nodes that go through the virtualizer (may be empty). */
     virtualizedNodes: readonly DocumentNode[];
@@ -45,7 +53,7 @@ export function partitionForVirtualization(
 ): VirtualizationPartition {
     if (nodes.length <= bufferSize) {
         return {
-            virtualizedNodes: [],
+            virtualizedNodes: EMPTY_NODES,
             streamingNodes: nodes,
             splitIndex: 0,
         };
