@@ -36,7 +36,21 @@ export interface AgentViewState {
      * user scrolls back near the bottom.
      */
     stickToBottom: Accessor<boolean>;
-    setStickToBottom: Setter<boolean>;
+
+    /**
+     * Engage stick-to-bottom AND clear any captured head anchor.
+     * Atomic — these always go together because a stale anchor would
+     * later restore scroll to the wrong place after a remount.
+     * (codex P2 on PR #783.)
+     */
+    engageStickToBottom: () => void;
+
+    /**
+     * Disengage stick-to-bottom without touching the anchor. Used when
+     * the user scrolls up but hasn't yet crossed the near-top threshold
+     * that triggers anchor capture.
+     */
+    disengageStickToBottom: () => void;
 
     /**
      * Captured anchor for restoring scroll position after a prepend
@@ -70,10 +84,12 @@ export interface AgentViewState {
  * existing AgentAtoms (see ../state.ts).
  */
 export function createAgentViewState(documentAtom: SignalPair<DocumentNode[]>): AgentViewState {
-    const [document] = documentAtom;
+    // Renamed from `document` to avoid shadowing the browser global
+    // (reagent P2 on PR #783).
+    const [docSignal] = documentAtom;
 
     const nodeIndex = createMemo<ReadonlyMap<string, number>>(() => {
-        const docs = document();
+        const docs = docSignal();
         const map = new Map<string, number>();
         for (let i = 0; i < docs.length; i++) {
             map.set(docs[i].id, i);
@@ -92,15 +108,28 @@ export function createAgentViewState(documentAtom: SignalPair<DocumentNode[]>): 
 
     const clearHeadAnchor = () => setHeadAnchor(null);
 
+    // Engaging stick MUST clear any captured head anchor — otherwise
+    // a later remount would restore from the stale anchor instead of
+    // sticking to the latest. Atomic.
+    const engageStickToBottom = () => {
+        setHeadAnchor(null);
+        setStickToBottom(true);
+    };
+
+    const disengageStickToBottom = () => {
+        setStickToBottom(false);
+    };
+
     const indexOf = (nodeId: string): number => {
         return nodeIndex().get(nodeId) ?? -1;
     };
 
     return {
-        nodes: document,
+        nodes: docSignal,
         nodeIndex,
         stickToBottom,
-        setStickToBottom,
+        engageStickToBottom,
+        disengageStickToBottom,
         headAnchor,
         captureHeadAnchor,
         clearHeadAnchor,

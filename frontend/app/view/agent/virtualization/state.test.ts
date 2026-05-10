@@ -67,14 +67,29 @@ describe("AgentViewState", () => {
             });
         });
 
-        it("can be toggled directly", () => {
+        it("disengageStickToBottom flips it off", () => {
             withRoot((dispose) => {
                 const doc = createSignal<DocumentNode[]>([]);
                 const state = createAgentViewState(doc);
-                state.setStickToBottom(false);
+                state.disengageStickToBottom();
                 expect(state.stickToBottom()).toBe(false);
-                state.setStickToBottom(true);
+                dispose();
+            });
+        });
+
+        it("engageStickToBottom flips it on AND clears any head anchor (atomic)", () => {
+            withRoot((dispose) => {
+                const doc = createSignal<DocumentNode[]>([]);
+                const state = createAgentViewState(doc);
+                state.captureHeadAnchor({ nodeId: "n5", offsetPx: 50 });
+                expect(state.stickToBottom()).toBe(false);
+                expect(state.headAnchor()).not.toBeNull();
+
+                state.engageStickToBottom();
+                // Both atomic: stick on, anchor cleared. Otherwise a later
+                // remount would restore to the stale anchor (codex P2).
                 expect(state.stickToBottom()).toBe(true);
+                expect(state.headAnchor()).toBeNull();
                 dispose();
             });
         });
