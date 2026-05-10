@@ -30,7 +30,7 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF ho
 - **Guardrail observability** — See which constraints are active and firing. Tune your agent system from live signal, not post-mortem guesswork.
 - **Multi-provider agent support** — Claude Code, Codex CLI, Gemini CLI, OpenClaw, Kimi Code CLI, GitHub Copilot CLI, and Pi as first-class providers, alongside terminals, editor, browser, and system metrics.
 - **Identity bundles** — Named credential sets (GitHub PAT, AWS profile, Anthropic key, etc.) that you assign per agent at launch. Survives renames; swappable without restart.
-- **Memory bundles** — Reusable agent personality + capability stacks (provider, model, instructions, MCP, skills) selectable at launch.
+- **Memory bundles** — Reusable agent personality + capability stacks (provider, model, instructions, MCP, skills). Manage via the Memory pane inside an Agent pane's settings; launch-modal selection arrives with the spawn-time content-injection layer (PR-F.4).
 - **Browser pane** — Native `CefBrowserView` embedded as a child window of the AgentMux frame — full Chromium fidelity (links, popups, DRM) without iframe limitations.
 - **App API** — Local WebSocket RPC with both an intent-based layer (`agent.open`, `agent.send`, `pane.open`) and a low-level command catalog (block, file, event, conn). External tools and agents can drive the host directly.
 - **Audited dispatch** — 4-layer reducer stack (launcher / host / sidecar / frontend slices) with structured event logs at every layer, so "what mutated this state?" has exactly one place to look.
@@ -67,10 +67,10 @@ task dev           # CEF host + Vite hot reload
 
 ```bash
 task package           # Portable ZIP for the host platform
-task package:macos     # macOS DMG
-task package:linux     # Linux AppImage / deb
-task package:msix      # Windows MSIX installer
+task package:linux     # Linux AppImage (writes to ~/Desktop)
 ```
+
+`task package:macos` and `task package:msix` are TODO stubs in `Taskfile.yml`. The full release artifact set is produced by `agentmuxai/agentmux-builder` — see §Releases below.
 
 ## Widgets
 
@@ -196,12 +196,14 @@ A fifth crate, `agentmux-common`, provides shared utilities (path resolution, ru
 
 ### Build Outputs
 
-| Platform | Artifact |
-|----------|----------|
-| **Windows** | `dist/agentmux-cef-*-x64-portable.zip` |
-| **macOS** (Apple Silicon) | `dist/AgentMux_*_aarch64.dmg` |
-| **Linux** (AppImage) | `dist/AgentMux_*_amd64.AppImage` |
-| **Linux** (.deb) | `dist/AgentMux_*_amd64.deb` |
+Local build outputs from `task package` on the host platform:
+
+| Platform | Task | Artifact |
+|----------|------|----------|
+| **Windows** | `task package` | `dist/agentmux-cef-*-x64-portable.zip` |
+| **Linux** | `task package:linux` | `~/Desktop/AgentMux_*_amd64.AppImage` |
+
+Other platform tasks (`task package:macos`, `task package:msix`) are TODO stubs in `Taskfile.yml`. The full release artifact set (macOS DMG, Windows installer, Windows MSIX, Linux .deb) is produced by [`agentmuxai/agentmux-builder`](https://github.com/agentmuxai/agentmux-builder) — see [§Releases](#releases) for the artifact catalog.
 
 ## Version Management
 
