@@ -29,7 +29,7 @@
  */
 
 import { createVirtualizer } from "@tanstack/solid-virtual";
-import { createEffect, For, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, For, type Accessor, type JSX } from "solid-js";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import {
@@ -73,9 +73,15 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // Guard against concurrent older-history fetches triggered by scroll.
     let loadingOlderInFlight = false;
 
-    const partition = (): ReturnType<typeof partitionForVirtualization> => {
+    // Memoized — partition is read inside virtualizer's reactive
+    // count getter, estimateSize, getItemKey, the streaming buffer
+    // <For>, and each virtual item's nodeAccessor. Without
+    // createMemo, every read re-slices the document (O(n)) on every
+    // token of streaming, defeating the streaming buffer's purpose.
+    // (reagent P1 on #784.)
+    const partition = createMemo(() => {
         return partitionForVirtualization(props.viewState.nodes());
-    };
+    });
 
     // Virtualizer over the virtualized head only — streaming buffer is
     // rendered separately as a normal flex list. Per-kind estimators
@@ -177,15 +183,30 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             !loadingOlderInFlight &&
             !(props.loadingOlder?.())
         ) {
-            // Capture anchor from the topmost virtualized item — its
-            // offsetPx is virtualItem.start + scrollMargin.
+            // Capture anchor from the topmost visible node. Two cases:
+            //   1) Document is large enough to virtualize → use the
+            //      topmost virtual item. Note: in TanStack Virtual v3
+            //      `virtualItem.start` ALREADY includes scrollMargin
+            //      so we read it directly without re-adding the margin.
+            //   2) Document fits entirely in the streaming buffer
+            //      (≤ STREAMING_BUFFER_SIZE nodes) → getVirtualItems()
+            //      is empty, so fall back to the streaming buffer's
+            //      first node via DOM. This is the common initial-
+            //      pagination case (codex P2 on #784).
             const items = virtualizer.getVirtualItems();
-            const anchorId = items.length > 0
-                ? partition().virtualizedNodes[items[0].index]?.id
-                : null;
+            let anchorId: string | null = null;
+            let anchorOffsetPx = 0;
+            if (items.length > 0) {
+                anchorId = partition().virtualizedNodes[items[0].index]?.id ?? null;
+                anchorOffsetPx = items[0].start;
+            } else if (partition().streamingNodes.length > 0) {
+                anchorId = partition().streamingNodes[0].id;
+                const el = scrollRef.querySelector(
+                    `[data-node-id="${anchorId}"]`,
+                ) as HTMLElement | null;
+                anchorOffsetPx = el?.offsetTop ?? 0;
+            }
             if (anchorId != null) {
-                const items0 = items[0];
-                const anchorOffsetPx = (items0.start) + (virtualContainerRef?.offsetTop ?? 0);
                 const anchor = captureTopmostAnchor(
                     [{ id: anchorId, offsetPx: anchorOffsetPx }],
                     scrollTop,
@@ -206,12 +227,11 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                             const newP = partitionForVirtualization(props.viewState.nodes());
                             if (newIdx < newP.splitIndex) {
                                 // Still virtualized — recompute via virtualizer's offsetForIndex.
+                                // The returned offset already includes scrollMargin in v3,
+                                // so don't add virtualContainerRef.offsetTop again.
                                 const offset = virtualizer.getOffsetForIndex(newIdx, "start");
                                 if (offset != null) {
-                                    const target = restoreScrollFromAnchor(
-                                        anchor,
-                                        offset[0] + (virtualContainerRef?.offsetTop ?? 0),
-                                    );
+                                    const target = restoreScrollFromAnchor(anchor, offset[0]);
                                     scrollRef.scrollTo({ top: target, behavior: "auto" });
                                 }
                             } else {
@@ -266,6 +286,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                 onToggleCollapse={props.onToggleCollapse}
                                 onTogglePin={props.onTogglePin}
                                 ref={virtualizer.measureElement}
+                                dataIndex={virtualItem.index}
                                 style={{
                                     position: "absolute",
                                     top: "0",
