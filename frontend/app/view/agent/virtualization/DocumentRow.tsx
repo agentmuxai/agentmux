@@ -263,16 +263,17 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 />
             </Show>
             <Show when={props.node() && props.node().type === "section"}>
-                {(() => {
-                    const sec = props.node() as Extract<DocumentNode, { type: "section" }>;
-                    return (
-                        <div class={`agent-section level-${sec.level}`}>
-                            <Show when={sec.level === 1}><h1>{sec.title}</h1></Show>
-                            <Show when={sec.level === 2}><h2>{sec.title}</h2></Show>
-                            <Show when={sec.level === 3}><h3>{sec.title}</h3></Show>
-                        </div>
-                    );
-                })()}
+                <div class={`agent-section level-${(props.node() as Extract<DocumentNode, { type: "section" }>).level}`}>
+                    <Show when={(props.node() as Extract<DocumentNode, { type: "section" }>).level === 1}>
+                        <h1>{(props.node() as Extract<DocumentNode, { type: "section" }>).title}</h1>
+                    </Show>
+                    <Show when={(props.node() as Extract<DocumentNode, { type: "section" }>).level === 2}>
+                        <h2>{(props.node() as Extract<DocumentNode, { type: "section" }>).title}</h2>
+                    </Show>
+                    <Show when={(props.node() as Extract<DocumentNode, { type: "section" }>).level === 3}>
+                        <h3>{(props.node() as Extract<DocumentNode, { type: "section" }>).title}</h3>
+                    </Show>
+                </div>
             </Show>
         </>
     );
