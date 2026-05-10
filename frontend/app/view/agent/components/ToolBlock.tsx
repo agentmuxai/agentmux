@@ -306,7 +306,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         >
             <div class="agent-tool-summary" onClick={props.onTogglePin}>
                 <span class="agent-tool-status-icon">{statusIcon()}</span>
-                <span class="agent-tool-name">{props.node.summary}</span>
+                <span class="agent-tool-name" title={props.node.summary}>{props.node.summary}</span>
                 <Show when={props.node.duration}>
                     <span class="agent-tool-duration">({props.node.duration.toFixed(1)}s)</span>
                 </Show>
