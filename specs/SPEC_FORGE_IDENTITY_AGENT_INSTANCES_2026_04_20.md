@@ -138,7 +138,7 @@ ForgeAgent(slug="agentx-pr-455-fork", parent_id="agentx-id")   ← branched defi
     └─ Instance C  [block:pane-2, running, parent_instance_id: Instance A]
 ```
 
-- **Interpane coordination:** `db_agent_instances.block_id` lets the bus know which pane
+- **Interagent coordination:** `db_agent_instances.block_id` lets the bus know which pane
   an instance lives in; broadcast messages can target by `definition_id` (all instances of
   this agent) or `instance_id` (specific one)
 - **GitHub async:** `github_context` on the instance (not the definition) captures what
