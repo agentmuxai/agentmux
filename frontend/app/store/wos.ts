@@ -110,15 +110,18 @@ function callBackendService(service: string, method: string, args: any[], noUICo
     usp.set("service", service);
     usp.set("method", method);
 
+    // Audit C3: the `?authkey=` query-string fallback was removed on
+    // every HTTP route. Use the X-AuthKey header instead.
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (globalThis.window != null) {
         const authKey = getApi()?.getAuthKey?.();
-        if (authKey) usp.set("authkey", authKey);
+        if (authKey) headers["X-AuthKey"] = authKey;
     }
 
     const url = getWebServerEndpoint() + "/agentmux/service?" + usp.toString();
     const fetchPromise = fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(waveCall),
     });
     return fetchPromise

@@ -637,11 +637,15 @@ export async function fetchWaveFile(
     usp.set("zoneid", zoneId);
     usp.set("name", fileName);
     if (offset != null) usp.set("offset", offset.toString());
+    // Use X-AuthKey header instead of `?authkey=` query-string fallback.
+    // The fallback was removed in the 2026-05-11 audit (C3) for everything
+    // except the /ws upgrade route, where headers aren't possible.
+    const headers: Record<string, string> = {};
     if (globalThis.window != null) {
         const authKey = getApi()?.getAuthKey?.();
-        if (authKey) usp.set("authkey", authKey);
+        if (authKey) headers["X-AuthKey"] = authKey;
     }
-    const resp = await fetch(getWebServerEndpoint() + "/agentmux/file?" + usp.toString());
+    const resp = await fetch(getWebServerEndpoint() + "/agentmux/file?" + usp.toString(), { headers });
     if (!resp.ok) {
         if (resp.status === 404) return { data: null, fileInfo: null };
         throw new Error("error getting wave file: " + resp.statusText);
