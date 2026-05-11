@@ -104,6 +104,9 @@ function untrackSubtree(root: Element): void {
  */
 export function startPaneOverlayAutoService(): void {
     if (started) return;
+    if (typeof navigator !== "undefined" && !navigator.userAgent.includes("Windows")) {
+        return;
+    }
     started = true;
 
     const mo = new MutationObserver((muts) => {
