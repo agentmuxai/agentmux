@@ -37,6 +37,11 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
     let cleanupAutoUpdate: (() => void) | null = null;
 
     const onOpenChangeMenu = (open: boolean) => {
+        if (!open) {
+            setVisibleSubMenus({});
+            setHoveredItems([]);
+            setSubMenuPosition({});
+        }
         setIsOpen(open);
         props.onOpenChange?.(open);
     };
@@ -288,7 +293,6 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
                 top: `${position()?.top ?? 0}px`,
                 left: `${position()?.left ?? 0}px`,
                 position: "absolute",
-                "z-index": 1000,
             }}
             data-pane-overlay
         >
