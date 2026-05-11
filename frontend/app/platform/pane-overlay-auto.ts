@@ -27,6 +27,7 @@ const SELECTOR = "[data-pane-overlay]";
 const tracked = new WeakSet<Element>();
 const observers = new WeakMap<Element, ResizeObserver>();
 const styleObservers = new WeakMap<Element, MutationObserver>();
+const transitionListeners = new WeakMap<Element, () => void>();
 const trackedList = new Set<Element>();
 
 let started = false;
@@ -83,6 +84,9 @@ function track(el: Element): void {
     const so = new MutationObserver(() => updateRect(el));
     so.observe(el, { attributes: true, attributeFilter: ["style", "class"] });
     styleObservers.set(el, so);
+    const onTransitionEnd = () => updateRect(el);
+    el.addEventListener("transitionend", onTransitionEnd);
+    transitionListeners.set(el, onTransitionEnd);
     updateRect(el);
 }
 
@@ -94,6 +98,11 @@ function untrack(el: Element): void {
     observers.delete(el);
     styleObservers.get(el)?.disconnect();
     styleObservers.delete(el);
+    const tl = transitionListeners.get(el);
+    if (tl) {
+        el.removeEventListener("transitionend", tl);
+        transitionListeners.delete(el);
+    }
     __deleteAutoOverlayRect(el);
 }
 
