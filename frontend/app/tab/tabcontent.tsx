@@ -5,6 +5,7 @@ import { Block } from "@/app/block/block";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { TabModalLayer } from "@/app/tab/TabModalLayer";
 import { CenteredDiv } from "@/element/quickelems";
+import logoUrl from "@/logos/agentmux-logo-brain-alternate.svg?url";
 import { ContentRenderer, NodeModel, PreviewRenderer, TileLayout } from "@/layout/index";
 import { TileLayoutContents } from "@/layout/lib/types";
 import { atoms, createBlock, getApi } from "@/store/global";
@@ -91,15 +92,8 @@ function TabContent(props: { tabId: string }): JSX.Element {
 
     const isEmpty = createMemo(() => (tabData()?.blockids?.length ?? 0) === 0);
 
-    // 1px gap below the tab bar is always present with >1 panes (TileLayout
-    // emits its own gap) but vanishes in the single-pane path. Restore it
-    // uniformly with padding-top. Box-shadow for empty-tab accent border
-    // sits on top of the padding so it still reads as a framed area.
     const rootStyle = (): JSX.CSSProperties => ({
         "padding-top": "1px",
-        ...(isEmpty()
-            ? { "box-shadow": "inset 0 0 0 1px var(--accent-color)" }
-            : {}),
     });
 
     return (
@@ -112,6 +106,24 @@ function TabContent(props: { tabId: string }): JSX.Element {
                 when={tabData() != null}
                 fallback={<CenteredDiv>Tab Not Found</CenteredDiv>}
             >
+                <Show when={isEmpty()}>
+                    <img
+                        src={logoUrl}
+                        alt="AgentMux"
+                        class="empty-tab-logo"
+                        style={{
+                            position: "absolute",
+                            top: "50%",
+                            left: "50%",
+                            transform: "translate(-50%, -50%)",
+                            "max-width": "160px",
+                            "max-height": "160px",
+                            opacity: "0.4",
+                            "pointer-events": "none",
+                            "user-select": "none",
+                        }}
+                    />
+                </Show>
                 <TabModalLayer>
                     <TileLayout
                         contents={tileLayoutContents()}
