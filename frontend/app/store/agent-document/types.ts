@@ -10,7 +10,7 @@
  * and produces typed Events for audit. Pure function, no I/O.
  */
 
-import type { DocumentNode } from "../../view/agent/types";
+import type { DocumentNode, ToolLogChunk } from "../../view/agent/types";
 
 export type SessionPhase = "loading-history" | "active" | "ended";
 
@@ -68,6 +68,16 @@ export type AgentDocumentCommand =
      */
     | { type: "StreamFlush"; newNodes: DocumentNode[]; updatedNodes: DocumentNode[] }
     /**
+     * Append one streaming chunk to a tool's live-log buffer
+     * (`ToolNode.log.chunks`). Append-only, idempotent on the timestamp
+     * + content dedup key. Dispatched at high frequency from
+     * `useAgentStream` for `tool_chunk` stream events — kept distinct
+     * from `StreamFlush` so chunk traffic doesn't re-trigger memos
+     * that watch the full node array length. See
+     * SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md §3.3.
+     */
+    | { type: "ToolChunkAppend"; toolId: string; chunk: ToolLogChunk }
+    /**
      * Backend `fileop=truncate` arrived on the file subject. The reducer
      * decides whether to honor (initialization, legitimate clear) or
      * suppress (stale event after socket reconnect — this is the bug we're
@@ -103,6 +113,18 @@ export type AgentDocumentEvent =
           activeForMs: number;
           /** Nodes that would have been wiped. */
           nodeCount: number;
+      }
+    | {
+          type: "tool-chunk-appended";
+          toolId: string;
+          /** Chunks attached to this tool AFTER the append (>=1). */
+          chunkCount: number;
+      }
+    | {
+          type: "tool-chunk-dropped";
+          toolId: string;
+          /** Reason the chunk was rejected without touching state. */
+          reason: "unknown-tool-id" | "node-not-tool" | "duplicate";
       }
     | { type: "user-cleared"; clearedCount: number };
 

@@ -153,6 +153,41 @@ export interface GlobResult {
 export type ToolResult = ReadResult | EditResult | WriteResult | BashResult | GrepResult | GlobResult | Record<string, unknown>;
 
 /**
+ * Kind of a live log chunk. `stdout`/`stderr` are bash-style streams,
+ * `diff-hunk` is one hunk of an Edit-tool incremental diff, `system`
+ * is provider-emitted metadata (e.g. "command spawned", retry banner).
+ */
+export type ToolLogChunkKind = "stdout" | "stderr" | "system" | "diff-hunk";
+
+/**
+ * One append delivered while a tool is running. The reducer keeps an
+ * append-only buffer of these on ToolNode.log.chunks until the
+ * matching tool_result arrives. See SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md.
+ */
+export interface ToolLogChunk {
+    kind: ToolLogChunkKind;
+    content: string;
+    /** Unix ms — defaults to receive time on the reducer side when the
+     *  event omits it. Also used as the dedup key on history replay. */
+    timestamp: number;
+}
+
+/**
+ * Streaming log buffer attached to a ToolNode while it's running.
+ * Append-only — chunks are never reordered or removed. `open` flips
+ * false when `tool_result` lands; `result` (on ToolNode) holds the
+ * final snapshot.
+ */
+export interface ToolStreamingLog {
+    chunks: ReadonlyArray<ToolLogChunk>;
+    /** True while the tool is producing output. Distinct from
+     *  ToolNode.status because status flips at the network level; the
+     *  reducer may still drain queued chunks for the same tool id
+     *  even after status flips. */
+    open: boolean;
+}
+
+/**
  * Tool execution block (Read, Edit, Bash, etc.)
  */
 export interface ToolNode {
@@ -171,6 +206,11 @@ export interface ToolNode {
     status: "running" | "pending_approval" | "success" | "failed" | "denied";
     duration?: number; // Seconds
     result?: ToolResult;
+    /** Live streaming buffer. Populated when the provider emits
+     *  `tool_chunk` events between `tool_call` and `tool_result`.
+     *  Undefined for tools that don't stream partials (e.g. Read,
+     *  Grep). See SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md. */
+    log?: ToolStreamingLog;
     collapsed: boolean;
     summary: string; // e.g., "📖 Read auth.ts (0.3s) ✓"
     timestamp?: number; // Unix ms — when this tool call was initiated
@@ -255,6 +295,7 @@ export type StreamEvent =
     | TextEvent
     | ThinkingEvent
     | ToolCallEvent
+    | ToolChunkEvent
     | ToolResultEvent
     | AgentMessageEvent
     | UserMessageEvent
@@ -276,6 +317,24 @@ export interface ToolCallEvent {
     tool: string;
     id: string;
     params: Record<string, any>;
+}
+
+/**
+ * Streaming chunk delivered between `tool_call` and `tool_result` for
+ * tools that produce partial output (bash stdout/stderr lines, edit
+ * diff hunks). The reducer routes one of these into the matching
+ * ToolNode's `log.chunks` via `ToolChunkAppend`. See
+ * SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md.
+ */
+export interface ToolChunkEvent {
+    type: "tool_chunk";
+    /** Tool call id — matches the preceding `tool_call.id`. */
+    id: string;
+    kind: ToolLogChunkKind;
+    content: string;
+    /** Unix ms. Optional — defaults to receive time when the provider
+     *  omits it. Used as part of the dedup key on history replay. */
+    timestamp?: number;
 }
 
 export interface ToolResultEvent {
