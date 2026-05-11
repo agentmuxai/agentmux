@@ -202,7 +202,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
                                             fallback={
                                                 <i
                                                     class={clsx(
-                                                        "fa-solid fa-fw menu-item-icon",
+                                                        "fa-solid fa-fw menu-item-icon menu-item-check",
                                                         { "fa-check": item.checked === true },
                                                     )}
                                                 />
@@ -306,8 +306,20 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
                         props.renderMenuItem(item, menuItemProps)
                     ) : (
                         <div {...menuItemProps}>
-                            <Show when={item.icon}>
-                                <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                            <Show
+                                when={item.checked === undefined}
+                                fallback={
+                                    <i
+                                        class={clsx(
+                                            "fa-solid fa-fw menu-item-icon menu-item-check",
+                                            { "fa-check": item.checked === true },
+                                        )}
+                                    />
+                                }
+                            >
+                                <Show when={item.icon}>
+                                    <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                                </Show>
                             </Show>
                             <span class="label">{item.label}</span>
                             <Show when={item.subItems}>
