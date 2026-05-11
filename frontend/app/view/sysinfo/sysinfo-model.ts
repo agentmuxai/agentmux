@@ -101,7 +101,7 @@ class SysinfoViewModel implements ViewModel {
 
         this.numPoints = createMemo(() => {
             const fullConfig = atoms.fullConfigAtom();
-            const settingsNumPoints = fullConfig?.settings?.["telemetry:numpoints"];
+            const settingsNumPoints = fullConfig?.settings?.["sysinfo:numpoints"];
             if (settingsNumPoints != null && settingsNumPoints > 0) {
                 return Math.max(30, Math.min(1024, settingsNumPoints));
             }
@@ -152,7 +152,7 @@ class SysinfoViewModel implements ViewModel {
 
         this.intervalSecsAtom = createMemo(() => {
             const fullConfig = atoms.fullConfigAtom();
-            const val = fullConfig?.settings?.["telemetry:interval"];
+            const val = fullConfig?.settings?.["sysinfo:interval"];
             if (val == null || val <= 0) return 1.0;
             return val as number;
         });

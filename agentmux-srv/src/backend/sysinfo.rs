@@ -3,7 +3,7 @@
 
 //! Sysinfo data collection loop: collects CPU, memory, and network metrics
 //! and publishes them via the WPS broker. Sampling interval is configurable
-//! via the `telemetry:interval` setting (0.1s–2.0s, default 1.0s).
+//! via the `sysinfo:interval` setting (0.1s–2.0s, default 1.0s).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -114,9 +114,9 @@ fn get_disk_data(disks: &Disks, elapsed_secs: f64, values: &mut HashMap<String, 
     values.insert("disk:total".to_string(), read_rate + write_rate);
 }
 
-/// Read the telemetry interval from config, clamped to [MIN, MAX].
+/// Read the sysinfo polling interval from config, clamped to [MIN, MAX].
 fn get_interval_secs(config_watcher: &ConfigWatcher) -> f64 {
-    let val = config_watcher.get_settings().telemetry_interval;
+    let val = config_watcher.get_settings().sysinfo_interval;
     if val <= 0.0 {
         return DEFAULT_INTERVAL_SECS;
     }
