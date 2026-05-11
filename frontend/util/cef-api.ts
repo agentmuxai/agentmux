@@ -140,6 +140,7 @@ function showJsContextMenu(
     });
 
     const menuEl = document.createElement("div");
+    menuEl.setAttribute("data-pane-overlay", "");
     Object.assign(menuEl.style, {
         position: "absolute",
         left: `${position.x}px`,

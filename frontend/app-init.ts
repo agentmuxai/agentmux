@@ -587,6 +587,12 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     const elem = document.getElementById("main");
     render(App, elem);
     tlog("SolidJS render", t);
+
+    // Start the auto pane-overlay clip service. Any DOM element tagged
+    // `data-pane-overlay` automatically participates in browser-pane
+    // clipping. See docs/specs/SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md.
+    const { startPaneOverlayAutoService } = await import("@/app/platform/pane-overlay-auto");
+    startPaneOverlayAutoService();
     tlog("TOTAL initWave", t0);
 
     // Register this window's backend ID with the CEF host so on_before_close

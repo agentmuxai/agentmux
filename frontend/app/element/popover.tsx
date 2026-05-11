@@ -169,6 +169,7 @@ const PopoverContent = (props: PopoverContentProps): JSX.Element => {
                     ref={(el) => ctx?.registerFloating(el)}
                     class={clsx("popover-content", props.className)}
                     style={ctx?.floatingStyle()}
+                    data-pane-overlay
                     {...(props as any)}
                 >
                     {props.children}
