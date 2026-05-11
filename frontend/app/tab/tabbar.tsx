@@ -1,7 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, createBlock, createTab, getApi, setActiveTab } from "@/store/global";
+import { atoms, createBlock, createTab, getApi, setActiveTab, settingsAtom } from "@/store/global";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
+import { THEME_OPTIONS } from "@/app/menu/base-menus";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
 import { invokeCommand } from "@/app/platform/ipc";
 import { fireAndForget } from "@/util/util";
@@ -585,34 +588,92 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     const activeIndex = () => tabIds().indexOf(activeTabId());
 
-    const tabBarMenuItems = createMemo((): MenuItem[] => [
-        {
-            label: "New Tab",
-            icon: "plus",
-            onClick: () => createTab(),
-        },
-        { label: "", divider: true },
-        {
-            label: "New Window",
-            icon: "window-restore",
-            onClick: () => getApi().openNewWindow().catch(console.error),
-        },
-        { label: "", divider: true },
-        {
-            label: "Settings",
-            icon: "cog",
-            onClick: () =>
-                fireAndForget(async () => {
-                    const path = await invokeCommand<string>("ensure_settings_file");
-                    await invokeCommand("open_in_editor", { path });
-                }),
-        },
-        {
-            label: "Help",
-            icon: "circle-question",
-            onClick: () => fireAndForget(() => createBlock({ meta: { view: "help" } })),
-        },
-    ]);
+    const tabBarMenuItems = createMemo((): MenuItem[] => {
+        const settings = settingsAtom() ?? ({} as any);
+
+        const currentTheme = (settings["window:theme"] as string) || "default";
+        const themeSubItems: MenuItem[] = THEME_OPTIONS.map((opt) => ({
+            label: opt.label,
+            checked: currentTheme === opt.id,
+            onClick: () => {
+                fireAndForget(() =>
+                    RpcApi.SetConfigCommand(TabRpcClient, { "window:theme": opt.id } as any),
+                );
+            },
+        }));
+
+        const rawOpacity = (settings["window:opacity"] as number) ?? 0.8;
+        const isTransparent = (settings["window:transparent"] as boolean) ?? false;
+        const effectiveOpacity = isTransparent ? rawOpacity : 1.0;
+        const opacityStep = Math.round(effectiveOpacity * 20) / 20;
+        const opacitySubItems: MenuItem[] = [];
+        for (let pct = 100; pct >= 35; pct -= 5) {
+            const value = pct / 100;
+            opacitySubItems.push({
+                label: `${pct}%`,
+                checked: Math.abs(value - opacityStep) < 0.001,
+                onClick: () => {
+                    fireAndForget(() =>
+                        value < 1.0
+                            ? RpcApi.SetConfigCommand(TabRpcClient, {
+                                  "window:opacity": value,
+                                  "window:transparent": true,
+                              } as any)
+                            : RpcApi.SetConfigCommand(TabRpcClient, {
+                                  "window:opacity": 1.0,
+                                  "window:transparent": false,
+                              } as any),
+                    );
+                },
+            });
+        }
+
+        return [
+            {
+                label: "New Tab",
+                icon: "plus",
+                onClick: () => createTab(),
+            },
+            { label: "", divider: true },
+            {
+                label: "New Window",
+                icon: "window-restore",
+                onClick: () => getApi().openNewWindow().catch(console.error),
+            },
+            { label: "", divider: true },
+            {
+                label: "Theme",
+                icon: "palette",
+                subItems: themeSubItems,
+            },
+            {
+                label: "Opacity",
+                icon: "circle-half-stroke",
+                subItems: opacitySubItems,
+            },
+            { label: "", divider: true },
+            {
+                label: "Settings",
+                icon: "cog",
+                onClick: () =>
+                    fireAndForget(async () => {
+                        const path = await invokeCommand<string>("ensure_settings_file");
+                        await invokeCommand("open_in_editor", { path });
+                    }),
+            },
+            {
+                label: "Help",
+                icon: "circle-question",
+                onClick: () => fireAndForget(() => createBlock({ meta: { view: "help" } })),
+            },
+            { label: "", divider: true },
+            {
+                label: "Exit",
+                icon: "right-from-bracket",
+                onClick: () => fireAndForget(() => invokeCommand("close_window", {})),
+            },
+        ];
+    });
 
     return (
         <div class="tab-bar" {...dragProps}>
