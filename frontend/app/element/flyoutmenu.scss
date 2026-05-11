@@ -23,7 +23,6 @@
 .menu-item {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     padding: var(--space-1) var(--space-1-5);
     cursor: pointer;
     color: var(--main-text-color);
@@ -38,6 +37,17 @@
     .label {
         @include mixins.ellipsis();
         text-decoration: none;
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    // Push the submenu chevron to the right; the label between the
+    // icon and the chevron is `flex: 1` so it fills the remaining
+    // space without leaving an awkward gap when there's no chevron
+    // (e.g., radio sub-items have only icon + label).
+    > .fa-chevron-right {
+        margin-left: var(--space-1);
+        flex-shrink: 0;
     }
 }
 
