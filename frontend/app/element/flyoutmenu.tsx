@@ -87,12 +87,6 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
 
     const subMenuRefs: { [key: string]: HTMLDivElement | null } = {};
 
-    // Set the submenu's primary placement synchronously off the parent
-    // item's rect. No DOM measurement of the submenu (.menu.sub-menu
-    // uses `width: max-content`, so it sizes to content alone). Edge
-    // flip — when the primary spot would clip the viewport — runs in
-    // SubMenu's onMount via setSubMenuPosition, after the first paint.
-    // See docs/research/MENU_SNAPPINESS_DEEP_DIVE.md §3.1.
     const handleSubMenuPosition = (key: string, itemRect: DOMRect, label: string) => {
         const scrollTop = window.scrollY || document.documentElement.scrollTop;
         const scrollLeft = window.scrollX || document.documentElement.scrollLeft;
@@ -273,11 +267,6 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
     let subMenuEl: HTMLDivElement | undefined;
     const position = () => props.subMenuPosition[props.parentKey];
 
-    // Edge-flip after first paint. The synchronous primary placement
-    // in handleSubMenuPosition is correct in 99% of viewport
-    // configurations; the rare overflow case triggers a one-frame
-    // reposition via setSubMenuPosition, which Solid resolves in the
-    // next render. No visibility:hidden gate, no two-render dance.
     onMount(() => {
         if (!subMenuEl) return;
         const rect = subMenuEl.getBoundingClientRect();
