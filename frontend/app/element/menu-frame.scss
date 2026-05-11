@@ -9,7 +9,7 @@
 
 @mixin menu-frame {
     background: var(--main-bg-color);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    border: 1px solid var(--border-color);
     border-radius: 6px;
     box-shadow: 0px 8px 24px 0px rgba(0, 0, 0, 0.3);
     padding: var(--space-0-5);
