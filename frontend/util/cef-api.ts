@@ -140,6 +140,7 @@ function showJsContextMenu(
     });
 
     const menuEl = document.createElement("div");
+    menuEl.setAttribute("data-pane-overlay", "");
     Object.assign(menuEl.style, {
         position: "absolute",
         left: `${position.x}px`,
@@ -205,6 +206,7 @@ function showJsContextMenu(
                 row.appendChild(arrow);
 
                 const sub = document.createElement("div");
+                sub.setAttribute("data-pane-overlay", "");
                 Object.assign(sub.style, {
                     display: "none", position: "absolute",
                     left: "100%", top: "0", zIndex: "100000",

@@ -28,6 +28,12 @@ interface OverlayRect {
 const overlayRects = new Map<number, OverlayRect>();
 let nextOverlayId = 1;
 
+// Second map for rects discovered automatically by the auto-clip
+// service (pane-overlay-auto.ts), keyed by element ref. Hook callers
+// and auto-discovery feed two maps; sendClip unions them. Existing
+// hook callers do not need to migrate.
+const autoOverlayRects = new Map<Element, OverlayRect>();
+
 /**
  * Window label of the host window this frontend instance belongs to.
  * Set by the CEF launcher on each window's startup URL via `?windowLabel=`.
@@ -45,9 +51,41 @@ function currentWindowLabel(): string {
 }
 
 function sendClip(): void {
-    const rects = Array.from(overlayRects.values());
+    const rects: OverlayRect[] = [];
+    for (const r of overlayRects.values()) rects.push(r);
+    for (const r of autoOverlayRects.values()) {
+        if (r.w > 0 && r.h > 0) rects.push(r);
+    }
     const window_label = currentWindowLabel();
     invokeCommand("browser_panes_set_overlay_clip", { rects, window_label }).catch(() => {});
+}
+
+/**
+ * Auto-discovery hooks for `pane-overlay-auto.ts`. Each function
+ * mutates the shared map and calls `sendClip()`. Returns true if the
+ * map actually changed (so callers can skip redundant dispatches).
+ */
+export function __setAutoOverlayRect(el: Element, rect: OverlayRect): boolean {
+    if (rect.w <= 0 || rect.h <= 0) return __deleteAutoOverlayRect(el);
+    const prev = autoOverlayRects.get(el);
+    if (
+        prev &&
+        prev.x === rect.x && prev.y === rect.y &&
+        prev.w === rect.w && prev.h === rect.h
+    ) return false;
+    autoOverlayRects.set(el, rect);
+    sendClip();
+    return true;
+}
+
+export function __deleteAutoOverlayRect(el: Element): boolean {
+    if (!autoOverlayRects.delete(el)) return false;
+    sendClip();
+    return true;
+}
+
+export function __rectFromElement(el: HTMLElement): OverlayRect {
+    return rectFromElement(el);
 }
 
 function rectFromElement(el: HTMLElement): OverlayRect {
