@@ -63,6 +63,8 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
         if (!isOpen()) return;
         const target = e.target as Node;
         if (referenceEl?.contains(target) || floatingEl?.contains(target)) return;
+        const el = target instanceof Element ? target : (target as Node).parentElement;
+        if (el?.closest(".menu, .sub-menu")) return;
         onOpenChangeMenu(false);
     };
 
