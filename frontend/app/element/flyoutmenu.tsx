@@ -26,7 +26,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
     const [visibleSubMenus, setVisibleSubMenus] = createSignal<{ [key: string]: any }>({});
     const [hoveredItems, setHoveredItems] = createSignal<string[]>([]);
     const [subMenuPosition, setSubMenuPosition] = createSignal<{
-        [key: string]: { top: number; left: number; parentLeft: number; label: string };
+        [key: string]: { bottom: number; left: number; parentLeft: number; parentTop: number; label: string };
     }>({});
 
     const [isOpen, setIsOpen] = createSignal(false);
@@ -37,6 +37,11 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
     let cleanupAutoUpdate: (() => void) | null = null;
 
     const onOpenChangeMenu = (open: boolean) => {
+        if (!open) {
+            setVisibleSubMenus({});
+            setHoveredItems([]);
+            setSubMenuPosition({});
+        }
         setIsOpen(open);
         props.onOpenChange?.(open);
     };
@@ -79,10 +84,11 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
     const handleSubMenuPosition = (key: string, itemRect: DOMRect, label: string) => {
         const scrollTop = window.scrollY || document.documentElement.scrollTop;
         const scrollLeft = window.scrollX || document.documentElement.scrollLeft;
-        const top = itemRect.top - 2 + scrollTop;
+        const bottom = window.innerHeight + scrollTop - itemRect.bottom - 2;
         const left = itemRect.right + scrollLeft - 2;
         const parentLeft = itemRect.left + scrollLeft;
-        setSubMenuPosition((prev) => ({ ...prev, [key]: { top, left, parentLeft, label } }));
+        const parentTop = itemRect.top + scrollTop;
+        setSubMenuPosition((prev) => ({ ...prev, [key]: { bottom, left, parentLeft, parentTop, label } }));
     };
 
     const handleMouseEnterItem = (
@@ -228,7 +234,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
 };
 
 type SubMenuPositionMap = {
-    [key: string]: { top: number; left: number; parentLeft: number; label: string };
+    [key: string]: { bottom: number; left: number; parentLeft: number; parentTop: number; label: string };
 };
 
 type SubMenuProps = {
@@ -261,8 +267,8 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
         if (!pos || flipped || !subMenuEl) return;
         const rect = subMenuEl.getBoundingClientRect();
         const overflowRight = rect.right - window.innerWidth;
-        const overflowBottom = rect.bottom - window.innerHeight;
-        if (overflowRight <= 0 && overflowBottom <= 0) {
+        const overflowTop = -rect.top;
+        if (overflowRight <= 0 && overflowTop <= 0) {
             flipped = true;
             return;
         }
@@ -272,10 +278,11 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
             [props.parentKey]: {
                 label: pos.label,
                 parentLeft: pos.parentLeft,
+                parentTop: pos.parentTop,
                 left: overflowRight > 0 ? pos.parentLeft - rect.width + 2 : pos.left,
-                top: overflowBottom > 0
-                    ? window.innerHeight - rect.height - 10 + window.scrollY
-                    : pos.top,
+                bottom: overflowTop > 0
+                    ? window.innerHeight + window.scrollY - pos.parentTop - rect.height + 2
+                    : pos.bottom,
             },
         }));
     });
@@ -285,7 +292,7 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
             ref={(el) => { subMenuEl = el; }}
             class="menu sub-menu"
             style={{
-                top: `${position()?.top ?? 0}px`,
+                bottom: `${position()?.bottom ?? 0}px`,
                 left: `${position()?.left ?? 0}px`,
                 position: "absolute",
                 "z-index": 1000,
