@@ -64,3 +64,11 @@
     opacity: 0.7;
     flex-shrink: 0;
 }
+
+// Radio/checkbox indicator. More opaque + slightly larger than the
+// regular icon slot so the active selection actually pops at a glance.
+.menu-item-check {
+    opacity: 1;
+    font-size: 12px;
+    color: var(--accent-color);
+}
