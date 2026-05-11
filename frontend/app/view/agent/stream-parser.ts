@@ -19,6 +19,8 @@ import {
     ThinkingEvent,
     TOOL_ICONS,
     ToolCallEvent,
+    ToolChunkEvent,
+    ToolLogChunk,
     ToolNode,
     ToolResultEvent,
     UserMessageEvent,
@@ -128,6 +130,17 @@ export class ClaudeCodeStreamParser {
                 this.currentThinkingNode = null;
                 return this.toolCallToNode(event as ToolCallEvent);
 
+            case "tool_chunk":
+                // tool_chunk does NOT produce a DocumentNode. It routes
+                // through the agent-document reducer's ToolChunkAppend
+                // command instead — see SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md
+                // §3.3. Consumers (useAgentStream) detect this event
+                // type ahead of calling the parser and dispatch the
+                // command directly, then short-circuit. Returning null
+                // here also makes parseLine safe for tool_chunk lines
+                // that arrive in history replay.
+                return null;
+
             case "tool_result":
                 this.currentTextNode = null;
                 this.currentThinkingNode = null;
@@ -177,6 +190,26 @@ export class ClaudeCodeStreamParser {
             this.currentThinkingNode = { ...this.currentThinkingNode, content: this.currentThinkingNode.content + event.content };
         }
         return { ...this.currentThinkingNode };
+    }
+
+    /**
+     * Normalize a `tool_chunk` stream event into a `ToolLogChunk`
+     * payload suitable for the agent-document reducer's
+     * `ToolChunkAppend` command. Defaults `timestamp` to receive time
+     * when the provider didn't supply one. Pure / no side effects —
+     * does NOT touch `pendingToolCalls` or the text/thinking
+     * accumulators, since chunks live in their own append-only
+     * buffer (see SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md §3.1).
+     */
+    parseToolChunkEvent(event: ToolChunkEvent, now: number = Date.now()): { toolId: string; chunk: ToolLogChunk } {
+        return {
+            toolId: event.id,
+            chunk: {
+                kind: event.kind,
+                content: event.content,
+                timestamp: event.timestamp ?? now,
+            },
+        };
     }
 
     /**
