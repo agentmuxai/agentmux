@@ -38,7 +38,33 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     let scrollRef: HTMLDivElement | undefined;
 
     const chunks = createMemo(() => props.node.log?.chunks ?? []);
-    const hasLog = createMemo(() => chunks().length > 0);
+    /**
+     * Phase 3 fallback rules — refined after codex P1 on PR #803.
+     *
+     * - While the tool is still streaming (`log.open === true`):
+     *   show the live chunk feed exclusively. This is the user's
+     *   primary "what's happening" surface.
+     * - Once the tool terminates (`log.open === false`): if a
+     *   structured `result` is present (BashResult with exit code,
+     *   EditResult diff, ReadResult content), show the rich
+     *   `ToolOverlayResult`. Structured viewers carry information
+     *   the raw chunk feed can't (exit code, diff syntax highlight,
+     *   per-language code highlight).
+     * - If terminated without a structured result, keep the chunks
+     *   visible so the user can still see what happened.
+     * - If neither chunks nor result is present (running tool that
+     *   hasn't emitted yet, or a non-streaming tool with no result
+     *   yet), defer to `ToolOverlayResult` which renders the
+     *   "⏳ Running..." placeholder.
+     *
+     * The codex-reported bug was a naive `chunks.length > 0` gate
+     * that permanently suppressed the structured result viewer for
+     * every tool that streamed any output — exit codes, diffs, and
+     * highlighted Read content were silently dropped post-completion.
+     */
+    const isStreaming = createMemo(() => props.node.log?.open === true);
+    const hasChunks = createMemo(() => chunks().length > 0);
+    const hasResult = createMemo(() => props.node.result != null);
 
     // Auto-stick to bottom while the user hasn't scrolled away. The
     // threshold is forgiving — within 40px of the bottom counts as
@@ -63,20 +89,36 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
 
     return (
         <div class="agent-tool-overlay-log" ref={scrollRef} onScroll={onScroll}>
-            <Show when={hasLog()} fallback={<ToolOverlayResult node={props.node} />}>
-                <For each={chunks()}>
-                    {(chunk) => (
-                        <pre
-                            class={`agent-tool-log-line ${KIND_CLASS[chunk.kind] ?? ""}`}
-                        >
-                            {chunk.content}
-                        </pre>
-                    )}
-                </For>
+            <Show when={isStreaming() && hasChunks()}>
+                <ChunkList chunks={chunks()} />
+            </Show>
+            <Show when={!isStreaming() && hasResult()}>
+                <ToolOverlayResult node={props.node} />
+            </Show>
+            <Show when={!isStreaming() && !hasResult() && hasChunks()}>
+                <ChunkList chunks={chunks()} />
+            </Show>
+            <Show when={!hasChunks() && !hasResult()}>
+                <ToolOverlayResult node={props.node} />
             </Show>
         </div>
     );
 };
+
+interface ChunkListProps {
+    chunks: ReadonlyArray<{ kind: string; content: string; timestamp: number }>;
+}
+function ChunkList(props: ChunkListProps): JSX.Element {
+    return (
+        <For each={props.chunks}>
+            {(chunk) => (
+                <pre class={`agent-tool-log-line ${KIND_CLASS[chunk.kind] ?? ""}`}>
+                    {chunk.content}
+                </pre>
+            )}
+        </For>
+    );
+}
 
 ToolOverlayLog.displayName = "ToolOverlayLog";
 
