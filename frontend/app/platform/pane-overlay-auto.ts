@@ -47,14 +47,23 @@ function scheduleSweep(): void {
     });
 }
 
-function updateRect(el: Element): void {
-    if (!(el instanceof HTMLElement)) return;
+/**
+ * True when the element is currently visible enough to clip the
+ * browser pane underneath. Exported for unit-testing the visibility
+ * filter independently of the DOM observers.
+ */
+export function isOverlayElementVisible(el: HTMLElement): boolean {
     const cs = window.getComputedStyle(el);
-    if (
+    return !(
         cs.visibility === "hidden" ||
         cs.display === "none" ||
         parseFloat(cs.opacity) === 0
-    ) {
+    );
+}
+
+function updateRect(el: Element): void {
+    if (!(el instanceof HTMLElement)) return;
+    if (!isOverlayElementVisible(el)) {
         __deleteAutoOverlayRect(el);
         return;
     }
