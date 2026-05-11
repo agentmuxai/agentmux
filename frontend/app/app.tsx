@@ -133,18 +133,26 @@ function AppSettingsUpdater() {
         // subscribes to windowSettingsAtom, and gets re-fired once both
         // settings AND the main div are ready.
         const mainDiv = document.getElementById("main");
+        // `--window-opacity` MUST be set on :root, not body. theme.scss declares
+        // `--main-bg-color: rgba(34, 34, 34, var(--window-opacity, 1))` on
+        // :root. CSS substitutes var() at the element where the custom
+        // property is computed — so at :root, with :root's --window-opacity.
+        // Descendants inherit the already-substituted value. Setting
+        // --window-opacity only on body leaves :root's --main-bg-color at
+        // alpha=1, and all 30+ panes that use `background: var(--main-bg-color)`
+        // stay fully opaque even with window:transparent on.
         if (isTransparentOrBlur) {
             mainDiv?.classList.add("is-transparent");
             document.documentElement.style.background = "transparent";
             if (opacity != null) {
-                document.body.style.setProperty("--window-opacity", `${opacity}`);
+                document.documentElement.style.setProperty("--window-opacity", `${opacity}`);
             } else {
-                document.body.style.removeProperty("--window-opacity");
+                document.documentElement.style.removeProperty("--window-opacity");
             }
         } else {
             mainDiv?.classList.remove("is-transparent");
             document.documentElement.style.removeProperty("background");
-            document.body.style.removeProperty("--window-opacity");
+            document.documentElement.style.removeProperty("--window-opacity");
         }
         if (baseBgColor != null) {
             document.body.style.setProperty("--main-bg-color", baseBgColor);
