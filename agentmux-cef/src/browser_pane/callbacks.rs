@@ -78,10 +78,31 @@ pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
 /// been removed from `state.browsers` and the label has been identified
 /// as a pane label (prefix `browser-pane-*`).
 ///
-/// Drains the lifecycle entry from `BrowserPaneManager` so a re-create
-/// with the same block_id gets a fresh Live state. Idempotent — if the
-/// explicit `close()` path already drained it, this is a no-op.
+/// On Linux/macOS, runs the deferred `OverlayController::destroy()` for
+/// any controller that `detach_browser_pane_view` stashed — see the long
+/// comment on `state.pending_overlay_destroy` for why destroy can't run
+/// synchronously with the close request. Drains the reducer entry next so
+/// a re-create with the same block_id gets a fresh Live state. Idempotent
+/// — if the explicit `close()` path already drained the reducer, the
+/// drain is a no-op; if no controller was stashed (Windows or already
+/// destroyed), the destroy step is a no-op.
 pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str) {
+    // Step 1 (Linux/macOS): destroy the deferred OverlayController.
+    // Safe now because the Browser is fully torn down and Chromium has
+    // drained any queued tasks holding `WeakPtr<View>` to its BrowserView.
+    #[cfg(not(target_os = "windows"))]
+    {
+        let stashed = state.pending_overlay_destroy.lock().remove(label);
+        if let Some(controller) = stashed {
+            controller.destroy();
+            tracing::info!(
+                label = %label,
+                "[browser-pane] views: deferred OverlayController destroyed at on_before_close"
+            );
+        }
+    }
+
+    // Step 2: drain the reducer's pane entry (idempotent).
     state.browser_panes.drain_closed_label(state, label);
 
     // Labels are `browser-pane-<uuid>-<seq>`; strip prefix + trailing `-<seq>`
