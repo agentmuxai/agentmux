@@ -50,7 +50,11 @@ function scheduleSweep(): void {
 function updateRect(el: Element): void {
     if (!(el instanceof HTMLElement)) return;
     const cs = window.getComputedStyle(el);
-    if (cs.visibility === "hidden" || cs.display === "none") {
+    if (
+        cs.visibility === "hidden" ||
+        cs.display === "none" ||
+        parseFloat(cs.opacity) === 0
+    ) {
         __deleteAutoOverlayRect(el);
         return;
     }
