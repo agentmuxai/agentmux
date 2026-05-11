@@ -209,6 +209,16 @@ function TabBar(props: TabBarProps): JSX.Element {
                                       screenY - grabOffset.y - firstTabRect.top - chromeBorderY,
                                   )
                                 : undefined;
+                        Logger.info("dnd", "tear-off anchor compute", {
+                            screenX, screenY,
+                            grabOffsetX: grabOffset?.x, grabOffsetY: grabOffset?.y,
+                            firstTabLeft: firstTabRect?.left, firstTabTop: firstTabRect?.top,
+                            chromeBorderX, chromeBorderY,
+                            tabAnchorX, tabAnchorY,
+                            windowOuterW: window.outerWidth, windowInnerW: window.innerWidth,
+                            windowOuterH: window.outerHeight, windowInnerH: window.innerHeight,
+                            windowScreenX: window.screenX, windowScreenY: window.screenY,
+                        });
                         // Phase 2: real tear-off (sidecar TearOffTab +
                         // host openWindowAtPosition + Win32 SC_MOVE).
                         // Fire-and-forget — the user is mid-drag and the
