@@ -318,18 +318,19 @@ impl BrowserPaneManager {
         // `spawn_pool_window` is internally idempotent (single-flight +
         // below-target check), so calling on every pane close is safe.
         //
-        // Windows-only path: HWND was destroyed synchronously above so the
-        // pane really is fully gone here. Refill immediately.
-        //
-        // Linux/macOS: the Views detach is async-queued (line above), and
-        // creating a new pool window in the same UI tick caused a Chromium
-        // `weak_ptr.h:250` FATAL — Views' focus chain still holds tasks
-        // referencing the destroyed OverlayController while the new pool
-        // browser's focus traversal also runs. Skip the immediate refill;
-        // `drain_closed_label` (called from `on_before_close_browser_pane`
-        // after the Browser is fully torn down) already calls
-        // `spawn_pool_window` for us, with no race.
-        #[cfg(target_os = "windows")]
+        // Cross-platform: the original `weak_ptr.h:250` race that prompted
+        // an earlier Windows-only cfg-gate is gone. With the deferred
+        // OverlayController destroy (see
+        // browser_pane/creation_views.rs::detach_browser_pane_view),
+        // close() no longer destroys the controller synchronously — it
+        // just stashes it for on_before_close to destroy later. Creating
+        // a new pool window here therefore can't race a synchronous
+        // destroy of the just-closed pane's View. drain_closed_label's
+        // pool kick can't be relied on as the sole refill source either:
+        // CompleteBrowserPaneClose (dispatched above) already removed the
+        // reducer entry, so DrainBrowserPaneByLabel inside
+        // drain_closed_label is a no-op and never reaches its
+        // spawn_pool_window() call (codex P2 on PR #788).
         crate::commands::window_pool::spawn_pool_window(state);
     }
 

@@ -304,28 +304,39 @@ pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
         return;
     };
 
-    // Stash the controller BEFORE close_browser. Although close_browser is
-    // async (it queues a task; on_before_close fires later), keeping the
-    // ordering "stash → close" makes the contract trivially correct: by
-    // the time on_before_close runs, the entry is guaranteed present.
-    state
-        .pending_overlay_destroy
-        .lock()
-        .insert(label.to_string(), controller);
+    // Whether to defer destroy depends on whether there's a live Browser.
+    //   - Live Browser + host: close_browser(force=1) fires; on_before_close
+    //     will land asynchronously; stash so the callback finds the
+    //     controller and runs destroy() then. (Synchronous destroy here
+    //     races Chromium's queued WeakPtr<View> tasks → weak_ptr.h:250
+    //     FATAL; that's the whole reason for this dance.)
+    //   - No live Browser (already drained, or host gone): on_before_close
+    //     won't fire — stashing would leak the controller in
+    //     pending_overlay_destroy forever (reagent P1 on PR #788).
+    //     No Browser means no queued WeakPtr tasks against this view, so
+    //     destroying synchronously is safe.
+    let live_host = state
+        .get_browser(label)
+        .and_then(|mut b| b.host());
 
-    // Ask the Browser to die. force=1 skips beforeunload; pane is going.
-    if let Some(browser) = state.get_browser(label) {
-        if let Some(host) = browser.host() {
-            host.close_browser(1);
-            tracing::info!(
-                label = %label,
-                "[browser-pane] views: close_browser(force=1) requested; OverlayController stashed for deferred destroy"
-            );
-        }
-    } else {
-        tracing::warn!(
+    if let Some(host) = live_host {
+        state
+            .pending_overlay_destroy
+            .lock()
+            .insert(label.to_string(), controller);
+        host.close_browser(1);
+        tracing::info!(
             label = %label,
-            "[browser-pane] views: no Browser registered at detach — controller stashed but on_before_close may not fire (potential overlay leak)"
+            "[browser-pane] views: close_browser(force=1) requested; OverlayController stashed for deferred destroy at on_before_close"
+        );
+    } else {
+        // No Browser / no host → on_before_close won't fire. Destroy now to
+        // avoid the leak. No race risk: there's no live Browser holding
+        // WeakPtrs to our BrowserView.
+        controller.destroy();
+        tracing::info!(
+            label = %label,
+            "[browser-pane] views: no live Browser at detach — OverlayController destroyed synchronously"
         );
     }
 }
