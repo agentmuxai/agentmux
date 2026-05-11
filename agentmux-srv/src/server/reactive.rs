@@ -47,7 +47,17 @@ pub(super) async fn handle_reactive_inject(
                     url = %forward_url,
                     "cross-instance inject forward"
                 );
-                match state.http_client.post(&forward_url).json(&req).send().await {
+                // Reactive routes now require auth (audit C1/C2 fix).
+                // Peers authenticate using the entry's `auth_key` (the
+                // owning instance's per-launch UUID, written into the
+                // registry by `registry::write`). If a pre-fix entry has
+                // no auth_key, the peer returns 401 and the cloud
+                // agentbus fallback handles it.
+                let mut fwd = state.http_client.post(&forward_url).json(&req);
+                if !entry.auth_key.is_empty() {
+                    fwd = fwd.header("X-AuthKey", &entry.auth_key);
+                }
+                match fwd.send().await {
                     Ok(r) if r.status().is_success() => {
                         if let Ok(body) = r.json::<serde_json::Value>().await {
                             return Json(body);

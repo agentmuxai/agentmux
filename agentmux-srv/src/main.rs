@@ -264,6 +264,14 @@ async fn main() {
     let version = config.version.to_string();
     let build_time = config.build_time.to_string();
 
+    // Make the per-launch auth_key available to the cross-instance agent
+    // registry writer. Peers performing an HTTP forward of a missed inject
+    // use this to authenticate against the writing instance's sidecar.
+    // Must happen after Config::from_env_and_args (which removes
+    // AGENTMUX_AUTH_KEY from the process env) but before anything calls
+    // `agent_registry::write`.
+    crate::backend::reactive::registry::init_local_auth_key(&config.auth_key);
+
     // 4. Initialize backend (matching Go cmd/server/main-server.go:374-590)
     base::set_version(&version);
     base::set_build_time(&build_time);
