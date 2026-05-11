@@ -12,7 +12,13 @@
     --window-opacity: 1;
     --secondary-text-color: rgb(195, 200, 194);
     --grey-text-color: #666;
-    --main-bg-color: rgb(34, 34, 34);
+    // Alpha-aware so panes that use `background: var(--main-bg-color)`
+    // (and there are 30+ of them across agent / swarm / browser / identity /
+    // memory / etc.) automatically inherit window transparency. Defaults to
+    // alpha=1 (fully opaque, same as before) when --window-opacity is unset
+    // — AppSettingsUpdater only sets --window-opacity when window:transparent
+    // is true, so non-transparent mode is byte-for-byte unchanged.
+    --main-bg-color: rgba(34, 34, 34, var(--window-opacity, 1));
     --border-color: rgba(255, 255, 255, 0.16);
     // Tab separator — the constant gap between adjacent tabs. The
     // optional centered line is currently set to 0px (no visible
