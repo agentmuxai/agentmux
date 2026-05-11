@@ -93,16 +93,17 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
         else props.onToggleCollapse(n.id);
     };
 
-    // Phase 6 placeholders — match existing AgentDocumentView contract.
-    const onOpenInNewPane = (): void => {
+    // Open-in-pane for tool nodes — surfaces in the overlay action bar
+    // (SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md §4). Stubbed in Phase 3 as
+    // a console.warn; Phase 4 wires it to createBlock({view:"tool-detail"}).
+    // The other two branching actions (open-in-window, new-agent-here)
+    // are surfaced disabled by `ToolOverlayActions` itself with their
+    // own coming-soon tooltips.
+    const onOpenInPane = (): void => {
         if (props.node().type === "tool") {
-            console.warn("[hover-strip] open in new pane — not yet implemented");
+            console.warn("[tool-overlay] open in pane — not yet implemented");
         }
     };
-    const onOpenInNewWindow = (): void =>
-        console.warn("[hover-strip] open in new window — not yet implemented");
-    const onNewAgentFromHere = (): void =>
-        console.warn("[hover-strip] new agent from here — not yet implemented");
 
     const handleRowKey = (e: KeyboardEvent): void => {
         if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -113,15 +114,6 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
                 break;
             case "b":
                 if (props.onBookmark != null) { props.onBookmark(n); e.preventDefault(); }
-                break;
-            case "p":
-                if (n.type === "tool") { onOpenInNewPane(); e.preventDefault(); }
-                break;
-            case "w":
-                onOpenInNewWindow(); e.preventDefault();
-                break;
-            case "n":
-                onNewAgentFromHere(); e.preventDefault();
                 break;
             case "escape":
                 (e.currentTarget as HTMLElement).blur();
@@ -167,6 +159,9 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
             <DocumentNodeBody
                 node={props.node}
                 documentState={props.documentState}
+                isBookmarked={isBookmarked()}
+                onBookmark={props.onBookmark != null ? () => props.onBookmark!(props.node()) : undefined}
+                onOpenInPane={onOpenInPane}
                 onToggleCollapse={props.onToggleCollapse}
                 onTogglePin={props.onTogglePin}
                 onSubagentClick={props.onSubagentClick}
@@ -179,9 +174,6 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
                 canExpand={canExpand()}
                 isExpanded={isExpanded()}
                 onExpand={onExpand}
-                onOpenInNewPane={props.node().type === "tool" ? onOpenInNewPane : undefined}
-                onOpenInNewWindow={onOpenInNewWindow}
-                onNewAgentFromHere={onNewAgentFromHere}
             />
         </div>
     );
@@ -190,6 +182,14 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
 interface DocumentNodeBodyProps {
     node: Accessor<DocumentNode>;
     documentState: Accessor<DocumentState>;
+    /** Bookmark state + handler — surfaced inside the tool overlay's
+     *  bottom action bar (SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md §3.5).
+     *  The row-level NodeHoverStrip also surfaces bookmark — same handler
+     *  threaded through both. */
+    isBookmarked?: boolean;
+    onBookmark?: () => void;
+    /** Open-in-pane handler for tool nodes (overlay action bar). */
+    onOpenInPane?: () => void;
     onToggleCollapse: (id: string) => void;
     onTogglePin: (id: string) => void;
     onSubagentClick?: (node: SubagentLinkNode) => void;
@@ -234,6 +234,9 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     node={props.node() as Extract<DocumentNode, { type: "tool" }>}
                     pinned={props.documentState().pinnedNodes.has(props.node().id)}
                     onTogglePin={() => props.onTogglePin(props.node().id)}
+                    isBookmarked={props.isBookmarked}
+                    onBookmark={props.onBookmark}
+                    onOpenInPane={props.onOpenInPane}
                 />
             </Show>
             <Show when={props.node() && props.node().type === "agent_message"}>
