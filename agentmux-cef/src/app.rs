@@ -370,6 +370,17 @@ wrap_app! {
                 let bg_val = CefString::from("00000000");
                 cmd.append_switch_with_value(Some(&bg_key), Some(&bg_val));
 
+                // Disable LCD text rendering — LCD subpixel anti-aliasing
+                // requires opaque backgrounds, so Chromium force-sets
+                // contents_opaque=true on every compositor layer that contains
+                // LCD-rendered text. With opaque layers, even CSS alpha<1
+                // backgrounds get rasterized as fully opaque, defeating the
+                // whole transparency cascade. Grayscale text AA on a
+                // translucent UI is the standard tradeoff for window
+                // transparency.
+                let lcd_key = CefString::from("disable-lcd-text");
+                cmd.append_switch(Some(&lcd_key));
+
                 // Allow the DevTools inspector page (served from the remote
                 // debugging server) to open its own WebSocket connection back
                 // to that same server.  Without this flag Chromium 107+ blocks
