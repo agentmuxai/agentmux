@@ -147,14 +147,31 @@ async fn auth_accepts_query_param() {
 }
 
 #[tokio::test]
-async fn reactive_routes_skip_auth() {
+async fn reactive_routes_require_auth_unauthenticated() {
+    // Audit C1/C2 fix: /agentmux/reactive/* used to skip auth on the
+    // "localhost is trusted" assumption. It isn't — same-host CSRF
+    // via the permissive CORS layer could drive inject + poller-config.
+    // These routes now require X-AuthKey. The previous test
+    // (`reactive_routes_skip_auth`) asserted the bug; this one asserts
+    // the fix.
     let app = test_router();
     let req = Request::builder()
         .uri("/agentmux/reactive/agents")
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
-    assert_ne!(resp.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn reactive_routes_accept_valid_authkey() {
+    let app = test_router();
+    let req = Request::builder()
+        .uri("/agentmux/reactive/agents")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 }
 
@@ -250,6 +267,7 @@ async fn reactive_agents_returns_empty_list() {
     let app = test_router();
     let req = Request::builder()
         .uri("/agentmux/reactive/agents")
+        .header("X-AuthKey", "test-secret-key")
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
@@ -267,6 +285,7 @@ async fn reactive_poller_status() {
     let app = test_router();
     let req = Request::builder()
         .uri("/agentmux/reactive/poller/status")
+        .header("X-AuthKey", "test-secret-key")
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();

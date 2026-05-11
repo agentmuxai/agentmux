@@ -15,6 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use super::now_unix_millis;
 
@@ -29,6 +30,35 @@ pub struct AgentEntry {
     pub pid: u32,
     /// Unix milliseconds of last update.
     pub updated_at: u64,
+    /// Per-launch auth key of the owning instance. Required by peers
+    /// performing cross-instance HTTP forward of `/agentmux/reactive/inject`
+    /// after the route moved under auth_middleware. Optional in the
+    /// struct (serde default) so older on-disk entries still deserialize;
+    /// a missing or empty value means a forward to this entry will be
+    /// rejected by the peer's auth layer (graceful — falls back to cloud
+    /// agentbus).
+    #[serde(default)]
+    pub auth_key: String,
+}
+
+/// Process-wide auth key for the local AgentMux instance.
+///
+/// Initialised once by `main.rs` after `Config::from_env_and_args` reads
+/// `AGENTMUX_AUTH_KEY` and removes it from the env. The registry write
+/// path reads this to populate `AgentEntry::auth_key`, which lets peers
+/// authenticate cross-instance inject forwards.
+///
+/// Tests and the `register` HTTP handler (which has `state.auth_key`)
+/// can both pre-set this safely — the first `set` wins.
+static LOCAL_AUTH_KEY: OnceLock<String> = OnceLock::new();
+
+/// Initialise the process's local auth key. Idempotent — first call wins.
+pub fn init_local_auth_key(key: impl Into<String>) {
+    let _ = LOCAL_AUTH_KEY.set(key.into());
+}
+
+fn local_auth_key() -> &'static str {
+    LOCAL_AUTH_KEY.get().map(String::as_str).unwrap_or("")
 }
 
 fn agents_dir(data_dir: &Path) -> PathBuf {
@@ -45,6 +75,13 @@ fn agent_path(data_dir: &Path, agent_id: &str) -> PathBuf {
 }
 
 /// Write (create or update) an agent entry in the shared registry.
+///
+/// The entry includes the writing instance's auth_key (from
+/// `LOCAL_AUTH_KEY`) so a peer performing an HTTP forward of a missed
+/// inject can authenticate. The on-disk file is set to mode 0600 on
+/// Unix because the auth_key is sensitive — same security boundary as
+/// the existing `authkey.dev` file. On Windows, default ACLs inherit
+/// user-only on user-owned directories.
 pub fn write(data_dir: &Path, agent_id: &str, local_url: &str, block_id: &str) {
     let dir = agents_dir(data_dir);
     let _ = std::fs::create_dir_all(&dir);
@@ -54,9 +91,19 @@ pub fn write(data_dir: &Path, agent_id: &str, local_url: &str, block_id: &str) {
         block_id: block_id.to_string(),
         pid: std::process::id(),
         updated_at: now_unix_millis(),
+        auth_key: local_auth_key().to_string(),
     };
+    let path = agent_path(data_dir, agent_id);
     if let Ok(json) = serde_json::to_string(&entry) {
-        let _ = std::fs::write(agent_path(data_dir, agent_id), json);
+        let _ = std::fs::write(&path, json);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(
+                &path,
+                std::fs::Permissions::from_mode(0o600),
+            );
+        }
     }
 }
 
