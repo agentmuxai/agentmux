@@ -95,9 +95,31 @@ pub struct AppState {
 
 /// Build the Axum router with all routes, auth middleware, and CORS.
 pub fn build_router(state: AppState) -> Router {
-    // CORS: allow all origins, methods, headers (matching Go pkg/web/web.go:536-573)
+    // CORS: reflect only loopback origins.
+    //
+    // Before the 2026-05-11 security audit (C3) this allowed any origin
+    // (matching the historical Go pkg/web/web.go). That made every web
+    // page the user happened to have open a potential CSRF source —
+    // localhost is not a trust boundary on a developer machine.
+    //
+    // The legitimate cross-origin callers are:
+    //   - The CEF frontend served from `http://127.0.0.1:<host-port>`
+    //   - Vite dev server at `http://localhost:5173` (and similar)
+    //
+    // Both are loopback. The predicate accepts http://127.0.0.1:* and
+    // http://localhost:* (any port, http only; https is irrelevant for
+    // loopback). External origins are denied, which means a malicious
+    // page in the user's browser can't drive the sidecar even if it
+    // discovers the port.
+    use tower_http::cors::AllowOrigin;
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin(AllowOrigin::predicate(|origin, _req| {
+            let Ok(s) = origin.to_str() else { return false };
+            s.starts_with("http://127.0.0.1:")
+                || s.starts_with("http://localhost:")
+                || s == "http://127.0.0.1"
+                || s == "http://localhost"
+        }))
         .allow_methods(Any)
         .allow_headers(vec![
             header::CONTENT_TYPE,
@@ -279,7 +301,17 @@ async fn auth_middleware(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
+    // 2026-05-11 audit (C3): the query-string `?authkey=` fallback
+    // bypasses CORS preflight and is preserved in browser history,
+    // navigation `Referer` headers, server access logs, etc. — a CSRF
+    // amplifier whenever the key leaks. It is allowed **only** on the
+    // WebSocket upgrade route (`/ws`), where the browser WS API doesn't
+    // permit custom headers and there is no other practical channel
+    // for the key. Every other route requires the header.
     let auth_key = auth_key.or_else(|| {
+        if req.uri().path() != "/ws" {
+            return None;
+        }
         req.uri().query().and_then(|q| {
             q.split('&')
                 .filter_map(|pair| pair.split_once('='))
