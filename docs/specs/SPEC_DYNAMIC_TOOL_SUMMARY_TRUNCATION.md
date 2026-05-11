@@ -1,6 +1,6 @@
 # Dynamic ellipsis truncation for tool summaries
 
-**Status:** Proposed
+**Status:** Implemented (PR #790, v0.33.760)
 **Owner:** AgentA
 **Date:** 2026-05-10
 **Driving observation:** Bash command (and other tool) summaries in the agent pane are pre-truncated to a fixed character count + "…". Zooming out leaves a wide blank to the right of the ellipsis because the truncation point doesn't recompute. The ellipsis should "slide" based on available row width.
