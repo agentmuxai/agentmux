@@ -155,6 +155,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
                         class={clsx("menu", props.className)}
                         ref={registerFloating}
                         style={floatingStyle()}
+                        data-pane-overlay
                     >
                         <For each={props.items}>
                             {(item, index) => {
@@ -289,6 +290,7 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
                 position: "absolute",
                 "z-index": 1000,
             }}
+            data-pane-overlay
         >
             <For each={props.subItems}>
                 {(item, idx) => {

@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux-cef"
-version = "0.33.777"
+version = "0.33.778"
 dependencies = [
  "agentmux-common",
  "axum 0.8.9",
@@ -38,7 +38,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-common"
-version = "0.33.777"
+version = "0.33.778"
 dependencies = [
  "dirs",
  "serde",
@@ -50,7 +50,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.33.777"
+version = "0.33.778"
 dependencies = [
  "agentmux-common",
  "chrono",
@@ -70,7 +70,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-srv"
-version = "0.33.777"
+version = "0.33.778"
 dependencies = [
  "agentmux-common",
  "async-stream",
@@ -2589,13 +2589,13 @@ dependencies = [
 
 [[package]]
 name = "serial2"
-version = "0.2.36"
+version = "0.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcdbc46aa3882ec3d48ec2b5abcb4f0d863a13d7599265f3faa6d851f23c12f3"
+checksum = "9eb6ea5562eeaed6936b8b54e086aa0f88b9e5b1bef45beb038e2519fa1185b1"
 dependencies = [
  "cfg-if",
  "libc",
- "winapi",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
