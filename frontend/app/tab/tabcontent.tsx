@@ -106,16 +106,23 @@ function TabContent(props: { tabId: string }): JSX.Element {
                 when={tabData() != null}
                 fallback={<CenteredDiv>Tab Not Found</CenteredDiv>}
             >
-                <Show when={isEmpty()}>
+                <Show
+                    when={isEmpty()}
+                    fallback={
+                        <TabModalLayer>
+                            <TileLayout
+                                contents={tileLayoutContents()}
+                                tabAtom={tabAtom()}
+                                getCursorPoint={getApi().getCursorPoint}
+                            />
+                        </TabModalLayer>
+                    }
+                >
                     <img
                         src={logoUrl}
                         alt="AgentMux"
                         class="empty-tab-logo"
                         style={{
-                            position: "absolute",
-                            top: "50%",
-                            left: "50%",
-                            transform: "translate(-50%, -50%)",
                             "max-width": "160px",
                             "max-height": "160px",
                             opacity: "0.4",
@@ -124,13 +131,6 @@ function TabContent(props: { tabId: string }): JSX.Element {
                         }}
                     />
                 </Show>
-                <TabModalLayer>
-                    <TileLayout
-                        contents={tileLayoutContents()}
-                        tabAtom={tabAtom()}
-                        getCursorPoint={getApi().getCursorPoint}
-                    />
-                </TabModalLayer>
             </Show>
         </div>
     );
