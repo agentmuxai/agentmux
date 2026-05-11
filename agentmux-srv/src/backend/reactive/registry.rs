@@ -78,9 +78,10 @@ fn agent_path(data_dir: &Path, agent_id: &str) -> PathBuf {
 ///
 /// The entry includes the writing instance's auth_key (from
 /// `LOCAL_AUTH_KEY`) so a peer performing an HTTP forward of a missed
-/// inject can authenticate. The on-disk file is set to mode 0600 on
-/// Unix because the auth_key is sensitive — same security boundary as
-/// the existing `authkey.dev` file. On Windows, default ACLs inherit
+/// inject can authenticate. On Unix the file is created with mode 0600
+/// **at open time** (not write-then-chmod, which would briefly expose
+/// the file at the default umask — same security boundary as the
+/// existing `authkey.dev` file). On Windows, default ACLs inherit
 /// user-only on user-owned directories.
 pub fn write(data_dir: &Path, agent_id: &str, local_url: &str, block_id: &str) {
     let dir = agents_dir(data_dir);
@@ -94,16 +95,18 @@ pub fn write(data_dir: &Path, agent_id: &str, local_url: &str, block_id: &str) {
         auth_key: local_auth_key().to_string(),
     };
     let path = agent_path(data_dir, agent_id);
-    if let Ok(json) = serde_json::to_string(&entry) {
-        let _ = std::fs::write(&path, json);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(
-                &path,
-                std::fs::Permissions::from_mode(0o600),
-            );
-        }
+    let Ok(json) = serde_json::to_string(&entry) else { return };
+
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    if let Ok(mut f) = opts.open(&path) {
+        use std::io::Write;
+        let _ = f.write_all(json.as_bytes());
     }
 }
 
