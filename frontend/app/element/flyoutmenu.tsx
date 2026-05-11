@@ -7,7 +7,7 @@ import {
     type Placement,
 } from "@floating-ui/dom";
 import clsx from "clsx";
-import { createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 
 import "./flyoutmenu.scss";
@@ -252,16 +252,20 @@ type SubMenuProps = {
 
 const SubMenu = (props: SubMenuProps): JSX.Element => {
     let subMenuEl: HTMLDivElement | undefined;
+    let flipped = false;
     const position = () => props.subMenuPosition[props.parentKey];
 
-    onMount(() => {
-        if (!subMenuEl) return;
+    createEffect(() => {
+        const pos = position();
+        if (!pos || flipped || !subMenuEl) return;
         const rect = subMenuEl.getBoundingClientRect();
         const overflowRight = rect.right - window.innerWidth;
         const overflowBottom = rect.bottom - window.innerHeight;
-        if (overflowRight <= 0 && overflowBottom <= 0) return;
-        const pos = position();
-        if (!pos) return;
+        if (overflowRight <= 0 && overflowBottom <= 0) {
+            flipped = true;
+            return;
+        }
+        flipped = true;
         props.setSubMenuPosition((prev) => ({
             ...prev,
             [props.parentKey]: {
