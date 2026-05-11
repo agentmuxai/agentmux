@@ -25,7 +25,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
     const [visibleSubMenus, setVisibleSubMenus] = createSignal<{ [key: string]: any }>({});
     const [hoveredItems, setHoveredItems] = createSignal<string[]>([]);
     const [subMenuPosition, setSubMenuPosition] = createSignal<{
-        [key: string]: { top: number; left: number; label: string };
+        [key: string]: { top: number; left: number; parentLeft: number; label: string };
     }>({});
 
     const [isOpen, setIsOpen] = createSignal(false);
@@ -98,7 +98,8 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
         const scrollLeft = window.scrollX || document.documentElement.scrollLeft;
         const top = itemRect.top - 2 + scrollTop;
         const left = itemRect.right + scrollLeft - 2;
-        setSubMenuPosition((prev) => ({ ...prev, [key]: { top, left, label } }));
+        const parentLeft = itemRect.left + scrollLeft;
+        setSubMenuPosition((prev) => ({ ...prev, [key]: { top, left, parentLeft, label } }));
     };
 
     const handleMouseEnterItem = (
@@ -244,7 +245,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
 };
 
 type SubMenuPositionMap = {
-    [key: string]: { top: number; left: number; label: string };
+    [key: string]: { top: number; left: number; parentLeft: number; label: string };
 };
 
 type SubMenuProps = {
@@ -289,7 +290,8 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
             ...prev,
             [props.parentKey]: {
                 label: pos.label,
-                left: overflowRight > 0 ? pos.left - rect.width - 4 : pos.left,
+                parentLeft: pos.parentLeft,
+                left: overflowRight > 0 ? pos.parentLeft - rect.width + 2 : pos.left,
                 top: overflowBottom > 0
                     ? window.innerHeight - rect.height - 10 + window.scrollY
                     : pos.top,
