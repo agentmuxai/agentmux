@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+    autoUpdate,
     computePosition,
     type Placement,
 } from "@floating-ui/dom";
@@ -48,22 +49,12 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
         setFloatingStyle(`position:absolute;left:${pos.x}px;top:${pos.y}px`);
     };
 
-    const reposition = () => {
-        void updatePosition();
-    };
-
     const registerFloating = (el: HTMLElement) => {
         floatingEl = el;
         requestAnimationFrame(() => {
             if (!(referenceEl instanceof Element) || !(floatingEl instanceof Element)) return;
             cleanupAutoUpdate?.();
-            reposition();
-            window.addEventListener("resize", reposition, { passive: true });
-            window.addEventListener("scroll", reposition, { passive: true, capture: true });
-            cleanupAutoUpdate = () => {
-                window.removeEventListener("resize", reposition);
-                window.removeEventListener("scroll", reposition, { capture: true });
-            };
+            cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
         });
     };
 
