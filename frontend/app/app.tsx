@@ -123,10 +123,18 @@ function AppSettingsUpdater() {
             (windowSettings?.["window:transparent"] || windowSettings?.["window:blur"]) ?? false;
         const opacity = util.boundNumber(windowSettings?.["window:opacity"] ?? 0.8, 0, 1);
         const baseBgColor = windowSettings?.["window:bgcolor"];
+        // `#main` may not exist on the first effect run: AppSettingsUpdater is
+        // a sibling of <Workspace /> (which owns the main div), and SolidJS's
+        // mount order is sibling-by-sibling. Without a null guard, this
+        // effect threw on the first run and SolidJS lost the subscription —
+        // settings.json could say `window:transparent: true` and the effect
+        // would never re-fire on later settings ticks. Optional chaining
+        // means the effect runs cleanly on the first (mainDiv-less) tick,
+        // subscribes to windowSettingsAtom, and gets re-fired once both
+        // settings AND the main div are ready.
         const mainDiv = document.getElementById("main");
-        // console.log("window settings", windowSettings, isTransparentOrBlur, opacity, baseBgColor, mainDiv);
         if (isTransparentOrBlur) {
-            mainDiv.classList.add("is-transparent");
+            mainDiv?.classList.add("is-transparent");
             document.documentElement.style.background = "transparent";
             if (opacity != null) {
                 document.body.style.setProperty("--window-opacity", `${opacity}`);
@@ -134,7 +142,7 @@ function AppSettingsUpdater() {
                 document.body.style.removeProperty("--window-opacity");
             }
         } else {
-            mainDiv.classList.remove("is-transparent");
+            mainDiv?.classList.remove("is-transparent");
             document.documentElement.style.removeProperty("background");
             document.body.style.removeProperty("--window-opacity");
         }
