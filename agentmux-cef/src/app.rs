@@ -356,9 +356,18 @@ wrap_app! {
                 let val = CefString::from("CalculateNativeWinOcclusion");
                 cmd.append_switch_with_value(Some(&key), Some(&val));
 
-                // Set initial background color via CLI.
+                // Initial background color, ARGB hex. alpha=00 → fully
+                // transparent → first-frame paint is alpha-aware so the
+                // CSS body background's rgba() composes with the desktop
+                // wallpaper. ff222222 here would clobber the alpha=0 we set
+                // via CefSettings.background_color in main.rs and force the
+                // first frame opaque (visible as a brief flash even after
+                // the renderer flips to ARGB on the first commit).
+                // Pair with: main.rs CefSettings.background_color = 0,
+                // app.rs BrowserSettings.background_color = 0, and the
+                // is_frameless main window delegate.
                 let bg_key = CefString::from("background-color");
-                let bg_val = CefString::from("ff222222");
+                let bg_val = CefString::from("00000000");
                 cmd.append_switch_with_value(Some(&bg_key), Some(&bg_val));
 
                 // Allow the DevTools inspector page (served from the remote
@@ -427,9 +436,13 @@ wrap_browser_process_handler! {
             // Browser settings.
             let settings = BrowserSettings {
                 windowless_frame_rate: 60,
-                // Dark background to match app theme — prevents white bleed-through
-                // when terminal panes use transparency.
-                background_color: 0xFF000000, // ARGB: opaque black (matches pre-transparency-experiment baseline)
+                // ARGB: alpha=0 → SK_AlphaTRANSPARENT → enables Views-framework
+                // transparency in the patched libcef.so. Pair with the
+                // CefSettings::background_color flip in main.rs and the
+                // is_frameless=true main window delegate. See
+                // docs/research/cef-transparency-research-2026-05-10.md and
+                // docs/retros/cef-transparency-empirical-2026-05-11.md.
+                background_color: 0x00000000,
                 ..Default::default()
             };
 

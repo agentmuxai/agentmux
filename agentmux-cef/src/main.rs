@@ -464,7 +464,15 @@ fn main() {
 
     let settings = Settings {
         no_sandbox: 1,
-        background_color: 0xFF000000, // ARGB: opaque black (matches pre-transparency-experiment baseline)
+        // ARGB: alpha=0 → SK_AlphaTRANSPARENT → triggers the transparency
+        // cascade in the patched libcef.so (see cef commits b921ffe18 +
+        // 68e0dc668). The CSS layer's rgba(_,_,_,<1) body bg then composites
+        // with the desktop instead of being clamped to opaque white.
+        // Pair: BrowserSettings.background_color must also be 0 (app.rs).
+        // Pair: WindowDelegate must return is_frameless=true (already does
+        // for the main window).
+        // Spec: docs/research/cef-transparency-research-2026-05-10.md.
+        background_color: 0x00000000,
         remote_debugging_port: debug_port as i32,
         root_cache_path: cache_dir,
         resources_dir_path: resources_dir,
