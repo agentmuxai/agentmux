@@ -109,7 +109,13 @@ pub fn build_router(state: AppState) -> Router {
             "x-vercel-ai-ui-message-stream".parse().unwrap(),
         ]);
 
-    // No-auth routes (matching Go SkipAuth: true — localhost-only reactive endpoints)
+    // Reactive routes. Previously registered without auth on the
+    // assumption that localhost is a trust boundary; the 2026-05-11
+    // security audit (C1 + C2) showed that any local process — or a
+    // web page driving 127.0.0.1 via the permissive CORS layer — could
+    // drive `/agentmux/reactive/inject` and reconfigure the cloud
+    // agentbus poller. These routes are now merged into `authed_routes`
+    // below and gated by `auth_middleware`.
     let reactive_routes = Router::new()
         .route("/agentmux/reactive/inject", post(reactive::handle_reactive_inject))
         .route("/agentmux/reactive/agents", get(reactive::handle_reactive_agents))
@@ -156,6 +162,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/lan-instances", get(handle_lan_instances))
         .route("/agentmux/diag/sagas", get(handle_diag_sagas))
         .merge(bus_routes)
+        .merge(reactive_routes)
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -166,7 +173,6 @@ pub fn build_router(state: AppState) -> Router {
 
     Router::new()
         .merge(health)
-        .merge(reactive_routes)
         .merge(authed_routes)
         .layer(cors)
         .with_state(state)

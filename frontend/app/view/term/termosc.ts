@@ -6,7 +6,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { WOS, atoms } from "@/app/store/global";
+import { WOS, atoms, getApi } from "@/app/store/global";
 import * as services from "@/app/store/services";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fireAndForget } from "@/util/util";
@@ -290,9 +290,14 @@ export function handleOsc16162Command(data: string, blockId: string, loaded: boo
             fireAndForget(async () => {
                 try {
                     const url = getWebServerEndpoint() + "/agentmux/reactive/poller/config";
+                    // X-AuthKey required after audit C1/C2 fix moved
+                    // /agentmux/reactive/* under auth_middleware.
+                    const authKey = getApi()?.getAuthKey?.();
+                    const headers: Record<string, string> = { "Content-Type": "application/json" };
+                    if (authKey) headers["X-AuthKey"] = authKey;
                     const response = await fetch(url, {
                         method: "POST",
-                        headers: { "Content-Type": "application/json" },
+                        headers,
                         body: JSON.stringify({
                             agentmux_url: cmd.data.agentmux_url || "",
                             agentmux_token: cmd.data.agentmux_token || "",
