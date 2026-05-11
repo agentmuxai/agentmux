@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-    autoUpdate,
     computePosition,
     type Placement,
 } from "@floating-ui/dom";
@@ -49,13 +48,22 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
         setFloatingStyle(`position:absolute;left:${pos.x}px;top:${pos.y}px`);
     };
 
+    const reposition = () => {
+        void updatePosition();
+    };
+
     const registerFloating = (el: HTMLElement) => {
         floatingEl = el;
         requestAnimationFrame(() => {
-            if (referenceEl instanceof Element && floatingEl instanceof Element) {
-                cleanupAutoUpdate?.();
-                cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
-            }
+            if (!(referenceEl instanceof Element) || !(floatingEl instanceof Element)) return;
+            cleanupAutoUpdate?.();
+            reposition();
+            window.addEventListener("resize", reposition, { passive: true });
+            window.addEventListener("scroll", reposition, { passive: true, capture: true });
+            cleanupAutoUpdate = () => {
+                window.removeEventListener("resize", reposition);
+                window.removeEventListener("scroll", reposition, { capture: true });
+            };
         });
     };
 
@@ -79,34 +87,18 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
 
     const subMenuRefs: { [key: string]: HTMLDivElement | null } = {};
 
-    // Position submenus based on available space and scroll position
+    // Set the submenu's primary placement synchronously off the parent
+    // item's rect. No DOM measurement of the submenu (.menu.sub-menu
+    // uses `width: max-content`, so it sizes to content alone). Edge
+    // flip — when the primary spot would clip the viewport — runs in
+    // SubMenu's onMount via setSubMenuPosition, after the first paint.
+    // See docs/research/MENU_SNAPPINESS_DEEP_DIVE.md §3.1.
     const handleSubMenuPosition = (key: string, itemRect: DOMRect, label: string) => {
-        setTimeout(() => {
-            const subMenuRef = subMenuRefs[key];
-            if (!subMenuRef) return;
-
-            const scrollTop = window.scrollY || document.documentElement.scrollTop;
-            const scrollLeft = window.scrollX || document.documentElement.scrollLeft;
-
-            const submenuWidth = subMenuRef.offsetWidth;
-            const submenuHeight = subMenuRef.offsetHeight;
-
-            let left = itemRect.right + scrollLeft - 2;
-            let top = itemRect.top - 2 + scrollTop;
-
-            if (left + submenuWidth > window.innerWidth + scrollLeft) {
-                left = itemRect.left + scrollLeft - submenuWidth;
-            }
-
-            if (top + submenuHeight > window.innerHeight + scrollTop) {
-                top = window.innerHeight + scrollTop - submenuHeight - 10;
-            }
-
-            setSubMenuPosition((prev) => ({
-                ...prev,
-                [key]: { top, left, label },
-            }));
-        }, 0);
+        const scrollTop = window.scrollY || document.documentElement.scrollTop;
+        const scrollLeft = window.scrollX || document.documentElement.scrollLeft;
+        const top = itemRect.top - 2 + scrollTop;
+        const left = itemRect.right + scrollLeft - 2;
+        setSubMenuPosition((prev) => ({ ...prev, [key]: { top, left, label } }));
     };
 
     const handleMouseEnterItem = (
@@ -230,6 +222,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
                                                 subItems={item.subItems!}
                                                 parentKey={key}
                                                 subMenuPosition={subMenuPosition()}
+                                                setSubMenuPosition={setSubMenuPosition}
                                                 visibleSubMenus={visibleSubMenus()}
                                                 hoveredItems={hoveredItems()}
                                                 handleMouseEnterItem={handleMouseEnterItem}
@@ -250,12 +243,17 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
     );
 };
 
+type SubMenuPositionMap = {
+    [key: string]: { top: number; left: number; label: string };
+};
+
 type SubMenuProps = {
     subItems: MenuItem[];
     parentKey: string;
-    subMenuPosition: {
-        [key: string]: { top: number; left: number; label: string };
-    };
+    subMenuPosition: SubMenuPositionMap;
+    setSubMenuPosition: (
+        updater: (prev: SubMenuPositionMap) => SubMenuPositionMap,
+    ) => void;
     visibleSubMenus: { [key: string]: any };
     hoveredItems: string[];
     subMenuRefs: { [key: string]: HTMLDivElement | null };
@@ -271,22 +269,46 @@ type SubMenuProps = {
 };
 
 const SubMenu = (props: SubMenuProps): JSX.Element => {
+    let subMenuEl: HTMLDivElement | undefined;
     const position = () => props.subMenuPosition[props.parentKey];
-    const isPositioned = () => {
+
+    // Edge-flip after first paint. The synchronous primary placement
+    // in handleSubMenuPosition is correct in 99% of viewport
+    // configurations; the rare overflow case triggers a one-frame
+    // reposition via setSubMenuPosition, which Solid resolves in the
+    // next render. No visibility:hidden gate, no two-render dance.
+    onMount(() => {
+        if (!subMenuEl) return;
+        const rect = subMenuEl.getBoundingClientRect();
+        const overflowRight = rect.right - window.innerWidth;
+        const overflowBottom = rect.bottom - window.innerHeight;
+        if (overflowRight <= 0 && overflowBottom <= 0) return;
         const pos = position();
-        return pos && pos.top !== undefined && pos.left !== undefined;
-    };
+        if (!pos) return;
+        props.setSubMenuPosition((prev) => ({
+            ...prev,
+            [props.parentKey]: {
+                label: pos.label,
+                left: overflowRight > 0 ? pos.left - rect.width - 4 : pos.left,
+                top: overflowBottom > 0
+                    ? window.innerHeight - rect.height - 10 + window.scrollY
+                    : pos.top,
+            },
+        }));
+    });
 
     const subMenu = (
         <div
-            ref={(el) => { props.subMenuRefs[props.parentKey] = el; }}
+            ref={(el) => {
+                subMenuEl = el;
+                props.subMenuRefs[props.parentKey] = el;
+            }}
             class="menu sub-menu"
             style={{
-                top: `${position()?.top || 0}px`,
-                left: `${position()?.left || 0}px`,
+                top: `${position()?.top ?? 0}px`,
+                left: `${position()?.left ?? 0}px`,
                 position: "absolute",
                 "z-index": 1000,
-                visibility: props.visibleSubMenus[props.parentKey]?.visible && isPositioned() ? "visible" : "hidden",
             }}
         >
             <For each={props.subItems}>
@@ -339,6 +361,7 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
                                     subItems={item.subItems!}
                                     parentKey={newKey}
                                     subMenuPosition={props.subMenuPosition}
+                                    setSubMenuPosition={props.setSubMenuPosition}
                                     visibleSubMenus={props.visibleSubMenus}
                                     hoveredItems={props.hoveredItems}
                                     handleMouseEnterItem={props.handleMouseEnterItem}
