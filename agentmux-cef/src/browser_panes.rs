@@ -314,12 +314,23 @@ impl BrowserPaneManager {
         );
         tracing::info!(block_id, label, "browser pane closed");
 
-        // PR #6 H.7 kick — the pane is fully closed; if any pool refill
-        // was deferred by `any_browser_pane_closing()` while we were mid-close,
-        // top up now. `spawn_pool_window` is internally idempotent
-        // (single-flight semaphore + below-target check via reducer), so
-        // calling it always-on-pane-close is safe even when no refill is
-        // needed.
+        // PR #6 H.7 kick — top up the pool now that this pane has closed.
+        // `spawn_pool_window` is internally idempotent (single-flight +
+        // below-target check), so calling on every pane close is safe.
+        //
+        // Cross-platform: the original `weak_ptr.h:250` race that prompted
+        // an earlier Windows-only cfg-gate is gone. With the deferred
+        // OverlayController destroy (see
+        // browser_pane/creation_views.rs::detach_browser_pane_view),
+        // close() no longer destroys the controller synchronously — it
+        // just stashes it for on_before_close to destroy later. Creating
+        // a new pool window here therefore can't race a synchronous
+        // destroy of the just-closed pane's View. drain_closed_label's
+        // pool kick can't be relied on as the sole refill source either:
+        // CompleteBrowserPaneClose (dispatched above) already removed the
+        // reducer entry, so DrainBrowserPaneByLabel inside
+        // drain_closed_label is a no-op and never reaches its
+        // spawn_pool_window() call (codex P2 on PR #788).
         crate::commands::window_pool::spawn_pool_window(state);
     }
 

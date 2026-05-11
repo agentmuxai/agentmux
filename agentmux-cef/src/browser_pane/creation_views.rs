@@ -273,22 +273,25 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
     );
 }
 
-/// Detach + drop a Views-based browser pane (Linux/macOS only).
+/// Detach a Views-based browser pane (Linux/macOS only).
 ///
 /// Called from `BrowserPaneManager::close` on non-Windows. Order matters:
 ///
-///   1. Look up the underlying `Browser` for this label and call
-///      `BrowserHost::close_browser(force=1)`. Empirically `OverlayController::destroy`
-///      DOES eventually trigger `on_before_close`, but per CEF's documentation
-///      the destroy path is layout-tracking only and the Browser's lifecycle
-///      is independent — without the explicit close request a Browser can
-///      survive its overlay's destruction and stay registered in `state.browsers`
-///      with stale callbacks (PR #682 codex P2).
-///   2. Destroy the OverlayController to remove the overlay from the parent.
-///   3. Drop the cached handle. `on_before_close` fires asynchronously on the
-///      Browser and the existing `callbacks::on_before_close_browser_pane`
-///      drains state.browsers + the reducer's pane map. If close_browser
-///      fails (already-gone race), the destroy still cleans up the overlay.
+///   1. Pop the controller out of `state.browser_pane_overlays` so future
+///      resize / focus / overlay-clip calls become no-ops.
+///   2. Stash the controller in `state.pending_overlay_destroy`. Keeping it
+///      alive here is critical: dropping or destroying it now would yank
+///      the BrowserView out of its parent Window's hierarchy while
+///      Chromium still has UI-thread tasks holding `WeakPtr<View>` to it,
+///      tripping `weak_ptr.h:250 Check failed: ref_.IsValid()` and FATALing
+///      the host. Reproducers: pane-close-then-pool-spawn (0.33.721) and
+///      tab tear-off (0.33.722).
+///   3. Call `BrowserHost::close_browser(force=1)`. This triggers async
+///      Browser teardown; CEF will eventually call our `on_before_close`
+///      handler, which drains `pending_overlay_destroy[label]` and runs
+///      the actual `controller.destroy()` — by that point the Browser is
+///      fully gone and any queued WeakPtr-bearing tasks have drained, so
+///      destroy can no longer race.
 ///
 /// Must run on the CEF UI thread.
 pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
@@ -301,24 +304,39 @@ pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
         return;
     };
 
-    // Step 1: ask the Browser to close BEFORE destroying its overlay.
-    if let Some(browser) = state.get_browser(label) {
-        if let Some(host) = browser.host() {
-            host.close_browser(1); // force=1 — pane is going away regardless
-            tracing::debug!(label = %label, "[browser-pane] views: close_browser(force=1) requested");
-        }
-    } else {
-        tracing::debug!(
+    // Whether to defer destroy depends on whether there's a live Browser.
+    //   - Live Browser + host: close_browser(force=1) fires; on_before_close
+    //     will land asynchronously; stash so the callback finds the
+    //     controller and runs destroy() then. (Synchronous destroy here
+    //     races Chromium's queued WeakPtr<View> tasks → weak_ptr.h:250
+    //     FATAL; that's the whole reason for this dance.)
+    //   - No live Browser (already drained, or host gone): on_before_close
+    //     won't fire — stashing would leak the controller in
+    //     pending_overlay_destroy forever (reagent P1 on PR #788).
+    //     No Browser means no queued WeakPtr tasks against this view, so
+    //     destroying synchronously is safe.
+    let live_host = state
+        .get_browser(label)
+        .and_then(|mut b| b.host());
+
+    if let Some(host) = live_host {
+        state
+            .pending_overlay_destroy
+            .lock()
+            .insert(label.to_string(), controller);
+        host.close_browser(1);
+        tracing::info!(
             label = %label,
-            "[browser-pane] views: no Browser registered at detach (already drained?)"
+            "[browser-pane] views: close_browser(force=1) requested; OverlayController stashed for deferred destroy at on_before_close"
+        );
+    } else {
+        // No Browser / no host → on_before_close won't fire. Destroy now to
+        // avoid the leak. No race risk: there's no live Browser holding
+        // WeakPtrs to our BrowserView.
+        controller.destroy();
+        tracing::info!(
+            label = %label,
+            "[browser-pane] views: no live Browser at detach — OverlayController destroyed synchronously"
         );
     }
-
-    // Step 2: destroy the overlay.
-    controller.destroy();
-    tracing::info!(
-        label = %label,
-        "[browser-pane] views: OverlayController destroyed"
-    );
-    drop(controller);
 }

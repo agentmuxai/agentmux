@@ -32,8 +32,11 @@ pub mod registry;
 #[cfg(windows)]
 pub mod windows;
 
-#[cfg(not(windows))]
-pub mod stub;
+// `pub mod stub;` (file-form) was here. Removed: `stub.rs` doesn't exist
+// in the tree — only the two inline `pub mod stub { ... }` definitions
+// below (cfg(not(windows)) and cfg(windows)) define the module. On Linux
+// the file-form line collided with the inline non-Windows definition →
+// E0428 "the name `stub` is defined multiple times" → broke `task dev`.
 
 /// A single process tracked by the host — PID + metadata enriched
 /// per-platform. The frontend renders one row per entry.

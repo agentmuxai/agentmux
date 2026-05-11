@@ -568,6 +568,29 @@ pub struct AppState {
     pub browser_pane_overlays:
         Mutex<std::collections::HashMap<String, (String, cef::OverlayController)>>,
 
+    /// Linux/macOS only — OverlayControllers awaiting deferred destroy.
+    ///
+    /// Calling `OverlayController::destroy()` synchronously on the same UI
+    /// tick as `BrowserHost::close_browser(force=1)` races CEF/Chromium's
+    /// internal Views focus traversal — pending tasks hold
+    /// `base::WeakPtr<View>` to the BrowserView, and yanking the view out
+    /// of the Window's hierarchy before those tasks drain trips
+    /// `weak_ptr.h:250 Check failed: ref_.IsValid()` and FATALs the host.
+    /// Two confirmed reproducers: closing a pane while a pool window is
+    /// being spawned (PR #743 follow-up) and tearing off a tab (a tear-off
+    /// closes the pane in the source workspace then immediately creates a
+    /// new top-level window for the torn tab).
+    ///
+    /// Fix: detach moves the controller out of `browser_pane_overlays`
+    /// (so future resize/clip calls miss), calls `close_browser(force=1)`,
+    /// and stashes the controller here. `on_before_close_browser_pane`
+    /// then drains this map and runs `destroy()` — by that point the
+    /// Browser is fully torn down and Chromium has drained the queued
+    /// tasks that referenced its View, so destroy can't race anything.
+    #[cfg(not(target_os = "windows"))]
+    pub pending_overlay_destroy:
+        Mutex<std::collections::HashMap<String, cef::OverlayController>>,
+
     /// Tear-off Phase 6 — pre-warmed pool of hidden CEF windows ready for
     /// instant promotion on tear-off. Each entry is a label of a window
     /// that's already painted, has its renderer connected, and is sitting
@@ -665,6 +688,8 @@ impl Default for AppState {
             windows: Mutex::new(HashMap::new()),
             #[cfg(not(target_os = "windows"))]
             browser_pane_overlays: Mutex::new(HashMap::new()),
+            #[cfg(not(target_os = "windows"))]
+            pending_overlay_destroy: Mutex::new(HashMap::new()),
             // window_pool / unpromoted_pool_labels / window_pool_respawn_in_flight
             // deleted (PR #5 H.4) — see HostState.pool.
             // is_quitting deleted (PR #5 H.5) — see HostState.quit_state.

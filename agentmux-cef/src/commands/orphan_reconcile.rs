@@ -399,22 +399,28 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
 fn classify_hwnd(browser: &Browser) -> HwndStatus {
     let mut b = browser.clone();
     let Some(host) = b.host() else { return HwndStatus::Hostless };
-    let wh = host.window_handle();
-    if wh.0.is_null() {
-        return HwndStatus::Dead;
-    }
     #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::Foundation::HWND;
         use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;
+        let wh = host.window_handle();
+        if wh.0.is_null() {
+            return HwndStatus::Dead;
+        }
         if IsWindow(wh.0 as HWND) == 0 {
             HwndStatus::Dead
         } else {
             HwndStatus::Live
         }
     }
+    // On Linux/macOS `cef_window_handle_t` is `u64` (X11 XID / NSView ptr),
+    // not the Win32 HWND tuple-struct, so `wh.0.is_null()` doesn't typecheck.
+    // We don't have an `IsWindow` equivalent here either — treat any host
+    // with a Browser as Live for orphan-reconcile classification. The Win32
+    // path keeps the strict liveness check that landed in #702.
     #[cfg(not(target_os = "windows"))]
     {
+        let _ = host;
         HwndStatus::Live
     }
 }
