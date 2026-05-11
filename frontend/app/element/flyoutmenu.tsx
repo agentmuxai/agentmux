@@ -85,8 +85,6 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
         cleanupAutoUpdate?.();
     });
 
-    const subMenuRefs: { [key: string]: HTMLDivElement | null } = {};
-
     const handleSubMenuPosition = (key: string, itemRect: DOMRect, label: string) => {
         const scrollTop = window.scrollY || document.documentElement.scrollTop;
         const scrollLeft = window.scrollX || document.documentElement.scrollLeft;
@@ -222,7 +220,6 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
                                                 hoveredItems={hoveredItems()}
                                                 handleMouseEnterItem={handleMouseEnterItem}
                                                 handleOnClick={handleOnClick}
-                                                subMenuRefs={subMenuRefs}
                                                 renderMenu={props.renderMenu}
                                                 renderMenuItem={props.renderMenuItem}
                                             />
@@ -251,7 +248,6 @@ type SubMenuProps = {
     ) => void;
     visibleSubMenus: { [key: string]: any };
     hoveredItems: string[];
-    subMenuRefs: { [key: string]: HTMLDivElement | null };
     handleMouseEnterItem: (
         event: MouseEvent,
         parentKey: string | null,
@@ -290,10 +286,7 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
 
     const subMenu = (
         <div
-            ref={(el) => {
-                subMenuEl = el;
-                props.subMenuRefs[props.parentKey] = el;
-            }}
+            ref={(el) => { subMenuEl = el; }}
             class="menu sub-menu"
             style={{
                 top: `${position()?.top ?? 0}px`,
@@ -357,7 +350,6 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
                                     hoveredItems={props.hoveredItems}
                                     handleMouseEnterItem={props.handleMouseEnterItem}
                                     handleOnClick={props.handleOnClick}
-                                    subMenuRefs={props.subMenuRefs}
                                     renderMenu={props.renderMenu}
                                     renderMenuItem={props.renderMenuItem}
                                 />
