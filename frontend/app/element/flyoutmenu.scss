@@ -20,10 +20,13 @@
     box-shadow: 0px 8px 24px 0px rgba(0, 0, 0, 0.3);
 }
 
+.menu.sub-menu {
+    min-width: 0;
+}
+
 .menu-item {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     padding: var(--space-1) var(--space-1-5);
     cursor: pointer;
     color: var(--main-text-color);
@@ -38,6 +41,17 @@
     .label {
         @include mixins.ellipsis();
         text-decoration: none;
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    // Push the submenu chevron to the right; the label between the
+    // icon and the chevron is `flex: 1` so it fills the remaining
+    // space without leaving an awkward gap when there's no chevron
+    // (e.g., radio sub-items have only icon + label).
+    > .fa-chevron-right {
+        margin-left: var(--space-1);
+        flex-shrink: 0;
     }
 }
 
@@ -45,8 +59,7 @@
     color: var(--main-text-color);
 
     &:hover {
-        background-color: var(--accent-color);
-        color: var(--button-text-color);
+        background-color: var(--hover-bg-color);
         border-radius: 2px;
     }
 }
@@ -64,4 +77,12 @@
     margin-right: var(--space-1);
     opacity: 0.7;
     flex-shrink: 0;
+}
+
+// Radio/checkbox indicator. More opaque + slightly larger than the
+// regular icon slot so the active selection actually pops at a glance.
+.menu-item-check {
+    opacity: 1;
+    font-size: 12px;
+    color: var(--accent-color);
 }

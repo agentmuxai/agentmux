@@ -383,6 +383,11 @@ declare global {
         subItems?: MenuItem[];
         onClick?: (e: MouseEvent) => void;
         divider?: boolean;
+        // Radio/checkbox indicator. When set, FlyoutMenu renders a
+        // check icon in the icon slot for true and a blank-width
+        // spacer for false (so radio groups stay aligned). When
+        // unset, the regular `icon` field renders.
+        checked?: boolean;
     };
 
     type MenuButtonProps = {

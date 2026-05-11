@@ -65,4 +65,13 @@
     --color-hover: var(--hover-bg-color);
     --color-border: var(--border-color);
     --color-modalbg: var(--modal-bg-color);
+
+    .agent-view,
+    .agent-view .agent-document {
+        background: #000;
+    }
+
+    .agent-view .hover-strip-host .node-strip {
+        background: #000;
+    }
 }

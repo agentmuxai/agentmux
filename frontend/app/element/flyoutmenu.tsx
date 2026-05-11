@@ -63,6 +63,8 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
         if (!isOpen()) return;
         const target = e.target as Node;
         if (referenceEl?.contains(target) || floatingEl?.contains(target)) return;
+        const el = target instanceof Element ? target : (target as Node).parentElement;
+        if (el?.closest(".menu, .sub-menu")) return;
         onOpenChangeMenu(false);
     };
 
@@ -154,6 +156,9 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
 
     const handleOnClick = (e: MouseEvent, item: MenuItem) => {
         e.stopPropagation();
+        if (item.subItems) {
+            return;
+        }
         onOpenChangeMenu(false);
         item.onClick?.(e);
     };
@@ -195,8 +200,20 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
                                     props.renderMenuItem(item, menuItemProps)
                                 ) : (
                                     <div {...menuItemProps}>
-                                        <Show when={item.icon}>
-                                            <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                                        <Show
+                                            when={item.checked === undefined}
+                                            fallback={
+                                                <i
+                                                    class={clsx(
+                                                        "fa-solid fa-fw menu-item-icon menu-item-check",
+                                                        { "fa-check": item.checked === true },
+                                                    )}
+                                                />
+                                            }
+                                        >
+                                            <Show when={item.icon}>
+                                                <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                                            </Show>
                                         </Show>
                                         <span class="label">{item.label}</span>
                                         <Show when={item.subItems}>
@@ -292,8 +309,20 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
                         props.renderMenuItem(item, menuItemProps)
                     ) : (
                         <div {...menuItemProps}>
-                            <Show when={item.icon}>
-                                <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                            <Show
+                                when={item.checked === undefined}
+                                fallback={
+                                    <i
+                                        class={clsx(
+                                            "fa-solid fa-fw menu-item-icon menu-item-check",
+                                            { "fa-check": item.checked === true },
+                                        )}
+                                    />
+                                }
+                            >
+                                <Show when={item.icon}>
+                                    <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                                </Show>
                             </Show>
                             <span class="label">{item.label}</span>
                             <Show when={item.subItems}>
