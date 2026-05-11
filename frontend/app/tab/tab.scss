@@ -1,6 +1,8 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../element/menu-frame" as menuFrame;
+
 .tab {
     position: absolute;
     // Content-sized tabs (AgentMux's style). Width follows the tab
@@ -232,14 +234,11 @@ body:not(.nohover) .tab.tab-colored.dragging {
 // --- Tab color picker popup ---
 
 .tab-context-panel {
+    @include menuFrame.menu-frame;
     display: flex;
     flex-direction: column;
     gap: var(--space-1-5);
     padding: var(--space-2);
-    background: var(--main-bg-color);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
     user-select: none;
 }
 

@@ -140,85 +140,68 @@ function showJsContextMenu(
     });
 
     const menuEl = document.createElement("div");
+    menuEl.className = "menu";
     menuEl.setAttribute("data-pane-overlay", "");
-    Object.assign(menuEl.style, {
-        position: "absolute",
-        left: `${position.x}px`,
-        top: `${position.y}px`,
-        background: "var(--main-bg-color, #222)",
-        border: "1px solid var(--border-color, #444)",
-        borderRadius: "6px",
-        padding: "4px 0",
-        minWidth: "160px",
-        boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
-        fontFamily: "var(--termfontfamily, sans-serif)",
-        fontSize: "13px",
-        color: "var(--main-text-color, #ddd)",
-    });
+    menuEl.style.left = `${position.x}px`;
+    menuEl.style.top = `${position.y}px`;
 
     function renderItems(container: HTMLElement, itemList: NativeContextMenuItem[]) {
         for (const item of itemList) {
             if (item.type === "separator") {
                 const sep = document.createElement("div");
-                Object.assign(sep.style, {
-                    height: "1px", margin: "4px 8px",
-                    background: "var(--border-color, #444)",
-                });
+                sep.className = "menu-divider";
                 container.appendChild(sep);
                 continue;
             }
             if (item.visible === false) continue;
 
             const row = document.createElement("div");
-            Object.assign(row.style, {
-                padding: "6px 24px 6px 12px",
-                cursor: item.enabled === false ? "default" : "pointer",
-                opacity: item.enabled === false ? "0.4" : "1",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                whiteSpace: "nowrap",
-                position: "relative",
-            });
-            if (item.enabled !== false) {
-                row.addEventListener("mouseenter", () => { row.style.background = "var(--accent-color, #335)"; });
-                row.addEventListener("mouseleave", () => { row.style.background = ""; });
+            row.className = "menu-item";
+            if (item.enabled === false) {
+                row.style.cursor = "default";
+                row.style.opacity = "0.4";
+                row.style.pointerEvents = "none";
             }
 
-            // Radio/checkbox indicator
-            if (item.type === "radio" || item.type === "checkbox") {
-                const check = document.createElement("span");
-                check.style.width = "14px";
-                check.style.display = "inline-block";
-                check.textContent = item.checked ? "●" : "";
-                if (item.type === "checkbox" && item.checked) check.textContent = "✓";
-                row.appendChild(check);
+            // Radio/checkbox indicator slot — same FA-icon shape the
+            // FlyoutMenu uses. When checked, render fa-check in accent
+            // color; when unchecked but in a check-capable group,
+            // render a blank-width spacer so labels stay aligned.
+            const isCheckableType = item.type === "radio" || item.type === "checkbox";
+            if (isCheckableType || item.checked !== undefined) {
+                const icon = document.createElement("i");
+                icon.className = item.checked
+                    ? "fa-solid fa-fw fa-check menu-item-icon menu-item-check"
+                    : "fa-solid fa-fw menu-item-icon menu-item-check";
+                row.appendChild(icon);
             }
 
             const label = document.createElement("span");
+            label.className = "label";
             label.textContent = item.label ?? "";
             row.appendChild(label);
 
             if (item.submenu && item.submenu.length > 0) {
-                const arrow = document.createElement("span");
-                arrow.textContent = "▸";
-                arrow.style.marginLeft = "auto";
+                // The submenu uses `position: absolute; left: 100%` to
+                // anchor at the row's right edge. That requires the
+                // row to be a positioned ancestor; otherwise `left:
+                // 100%` resolves against the outer .menu and every
+                // submenu opens at the same vertical position.
+                row.style.position = "relative";
+
+                const arrow = document.createElement("i");
+                arrow.className = "fa-sharp fa-solid fa-chevron-right";
                 row.appendChild(arrow);
 
                 const sub = document.createElement("div");
+                sub.className = "menu sub-menu";
                 sub.setAttribute("data-pane-overlay", "");
-                Object.assign(sub.style, {
-                    display: "none", position: "absolute",
-                    left: "100%", top: "0", zIndex: "100000",
-                    background: "var(--main-bg-color, #222)",
-                    border: "1px solid var(--border-color, #444)",
-                    borderRadius: "6px", padding: "4px 0",
-                    minWidth: "140px",
-                    boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
-                });
+                sub.style.display = "none";
+                sub.style.left = "100%";
+                sub.style.top = "0";
                 renderItems(sub, item.submenu);
                 row.appendChild(sub);
-                row.addEventListener("mouseenter", () => { sub.style.display = "block"; });
+                row.addEventListener("mouseenter", () => { sub.style.display = ""; });
                 row.addEventListener("mouseleave", () => { sub.style.display = "none"; });
             } else if (item.enabled !== false) {
                 row.addEventListener("click", () => {

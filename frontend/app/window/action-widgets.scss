@@ -1,6 +1,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../element/menu-frame" as menuFrame;
+
 .action-widgets {
     display: flex;
     flex-direction: row;
@@ -80,42 +82,38 @@
 // ── More dropdown ─────────────────────────────────────────────────────────────
 
 .action-widget-more-dropdown {
-    // Dropdown sits in the flyout slot — needs to paint above modals
-    // it's anchored against (it's part of the window action surface,
-    // not modal content).
+    @include menuFrame.menu-frame;
     z-index: var(--z-flyout-menu);
-    background: var(--main-bg-color);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
     min-width: 170px;
-    padding: var(--space-1) 0;
     user-select: none;
 
     .action-widget-more-item {
         display: flex;
-        flex-direction: row;
         align-items: center;
-        gap: 10px;
-        padding: var(--space-1-5) 14px;
+        padding: var(--space-1) var(--space-1-5);
         cursor: pointer;
-        font-size: 13px;
-        color: var(--secondary-text-color);
+        color: var(--main-text-color);
+        font-size: 12px;
+        line-height: normal;
+        letter-spacing: -0.12px;
+        border-radius: 2px;
+        gap: var(--space-1);
 
         &:hover {
-            background: var(--hoverbg-color, rgba(255, 255, 255, 0.08));
-            color: white;
+            background: var(--hover-bg-color);
         }
 
         .action-widget-more-item-icon {
-            width: 16px;
+            width: 14px;
             text-align: center;
             flex-shrink: 0;
-            font-size: 13px;
+            font-size: 11px;
         }
 
         .action-widget-more-item-label {
             text-transform: capitalize;
+            flex: 1 1 auto;
+            min-width: 0;
         }
     }
 }
