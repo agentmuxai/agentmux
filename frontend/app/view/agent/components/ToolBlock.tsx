@@ -328,7 +328,6 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                         ⧉
                     </button>
                 </Show>
-                <span class="agent-tool-ellipsis">…</span>
             </div>
             {/* All expansion now routes through the portal overlay — running,
                 failed, success all collapse by default (SPEC_AGENT_PANE_FOLLOWUPS

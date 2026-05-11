@@ -25,12 +25,20 @@
         user-select: text;
         cursor: text;
 
+        .markdown,
+        .markdown > .content {
+            display: block;
+            height: auto;
+            overflow: visible;
+        }
+
         &.thinking-block {
             opacity: 0.6;
             font-style: italic;
             border-left: 2px solid var(--secondary-text-color);
             padding-left: var(--space-2);
             background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+            margin-block: 4px;
         }
 
         p {
@@ -120,13 +128,6 @@
                 font-size: 11px;
             }
 
-            .agent-tool-ellipsis {
-                flex-shrink: 0;
-                margin-left: var(--space-1);
-                color: var(--secondary-text-color);
-                opacity: 0.6;
-                font-size: 11px;
-            }
         }
 
         // When pinned open, the click-to-pin state gets a subtle accent
