@@ -5,7 +5,7 @@ import { Block } from "@/app/block/block";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { TabModalLayer } from "@/app/tab/TabModalLayer";
 import { CenteredDiv } from "@/element/quickelems";
-import logoUrl from "@/logos/agentmux-logo-brain-alternate.svg?url";
+import logoUrl from "@/app/asset/logo-brain.svg?url";
 import { ContentRenderer, NodeModel, PreviewRenderer, TileLayout } from "@/layout/index";
 import { TileLayoutContents } from "@/layout/lib/types";
 import { atoms, createBlock, getApi } from "@/store/global";
