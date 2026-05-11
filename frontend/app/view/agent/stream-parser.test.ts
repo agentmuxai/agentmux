@@ -244,6 +244,65 @@ describe("flushPending", () => {
     });
 });
 
+// ── tool_chunk ─────────────────────────────────────────────────────────────
+
+describe("tool_chunk parsing", () => {
+    test("eventToNode returns null for tool_chunk (no DocumentNode)", () => {
+        const node = parser.parseStreamEvent({
+            type: "tool_chunk",
+            id: "tc_x",
+            kind: "stdout",
+            content: "hi",
+            timestamp: 42,
+        } as StreamEvent);
+        expect(node).toBeNull();
+    });
+
+    test("parseToolChunkEvent normalizes the event into a chunk record", () => {
+        const out = parser.parseToolChunkEvent({
+            type: "tool_chunk",
+            id: "tc_x",
+            kind: "stderr",
+            content: "warn\n",
+            timestamp: 99,
+        });
+        expect(out.toolId).toBe("tc_x");
+        expect(out.chunk).toEqual({
+            kind: "stderr",
+            content: "warn\n",
+            timestamp: 99,
+        });
+    });
+
+    test("parseToolChunkEvent defaults timestamp to the injected now", () => {
+        const out = parser.parseToolChunkEvent(
+            {
+                type: "tool_chunk",
+                id: "tc_x",
+                kind: "stdout",
+                content: "hi",
+            },
+            12345,
+        );
+        expect(out.chunk.timestamp).toBe(12345);
+    });
+
+    test("tool_chunk does not disturb text accumulation", () => {
+        const t1 = parser.parseStreamEvent({ type: "text", content: "Hello " });
+        const chunkNode = parser.parseStreamEvent({
+            type: "tool_chunk",
+            id: "tc_y",
+            kind: "stdout",
+            content: "ignore me",
+        } as StreamEvent);
+        const t2 = parser.parseStreamEvent({ type: "text", content: "world" });
+        expect(chunkNode).toBeNull();
+        // Text node IDs stay equal — tool_chunk did NOT break accumulation.
+        expect(t1!.id).toBe(t2!.id);
+        expect((t2 as MarkdownNode).content).toBe("Hello world");
+    });
+});
+
 // ── reset ───────────────────────────────────────────────────────────────────
 
 describe("reset", () => {

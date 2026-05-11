@@ -13,7 +13,7 @@
  * on every mount. Issue #728 gap 4.
  */
 
-import type { DocumentNode } from "../../view/agent/types";
+import type { DocumentNode, ToolLogChunk, ToolNode, ToolStreamingLog } from "../../view/agent/types";
 import {
     AgentDocumentCommand,
     AgentDocumentState,
@@ -115,7 +115,7 @@ export function update(
                 if (existing.type === "markdown" && upd.type === "markdown") {
                     arr[idx] = { ...existing, content: upd.content };
                 } else {
-                    arr[idx] = upd;
+                    arr[idx] = mergeReplacement(existing, upd);
                 }
                 updateApplied++;
             }
@@ -130,7 +130,7 @@ export function update(
                 const idx = indexById.get(n.id);
                 if (idx != null) {
                     const arr = ensureClone();
-                    arr[idx] = n;
+                    arr[idx] = mergeReplacement(arr[idx], n);
                     collidedAndUpdated++;
                     continue;
                 }
@@ -158,6 +158,58 @@ export function update(
                         collidedAndUpdated,
                         updateApplied,
                         updateDropped,
+                    },
+                ],
+            };
+        }
+
+        case "ToolChunkAppend": {
+            const idx = findToolIndex(state, command.toolId);
+            if (idx === -1) {
+                return {
+                    state,
+                    events: [
+                        {
+                            type: "tool-chunk-dropped",
+                            toolId: command.toolId,
+                            reason: nodeReasonFor(state, command.toolId),
+                        },
+                    ],
+                };
+            }
+            const tool = state.nodes[idx] as ToolNode;
+            // Dedup against the last-stored chunk on (timestamp + kind +
+            // content). This matters during history replay where the
+            // backend rebroadcasts the chunk stream and we mustn't
+            // double-buffer. Order is preserved (chunks always arrive
+            // monotonic-by-timestamp from a single provider), so a
+            // last-chunk compare is sufficient.
+            const existingChunks = tool.log?.chunks ?? [];
+            if (isDuplicate(existingChunks, command.chunk)) {
+                return {
+                    state,
+                    events: [
+                        {
+                            type: "tool-chunk-dropped",
+                            toolId: command.toolId,
+                            reason: "duplicate",
+                        },
+                    ],
+                };
+            }
+            const nextLog: ToolStreamingLog = {
+                chunks: [...existingChunks, command.chunk],
+                open: tool.log?.open ?? (tool.status === "running"),
+            };
+            const nextNodes = state.nodes.slice();
+            nextNodes[idx] = { ...tool, log: nextLog };
+            return {
+                state: { ...state, nodes: nextNodes },
+                events: [
+                    {
+                        type: "tool-chunk-appended",
+                        toolId: command.toolId,
+                        chunkCount: nextLog.chunks.length,
                     },
                 ],
             };
@@ -226,4 +278,73 @@ function shouldSuppressTruncate(
     if (state.nodes.length === 0) return false;
     if (state.sessionStartedAt == null) return false;
     return now - state.sessionStartedAt > graceMs;
+}
+
+/**
+ * Locate the index of a ToolNode by id, or -1 if either the id is
+ * unknown or the matching node is not a tool. The two failure modes
+ * map to distinct audit-event reasons.
+ */
+function findToolIndex(state: AgentDocumentState, toolId: string): number {
+    if (!state.nodeIdSet.has(toolId)) return -1;
+    for (let i = 0; i < state.nodes.length; i++) {
+        if (state.nodes[i].id === toolId) {
+            return state.nodes[i].type === "tool" ? i : -1;
+        }
+    }
+    return -1;
+}
+
+function nodeReasonFor(
+    state: AgentDocumentState,
+    toolId: string,
+): "unknown-tool-id" | "node-not-tool" {
+    if (!state.nodeIdSet.has(toolId)) return "unknown-tool-id";
+    for (const n of state.nodes) {
+        if (n.id === toolId && n.type !== "tool") return "node-not-tool";
+    }
+    return "unknown-tool-id";
+}
+
+function isDuplicate(
+    chunks: ReadonlyArray<ToolLogChunk>,
+    incoming: ToolLogChunk,
+): boolean {
+    if (chunks.length === 0) return false;
+    const last = chunks[chunks.length - 1];
+    return (
+        last.timestamp === incoming.timestamp &&
+        last.kind === incoming.kind &&
+        last.content === incoming.content
+    );
+}
+
+/**
+ * When a tool's `tool_result` arrives via StreamFlush, the replacement
+ * node is built from scratch by the parser and doesn't carry the
+ * live-log buffer that was accumulated on the running node. Preserve
+ * `log.chunks` across the replacement and flip `log.open = false`
+ * since the tool has terminated. For non-tool nodes the behavior is
+ * the same as the prior unconditional replacement.
+ */
+function mergeReplacement(existing: DocumentNode, replacement: DocumentNode): DocumentNode {
+    if (existing.type !== "tool" || replacement.type !== "tool") {
+        return replacement;
+    }
+    const existingLog = (existing as ToolNode).log;
+    if (!existingLog || existingLog.chunks.length === 0) {
+        // No buffer to carry. If the replacement is terminal, keep
+        // the parser's view (likely undefined). Otherwise nothing
+        // to merge.
+        return replacement;
+    }
+    const terminal =
+        replacement.status === "success" ||
+        replacement.status === "failed" ||
+        replacement.status === "denied";
+    const mergedLog: ToolStreamingLog = {
+        chunks: existingLog.chunks,
+        open: terminal ? false : existingLog.open,
+    };
+    return { ...(replacement as ToolNode), log: mergedLog };
 }

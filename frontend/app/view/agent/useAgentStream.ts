@@ -430,6 +430,16 @@ export function useAgentStream({
                         }
                     } else if (event.type === "tool_result") {
                         dispatchPane(blockId, { type: "ToolEnd" });
+                    } else if (event.type === "tool_chunk") {
+                        // Live-log streaming (SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md):
+                        // route chunks through their own reducer command
+                        // instead of forcing the full node list through
+                        // StreamFlush. Skip the per-event parseLine →
+                        // node → pendingNew path; the reducer mutates
+                        // one ToolNode in place.
+                        const { toolId, chunk } = parser.parseToolChunkEvent(event);
+                        dispatchDoc(blockId, { type: "ToolChunkAppend", toolId, chunk });
+                        continue;
                     }
                     const node = parser.parseLine(JSON.stringify(event));
                     if (!node) continue;
