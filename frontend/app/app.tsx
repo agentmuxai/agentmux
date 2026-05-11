@@ -143,9 +143,23 @@ function AppSettingsUpdater() {
         } else {
             document.body.style.removeProperty("--main-bg-color");
         }
-        // Apply Tauri-level window transparency and platform blur effects
+        // Apply Tauri-level window transparency and platform blur effects.
+        // The IPC call can throw early in startup if window.api hasn't been
+        // wired yet (visible as "[getApi] called before window.api exists" in
+        // the console). Without try/catch the throw aborts this effect and
+        // SolidJS never re-runs it on the next settings tick — leaving the
+        // CSS classes set above untouched, and the body opaque. The CEF host
+        // also reads CefSettings.background_color directly at init time, so
+        // the IPC is only the "Tauri-side window.transparent" mirror; we can
+        // safely skip it when the API isn't ready.
         const isBlur = windowSettings?.["window:blur"] ?? false;
-        getApi().setWindowTransparency(isTransparentOrBlur, isBlur, opacity);
+        try {
+            getApi().setWindowTransparency(isTransparentOrBlur, isBlur, opacity);
+        } catch (e) {
+            // Swallow — the CSS path above is what actually drives visual
+            // transparency on Linux/Wayland under CEF. The Tauri-era IPC
+            // mirror is best-effort.
+        }
 
         // Apply color theme
         const theme = windowSettings?.["window:theme"];
