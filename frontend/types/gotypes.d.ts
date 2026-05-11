@@ -1106,8 +1106,6 @@ declare global {
     // wconfig.SettingsType
     type SettingsType = {
         "app:*"?: boolean;
-        "app:globalhotkey"?: string;
-        "app:dismissarchitecturewarning"?: boolean;
         "app:defaultnewblock"?: string;
         "app:showoverlayblocknums"?: boolean;
         "term:*"?: boolean;
@@ -1126,11 +1124,8 @@ declare global {
         "cmd:env"?: {[key: string]: string};
         "blockheader:*"?: boolean;
         "blockheader:showblockids"?: boolean;
-        "preview:showhiddenfiles"?: boolean;
-        "tab:preset"?: string;
         "tab:color"?: string | null;
         "widget:*"?: boolean;
-        "widget:showhelp"?: boolean;
         "widget:icononly"?: boolean;
         "window:*"?: boolean;
         "window:transparent"?: boolean;
@@ -1139,21 +1134,12 @@ declare global {
         "window:bgcolor"?: string;
         "window:reducedmotion"?: boolean;
         "window:tilegapsize"?: number;
-        "window:showmenubar"?: boolean;
-        "window:nativetitlebar"?: boolean;
-        "window:disablehardwareacceleration"?: boolean;
-        "window:maxtabcachesize"?: number;
         "window:magnifiedblockopacity"?: number;
         "window:magnifiedblocksize"?: number;
         "window:magnifiedblockblurprimarypx"?: number;
         "window:magnifiedblockblursecondarypx"?: number;
-        "window:confirmclose"?: boolean;
-        "window:savelastwindow"?: boolean;
-        "window:dimensions"?: string;
-        "window:zoom"?: number;
         "window:theme"?: string;
         "telemetry:*"?: boolean;
-        "telemetry:enabled"?: boolean;
         "telemetry:interval"?: number;
         "telemetry:numpoints"?: number;
         "conn:*"?: boolean;

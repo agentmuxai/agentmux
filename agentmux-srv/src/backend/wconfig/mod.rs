@@ -62,15 +62,15 @@ mod tests {
         let s = SettingsType {
             window_transparent: true,
             window_opacity: Some(0.9),
-            window_zoom: Some(1.5),
-            window_dimensions: "1920x1080".to_string(),
+            window_bg_color: "#222".to_string(),
+            window_tile_gap_size: Some(5),
             ..Default::default()
         };
         let json = serde_json::to_string(&s).unwrap();
         assert!(json.contains("\"window:transparent\":true"));
         assert!(json.contains("\"window:opacity\":0.9"));
-        assert!(json.contains("\"window:zoom\":1.5"));
-        assert!(json.contains("\"window:dimensions\":\"1920x1080\""));
+        assert!(json.contains("\"window:bgcolor\":\"#222\""));
+        assert!(json.contains("\"window:tilegapsize\":5"));
     }
 
     #[test]
@@ -81,7 +81,7 @@ mod tests {
             "term:scrollback": 5000,
             "window:transparent": true,
             "window:opacity": 0.85,
-            "telemetry:enabled": true
+            "telemetry:interval": 1.5
         }"#;
         let s: SettingsType = serde_json::from_str(json_str).unwrap();
         assert_eq!(s.term_font_size, 13.0);
@@ -89,7 +89,7 @@ mod tests {
         assert_eq!(s.term_scrollback, Some(5000));
         assert!(s.window_transparent);
         assert_eq!(s.window_opacity, Some(0.85));
-        assert!(s.telemetry_enabled);
+        assert_eq!(s.telemetry_interval, 1.5);
     }
 
     #[test]

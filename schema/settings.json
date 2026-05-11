@@ -8,12 +8,6 @@
         "app:*": {
           "type": "boolean"
         },
-        "app:globalhotkey": {
-          "type": "string"
-        },
-        "app:dismissarchitecturewarning": {
-          "type": "boolean"
-        },
         "app:defaultnewblock": {
           "type": "string"
         },
@@ -71,16 +65,7 @@
         "blockheader:showblockids": {
           "type": "boolean"
         },
-        "preview:showhiddenfiles": {
-          "type": "boolean"
-        },
-        "tab:preset": {
-          "type": "string"
-        },
         "widget:*": {
-          "type": "boolean"
-        },
-        "widget:showhelp": {
           "type": "boolean"
         },
         "widget:icononly": {
@@ -107,18 +92,6 @@
         "window:tilegapsize": {
           "type": "integer"
         },
-        "window:showmenubar": {
-          "type": "boolean"
-        },
-        "window:nativetitlebar": {
-          "type": "boolean"
-        },
-        "window:disablehardwareacceleration": {
-          "type": "boolean"
-        },
-        "window:maxtabcachesize": {
-          "type": "integer"
-        },
         "window:magnifiedblockopacity": {
           "type": "number"
         },
@@ -131,27 +104,12 @@
         "window:magnifiedblockblursecondarypx": {
           "type": "integer"
         },
-        "window:confirmclose": {
-          "type": "boolean"
-        },
-        "window:savelastwindow": {
-          "type": "boolean"
-        },
-        "window:dimensions": {
-          "type": "string"
-        },
-        "window:zoom": {
-          "type": "number"
-        },
         "window:theme": {
           "type": "string",
           "enum": ["default", "midnight", "high-contrast", "monokai", "nord", "dracula", "catppuccin", "tokyo-night", "gruvbox"],
           "description": "UI color theme. Options: default (dark grey + blue), midnight (deep navy), high-contrast (black + cyan), monokai (warm dark + green), nord (arctic blue-grey), dracula (purple dark), catppuccin (pastel dark + mauve), tokyo-night (blue-purple), gruvbox (retro warm + yellow)"
         },
         "telemetry:*": {
-          "type": "boolean"
-        },
-        "telemetry:enabled": {
           "type": "boolean"
         },
         "telemetry:interval": {
@@ -164,12 +122,6 @@
           "default": 120
         },
         "conn:*": {
-          "type": "boolean"
-        },
-        "conn:askbeforewshinstall": {
-          "type": "boolean"
-        },
-        "conn:wshenabled": {
           "type": "boolean"
         }
       },

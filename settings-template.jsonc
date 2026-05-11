@@ -22,21 +22,12 @@
     // "window:blur":              false,
     // "window:opacity":           1.0,
     // "window:bgcolor":           "",
-    // "window:zoom":              1.0,
     // "window:tilegapsize":       3,
-    // "window:showmenubar":       false,
-    // "window:nativetitlebar":    false,
-    // "window:confirmclose":      false,
-    // "window:savelastwindow":    true,
-    // "window:dimensions":        "",
     // "window:reducedmotion":     false,
     // "window:magnifiedblockopacity": 0.6,
     // "window:magnifiedblocksize":    0.9,
-    // "window:maxtabcachesize":   10,
-    // "window:disablehardwareacceleration": false,
 
     // -- App --
-    // "app:globalhotkey":         "",
     // "app:defaultnewblock":      "",
     // "app:showoverlayblocknums": false,
 
@@ -44,17 +35,13 @@
     // "cmd:env":                  {},
 
     // -- Telemetry --
-    // "telemetry:enabled":        true,
+    // telemetry:interval/numpoints actually drive the local sysinfo widget
+    // polling rate (no data transmission). These keys will be renamed to
+    // sysinfo:* in a follow-up release.
     // "telemetry:interval":       1.0,
     // "telemetry:numpoints":      120,
 
-    // -- Connections --
-    // "conn:wshenabled":          true,
-    // "conn:askbeforewshinstall": true,
-
     // -- Other --
-    // "widget:icononly":           false,
-    // "blockheader:showblockids": false,
-    // "preview:showhiddenfiles":  false,
-    // "tab:preset":               ""
+    // "widget:icononly":          false,
+    // "blockheader:showblockids": false
 }
