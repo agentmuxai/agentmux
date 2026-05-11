@@ -1,8 +1,9 @@
 # Theme picker in hamburger menu + midnight agent-pane black background
 
-**Status:** Proposed
+**Status:** Implemented (PR #791)
 **Owner:** AgentA
 **Date:** 2026-05-10
+**Revised:** 2026-05-10 — first cut targeted the right-click tabbar context menu (`base-menus.ts` `createTabBarMenu`); corrected to the actual hamburger (≡) button in `frontend/app/tab/tabbar.tsx` (`tabBarMenuItems`). Opacity moved alongside Theme. Added `Exit` entry and softened menu-item hover color (`--accent-color` → `--hover-bg-color`).
 **Driving observation:** AgentMux ships nine themes (`default`, `midnight`, `high-contrast`, `monokai`, `nord`, `dracula`, `catppuccin`, `tokyo-night`, `gruvbox`) and the `window:theme` setting is fully wired end-to-end, but the only way for a user to switch is to hand-edit `settings.json`. We want a `Theme` entry in the hamburger (window-header) menu that expands to a radio list of the available themes. Additionally, the `midnight` theme's deep-navy background (`rgb(10, 12, 22)`) is too light for the agent pane; midnight specifically should paint the agent pane pure black.
 
 ---
@@ -25,7 +26,7 @@ The implementation is genuinely additive — no new state, no new RPC, no new in
 
 ## 2. UI: hamburger menu `Theme` submenu
 
-Insert a new `Theme` entry into `createTabBarMenu()` in `frontend/app/menu/base-menus.ts`, immediately after `Opacity` (both are presentation prefs, they belong together). The submenu is a radio list — exactly one theme is active.
+The hamburger (≡) button lives in `frontend/app/tab/tabbar.tsx` line 623, wrapped in `<FlyoutMenu items={tabBarMenuItems()}>`. `tabBarMenuItems` is a `createMemo<MenuItem[]>` returning a static list (New Tab / New Window / Settings / Help). Insert `Theme` (and `Opacity`, moved from the right-click context menu) between the New Window divider and Settings. The submenu is a radio list — exactly one theme is active — using a new `checked?: boolean` field on `MenuItem` that `FlyoutMenu` renders as a check icon (true) or blank-width spacer (false).
 
 ### Theme list, in menu order
 

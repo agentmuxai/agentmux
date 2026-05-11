@@ -45,8 +45,7 @@
     color: var(--main-text-color);
 
     &:hover {
-        background-color: var(--accent-color);
-        color: var(--button-text-color);
+        background-color: var(--hover-bg-color);
         border-radius: 2px;
     }
 }
