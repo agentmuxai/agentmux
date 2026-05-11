@@ -653,6 +653,11 @@ function TabBar(props: TabBarProps): JSX.Element {
             },
             { label: "", divider: true },
             {
+                label: "Help",
+                icon: "circle-question",
+                onClick: () => fireAndForget(() => createBlock({ meta: { view: "help" } })),
+            },
+            {
                 label: "Settings",
                 icon: "cog",
                 onClick: () =>
@@ -660,11 +665,6 @@ function TabBar(props: TabBarProps): JSX.Element {
                         const path = await invokeCommand<string>("ensure_settings_file");
                         await invokeCommand("open_in_editor", { path });
                     }),
-            },
-            {
-                label: "Help",
-                icon: "circle-question",
-                onClick: () => fireAndForget(() => createBlock({ meta: { view: "help" } })),
             },
             { label: "", divider: true },
             {
