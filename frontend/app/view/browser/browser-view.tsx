@@ -50,6 +50,13 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
     let placeholderRef: HTMLDivElement | undefined;
     let resizeObserver: ResizeObserver | null = null;
     let positionInterval: ReturnType<typeof setInterval> | null = null;
+    // Last rect we actually sent to the host. syncPosition compares against
+    // this and skips the IPC when nothing changed. Without this gate the
+    // safety-net interval fired browser_pane_resize 5 ×/sec even when the
+    // pane was steady, and each call ran controller.set_size +
+    // set_position + window.layout() on the UI thread — visible as a 200ms
+    // DOM blink as Views relayouted on every tick.
+    let lastSentRect: { x: number; y: number; width: number; height: number } | null = null;
     // SolidJS signal — must be reactive so <Show when={!paneCreated()}> re-runs
     // when the pane is created and hides the empty-state placeholder.
     const [paneCreated, setPaneCreated] = createSignal(false);
@@ -71,9 +78,20 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
 
     const syncPosition = () => {
         if (!placeholderRef || !paneCreated() || model.closed) return;
+        const rect = paneRect();
+        if (
+            lastSentRect &&
+            lastSentRect.x === rect.x &&
+            lastSentRect.y === rect.y &&
+            lastSentRect.width === rect.width &&
+            lastSentRect.height === rect.height
+        ) {
+            return;
+        }
+        lastSentRect = rect;
         invokeCommand("browser_pane_resize", {
             block_id: model.blockId,
-            ...paneRect(),
+            ...rect,
         }).catch(() => {});
     };
 

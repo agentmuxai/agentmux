@@ -123,6 +123,13 @@ if [ -d dist/schema ]; then
     cp -r dist/schema "$APPDIR/usr/share/agentmux/"
 fi
 
+# --- 6b. VERSION marker — read by AppRun to key the extract-once-cache.
+#         AppRun re-execs from $HOME/.local/share/agentmux/extracted/<VERSION>/
+#         on second+ launches to skip SquashFS decompression. Spec:
+#         docs/specs/linux-appimage-cold-launch-tax-2026-05-08.md (Phase 2).
+mkdir -p "$APPDIR/usr/share/agentmux"
+echo "$VERSION" > "$APPDIR/usr/share/agentmux/VERSION"
+
 # --- 7. AppRun + helper script + assets the installer reads ---
 cp scripts/linux-apprun.sh "$APPDIR/AppRun"
 chmod +x "$APPDIR/AppRun"
