@@ -26,6 +26,7 @@ const SELECTOR = "[data-pane-overlay]";
 
 const tracked = new WeakSet<Element>();
 const observers = new WeakMap<Element, ResizeObserver>();
+const styleObservers = new WeakMap<Element, MutationObserver>();
 const trackedList = new Set<Element>();
 
 let started = false;
@@ -48,6 +49,11 @@ function scheduleSweep(): void {
 
 function updateRect(el: Element): void {
     if (!(el instanceof HTMLElement)) return;
+    const cs = window.getComputedStyle(el);
+    if (cs.visibility === "hidden" || cs.display === "none") {
+        __deleteAutoOverlayRect(el);
+        return;
+    }
     __setAutoOverlayRect(el, __rectFromElement(el));
 }
 
@@ -61,6 +67,9 @@ function track(el: Element): void {
     const ro = new ResizeObserver(() => updateRect(el));
     ro.observe(el);
     observers.set(el, ro);
+    const so = new MutationObserver(() => updateRect(el));
+    so.observe(el, { attributes: true, attributeFilter: ["style", "class"] });
+    styleObservers.set(el, so);
     updateRect(el);
 }
 
@@ -70,6 +79,8 @@ function untrack(el: Element): void {
     trackedList.delete(el);
     observers.get(el)?.disconnect();
     observers.delete(el);
+    styleObservers.get(el)?.disconnect();
+    styleObservers.delete(el);
     __deleteAutoOverlayRect(el);
 }
 
