@@ -182,6 +182,13 @@ function showJsContextMenu(
             row.appendChild(label);
 
             if (item.submenu && item.submenu.length > 0) {
+                // The submenu uses `position: absolute; left: 100%` to
+                // anchor at the row's right edge. That requires the
+                // row to be a positioned ancestor; otherwise `left:
+                // 100%` resolves against the outer .menu and every
+                // submenu opens at the same vertical position.
+                row.style.position = "relative";
+
                 const arrow = document.createElement("i");
                 arrow.className = "fa-sharp fa-solid fa-chevron-right";
                 row.appendChild(arrow);
