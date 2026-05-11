@@ -2,22 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 @use "../mixins.scss";
+@use "./menu-frame" as menuFrame;
 
 .menu {
+    @include menuFrame.menu-frame;
     position: absolute;
     z-index: var(--z-flyout-menu);
     display: flex;
     max-width: 400px;
     min-width: 125px;
-    padding: var(--space-0-5);
     flex-direction: column;
     justify-content: flex-end;
     align-items: flex-start;
     gap: 1px;
-    border-radius: 4px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    background: var(--main-bg-color);
-    box-shadow: 0px 8px 24px 0px rgba(0, 0, 0, 0.3);
 }
 
 .menu.sub-menu {
