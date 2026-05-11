@@ -11,7 +11,7 @@
         padding: var(--space-0-5) var(--space-1);
         display: flex;
         flex-direction: column;
-        gap: 1px;
+        gap: 4px;
         user-select: text;
         cursor: text;
         // Isolate layout/paint from siblings — critical for typing smoothness
@@ -131,7 +131,7 @@
         // don't have to wait for measureElement to settle.
         display: flex;
         flex-direction: column;
-        gap: 1px;
+        gap: 4px;
         flex-shrink: 0;
     }
 

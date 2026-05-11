@@ -309,7 +309,13 @@ export class ClaudeCodeStreamParser {
     }
 
     /**
-     * Extract relevant detail from tool params for summary
+     * Extract relevant detail from tool params for summary. Returns the
+     * full text — the .agent-tool-name CSS rule clips with
+     * `text-overflow: ellipsis` based on actual row width, so the
+     * ellipsis position recomputes for free on zoom and pane resize.
+     * Pre-truncating here would freeze the ellipsis at a fixed character
+     * count and leave blank space when the row is wider than the
+     * truncated string. (See SPEC_DYNAMIC_TOOL_SUMMARY_TRUNCATION.md.)
      */
     private extractToolDetail(tool: string, params: Record<string, any>): string {
         switch (tool) {
@@ -318,17 +324,13 @@ export class ClaudeCodeStreamParser {
             case "Write":
                 return params.file_path || "";
             case "Bash":
-                // Truncate long commands
-                const cmd = params.command || "";
-                return cmd.length > 30 ? cmd.substring(0, 30) + "..." : cmd;
+                return params.command || "";
             case "Grep":
                 return params.pattern || "";
             case "Glob":
                 return params.pattern || "";
-            case "Agent": {
-                const desc = params.description || params.prompt || "";
-                return desc.length > 40 ? desc.substring(0, 40) + "..." : desc;
-            }
+            case "Agent":
+                return params.description || params.prompt || "";
             default:
                 return "";
         }
