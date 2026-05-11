@@ -58,11 +58,24 @@ if [ ! -x "$EXTRACT_DIR/usr/bin/agentmux" ]; then
         # Extract to a temp dir, then rename. If interrupted, the next run
         # sees a missing or partial $EXTRACT_DIR and retries; the final
         # destination is only created on full success.
+        # PID-scoped temp so two simultaneous first-runs don't share state.
         TMP_DIR="${EXTRACT_DIR}.tmp.$$"
         rm -rf "$TMP_DIR" 2>/dev/null || true
         echo "[agentmux] First-run extraction of v${VERSION} → ${EXTRACT_DIR} (one-time, ~2-3s)" >&2
         if cp -a "$this_dir/." "$TMP_DIR/" 2>/dev/null; then
-            mv "$TMP_DIR" "$EXTRACT_DIR"
+            # Concurrent-launch race: two simultaneous first-runs both
+            # pass the existence check above. `mv -T` is strict rename —
+            # it fails if target exists rather than nesting into it. We
+            # tolerate that failure: the winning instance's $EXTRACT_DIR
+            # is already valid for us to re-exec from. `set -e` at the
+            # top of the script would otherwise abort the loser. (Codex
+            # P2 round-2 on PR #788.)
+            if mv -T "$TMP_DIR" "$EXTRACT_DIR" 2>/dev/null; then
+                : # we won the race
+            else
+                echo "[agentmux] Cache populated by a concurrent instance; reusing" >&2
+                rm -rf "$TMP_DIR" 2>/dev/null || true
+            fi
             # Best-effort cleanup of older extractions. Keep the two most
             # recently modified version dirs (the current one plus the
             # immediately previous, in case the user is running both

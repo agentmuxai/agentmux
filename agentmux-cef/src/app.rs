@@ -78,27 +78,21 @@ wrap_window_delegate! {
                 // Startup pool fill — Windows uses the launcher saga path
                 // (saga_dispatch.rs::LiveActionRunner is cfg(windows) only).
                 //
-                // On Linux/Wayland: DISABLED. POOL_OFFSCREEN_X = -32000 in
-                // window_pool.rs is a Win32/X11-era hack that the Wayland
-                // compositor ignores — pool windows appear ON SCREEN as
-                // blank/empty windows because Wayland doesn't let clients
-                // dictate position. Until pool windows can be properly
-                // hidden on Wayland (xdg_toplevel.set_minimized? transparent
-                // surfaces? a separate `--headless` renderer pool?), spawning
-                // them at startup creates visible blank windows that consume
-                // CPU/RAM and confuse the user. Tear-off takes the cold path
-                // on first use as a result. See
-                // docs/specs/linux-pool-startup-fill-2026-05-08.md
-                // (open question now answered: Wayland positioning).
+                // Non-Windows: DISABLED entirely. Two separate blockers, both
+                // documented in docs/specs/linux-pool-startup-fill-2026-05-08.md:
+                //   1. promote_pool_window in commands/window_pool.rs has a
+                //      `cfg(not(target_os = "windows"))` impl that always
+                //      returns None — tear-off can't consume a pool window
+                //      on macOS or Linux, so any pre-warmed windows are
+                //      strictly wasted RAM. Codex P2 on PR #788 caught this
+                //      for the macOS path that an earlier revision enabled.
+                //   2. (Linux/Wayland only) POOL_OFFSCREEN_X = -32000 is a
+                //      Win32/X11 hack that the Wayland compositor ignores —
+                //      pool windows would appear on-screen as blank windows.
                 //
-                // On macOS: enabled. NSWindow off-screen positioning works.
-                // (Untested by the same operator who tested Linux; revisit
-                // if the macOS build shows visible pool windows too.)
-                #[cfg(target_os = "macos")]
-                if label == "main" {
-                    tracing::info!("[pool] kicking off startup pool fill (macOS)");
-                    crate::commands::window_pool::spawn_pool_window(state);
-                }
+                // Either blocker alone makes startup pool fill the wrong
+                // call here. When the platform pool implementation lands
+                // (Phase 7), this is the right place to re-enable.
             }
 
             // Chrome-style windows (DevTools popups) are shown immediately.

@@ -1,10 +1,23 @@
 # Linux/macOS: wire startup-time window-pool fill
 
-**Status:** Draft.
+**Status:** BLOCKED — see "Blockers" below. Investigation 2026-05-08; reclassified 2026-05-10 after PR #788 round-2 codex review.
 **Author:** runtime investigation 2026-05-08.
 **Owner:** TBD.
 **Affects:** Linux + macOS AppImage / .app builds.
 **Out of scope:** Windows (already correct).
+
+---
+
+## Blockers (added 2026-05-10)
+
+Two independent blockers — fixing one doesn't unblock startup pool fill.
+
+1. **`promote_pool_window` is `cfg(target_os = "windows")` only.** The non-Windows impl at `agentmux-cef/src/commands/window_pool.rs:872-886` always returns `None` with the comment "Non-Windows: pool isn't built yet (Phase 7). Caller falls back to the cold path." Any pre-warmed pool windows on Linux or macOS can never be consumed by tear-off — they're strictly wasted RAM + CPU. Codex P2 on PR #788 caught this for the macOS path; the same applies to Linux.
+2. **(Linux/Wayland only)** `POOL_OFFSCREEN_X = -32000` in `window_pool.rs` is a Win32/X11-era hack that the Wayland compositor ignores. Pool windows appear ON SCREEN as visible blank windows because Wayland doesn't let clients dictate position.
+
+Blocker (1) alone makes startup pool fill the wrong call on any non-Windows platform until Phase 7 lands a working `promote_pool_window`. Blocker (2) additionally requires a Wayland-correct hide mechanism (`xdg_toplevel.set_minimized`? transparent surfaces? `--headless` renderer pool?) before any visible-side approach works.
+
+**Implementation status:** the cfg(macos)-only version of the startup pool fill that landed in PR #788 was reverted in the same PR after the codex finding. App.rs no longer fires `spawn_pool_window` from `on_window_created`; the call site is intentionally absent. When Phase 7 implements `promote_pool_window` for non-Windows platforms, this spec is the right place to re-enable startup fill.
 
 ---
 
