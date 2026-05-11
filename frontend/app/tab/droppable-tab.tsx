@@ -109,7 +109,16 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
             onDrop: () => {
                 setGlobalDragTabId(null);
                 setIsDragging(false);
-                setTabGrabOffset(null);
+                // Do NOT clear setTabGrabOffset here. pragmatic-dnd's
+                // onDrop fires during the dragend event dispatch, BEFORE
+                // CrossWindowDragMonitor.win32.tsx::handleDragEnd runs.
+                // Clearing here makes the cross-window tear-off path
+                // read null for the grab offset (which it needs to
+                // compute the tab anchor) — host then falls back to
+                // "cursor at caption top-center" placement. The next
+                // drag's onGenerateDragPreview overwrites the offset,
+                // so leaving it stale across the no-drag interval is
+                // safe.
                 getApi().setJsDragActive(false).catch(() => {});
                 // Do NOT clear currentDragPayload here — this fires for ALL drops including
                 // out-of-window. Payload is cleared in the monitorForElements onDrop in
