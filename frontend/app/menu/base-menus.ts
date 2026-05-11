@@ -114,7 +114,5 @@ export const THEME_OPTIONS: ReadonlyArray<{ id: string; label: string }> = [
  * controls (show/icon-only).
  */
 export function createTabBarMenu(fullConfig: any): MenuBuilder {
-    return createTabBarBaseMenu()
-        .separator()
-        .merge(createWidgetsMenu(fullConfig));
+    return createTabBarBaseMenu().merge(createWidgetsMenu(fullConfig));
 }
