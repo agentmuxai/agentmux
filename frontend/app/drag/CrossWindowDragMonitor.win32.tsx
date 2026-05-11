@@ -118,7 +118,19 @@ function CrossWindowDragMonitor(): JSX.Element {
             const payload = _currentDragPayload;
             _currentDragPayload = null;
 
-            Logger.info("dnd:cross", "dragend fired", { hasPayload: !!payload, dropEffect: e.dataTransfer?.dropEffect });
+            // Snapshot the grab offset RIGHT NOW. pragmatic-dnd's onDrop
+            // in droppable-tab.tsx clears it via setTabGrabOffset(null);
+            // by the time the setTimeout below fires and performTearOff
+            // calls getTabGrabOffset(), the offset is already null and
+            // the tear-off anchor falls back to cursor-centered.
+            const grabOffsetSnapshot = getTabGrabOffset();
+
+            Logger.info("dnd:cross", "dragend fired", {
+                hasPayload: !!payload,
+                dropEffect: e.dataTransfer?.dropEffect,
+                grabOffsetX: grabOffsetSnapshot?.x,
+                grabOffsetY: grabOffsetSnapshot?.y,
+            });
 
             if (!payload) return;
 
@@ -127,7 +139,7 @@ function CrossWindowDragMonitor(): JSX.Element {
             getApi().releaseDragCapture().catch(() => {});
 
             await new Promise((r) => setTimeout(r, 50));
-            await handleCrossWindowDragEnd(payload, windowLabelRef);
+            await handleCrossWindowDragEnd(payload, windowLabelRef, grabOffsetSnapshot);
         };
 
         document.addEventListener("dragleave", handleDragLeave);
@@ -144,7 +156,11 @@ function CrossWindowDragMonitor(): JSX.Element {
     return null;
 }
 
-async function handleCrossWindowDragEnd(payload: DragItemPayload, sourceWindow: string | null) {
+async function handleCrossWindowDragEnd(
+    payload: DragItemPayload,
+    sourceWindow: string | null,
+    grabOffsetSnapshot: ReturnType<typeof getTabGrabOffset> = null,
+) {
     let cursorPoint: { x: number; y: number };
     try {
         cursorPoint = await invokeCommand<{ x: number; y: number }>("get_cursor_point");
@@ -192,7 +208,7 @@ async function handleCrossWindowDragEnd(payload: DragItemPayload, sourceWindow: 
             await performCrossWindowDrop(dragType, dragPayloadForApi, workspace.oid, activeTabId);
             await api.completeCrossDrag(dragId, targetWindow, cursorPoint.x, cursorPoint.y);
         } else if (!targetWindow) {
-            await performTearOff(dragType, dragPayloadForApi, workspace.oid, activeTabId, cursorPoint.x, cursorPoint.y);
+            await performTearOff(dragType, dragPayloadForApi, workspace.oid, activeTabId, cursorPoint.x, cursorPoint.y, grabOffsetSnapshot);
             await api.completeCrossDrag(dragId, null, cursorPoint.x, cursorPoint.y);
             try { await api.releaseDragCapture(); } catch {}
         } else {
@@ -218,7 +234,8 @@ async function performTearOff(
     sourceWsId: string,
     sourceTabId: string,
     screenX: number,
-    screenY: number
+    screenY: number,
+    grabOffsetSnapshot: ReturnType<typeof getTabGrabOffset> = null,
 ) {
     const api = getApi();
     if (dragType === "pane" && payload.blockId) {
@@ -257,10 +274,18 @@ async function performTearOff(
             // (The tabbar.tsx::performTabTearOff path doesn't have this
             // mismatch because its screenX is `window.screenX +
             // input.clientX`, both DIP — matches the offset.)
-            const grabOffset = getTabGrabOffset();
+            // Prefer the dragend-time snapshot (captured before pragmatic-dnd
+            // onDrop cleared the offset). Fall back to the live store if no
+            // snapshot was passed.
+            const grabOffset = grabOffsetSnapshot ?? getTabGrabOffset();
             const dpr = window.devicePixelRatio || 1;
             const tabAnchorX = grabOffset ? screenX - grabOffset.x * dpr : undefined;
             const tabAnchorY = grabOffset ? screenY - grabOffset.y * dpr : undefined;
+            Logger.info("dnd:cross", "performTearOff anchor", {
+                screenX, screenY, dpr,
+                grabOffsetX: grabOffset?.x, grabOffsetY: grabOffset?.y,
+                tabAnchorX, tabAnchorY,
+            });
             await openTearOffWindow(
                 api,
                 newWsId,
