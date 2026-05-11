@@ -20,6 +20,10 @@
     box-shadow: 0px 8px 24px 0px rgba(0, 0, 0, 0.3);
 }
 
+.menu.sub-menu {
+    min-width: 0;
+}
+
 .menu-item {
     display: flex;
     align-items: center;
