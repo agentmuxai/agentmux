@@ -179,6 +179,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
                         class={clsx("menu", props.className)}
                         ref={registerFloating}
                         style={floatingStyle()}
+                        data-pane-overlay
                     >
                         <For each={props.items}>
                             {(item, index) => {
@@ -288,6 +289,7 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
                 "z-index": 1000,
                 visibility: props.visibleSubMenus[props.parentKey]?.visible && isPositioned() ? "visible" : "hidden",
             }}
+            data-pane-overlay
         >
             <For each={props.subItems}>
                 {(item, idx) => {

@@ -112,6 +112,7 @@ function TooltipInner(props: Omit<TooltipProps, "disable">): JSX.Element {
                         class={cn(
                             "bg-gray-800 border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl z-50"
                         )}
+                        data-pane-overlay
                     >
                         {props.content}
                     </div>
