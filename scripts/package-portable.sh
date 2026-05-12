@@ -20,7 +20,7 @@ ZIPPATH="$OUTDIR/agentmux-$VERSION-x64-portable.zip"
 echo "Packaging AgentMux v$VERSION Portable..."
 
 # Verify required files
-for f in target/release/agentmux-cef.exe dist/cef/libcef.dll dist/bin/agentmux-srv-$VERSION-windows.x64.exe dist/frontend/index.html target/release/agentmux-launcher.exe; do
+for f in target/release/agentmux-cef.exe dist/cef/libcef.dll dist/bin/agentmux-srv-$VERSION-windows.x64.exe dist/frontend/index.html target/release/agentmux-launcher.exe target/release/agentmux-bashwrap.exe; do
     if [ ! -f "$f" ]; then
         echo "ERROR: $f not found — build first" >&2
         exit 1
@@ -79,6 +79,13 @@ DATAEOF
 # Runtime binaries — versioned filenames so WER dumps & Event Viewer show versions
 cp target/release/agentmux-cef.exe "$PORTABLE/runtime/agentmux-$VERSION.exe"
 cp dist/bin/agentmux-srv-$VERSION-windows.x64.exe "$PORTABLE/runtime/"
+
+# Streaming bash wrapper — invoked by Claude's Bash subprocess via the
+# PreToolUse hook (agent_config.rs auto-injects .claude/hooks.json
+# pointing at "agentmux-bashwrap hook"). agentmux-srv adds tools/bin
+# to PATH for Claude's env, so the wrapper must land in tools/bin.
+# See docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md.
+cp target/release/agentmux-bashwrap.exe "$PORTABLE/runtime/tools/bin/"
 
 # wsh has been retired — see specs/SPEC_RETIRE_WSH_2026_04_12.md. No binary
 # to ship anymore; AGENTMUX env var is now a plain "1" sentinel.

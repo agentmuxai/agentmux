@@ -109,12 +109,20 @@ pub fn build_config_files(
     }
 
     // ----------------------------------------------------------------
-    // Write .claude/hooks.json if hooks content is present
+    // Write .claude/hooks.json — always includes a PreToolUse:Bash
+    // entry pointing at `agentmux-bashwrap hook` so the streaming
+    // wrapper is invoked for every Bash tool call. User-provided
+    // hooks (from content_map["hooks"]) are merged on top, with the
+    // user's entries winning on key collisions, EXCEPT that our
+    // PreToolUse entries are always appended to any user
+    // PreToolUse array so streaming stays on regardless. See
+    // docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §5.
     // ----------------------------------------------------------------
-    if let Some(hooks) = content_map.get("hooks") {
+    let user_hooks = content_map.get("hooks").map(|s| s.as_str());
+    if let Some(hooks_json) = build_hooks_config(user_hooks) {
         files.push(AgentConfigFile {
             filename: ".claude/hooks.json".to_string(),
-            content: hooks.clone(),
+            content: hooks_json,
         });
     }
 
@@ -287,6 +295,57 @@ pub fn build_mcp_config(
         Ok(s) => Some(s),
         Err(e) => {
             tracing::error!("agent_config: failed to serialize MCP config: {e}");
+            None
+        }
+    }
+}
+
+/// Build `.claude/hooks.json` content with the auto-injected PreToolUse
+/// Bash hook that redirects Bash invocations into the streaming
+/// wrapper (`agentmux-bashwrap exec`). User-supplied hooks (from the
+/// agent's `content_map["hooks"]`) are merged in: their keys win on
+/// collision for non-PreToolUse events, and for PreToolUse the user's
+/// matchers are appended *before* ours so user policy can short-circuit
+/// (e.g. deny a dangerous command) before our rewrite fires.
+///
+/// See `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §5.
+pub fn build_hooks_config(user_hooks_content: Option<&str>) -> Option<String> {
+    use serde_json::Value;
+    let agentmux_pretooluse = json!({
+        "matcher": "^(Bash|.*[Bb]ash.*)$",
+        "hooks": [
+            {
+                "type": "command",
+                "command": "agentmux-bashwrap hook"
+            }
+        ]
+    });
+    let mut hooks_obj = serde_json::Map::new();
+    let mut pretooluse_entries: Vec<Value> = Vec::new();
+
+    // Start with user hooks if present + parseable.
+    if let Some(raw) = user_hooks_content {
+        if let Ok(Value::Object(user_obj)) = serde_json::from_str::<Value>(raw) {
+            for (k, v) in user_obj {
+                if k == "PreToolUse" {
+                    if let Value::Array(arr) = v {
+                        pretooluse_entries.extend(arr);
+                    }
+                } else {
+                    hooks_obj.insert(k, v);
+                }
+            }
+        }
+    }
+    // Append our entry last so user matchers (deny rules etc.) get a chance to
+    // short-circuit before our rewrite.
+    pretooluse_entries.push(agentmux_pretooluse);
+    hooks_obj.insert("PreToolUse".to_string(), Value::Array(pretooluse_entries));
+
+    match serde_json::to_string_pretty(&Value::Object(hooks_obj)) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            tracing::error!("agent_config: failed to serialize hooks config: {e}");
             None
         }
     }
