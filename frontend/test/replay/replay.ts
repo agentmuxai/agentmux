@@ -158,7 +158,18 @@ function handleStreamLine(
 ): void {
     stats.streamLinesParsed += 1;
     const node = parser.parseLine(ev.line);
-    if (!node) return; // partial / init / no-op-yielding line
+    if (!node) {
+        // Parser returned null. Expected for line types the parser
+        // intentionally ignores (e.g. `tool_chunk` lines handled
+        // out-of-band, message_start/_stop). Surface it as a
+        // soft warning so authors of new fixtures notice when a
+        // line they expected to yield a node silently doesn't.
+        warnings.push(
+            `stream-json line at seq ${ev.seq} produced no node ` +
+                `(line starts with: ${ev.line.slice(0, 80)})`,
+        );
+        return;
+    }
     const isUpdate = seenIds.has(node.id);
     if (isUpdate) {
         applyDoc({ type: "StreamFlush", newNodes: [], updatedNodes: [node] });
@@ -166,7 +177,6 @@ function handleStreamLine(
         applyDoc({ type: "StreamFlush", newNodes: [node], updatedNodes: [] });
         stats.nodesAppended += 1;
     }
-    void warnings;
 }
 
 function handleWpsEvent(

@@ -87,15 +87,14 @@ impl WpsClient {
         })
     }
 
-    /// Publish a `tool_chunk` event. `tool_id` goes into the payload
-    /// rather than the event name so a single per-block subscription
-    /// receives chunks for every tool in that block. Persists with
-    /// `TOOL_CHUNK_PERSIST` so late subscribers (the frontend, which
-    /// learns about the tool_use only after Claude buffers the stream)
-    /// get the full history on subscribe.
+    /// Publish a `tool_chunk` event. The tool_use_id lives in the
+    /// payload (not on this method's signature) so a single per-block
+    /// subscription receives chunks for every tool in that block.
+    /// Persists with `TOOL_CHUNK_PERSIST` so late subscribers (the
+    /// frontend, which learns about the tool_use only after Claude
+    /// buffers the stream) get the full history on subscribe.
     pub async fn publish_chunk<T: Serialize>(
         &self,
-        _tool_id: &str,
         block_id: Option<&str>,
         payload: &T,
     ) -> Result<()> {
