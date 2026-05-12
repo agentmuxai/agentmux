@@ -323,17 +323,38 @@ pub fn build_hooks_config(user_hooks_content: Option<&str>) -> Option<String> {
     let mut hooks_obj = serde_json::Map::new();
     let mut pretooluse_entries: Vec<Value> = Vec::new();
 
-    // Start with user hooks if present + parseable.
+    // Start with user hooks if present + parseable. Parse failures or
+    // non-Object top-levels are logged at WARN so the diagnostic trail
+    // surfaces — silent swallowing made user hooks disappear with no
+    // signal (reagent P2 on PR #809).
     if let Some(raw) = user_hooks_content {
-        if let Ok(Value::Object(user_obj)) = serde_json::from_str::<Value>(raw) {
-            for (k, v) in user_obj {
-                if k == "PreToolUse" {
-                    if let Value::Array(arr) = v {
-                        pretooluse_entries.extend(arr);
+        match serde_json::from_str::<Value>(raw) {
+            Ok(Value::Object(user_obj)) => {
+                for (k, v) in user_obj {
+                    if k == "PreToolUse" {
+                        if let Value::Array(arr) = v {
+                            pretooluse_entries.extend(arr);
+                        } else {
+                            tracing::warn!(
+                                "agent_config: user hooks.PreToolUse is not an array; dropped"
+                            );
+                        }
+                    } else {
+                        hooks_obj.insert(k, v);
                     }
-                } else {
-                    hooks_obj.insert(k, v);
                 }
+            }
+            Ok(other) => {
+                tracing::warn!(
+                    kind = ?other,
+                    "agent_config: user hooks top-level value is not an object; dropped"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "agent_config: failed to parse user hooks JSON; dropped"
+                );
             }
         }
     }
