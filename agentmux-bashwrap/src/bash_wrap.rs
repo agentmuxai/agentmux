@@ -175,7 +175,6 @@ pub async fn run(mut args: Args) -> Result<i32> {
     if let Some(client) = wps.as_ref() {
         let _ = client
             .publish_chunk(
-                &args.tool_id,
                 args.block_id.as_deref(),
                 &TerminalMessage {
                     op: "terminal",
@@ -236,7 +235,6 @@ async fn publish_system(
 ) -> Result<()> {
     client
         .publish_chunk(
-            tool_id,
             block_id,
             &ChunkMessage {
                 op: "chunk",
@@ -258,7 +256,6 @@ async fn publish_line(
 ) -> Result<()> {
     client
         .publish_chunk(
-            tool_id,
             block_id,
             &ChunkMessage {
                 op: "chunk",
