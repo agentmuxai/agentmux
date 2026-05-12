@@ -39,12 +39,6 @@ pub struct SettingsType {
     #[serde(rename = "app:*", default, skip_serializing_if = "is_false")]
     pub app_clear: bool,
 
-    #[serde(rename = "app:globalhotkey", default, skip_serializing_if = "String::is_empty")]
-    pub app_global_hotkey: String,
-
-    #[serde(rename = "app:dismissarchitecturewarning", default, skip_serializing_if = "is_false")]
-    pub app_dismiss_architecture_warning: bool,
-
     #[serde(rename = "app:defaultnewblock", default, skip_serializing_if = "String::is_empty")]
     pub app_default_new_block: String,
 
@@ -109,20 +103,9 @@ pub struct SettingsType {
     #[serde(rename = "blockheader:showblockids", default, skip_serializing_if = "is_false")]
     pub block_header_show_block_ids: bool,
 
-    // -- Preview settings --
-    #[serde(rename = "preview:showhiddenfiles", default, skip_serializing_if = "Option::is_none")]
-    pub preview_show_hidden_files: Option<bool>,
-
-    // -- Tab settings --
-    #[serde(rename = "tab:preset", default, skip_serializing_if = "String::is_empty")]
-    pub tab_preset: String,
-
     // -- Widget settings --
     #[serde(rename = "widget:*", default, skip_serializing_if = "is_false")]
     pub widget_clear: bool,
-
-    #[serde(rename = "widget:showhelp", default, skip_serializing_if = "Option::is_none")]
-    pub widget_show_help: Option<bool>,
 
     #[serde(rename = "widget:icononly", default, skip_serializing_if = "Option::is_none")]
     pub widget_icon_only: Option<bool>,
@@ -149,18 +132,6 @@ pub struct SettingsType {
     #[serde(rename = "window:tilegapsize", default, skip_serializing_if = "Option::is_none")]
     pub window_tile_gap_size: Option<i64>,
 
-    #[serde(rename = "window:showmenubar", default, skip_serializing_if = "is_false")]
-    pub window_show_menu_bar: bool,
-
-    #[serde(rename = "window:nativetitlebar", default, skip_serializing_if = "is_false")]
-    pub window_native_title_bar: bool,
-
-    #[serde(rename = "window:disablehardwareacceleration", default, skip_serializing_if = "is_false")]
-    pub window_disable_hardware_acceleration: bool,
-
-    #[serde(rename = "window:maxtabcachesize", default, skip_serializing_if = "is_zero_i32")]
-    pub window_max_tab_cache_size: i32,
-
     #[serde(rename = "window:magnifiedblockopacity", default, skip_serializing_if = "Option::is_none")]
     pub window_magnified_block_opacity: Option<f64>,
 
@@ -173,24 +144,12 @@ pub struct SettingsType {
     #[serde(rename = "window:magnifiedblockblursecondarypx", default, skip_serializing_if = "Option::is_none")]
     pub window_magnified_block_blur_secondary_px: Option<i64>,
 
-    #[serde(rename = "window:confirmclose", default, skip_serializing_if = "is_false")]
-    pub window_confirm_close: bool,
-
-    #[serde(rename = "window:savelastwindow", default, skip_serializing_if = "is_false")]
-    pub window_save_last_window: bool,
-
-    #[serde(rename = "window:dimensions", default, skip_serializing_if = "String::is_empty")]
-    pub window_dimensions: String,
-
-    #[serde(rename = "window:zoom", default, skip_serializing_if = "Option::is_none")]
-    pub window_zoom: Option<f64>,
-
     // -- Telemetry settings --
+    // NOTE: telemetry:interval/numpoints actually drive the sysinfo widget
+    // polling rate (local-only, no transmission). Renamed to sysinfo:* in
+    // a follow-up PR. telemetry:enabled was dead and was removed.
     #[serde(rename = "telemetry:*", default, skip_serializing_if = "is_false")]
     pub telemetry_clear: bool,
-
-    #[serde(rename = "telemetry:enabled", default, skip_serializing_if = "is_false")]
-    pub telemetry_enabled: bool,
 
     #[serde(rename = "telemetry:interval", default, skip_serializing_if = "is_zero_f64")]
     pub telemetry_interval: f64,
