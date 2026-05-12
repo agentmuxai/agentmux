@@ -855,6 +855,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 //    rewrites the command to invoke it. AGENTMUX_LOCAL_URL
                 //    is already in the inherited process env (main.rs:498).
                 env_vars.insert("AGENTMUX_AUTH_KEY".to_string(), auth_key.clone());
+                // Block id so the wrapper can scope its WPS publishes
+                // to `block:<id>`. Without this, chunks publish without
+                // a scope and the frontend's per-block subscription
+                // doesn't receive them.
+                env_vars.insert("AGENTMUX_BLOCKID".to_string(), cmd.blockid.clone());
                 if let Some(tools_dir) = crate::backend::tool_store::bundled_tools_dir() {
                     let existing = env_vars
                         .get("PATH")

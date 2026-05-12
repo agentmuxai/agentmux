@@ -164,6 +164,13 @@ impl Broker {
     }
 
     /// Subscribe a route to an event, optionally scoped.
+    ///
+    /// **Replay-on-subscribe**: after registering the route, immediately
+    /// deliver any persisted events that match the subscription. Lets
+    /// late subscribers catch up on the most recent state without
+    /// waiting for the next publish — closes the race for live-log
+    /// streaming where the frontend learns the tool_use_id only after
+    /// the wrapper has already finished publishing.
     pub fn subscribe(&self, route_id: &str, sub: SubscriptionRequest) {
         if sub.event.is_empty() {
             return;
@@ -179,13 +186,50 @@ impl Broker {
 
         if sub.allscopes {
             add_unique(&mut bs.all_subs, route_id);
-            return;
+        } else {
+            for scope in &sub.scopes {
+                if scope_has_star(scope) {
+                    add_to_scope_map(&mut bs.star_subs, scope, route_id);
+                } else {
+                    add_to_scope_map(&mut bs.scope_subs, scope, route_id);
+                }
+            }
         }
-        for scope in &sub.scopes {
-            if scope_has_star(scope) {
-                add_to_scope_map(&mut bs.star_subs, scope, route_id);
-            } else {
-                add_to_scope_map(&mut bs.scope_subs, scope, route_id);
+
+        Self::replay_to_route(&inner, route_id, &sub);
+    }
+
+    /// Deliver any persisted events matching `sub` to `route_id`.
+    /// Called inside `subscribe` so replay happens atomically under the
+    /// broker lock — no live event published mid-replay can interleave.
+    /// Star-scope replay is intentionally not implemented (rare,
+    /// requires scanning every persist key; can add later if needed).
+    fn replay_to_route(inner: &BrokerInner, route_id: &str, sub: &SubscriptionRequest) {
+        let client = match &inner.client {
+            Some(c) => c,
+            None => return,
+        };
+
+        let deliver = |scope: &str| {
+            let key = PersistKey {
+                event: sub.event.clone(),
+                scope: scope.to_string(),
+            };
+            if let Some(pe) = inner.persist_map.get(&key) {
+                for event in &pe.events {
+                    client.send_event(route_id, event.clone());
+                }
+            }
+        };
+
+        if sub.allscopes {
+            // "" key holds the global history per persist_event's scope_set.
+            deliver("");
+        } else {
+            for scope in &sub.scopes {
+                if !scope_has_star(scope) {
+                    deliver(scope);
+                }
             }
         }
     }
@@ -614,6 +658,75 @@ mod tests {
         });
 
         assert!(client.received_events().is_empty());
+    }
+
+    /// Regression: replay-on-subscribe delivers persisted events that
+    /// were published BEFORE the route subscribed. This closes the
+    /// late-subscribe race for tool_chunk streaming.
+    #[test]
+    fn test_replay_on_subscribe_exact_scope() {
+        let broker = Broker::new();
+        let client = Arc::new(TestClient::new());
+        broker.set_client(Box::new(Arc::clone(&client)));
+
+        // Publish 5 persisted events BEFORE any subscriber exists.
+        for i in 0..5 {
+            broker.publish(WaveEvent {
+                event: "tool_chunk".to_string(),
+                scopes: vec!["block:abc".to_string()],
+                sender: String::new(),
+                persist: 10,
+                data: Some(serde_json::json!({"tool_id": "t1", "n": i})),
+            });
+        }
+        assert!(
+            client.received_events().is_empty(),
+            "no subscriber yet, no delivery"
+        );
+
+        // Subscribe to the matching scope — replay should fire.
+        broker.subscribe(
+            "route-1",
+            SubscriptionRequest {
+                event: "tool_chunk".to_string(),
+                scopes: vec!["block:abc".to_string()],
+                allscopes: false,
+            },
+        );
+
+        let events = client.received_events();
+        assert_eq!(events.len(), 5, "all 5 persisted events replayed");
+        assert_eq!(events[0].1.data, Some(serde_json::json!({"tool_id": "t1", "n": 0})));
+        assert_eq!(events[4].1.data, Some(serde_json::json!({"tool_id": "t1", "n": 4})));
+    }
+
+    /// Regression: replay does NOT cross-pollute scopes. Subscriber to
+    /// `block:abc` must not receive events persisted for `block:xyz`.
+    #[test]
+    fn test_replay_on_subscribe_scope_isolation() {
+        let broker = Broker::new();
+        let client = Arc::new(TestClient::new());
+        broker.set_client(Box::new(Arc::clone(&client)));
+
+        broker.publish(WaveEvent {
+            event: "tool_chunk".to_string(),
+            scopes: vec!["block:xyz".to_string()],
+            sender: String::new(),
+            persist: 10,
+            data: Some(serde_json::json!({"tool_id": "other"})),
+        });
+
+        broker.subscribe(
+            "route-1",
+            SubscriptionRequest {
+                event: "tool_chunk".to_string(),
+                scopes: vec!["block:abc".to_string()],
+                allscopes: false,
+            },
+        );
+
+        let events = client.received_events();
+        assert_eq!(events.len(), 0, "scope:abc must not get block:xyz events");
     }
 
     #[test]
