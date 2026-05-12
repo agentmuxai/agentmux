@@ -1154,7 +1154,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     cmd.limit.min(1000)
                 };
                 let instances = wstore
-                    .instance_list_named(limit)
+                    .instance_list_named(limit, cmd.definition_id.as_deref())
                     .map_err(|e| format!("listnamedagents: {e}"))?;
 
                 // Resolve bundle names once per response. With ≤200

@@ -594,13 +594,41 @@ mod tests {
     }
 
     #[test]
-    fn test_build_config_files_settings_written() {
+    fn test_build_config_files_settings_merges_user_hooks() {
         // PR #813 moved hooks from `.claude/hooks.json` (a Claude Code
         // dead-letter path) to `.claude/settings.json` under the
-        // `"hooks"` key (the real discovery location).
-        let content_map = HashMap::new();
+        // `"hooks"` key. This test exercises the merge path: user
+        // PreToolUse entries must be PREPENDED (not silently
+        // dropped) to the auto-injected bashwrap entry so streaming
+        // stays on while user-supplied gates fire first.
+        let mut content_map = HashMap::new();
+        content_map.insert(
+            "hooks".to_string(),
+            r#"{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"my-audit"}]}]}"#
+                .to_string(),
+        );
         let files = build_config_files(&content_map, &[], "Aria", "agent-1");
-        assert!(files.iter().any(|f| f.filename == ".claude/settings.json"));
+        let settings = files
+            .iter()
+            .find(|f| f.filename == ".claude/settings.json")
+            .expect("settings.json emitted");
+        let parsed: Value = serde_json::from_str(&settings.content).unwrap();
+        let pre_tool_use = parsed["hooks"]["PreToolUse"]
+            .as_array()
+            .expect("PreToolUse is an array");
+        // User's "Read" matcher prepended first, then our Bash matcher.
+        assert!(
+            pre_tool_use
+                .iter()
+                .any(|e| e["matcher"].as_str() == Some("Read")),
+            "user-supplied PreToolUse:Read must survive the merge"
+        );
+        assert!(
+            pre_tool_use
+                .iter()
+                .any(|e| e["matcher"].as_str().unwrap_or("").contains("Bash")),
+            "auto-injected PreToolUse:Bash must still be present"
+        );
     }
 
     #[test]

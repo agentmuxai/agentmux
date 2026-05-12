@@ -812,10 +812,13 @@ class RpcApiType {
     // command "listnamedagents" [call]
     // v8: powers the launch modal's "Continue agent" dropdown. Returns
     // named instance rows joined with their definition + identity /
-    // memory bundle names for one-shot rendering.
+    // memory bundle names for one-shot rendering. Pass `definition_id`
+    // to filter server-side — required for the modal use case so an
+    // older instance of the current definition can't fall off the
+    // global limit when the user has many agents across definitions.
     ListNamedAgentsCommand(
         client: RpcClient,
-        data: { limit?: number },
+        data: { limit?: number; definition_id?: string },
         opts?: RpcOpts,
     ): Promise<NamedAgentRow[]> {
         return client.rpcCall("listnamedagents", data, opts);

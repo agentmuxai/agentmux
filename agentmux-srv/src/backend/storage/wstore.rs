@@ -1544,9 +1544,32 @@ impl WaveStore {
     /// dropdown should surface: have a non-empty `instance_name`, not
     /// hidden, sorted by most-recent start. Capped to keep the
     /// dropdown's wire payload bounded.
-    pub fn instance_list_named(&self, limit: usize) -> Result<Vec<AgentInstance>, StoreError> {
+    ///
+    /// `definition_id`, when provided, restricts the result to
+    /// instances of that definition. Server-side filtering is
+    /// necessary because the launch modal opens per-definition: a
+    /// user with 200+ named agents across many definitions could
+    /// have the current definition's older instances cut off by a
+    /// purely global limit otherwise.
+    pub fn instance_list_named(
+        &self,
+        limit: usize,
+        definition_id: Option<&str>,
+    ) -> Result<Vec<AgentInstance>, StoreError> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
+        let sql = if definition_id.is_some() {
+            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
+                    status, github_context, started_at, ended_at, created_at,
+                    identity_id, memory_id, instance_name, working_directory,
+                    display_hidden
+             FROM db_agent_instances
+             WHERE display_hidden = 0
+               AND instance_name <> ''
+               AND parent_instance_id = ''
+               AND definition_id = ?1
+             ORDER BY started_at DESC
+             LIMIT ?2"
+        } else {
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
                     status, github_context, started_at, ended_at, created_at,
                     identity_id, memory_id, instance_name, working_directory,
@@ -1556,9 +1579,13 @@ impl WaveStore {
                AND instance_name <> ''
                AND parent_instance_id = ''
              ORDER BY started_at DESC
-             LIMIT ?1",
-        )?;
-        let iter = stmt.query_map(params![limit as i64], map_instance_row)?;
+             LIMIT ?1"
+        };
+        let mut stmt = conn.prepare(sql)?;
+        let iter = match definition_id {
+            Some(def) => stmt.query_map(params![def, limit as i64], map_instance_row)?,
+            None => stmt.query_map(params![limit as i64], map_instance_row)?,
+        };
         let mut out = Vec::new();
         for r in iter {
             out.push(r?);

@@ -1640,10 +1640,18 @@ pub struct CommandCreateAgentInstanceData {
 /// Request for `listnamedagents`. The launch modal's "Continue
 /// agent" dropdown calls this; an absent / zero `limit` defaults to
 /// 200 (capped at 1000 to keep the wire payload bounded).
+///
+/// `definition_id` is server-side filtering: when provided, only
+/// instances of that definition are returned. Required for the
+/// dropdown to behave correctly when a user has 200+ named agents
+/// across many definitions — without server filtering, the current
+/// definition's older instances could fall off the global cap.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CommandListNamedAgentsData {
     #[serde(default)]
     pub limit: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition_id: Option<String>,
 }
 
 /// One row of the launch modal's "Continue agent" dropdown. Joins
