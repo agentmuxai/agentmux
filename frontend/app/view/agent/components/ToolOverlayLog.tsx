@@ -15,7 +15,8 @@
  * ANSI parsing lands in Phase γ (perf + worker offload) per the spec.
  */
 
-import { For, Show, createEffect, createMemo, type JSX } from "solid-js";
+import { For, Match, Show, Switch, createEffect, createMemo, type JSX } from "solid-js";
+// `Show` retained for fallback ToolOverlayResult sub-tree.
 import type { ToolNode } from "../types";
 import { BashOutputViewer } from "./BashOutputViewer";
 import { CompactResult } from "./CompactResult";
@@ -81,26 +82,46 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         chunks();
         if (stickToBottom && scrollRef) {
             // Wait one frame for the DOM to flush before measuring.
+            // Re-check scrollRef + isConnected because a Show-branch
+            // flip during the same RAF window can detach the element
+            // out from under us. Mutating scrollTop on a detached node
+            // raised the `replaceChild` reconciliation race that
+            // crashed v0.33.799.
             requestAnimationFrame(() => {
-                if (scrollRef) scrollRef.scrollTop = scrollRef.scrollHeight;
+                if (scrollRef && scrollRef.isConnected) {
+                    scrollRef.scrollTop = scrollRef.scrollHeight;
+                }
             });
         }
     });
 
+    /**
+     * Render decision — exhaustive, mutually exclusive branches via
+     * `<Switch>` rather than the prior 4-way `<Show>` cascade that
+     * rendered `ToolOverlayResult` from TWO different branches. SolidJS's
+     * reconciler saw the same component type in two sibling slots and
+     * (during the running → success state transition) tried to re-parent
+     * the DOM node from one Show slot to the other, calling
+     * `replaceChild` on a node that was no longer a child of the
+     * expected parent. `<Switch>` exits all other branches before
+     * rendering the matched one — no shared DOM between branches.
+     */
     return (
         <div class="agent-tool-overlay-log" ref={scrollRef} onScroll={onScroll}>
-            <Show when={isStreaming() && hasChunks()}>
-                <ChunkList chunks={chunks()} />
-            </Show>
-            <Show when={!isStreaming() && hasResult()}>
-                <ToolOverlayResult node={props.node} />
-            </Show>
-            <Show when={!isStreaming() && !hasResult() && hasChunks()}>
-                <ChunkList chunks={chunks()} />
-            </Show>
-            <Show when={!hasChunks() && !hasResult()}>
-                <ToolOverlayResult node={props.node} />
-            </Show>
+            <Switch>
+                <Match when={isStreaming() && hasChunks()}>
+                    <ChunkList chunks={chunks()} />
+                </Match>
+                <Match when={!isStreaming() && hasResult()}>
+                    <ToolOverlayResult node={props.node} />
+                </Match>
+                <Match when={!isStreaming() && !hasResult() && hasChunks()}>
+                    <ChunkList chunks={chunks()} />
+                </Match>
+                <Match when={!hasChunks() && !hasResult()}>
+                    <ToolOverlayResult node={props.node} />
+                </Match>
+            </Switch>
         </div>
     );
 };
