@@ -33,6 +33,7 @@ import {
 import { modalsModel } from "./modalmodel";
 import { TAB_COLORS } from "@/app/tab/tab";
 import { ClientService, ObjectService, WorkspaceService } from "./services";
+import { scheduleRevealLift } from "./tab-reveal";
 import * as WOS from "./wos";
 import { getFileSubject, waveEventSubscribe } from "./wps";
 
@@ -848,6 +849,9 @@ const DEFAULT_NEW_TAB_COLOR = "#3b82f6";
 export function createTab() {
     const ws = workspace();
     if (ws == null) return;
+    // Hide the tab content while the new tab's preset (agent / sysinfo /
+    // swarm blocks) mounts and settles. See issue #774 / SPEC_TAB_CONTENT_REVEAL_GATE.md.
+    scheduleRevealLift();
     fireAndForget(async () => {
         try {
             const tabId = await WorkspaceService.CreateTab(ws.oid, "", true, false);
@@ -899,6 +903,11 @@ export async function setActiveTab(tabId: string): Promise<void> {
     const mySeq = ++tabSwitchSeq;
     tabSwitchInFlight = true;
     markStart("tab-switch", { from: fromTabId, to: tabId });
+    // Hide the destination tab's content during the switch so the
+    // 3-5-stage piecemeal mount cascade isn't visible. See issue #774 /
+    // SPEC_TAB_CONTENT_REVEAL_GATE.md. Honours rapid Ctrl-Tab spam —
+    // each call resets the detector.
+    scheduleRevealLift();
     try {
         await WorkspaceService.SetActiveTab(ws.oid, tabId);
     } finally {

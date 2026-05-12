@@ -41,6 +41,7 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 import { isHostApp } from "@/app/init/host-detect";
 import { showStartupError } from "@/app/init/error-display";
 import { withTimeout } from "@/app/init/timeout";
+import { scheduleRevealLift } from "@/store/tab-reveal";
 import { installLauncherEventBridge } from "@/util/launcher-events";
 import { installSrvEventBridge } from "@/util/srv-events";
 import {
@@ -441,6 +442,22 @@ async function initWaveWrap(initOpts: AgentMuxInitOpts) {
         getApi().sendLog("Error in initWave " + e.message + "\n" + e.stack);
         console.error("Error in initWave", e);
     } finally {
+        // First-paint + new-window reveal coordination — see issue
+        // #774. The body was hidden at line 324 before any rendering;
+        // we now have to lift it. Drive the lift through the same
+        // frame-budget gate that handles tab open/switch so the
+        // FIRST tab in the FIRST window also gets the "wait for the
+        // mount cascade to settle, then reveal atomically" treatment.
+        // This covers:
+        //   - Cold app start (the first window in the user's session)
+        //   - "New Window" from the hamburger menu (each opens its
+        //     own bootstrap → initWaveWrap)
+        //   - Any future window-spawning path that reuses initWave
+        //
+        // `scheduleRevealLift` already handles rapid Ctrl-Tab spam by
+        // resetting its detector, so the prior call from createTab /
+        // setActiveTab (if any) is just superseded.
+        scheduleRevealLift();
         document.body.style.visibility = null;
         document.body.style.opacity = null;
         document.body.classList.remove("is-transparent");
