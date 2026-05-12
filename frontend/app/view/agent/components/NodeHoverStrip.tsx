@@ -12,6 +12,14 @@
 
 import { Show, type JSX } from "solid-js";
 
+/**
+ * Row-level strip — bookmark + expand only after Phase 3 of
+ * SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md §3.5. Branching actions
+ * (open-in-pane, open-in-window, new-agent-here) moved into the tool
+ * overlay's bottom action bar so each row's chrome stays lean and the
+ * branching surface is contextual to the tool, not duplicated across
+ * every document row.
+ */
 interface NodeHoverStripProps {
     timestamp?: number; // Unix ms
     nodeId: string;
@@ -20,9 +28,6 @@ interface NodeHoverStripProps {
     canExpand?: boolean;
     isExpanded?: boolean;
     onExpand?: () => void;
-    onOpenInNewPane?: () => void;   // undefined → button hidden (non-tool rows)
-    onOpenInNewWindow?: () => void; // stub — logs console.warn until CEF bridge ships
-    onNewAgentFromHere?: () => void; // stub — requires backend RPC in v2
 }
 
 interface StripButtonProps {
@@ -59,10 +64,7 @@ export const NodeHoverStrip = (props: NodeHoverStripProps): JSX.Element => (
     <Show when={
         props.timestamp != null ||
         props.canExpand ||
-        props.onBookmark != null ||
-        props.onOpenInNewPane != null ||
-        props.onOpenInNewWindow != null ||
-        props.onNewAgentFromHere != null
+        props.onBookmark != null
     }>
         <div
             class="node-strip"
@@ -90,27 +92,6 @@ export const NodeHoverStrip = (props: NodeHoverStripProps): JSX.Element => (
                     label={props.isBookmarked ? "Remove bookmark" : "Bookmark"}
                     active={props.isBookmarked === true}
                     onClick={props.onBookmark}
-                />
-            </Show>
-            <Show when={props.onOpenInNewPane}>
-                <StripButton
-                    icon="⧉"
-                    label="Open in new pane"
-                    onClick={props.onOpenInNewPane}
-                />
-            </Show>
-            <Show when={props.onOpenInNewWindow}>
-                <StripButton
-                    icon="⊡"
-                    label="Open in new window"
-                    onClick={props.onOpenInNewWindow}
-                />
-            </Show>
-            <Show when={props.onNewAgentFromHere}>
-                <StripButton
-                    icon="✦"
-                    label="New agent from here"
-                    onClick={props.onNewAgentFromHere}
                 />
             </Show>
         </div>

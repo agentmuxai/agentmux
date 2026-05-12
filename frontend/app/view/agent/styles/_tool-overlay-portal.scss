@@ -16,13 +16,17 @@
     border-radius: 0 0 3px 3px;
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
     max-height: min(400px, 60vh);
-    overflow-y: auto;
-    padding: var(--space-1-5) 10px var(--space-2) var(--space-5);
+    // Remove outer scroll — the log slot inside owns scrolling so the
+    // bottom action bar stays fixed (SPEC_TOOL_BLOCK_LIVE_LOG §3.4).
+    overflow: hidden;
     cursor: default;
     user-select: text;
     font-family: var(--fixed-font, monospace);
     font-size: 12px;
     color: var(--main-text-color);
+    // Three-slot layout: sticky header / scrollable log / fixed action bar.
+    display: flex;
+    flex-direction: column;
 
     // Flip variant — overlay opens upward when there isn't enough room
     // below the block. Swap the border-radius so the rounded side is on
@@ -30,6 +34,105 @@
     &.overlay-up {
         border-radius: 3px 3px 0 0;
         box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.35);
+    }
+}
+
+// Phase 3 three-slot overlay: header / log / action bar.
+.agent-tool-overlay {
+    display: contents;
+}
+
+.agent-tool-overlay-header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    border-bottom: 1px solid var(--border-color);
+    background: var(--main-bg-color);
+    font-size: 11px;
+    color: var(--secondary-text-color);
+
+    .agent-tool-overlay-tool {
+        font-weight: 600;
+        color: var(--main-text-color);
+    }
+    .agent-tool-overlay-summary {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .agent-tool-overlay-meta {
+        display: flex;
+        gap: var(--space-1);
+        flex-shrink: 0;
+    }
+    .agent-tool-overlay-status-label {
+        text-transform: lowercase;
+    }
+}
+
+.agent-tool-overlay-log {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--space-1-5) 10px var(--space-1-5) var(--space-2);
+
+    .agent-tool-log-line {
+        margin: 0;
+        padding: 0;
+        font-family: var(--fixed-font, monospace);
+        font-size: 12px;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        word-break: break-word;
+
+        &--stderr {
+            color: var(--error-color, #ff6b6b);
+            opacity: 0.85;
+        }
+        &--system {
+            font-style: italic;
+            opacity: 0.7;
+        }
+    }
+}
+
+.agent-tool-overlay-actions {
+    flex: 0 0 auto;
+    display: flex;
+    gap: var(--space-0-5);
+    padding: var(--space-1) var(--space-1-5);
+    border-top: 1px solid var(--border-color);
+    background: var(--main-bg-color);
+
+    .agent-tool-overlay-action {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-0-5);
+        padding: var(--space-0-5) var(--space-1);
+        border: none;
+        border-radius: 3px;
+        background: transparent;
+        color: var(--main-text-color);
+        font-size: 11px;
+        cursor: pointer;
+
+        &:hover:not(.agent-tool-overlay-action--disabled) {
+            background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
+        }
+        &--active {
+            background: var(--hover-bg-color, rgba(255, 255, 255, 0.12));
+        }
+        &--disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+        .agent-tool-overlay-action-icon {
+            font-size: 12px;
+        }
     }
 }
 

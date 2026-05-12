@@ -38,11 +38,7 @@ import { Show, createEffect, createSignal, onCleanup, type JSX } from "solid-js"
 import { Portal } from "solid-js/web";
 import { createBlock } from "@/store/global";
 import type { ToolNode } from "../types";
-import { BashOutputViewer } from "./BashOutputViewer";
-import { CompactResult } from "./CompactResult";
-import { DiffViewer } from "./DiffViewer";
-import { HighlightedCode } from "./HighlightedCode";
-import { detectLanguage } from "./detectLanguage";
+import { ToolBlockOverlay } from "./ToolBlockOverlay";
 
 interface ToolBlockProps {
     node: ToolNode;
@@ -50,6 +46,13 @@ interface ToolBlockProps {
     pinned: boolean;
     /** Toggle the pinned state (called on click of the collapsed row). */
     onTogglePin: () => void;
+    /** Bookmark state + handler — surfaced in the overlay action bar
+     *  (SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md §3.4). Optional for
+     *  callers that don't surface bookmarking. */
+    isBookmarked?: boolean;
+    onBookmark?: () => void;
+    /** Opens the tool's overlay content in a dedicated pane. */
+    onOpenInPane?: () => void;
 }
 
 const STATUS_ICON: Record<ToolNode["status"], string> = {
@@ -168,90 +171,10 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         }
     });
 
-    // Render tool-specific content — only evaluated when expanded.
-    const renderToolContent = (): JSX.Element => {
-        const node = props.node;
-        if (node.status === "running") {
-            return (
-                <div class="agent-tool-loading">
-                    <span class="agent-tool-spinner">⏳</span> Running...
-                </div>
-            );
-        }
-
-        switch (node.tool) {
-            case "Edit":
-                return <DiffViewer params={node.params as any} result={node.result as any} />;
-
-            case "Bash":
-                return <BashOutputViewer params={node.params as any} result={node.result as any} />;
-
-            case "Read": {
-                const filePath = (node.params as any).file_path ?? "";
-                const content: string | undefined = (node.result as any)?.content;
-                return (
-                    <div class="agent-tool-read">
-                        <div class="agent-tool-file-path">{filePath}</div>
-                        <Show
-                            when={content}
-                            fallback={
-                                <Show when={node.result}>
-                                    <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
-                                </Show>
-                            }
-                        >
-                            <HighlightedCode
-                                code={content!}
-                                lang={detectLanguage(filePath, content!.split("\n")[0])}
-                                class="agent-tool-read-content"
-                            />
-                        </Show>
-                    </div>
-                );
-            }
-
-            case "Write":
-                return (
-                    <div class="agent-tool-write">
-                        <div class="agent-tool-file-path">{(node.params as any).file_path}</div>
-                        <div class="agent-tool-write-info">
-                            {node.result && `Wrote ${(node.result as any).bytesWritten || 0} bytes`}
-                        </div>
-                    </div>
-                );
-
-            case "Grep":
-            case "Glob":
-                return (
-                    <div class="agent-tool-search">
-                        <div class="agent-tool-pattern">Pattern: {(node.params as any).pattern}</div>
-                        <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
-                    </div>
-                );
-
-            case "Agent":
-                return (
-                    <div class="agent-tool-agent">
-                        <Show when={(node.params as any).description}>
-                            <div class="agent-tool-agent-desc">{(node.params as any).description}</div>
-                        </Show>
-                        <Show when={node.result}>
-                            <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
-                        </Show>
-                    </div>
-                );
-
-            case "Task":
-                return (
-                    <div class="agent-tool-task">
-                        <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
-                    </div>
-                );
-
-            default:
-                return <CompactResult tool={node.tool} params={node.params as any} result={node.result} />;
-        }
-    };
+    // Per-tool rich result rendering moved into `ToolOverlayLog`'s
+    // fallback path (Phase 3 of SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md).
+    // The overlay is now a header / log / action-bar three-slot
+    // component — see ToolBlockOverlay.tsx.
 
     // Overlay style — only meaningful when overlayMode() is true. Computed
     // from overlayRect() which is set during measure() / handleScroll.
@@ -342,7 +265,12 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                         style={overlayStyle()}
                         onClick={(e) => e.stopPropagation()}
                     >
-                        {renderToolContent()}
+                        <ToolBlockOverlay
+                            node={props.node}
+                            isBookmarked={props.isBookmarked}
+                            onBookmark={props.onBookmark}
+                            onOpenInPane={props.onOpenInPane}
+                        />
                     </div>
                 </Portal>
             </Show>
