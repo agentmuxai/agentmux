@@ -15,6 +15,7 @@ pub mod clipboard;
 pub mod stubs;
 pub mod palette;
 pub mod orphan_reconcile;
+pub mod floating_pane;
 
 use std::sync::Arc;
 use crate::state::AppState;
