@@ -287,7 +287,18 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
         .pending_window_creations
         .iter()
         .any(|p| {
-            !p.label.starts_with("window-pool-") && !p.label.starts_with("browser-pane-")
+            // Exclusions:
+            // - `window-pool-` / `browser-pane-` per the comment above.
+            // - `floating-` because floating-pane creation (#810) can
+            //   leak a pending entry on failure paths (e.g. CEF
+            //   `browser_host_create_browser` returning 0); without
+            //   this exclusion, one failed creation would permanently
+            //   block orphan reconciliation. Floating panes manage
+            //   their own lifecycle and don't participate in orphan
+            //   reconciliation today. Codex P1 on PR #811.
+            !p.label.starts_with("window-pool-")
+                && !p.label.starts_with("browser-pane-")
+                && !p.label.starts_with("floating-")
         });
     let plan = plan_reconcile(
         &browser_status,

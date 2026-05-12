@@ -35,6 +35,8 @@ mod srv_event_bridge;
 mod srv_ipc;
 mod memory_heartbeat;
 mod browser_pane;
+#[cfg(target_os = "windows")]
+mod floating_pane;
 mod reducer;
 mod saga_dispatch;
 mod sidecar;

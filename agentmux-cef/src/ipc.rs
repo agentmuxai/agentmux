@@ -232,6 +232,14 @@ async fn route_command(
                 .to_string();
             commands::window::open_subwindow(state, parent)
         }
+        "open_floating_pane_window" => {
+            // Phase 1 of floating-pane tear-off (issue #810 / spec
+            // SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md). Creates a
+            // subordinate `WS_POPUP + WS_EX_TOOLWINDOW` HWND owned by
+            // the source main window, with a CEF browser embedded.
+            // Windows-only; macOS / Linux return a clear error.
+            commands::floating_pane::open_floating_pane_window(state, args)
+        }
         "get_instance_number" => Ok(commands::window::get_instance_number(state, args)),
         "register_backend_window" => Ok(commands::window::register_backend_window(state, args)),
         "get_env" => Ok(commands::platform::get_env(args)),
