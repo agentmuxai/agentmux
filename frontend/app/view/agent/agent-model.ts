@@ -705,13 +705,23 @@ function buildSettingsWithHooks(
             console.warn("agent-model: user settings top-level is not an object; dropping");
         }
     }
-    // Merge existing user settings.hooks (non-PreToolUse keys) into ours;
-    // ours wins on PreToolUse since user-PreToolUse from content_map["hooks"]
-    // is already in pretooluseEntries.
+    // Merge existing user settings.hooks. For PreToolUse, user matchers are
+    // PREPENDED so they short-circuit before our auto-injected entry. Other
+    // event types (PostToolUse, Stop, etc.) pass through. Reagent P1 on
+    // #813 caught the previous `continue` as a silent drop of user
+    // PreToolUse from settings.json.
     const existingHooks = settingsObj["hooks"];
     if (existingHooks != null && typeof existingHooks === "object" && !Array.isArray(existingHooks)) {
         for (const [k, v] of Object.entries(existingHooks as Record<string, unknown>)) {
-            if (k === "PreToolUse") continue;
+            if (k === "PreToolUse") {
+                if (Array.isArray(v)) {
+                    const ours = Array.isArray(hooksObj["PreToolUse"]) ? hooksObj["PreToolUse"] as unknown[] : [];
+                    hooksObj["PreToolUse"] = [...v, ...ours];
+                } else {
+                    console.warn("agent-model: user settings.hooks.PreToolUse is not an array; dropped");
+                }
+                continue;
+            }
             if (!(k in hooksObj)) hooksObj[k] = v;
         }
     }

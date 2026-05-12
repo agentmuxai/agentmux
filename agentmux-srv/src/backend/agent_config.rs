@@ -400,14 +400,31 @@ pub fn build_settings_with_hooks(
         }
     }
     // Merge: any existing hooks key from user settings is merged with our
-    // additions (ours wins on collision for PreToolUse since we already
-    // collected user PreToolUse entries above via content_map["hooks"]).
+    // additions. For PreToolUse specifically, user matchers from
+    // settings.json are PREPENDED (not dropped) so they short-circuit
+    // before our auto-injected agentmux-bashwrap entry — same ordering
+    // rule we apply to legacy content_map["hooks"] PreToolUse entries.
+    // For other event types (PostToolUse, Stop, etc.) we keep user's
+    // entries verbatim. Reagent P1 on PR #813 (the `continue` was a
+    // silent drop — caught a real merge bug).
     if let Some(Value::Object(existing_hooks)) = settings_obj.get("hooks").cloned() {
         for (k, v) in existing_hooks {
             if k == "PreToolUse" {
-                // User PreToolUse in settings.json already merged above
-                // (if also provided via legacy content_map["hooks"]).
-                // Leave hooks_obj's PreToolUse intact.
+                if let Value::Array(user_pretooluse) = v {
+                    // Prepend user PreToolUse so their matchers run
+                    // first; our auto-injected entry stays last.
+                    if let Some(Value::Array(ours)) = hooks_obj.remove("PreToolUse") {
+                        let mut merged = user_pretooluse;
+                        merged.extend(ours);
+                        hooks_obj.insert("PreToolUse".to_string(), Value::Array(merged));
+                    } else {
+                        hooks_obj.insert("PreToolUse".to_string(), Value::Array(user_pretooluse));
+                    }
+                } else {
+                    tracing::warn!(
+                        "agent_config: user settings.hooks.PreToolUse is not an array; dropped"
+                    );
+                }
                 continue;
             }
             hooks_obj.entry(k).or_insert(v);
