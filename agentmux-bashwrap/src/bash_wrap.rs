@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! `bash-wrap` subcommand — owns the PTY and streams chunks while
-//! the user's bash command runs.
+//! `exec` subcommand — owns the PTY and streams chunks while the
+//! user's bash command runs.
 //!
 //! Invariants:
 //! - The user's command is decoded from `--b64-cmd` so quoting /
@@ -35,8 +35,8 @@ use tokio::sync::Mutex;
 
 use crate::wps_client::WpsClient;
 
-/// CLI args for `bash-wrap`. `command` carried as base64 to sidestep
-/// every quoting concern in the shell that invokes us.
+/// CLI args for `exec`. `command` carried as base64 to sidestep every
+/// quoting concern in the shell that invokes us.
 #[derive(Parser, Debug)]
 pub struct Args {
     /// Tool-use id from Claude's `tool_use` event; threaded back as

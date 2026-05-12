@@ -1,15 +1,15 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! `hook-pretooluse-bash` subcommand.
+//! `hook` subcommand.
 //!
 //! Reads a PreToolUse JSON event on stdin (the contract Claude Code
 //! uses for hooks: see `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md`
 //! §5). If the event is a Bash invocation whose `command` hasn't
 //! already been wrapped, emit an `updatedInput.command` that invokes
-//! `agentmux-bashwrap bash-wrap` with the original command base64-
-//! encoded into argv. Idempotent — if the command is already wrapped,
-//! pass through with no rewrite.
+//! `agentmux-bashwrap exec` with the original command base64-encoded
+//! into argv. Idempotent — if the command is already wrapped, pass
+//! through with no rewrite.
 //!
 //! All errors degrade to a pass-through response so a hook failure
 //! never blocks Claude's tool execution.
