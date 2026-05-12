@@ -264,6 +264,9 @@ mod tests {
             created_at: 0,
             identity_id: identity_id.to_string(),
             memory_id: String::new(),
+            instance_name: String::new(),
+            working_directory: String::new(),
+            display_hidden: false,
         }
     }
 

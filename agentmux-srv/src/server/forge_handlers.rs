@@ -30,6 +30,9 @@ use crate::backend::rpc_types::{
     COMMAND_LIST_AGENT_INSTANCES, COMMAND_GET_AGENT_INSTANCE,
     COMMAND_CREATE_AGENT_INSTANCE, COMMAND_UPDATE_AGENT_INSTANCE,
     COMMAND_DELETE_AGENT_INSTANCE,
+    COMMAND_LIST_NAMED_AGENTS, COMMAND_HIDE_NAMED_AGENT,
+    CommandListNamedAgentsData, CommandHideNamedAgentData,
+    NamedAgentRow,
     COMMAND_FORK_AGENT_DEFINITION,
     CommandListIdentityAccountsData, CommandGetIdentityAccountData,
     CommandDeleteIdentityAccountData,
@@ -1024,6 +1027,14 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // immediately on either "" or "blank").
                     identity_id: cmd.identity_id,
                     memory_id: cmd.memory_id,
+                    // v8: named-agent continuation. instance_name +
+                    // working_directory come from the launch-modal
+                    // overrides via CommandCreateAgentInstanceData
+                    // (added in the same spec). Empty string for
+                    // legacy/ambient launches.
+                    instance_name: cmd.instance_name.clone(),
+                    working_directory: cmd.working_directory.clone(),
+                    display_hidden: false,
                 };
                 wstore
                     .instance_create(&inst)
@@ -1065,11 +1076,17 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     started_at: existing.started_at,
                     ended_at: cmd.ended_at.unwrap_or(existing.ended_at),
                     created_at: existing.created_at,
-                    // identity_id / memory_id are immutable post-create
-                    // (mid-session credential rotation is out of scope —
-                    // launch a new instance with a different bundle).
+                    // identity_id / memory_id / instance_name /
+                    // working_directory are immutable post-create
+                    // (mid-session credential rotation is out of scope
+                    // — launch a new instance with a different bundle
+                    // or use ContinueNamedAgentCommand). display_hidden
+                    // is mutated via instance_set_hidden, not here.
                     identity_id: existing.identity_id.clone(),
                     memory_id: existing.memory_id.clone(),
+                    instance_name: existing.instance_name.clone(),
+                    working_directory: existing.working_directory.clone(),
+                    display_hidden: existing.display_hidden,
                 };
                 wstore
                     .instance_update(&merged)
@@ -1114,6 +1131,121 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     });
                 }
                 Ok(Some(json!({ "deleted": deleted })))
+            })
+        }),
+    );
+
+    // ---- v8: named agent continuation ----
+
+    // listnamedagents — powers the launch modal's "Continue agent"
+    // dropdown. Joins instance rows with the definition / identity /
+    // memory bundle names so the frontend renders without follow-ups.
+    let wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_LIST_NAMED_AGENTS,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                let cmd: CommandListNamedAgentsData =
+                    serde_json::from_value(data).unwrap_or_default();
+                let limit = if cmd.limit == 0 {
+                    200
+                } else {
+                    cmd.limit.min(1000)
+                };
+                let instances = wstore
+                    .instance_list_named(limit, cmd.definition_id.as_deref())
+                    .map_err(|e| format!("listnamedagents: {e}"))?;
+
+                // Resolve bundle names once per response. With ≤200
+                // rows and typical bundle counts in the low dozens,
+                // a linear lookup on cached lists beats per-row
+                // round-trips through the store.
+                let defs = wstore
+                    .forge_list()
+                    .map_err(|e| format!("listnamedagents: forge_list: {e}"))?;
+                let identities = wstore
+                    .bundle_identity_list()
+                    .map_err(|e| format!("listnamedagents: bundle_identity_list: {e}"))?;
+                let memories = wstore
+                    .bundle_memory_list()
+                    .map_err(|e| format!("listnamedagents: bundle_memory_list: {e}"))?;
+
+                let rows: Vec<NamedAgentRow> = instances
+                    .into_iter()
+                    .map(|inst| {
+                        let def = defs.iter().find(|d| d.id == inst.definition_id);
+                        let identity_name = if inst.identity_id.is_empty() {
+                            "(ambient creds)".to_string()
+                        } else {
+                            identities
+                                .iter()
+                                .find(|i| i.id == inst.identity_id)
+                                .map(|i| i.name.clone())
+                                .unwrap_or_else(|| "(missing identity)".to_string())
+                        };
+                        let memory_name = if inst.memory_id.is_empty() {
+                            "(vanilla CLI)".to_string()
+                        } else {
+                            memories
+                                .iter()
+                                .find(|m| m.id == inst.memory_id)
+                                .map(|m| m.name.clone())
+                                .unwrap_or_else(|| "(missing memory)".to_string())
+                        };
+                        NamedAgentRow {
+                            instance_id: inst.id,
+                            instance_name: inst.instance_name,
+                            definition_id: inst.definition_id.clone(),
+                            definition_name: def
+                                .map(|d| d.name.clone())
+                                .unwrap_or_else(|| "(missing definition)".to_string()),
+                            provider: def
+                                .map(|d| d.provider.clone())
+                                .unwrap_or_default(),
+                            working_directory: inst.working_directory,
+                            identity_id: inst.identity_id,
+                            identity_name,
+                            memory_id: inst.memory_id,
+                            memory_name,
+                            started_at: inst.started_at,
+                            ended_at: inst.ended_at,
+                            status: inst.status,
+                            block_id_hint: inst.block_id,
+                        }
+                    })
+                    .collect();
+
+                Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // hidenamedagent — soft-delete (sets display_hidden = 1) so the
+    // row disappears from the dropdown. Working dir stays on disk.
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_HIDE_NAMED_AGENT,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                let cmd: CommandHideNamedAgentData = serde_json::from_value(data)
+                    .map_err(|e| format!("hidenamedagent: {e}"))?;
+                let hidden = wstore
+                    .instance_set_hidden(&cmd.id, true)
+                    .map_err(|e| format!("hidenamedagent: {e}"))?;
+                if hidden {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "namedagents:changed".to_string(),
+                        scopes: vec![],
+                        sender: String::new(),
+                        persist: 0,
+                        data: None,
+                    });
+                }
+                Ok(Some(json!({ "hidden": hidden })))
             })
         }),
     );

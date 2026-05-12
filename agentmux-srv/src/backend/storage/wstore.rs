@@ -1206,6 +1206,21 @@ pub struct AgentInstance {
     /// instantiation via the launch modal's Memory dropdown.
     #[serde(default)]
     pub memory_id: String,
+    /// User-chosen instance name (becomes `AGENTMUX_AGENT_ID` in the
+    /// spawn env). Empty for pre-v8 rows and for un-named launches.
+    /// Drives the "Continue agent" dropdown in the launch modal.
+    #[serde(default)]
+    pub instance_name: String,
+    /// Absolute path returned by `allocate_agent_workdir` at spawn.
+    /// Stored explicitly (rather than re-derived from the slug at
+    /// continue-time) so the continue flow is robust against
+    /// slug-rule changes and user-side renames.
+    #[serde(default)]
+    pub working_directory: String,
+    /// Soft-delete flag for the "Forget agent" affordance. Hidden
+    /// rows stay on disk for audit + recovery.
+    #[serde(default)]
+    pub display_hidden: bool,
 }
 
 impl WaveStore {
@@ -1428,7 +1443,8 @@ impl WaveStore {
         let mut sql = String::from(
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
                     status, github_context, started_at, ended_at, created_at,
-                    identity_id, memory_id
+                    identity_id, memory_id, instance_name, working_directory,
+                    display_hidden
              FROM db_agent_instances",
         );
         let mut clauses: Vec<&str> = Vec::new();
@@ -1468,7 +1484,8 @@ impl WaveStore {
         let mut stmt = conn.prepare(
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
                     status, github_context, started_at, ended_at, created_at,
-                    identity_id, memory_id
+                    identity_id, memory_id, instance_name, working_directory,
+                    display_hidden
              FROM db_agent_instances WHERE id = ?1",
         )?;
         let result = stmt.query_row(params![id], map_instance_row);
@@ -1486,8 +1503,10 @@ impl WaveStore {
             "INSERT INTO db_agent_instances
                 (id, definition_id, parent_instance_id, block_id, session_id, status,
                  github_context, started_at, ended_at, created_at,
-                 identity_id, memory_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                 identity_id, memory_id,
+                 instance_name, working_directory, display_hidden)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                     ?13, ?14, ?15)",
             params![
                 inst.id,
                 inst.definition_id,
@@ -1501,9 +1520,109 @@ impl WaveStore {
                 inst.created_at,
                 inst.identity_id,
                 inst.memory_id,
+                inst.instance_name,
+                inst.working_directory,
+                if inst.display_hidden { 1_i64 } else { 0_i64 },
             ],
         )?;
         Ok(())
+    }
+
+    /// Set the `display_hidden` flag on an existing instance row. Used
+    /// by the "Forget agent" affordance — soft-delete only; the row +
+    /// working directory remain on disk for audit + recovery.
+    pub fn instance_set_hidden(&self, id: &str, hidden: bool) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "UPDATE db_agent_instances SET display_hidden = ?1 WHERE id = ?2",
+            params![if hidden { 1_i64 } else { 0_i64 }, id],
+        )?;
+        Ok(rows > 0)
+    }
+
+    /// List all instances that the launch modal's "Continue agent"
+    /// dropdown should surface: have a non-empty `instance_name`, not
+    /// hidden, sorted by most-recent start. Capped to keep the
+    /// dropdown's wire payload bounded.
+    ///
+    /// `definition_id`, when provided, restricts the result to
+    /// instances of that definition. Server-side filtering is
+    /// necessary because the launch modal opens per-definition: a
+    /// user with 200+ named agents across many definitions could
+    /// have the current definition's older instances cut off by a
+    /// purely global limit otherwise.
+    pub fn instance_list_named(
+        &self,
+        limit: usize,
+        definition_id: Option<&str>,
+    ) -> Result<Vec<AgentInstance>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let sql = if definition_id.is_some() {
+            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
+                    status, github_context, started_at, ended_at, created_at,
+                    identity_id, memory_id, instance_name, working_directory,
+                    display_hidden
+             FROM db_agent_instances
+             WHERE display_hidden = 0
+               AND instance_name <> ''
+               AND parent_instance_id = ''
+               AND definition_id = ?1
+             ORDER BY started_at DESC
+             LIMIT ?2"
+        } else {
+            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
+                    status, github_context, started_at, ended_at, created_at,
+                    identity_id, memory_id, instance_name, working_directory,
+                    display_hidden
+             FROM db_agent_instances
+             WHERE display_hidden = 0
+               AND instance_name <> ''
+               AND parent_instance_id = ''
+             ORDER BY started_at DESC
+             LIMIT ?1"
+        };
+        let mut stmt = conn.prepare(sql)?;
+        let iter = match definition_id {
+            Some(def) => stmt.query_map(params![def, limit as i64], map_instance_row)?,
+            None => stmt.query_map(params![limit as i64], map_instance_row)?,
+        };
+        let mut out = Vec::new();
+        for r in iter {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Look up the most recent (by `started_at`) named instance that
+    /// matches the given `instance_name`. Used by the launch modal to
+    /// detect name collisions ("did you mean to continue?") and by
+    /// `ContinueNamedAgentCommand` to resolve the canonical row when
+    /// the caller only knows the name. Hidden rows are excluded.
+    pub fn instance_get_by_name(
+        &self,
+        instance_name: &str,
+    ) -> Result<Option<AgentInstance>, StoreError> {
+        if instance_name.is_empty() {
+            return Ok(None);
+        }
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
+                    status, github_context, started_at, ended_at, created_at,
+                    identity_id, memory_id, instance_name, working_directory,
+                    display_hidden
+             FROM db_agent_instances
+             WHERE instance_name = ?1
+               AND display_hidden = 0
+             ORDER BY started_at DESC
+             LIMIT 1",
+        )?;
+        let result = stmt.query_row(params![instance_name], map_instance_row);
+        match result {
+            Ok(a) => Ok(Some(a)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Update mutable instance fields. `id`, `definition_id`,
@@ -1551,7 +1670,8 @@ impl WaveStore {
         let mut stmt = conn.prepare(
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
                     status, github_context, started_at, ended_at, created_at,
-                    identity_id, memory_id
+                    identity_id, memory_id, instance_name, working_directory,
+                    display_hidden
              FROM db_agent_instances
              WHERE block_id = ?1 AND status IN ('running', 'paused')
              ORDER BY created_at DESC
@@ -1818,6 +1938,7 @@ fn map_memory_row(row: &rusqlite::Row) -> rusqlite::Result<Memory> {
 }
 
 fn map_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
+    let display_hidden_int: i64 = row.get(14)?;
     Ok(AgentInstance {
         id: row.get(0)?,
         definition_id: row.get(1)?,
@@ -1831,6 +1952,9 @@ fn map_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
         created_at: row.get(9)?,
         identity_id: row.get(10)?,
         memory_id: row.get(11)?,
+        instance_name: row.get(12)?,
+        working_directory: row.get(13)?,
+        display_hidden: display_hidden_int != 0,
     })
 }
 
@@ -2365,6 +2489,9 @@ mod tests {
             created_at: 1000,
             identity_id: String::new(),
             memory_id: String::new(),
+            instance_name: String::new(),
+            working_directory: String::new(),
+            display_hidden: false,
         };
         store.instance_create(&inst).unwrap();
 
@@ -2408,6 +2535,9 @@ mod tests {
             created_at: 0,
             identity_id: String::new(),
             memory_id: String::new(),
+            instance_name: String::new(),
+            working_directory: String::new(),
+            display_hidden: false,
         };
         store.instance_create(&inst).unwrap();
 
