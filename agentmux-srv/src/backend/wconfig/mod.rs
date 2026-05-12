@@ -42,20 +42,6 @@ mod tests {
     }
 
     #[test]
-    fn test_settings_ai_fields() {
-        let s = SettingsType {
-            ai_api_type: "anthropic".to_string(),
-            ai_model: "claude-3-opus".to_string(),
-            ai_max_tokens: 4096.0,
-            ..Default::default()
-        };
-        let json = serde_json::to_string(&s).unwrap();
-        assert!(json.contains("\"ai:apitype\":\"anthropic\""));
-        assert!(json.contains("\"ai:model\":\"claude-3-opus\""));
-        assert!(json.contains("\"ai:maxtokens\":4096.0"));
-    }
-
-    #[test]
     fn test_settings_terminal_fields() {
         let s = SettingsType {
             term_font_size: 14.0,
@@ -88,11 +74,8 @@ mod tests {
     }
 
     #[test]
-    fn test_settings_from_go_json() {
-        let go_json = r#"{
-            "ai:apitype": "openai",
-            "ai:model": "gpt-4",
-            "ai:maxtokens": 2048,
+    fn test_settings_from_json() {
+        let json_str = r#"{
             "term:fontsize": 13,
             "term:theme": "solarized-dark",
             "term:scrollback": 5000,
@@ -100,11 +83,9 @@ mod tests {
             "window:opacity": 0.85,
             "telemetry:enabled": true
         }"#;
-        let s: SettingsType = serde_json::from_str(go_json).unwrap();
-        assert_eq!(s.ai_api_type, "openai");
-        assert_eq!(s.ai_model, "gpt-4");
-        assert_eq!(s.ai_max_tokens, 2048.0);
+        let s: SettingsType = serde_json::from_str(json_str).unwrap();
         assert_eq!(s.term_font_size, 13.0);
+        assert_eq!(s.term_theme, "solarized-dark");
         assert_eq!(s.term_scrollback, Some(5000));
         assert!(s.window_transparent);
         assert_eq!(s.window_opacity, Some(0.85));
@@ -114,16 +95,34 @@ mod tests {
     #[test]
     fn test_settings_roundtrip() {
         let s = SettingsType {
-            ai_api_type: "anthropic".to_string(),
             term_font_size: 14.0,
+            term_theme: "dracula".to_string(),
             window_opacity: Some(0.95),
             ..Default::default()
         };
         let json = serde_json::to_string(&s).unwrap();
         let parsed: SettingsType = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.ai_api_type, "anthropic");
         assert_eq!(parsed.term_font_size, 14.0);
+        assert_eq!(parsed.term_theme, "dracula");
         assert_eq!(parsed.window_opacity, Some(0.95));
+    }
+
+    #[test]
+    fn test_settings_unknown_keys_passthrough() {
+        // Legacy keys (ai:*, autoupdate:*, editor:*, markdown:*) removed from
+        // SettingsType should land in `extra` via the flatten catch-all so
+        // existing user settings.json files don't error.
+        let json_str = r#"{
+            "ai:model": "claude-3-opus",
+            "autoupdate:enabled": true,
+            "editor:wordwrap": true,
+            "term:fontsize": 14
+        }"#;
+        let s: SettingsType = serde_json::from_str(json_str).unwrap();
+        assert_eq!(s.term_font_size, 14.0);
+        assert!(s.extra.contains_key("ai:model"));
+        assert!(s.extra.contains_key("autoupdate:enabled"));
+        assert!(s.extra.contains_key("editor:wordwrap"));
     }
 
     // -- TermThemeType serde --
@@ -286,7 +285,7 @@ mod tests {
     #[test]
     fn test_full_config_with_data() {
         let mut config = FullConfigType::default();
-        config.settings.ai_model = "claude-3".to_string();
+        config.settings.term_theme = "dracula".to_string();
         config.term_themes.insert(
             "test".to_string(),
             TermThemeType {
@@ -304,7 +303,7 @@ mod tests {
 
         let json = serde_json::to_string(&config).unwrap();
         let parsed: FullConfigType = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.settings.ai_model, "claude-3");
+        assert_eq!(parsed.settings.term_theme, "dracula");
         assert_eq!(parsed.term_themes.len(), 1);
         assert_eq!(
             parsed.term_themes.get("test").unwrap().display_name,
@@ -314,10 +313,10 @@ mod tests {
     }
 
     #[test]
-    fn test_full_config_from_go_json() {
-        let go_json = r##"{
+    fn test_full_config_from_json() {
+        let json = r##"{
             "settings": {
-                "ai:apitype": "anthropic",
+                "term:theme": "solarized-dark",
                 "term:fontsize": 14,
                 "window:transparent": true
             },
@@ -344,8 +343,8 @@ mod tests {
             "defaultwidgets": {},
             "presets": {}
         }"##;
-        let parsed: FullConfigType = serde_json::from_str(go_json).unwrap();
-        assert_eq!(parsed.settings.ai_api_type, "anthropic");
+        let parsed: FullConfigType = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.settings.term_theme, "solarized-dark");
         assert_eq!(parsed.settings.term_font_size, 14.0);
         assert!(parsed.settings.window_transparent);
         assert_eq!(parsed.mime_types.len(), 1);
@@ -394,15 +393,15 @@ mod tests {
     fn test_config_watcher_default() {
         let watcher = ConfigWatcher::new();
         let config = watcher.get_full_config();
-        assert!(config.settings.ai_model.is_empty());
+        assert!(config.settings.term_theme.is_empty());
     }
 
     #[test]
     fn test_config_watcher_with_initial() {
         let mut config = FullConfigType::default();
-        config.settings.ai_model = "test-model".to_string();
+        config.settings.term_theme = "dracula".to_string();
         let watcher = ConfigWatcher::with_config(config);
-        assert_eq!(watcher.get_settings().ai_model, "test-model");
+        assert_eq!(watcher.get_settings().term_theme, "dracula");
     }
 
     #[test]
@@ -418,11 +417,11 @@ mod tests {
     fn test_config_watcher_update_settings() {
         let watcher = ConfigWatcher::new();
         let settings = SettingsType {
-            ai_api_type: "openai".to_string(),
+            term_theme: "solarized-dark".to_string(),
             ..Default::default()
         };
         watcher.update_settings(settings);
-        assert_eq!(watcher.get_settings().ai_api_type, "openai");
+        assert_eq!(watcher.get_settings().term_theme, "solarized-dark");
     }
 
     #[test]
@@ -436,7 +435,7 @@ mod tests {
                 let w = watcher.clone();
                 thread::spawn(move || {
                     let s = SettingsType {
-                        ai_model: format!("model-{}", i),
+                        term_theme: format!("theme-{}", i),
                         ..Default::default()
                     };
                     w.update_settings(s);
@@ -486,7 +485,7 @@ mod tests {
         let path = PathBuf::from("/nonexistent/settings.json");
         let (config, errors): (SettingsType, _) = read_config_file(&path);
         assert!(errors.is_empty()); // Missing file is not an error
-        assert!(config.ai_model.is_empty());
+        assert!(config.term_theme.is_empty());
     }
 
     #[test]
@@ -500,8 +499,8 @@ mod tests {
 // Terminal settings
 {
     "term:fontsize": 16.0,
-    /* AI config */
-    "ai:model": "claude-sonnet-4-6" // inline comment
+    /* theme */
+    "term:theme": "dracula" // inline comment
 }
 "#,
         )
@@ -510,7 +509,7 @@ mod tests {
         let (config, errors): (SettingsType, _) = read_config_file(&path);
         assert!(errors.is_empty(), "errors: {:?}", errors);
         assert_eq!(config.term_font_size, 16.0);
-        assert_eq!(config.ai_model, "claude-sonnet-4-6");
+        assert_eq!(config.term_theme, "dracula");
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -543,24 +542,6 @@ mod tests {
         assert_eq!(loader::strip_trailing_commas(r#"[1, 2,]"#), r#"[1, 2 ]"#);
         assert_eq!(loader::strip_trailing_commas(r#"{"a": "b,}"}"#), r#"{"a": "b,}"}"#);
         assert_eq!(loader::strip_trailing_commas(r#"{"a": 1, "b": 2}"#), r#"{"a": 1, "b": 2}"#);
-    }
-
-    // -- AiSettingsType serde --
-
-    #[test]
-    fn test_ai_settings_type_serde() {
-        let ai = AiSettingsType {
-            ai_api_type: "anthropic".to_string(),
-            ai_model: "claude-3-opus".to_string(),
-            ai_max_tokens: 4096.0,
-            display_name: "Claude Opus".to_string(),
-            display_order: 1.0,
-            ..Default::default()
-        };
-        let json = serde_json::to_string(&ai).unwrap();
-        assert!(json.contains("\"ai:apitype\":\"anthropic\""));
-        assert!(json.contains("\"display:name\":\"Claude Opus\""));
-        assert!(json.contains("\"display:order\":1.0"));
     }
 
     // -- merge_into_template --
