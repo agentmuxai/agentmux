@@ -14,9 +14,9 @@ vars:
     BIN_DIR: "bin"
     VERSION:
         sh: 'PATH="$HOME/.cargo/bin:/opt/homebrew/opt/node@20/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" node version.cjs'
-    RM: '{{if eq OS "windows"}}pwsh Remove-Item -Force -ErrorAction SilentlyContinue{{else}}rm -f{{end}}'
-    RMRF: '{{if eq OS "windows"}}pwsh Remove-Item -Force -Recurse -ErrorAction SilentlyContinue{{else}}rm -rf{{end}}'
-    DATE: '{{if eq OS "windows"}}pwsh Get-Date -UFormat{{else}}date{{end}}'
+    RM: '{{if eq OS "windows"}}pwsh -Command Remove-Item -Force -ErrorAction SilentlyContinue{{else}}rm -f{{end}}'
+    RMRF: '{{if eq OS "windows"}}pwsh -Command Remove-Item -Force -Recurse -ErrorAction SilentlyContinue{{else}}rm -rf{{end}}'
+    DATE: '{{if eq OS "windows"}}pwsh -Command Get-Date -UFormat{{else}}date{{end}}'
     ARTIFACTS_BUCKET: agentmux-github-artifacts/staging
     RELEASES_BUCKET: dl.agentmux.ai/releases
     WINGET_PACKAGE: AgentMux.AgentMux
@@ -260,7 +260,7 @@ tasks:
     copyfiles:*:*:
         desc: Recursively copy directory and its contents.
         internal: true
-        cmd: '{{if eq OS "windows"}}pwsh Copy-Item -Recurse -Force -Path {{index .MATCH 0}} -Destination {{index .MATCH 1}}{{else}}mkdir -p "$(dirname {{index .MATCH 1}})" && cp -r {{index .MATCH 0}} {{index .MATCH 1}}{{end}}'
+        cmd: '{{if eq OS "windows"}}pwsh -Command Copy-Item -Recurse -Force -Path {{index .MATCH 0}} -Destination {{index .MATCH 1}}{{else}}mkdir -p "$(dirname {{index .MATCH 1}})" && cp -r {{index .MATCH 0}} {{index .MATCH 1}}{{end}}'
 
     clean:
         desc: clean dist directories
