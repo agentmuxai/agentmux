@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-srv"
-version = "0.33.831"
+version = "0.33.808"
 edition = "2021"
 description = "AgentMux Rust backend server"
 
@@ -43,7 +43,6 @@ sha2 = "0.10"
 hex = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 tar = "0.4"
-tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]
 # Out-of-process crash dump capture via VEH + named-pipe IPC.
@@ -69,6 +68,7 @@ winres = "0.1"
 tower = { version = "0.5", features = ["util"] }
 serde_json = "1"
 libc = "0.2"
+tempfile = "3"
 # Phase E.7 — property-based testing for reducer arm invariants.
 # `default-features = false` to avoid the timeout-fork machinery
 # that doesn't play nicely with our existing test runner; we only
