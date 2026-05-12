@@ -594,12 +594,13 @@ mod tests {
     }
 
     #[test]
-    fn test_build_config_files_hooks_written() {
-        let mut content_map = HashMap::new();
-        content_map.insert("hooks".to_string(), r#"{"hooks":[]}"#.to_string());
-
+    fn test_build_config_files_settings_written() {
+        // PR #813 moved hooks from `.claude/hooks.json` (a Claude Code
+        // dead-letter path) to `.claude/settings.json` under the
+        // `"hooks"` key (the real discovery location).
+        let content_map = HashMap::new();
         let files = build_config_files(&content_map, &[], "Aria", "agent-1");
-        assert!(files.iter().any(|f| f.filename == ".claude/hooks.json"));
+        assert!(files.iter().any(|f| f.filename == ".claude/settings.json"));
     }
 
     #[test]

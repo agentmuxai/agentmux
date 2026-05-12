@@ -1617,6 +1617,17 @@ pub struct CommandCreateAgentInstanceData {
     /// modal's Memory dropdown.
     #[serde(default)]
     pub memory_id: String,
+    /// User-chosen instance name (becomes `AGENTMUX_AGENT_ID` in the
+    /// spawn env). Powers the launch modal's "Continue agent"
+    /// dropdown. Empty = un-named, won't appear in the dropdown.
+    #[serde(default)]
+    pub instance_name: String,
+    /// Absolute working directory path resolved by
+    /// `allocate_agent_workdir` at spawn time. Stored on the instance
+    /// row so the continue flow can reuse it without re-deriving the
+    /// slug.
+    #[serde(default)]
+    pub working_directory: String,
 }
 
 /// Mutable subset of AgentInstance for PATCH-style updates. Every field is
