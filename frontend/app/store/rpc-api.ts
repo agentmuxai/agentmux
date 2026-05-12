@@ -770,6 +770,13 @@ class RpcApiType {
             identity_id?: string;
             /** v7 — Memory bundle FK. Empty = blank singleton. */
             memory_id?: string;
+            /** v8 — user-chosen instance name; powers the launch modal's
+             * "Continue agent" dropdown. Empty = un-named. */
+            instance_name?: string;
+            /** v8 — resolved absolute working directory from
+             * `WriteAgentConfigCommand`. Stored on the row so the
+             * continue flow can reuse it. */
+            working_directory?: string;
         },
         opts?: RpcOpts,
     ): Promise<AgentInstance> {
@@ -800,6 +807,29 @@ class RpcApiType {
         opts?: RpcOpts,
     ): Promise<{ deleted: boolean }> {
         return client.rpcCall("deleteagentinstance", data, opts);
+    }
+
+    // command "listnamedagents" [call]
+    // v8: powers the launch modal's "Continue agent" dropdown. Returns
+    // named instance rows joined with their definition + identity /
+    // memory bundle names for one-shot rendering.
+    ListNamedAgentsCommand(
+        client: RpcClient,
+        data: { limit?: number },
+        opts?: RpcOpts,
+    ): Promise<NamedAgentRow[]> {
+        return client.rpcCall("listnamedagents", data, opts);
+    }
+
+    // command "hidenamedagent" [call]
+    // v8: soft-deletes a named instance from the dropdown (row +
+    // working dir remain on disk for audit + recovery).
+    HideNamedAgentCommand(
+        client: RpcClient,
+        data: { id: string },
+        opts?: RpcOpts,
+    ): Promise<{ hidden: boolean }> {
+        return client.rpcCall("hidenamedagent", data, opts);
     }
 
     // command "forkagentdefinition" [call]
