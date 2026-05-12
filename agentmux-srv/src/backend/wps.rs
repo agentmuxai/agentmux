@@ -11,7 +11,7 @@
 //! - Star-scope subscriptions (e.g., "block:*")
 //! - Event persistence (history/replay)
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -141,10 +141,19 @@ pub struct Broker {
     inner: Mutex<BrokerInner>,
 }
 
+/// Tracks `(route_id, event_name, scope)` tuples whose persisted
+/// history has already been replayed to a given route. Skipping
+/// replay on resubscribe prevents the frontend's `eventsub`
+/// flushes (sent on every listener add/remove against the shared
+/// `ws-main` route) from re-emitting completed bash logs on every
+/// pane mount or tab switch. Codex P2 on PR #817.
+type ReplayKey = (String, String, String);
+
 struct BrokerInner {
     client: Option<Box<dyn WpsClient>>,
     sub_map: HashMap<String, BrokerSubscription>,
     persist_map: HashMap<PersistKey, PersistEventWrap>,
+    replayed: HashSet<ReplayKey>,
 }
 
 impl Broker {
@@ -154,6 +163,7 @@ impl Broker {
                 client: None,
                 sub_map: HashMap::new(),
                 persist_map: HashMap::new(),
+                replayed: HashSet::new(),
             }),
         }
     }
@@ -196,41 +206,67 @@ impl Broker {
             }
         }
 
-        Self::replay_to_route(&inner, route_id, &sub);
+        Self::replay_to_route(&mut inner, route_id, &sub);
     }
 
     /// Deliver any persisted events matching `sub` to `route_id`.
-    /// Called inside `subscribe` so replay happens atomically under the
-    /// broker lock — no live event published mid-replay can interleave.
+    /// Called inside `subscribe` so replay happens atomically under
+    /// the broker lock — no live event published mid-replay can
+    /// interleave.
+    ///
+    /// **Once-per-(route, event, scope).** The frontend
+    /// (`frontend/app/store/wps.ts`) flushes `eventsub` for the
+    /// shared `ws-main` route on every listener add/remove. Replaying
+    /// persisted history on each of those flushes would re-emit
+    /// completed bash logs every pane mount / tab switch / sibling
+    /// subscription. The `replayed` set tracks tuples that already
+    /// received their backfill and short-circuits subsequent
+    /// resubscribes. Cleared per-route in `unsubscribe_all` so a true
+    /// reconnect (route dropped + re-registered) gets a fresh replay.
+    ///
     /// Star-scope replay is intentionally not implemented (rare,
     /// requires scanning every persist key; can add later if needed).
-    fn replay_to_route(inner: &BrokerInner, route_id: &str, sub: &SubscriptionRequest) {
+    fn replay_to_route(
+        inner: &mut BrokerInner,
+        route_id: &str,
+        sub: &SubscriptionRequest,
+    ) {
         let client = match &inner.client {
             Some(c) => c,
             None => return,
         };
 
-        let deliver = |scope: &str| {
-            let key = PersistKey {
-                event: sub.event.clone(),
-                scope: scope.to_string(),
-            };
-            if let Some(pe) = inner.persist_map.get(&key) {
-                for event in &pe.events {
-                    client.send_event(route_id, event.clone());
-                }
-            }
-        };
-
+        let mut scopes_to_deliver: Vec<String> = Vec::new();
         if sub.allscopes {
             // "" key holds the global history per persist_event's scope_set.
-            deliver("");
+            scopes_to_deliver.push(String::new());
         } else {
             for scope in &sub.scopes {
                 if !scope_has_star(scope) {
-                    deliver(scope);
+                    scopes_to_deliver.push(scope.clone());
                 }
             }
+        }
+
+        let mut to_send: Vec<WaveEvent> = Vec::new();
+        for scope in scopes_to_deliver {
+            let key = (route_id.to_string(), sub.event.clone(), scope.clone());
+            if inner.replayed.contains(&key) {
+                continue;
+            }
+            let pkey = PersistKey {
+                event: sub.event.clone(),
+                scope: scope.clone(),
+            };
+            if let Some(pe) = inner.persist_map.get(&pkey) {
+                for event in &pe.events {
+                    to_send.push(event.clone());
+                }
+            }
+            inner.replayed.insert(key);
+        }
+        for event in to_send {
+            client.send_event(route_id, event);
         }
     }
 
@@ -241,12 +277,18 @@ impl Broker {
     }
 
     /// Unsubscribe a route from all events.
+    ///
+    /// Also clears the `replayed` tracker for this route so a future
+    /// reconnect (route registers again from scratch) gets a fresh
+    /// replay of persisted history. Without this, a transient
+    /// WebSocket drop would silently lose all subsequent replay.
     pub fn unsubscribe_all(&self, route_id: &str) {
         let mut inner = self.inner.lock().unwrap();
         let events: Vec<String> = inner.sub_map.keys().cloned().collect();
         for event in events {
             Self::unsubscribe_nolock(&mut inner, route_id, &event);
         }
+        inner.replayed.retain(|(r, _, _)| r != route_id);
     }
 
     fn unsubscribe_nolock(inner: &mut BrokerInner, route_id: &str, event_name: &str) {
@@ -698,6 +740,74 @@ mod tests {
         assert_eq!(events.len(), 5, "all 5 persisted events replayed");
         assert_eq!(events[0].1.data, Some(serde_json::json!({"tool_id": "t1", "n": 0})));
         assert_eq!(events[4].1.data, Some(serde_json::json!({"tool_id": "t1", "n": 4})));
+    }
+
+    /// Regression: re-subscribing the SAME route to the SAME
+    /// (event, scope) does NOT replay again. The frontend's
+    /// `eventsub` flushes happen on every listener add/remove, so
+    /// the broker has to be idempotent across resubscribe calls.
+    /// Codex P2 on PR #817.
+    #[test]
+    fn test_replay_on_resubscribe_is_idempotent() {
+        let broker = Broker::new();
+        let client = Arc::new(TestClient::new());
+        broker.set_client(Box::new(Arc::clone(&client)));
+
+        for i in 0..3 {
+            broker.publish(WaveEvent {
+                event: "tool_chunk".to_string(),
+                scopes: vec!["block:abc".to_string()],
+                sender: String::new(),
+                persist: 10,
+                data: Some(serde_json::json!({"n": i})),
+            });
+        }
+
+        let sub = SubscriptionRequest {
+            event: "tool_chunk".to_string(),
+            scopes: vec!["block:abc".to_string()],
+            allscopes: false,
+        };
+
+        broker.subscribe("route-1", sub.clone());
+        assert_eq!(
+            client.received_events().len(),
+            3,
+            "first subscribe replays all 3 persisted events"
+        );
+
+        // Re-subscribe (same route, same event+scope) — must not
+        // replay a second time.
+        broker.subscribe("route-1", sub.clone());
+        assert_eq!(
+            client.received_events().len(),
+            3,
+            "re-subscribe is a no-op for replay; received count stays at 3"
+        );
+
+        // Live publish after re-subscribe still delivers.
+        broker.publish(WaveEvent {
+            event: "tool_chunk".to_string(),
+            scopes: vec!["block:abc".to_string()],
+            sender: String::new(),
+            persist: 10,
+            data: Some(serde_json::json!({"n": "live"})),
+        });
+        assert_eq!(
+            client.received_events().len(),
+            4,
+            "live publish after resubscribe is delivered exactly once"
+        );
+
+        // Disconnect (unsubscribe_all) + reconnect — fresh replay.
+        broker.unsubscribe_all("route-1");
+        broker.subscribe("route-1", sub.clone());
+        assert_eq!(
+            client.received_events().len(),
+            8,
+            "reconnect after unsubscribe_all clears the replayed tracker; \
+             gets all 4 persisted events again"
+        );
     }
 
     /// Regression: replay does NOT cross-pollute scopes. Subscriber to
