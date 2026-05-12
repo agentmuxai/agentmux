@@ -602,16 +602,21 @@ function buildConfigFiles(
         }
     }
 
-    // Always write .claude/hooks.json with the auto-injected PreToolUse:Bash
-    // hook (agentmux-bashwrap) so live streaming engages on every
-    // session. User-supplied hooks merge in. Codex P1 on PR #809:
-    // the prior conditional silently disabled live streaming for the
-    // primary UI launch path (any agent without pre-existing user
-    // hooks). Mirror of agentmux-srv/src/backend/agent_config.rs
-    // build_hooks_config — keep the two paths in sync.
-    const hooksJson = buildHooksConfig(contentMap["hooks"]);
-    if (hooksJson) {
-        files.push({ path: ".claude/hooks.json", content: hooksJson });
+    // Always write .claude/settings.json with the auto-injected
+    // PreToolUse:Bash hook (under the `hooks` key) so live streaming
+    // engages on every session. User-supplied legacy hooks content
+    // and user settings.json content both merge in. Mirror of
+    // agentmux-srv/src/backend/agent_config.rs build_settings_with_hooks —
+    // keep the two paths in sync.
+    //
+    // FILE LOCATION (v0.33.805+): Claude Code reads project hooks from
+    // .claude/settings.json under the "hooks" key. A standalone
+    // .claude/hooks.json is NOT a discovery location — that was the
+    // v0.33.804 root cause: file was written but Claude never read it.
+    // See https://code.claude.com/docs/en/hooks.md.
+    const settingsJson = buildSettingsWithHooks(contentMap["settings"], contentMap["hooks"]);
+    if (settingsJson) {
+        files.push({ path: ".claude/settings.json", content: settingsJson });
     }
 
     // Build .mcp.json: auto-inject AgentMux MCP + merge user-provided config
@@ -644,7 +649,10 @@ function expandTemplate(content: string, vars: Record<string, string>): string {
  * in sync — keep changes aligned across both files. See
  * docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §5.
  */
-function buildHooksConfig(userHooksContent: string | undefined): string | null {
+function buildSettingsWithHooks(
+    userSettingsContent: string | undefined,
+    userHooksContent: string | undefined,
+): string | null {
     const agentmuxPretooluse = {
         matcher: "^(Bash|.*[Bb]ash.*)$",
         hooks: [
@@ -680,10 +688,39 @@ function buildHooksConfig(userHooksContent: string | undefined): string | null {
     }
     pretooluseEntries.push(agentmuxPretooluse);
     hooksObj["PreToolUse"] = pretooluseEntries;
+
+    // Wrap into settings.json shape, merging any user-supplied settings.
+    const settingsObj: Record<string, unknown> = {};
+    if (userSettingsContent) {
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(userSettingsContent);
+        } catch (e) {
+            console.warn("agent-model: failed to parse user settings JSON; dropping", e);
+            parsed = null;
+        }
+        if (parsed != null && typeof parsed === "object" && !Array.isArray(parsed)) {
+            Object.assign(settingsObj, parsed as Record<string, unknown>);
+        } else if (parsed != null) {
+            console.warn("agent-model: user settings top-level is not an object; dropping");
+        }
+    }
+    // Merge existing user settings.hooks (non-PreToolUse keys) into ours;
+    // ours wins on PreToolUse since user-PreToolUse from content_map["hooks"]
+    // is already in pretooluseEntries.
+    const existingHooks = settingsObj["hooks"];
+    if (existingHooks != null && typeof existingHooks === "object" && !Array.isArray(existingHooks)) {
+        for (const [k, v] of Object.entries(existingHooks as Record<string, unknown>)) {
+            if (k === "PreToolUse") continue;
+            if (!(k in hooksObj)) hooksObj[k] = v;
+        }
+    }
+    settingsObj["hooks"] = hooksObj;
+
     try {
-        return JSON.stringify(hooksObj, null, 2);
+        return JSON.stringify(settingsObj, null, 2);
     } catch (e) {
-        console.error("agent-model: failed to serialize hooks config", e);
+        console.error("agent-model: failed to serialize settings.json", e);
         return null;
     }
 }
