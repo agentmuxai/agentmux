@@ -1,0 +1,9 @@
+{"kind":"header","version":1,"agentmux_version":"0.33.817","schema_version":8,"recorded_at":"2026-05-12T15:00:00Z","provider":"claude","block_id":"<placeholder-uuid-1>","instance_name":"livelog-fixture","redactions":["session_id","tool_use_id","cwd","timestamp"]}
+{"seq":1,"t_ms":0,"src":"stream-json","line":"{\"type\":\"text\",\"content\":\"I'll run a bash command.\"}"}
+{"seq":2,"t_ms":150,"src":"stream-json","line":"{\"type\":\"tool_call\",\"tool\":\"Bash\",\"id\":\"<placeholder-tool-1>\",\"params\":{\"command\":\"ls /tmp\"}}"}
+{"seq":3,"t_ms":200,"src":"wps","event":"tool_chunk","scopes":["block:<placeholder-uuid-1>"],"data":{"op":"chunk","tool_id":"<placeholder-tool-1>","kind":"stdout","content":"file1.txt","timestamp":200}}
+{"seq":4,"t_ms":240,"src":"wps","event":"tool_chunk","scopes":["block:<placeholder-uuid-1>"],"data":{"op":"chunk","tool_id":"<placeholder-tool-1>","kind":"stdout","content":"file2.txt","timestamp":240}}
+{"seq":5,"t_ms":280,"src":"wps","event":"tool_chunk","scopes":["block:<placeholder-uuid-1>"],"data":{"op":"chunk","tool_id":"<placeholder-tool-1>","kind":"stdout","content":"file3.txt","timestamp":280}}
+{"seq":6,"t_ms":320,"src":"wps","event":"tool_chunk","scopes":["block:<placeholder-uuid-1>"],"data":{"op":"terminal","tool_id":"<placeholder-tool-1>","exit_code":0,"timestamp":320}}
+{"seq":7,"t_ms":380,"src":"stream-json","line":"{\"type\":\"tool_result\",\"tool\":\"Bash\",\"id\":\"<placeholder-tool-1>\",\"result\":\"file1.txt\\nfile2.txt\\nfile3.txt\",\"isError\":false}"}
+{"kind":"trailer","wall_time_ms":380,"expect":{"tool_chunks_applied":4,"warnings_count":0,"tool_id":"<placeholder-tool-1>","final_kind_breakdown":{"stdout":3,"system":1}}}

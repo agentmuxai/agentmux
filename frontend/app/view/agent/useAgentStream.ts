@@ -85,6 +85,10 @@ export function useAgentStream({
     provider,
 }: UseAgentStreamOpts): void {
     // Read-side accessors only — all writes route through dispatchPane.
+    // Maintaining this contract is how the agent pane stays 100%
+    // reducer-routed and why `recordDispatch` is a sufficient tap for
+    // session-replay fixtures. See docs/analysis/AGENT_PANE_REDUCER_
+    // AUDIT_2026_05_12.md.
     const [getTurnTokens] = turnTokensAtom;
     const getStopping = stoppingAtom?.[0];
 
