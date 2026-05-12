@@ -9,16 +9,21 @@
 :root {
     --main-text-color: #f7f7f7;
     --title-font-size: 18px;
-    --window-opacity: 1;
+    // Default to a translucent value so the FIRST paint after page load has
+    // alpha-aware bg, even before AppSettingsUpdater runs. Without this the
+    // body's first rasterization bakes opaque pixels into Chromium's tile
+    // cache, which reuses them for the lifetime of the renderer — leaving
+    // pane interiors opaque even after JS has set --window-opacity correctly.
+    // (Popovers and modals are rasterized fresh on show, so they pick up
+    // the correct alpha — but the main panes are rasterized once at boot.)
+    // For window:transparent=false, AppSettingsUpdater overrides this to 1.
+    --window-opacity: 0.45;
     --secondary-text-color: rgb(195, 200, 194);
     --grey-text-color: #666;
     // Alpha-aware so panes that use `background: var(--main-bg-color)`
     // (and there are 30+ of them across agent / swarm / browser / identity /
-    // memory / etc.) automatically inherit window transparency. Defaults to
-    // alpha=1 (fully opaque, same as before) when --window-opacity is unset
-    // — AppSettingsUpdater only sets --window-opacity when window:transparent
-    // is true, so non-transparent mode is byte-for-byte unchanged.
-    --main-bg-color: rgba(34, 34, 34, var(--window-opacity, 1));
+    // memory / etc.) automatically inherit window transparency.
+    --main-bg-color: rgba(34, 34, 34, var(--window-opacity, 0.45));
     --border-color: rgba(255, 255, 255, 0.16);
     // Tab separator — the constant gap between adjacent tabs. The
     // optional centered line is currently set to 0px (no visible
