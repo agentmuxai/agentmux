@@ -314,7 +314,7 @@ mod tests {
 
     #[test]
     fn test_full_config_from_json() {
-        let go_json = r##"{
+        let json = r##"{
             "settings": {
                 "term:theme": "solarized-dark",
                 "term:fontsize": 14,
@@ -343,7 +343,7 @@ mod tests {
             "defaultwidgets": {},
             "presets": {}
         }"##;
-        let parsed: FullConfigType = serde_json::from_str(go_json).unwrap();
+        let parsed: FullConfigType = serde_json::from_str(json).unwrap();
         assert_eq!(parsed.settings.term_theme, "solarized-dark");
         assert_eq!(parsed.settings.term_font_size, 14.0);
         assert!(parsed.settings.window_transparent);
