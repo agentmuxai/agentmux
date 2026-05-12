@@ -202,3 +202,64 @@ If full transparency is needed:
 - libcef.so HEAD-of-patches: `~/cef-build/chromium_git/chromium/src/out/Release_GN_x64/libcef.so` mtime 11:36, contains `web_view_impl.cc` (UpdateBaseBackgroundColor patch) + `content_layer_client_impl.cc` (isOpaque() patch) + CEF source patches
 - AppImage extracted: `~/.local/share/agentmux/extracted/0.33.792/usr/bin/{agentmux,libcef.so}` updated 11:40
 - Original AppImage on Desktop: `~/Desktop/AgentMux_0.33.792_amd64.AppImage` — built before today's chromium patches, would need a fresh `task package` if redistributing
+
+---
+
+## Session 3 addendum (2026-05-11 evening, 17:00–23:20 PDT)
+
+Continued the investigation that ended session 2. New findings:
+
+### What we tried and confirmed by pixel sampling
+
+Diagnostic LOGs were added at every layer of the rasterization pipeline to identify the source of the opaque rgb(250, 250, 250) tile content:
+
+1. **`SoftwareRenderer::DrawTileQuad` tile-content sampling** — confirmed tile bitmap center pixels are `0xfffafafa` (opaque rgb(250, 250, 250)) even after all CSS bgs are stripped via CDP injection. Source is below the CSS layer.
+
+2. **`SoftwareRenderer::DrawSolidColorQuad` quad inspection** — found two opaque sources before the SI clamp patch:
+   - Full-viewport `(0.133, 0.133, 0.133, 1)` (= body color, alpha=1) — a SolidColorLayer
+   - 254×254 tile-grid `(0.980, 0.980, 0.980, 1)` quads (= Material Grey 50) — PictureLayer tiles detected as solid color
+
+3. **`ViewPainter::PaintRootGroup` diagnostic** — captured the actual `root_element_background_color` painted into tiles. Early frames showed `#222222` opaque (i.e., body's color promoted to alpha=1) BEFORE AppSettingsUpdater ran. Later frames showed `rgba(34, 34, 34, 0.45)` correctly. The early-opaque paints get baked into tiles and the tile cache reuses them.
+
+### Patches tried that DID NOT survive
+
+These were brute-force / too-aggressive and were reverted at the user's "we want robust, not a hack" direction:
+
+- `software_renderer.cc DrawTileQuad` — skip tile quads whose center pixel is opaque rgb >= 240 each. **DID produce visible transparency** (pane interior rgb(30, 35, 30) with green tint over wallpaper) but rejected as a hack.
+- `pending_layer.cc::UsesSolidColorLayer` — globally reject non-opaque solid colors → forced PictureLayer path. Broke agentmux's UI rendering.
+- `solid_color_layer_impl.cc::AppendQuads` — clamp quad alpha to active_tree.background_color alpha. Broke rendering.
+- `web_frame_widget_impl.cc::SetBackgroundColor` — "sticky transparency" latch: once host bg is non-opaque, reject opaque updates. Broke rendering.
+- `tile_manager.cc` — reject solid-color cache for near-white analyzed colors. Insufficient on its own.
+- `raster_source.cc::ClearForOpaqueRaster` — always clear with kTransparent. Insufficient.
+- `picture_layer_impl.cc` missing-tile fallback — kTransparent instead of safe_opaque. Insufficient.
+- `view_painter.cc::PaintRootGroup` — skip opaque combined when base is transparent. Caused agentmux UI to not render at all (root view's bg fill is required).
+- `aura/window.cc::OnFirstSurfaceActivation`, `delegated_frame_host_client_aura.cc::GetGutterColor`, `render_widget_host_view_aura.cc::CreateAuraWindow` — change SK_ColorWHITE defaults to TRANSPARENT. Each one is a real opaque-white source but reverting individually did not eliminate the pane-interior opacity.
+
+### Final patch set (verified safe — agentmux UI renders fully)
+
+**CEF source patches (`a5af/cef` `agentmux/7680-drag-rightclick-and-transparency` HEAD `3e041ad2f`):**
+- `window_impl.cc::CreateWidget` — deferred `SetBackgroundColor(SK_ColorTRANSPARENT)` for top-level windows after `widget_` is assigned
+- `window_view.cc` — mirror translucent branch for non-modal top-level windows
+- `browser_view_impl.cc::TransparencyApplyOnRenderReady` — WebContentsObserver that calls RWHView::SetBackgroundColor + direct SetBackgroundOpaque(false) via owner_delegate
+
+**Chromium patch (in local tree only — needs porting to CEF's `patch/patches/` system):**
+- `third_party/blink/renderer/core/exported/web_view_impl.cc::UpdateBaseBackgroundColor` — re-push BackgroundColor() to FrameWidget so cc::LayerTreeHost.background_color gets the alpha-aware value
+
+**AgentMux (`agentu/cef-transparency` HEAD `5d7ee44b`):**
+- `frontend/app/app.tsx::AppSettingsUpdater` — `--window-opacity` set on `documentElement` (`:root`), not body
+- `agentmux-cef/src/app.rs` — `--disable-lcd-text` Chromium switch
+
+### Unresolved
+
+After all the safe patches, pane interiors still render opaque rgb(34, 34, 34) — same as the original baseline. Window borders/gaps continue to show wallpaper bleed-through (rgb(14, 77, 14) green tint). The rgb(250, 250, 250) opaque-tile source was identified empirically (visible in tile bitmap samples) but its blink display-list source was never traced. The only patches that produced visible interior transparency caused other rendering regressions.
+
+### Next investigation steps (for future sessions)
+
+1. Identify the blink paint op that writes opaque rgb(250, 250, 250) to tiles. Hypothesis: `kColorWindowBackground` or `kColorPrimaryBackground` via Material Design ColorProvider for some implicit chrome element (scrollbar track? rootView default?).
+2. Patch CEF's color provider to return transparent for `kColorWindowBackground` family when `is_transparent=true` is set.
+3. Test on a system with working GPU (this machine has VAAPI/WebGL blocklisted, forcing software compositing — may behave differently with GL/Vulkan).
+
+### Test artifacts
+
+- `/tmp/transparency-test/v792-SAFE-FINAL.png` — final safe state (pane opaque, gaps transparent)
+- `/tmp/transparency-test/v792-SKIP-WHITE-TILES.png` — brute-force tile-skip state (pane partial-transparent rgb(30, 35, 30))
