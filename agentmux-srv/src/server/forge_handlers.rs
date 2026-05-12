@@ -1024,6 +1024,14 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // immediately on either "" or "blank").
                     identity_id: cmd.identity_id,
                     memory_id: cmd.memory_id,
+                    // v8: named-agent continuation. instance_name +
+                    // working_directory come from the launch-modal
+                    // overrides via CommandCreateAgentInstanceData
+                    // (added in the same spec). Empty string for
+                    // legacy/ambient launches.
+                    instance_name: cmd.instance_name.clone(),
+                    working_directory: cmd.working_directory.clone(),
+                    display_hidden: false,
                 };
                 wstore
                     .instance_create(&inst)
@@ -1065,11 +1073,17 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     started_at: existing.started_at,
                     ended_at: cmd.ended_at.unwrap_or(existing.ended_at),
                     created_at: existing.created_at,
-                    // identity_id / memory_id are immutable post-create
-                    // (mid-session credential rotation is out of scope —
-                    // launch a new instance with a different bundle).
+                    // identity_id / memory_id / instance_name /
+                    // working_directory are immutable post-create
+                    // (mid-session credential rotation is out of scope
+                    // — launch a new instance with a different bundle
+                    // or use ContinueNamedAgentCommand). display_hidden
+                    // is mutated via instance_set_hidden, not here.
                     identity_id: existing.identity_id.clone(),
                     memory_id: existing.memory_id.clone(),
+                    instance_name: existing.instance_name.clone(),
+                    working_directory: existing.working_directory.clone(),
+                    display_hidden: existing.display_hidden,
                 };
                 wstore
                     .instance_update(&merged)

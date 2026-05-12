@@ -125,6 +125,7 @@ pub fn run_forge_migrations(conn: &Connection) -> Result<(), StoreError> {
     run_forge_v5_migrations(conn)?;
     run_forge_v6_migrations(conn)?;
     run_forge_v7_migrations(conn)?;
+    run_forge_v8_migrations(conn)?;
     Ok(())
 }
 
@@ -611,6 +612,66 @@ pub fn run_forge_v7_migrations(conn: &Connection) -> Result<(), StoreError> {
         "UPDATE db_agent_instances
          SET memory_id = definition_id
          WHERE memory_id = '' AND definition_id <> '';",
+    )?;
+
+    Ok(())
+}
+
+/// Forge v8 migrations: persist the human-readable instance name +
+/// resolved working directory on every `db_agent_instances` row so the
+/// launch modal can list past named agents and continue them. Adds a
+/// soft-delete column (`display_hidden`) for the "Forget agent"
+/// affordance — destructive deletion of the row + working dir is
+/// out of scope for v8 (separate confirm flow + spec).
+///
+/// See `docs/specs/SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md`.
+///
+/// Schema changes:
+///
+/// - `db_agent_instances.instance_name` (new column): user-chosen
+///   instance name (becomes `AGENTMUX_AGENT_ID` in the spawn env).
+///   Empty string for legacy rows — they don't appear in the dropdown.
+/// - `db_agent_instances.working_directory` (new column): absolute
+///   path returned by `allocate_agent_workdir` at spawn time. Stored
+///   here (rather than re-derived from the slug at continue-time) to
+///   stay robust against slug-rule changes and user-side renames.
+/// - `db_agent_instances.display_hidden` (new column, INTEGER 0/1):
+///   soft-delete flag for the "Forget agent" affordance. Hidden rows
+///   stay on disk for audit + recovery.
+///
+/// Idempotent: re-running after v8 has executed is a no-op
+/// ("duplicate column" errors are caught and ignored, matching v2/v7
+/// precedent).
+pub fn run_forge_v8_migrations(conn: &Connection) -> Result<(), StoreError> {
+    let alter_statements = [
+        "ALTER TABLE db_agent_instances ADD COLUMN instance_name TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agent_instances ADD COLUMN working_directory TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agent_instances ADD COLUMN display_hidden INTEGER NOT NULL DEFAULT 0",
+    ];
+    for stmt in &alter_statements {
+        match conn.execute_batch(stmt) {
+            Ok(_) => {}
+            Err(e) => {
+                let msg = e.to_string();
+                if !msg.contains("duplicate column") {
+                    return Err(StoreError::Sqlite(match e {
+                        rusqlite::Error::SqliteFailure(code, _) => {
+                            rusqlite::Error::SqliteFailure(code, Some(msg))
+                        }
+                        other => other,
+                    }));
+                }
+            }
+        }
+    }
+
+    // Partial index supports the `ListNamedAgentsCommand` query: rows
+    // with a non-empty instance_name and not hidden, ordered by
+    // recency. Keeps the dropdown lookup to a single b-tree scan.
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_agent_instances_name_recent
+            ON db_agent_instances(instance_name, started_at DESC)
+            WHERE display_hidden = 0 AND instance_name != '';",
     )?;
 
     Ok(())
