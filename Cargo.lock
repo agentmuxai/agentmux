@@ -15,6 +15,7 @@ dependencies = [
  "anyhow",
  "base64",
  "clap",
+ "dirs",
  "reqwest",
  "serde",
  "serde_json",

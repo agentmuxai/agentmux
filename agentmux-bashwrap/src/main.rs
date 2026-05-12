@@ -48,16 +48,7 @@ enum Command {
 }
 
 fn main() -> Result<()> {
-    // Logs go to stderr so they don't pollute the stdout channel that
-    // Claude reads as `tool_result.content`. RUST_LOG controls level;
-    // default `warn` keeps noise minimal in production.
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
-        )
-        .init();
+    init_tracing();
 
     let cli = Cli::parse();
     let rt = tokio::runtime::Runtime::new()?;
@@ -73,4 +64,48 @@ fn main() -> Result<()> {
         }
         Command::Hook => hook::run_pretooluse_bash(),
     }
+}
+
+/// Initialize tracing to write to `~/.agentmux/logs/bashwrap-debug.log`
+/// at INFO by default. Writing to a file instead of stderr means:
+///
+/// 1. Diagnostics survive bash's stdio capture — Claude's tool_result
+///    `stderr` field is empty for successful commands, so anything we
+///    write to stderr is lost to us as developers.
+/// 2. We don't pollute the model's tool_result with bashwrap-internal
+///    noise (env snapshot, publish attempts, etc.).
+/// 3. We can tail the file from outside the agentmux process tree.
+///
+/// Falls back to stderr at WARN level if the file can't be opened.
+fn init_tracing() {
+    let log_path = dirs::home_dir()
+        .map(|h| h.join(".agentmux").join("logs").join("bashwrap-debug.log"));
+    if let Some(path) = log_path {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(file) = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&path)
+        {
+            let writer = std::sync::Mutex::new(file);
+            let _ = tracing_subscriber::fmt()
+                .with_writer(writer)
+                .with_ansi(false)
+                .with_env_filter(
+                    tracing_subscriber::EnvFilter::try_from_default_env()
+                        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                )
+                .try_init();
+            return;
+        }
+    }
+    let _ = tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+        )
+        .try_init();
 }
