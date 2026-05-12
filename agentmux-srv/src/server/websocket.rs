@@ -860,15 +860,34 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 // a scope and the frontend's per-block subscription
                 // doesn't receive them.
                 env_vars.insert("AGENTMUX_BLOCKID".to_string(), cmd.blockid.clone());
-                if let Some(tools_dir) = crate::backend::tool_store::bundled_tools_dir() {
+                // PATH includes BOTH bundled tools dir (portable
+                // builds, runtime/tools/bin/) AND user tools dir
+                // (~/.agentmux/tools/bin/). bundled is None in dev
+                // mode (target/debug exclusion in tool_store), so
+                // without user_tools_dir the wrapper wouldn't be on
+                // the agent's PATH during `task dev`.
+                {
                     let existing = env_vars
                         .get("PATH")
                         .cloned()
                         .or_else(|| std::env::var("PATH").ok())
                         .unwrap_or_default();
                     let sep = if cfg!(windows) { ";" } else { ":" };
-                    let new_path = format!("{}{}{}", tools_dir.display(), sep, existing);
-                    env_vars.insert("PATH".to_string(), new_path);
+                    let mut extras: Vec<String> = Vec::new();
+                    if let Some(d) = crate::backend::tool_store::bundled_tools_dir() {
+                        if d.exists() {
+                            extras.push(d.to_string_lossy().into_owned());
+                        }
+                    }
+                    if let Some(d) = crate::backend::tool_store::user_tools_dir() {
+                        if d.exists() {
+                            extras.push(d.to_string_lossy().into_owned());
+                        }
+                    }
+                    if !extras.is_empty() {
+                        let new_path = format!("{}{}{}", extras.join(sep), sep, existing);
+                        env_vars.insert("PATH".to_string(), new_path);
+                    }
                 }
 
                 let session_id_field = crate::backend::obj::meta_get_string(
