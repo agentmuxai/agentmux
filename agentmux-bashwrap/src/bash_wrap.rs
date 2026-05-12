@@ -86,8 +86,7 @@ struct TerminalMessage {
 /// Internal channel payload: a single line tagged with its source.
 /// Bytes are raw — UTF-8 conversion is deferred to the publish /
 /// aggregation site so non-UTF-8 output (binary `cat`, Windows
-/// legacy-encoded tools) doesn't abort the reader. Reagent + codex
-/// P2 on round 1 of PR #815.
+/// legacy-encoded tools) doesn't abort the reader.
 #[derive(Debug)]
 struct LineEvent {
     kind: &'static str, // "stdout" or "stderr"
@@ -99,8 +98,8 @@ struct LineEvent {
 
 /// Returns the inner command's exit code so main.rs can mirror it as
 /// the wrapper's own process exit. Without this, Claude's native Bash
-/// tool saw success for every wrapped command regardless of the actual
-/// outcome — codex P1 on PR #804.
+/// tool would see success for every wrapped command regardless of the
+/// actual outcome.
 pub async fn run(args: Args) -> Result<i32> {
     log_relevant_env();
     let command = decode_command(&args.b64_cmd)?;
@@ -316,7 +315,7 @@ async fn run_proc(
     // Stdout reader: byte-level read_until('\n'). NOT lines() — that
     // returns an IO error on the first non-UTF-8 sequence (binary
     // `cat`, Windows legacy-encoded output) and silently truncates
-    // every subsequent byte. Reagent + codex P2.
+    // every subsequent byte.
     tokio::spawn(async move {
         let mut reader = BufReader::new(stdout);
         loop {
@@ -450,9 +449,9 @@ fn snap_to_char_boundary_ceil(buf: &[u8], idx: usize) -> usize {
 /// **UTF-8 safety**: head/tail slice boundaries are snapped to the
 /// nearest UTF-8 character boundary so non-ASCII output (emoji,
 /// accented characters, CJK) doesn't get corrupted into `�`
-/// replacement characters at the cut point. Reagent P1 round 4 on
-/// PR #804 caught this — naive fixed-byte slicing splits multi-byte
-/// sequences and the lossy decode emits replacement chars.
+/// replacement characters at the cut point — naive fixed-byte slicing
+/// splits multi-byte sequences and the lossy decode emits replacement
+/// chars.
 pub(crate) fn format_model_blob(
     buf: &[u8],
     exit_code: i32,
@@ -487,7 +486,7 @@ mod tests {
     // `std::env::set_var` / `remove_var` mutate process-global state;
     // cargo test runs tests in parallel by default, so without a
     // serial lock tests that touch the env race each other. Mirrors
-    // the same pattern in `wps_client::tests`. Reagent P2 on PR #815.
+    // the same pattern in `wps_client::tests`.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
