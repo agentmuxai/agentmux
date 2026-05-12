@@ -463,6 +463,16 @@ export class AgentViewModel implements ViewModel {
                     // circuits so the agent inherits ambient creds.
                     identity_id: overrides?.identityId,
                     memory_id: overrides?.memoryId,
+                    // v8: named-agent continuation. The instance name
+                    // is the AGENTMUX_AGENT_ID the user picked in the
+                    // modal; finalWorkDir is the path that
+                    // WriteAgentConfigCommand resolved (after slug
+                    // collision suffixing). Both are persisted so the
+                    // launch modal's "Continue agent" dropdown can
+                    // surface this instance later. See
+                    // SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md.
+                    instance_name: instanceName,
+                    working_directory: finalWorkDir,
                 });
                 await RpcApi.SetMetaCommand(TabRpcClient, {
                     oref,
