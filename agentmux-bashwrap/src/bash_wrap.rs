@@ -467,6 +467,13 @@ pub(crate) fn format_model_blob(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // `std::env::set_var` / `remove_var` mutate process-global state;
+    // cargo test runs tests in parallel by default, so without a
+    // serial lock tests that touch the env race each other. Mirrors
+    // the same pattern in `wps_client::tests`. Reagent P2 on PR #815.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn decodes_b64_command() {
@@ -532,15 +539,27 @@ mod tests {
     fn locate_bash_via_explicit_env() {
         // Use the binary that runs the test as a stand-in for "bash"
         // — we only assert that the override is honored, not that the
-        // path is a real bash.
+        // path is a real bash. ENV_LOCK serializes against any future
+        // env-touching test (and against `BASH` reads in the same fn).
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let exe = std::env::current_exe().expect("current_exe");
+        let prev_agentmux_bash = std::env::var("AGENTMUX_BASH").ok();
+        let prev_bash = std::env::var("BASH").ok();
+        // Clear BASH so the override path is the one being asserted.
         unsafe {
             std::env::set_var("AGENTMUX_BASH", &exe);
+            std::env::remove_var("BASH");
         }
         let found = locate_bash().expect("locate_bash with override");
         assert_eq!(found, exe);
         unsafe {
-            std::env::remove_var("AGENTMUX_BASH");
+            match prev_agentmux_bash {
+                Some(v) => std::env::set_var("AGENTMUX_BASH", v),
+                None => std::env::remove_var("AGENTMUX_BASH"),
+            }
+            if let Some(v) = prev_bash {
+                std::env::set_var("BASH", v);
+            }
         }
     }
 }
