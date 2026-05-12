@@ -345,7 +345,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                 class="agent-launch-modal-input"
                                 value={memoryId()}
                                 onChange={(e) => setMemoryId(e.currentTarget.value)}
-                                disabled={submitting()}
+                                disabled={submitting() || isContinue()}
                                 aria-label="Memory bundle"
                             >
                                 <For each={memories() ?? []}>
