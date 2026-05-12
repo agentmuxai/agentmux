@@ -399,7 +399,7 @@ async fn main() {
     let bridge = backend::eventbus::EventBusBridge::new(event_bus.clone());
     broker.set_client(Box::new(bridge));
 
-    // Config watcher (created before sysinfo loop so it can read telemetry:interval)
+    // Config watcher (created before sysinfo loop so it can read sysinfo:interval)
     let config_watcher = Arc::new(wconfig::ConfigWatcher::with_config(wconfig::build_default_config()));
 
     // Load user's settings.json from disk (merges with defaults)
@@ -411,7 +411,7 @@ async fn main() {
         event_bus.clone(),
     );
 
-    // Start sysinfo collection loop (interval configurable via telemetry:interval)
+    // Start sysinfo collection loop (interval configurable via sysinfo:interval)
     let sysinfo_broker = broker.clone();
     let sysinfo_config = config_watcher.clone();
     tokio::spawn(async move {

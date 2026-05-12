@@ -4,6 +4,19 @@
 //
 // Docs: https://docs.agentmux.ai/settings
 {
+    // -- Appearance --
+    // "window:theme":             "default",
+    // "window:transparent":       false,
+    // "window:blur":              false,
+    // "window:opacity":           1.0,
+    // "window:bgcolor":           "",
+    // "window:tilegapsize":       3,
+    // "window:reducedmotion":     false,
+    // "window:magnifiedblockopacity":       0.6,
+    // "window:magnifiedblocksize":          0.9,
+    // "window:magnifiedblockblurprimarypx":   0,
+    // "window:magnifiedblockblursecondarypx": 0,
+
     // -- Terminal --
     // "term:fontsize":            12,
     // "term:fontfamily":          "JetBrains Mono",
@@ -17,31 +30,25 @@
     // "term:allowbracketedpaste": true,
     // "term:shiftenternewline":   false,
 
-    // -- Window --
-    // "window:transparent":       false,
-    // "window:blur":              false,
-    // "window:opacity":           1.0,
-    // "window:bgcolor":           "",
-    // "window:tilegapsize":       3,
-    // "window:reducedmotion":     false,
-    // "window:magnifiedblockopacity": 0.6,
-    // "window:magnifiedblocksize":    0.9,
+    // -- Agent Watchdog --
+    // 0 disables the limit.
+    // "term:agentmaxruntimehours": 0,
+    // "term:agentidletimeoutmins": 0,
 
     // -- App --
     // "app:defaultnewblock":      "",
     // "app:showoverlayblocknums": false,
+    // "widget:icononly":          false,
+    // "blockheader:showblockids": false,
 
     // -- Shell Environment --
     // "cmd:env":                  {},
 
-    // -- Telemetry --
-    // telemetry:interval/numpoints actually drive the local sysinfo widget
-    // polling rate (no data transmission). These keys will be renamed to
-    // sysinfo:* in a follow-up release.
-    // "telemetry:interval":       1.0,
-    // "telemetry:numpoints":      120,
+    // -- Sysinfo Widget --
+    // Local sysinfo widget polling rate (CPU/memory/network chart).
+    // "sysinfo:interval":         1.0,
+    // "sysinfo:numpoints":        120,
 
-    // -- Other --
-    // "widget:icononly":          false,
-    // "blockheader:showblockids": false
+    // -- Networking --
+    // "network:lan_discovery":    false
 }

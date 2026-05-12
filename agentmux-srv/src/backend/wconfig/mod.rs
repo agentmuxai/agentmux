@@ -81,7 +81,7 @@ mod tests {
             "term:scrollback": 5000,
             "window:transparent": true,
             "window:opacity": 0.85,
-            "telemetry:interval": 1.5
+            "sysinfo:interval": 1.5
         }"#;
         let s: SettingsType = serde_json::from_str(json_str).unwrap();
         assert_eq!(s.term_font_size, 13.0);
@@ -89,7 +89,7 @@ mod tests {
         assert_eq!(s.term_scrollback, Some(5000));
         assert!(s.window_transparent);
         assert_eq!(s.window_opacity, Some(0.85));
-        assert_eq!(s.telemetry_interval, 1.5);
+        assert_eq!(s.sysinfo_interval, 1.5);
     }
 
     #[test]

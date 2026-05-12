@@ -144,18 +144,17 @@ pub struct SettingsType {
     #[serde(rename = "window:magnifiedblockblursecondarypx", default, skip_serializing_if = "Option::is_none")]
     pub window_magnified_block_blur_secondary_px: Option<i64>,
 
-    // -- Telemetry settings --
-    // NOTE: telemetry:interval/numpoints actually drive the sysinfo widget
-    // polling rate (local-only, no transmission). Renamed to sysinfo:* in
-    // a follow-up PR. telemetry:enabled was dead and was removed.
-    #[serde(rename = "telemetry:*", default, skip_serializing_if = "is_false")]
-    pub telemetry_clear: bool,
+    // -- Sysinfo widget polling --
+    // Drives the local sysinfo widget polling rate. No data transmission.
+    // (Previously named telemetry:* — renamed for honesty.)
+    #[serde(rename = "sysinfo:*", default, skip_serializing_if = "is_false")]
+    pub sysinfo_clear: bool,
 
-    #[serde(rename = "telemetry:interval", default, skip_serializing_if = "is_zero_f64")]
-    pub telemetry_interval: f64,
+    #[serde(rename = "sysinfo:interval", default, skip_serializing_if = "is_zero_f64")]
+    pub sysinfo_interval: f64,
 
-    #[serde(rename = "telemetry:numpoints", default, skip_serializing_if = "Option::is_none")]
-    pub telemetry_numpoints: Option<i64>,
+    #[serde(rename = "sysinfo:numpoints", default, skip_serializing_if = "Option::is_none")]
+    pub sysinfo_numpoints: Option<i64>,
 
     // -- Connection settings --
     #[serde(rename = "conn:*", default, skip_serializing_if = "is_false")]
