@@ -85,6 +85,10 @@ export function useAgentStream({
     provider,
 }: UseAgentStreamOpts): void {
     // Read-side accessors only — all writes route through dispatchPane.
+    // Maintaining this contract is how the agent pane stays 100%
+    // reducer-routed and why `recordDispatch` is a sufficient tap for
+    // session-replay fixtures. See docs/analysis/AGENT_PANE_REDUCER_
+    // AUDIT_2026_05_12.md.
     const [getTurnTokens] = turnTokensAtom;
     const getStopping = stoppingAtom?.[0];
 
@@ -101,60 +105,47 @@ export function useAgentStream({
     let pendingUpdates: DocumentNode[] = [];
     let flushRafId: number | null = null;
 
-    // Per-tool WPS subscriptions for `tool_chunk:<tool_use_id>` events.
-    // `agentmux-bashwrap exec` (invoked via the PreToolUse hook) publishes
-    // each stdout/stderr line to its own subject; we open a subscription
-    // when `tool_call` lands, dispatch the chunks into the reducer's
-    // `ToolChunkAppend` command, and tear it down on `tool_result` (or on
-    // unmount). See SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §6.
-    const chunkSubs: Map<string, () => void> = new Map();
-
-    function openChunkSub(toolId: string) {
-        if (chunkSubs.has(toolId)) return;
-        const unsub = waveEventSubscribe({
-            eventType: `tool_chunk:${toolId}`,
-            scope: "",
-            handler: (event: any) => {
-                const data = event?.data;
-                if (!data || typeof data !== "object") return;
-                if (data.op === "terminal") {
-                    // Synthesize a system chunk and close the subscription
-                    // — defense in depth if the matching tool_result is
-                    // delayed by network or backend.
-                    dispatchDoc(blockId, {
-                        type: "ToolChunkAppend",
-                        toolId,
-                        chunk: {
-                            kind: "system",
-                            content: `[exited ${data.exit_code ?? "?"}]`,
-                            timestamp: data.timestamp ?? Date.now(),
-                        },
-                    });
-                    closeChunkSub(toolId);
-                    return;
-                }
-                if (data.op !== "chunk") return;
+    // Single per-block WPS subscription for `tool_chunk` events.
+    // `agentmux-bashwrap exec` publishes every stdout/stderr line to a
+    // fixed event name with `scopes: ["block:<id>"]` and the tool_use_id
+    // in the payload. The broker persists ~1024 events per scope, so
+    // the subscription installed on mount picks up any chunks that
+    // landed before Claude's stream-json caught up enough for the
+    // frontend to learn the tool_use_id — closes the late-subscribe
+    // race that the previous per-tool subscription model could not.
+    // See `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §6.
+    const blockChunkUnsub = waveEventSubscribe({
+        eventType: "tool_chunk",
+        scope: `block:${blockId}`,
+        handler: (event: any) => {
+            const data = event?.data;
+            if (!data || typeof data !== "object") return;
+            const toolId = typeof data.tool_id === "string" ? data.tool_id : "";
+            if (!toolId) return;
+            if (data.op === "terminal") {
                 dispatchDoc(blockId, {
                     type: "ToolChunkAppend",
                     toolId,
                     chunk: {
-                        kind: data.kind ?? "stdout",
-                        content: data.content ?? "",
+                        kind: "system",
+                        content: `[exited ${data.exit_code ?? "?"}]`,
                         timestamp: data.timestamp ?? Date.now(),
                     },
                 });
-            },
-        });
-        chunkSubs.set(toolId, unsub);
-    }
-
-    function closeChunkSub(toolId: string) {
-        const unsub = chunkSubs.get(toolId);
-        if (unsub) {
-            try { unsub(); } catch { /* ignore */ }
-            chunkSubs.delete(toolId);
-        }
-    }
+                return;
+            }
+            if (data.op !== "chunk") return;
+            dispatchDoc(blockId, {
+                type: "ToolChunkAppend",
+                toolId,
+                chunk: {
+                    kind: data.kind ?? "stdout",
+                    content: data.content ?? "",
+                    timestamp: data.timestamp ?? Date.now(),
+                },
+            });
+        },
+    });
 
     function flushPendingNodes() {
         flushRafId = null;
@@ -472,28 +463,21 @@ export function useAgentStream({
                         finalizeTurn(event.stats ?? null);
                         continue;
                     }
-                    // Track the currently-running tool for the status line
+                    // Track the currently-running tool for the status line.
+                    // Per-tool subscription open/close was removed — a single
+                    // per-block subscription installed on mount above handles
+                    // every tool's chunks (the wrapper publishes on a fixed
+                    // event name with the tool_use_id in the payload), and
+                    // the broker's replay-on-subscribe covers the late-
+                    // subscribe race that the per-tool model lost.
                     if (event.type === "tool_call") {
-                        // Preserve prior semantic: missing tool name means
-                        // "no tool" (currentTool=null), NOT "tool with empty
-                        // name". Pre-reducer code did setCurrentTool(event.tool ?? null);
-                        // route through ToolEnd in the missing-name case.
                         if (event.tool) {
                             dispatchPane(blockId, { type: "ToolStart", name: event.tool });
                         } else {
                             dispatchPane(blockId, { type: "ToolEnd" });
                         }
-                        // Open per-tool WPS subscription for live chunks
-                        // (β.B wire-up). Only Bash currently streams, but
-                        // the subscription is cheap and provider-agnostic —
-                        // if the wrapper publishes for this tool_id, we
-                        // receive; if not, the subject stays silent and
-                        // the existing tool_result path lands the whole
-                        // result as before.
-                        if (event.id) openChunkSub(event.id);
                     } else if (event.type === "tool_result") {
                         dispatchPane(blockId, { type: "ToolEnd" });
-                        if (event.id) closeChunkSub(event.id);
                     } else if (event.type === "tool_chunk") {
                         // Live-log streaming (SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md):
                         // route chunks through their own reducer command
@@ -533,11 +517,8 @@ export function useAgentStream({
         onCleanup(() => {
             if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
             subscription.unsubscribe();
-            // Tear down all live tool_chunk subscriptions opened during
-            // this session (β.B wire-up). A pin/unpin race that left a
-            // chunk subscription open would otherwise leak into the next
-            // session.
-            for (const [id] of chunkSubs) closeChunkSub(id);
+            // Tear down the per-block tool_chunk subscription.
+            try { blockChunkUnsub(); } catch { /* ignore */ }
             // StreamUnsubscribe also force-clears turnActive (so a crash
             // or exit without session_end doesn't leave "Working…" stuck).
             const at = Date.now();
