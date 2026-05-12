@@ -30,15 +30,38 @@ pub struct WpsClient {
 
 #[derive(Serialize)]
 struct PublishRequest<'a, T: Serialize> {
-    /// WPS event name. We use `tool_chunk:<id>` for streaming chunks.
+    /// WPS event name. Fixed `tool_chunk` for every streaming chunk —
+    /// the tool_use_id lives in the payload, not in the event name.
+    /// Lets the frontend open a single per-block subscription on mount
+    /// instead of per-tool subscriptions racing the tool's execution.
     event: &'a str,
-    /// Optional scope filters (typically `block:<id>` so only
-    /// subscribers watching that block receive the event).
+    /// Scope filters. Always `["block:<id>"]` for tool_chunk so the
+    /// broker delivers only to the relevant pane.
     #[serde(skip_serializing_if = "<[String]>::is_empty")]
     scopes: &'a [String],
+    /// Per-event persistence count (kept by the broker for
+    /// replay-on-subscribe). Captures the wrapper's full output for
+    /// late subscribers when Claude buffers the tool_use stream until
+    /// after the tool runs.
+    #[serde(skip_serializing_if = "is_zero_usize")]
+    persist: usize,
     /// Event payload. Free-form per event type.
     data: &'a T,
 }
+
+fn is_zero_usize(n: &usize) -> bool {
+    *n == 0
+}
+
+/// How many `tool_chunk` events the broker keeps per `block:<id>`
+/// scope. Sized for npm-install class output (~1000 lines is typical;
+/// 1024 covers all but heavy CI builds). Each event is ~200–500 bytes,
+/// so the steady-state ceiling is ~512 KB per actively-streaming block.
+const TOOL_CHUNK_PERSIST: usize = 1024;
+
+/// Event name for streaming bash chunks. Held constant across every
+/// publish so the frontend can subscribe once per block on mount.
+const TOOL_CHUNK_EVENT: &str = "tool_chunk";
 
 impl WpsClient {
     /// Build a client from the env. Returns `None` when the required
@@ -64,22 +87,25 @@ impl WpsClient {
         })
     }
 
-    /// Publish a `tool_chunk:<id>` event. `payload` is serialized as
-    /// the event's `data` field; scopes restrict delivery to listeners
-    /// watching `block:<block_id>` (if provided).
+    /// Publish a `tool_chunk` event. `tool_id` goes into the payload
+    /// rather than the event name so a single per-block subscription
+    /// receives chunks for every tool in that block. Persists with
+    /// `TOOL_CHUNK_PERSIST` so late subscribers (the frontend, which
+    /// learns about the tool_use only after Claude buffers the stream)
+    /// get the full history on subscribe.
     pub async fn publish_chunk<T: Serialize>(
         &self,
-        tool_id: &str,
+        _tool_id: &str,
         block_id: Option<&str>,
         payload: &T,
     ) -> Result<()> {
-        let event = format!("tool_chunk:{}", tool_id);
         let scopes: Vec<String> = block_id
             .map(|b| vec![format!("block:{}", b)])
             .unwrap_or_default();
         let body = PublishRequest {
-            event: &event,
+            event: TOOL_CHUNK_EVENT,
             scopes: &scopes,
+            persist: TOOL_CHUNK_PERSIST,
             data: payload,
         };
         let url = format!("{}{}", self.endpoint, PUBLISH_PATH);
@@ -93,8 +119,6 @@ impl WpsClient {
             .await?;
         if !resp.status().is_success() {
             let status = resp.status();
-            // Body may include a structured error from auth_middleware;
-            // include for diagnostics in the wrapper's stderr trace.
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("publish failed: HTTP {} — {}", status, text);
         }

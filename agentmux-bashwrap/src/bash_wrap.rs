@@ -78,19 +78,23 @@ const FLUSH_BYTES: usize = 4096;
 /// natural flush.
 const FLUSH_QUIET_WINDOW: Duration = Duration::from_millis(50);
 
-/// Wire payload published on `tool_chunk:<id>`. Mirrors the TypeScript
-/// `ToolChunkMessage` in `SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §4.3.
+/// Wire payload published on the `tool_chunk` event. The tool_use_id
+/// rides in the payload (not the event name) so the frontend opens
+/// a single per-block subscription on mount and routes by `tool_id`
+/// rather than per-tool subscriptions racing the tool's execution.
 #[derive(Serialize)]
 struct ChunkMessage<'a> {
     op: &'static str, // "chunk"
+    tool_id: &'a str,
     kind: &'a str,    // "stdout" | "stderr" | "system"
     content: &'a str,
     timestamp: u64,
 }
 
 #[derive(Serialize)]
-struct TerminalMessage {
+struct TerminalMessage<'a> {
     op: &'static str, // "terminal"
+    tool_id: &'a str,
     exit_code: i32,
     timestamp: u64,
 }
@@ -112,9 +116,22 @@ struct LineEvent {
 /// the wrapper's own process exit. Without this, Claude's native Bash
 /// tool would see success for every wrapped command regardless of the
 /// actual outcome.
-pub async fn run(args: Args) -> Result<i32> {
+pub async fn run(mut args: Args) -> Result<i32> {
     log_relevant_env();
     let command = decode_command(&args.b64_cmd)?;
+
+    // `block_id` controls the WPS publish scope. Prefer the explicit
+    // CLI arg, but fall back to AGENTMUX_BLOCKID env (set by
+    // agentmux-srv when spawning Claude) so the hook doesn't have to
+    // pass it explicitly. Without a scope, the frontend's per-block
+    // subscription won't receive the events.
+    if args.block_id.as_deref().filter(|s| !s.is_empty()).is_none() {
+        if let Ok(v) = std::env::var("AGENTMUX_BLOCKID") {
+            if !v.is_empty() {
+                args.block_id = Some(v);
+            }
+        }
+    }
 
     let wps = WpsClient::from_env();
     let degraded = wps.is_none();
@@ -124,6 +141,7 @@ pub async fn run(args: Args) -> Result<i32> {
     tracing::info!(
         target: "bashwrap",
         tool_id = %args.tool_id,
+        block_id = %args.block_id.as_deref().unwrap_or(""),
         degraded,
         command_len = command.len(),
         "exec start"
@@ -161,6 +179,7 @@ pub async fn run(args: Args) -> Result<i32> {
                 args.block_id.as_deref(),
                 &TerminalMessage {
                     op: "terminal",
+                    tool_id: &args.tool_id,
                     exit_code: status,
                     timestamp: now_ms(),
                 },
@@ -221,6 +240,7 @@ async fn publish_system(
             block_id,
             &ChunkMessage {
                 op: "chunk",
+                tool_id,
                 kind: "system",
                 content: msg,
                 timestamp: now_ms(),
@@ -242,6 +262,7 @@ async fn publish_line(
             block_id,
             &ChunkMessage {
                 op: "chunk",
+                tool_id,
                 kind,
                 content: line,
                 timestamp: now_ms(),
