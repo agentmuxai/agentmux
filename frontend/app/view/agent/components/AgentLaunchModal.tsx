@@ -88,13 +88,16 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     });
 
     // v8 — "Continue agent" dropdown. Filters to instances of the
-    // CURRENT definition since continuing a Claude agent inside the
-    // Codex picker would be nonsensical. Empty/missing list = no
-    // past launches for this definition, dropdown hides itself.
+    // CURRENT definition (server-side; a global cap would let older
+    // rows of this definition fall off when users have many agents
+    // across definitions). Empty list = no past launches for this
+    // definition, dropdown hides itself.
     const [namedAgents] = createResource<NamedAgentRow[]>(async () => {
         try {
-            const rows = await RpcApi.ListNamedAgentsCommand(TabRpcClient, { limit: 200 });
-            return rows.filter((r) => r.definition_id === props.agent.id);
+            return await RpcApi.ListNamedAgentsCommand(TabRpcClient, {
+                limit: 200,
+                definition_id: props.agent.id,
+            });
         } catch {
             return [];
         }
@@ -117,6 +120,15 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
             setName(row.instance_name);
             setIdentityId(row.identity_id || "blank");
             setMemoryId(row.memory_id || "blank");
+        } else {
+            // Selecting "— New agent —" releases the lock. Clear the
+            // fields back to defaults so the user doesn't accidentally
+            // submit a brand-new launch carrying the previously
+            // continued agent's name + bundles (which would collide
+            // on allocate_agent_workdir and inject the wrong creds).
+            setName("");
+            setIdentityId("blank");
+            setMemoryId("blank");
         }
     };
 
