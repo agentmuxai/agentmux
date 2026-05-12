@@ -602,9 +602,16 @@ function buildConfigFiles(
         }
     }
 
-    // Write hooks.json if hooks content exists
-    if (contentMap["hooks"]) {
-        files.push({ path: ".claude/hooks.json", content: contentMap["hooks"] });
+    // Always write .claude/hooks.json with the auto-injected PreToolUse:Bash
+    // hook (agentmux-bashwrap) so live streaming engages on every
+    // session. User-supplied hooks merge in. Codex P1 on PR #809:
+    // the prior conditional silently disabled live streaming for the
+    // primary UI launch path (any agent without pre-existing user
+    // hooks). Mirror of agentmux-srv/src/backend/agent_config.rs
+    // build_hooks_config — keep the two paths in sync.
+    const hooksJson = buildHooksConfig(contentMap["hooks"]);
+    if (hooksJson) {
+        files.push({ path: ".claude/hooks.json", content: hooksJson });
     }
 
     // Build .mcp.json: auto-inject AgentMux MCP + merge user-provided config
@@ -623,6 +630,62 @@ function expandTemplate(content: string, vars: Record<string, string>): string {
     return content.replace(/\{\{(\w+)\}\}/g, (match, key) => {
         return vars[key] ?? match;
     });
+}
+
+/**
+ * Build .claude/hooks.json content with the auto-injected PreToolUse:Bash
+ * entry pointing at `agentmux-bashwrap hook`. User-supplied hooks merge
+ * in: non-PreToolUse keys win on collision; user PreToolUse matchers
+ * are appended BEFORE ours so a user deny-rule can short-circuit before
+ * our rewrite fires.
+ *
+ * Mirror of `build_hooks_config` in
+ * `agentmux-srv/src/backend/agent_config.rs`. The two paths must stay
+ * in sync — keep changes aligned across both files. See
+ * docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §5.
+ */
+function buildHooksConfig(userHooksContent: string | undefined): string | null {
+    const agentmuxPretooluse = {
+        matcher: "^(Bash|.*[Bb]ash.*)$",
+        hooks: [
+            { type: "command", command: "agentmux-bashwrap hook" },
+        ],
+    };
+    const hooksObj: Record<string, unknown> = {};
+    const pretooluseEntries: unknown[] = [];
+
+    if (userHooksContent) {
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(userHooksContent);
+        } catch (e) {
+            console.warn("agent-model: failed to parse user hooks JSON; dropping", e);
+            parsed = null;
+        }
+        if (parsed != null && typeof parsed === "object" && !Array.isArray(parsed)) {
+            for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+                if (k === "PreToolUse") {
+                    if (Array.isArray(v)) {
+                        pretooluseEntries.push(...v);
+                    } else {
+                        console.warn("agent-model: user hooks.PreToolUse is not an array; dropping");
+                    }
+                } else {
+                    hooksObj[k] = v;
+                }
+            }
+        } else if (parsed != null) {
+            console.warn("agent-model: user hooks top-level is not an object; dropping");
+        }
+    }
+    pretooluseEntries.push(agentmuxPretooluse);
+    hooksObj["PreToolUse"] = pretooluseEntries;
+    try {
+        return JSON.stringify(hooksObj, null, 2);
+    } catch (e) {
+        console.error("agent-model: failed to serialize hooks config", e);
+        return null;
+    }
 }
 
 /**

@@ -101,6 +101,61 @@ export function useAgentStream({
     let pendingUpdates: DocumentNode[] = [];
     let flushRafId: number | null = null;
 
+    // Per-tool WPS subscriptions for `tool_chunk:<tool_use_id>` events.
+    // `agentmux-bashwrap exec` (invoked via the PreToolUse hook) publishes
+    // each stdout/stderr line to its own subject; we open a subscription
+    // when `tool_call` lands, dispatch the chunks into the reducer's
+    // `ToolChunkAppend` command, and tear it down on `tool_result` (or on
+    // unmount). See SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §6.
+    const chunkSubs: Map<string, () => void> = new Map();
+
+    function openChunkSub(toolId: string) {
+        if (chunkSubs.has(toolId)) return;
+        const unsub = waveEventSubscribe({
+            eventType: `tool_chunk:${toolId}`,
+            scope: "",
+            handler: (event: any) => {
+                const data = event?.data;
+                if (!data || typeof data !== "object") return;
+                if (data.op === "terminal") {
+                    // Synthesize a system chunk and close the subscription
+                    // — defense in depth if the matching tool_result is
+                    // delayed by network or backend.
+                    dispatchDoc(blockId, {
+                        type: "ToolChunkAppend",
+                        toolId,
+                        chunk: {
+                            kind: "system",
+                            content: `[exited ${data.exit_code ?? "?"}]`,
+                            timestamp: data.timestamp ?? Date.now(),
+                        },
+                    });
+                    closeChunkSub(toolId);
+                    return;
+                }
+                if (data.op !== "chunk") return;
+                dispatchDoc(blockId, {
+                    type: "ToolChunkAppend",
+                    toolId,
+                    chunk: {
+                        kind: data.kind ?? "stdout",
+                        content: data.content ?? "",
+                        timestamp: data.timestamp ?? Date.now(),
+                    },
+                });
+            },
+        });
+        chunkSubs.set(toolId, unsub);
+    }
+
+    function closeChunkSub(toolId: string) {
+        const unsub = chunkSubs.get(toolId);
+        if (unsub) {
+            try { unsub(); } catch { /* ignore */ }
+            chunkSubs.delete(toolId);
+        }
+    }
+
     function flushPendingNodes() {
         flushRafId = null;
         if (pendingNew.length === 0 && pendingUpdates.length === 0) return;
@@ -428,8 +483,17 @@ export function useAgentStream({
                         } else {
                             dispatchPane(blockId, { type: "ToolEnd" });
                         }
+                        // Open per-tool WPS subscription for live chunks
+                        // (β.B wire-up). Only Bash currently streams, but
+                        // the subscription is cheap and provider-agnostic —
+                        // if the wrapper publishes for this tool_id, we
+                        // receive; if not, the subject stays silent and
+                        // the existing tool_result path lands the whole
+                        // result as before.
+                        if (event.id) openChunkSub(event.id);
                     } else if (event.type === "tool_result") {
                         dispatchPane(blockId, { type: "ToolEnd" });
+                        if (event.id) closeChunkSub(event.id);
                     } else if (event.type === "tool_chunk") {
                         // Live-log streaming (SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md):
                         // route chunks through their own reducer command
@@ -469,6 +533,11 @@ export function useAgentStream({
         onCleanup(() => {
             if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
             subscription.unsubscribe();
+            // Tear down all live tool_chunk subscriptions opened during
+            // this session (β.B wire-up). A pin/unpin race that left a
+            // chunk subscription open would otherwise leak into the next
+            // session.
+            for (const [id] of chunkSubs) closeChunkSub(id);
             // StreamUnsubscribe also force-clears turnActive (so a crash
             // or exit without session_end doesn't leave "Working…" stuck).
             const at = Date.now();

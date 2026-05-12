@@ -183,6 +183,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/schema/*path", get(files::handle_schema))
         .route("/api/lan-instances", get(handle_lan_instances))
         .route("/agentmux/diag/sagas", get(handle_diag_sagas))
+        // Streaming-bash wrapper publish endpoint
+        // (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §4.3). agentmux-bashwrap
+        // POSTs `{event, scopes, data}` here while a PreToolUse-rewritten
+        // Bash command is running; we forward to the in-process WPS broker.
+        // Auth-gated like the other reactive routes (PR #801 pattern).
+        .route("/agentmux/wps/publish", post(handle_wps_publish))
         .merge(bus_routes)
         .merge(reactive_routes)
         .route_layer(middleware::from_fn_with_state(
@@ -281,6 +287,43 @@ async fn stub_501() -> impl IntoResponse {
         StatusCode::NOT_IMPLEMENTED,
         Json(json!({"error": "not implemented"})),
     )
+}
+
+/// Wire shape for `POST /agentmux/wps/publish`. Mirrors `WaveEvent`
+/// but keeps the field set narrow for what `agentmux-bashwrap`
+/// actually needs (no `sender`, no `persist`).
+#[derive(serde::Deserialize)]
+struct WpsPublishRequest {
+    /// WPS event name. We use `tool_chunk:<tool_use_id>` for
+    /// streaming chunks, but the handler is general-purpose.
+    event: String,
+    /// Optional scope filters (e.g. `["block:<id>"]`) so only
+    /// subscribers watching that block receive the event.
+    #[serde(default)]
+    scopes: Vec<String>,
+    /// Free-form payload. For tool_chunk events this is the
+    /// `{op, kind, content, timestamp}` shape from
+    /// `SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §4.3.
+    data: serde_json::Value,
+}
+
+/// Auth-gated WPS publish endpoint
+/// (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §3.2). `agentmux-bashwrap`
+/// POSTs here while running a Bash command; we forward to the
+/// in-process WPS broker so subscribed frontends receive the event.
+async fn handle_wps_publish(
+    State(state): State<AppState>,
+    Json(req): Json<WpsPublishRequest>,
+) -> impl IntoResponse {
+    let event = crate::backend::wps::WaveEvent {
+        event: req.event,
+        scopes: req.scopes,
+        sender: String::new(),
+        persist: 0,
+        data: Some(req.data),
+    };
+    state.broker.publish(event);
+    (StatusCode::OK, Json(json!({"ok": true})))
 }
 
 // ---- Auth Middleware ----
