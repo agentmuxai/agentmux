@@ -152,7 +152,11 @@ function AppSettingsUpdater() {
         } else {
             mainDiv?.classList.remove("is-transparent");
             document.documentElement.style.removeProperty("background");
-            document.documentElement.style.removeProperty("--window-opacity");
+            // Explicitly set opacity=1 to override theme.scss's translucent
+            // default (0.45). The default is chosen for first-paint
+            // alpha-awareness in the common transparent-window case;
+            // non-transparent windows need to flip it back to fully opaque.
+            document.documentElement.style.setProperty("--window-opacity", "1");
         }
         if (baseBgColor != null) {
             document.body.style.setProperty("--main-bg-color", baseBgColor);
