@@ -20,48 +20,6 @@
         "app:showoverlayblocknums": {
           "type": "boolean"
         },
-        "ai:*": {
-          "type": "boolean"
-        },
-        "ai:preset": {
-          "type": "string"
-        },
-        "ai:apitype": {
-          "type": "string"
-        },
-        "ai:baseurl": {
-          "type": "string"
-        },
-        "ai:apitoken": {
-          "type": "string"
-        },
-        "ai:name": {
-          "type": "string"
-        },
-        "ai:model": {
-          "type": "string"
-        },
-        "ai:orgid": {
-          "type": "string"
-        },
-        "ai:apiversion": {
-          "type": "string"
-        },
-        "ai:maxtokens": {
-          "type": "number"
-        },
-        "ai:timeoutms": {
-          "type": "number"
-        },
-        "ai:proxyurl": {
-          "type": "string"
-        },
-        "ai:fontsize": {
-          "type": "number"
-        },
-        "ai:fixedfontsize": {
-          "type": "number"
-        },
         "term:*": {
           "type": "boolean"
         },
@@ -107,44 +65,11 @@
           },
           "type": "object"
         },
-        "editor:minimapenabled": {
-          "type": "boolean"
-        },
-        "editor:stickyscrollenabled": {
-          "type": "boolean"
-        },
-        "editor:wordwrap": {
-          "type": "boolean"
-        },
-        "editor:fontsize": {
-          "type": "number"
-        },
         "blockheader:*": {
           "type": "boolean"
         },
         "blockheader:showblockids": {
           "type": "boolean"
-        },
-        "autoupdate:*": {
-          "type": "boolean"
-        },
-        "autoupdate:enabled": {
-          "type": "boolean"
-        },
-        "autoupdate:intervalms": {
-          "type": "number"
-        },
-        "autoupdate:installonquit": {
-          "type": "boolean"
-        },
-        "autoupdate:channel": {
-          "type": "string"
-        },
-        "markdown:fontsize": {
-          "type": "number"
-        },
-        "markdown:fixedfontsize": {
-          "type": "number"
         },
         "preview:showhiddenfiles": {
           "type": "boolean"
