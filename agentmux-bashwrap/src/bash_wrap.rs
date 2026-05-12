@@ -84,10 +84,17 @@ struct TerminalMessage {
 }
 
 /// Internal channel payload: a single line tagged with its source.
+/// Bytes are raw — UTF-8 conversion is deferred to the publish /
+/// aggregation site so non-UTF-8 output (binary `cat`, Windows
+/// legacy-encoded tools) doesn't abort the reader. Reagent + codex
+/// P2 on round 1 of PR #815.
 #[derive(Debug)]
 struct LineEvent {
     kind: &'static str, // "stdout" or "stderr"
-    text: String,       // newline NOT included (lines() strips it)
+    /// Raw bytes including the trailing `\n` if present. May be the
+    /// final fragment before EOF without a newline, in which case it
+    /// has no trailing delimiter.
+    bytes: Vec<u8>,
 }
 
 /// Returns the inner command's exit code so main.rs can mirror it as
@@ -306,24 +313,25 @@ async fn run_proc(
     let tx_stderr = tx.clone();
     drop(tx); // both clones own EOF for the publisher
 
-    // Stdout reader: line-buffered, each line is a chunk.
+    // Stdout reader: byte-level read_until('\n'). NOT lines() — that
+    // returns an IO error on the first non-UTF-8 sequence (binary
+    // `cat`, Windows legacy-encoded output) and silently truncates
+    // every subsequent byte. Reagent + codex P2.
     tokio::spawn(async move {
-        let mut reader = BufReader::new(stdout).lines();
+        let mut reader = BufReader::new(stdout);
         loop {
-            match reader.next_line().await {
-                Ok(Some(line)) => {
+            let mut buf = Vec::with_capacity(256);
+            match reader.read_until(b'\n', &mut buf).await {
+                Ok(0) => return, // EOF
+                Ok(_) => {
                     if tx_stdout
-                        .send(LineEvent {
-                            kind: "stdout",
-                            text: line,
-                        })
+                        .send(LineEvent { kind: "stdout", bytes: buf })
                         .await
                         .is_err()
                     {
                         return;
                     }
                 }
-                Ok(None) => return, // EOF
                 Err(e) => {
                     tracing::warn!(target: "bashwrap", error = %e, "stdout read error");
                     return;
@@ -332,25 +340,22 @@ async fn run_proc(
         }
     });
 
-    // Stderr reader: same shape; lines tagged so the model can tell
-    // them apart in the aggregated blob.
+    // Stderr reader: same byte-level shape.
     tokio::spawn(async move {
-        let mut reader = BufReader::new(stderr).lines();
+        let mut reader = BufReader::new(stderr);
         loop {
-            match reader.next_line().await {
-                Ok(Some(line)) => {
+            let mut buf = Vec::with_capacity(256);
+            match reader.read_until(b'\n', &mut buf).await {
+                Ok(0) => return,
+                Ok(_) => {
                     if tx_stderr
-                        .send(LineEvent {
-                            kind: "stderr",
-                            text: line,
-                        })
+                        .send(LineEvent { kind: "stderr", bytes: buf })
                         .await
                         .is_err()
                     {
                         return;
                     }
                 }
-                Ok(None) => return,
                 Err(e) => {
                     tracing::warn!(target: "bashwrap", error = %e, "stderr read error");
                     return;
@@ -366,29 +371,39 @@ async fn run_proc(
     let buffered_clone = buffered.clone();
     let publisher_handle = tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
-            // Aggregate into the model-visible buffer first. Stderr
-            // lines are prefixed so Claude can reason about them
-            // distinctly when it reads the tool_result blob.
+            // Aggregate raw bytes into the model-visible buffer
+            // FIRST, before any UTF-8 conversion — preserves binary
+            // output fidelity. Stderr lines are prefixed so Claude
+            // can reason about them distinctly in the tool_result.
+            // `event.bytes` already includes the trailing `\n` from
+            // read_until (or omits it on the final EOF fragment).
             {
                 let mut buf = buffered_clone.lock().await;
                 if event.kind == "stderr" {
                     buf.extend_from_slice(b"[stderr] ");
                 }
-                buf.extend_from_slice(event.text.as_bytes());
-                buf.push(b'\n');
+                buf.extend_from_slice(&event.bytes);
             }
 
-            // Stream chunk over WPS. Best-effort: a publish failure
-            // doesn't abort the command (the buffer already has the
-            // line). The frontend will see the line on `tool_result`
-            // even if the chunk never arrived.
+            // For the WPS chunk, the wire format is JSON so we must
+            // produce a String. `from_utf8_lossy` replaces invalid
+            // sequences with U+FFFD rather than aborting, preserving
+            // the model-visible blob's fidelity (kept above) while
+            // still publishing a readable line for the overlay.
+            // Strip the trailing `\n` from the chunk content so the
+            // frontend renderer doesn't add a stray blank line.
             if let Some(client) = wps_clone.as_ref() {
+                let mut line_bytes: &[u8] = &event.bytes;
+                if line_bytes.last() == Some(&b'\n') {
+                    line_bytes = &line_bytes[..line_bytes.len() - 1];
+                }
+                let line_str = String::from_utf8_lossy(line_bytes);
                 if let Err(e) = publish_line(
                     client,
                     &tool_id,
                     block_id.as_deref(),
                     event.kind,
-                    &event.text,
+                    &line_str,
                 )
                 .await
                 {
