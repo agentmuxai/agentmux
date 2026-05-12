@@ -151,7 +151,7 @@ To get Claude to actually call our MCP bash instead of native Bash, two paths:
 
 Recommend **B-hard** for the deterministic path: zero non-streaming bash invocations possible.
 
-- **Cost:** ~400-600 LOC across `agentmux-mcp/src/bash.rs` (new), `agentmux-srv` WPS subject wiring, frontend bridge from new WPS subject → `dispatchDoc(ToolChunkAppend)`, `.claude/hooks.json` auto-injection in `agent_config.rs`, plus tests.
+- **Cost:** ~400-600 LOC across `agentmux-mcp/src/bash.rs` (new), `agentmux-srv` WPS subject wiring, frontend bridge from new WPS subject → `dispatchDoc(ToolChunkAppend)`, `.claude/settings.json` (under `"hooks"` key — the real Claude Code discovery location; `.claude/hooks.json` is not read) auto-injection in `agent_config.rs`, plus tests.
 - **Value:** Real live streaming. Matches every peer product's pattern. Re-uses our existing infra (WPS broker, MCP injector).
 - **Risks:**
   - **Tool-selection drift.** If Claude's tool-selection heuristic flips, B-soft fails silently. B-hard's `PreToolUse` deny safeguards this. Test matrix needs an explicit "Claude picks mcp__agentmux__bash" assertion per provider release.
@@ -190,7 +190,7 @@ Provider parity for Codex / Gemini in PR β is bandwidth-bounded — start with 
 - **Output size cap?** Long builds produce 100k+ lines. Frontend caps at 50k per spec; should the MCP runner also truncate what it returns to Claude, or send the whole thing? Truncating in the runner risks the model losing critical end-of-output errors. Probably: full output to Claude (with a head/tail compression for >1MB), capped view to the frontend log.
 - **What happens to direct `task dev` / inline terminal Bash calls** that don't route through the agent at all? Out of scope — they live in the terminal pane, separate code path.
 - **Per-OS shell selection.** Bash on Linux/macOS; pwsh-then-cmd on Windows (we already detect this in `agentmux-srv/.../shell.rs`). Reuse that path.
-- **Hook injection mechanics.** We already write `.claude/hooks.json` from `agent_config.rs:112-119`; the `PreToolUse` redirect entry is one new JSON object. No new infra.
+- **Hook injection mechanics.** We write `.claude/settings.json` (under the `"hooks"` key — the real Claude Code discovery location) from `agent_config.rs`; the `PreToolUse` redirect entry is one new JSON object. No new infra.
 - **Permission flow interaction.** With `--dangerously-skip-permissions` set, the `PreToolUse` deny still fires and re-routes — but if we ever turn permissions back on, the redirect must auto-allow the MCP follow-up. Decision needed alongside [SPEC_DECISION_PROMPT_2026_04_24.md](../specs/SPEC_DECISION_PROMPT_2026_04_24.md).
 
 ---
