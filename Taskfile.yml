@@ -377,7 +377,7 @@ tasks:
             # (see docs/retros/RETRO_CEF_BUILD_RACE_2026_04_24.md). If the first
             # build lost the race, cef_windows_x86_64/ is missing libcef_dll/ +
             # include/ + Resources/. Retry once after repair before failing hard.
-            - cmd: bash -c 'cargo build --release -p agentmux-cef -p agentmux-launcher || { bash scripts/repair-cef-extract.sh && cargo build --release -p agentmux-cef -p agentmux-launcher; }'
+            - cmd: bash -c 'cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap || { bash scripts/repair-cef-extract.sh && cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap; }'
             - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/cef | Out-Null; Copy-Item target/release/agentmux-cef.exe dist/cef/agentmux-cef.exe -Force"
             - echo "✓ Built host + launcher for Windows"
 
