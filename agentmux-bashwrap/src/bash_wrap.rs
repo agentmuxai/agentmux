@@ -121,6 +121,14 @@ pub async fn run(args: Args) -> Result<i32> {
 
     let buffered = Arc::new(Mutex::new(Vec::<u8>::with_capacity(64 * 1024)));
 
+    tracing::info!(
+        target: "bashwrap",
+        tool_id = %args.tool_id,
+        degraded,
+        command_len = command.len(),
+        "exec start"
+    );
+
     if degraded {
         // Surface degradation as a real chunk on stdout (we'll prefix
         // it on the model side too) so the user sees a clear "no
@@ -129,14 +137,17 @@ pub async fn run(args: Args) -> Result<i32> {
         let warn = b"[bashwrap] warning: streaming disabled (auth/url env missing); command output will only appear on completion\n";
         buffered.lock().await.extend_from_slice(warn);
     } else if let Some(client) = wps.as_ref() {
-        publish_system(
+        match publish_system(
             client,
             &args.tool_id,
             args.block_id.as_deref(),
             &format!("[bashwrap] starting: {} chars", command.len()),
         )
         .await
-        .ok(); // Best-effort.
+        {
+            Ok(()) => tracing::info!(target: "bashwrap", tool_id = %args.tool_id, "initial publish ok"),
+            Err(e) => tracing::warn!(target: "bashwrap", tool_id = %args.tool_id, error = %e, "initial publish failed"),
+        }
     }
 
     let start = std::time::Instant::now();
@@ -404,6 +415,8 @@ async fn run_proc(
     let wps_clone = wps.cloned();
     let buffered_clone = buffered.clone();
     let publisher_handle = tokio::spawn(async move {
+        let mut chunks_published = 0u64;
+        let mut chunks_failed = 0u64;
         while let Some(event) = rx.recv().await {
             // Aggregate raw bytes into the model-visible buffer
             // FIRST, before any UTF-8 conversion — preserves binary
@@ -432,7 +445,7 @@ async fn run_proc(
                     line_bytes = &line_bytes[..line_bytes.len() - 1];
                 }
                 let line_str = String::from_utf8_lossy(line_bytes);
-                if let Err(e) = publish_line(
+                match publish_line(
                     client,
                     &tool_id,
                     block_id.as_deref(),
@@ -441,10 +454,21 @@ async fn run_proc(
                 )
                 .await
                 {
-                    tracing::warn!(target: "bashwrap", error = %e, "WPS publish failed");
+                    Ok(()) => chunks_published += 1,
+                    Err(e) => {
+                        chunks_failed += 1;
+                        tracing::warn!(target: "bashwrap", tool_id = %tool_id, error = %e, "WPS publish failed");
+                    }
                 }
             }
         }
+        tracing::info!(
+            target: "bashwrap",
+            tool_id = %tool_id,
+            chunks_published,
+            chunks_failed,
+            "publisher done"
+        );
     });
 
     // Wait for the child; tokio::process gives us the real exit code.
