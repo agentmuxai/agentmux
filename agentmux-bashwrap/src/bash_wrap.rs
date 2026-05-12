@@ -34,8 +34,8 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::sync::{Mutex, mpsc};
 
@@ -65,6 +65,18 @@ pub struct Args {
 /// Cap the model-visible head/tail sections of the aggregated blob.
 const MODEL_BLOB_HEAD_BYTES: usize = 50_000;
 const MODEL_BLOB_TAIL_BYTES: usize = 50_000;
+
+/// Flush pending bytes to the publisher when buffered without a
+/// newline AND the buffer reaches this size — so long lines and
+/// newline-free output (minified JSON, CR-only progress bars) still
+/// stream live instead of accumulating in memory unbounded.
+const FLUSH_BYTES: usize = 4096;
+
+/// Flush pending bytes after this much idle time even if no newline /
+/// size threshold has been hit — keeps slow-trickle output visible
+/// without waiting for the next byte that would have triggered a
+/// natural flush.
+const FLUSH_QUIET_WINDOW: Duration = Duration::from_millis(50);
 
 /// Wire payload published on `tool_chunk:<id>`. Mirrors the TypeScript
 /// `ToolChunkMessage` in `SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §4.3.
@@ -270,6 +282,80 @@ pub(crate) fn locate_bash() -> Result<PathBuf> {
     ))
 }
 
+/// Read raw bytes from a child stdio handle and forward chunks to
+/// the publisher with three flush triggers:
+///
+/// 1. **Newline.** As soon as a `\n` is in the buffer, drain everything
+///    up to and including that newline as one chunk. Loop, since a
+///    single read can contain multiple complete lines.
+/// 2. **Size threshold** (`FLUSH_BYTES`). If the buffer accumulates
+///    without a newline (minified JSON output, long progress lines,
+///    `printf` without `\n`), flush as soon as it exceeds the
+///    threshold. Prevents unbounded memory growth and keeps streaming
+///    live for newline-free output.
+/// 3. **Quiet-window** (`FLUSH_QUIET_WINDOW`). After this much idle
+///    time with non-empty pending bytes, flush. Surfaces slow-trickle
+///    output (one byte at a time) that would otherwise wait for the
+///    next byte to trigger a natural flush.
+async fn stream_reader<R>(mut reader: R, kind: &'static str, tx: mpsc::Sender<LineEvent>)
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut pending: Vec<u8> = Vec::with_capacity(8192);
+    let mut buf = [0u8; 8192];
+    loop {
+        match tokio::time::timeout(FLUSH_QUIET_WINDOW, reader.read(&mut buf)).await {
+            Ok(Ok(0)) => {
+                // EOF: drain remainder and exit.
+                if !pending.is_empty() {
+                    let _ = tx
+                        .send(LineEvent { kind, bytes: std::mem::take(&mut pending) })
+                        .await;
+                }
+                return;
+            }
+            Ok(Ok(n)) => {
+                pending.extend_from_slice(&buf[..n]);
+                // Drain every complete line.
+                while let Some(nl_pos) = pending.iter().position(|&b| b == b'\n') {
+                    let line: Vec<u8> = pending.drain(..=nl_pos).collect();
+                    if tx.send(LineEvent { kind, bytes: line }).await.is_err() {
+                        return;
+                    }
+                }
+                // Newline-free residue past the size threshold: flush
+                // as one chunk to keep memory bounded + streaming live.
+                if pending.len() >= FLUSH_BYTES {
+                    if tx
+                        .send(LineEvent { kind, bytes: std::mem::take(&mut pending) })
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(target: "bashwrap", error = %e, kind, "read error");
+                return;
+            }
+            Err(_elapsed) => {
+                // Quiet window: flush any pending bytes so slow-trickle
+                // output doesn't sit indefinitely.
+                if !pending.is_empty() {
+                    if tx
+                        .send(LineEvent { kind, bytes: std::mem::take(&mut pending) })
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Spawn the bash child via piped stdio and stream its lines.
 ///
 /// Why pipes instead of a PTY: on Windows, the previous `portable_pty`
@@ -308,60 +394,9 @@ async fn run_proc(
         .ok_or_else(|| anyhow!("bash child has no stderr"))?;
 
     let (tx, mut rx) = mpsc::channel::<LineEvent>(1024);
-    let tx_stdout = tx.clone();
-    let tx_stderr = tx.clone();
-    drop(tx); // both clones own EOF for the publisher
-
-    // Stdout reader: byte-level read_until('\n'). NOT lines() — that
-    // returns an IO error on the first non-UTF-8 sequence (binary
-    // `cat`, Windows legacy-encoded output) and silently truncates
-    // every subsequent byte.
-    tokio::spawn(async move {
-        let mut reader = BufReader::new(stdout);
-        loop {
-            let mut buf = Vec::with_capacity(256);
-            match reader.read_until(b'\n', &mut buf).await {
-                Ok(0) => return, // EOF
-                Ok(_) => {
-                    if tx_stdout
-                        .send(LineEvent { kind: "stdout", bytes: buf })
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(target: "bashwrap", error = %e, "stdout read error");
-                    return;
-                }
-            }
-        }
-    });
-
-    // Stderr reader: same byte-level shape.
-    tokio::spawn(async move {
-        let mut reader = BufReader::new(stderr);
-        loop {
-            let mut buf = Vec::with_capacity(256);
-            match reader.read_until(b'\n', &mut buf).await {
-                Ok(0) => return,
-                Ok(_) => {
-                    if tx_stderr
-                        .send(LineEvent { kind: "stderr", bytes: buf })
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(target: "bashwrap", error = %e, "stderr read error");
-                    return;
-                }
-            }
-        }
-    });
+    tokio::spawn(stream_reader(stdout, "stdout", tx.clone()));
+    tokio::spawn(stream_reader(stderr, "stderr", tx.clone()));
+    drop(tx); // last surviving sender lives in the spawned tasks
 
     // Publisher: aggregate into buffer + publish to WPS.
     let tool_id = args.tool_id.clone();
