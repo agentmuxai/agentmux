@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-bashwrap"
-version = "0.33.810"
+version = "0.33.811"
 edition = "2021"
 description = "AgentMux streaming bash wrapper + PreToolUse hook helper"
 authors = ["AgentMux Corp"]
