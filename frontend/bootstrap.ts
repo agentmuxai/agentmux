@@ -8,6 +8,7 @@
 import { initLogPipe } from "./log/log-pipe";
 import { setupCefApi } from "./cef-init";
 import { initApp } from "./app-init";
+import { renderFloatingPaneShell } from "./app/floating-pane/floating-pane-shell";
 import { benchMark } from "@/util/startup-bench";
 import { initPerf } from "@/perf";
 
@@ -103,6 +104,19 @@ async function bootstrap() {
         await setupCefApi();
         benchMark("setupCefApi-done");
         log("INFO", "API initialized, window.api available:", !!window.api);
+
+        // Floating pane shell branch — when the host opens a window via
+        // `open_floating_pane_window`, it appends `?floatingPaneId=<id>`
+        // to the URL. We render a minimal shell instead of the full
+        // workspace. See issue #810 / SPEC_FLOATING_PANE_TEAROFF_2026_05_11.
+        const params = new URLSearchParams(window.location.search);
+        const floatingPaneId = params.get("floatingPaneId");
+        if (floatingPaneId) {
+            const windowLabel = params.get("windowLabel") ?? "";
+            log("INFO", `[floating-pane] detected floatingPaneId=${floatingPaneId} — rendering shell`);
+            renderFloatingPaneShell(floatingPaneId, windowLabel);
+            return;
+        }
 
         // Launch the main application
         log("INFO", "Starting main application (app-init)...");
