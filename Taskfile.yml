@@ -14,9 +14,9 @@ vars:
     BIN_DIR: "bin"
     VERSION:
         sh: 'PATH="$HOME/.cargo/bin:/opt/homebrew/opt/node@20/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" node version.cjs'
-    RM: '{{if eq OS "windows"}}powershell Remove-Item -Force -ErrorAction SilentlyContinue{{else}}rm -f{{end}}'
-    RMRF: '{{if eq OS "windows"}}powershell Remove-Item -Force -Recurse -ErrorAction SilentlyContinue{{else}}rm -rf{{end}}'
-    DATE: '{{if eq OS "windows"}}powershell Get-Date -UFormat{{else}}date{{end}}'
+    RM: '{{if eq OS "windows"}}pwsh Remove-Item -Force -ErrorAction SilentlyContinue{{else}}rm -f{{end}}'
+    RMRF: '{{if eq OS "windows"}}pwsh Remove-Item -Force -Recurse -ErrorAction SilentlyContinue{{else}}rm -rf{{end}}'
+    DATE: '{{if eq OS "windows"}}pwsh Get-Date -UFormat{{else}}date{{end}}'
     ARTIFACTS_BUCKET: agentmux-github-artifacts/staging
     RELEASES_BUCKET: dl.agentmux.ai/releases
     WINGET_PACKAGE: AgentMux.AgentMux
@@ -51,7 +51,7 @@ tasks:
     copy:schema:
         desc: Copy schema directory to dist
         cmds:
-            - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/schema | Out-Null; Copy-Item schema/* dist/schema/ -Recurse -Force"
+            - cmd: pwsh -Command "New-Item -ItemType Directory -Force -Path dist/schema | Out-Null; Copy-Item schema/* dist/schema/ -Recurse -Force"
               platforms: [windows]
             - cmd: mkdir -p dist/schema && cp -r schema/* dist/schema/
               platforms: [linux, darwin]
@@ -143,7 +143,7 @@ tasks:
         platforms: [windows]
         cmds:
             - cargo build --release -p agentmux-srv
-            - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/bin | Out-Null; Copy-Item target/release/agentmux-srv.exe dist/bin/agentmux-srv-{{.VERSION}}-windows.x64.exe -Force"
+            - cmd: pwsh -Command "New-Item -ItemType Directory -Force -Path dist/bin | Out-Null; Copy-Item target/release/agentmux-srv.exe dist/bin/agentmux-srv-{{.VERSION}}-windows.x64.exe -Force"
             - echo "✓ Built agentmux-srv for Windows (dist/bin/agentmux-srv-{{.VERSION}}-windows.x64.exe)"
 
     # agentmux-wsh build tasks removed — wsh has been retired.
@@ -260,7 +260,7 @@ tasks:
     copyfiles:*:*:
         desc: Recursively copy directory and its contents.
         internal: true
-        cmd: '{{if eq OS "windows"}}powershell Copy-Item -Recurse -Force -Path {{index .MATCH 0}} -Destination {{index .MATCH 1}}{{else}}mkdir -p "$(dirname {{index .MATCH 1}})" && cp -r {{index .MATCH 0}} {{index .MATCH 1}}{{end}}'
+        cmd: '{{if eq OS "windows"}}pwsh Copy-Item -Recurse -Force -Path {{index .MATCH 0}} -Destination {{index .MATCH 1}}{{else}}mkdir -p "$(dirname {{index .MATCH 1}})" && cp -r {{index .MATCH 0}} {{index .MATCH 1}}{{end}}'
 
     clean:
         desc: clean dist directories
@@ -378,7 +378,7 @@ tasks:
             # build lost the race, cef_windows_x86_64/ is missing libcef_dll/ +
             # include/ + Resources/. Retry once after repair before failing hard.
             - cmd: bash -c 'cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap || { bash scripts/repair-cef-extract.sh && cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap; }'
-            - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/cef | Out-Null; Copy-Item target/release/agentmux-cef.exe dist/cef/agentmux-cef.exe -Force"
+            - cmd: pwsh -Command "New-Item -ItemType Directory -Force -Path dist/cef | Out-Null; Copy-Item target/release/agentmux-cef.exe dist/cef/agentmux-cef.exe -Force"
             - echo "✓ Built host + launcher for Windows"
 
     build:host:darwin:
