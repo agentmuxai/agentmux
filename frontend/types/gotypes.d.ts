@@ -349,6 +349,31 @@ declare global {
         identity_id?: string;
         /** v7 — FK to db_memories. Empty string = blank singleton. */
         memory_id?: string;
+        /** v8 — user-chosen instance name (AGENTMUX_AGENT_ID). */
+        instance_name?: string;
+        /** v8 — absolute working directory from allocate_agent_workdir. */
+        working_directory?: string;
+        /** v8 — soft-delete flag for the "Forget agent" affordance. */
+        display_hidden?: boolean;
+    };
+
+    /** v8 — one row of the launch modal's "Continue agent" dropdown.
+     * Server-side join across instance + definition + bundle tables. */
+    type NamedAgentRow = {
+        instance_id: string;
+        instance_name: string;
+        definition_id: string;
+        definition_name: string;
+        provider: string;
+        working_directory: string;
+        identity_id: string;
+        identity_name: string;
+        memory_id: string;
+        memory_name: string;
+        started_at: number;
+        ended_at: number;
+        status: string;
+        block_id_hint: string;
     };
 
     // ForgeContent
