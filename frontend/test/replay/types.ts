@@ -65,7 +65,7 @@ export interface FixtureDispatchEvent {
     src: "dispatch";
     blockId: string;
     /** Either an agent-document or an agent-pane-state command. */
-    action: AgentDocumentCommand | AgentPaneStateCommand;
+    action: AgentDocumentCommand | AgentPaneCommand;
     /** Which slot store the action targets. */
     store: "doc" | "pane";
 }
