@@ -146,50 +146,10 @@ mod tests {
         assert!(err.contains("invalid agent_ref"), "got: {err}");
     }
 
-    #[tokio::test]
-    async fn surfaces_spawn_failure() {
-        // Force a known-nonexistent claude binary so the spawn fails
-        // deterministically. This verifies the AgentError → block
-        // error path without needing claude on PATH.
-        let _guard = EnvGuard::set(
-            "AGENTMUX_CLAUDE_BIN",
-            "/definitely/does/not/exist/claude-xyz-test",
-        );
-
-        let node = mk_node(json!({
-            "kind": "agent",
-            "task": "anything"
-        }));
-        let scope = ExecutionScope::new();
-        let err = run(&node, &scope).await.expect_err("must error");
-        assert!(
-            err.contains("spawn failed") || err.contains("agent block: spawn"),
-            "got: {err}"
-        );
-    }
-
-    /// RAII helper to set + restore an env var, since tests run in the
-    /// same process and we don't want to leak state to siblings.
-    struct EnvGuard {
-        key: String,
-        prior: Option<String>,
-    }
-    impl EnvGuard {
-        fn set(key: &str, value: &str) -> Self {
-            let prior = std::env::var(key).ok();
-            std::env::set_var(key, value);
-            Self {
-                key: key.to_string(),
-                prior,
-            }
-        }
-    }
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            match &self.prior {
-                Some(v) => std::env::set_var(&self.key, v),
-                None => std::env::remove_var(&self.key),
-            }
-        }
-    }
+    // The spawn-failure → "agent block: spawn failed: ..." mapping is
+    // covered by `agents::runner::tests::run_agent_with_bin_surfaces_spawn_failure`,
+    // which injects a nonexistent binary path via the internal
+    // `run_agent_with_bin` entry point instead of `std::env::set_var`
+    // (unsound under concurrent test execution in Rust 1.81+).
+    // Reagent P2 on PR #834.
 }

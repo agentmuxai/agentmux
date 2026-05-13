@@ -21,7 +21,7 @@
 use std::path::PathBuf;
 use std::process::Stdio;
 
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot};
 
@@ -79,15 +79,29 @@ pub async fn run_agent(
     task: AgentTask,
     tx: mpsc::UnboundedSender<AgentEvent>,
 ) -> Result<AgentRunHandle, AgentError> {
+    let bin = std::env::var(ENV_CLAUDE_BIN)
+        .unwrap_or_else(|_| DEFAULT_CLAUDE_BIN.to_string());
+    run_agent_with_bin(&bin, agent_ref, task, tx).await
+}
+
+/// Internal entry point — same as `run_agent` but takes the `claude`
+/// binary path explicitly. Lets tests inject a known-nonexistent
+/// path to exercise the spawn-failure path without touching env vars
+/// (Rust 1.81+ flags `std::env::set_var` as unsound under concurrent
+/// test execution). The public `run_agent` is a thin shim that
+/// resolves the binary from `$AGENTMUX_CLAUDE_BIN` or the default.
+pub(crate) async fn run_agent_with_bin(
+    bin: &str,
+    agent_ref: AgentRef,
+    task: AgentTask,
+    tx: mpsc::UnboundedSender<AgentEvent>,
+) -> Result<AgentRunHandle, AgentError> {
     let working_dir = if agent_ref.working_directory.is_empty() {
         std::env::current_dir()
             .map_err(|e| AgentError::Spawn(format!("cwd: {e}")))?
     } else {
         PathBuf::from(&agent_ref.working_directory)
     };
-
-    let bin = std::env::var(ENV_CLAUDE_BIN)
-        .unwrap_or_else(|_| DEFAULT_CLAUDE_BIN.to_string());
 
     // `claude --print` runs in non-interactive mode and exits when
     // done. `--output-format=stream-json` emits one JSON object per
@@ -96,11 +110,19 @@ pub async fn run_agent(
     // without it). `--include-partial-messages` gives us the
     // streaming text_deltas — the translator skips the resulting
     // `partial: true` snapshots when building the transcript.
-    let mut child = Command::new(&bin)
-        .arg("--print")
+    let mut cmd = Command::new(bin);
+    cmd.arg("--print")
         .arg("--output-format=stream-json")
         .arg("--verbose")
-        .arg("--include-partial-messages")
+        .arg("--include-partial-messages");
+    // Forward the configured turn cap so the CLI enforces it.
+    // Previously stored on AgentTask but never passed to the
+    // subprocess — silently ignored. Reagent P1 + codex P2 on
+    // PR #834.
+    if let Some(n) = task.max_turns {
+        cmd.arg("--max-turns").arg(n.to_string());
+    }
+    let mut child = cmd
         .arg(&task.prompt)
         .current_dir(&working_dir)
         .stdin(Stdio::null())
@@ -122,18 +144,40 @@ pub async fn run_agent(
     let instance_id = format!("workflow-agent-{}", uuid::Uuid::new_v4());
     let (result_tx, result_rx) = oneshot::channel();
 
-    // Drain stderr in the background — captured into the spawn
-    // error path if the run fails. Detached: it just reads bytes
-    // until EOF; not used for AgentEvent translation.
+    // Drain stderr to EOF in the background so the child's pipe
+    // never fills (a half-drained pipe causes the child to block
+    // on stderr writes, which can stall the whole run). Capped at
+    // STDERR_CAP bytes — beyond that, additional bytes are read
+    // and dropped on the floor so the child can keep writing.
+    // Phase 2 surfaces stderr as a `workflowrun:<id>` diagnostic
+    // event; for now it's captured locally and discarded.
+    // Reagent P2 on PR #834.
     tokio::spawn(async move {
-        let mut buf = String::new();
+        const STDERR_CAP: usize = 64 * 1024;
+        let mut buf = Vec::with_capacity(4096);
         let mut reader = BufReader::new(stderr);
-        // Best-effort drain; ignore errors (the stream may close
-        // mid-read on cancellation).
-        let _ = AsyncBufReadExt::read_line(&mut reader, &mut buf).await;
-        // We don't currently propagate stderr to the AgentRunResult.
-        // Phase 2 surfaces it on the workflowrun:<id> broker as a
-        // diagnostic event.
+        let mut sink = [0u8; 4096];
+        // Read until EOF, capping the kept prefix at STDERR_CAP.
+        loop {
+            if buf.len() < STDERR_CAP {
+                let space = STDERR_CAP - buf.len();
+                let take = space.min(sink.len());
+                match reader.read(&mut sink[..take]).await {
+                    Ok(0) => break,
+                    Ok(n) => buf.extend_from_slice(&sink[..n]),
+                    Err(_) => break,
+                }
+            } else {
+                // Beyond cap — keep draining but discard.
+                match reader.read(&mut sink).await {
+                    Ok(0) => break,
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
+            }
+        }
+        // buf currently dropped; Phase 2 will plumb it to the broker.
+        let _ = buf;
     });
 
     tokio::spawn(async move {
@@ -411,6 +455,55 @@ mod tests {
             .expect("agent run ok");
         assert!(result.response.contains('4'), "got: {}", result.response);
         assert!(result.cost_usd > 0.0);
+    }
+
+    #[tokio::test]
+    async fn run_agent_with_bin_surfaces_spawn_failure() {
+        // Inject a known-nonexistent binary path so the spawn fails
+        // deterministically. Verifies the AgentError::Spawn path
+        // without touching env vars (set_var is unsound under
+        // concurrent test execution in Rust 1.81+).
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let result = run_agent_with_bin(
+            "/definitely/does/not/exist/claude-xyz-test",
+            AgentRef::default(),
+            AgentTask {
+                prompt: "hi".to_string(),
+                context: serde_json::Map::new(),
+                max_turns: None,
+            },
+            tx,
+        )
+        .await;
+        match result {
+            Err(AgentError::Spawn(msg)) => {
+                assert!(
+                    msg.contains("spawn") || msg.contains("does/not/exist"),
+                    "spawn error message should reference the failure; got: {msg}"
+                );
+            }
+            Err(other) => panic!("expected Spawn error, got: {other}"),
+            Ok(_) => panic!("expected Spawn error, got Ok(handle)"),
+        }
+    }
+
+    #[test]
+    fn agent_task_max_turns_field_round_trips() {
+        // Reagent P1 + codex P2 on PR #834: the max_turns field is
+        // forwarded to the subprocess via `--max-turns N`. We can't
+        // assert the actual CLI argument here without spawning, but
+        // we can verify the field flows through AgentTask's
+        // serde + Clone path without loss — the subprocess wiring
+        // is exercised by the end-to-end test.
+        let task = AgentTask {
+            prompt: "x".into(),
+            context: serde_json::Map::new(),
+            max_turns: Some(7),
+        };
+        let v = serde_json::to_value(&task).unwrap();
+        assert_eq!(v["maxTurns"], json!(7));
+        let back: AgentTask = serde_json::from_value(v).unwrap();
+        assert_eq!(back.max_turns, Some(7));
     }
 
     #[test]
