@@ -99,7 +99,7 @@ pub enum AgentEvent {
     /// `transcript` is the full ordered turn list for audit / replay.
     Done {
         response: String,
-        transcript: Vec<Turn>,
+        transcript: Vec<AgentTurn>,
     },
     /// Run failed. `message` is the user-facing error.
     Error {
@@ -122,7 +122,7 @@ pub struct TokenCounts {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Turn {
+pub struct AgentTurn {
     /// `"user"` | `"assistant"` | `"tool_result"`.
     pub role: String,
     pub content: serde_json::Value,
@@ -139,7 +139,7 @@ pub struct AgentRunResult {
     pub response: String,
     pub tokens: TokenCounts,
     pub cost_usd: f64,
-    pub transcript: Vec<Turn>,
+    pub transcript: Vec<AgentTurn>,
 }
 
 #[cfg(test)]
@@ -240,7 +240,7 @@ mod tests {
     fn agent_event_roundtrips() {
         let original = AgentEvent::Done {
             response: "ok".into(),
-            transcript: vec![Turn {
+            transcript: vec![AgentTurn {
                 role: "assistant".into(),
                 content: json!("hi"),
                 timestamp_ms: 1_700_000_000_000,

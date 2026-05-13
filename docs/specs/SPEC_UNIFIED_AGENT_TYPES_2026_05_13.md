@@ -110,7 +110,7 @@ pub enum AgentEvent {
     /// audit / replay.
     Done {
         response: String,
-        transcript: Vec<Turn>,
+        transcript: Vec<AgentTurn>,
     },
     /// Run failed. `message` is the user-facing error.
     Error { message: String },
@@ -127,7 +127,7 @@ pub struct TokenCounts {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Turn {
+pub struct AgentTurn {
     pub role: String,  // "user" | "assistant" | "tool_result"
     pub content: serde_json::Value,
     pub timestamp_ms: i64,
@@ -143,7 +143,7 @@ pub struct AgentRunResult {
     pub response: String,
     pub tokens: TokenCounts,
     pub cost_usd: f64,
-    pub transcript: Vec<Turn>,
+    pub transcript: Vec<AgentTurn>,
 }
 ```
 
@@ -170,7 +170,7 @@ type AgentEvent =
     | { type: "tool_use"; toolUseId: string; tool: string; input: unknown }
     | { type: "tool_result"; toolUseId: string; output: unknown; isError: boolean }
     | { type: "cost"; costUsd: number; tokens: TokenCounts }
-    | { type: "done"; response: string; transcript: Turn[] }
+    | { type: "done"; response: string; transcript: AgentTurn[] }
     | { type: "error"; message: string };
 
 type TokenCounts = {
@@ -180,7 +180,7 @@ type TokenCounts = {
     cacheRead: number;
 };
 
-type Turn = {
+type AgentTurn = {
     role: "user" | "assistant" | "tool_result";
     content: unknown;
     timestampMs: number;
@@ -190,7 +190,7 @@ type AgentRunResult = {
     response: string;
     tokens: TokenCounts;
     costUsd: number;
-    transcript: Turn[];
+    transcript: AgentTurn[];
 };
 ```
 
