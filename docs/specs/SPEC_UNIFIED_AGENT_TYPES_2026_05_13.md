@@ -80,7 +80,7 @@ pub struct AgentTask {
 /// pane (renders into the UI) and the workflow Agent block
 /// (accumulates until Done, returns AgentRunResult).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
 pub enum AgentEvent {
     /// Streaming text chunk from the assistant — agent pane appends
     /// to its visible transcript; workflow Agent block buffers.
@@ -210,13 +210,39 @@ agentmux-srv/src/agents/
     └── acp.rs          — ACP frame → AgentEvent (already exists in part as frontend providers/acp-translator.ts; backend-side mirror)
 ```
 
-### 4.2 The unified runner
+### 4.2 What's shared, and what isn't
+
+An audit of the existing agent-pane code surfaced an important wrinkle: **the spawn function is NOT naturally shareable** between the two consumers.
+
+- The **agent pane** spawns `claude` as a long-lived PTY subprocess. User input flows into stdin, output streams forever, the session is multi-turn and interactive. There's no per-task lifecycle at the spawn level — `claude` itself owns the conversation.
+- The **workflow Agent block** is one-shot: send a task, drain events until `Done`, return `AgentRunResult` to the next block. No PTY, no stdin, no multi-turn.
+
+What IS naturally shareable is the **translator + event shape**. Both consumers receive Claude's stream-json on stdout; both want it converted to `AgentEvent`s. The pane's read loop and the workflow runner are *different spawn drivers* feeding the *same translator* and emitting the *same event union*.
+
+```
+                            ┌─→ AssistantText / ToolUse / ToolResult / Cost / Done
+ClaudeTranslator (shared) ──┤
+                            ↑
+        stream-json lines from claude stdout
+                            ↑
+       ┌────────────────────┴────────────────────┐
+   Pane PTY read loop                       Workflow one-shot runner
+   (multi-turn, interactive,                (`run_agent` — single
+   user stdin via PTY,                       task, no PTY, headless)
+   long-lived session)
+```
+
+### 4.3 The one-shot runner (workflows only)
 
 ```rust
-/// Spawns the agent subprocess (claude / aider / ACP-compatible)
-/// per the AgentRef, drains its stdout, translates frames into
-/// AgentEvent, broadcasts them on `tx`. Returns a handle whose
-/// `final_result` future resolves to AgentRunResult when Done fires.
+/// Spawn `claude` as a non-interactive one-shot for the workflow
+/// Agent block: prompt → drain stream-json → emit AgentEvents →
+/// resolve `final_result` with AgentRunResult on Done. Headless;
+/// no PTY, no stdin pipe back to the user.
+///
+/// The agent pane does NOT use this — it has its own multi-turn
+/// PTY-driven spawn in `blockcontroller/shell.rs` which shares only
+/// the translator.
 pub async fn run_agent(
     agent_ref: AgentRef,
     task: AgentTask,
@@ -224,12 +250,13 @@ pub async fn run_agent(
 ) -> Result<AgentRunHandle, AgentError> {
     // 1. Resolve identity_id → Identity bundle (creds, env-var injection)
     // 2. Resolve memory_id → Memory bundle (system instructions, working files)
-    // 3. Resolve instance_name → existing AgentInstance row or allocate new
-    // 4. Build spawn env (AGENTMUX_AGENT_ID, identity vars, bashwrap WPS endpoint)
-    // 5. Spawn subprocess via the existing shell controller
-    // 6. Pipe stdout through Translator::translate() → AgentEvent
-    // 7. Forward each AgentEvent on `tx`
-    // 8. On Done: build AgentRunResult, fulfill the handle's final_result
+    // 3. Allocate working directory (no continuation — workflows always
+    //    spawn fresh AgentInstance rows for audit clarity)
+    // 4. Spawn `claude --print --output-format=stream-json` with prompt
+    //    on argv, capturing stdout
+    // 5. Pipe stdout lines through ClaudeTranslator → AgentEvent
+    // 6. Forward each AgentEvent on `tx`
+    // 7. On Done: build AgentRunResult, fulfill the handle's final_result
 }
 
 pub struct AgentRunHandle {
@@ -238,14 +265,14 @@ pub struct AgentRunHandle {
 }
 ```
 
-### 4.3 Agent pane integration
+### 4.4 Agent pane integration
 
-The current agent pane code in `agentmux-srv/src/backend/blockcontroller/shell.rs` is the spawn path. The refactor:
+The agent pane code in `agentmux-srv/src/backend/blockcontroller/shell.rs` keeps its PTY model — that's what enables interactive multi-turn use. What changes is **how the read loop interprets stdout**:
 
-- **Today**: shell controller spawns claude, parses stream-json via `ClaudeHistoryAdapter` in `agentmux-srv/src/backend/history/claude_adapter.rs`, persists turns into `db_messages`.
-- **After Phase 1.5**: shell controller calls `run_agent(agent_ref, task, tx)` where the tx is a fan-out: one sink writes turns to `db_messages` (preserved), another forwards `AgentEvent`s to the frontend via the existing `agentmux-bashwrap` WPS endpoint (so the agent pane's tool-chunk reducer keeps working unchanged).
+- **Today**: read loop drains PTY stdout in 4 KB chunks, publishes each chunk to WPS as `EVENT_BLOCK_FILE` (raw terminal data, the pane renders it as a terminal).
+- **After Phase 1.5**: read loop additionally line-buffers stdout, feeds each parsed JSON line through `ClaudeTranslator`, and emits the resulting `AgentEvent`s on a second channel alongside the existing raw-chunk publish. The raw-chunk path stays byte-equal so the pane's tool-chunk reducer keeps working unchanged.
 
-This is a *refactor*, not a rewrite: the agent pane's user-visible behavior is identical, the underlying spawn just goes through the unified runner.
+This is an **additive** change — zero risk of breaking the pane's existing behavior. The new `AgentEvent` stream becomes available for the in-pane Identity/Memory cog tabs, future per-turn audit views, etc.
 
 ### 4.4 Workflow Agent block integration
 
@@ -314,27 +341,30 @@ This closes the third drift item from the memory note: workflows graduates onto 
 
 ## 6. Migration plan
 
+The plan was revised after the §4.2 audit: PR 1 no longer refactors the pane's spawn function (it doesn't fit). Instead, the pane keeps its PTY model and gains parallel `AgentEvent` emission via the shared translator.
+
 | Step | Branch / PR | Description |
 |------|------------|-------------|
-| 0 | `feat/workflows-phase-1-5/types` | Land §3 types + `agents::runner::run_agent` skeleton. Wire stub claude-code spawn so the runner is callable but blocking. **Zero behavior change** for the agent pane. |
-| 1 | `feat/workflows-phase-1-5/refactor-shell-controller` | Refactor `agentmux-srv/src/backend/blockcontroller/shell.rs` to call `run_agent` for claude/aider spawns. Stream output stays identical at the WPS endpoint. Tests verify byte-identical event sequences before/after. |
-| 2 | `feat/workflows-phase-1-5/wire-workflow-block` | Replace `workflows/executor/blocks/agent.rs` stub with the real runner call (§4.4). Drop the `"[stub]"` test. |
-| 3 | `feat/workflows-phase-1-5/inspector` | Frontend: workflow Agent block inspector subscribed to `workflowrun:<id>` showing final `AgentRunResult` post-completion. Hover-expand parity deferred to Phase 2 polish. |
-| 4 | `feat/workflows-phase-1-5/reducer-slice` | Slice #10 reducer for workflow run state. Closes the "workflows-model.ts is not a reducer" drift item. |
+| 0 | `agenta/workflows-phase-1-5-types` (#831) | Land §3 types + `agents::runner::run_agent` skeleton (`NotImplemented`) + `ClaudeTranslator` skeleton. **Zero behavior change** anywhere. |
+| 1 | `feat/workflows-phase-1-5-translator` | Implement `ClaudeTranslator::translate()` for the full stream-json frame set. Wire it into `shell.rs`'s read loop *additively*: existing raw-chunk WPS publish stays byte-equal, new `AgentEvent` stream emits in parallel on a second channel. Golden-file tests over recorded stream-json sessions verify the translation. |
+| 2 | `feat/workflows-phase-1-5-runner` | Implement `run_agent()` as a one-shot headless spawn (`claude --print --output-format=stream-json` style). Replace `workflows/executor/blocks/agent.rs` stub with a `run_agent` call. End-to-end test: `Variables → Agent → Response` chain. |
+| 3 | `feat/workflows-phase-1-5-inspector` | Frontend: workflow Agent block inspector subscribed to `workflowrun:<id>` showing final `AgentRunResult` post-completion. Hover-expand parity deferred to Phase 2 polish. Closes issue #830. |
+| 4 | `feat/workflows-phase-1-5-reducer-slice` | Slice #10 reducer for workflow run state. Closes the "workflows-model.ts is not a reducer" drift item. |
 
-PRs 0–4 each independently shippable; Phase 1.5 closes when all four land. Estimated 2 weeks if one engineer dedicates focus.
+PRs 0–4 each independently shippable. The pane's PTY behavior is untouched throughout; the byte-equal WPS path is preserved across all four PRs.
 
 ---
 
 ## 7. Acceptance criteria
 
-- [ ] `AgentRef`, `AgentTask`, `AgentEvent`, `AgentRunResult` live in `agentmux-srv/src/agents/types.rs` and mirror exactly in `frontend/types/gotypes.d.ts` (camelCase, `rename_all` confirmed).
-- [ ] `run_agent()` spawns Claude Code, drains stream-json, and emits the unified `AgentEvent` sequence. Backend test verifies a recorded transcript replays into a known event sequence.
-- [ ] Agent pane spawn path goes through `run_agent()` — verified by a parity test that captures the WPS event stream before and after the refactor and asserts byte-equality.
+- [ ] `AgentRef`, `AgentTask`, `AgentEvent`, `AgentRunResult`, `AgentTurn`, `TokenCounts` live in `agentmux-srv/src/agents/types.rs` and mirror exactly in `frontend/types/gotypes.d.ts` (camelCase via `serde(rename_all)` + `rename_all_fields`).
+- [ ] `ClaudeTranslator::translate()` converts the full stream-json frame set to `AgentEvent`s. Golden-file tests over recorded sessions verify the translation byte-for-byte.
+- [ ] Agent pane's `shell.rs` read loop emits `AgentEvent`s in parallel with its existing raw-chunk WPS publish. Byte-equal parity test on the raw-chunk path confirms zero regression on the pane.
+- [ ] `run_agent()` spawns `claude --print --output-format=stream-json`, drains the line stream through `ClaudeTranslator`, emits `AgentEvent`s, resolves `AgentRunResult` on `Done`.
 - [ ] Workflow Agent block runs a real claude task, returns `{response, tokens, cost_usd}` to the next block. End-to-end test: `Variables → Agent → Response` chain with `{{<agent_block_id>.response}}` template.
 - [ ] Workflow inspector renders `AgentRunResult` post-completion (markdown response + final cost).
 - [ ] No regression on the agent pane's existing tool-chunk reducer tests.
-- [ ] `cargo check` clean; `tsc --noEmit` clean (frontend untouched by Rust changes).
+- [ ] `cargo check` clean; `tsc --noEmit` clean.
 
 ---
 
@@ -342,11 +372,12 @@ PRs 0–4 each independently shippable; Phase 1.5 closes when all four land. Est
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| Shell controller refactor breaks agent pane behavior in subtle ways | High | Parity test captures the WPS event byte stream before refactor and asserts byte-equality after. Land PR 1 behind a feature flag if the parity test surfaces ANY diff. |
+| Pane's additive `AgentEvent` emission breaks existing behavior in subtle ways | Medium | The translator's output goes to a *new* channel, separate from the existing WPS raw-chunk path. Byte-equal parity test on the raw-chunk path is the gate before merge. |
+| `ClaudeTranslator` misinterprets a stream-json frame variant we haven't seen | Medium | Golden-file tests use real recorded sessions (long agent runs with tool use, errors, cancellations). Unknown frames return empty `Vec<AgentEvent>` rather than panic — the pane's raw-chunk path still publishes the underlying text. |
 | `AgentEvent` design forces a future provider to fork the enum | Medium | Reserve a `Custom { kind: String, data: Value }` variant for provider-specific extensions. Don't ship it Phase 1.5 — but the enum is designed not to preclude it. |
-| Workflow Agent block run blocks the executor thread for long agents | Medium | Phase 1 executor is per-block sequential; long agents *will* block. The "live SSE wiring" Phase 2 polish moves this off the request thread. Phase 1.5 documents the limitation. |
-| Named-agent continuation collides with workflow runs (same `instance_name`, two callers) | Medium | Workflow Agent block requires a `workflow_run_id` suffix on `instance_name` when set, or the AgentInstance row is locked by the workflow run. Phase 1.5 spec: workflow runs allocate fresh `instance_name` unless the user explicitly opts into a named instance. |
-| The agent pane's existing claude_adapter.rs duplicates translator logic | Low | PR 1 deprecates `claude_adapter.rs` in favor of `agents::translator::claude`. Migration is mechanical; deprecation comment + removal in PR 2. |
+| Workflow Agent block run blocks the executor thread for long agents | Medium | Phase 1 executor is per-block sequential; long agents *will* block. Phase 2 moves this off the request thread. Phase 1.5 documents the limitation. |
+| Workflow `run_agent` spawn collides with named-agent continuation | Low | Workflow runs always allocate fresh `instance_name` (never reuse). The named-agent continuation path stays exclusive to the pane. |
+| `claude_adapter.rs` (history file parser) duplicates translator logic | Low | The history parser stays — it operates on JSONL files for past-session browsing, not the live stream. Different lifetime, different inputs, no consolidation needed. |
 
 ---
 
