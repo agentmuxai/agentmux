@@ -69,8 +69,9 @@ export function scheduleRevealLift(): void {
         return;
     }
 
+    let observer: PerformanceObserver;
     try {
-        const observer = new PerformanceObserver((entries) => {
+        observer = new PerformanceObserver((entries) => {
             for (const e of entries.getEntries()) {
                 if (e.duration > LONG_TASK_THRESHOLD_MS) {
                     lastLongTaskAt = performance.now();
@@ -88,17 +89,26 @@ export function scheduleRevealLift(): void {
         return;
     }
 
+    // Hold the start timestamp in the closure so rapid Ctrl-Tab can't
+    // make this tick read a NEWER `activeStartedAt` for hard-cap calc.
+    const startedAt = activeStartedAt;
+
     const tick = () => {
-        // The detector may have been replaced by a newer switch — drop
-        // out without lifting; the newer one owns the signal.
-        if (activeObserver == null) return;
+        // Identity check against the captured observer — the
+        // module-level `activeObserver` may now point to a newer
+        // observer that a subsequent `scheduleRevealLift()` installed.
+        // If so, the older tick must NOT touch the signal: the newer
+        // detector owns it. The earlier `activeObserver == null` check
+        // didn't catch this because re-entry sets it to the new
+        // observer before the old tick observes the swap.
+        if (activeObserver !== observer) return;
 
         const now = performance.now();
         const settledSinceLastBusy = now - lastLongTaskAt >= SETTLE_MS;
-        const hardCapHit = now - activeStartedAt >= MAX_GATE_MS;
+        const hardCapHit = now - startedAt >= MAX_GATE_MS;
 
         if (settledSinceLastBusy || hardCapHit) {
-            activeObserver.disconnect();
+            observer.disconnect();
             activeObserver = null;
             setTabSwitching(false);
             return;

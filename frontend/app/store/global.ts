@@ -849,9 +849,6 @@ const DEFAULT_NEW_TAB_COLOR = "#3b82f6";
 export function createTab() {
     const ws = workspace();
     if (ws == null) return;
-    // Hide the tab content while the new tab's preset (agent / sysinfo /
-    // swarm blocks) mounts and settles. See issue #774 / SPEC_TAB_CONTENT_REVEAL_GATE.md.
-    scheduleRevealLift();
     fireAndForget(async () => {
         try {
             const tabId = await WorkspaceService.CreateTab(ws.oid, "", true, false);
@@ -865,6 +862,13 @@ export function createTab() {
             // can reuse the same panes layout. See
             // frontend/app/tab/tab-presets.ts.
             const { applyTabPreset, DEFAULT_TAB_PRESET } = await import("@/app/tab/tab-presets");
+            // Hide the tab content while the new tab's preset (agent /
+            // sysinfo / swarm blocks) mounts and settles. The gate is
+            // started AFTER `CreateTab` returns so the SETTLE / hard-cap
+            // timers measure the actual mount-and-settle window, not
+            // the async RPC latency that ran beforehand. See issue
+            // #774 / SPEC_TAB_CONTENT_REVEAL_GATE.md.
+            scheduleRevealLift();
             await applyTabPreset(tabId, DEFAULT_TAB_PRESET);
         } catch (e) {
             console.error("[createTab] failed:", e);
