@@ -34,6 +34,18 @@ tasks:
             AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
             AGENTMUX_DEV: "1"
 
+    dev:standalone:
+        desc: Run AgentMux in dev mode with the launcher BYPASSED (host invoked directly). Escape hatch for debugging the no-launcher fallback path. See docs/specs/SPEC_LAUNCHER_DEV_INTEGRATION_2026-05-13.md §5.4.
+        cmds:
+            - task: dev:standalone:serve
+        deps:
+            - npm:install
+            - build:backend
+            - copy:schema
+        env:
+            AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
+            AGENTMUX_DEV: "1"
+
     storybook:
         desc: Start the Storybook server.
         cmd: npm run storybook
@@ -471,7 +483,7 @@ tasks:
 
     dev:serve:
         internal: true
-        desc: Start Vite dev server and host concurrently.
+        desc: Start Vite dev server and host concurrently, via the launcher (Windows) or direct host invocation (Unix).
         cmds:
             - task: build:host
             - task: bundle
@@ -486,13 +498,38 @@ tasks:
                   exit 1
                 fi
 
-                # Copy staging dir to session dir so dist/cef/ is never locked
-                # by the running process. Next build can overwrite dist/cef/ freely.
+                # Build the dev session dir. Two layouts:
+                #
+                #   Windows: production-parallel layout — launcher at root,
+                #            host + DLLs + srv in runtime/. Exercises the
+                #            launcher's Job Object, single-instance pipe,
+                #            saga coordinator, splash, and srv-spawn paths
+                #            so dev mirrors the package-portable runtime.
+                #            See docs/specs/SPEC_LAUNCHER_DEV_INTEGRATION_2026-05-13.md.
+                #
+                #   Unix:    legacy flat layout — host + DLLs in DEV_DIR
+                #            directly, launcher bypassed. Phase 7 cross-
+                #            platform parity will integrate the launcher
+                #            on Unix (launcher main.rs:153).
+                #
+                # Either way the staging dir (dist/cef/) is never locked by
+                # the running process, so the next build can overwrite it.
                 DEV_DIR="dist/cef-dev"
                 rm -rf "$DEV_DIR" 2>/dev/null || true
-                mkdir -p "$DEV_DIR"
-                cp -r dist/cef/* "$DEV_DIR"/
-                echo "Copied dist/cef → $DEV_DIR (isolation)"
+                if [ "{{OS}}" = "windows" ]; then
+                  mkdir -p "$DEV_DIR/runtime"
+                  cp target/release/agentmux-launcher.exe "$DEV_DIR/agentmux-launcher.exe"
+                  cp -r dist/cef/* "$DEV_DIR/runtime/"
+                  # srv binary — launcher's resolve_srv_binary checks
+                  # runtime/agentmux-srv-{ver}-windows.x64.exe first
+                  # (agentmux-launcher/src/srv_spawner.rs:295-307).
+                  cp dist/bin/agentmux-srv-*-windows.x64.exe "$DEV_DIR/runtime/" 2>/dev/null || true
+                  echo "Built $DEV_DIR with launcher layout (launcher at root, host + DLLs + srv in runtime/)"
+                else
+                  mkdir -p "$DEV_DIR"
+                  cp -r dist/cef/* "$DEV_DIR"/
+                  echo "Copied dist/cef → $DEV_DIR (flat layout, launcher bypassed on Unix)"
+                fi
 
                 # Linux: register the .desktop file + hicolor icons so the
                 # window manager (GNOME/KWin/sway) shows the AgentMux logo
@@ -527,9 +564,65 @@ tasks:
                 # Inline AGENTMUX_DEV=1 on the launch: go-task's top-level
                 # env: block (on the `dev` task) doesn't propagate into
                 # cmd: shell subprocesses invoked via `task:` on Windows,
-                # so agentmux-cef would start without the flag and skip
-                # the authkey.dev write (docs/specs/SPEC_TEST_API_ACCESS.md §6).
-                cd "$DEV_DIR" && LD_LIBRARY_PATH=. AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url=http://localhost:5173
+                # so the launched binary would start without the flag and
+                # skip the authkey.dev write (docs/specs/SPEC_TEST_API_ACCESS.md §6).
+                # The launcher inherits AGENTMUX_DEV and the host inherits
+                # it transitively through tokio::process::Command::spawn.
+                if [ "{{OS}}" = "windows" ]; then
+                  cd "$DEV_DIR" && AGENTMUX_DEV=1 ./agentmux-launcher.exe --url=http://localhost:5173
+                else
+                  cd "$DEV_DIR" && LD_LIBRARY_PATH=. AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url=http://localhost:5173
+                fi
+
+    dev:standalone:serve:
+        internal: true
+        desc: Dev escape hatch — flat layout, host invoked directly, launcher bypassed on all OSes.
+        cmds:
+            - task: build:host
+            - task: bundle
+            - cmd: |
+                if [ ! -f dist/cef/agentmux-cef{{exeExt}} ]; then
+                  echo "❌ dist/cef/agentmux-cef{{exeExt}} not found — build failed?"
+                  exit 1
+                fi
+                if [ ! -f dist/cef/libcef.dll ] && [ "{{OS}}" = "windows" ]; then
+                  echo "❌ dist/cef/libcef.dll not found — bundle failed?"
+                  exit 1
+                fi
+
+                echo "⚠ dev:standalone — launcher bypassed. Phase B features (Job Object, IPC, sagas, splash) UNEXERCISED. Use 'task dev' for production-parallel behavior."
+
+                DEV_DIR="dist/cef-dev"
+                rm -rf "$DEV_DIR" 2>/dev/null || true
+                mkdir -p "$DEV_DIR"
+                cp -r dist/cef/* "$DEV_DIR"/
+
+                if [ "{{OS}}" = "linux" ]; then
+                  bash scripts/install-linux-desktop.sh "$(pwd)/$DEV_DIR/agentmux-cef" \
+                    || echo "⚠ install-linux-desktop.sh failed; icon may be wrong but launch continues"
+                fi
+
+                npx vite --config vite.config.ts --port 5173 &
+                VITE_PID=$!
+                trap "kill $VITE_PID 2>/dev/null" EXIT
+                echo "Waiting for Vite on port 5173 (pid $VITE_PID)..."
+                for i in $(seq 1 30); do
+                  curl -s http://localhost:5173 > /dev/null 2>&1 && break
+                  sleep 1
+                done
+                if ! curl -s http://localhost:5173 > /dev/null 2>&1; then
+                  echo "❌ Vite failed to start within 30 seconds"
+                  exit 1
+                fi
+                echo "Vite ready."
+                # `LD_LIBRARY_PATH` is a Unix-only convention; on Windows
+                # it has no effect but is inconsistent with the `dev:serve`
+                # OS gate above. Mirror that gate here.
+                if [ "{{OS}}" = "windows" ]; then
+                  cd "$DEV_DIR" && AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url=http://localhost:5173
+                else
+                  cd "$DEV_DIR" && LD_LIBRARY_PATH=. AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url=http://localhost:5173
+                fi
 
     run:
         desc: Run the host (must be built and bundled first).

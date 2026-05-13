@@ -15,8 +15,11 @@
 
 | Command | Use When | Auto-Updates? |
 |---------|----------|---------------|
-| `task dev` | **Development** (Vite hot reload) | Yes - hot reload |
+| `task dev` | **Development** (Vite hot reload, launcher-in-loop on Windows) | Yes - hot reload |
+| `task dev:standalone` | Debug the no-launcher fallback path (host invoked directly, Phase B features bypassed) | Yes - hot reload |
 | `task package` | **Portable release builds** | No |
+
+On Windows, `task dev` builds a production-parallel layout in `dist/cef-dev/` (launcher at root, host + DLLs + srv in `runtime/`) and invokes `agentmux-launcher.exe` — so the Job Object, single-instance pipe, saga coordinator, splash, and launcher-spawned srv paths are exercised in dev exactly as in package builds. On Linux/macOS, `task dev` still invokes the host directly (Phase 7 cross-platform parity will integrate the launcher). See `docs/specs/SPEC_LAUNCHER_DEV_INTEGRATION_2026-05-13.md`.
 
 ### Build System
 
@@ -60,7 +63,7 @@ On this dev machine, Ninja is at `/c/Systems/bin/ninja.exe` (copied from VS 2022
 AgentMux is a **100% Rust** desktop app with a **Chromium-based UI**:
 
 - **agentmux-cef** = Host app (Rust, IPC bridge, window management, bundled Chromium)
-- **agentmux-launcher** = 325 KB launcher exe (sets DLL path, spawns host from `runtime/`)
+- **agentmux-launcher** = launcher exe — owns Job Object J0, named-pipe IPC, single-instance enforcement, saga coordinator, splash, and srv lifecycle; spawns host from `runtime/`. Exercised by `task dev` on Windows (production-parallel layout).
 - **agentmux-srv** = Rust backend sidecar (auto-spawned, don't run manually)
 - **agentmux-common** = Shared utilities used by all the above
 
