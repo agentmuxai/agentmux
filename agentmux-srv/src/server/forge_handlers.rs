@@ -30,6 +30,9 @@ use crate::backend::rpc_types::{
     COMMAND_LIST_AGENT_INSTANCES, COMMAND_GET_AGENT_INSTANCE,
     COMMAND_CREATE_AGENT_INSTANCE, COMMAND_UPDATE_AGENT_INSTANCE,
     COMMAND_DELETE_AGENT_INSTANCE,
+    COMMAND_LIST_NAMED_AGENTS, COMMAND_HIDE_NAMED_AGENT,
+    CommandListNamedAgentsData, CommandHideNamedAgentData,
+    NamedAgentRow,
     COMMAND_FORK_AGENT_DEFINITION,
     CommandListIdentityAccountsData, CommandGetIdentityAccountData,
     CommandDeleteIdentityAccountData,
@@ -1024,6 +1027,14 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // immediately on either "" or "blank").
                     identity_id: cmd.identity_id,
                     memory_id: cmd.memory_id,
+                    // v8: named-agent continuation. instance_name +
+                    // working_directory come from the launch-modal
+                    // overrides via CommandCreateAgentInstanceData
+                    // (added in the same spec). Empty string for
+                    // legacy/ambient launches.
+                    instance_name: cmd.instance_name.clone(),
+                    working_directory: cmd.working_directory.clone(),
+                    display_hidden: false,
                 };
                 wstore
                     .instance_create(&inst)
@@ -1065,11 +1076,17 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     started_at: existing.started_at,
                     ended_at: cmd.ended_at.unwrap_or(existing.ended_at),
                     created_at: existing.created_at,
-                    // identity_id / memory_id are immutable post-create
-                    // (mid-session credential rotation is out of scope —
-                    // launch a new instance with a different bundle).
+                    // identity_id / memory_id / instance_name /
+                    // working_directory are immutable post-create
+                    // (mid-session credential rotation is out of scope
+                    // — launch a new instance with a different bundle
+                    // or use ContinueNamedAgentCommand). display_hidden
+                    // is mutated via instance_set_hidden, not here.
                     identity_id: existing.identity_id.clone(),
                     memory_id: existing.memory_id.clone(),
+                    instance_name: existing.instance_name.clone(),
+                    working_directory: existing.working_directory.clone(),
+                    display_hidden: existing.display_hidden,
                 };
                 wstore
                     .instance_update(&merged)
@@ -1114,6 +1131,227 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     });
                 }
                 Ok(Some(json!({ "deleted": deleted })))
+            })
+        }),
+    );
+
+    // ---- v8: named agent continuation ----
+
+    // listnamedagents — powers the launch modal's "Continue agent"
+    // dropdown. Joins instance rows with the definition / identity /
+    // memory bundle names so the frontend renders without follow-ups.
+    let wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_LIST_NAMED_AGENTS,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                let cmd: CommandListNamedAgentsData =
+                    serde_json::from_value(data).unwrap_or_default();
+                let limit = if cmd.limit == 0 {
+                    200
+                } else {
+                    cmd.limit.min(1000)
+                };
+                // Resolve bundle names once per response. With ≤200
+                // rows and typical bundle counts in the low dozens,
+                // a linear lookup on cached lists beats per-row
+                // round-trips through the store.
+                let defs = wstore
+                    .forge_list()
+                    .map_err(|e| format!("listnamedagents: forge_list: {e}"))?;
+                let identities = wstore
+                    .bundle_identity_list()
+                    .map_err(|e| format!("listnamedagents: bundle_identity_list: {e}"))?;
+                let memories = wstore
+                    .bundle_memory_list()
+                    .map_err(|e| format!("listnamedagents: bundle_memory_list: {e}"))?;
+
+                // PR B — read from the cross-version registry when
+                // it's available. Falls back to SQLite when the
+                // registry couldn't be resolved at startup (CI / odd
+                // environments). SQLite remains authoritative for
+                // PR B (parallel-write is still active); the choice
+                // here just affects which surface gets surfaced.
+                let rows: Vec<NamedAgentRow> = match wstore.shared_agent_registry() {
+                    Some(reg) => {
+                        let agents_root = reg.agents_root().map(|p| p.to_path_buf());
+                        let mut records = reg
+                            .list_active()
+                            .map_err(|e| format!("listnamedagents: registry: {e}"))?;
+                        if let Some(def_filter) = cmd.definition_id.as_deref() {
+                            records.retain(|r| r.data.definition_id == def_filter);
+                        }
+                        records.sort_by(|a, b| {
+                            b.data
+                                .last_launched_at_ms
+                                .cmp(&a.data.last_launched_at_ms)
+                        });
+                        records.truncate(limit);
+                        // Pre-fetch all candidate same-version rows
+                        // ONCE so enrichment doesn't issue N+1 queries.
+                        // Indexed by instance_id; rows that aren't in
+                        // current SQLite fall through to sentinels.
+                        let sqlite_rows: Vec<AgentInstance> = wstore
+                            .instance_list_named(records.len().max(1), cmd.definition_id.as_deref())
+                            .unwrap_or_default();
+                        let sqlite_by_id: std::collections::HashMap<&str, &AgentInstance> =
+                            sqlite_rows.iter().map(|i| (i.id.as_str(), i)).collect();
+                        records
+                            .into_iter()
+                            .map(|rec| {
+                                let d = rec.data;
+                                let def = defs.iter().find(|x| x.id == d.definition_id);
+                                let identity_id_str =
+                                    d.identity_id.clone().unwrap_or_default();
+                                let memory_id_str = d.memory_id.clone().unwrap_or_default();
+                                let identity_name = if identity_id_str.is_empty() {
+                                    "(ambient creds)".to_string()
+                                } else {
+                                    identities
+                                        .iter()
+                                        .find(|i| i.id == identity_id_str)
+                                        .map(|i| i.name.clone())
+                                        .unwrap_or_else(|| "(missing identity)".to_string())
+                                };
+                                let memory_name = if memory_id_str.is_empty() {
+                                    "(vanilla CLI)".to_string()
+                                } else {
+                                    memories
+                                        .iter()
+                                        .find(|m| m.id == memory_id_str)
+                                        .map(|m| m.name.clone())
+                                        .unwrap_or_else(|| "(missing memory)".to_string())
+                                };
+                                let working_directory = match agents_root.as_ref() {
+                                    Some(root) => root
+                                        .join(&d.working_dir)
+                                        .to_string_lossy()
+                                        .to_string(),
+                                    None => d.working_dir.clone(),
+                                };
+                                // Same-version enrichment: if this id
+                                // also exists in current SQLite, the
+                                // row carries runtime state (block_id
+                                // for focus-existing-pane, status,
+                                // ended_at) that the registry
+                                // intentionally doesn't track.
+                                // Cross-version rows fall through with
+                                // sentinel "available" status and
+                                // empty block_id_hint.
+                                let (block_id_hint, status, ended_at) =
+                                    match sqlite_by_id.get(d.instance_id.as_str()) {
+                                        Some(inst) => (
+                                            inst.block_id.clone(),
+                                            inst.status.clone(),
+                                            inst.ended_at,
+                                        ),
+                                        None => (String::new(), "available".to_string(), 0),
+                                    };
+                                NamedAgentRow {
+                                    instance_id: d.instance_id,
+                                    instance_name: d.instance_name,
+                                    definition_id: d.definition_id.clone(),
+                                    definition_name: def
+                                        .map(|x| x.name.clone())
+                                        .unwrap_or_else(|| "(missing definition)".to_string()),
+                                    provider: def
+                                        .map(|x| x.provider.clone())
+                                        .unwrap_or_default(),
+                                    working_directory,
+                                    identity_id: identity_id_str,
+                                    identity_name,
+                                    memory_id: memory_id_str,
+                                    memory_name,
+                                    started_at: d.last_launched_at_ms,
+                                    ended_at,
+                                    status,
+                                    block_id_hint,
+                                }
+                            })
+                            .collect()
+                    }
+                    None => {
+                        let instances = wstore
+                            .instance_list_named(limit, cmd.definition_id.as_deref())
+                            .map_err(|e| format!("listnamedagents: {e}"))?;
+                        instances
+                            .into_iter()
+                            .map(|inst| {
+                                let def = defs.iter().find(|d| d.id == inst.definition_id);
+                                let identity_name = if inst.identity_id.is_empty() {
+                                    "(ambient creds)".to_string()
+                                } else {
+                                    identities
+                                        .iter()
+                                        .find(|i| i.id == inst.identity_id)
+                                        .map(|i| i.name.clone())
+                                        .unwrap_or_else(|| "(missing identity)".to_string())
+                                };
+                                let memory_name = if inst.memory_id.is_empty() {
+                                    "(vanilla CLI)".to_string()
+                                } else {
+                                    memories
+                                        .iter()
+                                        .find(|m| m.id == inst.memory_id)
+                                        .map(|m| m.name.clone())
+                                        .unwrap_or_else(|| "(missing memory)".to_string())
+                                };
+                                NamedAgentRow {
+                                    instance_id: inst.id,
+                                    instance_name: inst.instance_name,
+                                    definition_id: inst.definition_id.clone(),
+                                    definition_name: def
+                                        .map(|d| d.name.clone())
+                                        .unwrap_or_else(|| "(missing definition)".to_string()),
+                                    provider: def
+                                        .map(|d| d.provider.clone())
+                                        .unwrap_or_default(),
+                                    working_directory: inst.working_directory,
+                                    identity_id: inst.identity_id,
+                                    identity_name,
+                                    memory_id: inst.memory_id,
+                                    memory_name,
+                                    started_at: inst.started_at,
+                                    ended_at: inst.ended_at,
+                                    status: inst.status,
+                                    block_id_hint: inst.block_id,
+                                }
+                            })
+                            .collect()
+                    }
+                };
+
+                Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // hidenamedagent — soft-delete (sets display_hidden = 1) so the
+    // row disappears from the dropdown. Working dir stays on disk.
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_HIDE_NAMED_AGENT,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                let cmd: CommandHideNamedAgentData = serde_json::from_value(data)
+                    .map_err(|e| format!("hidenamedagent: {e}"))?;
+                let hidden = wstore
+                    .instance_set_hidden(&cmd.id, true)
+                    .map_err(|e| format!("hidenamedagent: {e}"))?;
+                if hidden {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "namedagents:changed".to_string(),
+                        scopes: vec![],
+                        sender: String::new(),
+                        persist: 0,
+                        data: None,
+                    });
+                }
+                Ok(Some(json!({ "hidden": hidden })))
             })
         }),
     );

@@ -287,7 +287,18 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
         .pending_window_creations
         .iter()
         .any(|p| {
-            !p.label.starts_with("window-pool-") && !p.label.starts_with("browser-pane-")
+            // Exclusions:
+            // - `window-pool-` / `browser-pane-` per the comment above.
+            // - `floating-` because floating-pane creation (#810) can
+            //   leak a pending entry on failure paths (e.g. CEF
+            //   `browser_host_create_browser` returning 0); without
+            //   this exclusion, one failed creation would permanently
+            //   block orphan reconciliation. Floating panes manage
+            //   their own lifecycle and don't participate in orphan
+            //   reconciliation today. Codex P1 on PR #811.
+            !p.label.starts_with("window-pool-")
+                && !p.label.starts_with("browser-pane-")
+                && !p.label.starts_with("floating-")
         });
     let plan = plan_reconcile(
         &browser_status,
@@ -399,22 +410,28 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
 fn classify_hwnd(browser: &Browser) -> HwndStatus {
     let mut b = browser.clone();
     let Some(host) = b.host() else { return HwndStatus::Hostless };
-    let wh = host.window_handle();
-    if wh.0.is_null() {
-        return HwndStatus::Dead;
-    }
     #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::Foundation::HWND;
         use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;
+        let wh = host.window_handle();
+        if wh.0.is_null() {
+            return HwndStatus::Dead;
+        }
         if IsWindow(wh.0 as HWND) == 0 {
             HwndStatus::Dead
         } else {
             HwndStatus::Live
         }
     }
+    // On Linux/macOS `cef_window_handle_t` is `u64` (X11 XID / NSView ptr),
+    // not the Win32 HWND tuple-struct, so `wh.0.is_null()` doesn't typecheck.
+    // We don't have an `IsWindow` equivalent here either — treat any host
+    // with a Browser as Live for orphan-reconcile classification. The Win32
+    // path keeps the strict liveness check that landed in #702.
     #[cfg(not(target_os = "windows"))]
     {
+        let _ = host;
         HwndStatus::Live
     }
 }

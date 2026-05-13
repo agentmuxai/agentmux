@@ -2,10 +2,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * State management for agent widget using SolidJS signals
+ * State management for agent widget using SolidJS signals.
  *
- * IMPORTANT: All signals are instance-scoped (created per ViewModel instance)
- * to prevent state bleeding between multiple agent widgets.
+ * IMPORTANT: All signals are instance-scoped (created per ViewModel
+ * instance) to prevent state bleeding between multiple agent widgets.
+ *
+ * **Architecture: this file is the read/render projection layer, not
+ * a parallel state store.** The setters returned here are consumed by
+ * `registerAgentPaneStatePane` and `registerAgentDocPane` on mount; the
+ * slot-store reducers are the *only* callers of those setters. The
+ * components in this directory read via the accessors and never touch
+ * the setters directly. Every write to these signals therefore flows
+ * through `dispatchPane` / `dispatchDoc` and is captured by the
+ * `recordDispatch` audit ring.
+ *
+ * Anti-pattern to flag in review: a `set*` call from a component or
+ * hook outside `state.test.ts`. That bypass would break replay (see
+ * `docs/specs/SPEC_AGENT_PANE_SESSION_REPLAY_2026_05_12.md`) and the
+ * audit confirmation in `docs/analysis/AGENT_PANE_REDUCER_AUDIT_2026_05_12.md`.
  */
 
 import { createSignal, type Accessor, type Setter } from "solid-js";

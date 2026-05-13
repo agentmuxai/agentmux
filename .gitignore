@@ -55,3 +55,6 @@ nul
 
 # AppImage build artifacts (assembled in build/AgentMux.AppDir/ before being bundled by appimagetool)
 /build/AgentMux.AppDir/
+
+# Claude Code agent session state — worktrees, logs, todos, etc.
+.claude/

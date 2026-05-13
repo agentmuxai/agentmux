@@ -109,12 +109,21 @@ pub fn build_config_files(
     }
 
     // ----------------------------------------------------------------
-    // Write .claude/hooks.json if hooks content is present
+    // Write .claude/hooks.json — always includes a PreToolUse:Bash
+    // entry pointing at `agentmux-bashwrap hook` so the streaming
+    // wrapper is invoked for every Bash tool call. User-provided
+    // hooks (from content_map["hooks"]) are merged on top, with the
+    // user's entries winning on key collisions, EXCEPT that our
+    // PreToolUse entries are always appended to any user
+    // PreToolUse array so streaming stays on regardless. See
+    // docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §5.
     // ----------------------------------------------------------------
-    if let Some(hooks) = content_map.get("hooks") {
+    let user_hooks = content_map.get("hooks").map(|s| s.as_str());
+    let user_settings = content_map.get("settings").map(|s| s.as_str());
+    if let Some(settings_json) = build_settings_with_hooks(user_settings, user_hooks) {
         files.push(AgentConfigFile {
-            filename: ".claude/hooks.json".to_string(),
-            content: hooks.clone(),
+            filename: ".claude/settings.json".to_string(),
+            content: settings_json,
         });
     }
 
@@ -292,6 +301,146 @@ pub fn build_mcp_config(
     }
 }
 
+/// Build `.claude/settings.json` content with the auto-injected
+/// PreToolUse Bash hook (under the `"hooks"` key) that redirects
+/// Bash invocations into the streaming wrapper
+/// (`agentmux-bashwrap exec`). User-supplied settings.json (from
+/// the agent's `content_map["settings"]`) is parsed and merged at
+/// the top level; user-supplied legacy hooks content (from
+/// `content_map["hooks"]`) is merged into `settings.hooks`.
+///
+/// **File location matters.** Claude Code reads project hooks from
+/// `<project>/.claude/settings.json` under the `"hooks"` key.
+/// A standalone `.claude/hooks.json` is NOT a Claude Code
+/// discovery location — that was the v0.33.804 streaming-bug root
+/// cause: the file was written but Claude never read it, so the
+/// PreToolUse hook never fired and live streaming silently failed.
+///
+/// See `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §5
+/// and Claude Code docs: https://code.claude.com/docs/en/hooks.md
+pub fn build_settings_with_hooks(
+    user_settings_content: Option<&str>,
+    user_hooks_content: Option<&str>,
+) -> Option<String> {
+    use serde_json::Value;
+    let agentmux_pretooluse = json!({
+        "matcher": "^(Bash|.*[Bb]ash.*)$",
+        "hooks": [
+            {
+                "type": "command",
+                "command": "agentmux-bashwrap hook"
+            }
+        ]
+    });
+    let mut hooks_obj = serde_json::Map::new();
+    let mut pretooluse_entries: Vec<Value> = Vec::new();
+
+    // Start with user hooks if present + parseable. Parse failures or
+    // non-Object top-levels are logged at WARN so the diagnostic trail
+    // surfaces — silent swallowing made user hooks disappear with no
+    // signal (reagent P2 on PR #809).
+    if let Some(raw) = user_hooks_content {
+        match serde_json::from_str::<Value>(raw) {
+            Ok(Value::Object(user_obj)) => {
+                for (k, v) in user_obj {
+                    if k == "PreToolUse" {
+                        if let Value::Array(arr) = v {
+                            pretooluse_entries.extend(arr);
+                        } else {
+                            tracing::warn!(
+                                "agent_config: user hooks.PreToolUse is not an array; dropped"
+                            );
+                        }
+                    } else {
+                        hooks_obj.insert(k, v);
+                    }
+                }
+            }
+            Ok(other) => {
+                tracing::warn!(
+                    kind = ?other,
+                    "agent_config: user hooks top-level value is not an object; dropped"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "agent_config: failed to parse user hooks JSON; dropped"
+                );
+            }
+        }
+    }
+    // Append our entry last so user matchers (deny rules etc.) get a chance to
+    // short-circuit before our rewrite.
+    pretooluse_entries.push(agentmux_pretooluse);
+    hooks_obj.insert("PreToolUse".to_string(), Value::Array(pretooluse_entries));
+
+    // Build the settings.json object: start from user-supplied settings.json
+    // (if any), then overlay our hooks key. User keys other than `hooks`
+    // pass through unchanged.
+    let mut settings_obj = serde_json::Map::new();
+    if let Some(raw) = user_settings_content {
+        match serde_json::from_str::<Value>(raw) {
+            Ok(Value::Object(user_obj)) => {
+                for (k, v) in user_obj {
+                    settings_obj.insert(k, v);
+                }
+            }
+            Ok(_other) => {
+                tracing::warn!(
+                    "agent_config: user settings.json top-level is not an object; dropped"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "agent_config: failed to parse user settings.json; dropped"
+                );
+            }
+        }
+    }
+    // Merge: any existing hooks key from user settings is merged with our
+    // additions. For PreToolUse specifically, user matchers from
+    // settings.json are PREPENDED (not dropped) so they short-circuit
+    // before our auto-injected agentmux-bashwrap entry — same ordering
+    // rule we apply to legacy content_map["hooks"] PreToolUse entries.
+    // For other event types (PostToolUse, Stop, etc.) we keep user's
+    // entries verbatim. Reagent P1 on PR #813 (the `continue` was a
+    // silent drop — caught a real merge bug).
+    if let Some(Value::Object(existing_hooks)) = settings_obj.get("hooks").cloned() {
+        for (k, v) in existing_hooks {
+            if k == "PreToolUse" {
+                if let Value::Array(user_pretooluse) = v {
+                    // Prepend user PreToolUse so their matchers run
+                    // first; our auto-injected entry stays last.
+                    if let Some(Value::Array(ours)) = hooks_obj.remove("PreToolUse") {
+                        let mut merged = user_pretooluse;
+                        merged.extend(ours);
+                        hooks_obj.insert("PreToolUse".to_string(), Value::Array(merged));
+                    } else {
+                        hooks_obj.insert("PreToolUse".to_string(), Value::Array(user_pretooluse));
+                    }
+                } else {
+                    tracing::warn!(
+                        "agent_config: user settings.hooks.PreToolUse is not an array; dropped"
+                    );
+                }
+                continue;
+            }
+            hooks_obj.entry(k).or_insert(v);
+        }
+    }
+    settings_obj.insert("hooks".to_string(), Value::Object(hooks_obj));
+
+    match serde_json::to_string_pretty(&Value::Object(settings_obj)) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            tracing::error!("agent_config: failed to serialize settings.json: {e}");
+            None
+        }
+    }
+}
+
 /// Replace `{{VARIABLE}}` placeholders in `content` with values from `vars`.
 ///
 /// Placeholders that have no corresponding key in `vars` are left unchanged
@@ -445,12 +594,41 @@ mod tests {
     }
 
     #[test]
-    fn test_build_config_files_hooks_written() {
+    fn test_build_config_files_settings_merges_user_hooks() {
+        // PR #813 moved hooks from `.claude/hooks.json` (a Claude Code
+        // dead-letter path) to `.claude/settings.json` under the
+        // `"hooks"` key. This test exercises the merge path: user
+        // PreToolUse entries must be PREPENDED (not silently
+        // dropped) to the auto-injected bashwrap entry so streaming
+        // stays on while user-supplied gates fire first.
         let mut content_map = HashMap::new();
-        content_map.insert("hooks".to_string(), r#"{"hooks":[]}"#.to_string());
-
+        content_map.insert(
+            "hooks".to_string(),
+            r#"{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"my-audit"}]}]}"#
+                .to_string(),
+        );
         let files = build_config_files(&content_map, &[], "Aria", "agent-1");
-        assert!(files.iter().any(|f| f.filename == ".claude/hooks.json"));
+        let settings = files
+            .iter()
+            .find(|f| f.filename == ".claude/settings.json")
+            .expect("settings.json emitted");
+        let parsed: Value = serde_json::from_str(&settings.content).unwrap();
+        let pre_tool_use = parsed["hooks"]["PreToolUse"]
+            .as_array()
+            .expect("PreToolUse is an array");
+        // User's "Read" matcher prepended first, then our Bash matcher.
+        assert!(
+            pre_tool_use
+                .iter()
+                .any(|e| e["matcher"].as_str() == Some("Read")),
+            "user-supplied PreToolUse:Read must survive the merge"
+        );
+        assert!(
+            pre_tool_use
+                .iter()
+                .any(|e| e["matcher"].as_str().unwrap_or("").contains("Bash")),
+            "auto-injected PreToolUse:Bash must still be present"
+        );
     }
 
     #[test]

@@ -401,9 +401,21 @@ export class AgentViewModel implements ViewModel {
             //     ~/.agentmux/agents/<slug> default ourselves)
             // Any other persisted value is user-specified and stays
             // verbatim through allocation.
+            //
+            // v8 continuation path: `overrides.workDirOverride` short-
+            // circuits the auto-allocate logic entirely. The launch
+            // modal's "Continue agent" dropdown sets this from the
+            // prior instance's `working_directory`. We pass
+            // auto_allocate: false so WriteAgentConfigCommand reuses
+            // the existing directory (overwriting config files is
+            // intentional — bundles can change between sessions).
+            const continueWorkDir = overrides?.workDirOverride?.trim() ?? "";
+            const isContinue = continueWorkDir.length > 0;
             const autoAllocate =
-                Boolean(overrides?.instanceName) ||
-                (agent.working_directory ?? "").trim() === "";
+                !isContinue &&
+                (Boolean(overrides?.instanceName) ||
+                    (agent.working_directory ?? "").trim() === "");
+            const writeWorkDir = isContinue ? continueWorkDir : workDir;
 
             // Allocate the workdir + write config files BEFORE we set
             // cmd:cwd, so the meta records the actual collision-
@@ -412,11 +424,11 @@ export class AgentViewModel implements ViewModel {
             // to write) when auto-allocate so we get the atomic
             // `mkdir` reservation. Returns the final path.
             const writeResult = await RpcApi.WriteAgentConfigCommand(TabRpcClient, {
-                working_dir: workDir,
+                working_dir: writeWorkDir,
                 files: configFiles,
                 auto_allocate: autoAllocate,
             });
-            const finalWorkDir = writeResult?.working_dir || workDir;
+            const finalWorkDir = writeResult?.working_dir || writeWorkDir;
 
             // Store CLI config in block metadata using the (possibly
             // collision-resolved) finalWorkDir.
@@ -463,6 +475,21 @@ export class AgentViewModel implements ViewModel {
                     // circuits so the agent inherits ambient creds.
                     identity_id: overrides?.identityId,
                     memory_id: overrides?.memoryId,
+                    // v8: named-agent continuation. The instance name
+                    // is the AGENTMUX_AGENT_ID the user picked in the
+                    // modal; finalWorkDir is the path that
+                    // WriteAgentConfigCommand resolved (after slug
+                    // collision suffixing). Both are persisted so the
+                    // launch modal's "Continue agent" dropdown can
+                    // surface this instance later. See
+                    // SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md.
+                    instance_name: instanceName,
+                    working_directory: finalWorkDir,
+                    // v8 continuation: chain lineage to the prior row
+                    // so the dropdown query can collapse continuations
+                    // (filter parent_instance_id = '' surfaces only
+                    // the "root" of each chain).
+                    parent_instance_id: overrides?.continueOfInstanceId,
                 });
                 await RpcApi.SetMetaCommand(TabRpcClient, {
                     oref,
@@ -602,9 +629,21 @@ function buildConfigFiles(
         }
     }
 
-    // Write hooks.json if hooks content exists
-    if (contentMap["hooks"]) {
-        files.push({ path: ".claude/hooks.json", content: contentMap["hooks"] });
+    // Always write .claude/settings.json with the auto-injected
+    // PreToolUse:Bash hook (under the `hooks` key) so live streaming
+    // engages on every session. User-supplied legacy hooks content
+    // and user settings.json content both merge in. Mirror of
+    // agentmux-srv/src/backend/agent_config.rs build_settings_with_hooks —
+    // keep the two paths in sync.
+    //
+    // FILE LOCATION (v0.33.805+): Claude Code reads project hooks from
+    // .claude/settings.json under the "hooks" key. A standalone
+    // .claude/hooks.json is NOT a discovery location — that was the
+    // v0.33.804 root cause: file was written but Claude never read it.
+    // See https://code.claude.com/docs/en/hooks.md.
+    const settingsJson = buildSettingsWithHooks(contentMap["settings"], contentMap["hooks"]);
+    if (settingsJson) {
+        files.push({ path: ".claude/settings.json", content: settingsJson });
     }
 
     // Build .mcp.json: auto-inject AgentMux MCP + merge user-provided config
@@ -623,6 +662,104 @@ function expandTemplate(content: string, vars: Record<string, string>): string {
     return content.replace(/\{\{(\w+)\}\}/g, (match, key) => {
         return vars[key] ?? match;
     });
+}
+
+/**
+ * Build .claude/hooks.json content with the auto-injected PreToolUse:Bash
+ * entry pointing at `agentmux-bashwrap hook`. User-supplied hooks merge
+ * in: non-PreToolUse keys win on collision; user PreToolUse matchers
+ * are appended BEFORE ours so a user deny-rule can short-circuit before
+ * our rewrite fires.
+ *
+ * Mirror of `build_hooks_config` in
+ * `agentmux-srv/src/backend/agent_config.rs`. The two paths must stay
+ * in sync — keep changes aligned across both files. See
+ * docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §5.
+ */
+function buildSettingsWithHooks(
+    userSettingsContent: string | undefined,
+    userHooksContent: string | undefined,
+): string | null {
+    const agentmuxPretooluse = {
+        matcher: "^(Bash|.*[Bb]ash.*)$",
+        hooks: [
+            { type: "command", command: "agentmux-bashwrap hook" },
+        ],
+    };
+    const hooksObj: Record<string, unknown> = {};
+    const pretooluseEntries: unknown[] = [];
+
+    if (userHooksContent) {
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(userHooksContent);
+        } catch (e) {
+            console.warn("agent-model: failed to parse user hooks JSON; dropping", e);
+            parsed = null;
+        }
+        if (parsed != null && typeof parsed === "object" && !Array.isArray(parsed)) {
+            for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+                if (k === "PreToolUse") {
+                    if (Array.isArray(v)) {
+                        pretooluseEntries.push(...v);
+                    } else {
+                        console.warn("agent-model: user hooks.PreToolUse is not an array; dropping");
+                    }
+                } else {
+                    hooksObj[k] = v;
+                }
+            }
+        } else if (parsed != null) {
+            console.warn("agent-model: user hooks top-level is not an object; dropping");
+        }
+    }
+    pretooluseEntries.push(agentmuxPretooluse);
+    hooksObj["PreToolUse"] = pretooluseEntries;
+
+    // Wrap into settings.json shape, merging any user-supplied settings.
+    const settingsObj: Record<string, unknown> = {};
+    if (userSettingsContent) {
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(userSettingsContent);
+        } catch (e) {
+            console.warn("agent-model: failed to parse user settings JSON; dropping", e);
+            parsed = null;
+        }
+        if (parsed != null && typeof parsed === "object" && !Array.isArray(parsed)) {
+            Object.assign(settingsObj, parsed as Record<string, unknown>);
+        } else if (parsed != null) {
+            console.warn("agent-model: user settings top-level is not an object; dropping");
+        }
+    }
+    // Merge existing user settings.hooks. For PreToolUse, user matchers are
+    // PREPENDED so they short-circuit before our auto-injected entry. Other
+    // event types (PostToolUse, Stop, etc.) pass through. Reagent P1 on
+    // #813 caught the previous `continue` as a silent drop of user
+    // PreToolUse from settings.json.
+    const existingHooks = settingsObj["hooks"];
+    if (existingHooks != null && typeof existingHooks === "object" && !Array.isArray(existingHooks)) {
+        for (const [k, v] of Object.entries(existingHooks as Record<string, unknown>)) {
+            if (k === "PreToolUse") {
+                if (Array.isArray(v)) {
+                    const ours = Array.isArray(hooksObj["PreToolUse"]) ? hooksObj["PreToolUse"] as unknown[] : [];
+                    hooksObj["PreToolUse"] = [...v, ...ours];
+                } else {
+                    console.warn("agent-model: user settings.hooks.PreToolUse is not an array; dropped");
+                }
+                continue;
+            }
+            if (!(k in hooksObj)) hooksObj[k] = v;
+        }
+    }
+    settingsObj["hooks"] = hooksObj;
+
+    try {
+        return JSON.stringify(settingsObj, null, 2);
+    } catch (e) {
+        console.error("agent-model: failed to serialize settings.json", e);
+        return null;
+    }
 }
 
 /**

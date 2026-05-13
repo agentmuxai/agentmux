@@ -96,9 +96,31 @@ pub struct AppState {
 
 /// Build the Axum router with all routes, auth middleware, and CORS.
 pub fn build_router(state: AppState) -> Router {
-    // CORS: allow all origins, methods, headers (matching Go pkg/web/web.go:536-573)
+    // CORS: reflect only loopback origins.
+    //
+    // Before the 2026-05-11 security audit (C3) this allowed any origin
+    // (matching the historical Go pkg/web/web.go). That made every web
+    // page the user happened to have open a potential CSRF source —
+    // localhost is not a trust boundary on a developer machine.
+    //
+    // The legitimate cross-origin callers are:
+    //   - The CEF frontend served from `http://127.0.0.1:<host-port>`
+    //   - Vite dev server at `http://localhost:5173` (and similar)
+    //
+    // Both are loopback. The predicate accepts http://127.0.0.1:* and
+    // http://localhost:* (any port, http only; https is irrelevant for
+    // loopback). External origins are denied, which means a malicious
+    // page in the user's browser can't drive the sidecar even if it
+    // discovers the port.
+    use tower_http::cors::AllowOrigin;
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin(AllowOrigin::predicate(|origin, _req| {
+            let Ok(s) = origin.to_str() else { return false };
+            s.starts_with("http://127.0.0.1:")
+                || s.starts_with("http://localhost:")
+                || s == "http://127.0.0.1"
+                || s == "http://localhost"
+        }))
         .allow_methods(Any)
         .allow_headers(vec![
             header::CONTENT_TYPE,
@@ -110,7 +132,13 @@ pub fn build_router(state: AppState) -> Router {
             "x-vercel-ai-ui-message-stream".parse().unwrap(),
         ]);
 
-    // No-auth routes (matching Go SkipAuth: true — localhost-only reactive endpoints)
+    // Reactive routes. Previously registered without auth on the
+    // assumption that localhost is a trust boundary; the 2026-05-11
+    // security audit (C1 + C2) showed that any local process — or a
+    // web page driving 127.0.0.1 via the permissive CORS layer — could
+    // drive `/agentmux/reactive/inject` and reconfigure the cloud
+    // agentbus poller. These routes are now merged into `authed_routes`
+    // below and gated by `auth_middleware`.
     let reactive_routes = Router::new()
         .route("/agentmux/reactive/inject", post(reactive::handle_reactive_inject))
         .route("/agentmux/reactive/agents", get(reactive::handle_reactive_agents))
@@ -156,7 +184,14 @@ pub fn build_router(state: AppState) -> Router {
         .route("/schema/*path", get(files::handle_schema))
         .route("/api/lan-instances", get(handle_lan_instances))
         .route("/agentmux/diag/sagas", get(handle_diag_sagas))
+        // Streaming-bash wrapper publish endpoint
+        // (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §4.3). agentmux-bashwrap
+        // POSTs `{event, scopes, data}` here while a PreToolUse-rewritten
+        // Bash command is running; we forward to the in-process WPS broker.
+        // Auth-gated like the other reactive routes (PR #801 pattern).
+        .route("/agentmux/wps/publish", post(handle_wps_publish))
         .merge(bus_routes)
+        .merge(reactive_routes)
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -167,7 +202,6 @@ pub fn build_router(state: AppState) -> Router {
 
     Router::new()
         .merge(health)
-        .merge(reactive_routes)
         .merge(authed_routes)
         .layer(cors)
         .with_state(state)
@@ -256,6 +290,43 @@ async fn stub_501() -> impl IntoResponse {
     )
 }
 
+/// Wire shape for `POST /agentmux/wps/publish`. Mirrors `WaveEvent`
+/// but keeps the field set narrow for what `agentmux-bashwrap`
+/// actually needs (no `sender`, no `persist`).
+#[derive(serde::Deserialize)]
+struct WpsPublishRequest {
+    /// WPS event name. We use `tool_chunk:<tool_use_id>` for
+    /// streaming chunks, but the handler is general-purpose.
+    event: String,
+    /// Optional scope filters (e.g. `["block:<id>"]`) so only
+    /// subscribers watching that block receive the event.
+    #[serde(default)]
+    scopes: Vec<String>,
+    /// Free-form payload. For tool_chunk events this is the
+    /// `{op, kind, content, timestamp}` shape from
+    /// `SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §4.3.
+    data: serde_json::Value,
+}
+
+/// Auth-gated WPS publish endpoint
+/// (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §3.2). `agentmux-bashwrap`
+/// POSTs here while running a Bash command; we forward to the
+/// in-process WPS broker so subscribed frontends receive the event.
+async fn handle_wps_publish(
+    State(state): State<AppState>,
+    Json(req): Json<WpsPublishRequest>,
+) -> impl IntoResponse {
+    let event = crate::backend::wps::WaveEvent {
+        event: req.event,
+        scopes: req.scopes,
+        sender: String::new(),
+        persist: 0,
+        data: Some(req.data),
+    };
+    state.broker.publish(event);
+    (StatusCode::OK, Json(json!({"ok": true})))
+}
+
 // ---- Auth Middleware ----
 
 /// Auth middleware matching Go pkg/authkey/authkey.go:18-42.
@@ -274,7 +345,17 @@ async fn auth_middleware(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
+    // 2026-05-11 audit (C3): the query-string `?authkey=` fallback
+    // bypasses CORS preflight and is preserved in browser history,
+    // navigation `Referer` headers, server access logs, etc. — a CSRF
+    // amplifier whenever the key leaks. It is allowed **only** on the
+    // WebSocket upgrade route (`/ws`), where the browser WS API doesn't
+    // permit custom headers and there is no other practical channel
+    // for the key. Every other route requires the header.
     let auth_key = auth_key.or_else(|| {
+        if req.uri().path() != "/ws" {
+            return None;
+        }
         req.uri().query().and_then(|q| {
             q.split('&')
                 .filter_map(|pair| pair.split_once('='))

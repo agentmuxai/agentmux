@@ -326,6 +326,13 @@ pub const COMMAND_GET_AGENT_INSTANCE: &str = "getagentinstance";
 pub const COMMAND_CREATE_AGENT_INSTANCE: &str = "createagentinstance";
 pub const COMMAND_UPDATE_AGENT_INSTANCE: &str = "updateagentinstance";
 pub const COMMAND_DELETE_AGENT_INSTANCE: &str = "deleteagentinstance";
+/// v8 — list named agent instances for the launch modal's "Continue
+/// agent" dropdown. Filters to non-hidden rows with a non-empty
+/// instance_name, joined with definition + identity + memory bundles.
+pub const COMMAND_LIST_NAMED_AGENTS: &str = "listnamedagents";
+/// v8 — soft-delete (hide) a named agent instance from the dropdown.
+/// Row + working directory remain on disk for audit + recovery.
+pub const COMMAND_HIDE_NAMED_AGENT: &str = "hidenamedagent";
 
 // Agent definition branching
 pub const COMMAND_FORK_AGENT_DEFINITION: &str = "forkagentdefinition";
@@ -1625,6 +1632,64 @@ pub struct CommandCreateAgentInstanceData {
     /// modal's Memory dropdown.
     #[serde(default)]
     pub memory_id: String,
+    /// User-chosen instance name (becomes `AGENTMUX_AGENT_ID` in the
+    /// spawn env). Powers the launch modal's "Continue agent"
+    /// dropdown. Empty = un-named, won't appear in the dropdown.
+    #[serde(default)]
+    pub instance_name: String,
+    /// Absolute working directory path resolved by
+    /// `allocate_agent_workdir` at spawn time. Stored on the instance
+    /// row so the continue flow can reuse it without re-deriving the
+    /// slug.
+    #[serde(default)]
+    pub working_directory: String,
+}
+
+/// Request for `listnamedagents`. The launch modal's "Continue
+/// agent" dropdown calls this; an absent / zero `limit` defaults to
+/// 200 (capped at 1000 to keep the wire payload bounded).
+///
+/// `definition_id` is server-side filtering: when provided, only
+/// instances of that definition are returned. Required for the
+/// dropdown to behave correctly when a user has 200+ named agents
+/// across many definitions — without server filtering, the current
+/// definition's older instances could fall off the global cap.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CommandListNamedAgentsData {
+    #[serde(default)]
+    pub limit: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition_id: Option<String>,
+}
+
+/// One row of the launch modal's "Continue agent" dropdown. Joins
+/// `db_agent_instances` with `db_forge_agents` (for the definition's
+/// display name + provider) and `db_identities` / `db_memories` (for
+/// bundle names) so the frontend renders without further lookups.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NamedAgentRow {
+    pub instance_id: String,
+    pub instance_name: String,
+    pub definition_id: String,
+    pub definition_name: String,
+    pub provider: String,
+    pub working_directory: String,
+    pub identity_id: String,
+    pub identity_name: String,
+    pub memory_id: String,
+    pub memory_name: String,
+    pub started_at: i64,
+    pub ended_at: i64,
+    pub status: String,
+    pub block_id_hint: String,
+}
+
+/// Request for `hidenamedagent`. Sets `display_hidden = 1` on the
+/// row. Row + working directory remain on disk for audit + recovery
+/// (destructive deletion is a separate, confirm-gated flow).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandHideNamedAgentData {
+    pub id: String,
 }
 
 /// Mutable subset of AgentInstance for PATCH-style updates. Every field is

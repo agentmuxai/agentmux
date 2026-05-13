@@ -15,32 +15,36 @@ interface AgentMessageBlockProps {
     onToggle: () => void;
 }
 
-export const AgentMessageBlock = ({ node, collapsed, onToggle }: AgentMessageBlockProps): JSX.Element => {
-    const isIncoming = node.direction === "incoming";
-
+export const AgentMessageBlock = (props: AgentMessageBlockProps): JSX.Element => {
+    // Don't destructure — the streaming buffer keeps this row mounted
+    // across token deltas; useAgentStream replaces props.node ref on
+    // each chunk. Destructured `node` would freeze at first ref.
+    // Access props.X reactively at each site. (codex P1 on PR #786 +
+    // family of issues on virt redesign — also fixed in MarkdownBlock,
+    // SubagentLinkBlock.)
     return (
         <div
             class={clsx("agent-message-block", {
-                incoming: isIncoming,
-                outgoing: !isIncoming,
-                collapsed,
-                mux: node.method === "mux",
-                ject: node.method === "ject",
+                incoming: props.node.direction === "incoming",
+                outgoing: props.node.direction !== "incoming",
+                collapsed: props.collapsed,
+                mux: props.node.method === "mux",
+                ject: props.node.method === "ject",
             })}
-            onClick={onToggle}
+            onClick={props.onToggle}
         >
             <div class="agent-message-summary">
-                <span class="agent-message-chevron">{collapsed ? "▸" : "▾"}</span>
-                <span class="agent-message-icon">{node.summary}</span>
+                <span class="agent-message-chevron">{props.collapsed ? "▸" : "▾"}</span>
+                <span class="agent-message-icon">{props.node.summary}</span>
             </div>
-            <Show when={!collapsed}>
+            <Show when={!props.collapsed}>
                 <div class="agent-message-content" onClick={(e) => e.stopPropagation()}>
                     <div class="agent-message-meta">
-                        <span class="agent-message-from">From: {node.from}</span>
-                        <span class="agent-message-to">To: {node.to}</span>
-                        <span class="agent-message-method">Method: {node.method}</span>
+                        <span class="agent-message-from">From: {props.node.from}</span>
+                        <span class="agent-message-to">To: {props.node.to}</span>
+                        <span class="agent-message-method">Method: {props.node.method}</span>
                     </div>
-                    <pre class="agent-message-body">{node.message}</pre>
+                    <pre class="agent-message-body">{props.node.message}</pre>
                 </div>
             </Show>
         </div>

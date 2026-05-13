@@ -11,7 +11,7 @@
         padding: var(--space-0-5) var(--space-1);
         display: flex;
         flex-direction: column;
-        gap: 1px;
+        gap: 4px;
         user-select: text;
         cursor: text;
         // Isolate layout/paint from siblings — critical for typing smoothness
@@ -21,6 +21,14 @@
         // mutations inside the scroll container don't invalidate layout
         // outside it.
         contain: layout style paint;
+        // overflow-anchor on the actual scroll container (this element).
+        // Chromium auto-pins a visible anchor element when content above
+        // it changes height (e.g., async image/font loads, tool block
+        // expand). The JS layer in AgentDocumentVirtualList handles the
+        // cases CSS can't (programmatic scroll, remount).
+        // Spec: docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md
+        //       §"Anchor — CSS + JS belt-and-suspenders"
+        overflow-anchor: auto;
     }
 
     // Shared hover-strip anchor. Any element that renders a `.node-strip`
@@ -98,11 +106,64 @@
         }
     }
 
+    // === Virtualization (Phase 2 redesign) ===
+    // (overflow-anchor lives on .agent-document above — the actual
+    // scroll container — not here at the .agent-view level. reagent
+    // P2 on #784 caught the wrong nesting.)
+
+    .agent-document-virtualizer {
+        // Container for the virtualized region. Children are
+        // absolute-positioned via translateY; the height equals
+        // virtualizer.getTotalSize() so the native scrollbar reflects
+        // the full virtual content.
+        //
+        // flex-shrink: 0 — .agent-document is a column flex container,
+        // so without this the wrapper would collapse to viewport
+        // height when getTotalSize() exceeds it (codex P1 from #773).
+        position: relative;
+        width: 100%;
+        flex-shrink: 0;
+    }
+
+    .agent-document-streaming-buffer {
+        // Trailing nodes rendered in normal flex flow — no
+        // virtualization. Always mounted so streaming token batches
+        // don't have to wait for measureElement to settle.
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+
+    .agent-document-row {
+        // Replaces the old .agent-document-node-wrapper. content-
+        // visibility is no longer needed because off-screen items
+        // (in the virtualized region) aren't in the DOM at all.
+        // contain: layout style isolates the row's layout cost so
+        // a single message expanding doesn't reflow neighbors.
+        contain: layout style;
+        // Anchor for any width-relative children (markdown tables,
+        // code diffs). Without this, absolute-positioned virtualized
+        // rows lose their layout context and tables break.
+        width: 100%;
+
+        &:focus {
+            outline: 1px solid var(--accent-color);
+            outline-offset: -1px;
+        }
+
+        // Force tables to constrain their layout to the row width.
+        // Spec: SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md
+        //       §"Tables and rich content"
+        :is(table, .markdown-table) {
+            width: 100%;
+            table-layout: fixed;
+        }
+    }
+
+    // Legacy class — keep for any non-virtualized callers; remove
+    // once Phase 2 is fully wired in everywhere.
     .agent-document-node-wrapper {
-        // Each document node gets its own containment box. Off-screen nodes
-        // are skipped by the browser via content-visibility.
-        // contain-intrinsic-size gives the browser a size estimate so scroll
-        // position stays stable when content is virtualized in/out.
         content-visibility: auto;
         contain-intrinsic-size: auto 80px;
         contain: layout style;

@@ -38,11 +38,7 @@ import { Show, createEffect, createSignal, onCleanup, type JSX } from "solid-js"
 import { Portal } from "solid-js/web";
 import { createBlock } from "@/store/global";
 import type { ToolNode } from "../types";
-import { BashOutputViewer } from "./BashOutputViewer";
-import { CompactResult } from "./CompactResult";
-import { DiffViewer } from "./DiffViewer";
-import { HighlightedCode } from "./HighlightedCode";
-import { detectLanguage } from "./detectLanguage";
+import { ToolBlockOverlay } from "./ToolBlockOverlay";
 
 interface ToolBlockProps {
     node: ToolNode;
@@ -50,6 +46,13 @@ interface ToolBlockProps {
     pinned: boolean;
     /** Toggle the pinned state (called on click of the collapsed row). */
     onTogglePin: () => void;
+    /** Bookmark state + handler — surfaced in the overlay action bar
+     *  (SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md §3.4). Optional for
+     *  callers that don't surface bookmarking. */
+    isBookmarked?: boolean;
+    onBookmark?: () => void;
+    /** Opens the tool's overlay content in a dedicated pane. */
+    onOpenInPane?: () => void;
 }
 
 const STATUS_ICON: Record<ToolNode["status"], string> = {
@@ -93,6 +96,12 @@ function findScrollParent(el: HTMLElement): HTMLElement | null {
 // upward instead of downward.
 const OVERLAY_MAX_HEIGHT_PX = 400;
 
+// Hover-expand delays — match docs/specs/tool-collapse.md §"Expanded State (on Hover)".
+// 150ms enter avoids flicker on scroll-through; 300ms leave lets the user move the
+// cursor down into the expanded overlay without it collapsing first.
+const HOVER_ENTER_DELAY_MS = 150;
+const HOVER_LEAVE_DELAY_MS = 300;
+
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // Position of the collapsed row in viewport coordinates, recomputed when
     // pinned flips true. The overlay is rendered via a <Portal> to document.body
@@ -109,8 +118,41 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
 
     let blockRef: HTMLDivElement | undefined;
 
-    const expanded = () => props.pinned;
-    const overlayMode = () => props.pinned;
+    // Hover-expand state. Click pins (props.pinned); mouse hover
+    // expands transiently. The overlay portal uses overlayMode for
+    // styling — same for both hover and pin.
+    const [hovering, setHovering] = createSignal(false);
+    let enterTimer: ReturnType<typeof setTimeout> | undefined;
+    let leaveTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const clearTimers = () => {
+        if (enterTimer !== undefined) { clearTimeout(enterTimer); enterTimer = undefined; }
+        if (leaveTimer !== undefined) { clearTimeout(leaveTimer); leaveTimer = undefined; }
+    };
+
+    const handleMouseEnter = () => {
+        if (props.pinned) return;
+        if (leaveTimer !== undefined) { clearTimeout(leaveTimer); leaveTimer = undefined; }
+        if (hovering()) return;
+        enterTimer = setTimeout(() => {
+            setHovering(true);
+            enterTimer = undefined;
+        }, HOVER_ENTER_DELAY_MS);
+    };
+
+    const handleMouseLeave = () => {
+        if (enterTimer !== undefined) { clearTimeout(enterTimer); enterTimer = undefined; }
+        if (!hovering()) return;
+        leaveTimer = setTimeout(() => {
+            setHovering(false);
+            leaveTimer = undefined;
+        }, HOVER_LEAVE_DELAY_MS);
+    };
+
+    onCleanup(clearTimers);
+
+    const expanded = () => props.pinned || hovering();
+    const overlayMode = () => expanded();
 
     const statusIcon = (): string => STATUS_ICON[props.node.status] || "•";
 
@@ -132,9 +174,11 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         });
     };
 
-    // Measure position when pin flips true so the portal has coordinates on first render.
+    // Measure position when overlay flips visible so the portal has
+    // coordinates on first render. Fires for both pin (click) and
+    // hover paths via the unified `overlayMode()` getter.
     createEffect(() => {
-        if (props.pinned && blockRef) {
+        if (overlayMode() && blockRef) {
             measure();
         }
     });
@@ -168,90 +212,10 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         }
     });
 
-    // Render tool-specific content — only evaluated when expanded.
-    const renderToolContent = (): JSX.Element => {
-        const node = props.node;
-        if (node.status === "running") {
-            return (
-                <div class="agent-tool-loading">
-                    <span class="agent-tool-spinner">⏳</span> Running...
-                </div>
-            );
-        }
-
-        switch (node.tool) {
-            case "Edit":
-                return <DiffViewer params={node.params as any} result={node.result as any} />;
-
-            case "Bash":
-                return <BashOutputViewer params={node.params as any} result={node.result as any} />;
-
-            case "Read": {
-                const filePath = (node.params as any).file_path ?? "";
-                const content: string | undefined = (node.result as any)?.content;
-                return (
-                    <div class="agent-tool-read">
-                        <div class="agent-tool-file-path">{filePath}</div>
-                        <Show
-                            when={content}
-                            fallback={
-                                <Show when={node.result}>
-                                    <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
-                                </Show>
-                            }
-                        >
-                            <HighlightedCode
-                                code={content!}
-                                lang={detectLanguage(filePath, content!.split("\n")[0])}
-                                class="agent-tool-read-content"
-                            />
-                        </Show>
-                    </div>
-                );
-            }
-
-            case "Write":
-                return (
-                    <div class="agent-tool-write">
-                        <div class="agent-tool-file-path">{(node.params as any).file_path}</div>
-                        <div class="agent-tool-write-info">
-                            {node.result && `Wrote ${(node.result as any).bytesWritten || 0} bytes`}
-                        </div>
-                    </div>
-                );
-
-            case "Grep":
-            case "Glob":
-                return (
-                    <div class="agent-tool-search">
-                        <div class="agent-tool-pattern">Pattern: {(node.params as any).pattern}</div>
-                        <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
-                    </div>
-                );
-
-            case "Agent":
-                return (
-                    <div class="agent-tool-agent">
-                        <Show when={(node.params as any).description}>
-                            <div class="agent-tool-agent-desc">{(node.params as any).description}</div>
-                        </Show>
-                        <Show when={node.result}>
-                            <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
-                        </Show>
-                    </div>
-                );
-
-            case "Task":
-                return (
-                    <div class="agent-tool-task">
-                        <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
-                    </div>
-                );
-
-            default:
-                return <CompactResult tool={node.tool} params={node.params as any} result={node.result} />;
-        }
-    };
+    // Per-tool rich result rendering moved into `ToolOverlayLog`'s
+    // fallback path (Phase 3 of SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md).
+    // The overlay is now a header / log / action-bar three-slot
+    // component — see ToolBlockOverlay.tsx.
 
     // Overlay style — only meaningful when overlayMode() is true. Computed
     // from overlayRect() which is set during measure() / handleScroll.
@@ -293,6 +257,8 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     return (
         <div
             ref={blockRef}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
             class={clsx("agent-tool-block", {
                 collapsed: !expanded(),
                 expanded: expanded(),
@@ -306,7 +272,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         >
             <div class="agent-tool-summary" onClick={props.onTogglePin}>
                 <span class="agent-tool-status-icon">{statusIcon()}</span>
-                <span class="agent-tool-name">{props.node.summary}</span>
+                <span class="agent-tool-name" title={props.node.summary}>{props.node.summary}</span>
                 <Show when={props.node.duration}>
                     <span class="agent-tool-duration">({props.node.duration.toFixed(1)}s)</span>
                 </Show>
@@ -328,7 +294,6 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                         ⧉
                     </button>
                 </Show>
-                <span class="agent-tool-ellipsis">…</span>
             </div>
             {/* All expansion now routes through the portal overlay — running,
                 failed, success all collapse by default (SPEC_AGENT_PANE_FOLLOWUPS
@@ -342,8 +307,15 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                         })}
                         style={overlayStyle()}
                         onClick={(e) => e.stopPropagation()}
+                        onMouseEnter={handleMouseEnter}
+                        onMouseLeave={handleMouseLeave}
                     >
-                        {renderToolContent()}
+                        <ToolBlockOverlay
+                            node={props.node}
+                            isBookmarked={props.isBookmarked}
+                            onBookmark={props.onBookmark}
+                            onOpenInPane={props.onOpenInPane}
+                        />
                     </div>
                 </Portal>
             </Show>

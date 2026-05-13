@@ -3,6 +3,19 @@
 
 @import "../../../node_modules/highlight.js/scss/github-dark-dimmed.scss";
 
+// Global — applies to TableBlock wherever it renders (markdown.tsx and streamdown.tsx)
+.table-block {
+    margin-block: 8px;
+
+    tbody tr:nth-child(odd) {
+        background: color-mix(in srgb, var(--hover-bg-color) 40%, transparent);
+    }
+
+    tbody tr:hover {
+        background: var(--hover-bg-color);
+    }
+}
+
 .markdown {
     display: flex;
     flex-direction: row;

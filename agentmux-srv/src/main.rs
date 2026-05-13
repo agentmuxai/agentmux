@@ -5,6 +5,7 @@ mod identity;
 mod persist;
 mod persist_subscriber;
 mod reducer;
+mod registry;
 mod sagas;
 mod server;
 mod srv_ipc;
@@ -265,6 +266,14 @@ async fn main() {
     let version = config.version.to_string();
     let build_time = config.build_time.to_string();
 
+    // Make the per-launch auth_key available to the cross-instance agent
+    // registry writer. Peers performing an HTTP forward of a missed inject
+    // use this to authenticate against the writing instance's sidecar.
+    // Must happen after Config::from_env_and_args (which removes
+    // AGENTMUX_AUTH_KEY from the process env) but before anything calls
+    // `agent_registry::write`.
+    crate::backend::reactive::registry::init_local_auth_key(&config.auth_key);
+
     // 4. Initialize backend (matching Go cmd/server/main-server.go:374-590)
     base::set_version(&version);
     base::set_build_time(&build_time);
@@ -303,10 +312,83 @@ async fn main() {
 
     // Open databases
     let db_dir = base::get_wave_db_dir();
-    let wstore = Arc::new(WaveStore::open(&db_dir.join("objects.db")).unwrap_or_else(|e| {
+    let wstore_raw = WaveStore::open(&db_dir.join("objects.db")).unwrap_or_else(|e| {
         tracing::error!("Failed to open object store: {}", e);
         std::process::exit(1);
-    }));
+    });
+    // Attach the cross-version named-agent registry. Falls back to a
+    // disabled registry when the shared home can't be resolved (CI,
+    // unusual envs); mutations still hit SQLite, just don't mirror.
+    // See docs/specs/SPEC_SHARED_AGENT_REGISTRY_2026_05_12.md.
+    if let Some(root) = registry::resolve_shared_registry_dir() {
+        match registry::Registry::open(root.clone()) {
+            Ok(reg) => {
+                // PR B — one-shot backfill from every per-version
+                // objects.db into the registry. Idempotent via marker
+                // file in the registry root. Read-only on SQLite.
+                //
+                // Gating: the registry is only attached to wstore if
+                // migration completes (Ok) — that way the read path
+                // never serves a partial view. On Err, mirror writes
+                // are also disabled (registry stays detached); SQLite
+                // remains authoritative and the next launch retries
+                // the migration via the same marker logic.
+                let shared_home = root
+                    .parent()
+                    .and_then(|p| p.parent())
+                    .map(|p| p.to_path_buf());
+                let migration_ok = match shared_home {
+                    Some(home) => match registry::migrate_from_sqlite_once(&home, &reg) {
+                        Ok(stats) => {
+                            if stats.versions_scanned > 0 || stats.records_written > 0 {
+                                tracing::info!(
+                                    versions_scanned = stats.versions_scanned,
+                                    rows_seen = stats.rows_seen,
+                                    records_written = stats.records_written,
+                                    records_skipped_existing = stats.records_skipped_existing,
+                                    records_skipped_unmappable = stats.records_skipped_unmappable,
+                                    complete = stats.complete,
+                                    "registry: one-shot SQLite migration finished"
+                                );
+                            }
+                            // Gate attach on `complete` — partial
+                            // migration leaves the registry detached
+                            // so the read path serves SQLite (full,
+                            // current-version-only view) rather than
+                            // a half-populated registry.
+                            stats.complete
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "registry: SQLite migration errored — leaving registry detached; SQLite stays authoritative, next launch retries"
+                            );
+                            false
+                        }
+                    },
+                    None => {
+                        tracing::warn!(
+                            root = %root.display(),
+                            "registry: cannot resolve shared home (root has fewer than 2 ancestors) — leaving registry detached"
+                        );
+                        false
+                    }
+                };
+                if migration_ok {
+                    tracing::info!(root = %root.display(), "registry: shared agent registry attached");
+                    wstore_raw.set_registry(Arc::new(reg));
+                }
+            }
+            Err(e) => tracing::warn!(
+                root = %root.display(),
+                error = %e,
+                "registry: failed to open shared agent registry — SQLite remains authoritative"
+            ),
+        }
+    } else {
+        tracing::warn!("registry: could not resolve shared registry dir — mirror disabled");
+    }
+    let wstore = Arc::new(wstore_raw);
     let filestore = Arc::new(FileStore::open(&db_dir.join("filestore.db")).unwrap_or_else(|e| {
         tracing::error!("Failed to open file store: {}", e);
         std::process::exit(1);

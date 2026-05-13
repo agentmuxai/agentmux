@@ -51,49 +51,6 @@ pub struct SettingsType {
     #[serde(rename = "app:showoverlayblocknums", default, skip_serializing_if = "Option::is_none")]
     pub app_show_overlay_block_nums: Option<bool>,
 
-    // -- AI settings --
-    #[serde(rename = "ai:*", default, skip_serializing_if = "is_false")]
-    pub ai_clear: bool,
-
-    #[serde(rename = "ai:preset", default, skip_serializing_if = "String::is_empty")]
-    pub ai_preset: String,
-
-    #[serde(rename = "ai:apitype", default, skip_serializing_if = "String::is_empty")]
-    pub ai_api_type: String,
-
-    #[serde(rename = "ai:baseurl", default, skip_serializing_if = "String::is_empty")]
-    pub ai_base_url: String,
-
-    #[serde(rename = "ai:apitoken", default, skip_serializing_if = "String::is_empty")]
-    pub ai_api_token: String,
-
-    #[serde(rename = "ai:name", default, skip_serializing_if = "String::is_empty")]
-    pub ai_name: String,
-
-    #[serde(rename = "ai:model", default, skip_serializing_if = "String::is_empty")]
-    pub ai_model: String,
-
-    #[serde(rename = "ai:orgid", default, skip_serializing_if = "String::is_empty")]
-    pub ai_org_id: String,
-
-    #[serde(rename = "ai:apiversion", default, skip_serializing_if = "String::is_empty")]
-    pub ai_api_version: String,
-
-    #[serde(rename = "ai:maxtokens", default, skip_serializing_if = "is_zero_f64")]
-    pub ai_max_tokens: f64,
-
-    #[serde(rename = "ai:timeoutms", default, skip_serializing_if = "is_zero_f64")]
-    pub ai_timeout_ms: f64,
-
-    #[serde(rename = "ai:proxyurl", default, skip_serializing_if = "String::is_empty")]
-    pub ai_proxy_url: String,
-
-    #[serde(rename = "ai:fontsize", default, skip_serializing_if = "is_zero_f64")]
-    pub ai_font_size: f64,
-
-    #[serde(rename = "ai:fixedfontsize", default, skip_serializing_if = "is_zero_f64")]
-    pub ai_fixed_font_size: f64,
-
     // -- Terminal settings --
     #[serde(rename = "term:*", default, skip_serializing_if = "is_false")]
     pub term_clear: bool,
@@ -145,48 +102,12 @@ pub struct SettingsType {
     #[serde(rename = "cmd:env", default, skip_serializing_if = "HashMap::is_empty")]
     pub cmd_env: HashMap<String, String>,
 
-    // -- Editor settings --
-    #[serde(rename = "editor:minimapenabled", default, skip_serializing_if = "is_false")]
-    pub editor_minimap_enabled: bool,
-
-    #[serde(rename = "editor:stickyscrollenabled", default, skip_serializing_if = "is_false")]
-    pub editor_sticky_scroll_enabled: bool,
-
-    #[serde(rename = "editor:wordwrap", default, skip_serializing_if = "is_false")]
-    pub editor_word_wrap: bool,
-
-    #[serde(rename = "editor:fontsize", default, skip_serializing_if = "is_zero_f64")]
-    pub editor_font_size: f64,
-
     // -- Block header settings --
     #[serde(rename = "blockheader:*", default, skip_serializing_if = "is_false")]
     pub block_header_clear: bool,
 
     #[serde(rename = "blockheader:showblockids", default, skip_serializing_if = "is_false")]
     pub block_header_show_block_ids: bool,
-
-    // -- Auto-update settings --
-    #[serde(rename = "autoupdate:*", default, skip_serializing_if = "is_false")]
-    pub auto_update_clear: bool,
-
-    #[serde(rename = "autoupdate:enabled", default, skip_serializing_if = "is_false")]
-    pub auto_update_enabled: bool,
-
-    #[serde(rename = "autoupdate:intervalms", default, skip_serializing_if = "is_zero_f64")]
-    pub auto_update_interval_ms: f64,
-
-    #[serde(rename = "autoupdate:installonquit", default, skip_serializing_if = "is_false")]
-    pub auto_update_install_on_quit: bool,
-
-    #[serde(rename = "autoupdate:channel", default, skip_serializing_if = "String::is_empty")]
-    pub auto_update_channel: String,
-
-    // -- Markdown settings --
-    #[serde(rename = "markdown:fontsize", default, skip_serializing_if = "is_zero_f64")]
-    pub markdown_font_size: f64,
-
-    #[serde(rename = "markdown:fixedfontsize", default, skip_serializing_if = "is_zero_f64")]
-    pub markdown_fixed_font_size: f64,
 
     // -- Preview settings --
     #[serde(rename = "preview:showhiddenfiles", default, skip_serializing_if = "Option::is_none")]
@@ -289,62 +210,6 @@ pub struct SettingsType {
     /// These pass through serde unchanged so the frontend can access them as flat settings keys.
     #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]
     pub extra: HashMap<String, serde_json::Value>,
-}
-
-// ---- AI settings subset ----
-
-/// AI-specific settings (used for presets).
-/// Matches Go's `wconfig.AiSettingsType`.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct AiSettingsType {
-    #[serde(rename = "ai:*", default, skip_serializing_if = "is_false")]
-    pub ai_clear: bool,
-
-    #[serde(rename = "ai:preset", default, skip_serializing_if = "String::is_empty")]
-    pub ai_preset: String,
-
-    #[serde(rename = "ai:apitype", default, skip_serializing_if = "String::is_empty")]
-    pub ai_api_type: String,
-
-    #[serde(rename = "ai:baseurl", default, skip_serializing_if = "String::is_empty")]
-    pub ai_base_url: String,
-
-    #[serde(rename = "ai:apitoken", default, skip_serializing_if = "String::is_empty")]
-    pub ai_api_token: String,
-
-    #[serde(rename = "ai:name", default, skip_serializing_if = "String::is_empty")]
-    pub ai_name: String,
-
-    #[serde(rename = "ai:model", default, skip_serializing_if = "String::is_empty")]
-    pub ai_model: String,
-
-    #[serde(rename = "ai:orgid", default, skip_serializing_if = "String::is_empty")]
-    pub ai_org_id: String,
-
-    #[serde(rename = "ai:apiversion", default, skip_serializing_if = "String::is_empty")]
-    pub ai_api_version: String,
-
-    #[serde(rename = "ai:maxtokens", default, skip_serializing_if = "is_zero_f64")]
-    pub ai_max_tokens: f64,
-
-    #[serde(rename = "ai:timeoutms", default, skip_serializing_if = "is_zero_f64")]
-    pub ai_timeout_ms: f64,
-
-    #[serde(rename = "ai:proxyurl", default, skip_serializing_if = "String::is_empty")]
-    pub ai_proxy_url: String,
-
-    #[serde(rename = "ai:fontsize", default, skip_serializing_if = "is_zero_f64")]
-    pub ai_font_size: f64,
-
-    #[serde(rename = "ai:fixedfontsize", default, skip_serializing_if = "is_zero_f64")]
-    pub ai_fixed_font_size: f64,
-
-    #[serde(rename = "display:name", default, skip_serializing_if = "String::is_empty")]
-    pub display_name: String,
-
-    #[serde(rename = "display:order", default, skip_serializing_if = "is_zero_f64")]
-    pub display_order: f64,
 }
 
 // ---- Supporting config types ----

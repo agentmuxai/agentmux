@@ -74,6 +74,25 @@ wrap_window_delegate! {
                     window_label = %label,
                     "[browser-pane] registered Window in state.windows for pane attachment"
                 );
+
+                // Startup pool fill — Windows uses the launcher saga path
+                // (saga_dispatch.rs::LiveActionRunner is cfg(windows) only).
+                //
+                // Non-Windows: DISABLED entirely. Two separate blockers, both
+                // documented in docs/specs/linux-pool-startup-fill-2026-05-08.md:
+                //   1. promote_pool_window in commands/window_pool.rs has a
+                //      `cfg(not(target_os = "windows"))` impl that always
+                //      returns None — tear-off can't consume a pool window
+                //      on macOS or Linux, so any pre-warmed windows are
+                //      strictly wasted RAM. Codex P2 on PR #788 caught this
+                //      for the macOS path that an earlier revision enabled.
+                //   2. (Linux/Wayland only) POOL_OFFSCREEN_X = -32000 is a
+                //      Win32/X11 hack that the Wayland compositor ignores —
+                //      pool windows would appear on-screen as blank windows.
+                //
+                // Either blocker alone makes startup pool fill the wrong
+                // call here. When the platform pool implementation lands
+                // (Phase 7), this is the right place to re-enable.
             }
 
             // Chrome-style windows (DevTools popups) are shown immediately.
@@ -350,6 +369,20 @@ wrap_app! {
                 let ro_val = CefString::from("*");
                 cmd.append_switch_with_value(Some(&ro_key), Some(&ro_val));
 
+                // Skip Chrome features that add startup latency with no
+                // user-visible benefit in this app.
+                //
+                // `--no-proxy-server` was previously included here to skip
+                // WPAD/PAC auto-detect (2–3 s cold-start hit). Removed
+                // because it disables proxy support GLOBALLY — the
+                // `browser` widget loads arbitrary external URLs and
+                // would break for users on corporate networks where
+                // outbound HTTP requires the configured proxy. A future
+                // optimization could disable WPAD only without
+                // disabling explicit proxy config.
+                cmd.append_switch(Some(&CefString::from("disable-sync")));
+                cmd.append_switch(Some(&CefString::from("disable-extensions")));
+
                 // GPU compositing runs in a separate process (Chromium default).
                 // This allows Chromium to restart the GPU process transparently
                 // after driver resets (TDR, DXGI device removal, display power
@@ -360,12 +393,16 @@ wrap_app! {
                 // the app in a zombie white-screen state on GPU context loss with
                 // no recovery path. Removed in v0.33.66.
 
-                // Cap renderer subprocesses. In Alloy mode the frontend runs
-                // in the browser process (no renderer spawned), but DevTools
-                // popups can spawn additional renderers at ~100GB VA each.
-                let rpl_key = CefString::from("renderer-process-limit");
-                let rpl_val = CefString::from("1");
-                cmd.append_switch_with_value(Some(&rpl_key), Some(&rpl_val));
+                // NOTE: `--renderer-process-limit=1` was previously set here to
+                // protect against DevTools popups spawning extra renderers under
+                // an Alloy-mode assumption. The current Linux CEF build is NOT
+                // Alloy-mode for the user-visible UI: main window, every pool
+                // window, every tear-off window, and every browser-pane gets
+                // its own renderer process. Capping all of them to ONE shared
+                // renderer process serializes their JS event loops on a single
+                // thread, which manifests as hover/animation lag in the user-
+                // visible UI when pool windows are doing idle work. Removed
+                // 2026-05-09. See docs/specs/linux-cef-flags-audit-2026-05-08.md.
             }
         }
 

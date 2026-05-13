@@ -15,8 +15,11 @@
 
 | Command | Use When | Auto-Updates? |
 |---------|----------|---------------|
-| `task dev` | **Development** (Vite hot reload) | Yes - hot reload |
+| `task dev` | **Development** (Vite hot reload, launcher-in-loop on Windows) | Yes - hot reload |
+| `task dev:standalone` | Debug the no-launcher fallback path (host invoked directly, Phase B features bypassed) | Yes - hot reload |
 | `task package` | **Portable release builds** | No |
+
+On Windows, `task dev` builds a production-parallel layout in `dist/cef-dev/` (launcher at root, host + DLLs + srv in `runtime/`) and invokes `agentmux-launcher.exe` — so the Job Object, single-instance pipe, saga coordinator, splash, and launcher-spawned srv paths are exercised in dev exactly as in package builds. On Linux/macOS, `task dev` still invokes the host directly (Phase 7 cross-platform parity will integrate the launcher). See `docs/specs/SPEC_LAUNCHER_DEV_INTEGRATION_2026-05-13.md`.
 
 ### Build System
 
@@ -60,7 +63,7 @@ On this dev machine, Ninja is at `/c/Systems/bin/ninja.exe` (copied from VS 2022
 AgentMux is a **100% Rust** desktop app with a **Chromium-based UI**:
 
 - **agentmux-cef** = Host app (Rust, IPC bridge, window management, bundled Chromium)
-- **agentmux-launcher** = 325 KB launcher exe (sets DLL path, spawns host from `runtime/`)
+- **agentmux-launcher** = launcher exe — owns Job Object J0, named-pipe IPC, single-instance enforcement, saga coordinator, splash, and srv lifecycle; spawns host from `runtime/`. Exercised by `task dev` on Windows (production-parallel layout).
 - **agentmux-srv** = Rust backend sidecar (auto-spawned, don't run manually)
 - **agentmux-common** = Shared utilities used by all the above
 
@@ -84,17 +87,29 @@ This means:
 
 Widgets are defined in `agentmux-srv/src/config/widgets.json`. These are the **only** widget types — do not invent or reference widgets that don't exist here.
 
-| Widget Key | View | Label | Opens in Pane? |
-|------------|------|-------|----------------|
-| `defwidget@agent` | `agent` | agent | Yes |
-| `defwidget@browser` | `browser` | browser | Yes |
-| `defwidget@editor` | `editor` | editor | Yes |
-| `defwidget@swarm` | `swarm` | swarm | Yes (hidden by default) |
-| `defwidget@terminal` | `term` | terminal | Yes |
-| `defwidget@sysinfo` | `sysinfo` | sysinfo | Yes |
-| `defwidget@memory` | `memory` | memory | Yes |
-| `defwidget@help` | `help` | help | Yes |
-| `defwidget@devtools` | `devtools` | devtools | No — toggles browser inspector |
+The widget bar's visibility logic is in `frontend/app/window/action-widgets.tsx`: pinned widgets (`"display:pinned": true`) appear directly in the bar; everything else lives in the **More** dropdown. Both tiers are user-facing.
+
+| Widget Key | View | Label | Tier |
+|------------|------|-------|------|
+| `defwidget@agent` | `agent` | agent | Pinned |
+| `defwidget@browser` | `browser` | browser | Pinned |
+| `defwidget@terminal` | `term` | terminal | Pinned |
+| `defwidget@sysinfo` | `sysinfo` | sysinfo | Pinned |
+| `defwidget@devtools` | `devtools` | devtools | Pinned (toggles Chromium DevTools — does not open a pane) |
+| `defwidget@editor` | `editor` | editor | More dropdown |
+| `defwidget@swarm` | `swarm` | swarm | More dropdown |
+| `defwidget@help` | `help` | help | More dropdown |
+
+### Not widgets
+
+These views exist in the codebase but are **not** widget-bar entries — do not describe them as widgets to users:
+
+| Surface | How it's reached |
+|---|---|
+| **Identity** | Tab inside an Agent pane (cog → settings panel → Identity tab). The `view: "identity"` registration and `IdentityPaneViewModel` exist for `pane.open` RPC and right-click menu paths; no widget-bar entry. |
+| **Memory** | Tab inside an Agent pane (cog → settings panel → Memory tab). Same shape as Identity — view registered for programmatic access only. Replaces the old Forge concept; `db_forge_agents` rows migrated into `db_memories` in the v7 schema. The `block.tsx` migration shim still redirects `view: "forge"` blocks to `view: "agent"` for backward compatibility. |
+| **Settings** | Hamburger menu (≡) in the top tab bar → Settings. Opens `settings.json` in the user's default editor. |
+| **Subagent** | Spawned by clicking a sub-agent in the Swarm pane's overview. Not a top-level pane type the user opens directly. |
 
 ---
 

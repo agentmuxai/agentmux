@@ -85,6 +85,10 @@ export function useAgentStream({
     provider,
 }: UseAgentStreamOpts): void {
     // Read-side accessors only — all writes route through dispatchPane.
+    // Maintaining this contract is how the agent pane stays 100%
+    // reducer-routed and why `recordDispatch` is a sufficient tap for
+    // session-replay fixtures. See docs/analysis/AGENT_PANE_REDUCER_
+    // AUDIT_2026_05_12.md.
     const [getTurnTokens] = turnTokensAtom;
     const getStopping = stoppingAtom?.[0];
 
@@ -100,6 +104,48 @@ export function useAgentStream({
     let pendingNew: DocumentNode[] = [];
     let pendingUpdates: DocumentNode[] = [];
     let flushRafId: number | null = null;
+
+    // Single per-block WPS subscription for `tool_chunk` events.
+    // `agentmux-bashwrap exec` publishes every stdout/stderr line to a
+    // fixed event name with `scopes: ["block:<id>"]` and the tool_use_id
+    // in the payload. The broker persists ~1024 events per scope, so
+    // the subscription installed on mount picks up any chunks that
+    // landed before Claude's stream-json caught up enough for the
+    // frontend to learn the tool_use_id — closes the late-subscribe
+    // race that the previous per-tool subscription model could not.
+    // See `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §6.
+    const blockChunkUnsub = waveEventSubscribe({
+        eventType: "tool_chunk",
+        scope: `block:${blockId}`,
+        handler: (event: any) => {
+            const data = event?.data;
+            if (!data || typeof data !== "object") return;
+            const toolId = typeof data.tool_id === "string" ? data.tool_id : "";
+            if (!toolId) return;
+            if (data.op === "terminal") {
+                dispatchDoc(blockId, {
+                    type: "ToolChunkAppend",
+                    toolId,
+                    chunk: {
+                        kind: "system",
+                        content: `[exited ${data.exit_code ?? "?"}]`,
+                        timestamp: data.timestamp ?? Date.now(),
+                    },
+                });
+                return;
+            }
+            if (data.op !== "chunk") return;
+            dispatchDoc(blockId, {
+                type: "ToolChunkAppend",
+                toolId,
+                chunk: {
+                    kind: data.kind ?? "stdout",
+                    content: data.content ?? "",
+                    timestamp: data.timestamp ?? Date.now(),
+                },
+            });
+        },
+    });
 
     function flushPendingNodes() {
         flushRafId = null;
@@ -417,12 +463,14 @@ export function useAgentStream({
                         finalizeTurn(event.stats ?? null);
                         continue;
                     }
-                    // Track the currently-running tool for the status line
+                    // Track the currently-running tool for the status line.
+                    // Per-tool subscription open/close was removed — a single
+                    // per-block subscription installed on mount above handles
+                    // every tool's chunks (the wrapper publishes on a fixed
+                    // event name with the tool_use_id in the payload), and
+                    // the broker's replay-on-subscribe covers the late-
+                    // subscribe race that the per-tool model lost.
                     if (event.type === "tool_call") {
-                        // Preserve prior semantic: missing tool name means
-                        // "no tool" (currentTool=null), NOT "tool with empty
-                        // name". Pre-reducer code did setCurrentTool(event.tool ?? null);
-                        // route through ToolEnd in the missing-name case.
                         if (event.tool) {
                             dispatchPane(blockId, { type: "ToolStart", name: event.tool });
                         } else {
@@ -430,6 +478,16 @@ export function useAgentStream({
                         }
                     } else if (event.type === "tool_result") {
                         dispatchPane(blockId, { type: "ToolEnd" });
+                    } else if (event.type === "tool_chunk") {
+                        // Live-log streaming (SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md):
+                        // route chunks through their own reducer command
+                        // instead of forcing the full node list through
+                        // StreamFlush. Skip the per-event parseLine →
+                        // node → pendingNew path; the reducer mutates
+                        // one ToolNode in place.
+                        const { toolId, chunk } = parser.parseToolChunkEvent(event);
+                        dispatchDoc(blockId, { type: "ToolChunkAppend", toolId, chunk });
+                        continue;
                     }
                     const node = parser.parseLine(JSON.stringify(event));
                     if (!node) continue;
@@ -459,6 +517,8 @@ export function useAgentStream({
         onCleanup(() => {
             if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
             subscription.unsubscribe();
+            // Tear down the per-block tool_chunk subscription.
+            try { blockChunkUnsub(); } catch { /* ignore */ }
             // StreamUnsubscribe also force-clears turnActive (so a crash
             // or exit without session_end doesn't leave "Working…" stuck).
             const at = Date.now();

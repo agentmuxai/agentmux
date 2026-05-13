@@ -780,10 +780,15 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
 
     // agentinput → send message to agent (persistent or per-turn subprocess)
     let wstore_ai = state.wstore.clone();
+    // Streaming-bash wrapper auth — clone the per-launch auth_key into the
+    // handler's closure so each spawn can inject it into Claude's env.
+    // See SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §7.
+    let auth_key_ai = state.auth_key.clone();
     engine.register_handler(
         COMMAND_AGENT_INPUT,
         Box::new(move |data, _ctx| {
             let wstore = wstore_ai.clone();
+            let auth_key = auth_key_ai.clone();
             Box::pin(async move {
                 let cmd: CommandAgentInputData = serde_json::from_value(data)
                     .map_err(|e| format!("agentinput: {e}"))?;
@@ -835,6 +840,56 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     &cmd.blockid,
                     &mut env_vars,
                 );
+                // Streaming-bash wrapper auth + discovery
+                // (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §7).
+                //
+                // 1. AGENTMUX_AUTH_KEY — config.rs:42 removed it from
+                //    the process env at startup (security PR #801).
+                //    Re-inject for this spawn so the wrapper (running
+                //    inside Claude's bash subprocess tree) can
+                //    authenticate against the auth_middleware-gated
+                //    /agentmux/wps/publish endpoint via X-AuthKey.
+                // 2. PATH — prepend the bundled tools/bin dir so
+                //    `agentmux-bashwrap.exe` resolves when the
+                //    PreToolUse hook (auto-injected by agent_config.rs)
+                //    rewrites the command to invoke it. AGENTMUX_LOCAL_URL
+                //    is already in the inherited process env (main.rs:498).
+                env_vars.insert("AGENTMUX_AUTH_KEY".to_string(), auth_key.clone());
+                // Block id so the wrapper can scope its WPS publishes
+                // to `block:<id>`. Without this, chunks publish without
+                // a scope and the frontend's per-block subscription
+                // doesn't receive them.
+                env_vars.insert("AGENTMUX_BLOCKID".to_string(), cmd.blockid.clone());
+                // PATH includes BOTH bundled tools dir (portable
+                // builds, runtime/tools/bin/) AND user tools dir
+                // (~/.agentmux/tools/bin/). bundled is None in dev
+                // mode (target/debug exclusion in tool_store), so
+                // without user_tools_dir the wrapper wouldn't be on
+                // the agent's PATH during `task dev`.
+                {
+                    let existing = env_vars
+                        .get("PATH")
+                        .cloned()
+                        .or_else(|| std::env::var("PATH").ok())
+                        .unwrap_or_default();
+                    let sep = if cfg!(windows) { ";" } else { ":" };
+                    let mut extras: Vec<String> = Vec::new();
+                    if let Some(d) = crate::backend::tool_store::bundled_tools_dir() {
+                        if d.exists() {
+                            extras.push(d.to_string_lossy().into_owned());
+                        }
+                    }
+                    if let Some(d) = crate::backend::tool_store::user_tools_dir() {
+                        if d.exists() {
+                            extras.push(d.to_string_lossy().into_owned());
+                        }
+                    }
+                    if !extras.is_empty() {
+                        let new_path = format!("{}{}{}", extras.join(sep), sep, existing);
+                        env_vars.insert("PATH".to_string(), new_path);
+                    }
+                }
+
                 let session_id_field = crate::backend::obj::meta_get_string(
                     &block.meta, "agent:session_id_field", "session_id",
                 );

@@ -19,6 +19,8 @@ import {
     ThinkingEvent,
     TOOL_ICONS,
     ToolCallEvent,
+    ToolChunkEvent,
+    ToolLogChunk,
     ToolNode,
     ToolResultEvent,
     UserMessageEvent,
@@ -128,6 +130,17 @@ export class ClaudeCodeStreamParser {
                 this.currentThinkingNode = null;
                 return this.toolCallToNode(event as ToolCallEvent);
 
+            case "tool_chunk":
+                // tool_chunk does NOT produce a DocumentNode. It routes
+                // through the agent-document reducer's ToolChunkAppend
+                // command instead — see SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md
+                // §3.3. Consumers (useAgentStream) detect this event
+                // type ahead of calling the parser and dispatch the
+                // command directly, then short-circuit. Returning null
+                // here also makes parseLine safe for tool_chunk lines
+                // that arrive in history replay.
+                return null;
+
             case "tool_result":
                 this.currentTextNode = null;
                 this.currentThinkingNode = null;
@@ -177,6 +190,26 @@ export class ClaudeCodeStreamParser {
             this.currentThinkingNode = { ...this.currentThinkingNode, content: this.currentThinkingNode.content + event.content };
         }
         return { ...this.currentThinkingNode };
+    }
+
+    /**
+     * Normalize a `tool_chunk` stream event into a `ToolLogChunk`
+     * payload suitable for the agent-document reducer's
+     * `ToolChunkAppend` command. Defaults `timestamp` to receive time
+     * when the provider didn't supply one. Pure / no side effects —
+     * does NOT touch `pendingToolCalls` or the text/thinking
+     * accumulators, since chunks live in their own append-only
+     * buffer (see SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md §3.1).
+     */
+    parseToolChunkEvent(event: ToolChunkEvent, now: number = Date.now()): { toolId: string; chunk: ToolLogChunk } {
+        return {
+            toolId: event.id,
+            chunk: {
+                kind: event.kind,
+                content: event.content,
+                timestamp: event.timestamp ?? now,
+            },
+        };
     }
 
     /**
@@ -309,7 +342,13 @@ export class ClaudeCodeStreamParser {
     }
 
     /**
-     * Extract relevant detail from tool params for summary
+     * Extract relevant detail from tool params for summary. Returns the
+     * full text — the .agent-tool-name CSS rule clips with
+     * `text-overflow: ellipsis` based on actual row width, so the
+     * ellipsis position recomputes for free on zoom and pane resize.
+     * Pre-truncating here would freeze the ellipsis at a fixed character
+     * count and leave blank space when the row is wider than the
+     * truncated string. (See SPEC_DYNAMIC_TOOL_SUMMARY_TRUNCATION.md.)
      */
     private extractToolDetail(tool: string, params: Record<string, any>): string {
         switch (tool) {
@@ -318,17 +357,13 @@ export class ClaudeCodeStreamParser {
             case "Write":
                 return params.file_path || "";
             case "Bash":
-                // Truncate long commands
-                const cmd = params.command || "";
-                return cmd.length > 30 ? cmd.substring(0, 30) + "..." : cmd;
+                return params.command || "";
             case "Grep":
                 return params.pattern || "";
             case "Glob":
                 return params.pattern || "";
-            case "Agent": {
-                const desc = params.description || params.prompt || "";
-                return desc.length > 40 ? desc.substring(0, 40) + "..." : desc;
-            }
+            case "Agent":
+                return params.description || params.prompt || "";
             default:
                 return "";
         }

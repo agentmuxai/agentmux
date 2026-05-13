@@ -5,6 +5,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { markEnd, markStart } from "@/perf";
 import {
     getLayoutModelForStaticTab,
     LayoutTreeActionType,
@@ -32,6 +33,7 @@ import {
 import { modalsModel } from "./modalmodel";
 import { TAB_COLORS } from "@/app/tab/tab";
 import { ClientService, ObjectService, WorkspaceService } from "./services";
+import { holdRevealGate, scheduleRevealLift } from "./tab-reveal";
 import * as WOS from "./wos";
 import { getFileSubject, waveEventSubscribe } from "./wps";
 
@@ -636,11 +638,15 @@ export async function fetchWaveFile(
     usp.set("zoneid", zoneId);
     usp.set("name", fileName);
     if (offset != null) usp.set("offset", offset.toString());
+    // Use X-AuthKey header instead of `?authkey=` query-string fallback.
+    // The fallback was removed in the 2026-05-11 audit (C3) for everything
+    // except the /ws upgrade route, where headers aren't possible.
+    const headers: Record<string, string> = {};
     if (globalThis.window != null) {
         const authKey = getApi()?.getAuthKey?.();
-        if (authKey) usp.set("authkey", authKey);
+        if (authKey) headers["X-AuthKey"] = authKey;
     }
-    const resp = await fetch(getWebServerEndpoint() + "/agentmux/file?" + usp.toString());
+    const resp = await fetch(getWebServerEndpoint() + "/agentmux/file?" + usp.toString(), { headers });
     if (!resp.ok) {
         if (resp.status === 404) return { data: null, fileInfo: null };
         throw new Error("error getting wave file: " + resp.statusText);
@@ -844,6 +850,17 @@ export function createTab() {
     const ws = workspace();
     if (ws == null) return;
     fireAndForget(async () => {
+        // Pin the gate while CreateTab + UpdateObjectMeta + preset import
+        // + applyTabPreset run. Calling scheduleRevealLift here would let
+        // the 80ms SETTLE window elapse during the (longtask-free) RPCs
+        // and layout-model polling inside applyTabPreset, so the gate
+        // would lift before the agent/sysinfo/swarm blocks have mounted
+        // and the user would still see the piecemeal cascade. The
+        // detector is started in `finally` once the preset apply has
+        // returned (or failed) — at that point SETTLE / MAX_GATE measure
+        // the actual mount window. See issue #774 /
+        // SPEC_TAB_CONTENT_REVEAL_GATE.md.
+        holdRevealGate();
         try {
             const tabId = await WorkspaceService.CreateTab(ws.oid, "", true, false);
             await ObjectService.UpdateObjectMeta(
@@ -859,14 +876,69 @@ export function createTab() {
             await applyTabPreset(tabId, DEFAULT_TAB_PRESET);
         } catch (e) {
             console.error("[createTab] failed:", e);
+        } finally {
+            // Pair with holdRevealGate above — without this the gate
+            // would stay pinned forever on the error path.
+            scheduleRevealLift();
         }
     });
 }
 
+// Tracks an in-flight tab-switch measurement so rapid back-to-back
+// switches (held Ctrl+Tab, programmatic bursts) don't collide on the
+// shared `tab-switch:start` mark name. performance.mark throws on
+// duplicates and the second call would silently drop its measurement.
+// Sequence guard ensures the prior switch's pending double-rAF
+// markEnd doesn't close the new switch's measurement instead.
+let tabSwitchInFlight = false;
+let tabSwitchSeq = 0;
+
 export async function setActiveTab(tabId: string): Promise<void> {
     const ws = workspace();
     if (ws == null) return;
-    await WorkspaceService.SetActiveTab(ws.oid, tabId);
+    const fromTabId = activeTabId();
+    if (fromTabId === tabId) return;
+    // Canonical chokepoint for tab-switch perf marks. Wraps every entry
+    // path: click (tabbar), keyboard (Ctrl+Tab/1..9 in keymodel),
+    // palette (command-registry), test app API (cef-api). markEnd lands
+    // two rAFs after the IPC so the duration captures user-perceived
+    // switch cost — IPC + Solid fan-out + layout + paint — not just IPC.
+    // Backend-driven switches (tearoff merge, cross-drag) bypass this
+    // function and are not measured here; they're rare and observable
+    // via the long-task timeline.
+    if (tabSwitchInFlight) {
+        // Close prior measurement (truncated) so the new markStart
+        // doesn't collide. The prior call's pending rAF markEnd will
+        // see its sequence is stale and skip.
+        markEnd("tab-switch", "interrupted");
+    }
+    const mySeq = ++tabSwitchSeq;
+    tabSwitchInFlight = true;
+    markStart("tab-switch", { from: fromTabId, to: tabId });
+    // Pin the gate during the SetActiveTab RPC so the destination
+    // tab can't paint piecemeal once the workspace update lands.
+    // The auto-lift detector is started in `finally` (i.e. AFTER
+    // the active-tab update lands) so SETTLE / MAX_GATE measure the
+    // destination mount window, not the longtask-free RPC duration.
+    // Honours rapid Ctrl-Tab spam — each call resets the detector.
+    // See issue #774 / SPEC_TAB_CONTENT_REVEAL_GATE.md.
+    holdRevealGate();
+    try {
+        await WorkspaceService.SetActiveTab(ws.oid, tabId);
+    } finally {
+        // Pair with holdRevealGate above. Also lifts the gate on
+        // the RPC-throws path so the user isn't stuck on a hidden
+        // source tab.
+        scheduleRevealLift();
+        requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+                if (mySeq === tabSwitchSeq) {
+                    markEnd("tab-switch");
+                    tabSwitchInFlight = false;
+                }
+            })
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

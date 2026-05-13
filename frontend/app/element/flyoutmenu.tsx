@@ -7,7 +7,7 @@ import {
     type Placement,
 } from "@floating-ui/dom";
 import clsx from "clsx";
-import { createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 
 import "./flyoutmenu.scss";
@@ -26,7 +26,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
     const [visibleSubMenus, setVisibleSubMenus] = createSignal<{ [key: string]: any }>({});
     const [hoveredItems, setHoveredItems] = createSignal<string[]>([]);
     const [subMenuPosition, setSubMenuPosition] = createSignal<{
-        [key: string]: { top: number; left: number; label: string };
+        [key: string]: { top: number; left: number; parentLeft: number; label: string };
     }>({});
 
     const [isOpen, setIsOpen] = createSignal(false);
@@ -37,6 +37,11 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
     let cleanupAutoUpdate: (() => void) | null = null;
 
     const onOpenChangeMenu = (open: boolean) => {
+        if (!open) {
+            setVisibleSubMenus({});
+            setHoveredItems([]);
+            setSubMenuPosition({});
+        }
         setIsOpen(open);
         props.onOpenChange?.(open);
     };
@@ -52,10 +57,9 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
     const registerFloating = (el: HTMLElement) => {
         floatingEl = el;
         requestAnimationFrame(() => {
-            if (referenceEl instanceof Element && floatingEl instanceof Element) {
-                cleanupAutoUpdate?.();
-                cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
-            }
+            if (!(referenceEl instanceof Element) || !(floatingEl instanceof Element)) return;
+            cleanupAutoUpdate?.();
+            cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
         });
     };
 
@@ -63,6 +67,8 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
         if (!isOpen()) return;
         const target = e.target as Node;
         if (referenceEl?.contains(target) || floatingEl?.contains(target)) return;
+        const el = target instanceof Element ? target : (target as Node).parentElement;
+        if (el?.closest(".menu, .sub-menu")) return;
         onOpenChangeMenu(false);
     };
 
@@ -75,36 +81,13 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
         cleanupAutoUpdate?.();
     });
 
-    const subMenuRefs: { [key: string]: HTMLDivElement | null } = {};
-
-    // Position submenus based on available space and scroll position
     const handleSubMenuPosition = (key: string, itemRect: DOMRect, label: string) => {
-        setTimeout(() => {
-            const subMenuRef = subMenuRefs[key];
-            if (!subMenuRef) return;
-
-            const scrollTop = window.scrollY || document.documentElement.scrollTop;
-            const scrollLeft = window.scrollX || document.documentElement.scrollLeft;
-
-            const submenuWidth = subMenuRef.offsetWidth;
-            const submenuHeight = subMenuRef.offsetHeight;
-
-            let left = itemRect.right + scrollLeft - 2;
-            let top = itemRect.top - 2 + scrollTop;
-
-            if (left + submenuWidth > window.innerWidth + scrollLeft) {
-                left = itemRect.left + scrollLeft - submenuWidth;
-            }
-
-            if (top + submenuHeight > window.innerHeight + scrollTop) {
-                top = window.innerHeight + scrollTop - submenuHeight - 10;
-            }
-
-            setSubMenuPosition((prev) => ({
-                ...prev,
-                [key]: { top, left, label },
-            }));
-        }, 0);
+        const scrollTop = window.scrollY || document.documentElement.scrollTop;
+        const scrollLeft = window.scrollX || document.documentElement.scrollLeft;
+        const top = itemRect.top - 2 + scrollTop;
+        const left = itemRect.right + scrollLeft - 2;
+        const parentLeft = itemRect.left + scrollLeft;
+        setSubMenuPosition((prev) => ({ ...prev, [key]: { top, left, parentLeft, label } }));
     };
 
     const handleMouseEnterItem = (
@@ -154,6 +137,9 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
 
     const handleOnClick = (e: MouseEvent, item: MenuItem) => {
         e.stopPropagation();
+        if (item.subItems) {
+            return;
+        }
         onOpenChangeMenu(false);
         item.onClick?.(e);
     };
@@ -174,6 +160,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
                         class={clsx("menu", props.className)}
                         ref={registerFloating}
                         style={floatingStyle()}
+                        data-pane-overlay
                     >
                         <For each={props.items}>
                             {(item, index) => {
@@ -195,8 +182,20 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
                                     props.renderMenuItem(item, menuItemProps)
                                 ) : (
                                     <div {...menuItemProps}>
-                                        <Show when={item.icon}>
-                                            <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                                        <Show
+                                            when={item.checked === undefined}
+                                            fallback={
+                                                <i
+                                                    class={clsx(
+                                                        "fa-solid fa-fw menu-item-icon menu-item-check",
+                                                        { "fa-check": item.checked === true },
+                                                    )}
+                                                />
+                                            }
+                                        >
+                                            <Show when={item.icon}>
+                                                <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                                            </Show>
                                         </Show>
                                         <span class="label">{item.label}</span>
                                         <Show when={item.subItems}>
@@ -213,11 +212,11 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
                                                 subItems={item.subItems!}
                                                 parentKey={key}
                                                 subMenuPosition={subMenuPosition()}
+                                                setSubMenuPosition={setSubMenuPosition}
                                                 visibleSubMenus={visibleSubMenus()}
                                                 hoveredItems={hoveredItems()}
                                                 handleMouseEnterItem={handleMouseEnterItem}
                                                 handleOnClick={handleOnClick}
-                                                subMenuRefs={subMenuRefs}
                                                 renderMenu={props.renderMenu}
                                                 renderMenuItem={props.renderMenuItem}
                                             />
@@ -233,15 +232,19 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
     );
 };
 
+type SubMenuPositionMap = {
+    [key: string]: { top: number; left: number; parentLeft: number; label: string };
+};
+
 type SubMenuProps = {
     subItems: MenuItem[];
     parentKey: string;
-    subMenuPosition: {
-        [key: string]: { top: number; left: number; label: string };
-    };
+    subMenuPosition: SubMenuPositionMap;
+    setSubMenuPosition: (
+        updater: (prev: SubMenuPositionMap) => SubMenuPositionMap,
+    ) => void;
     visibleSubMenus: { [key: string]: any };
     hoveredItems: string[];
-    subMenuRefs: { [key: string]: HTMLDivElement | null };
     handleMouseEnterItem: (
         event: MouseEvent,
         parentKey: string | null,
@@ -254,23 +257,44 @@ type SubMenuProps = {
 };
 
 const SubMenu = (props: SubMenuProps): JSX.Element => {
+    let subMenuEl: HTMLDivElement | undefined;
+    let flipped = false;
     const position = () => props.subMenuPosition[props.parentKey];
-    const isPositioned = () => {
+
+    createEffect(() => {
         const pos = position();
-        return pos && pos.top !== undefined && pos.left !== undefined;
-    };
+        if (!pos || flipped || !subMenuEl) return;
+        const rect = subMenuEl.getBoundingClientRect();
+        const overflowRight = rect.right - window.innerWidth;
+        const overflowBottom = rect.bottom - window.innerHeight;
+        if (overflowRight <= 0 && overflowBottom <= 0) {
+            flipped = true;
+            return;
+        }
+        flipped = true;
+        props.setSubMenuPosition((prev) => ({
+            ...prev,
+            [props.parentKey]: {
+                label: pos.label,
+                parentLeft: pos.parentLeft,
+                left: overflowRight > 0 ? pos.parentLeft - rect.width + 2 : pos.left,
+                top: overflowBottom > 0
+                    ? window.innerHeight - rect.height - 10 + window.scrollY
+                    : pos.top,
+            },
+        }));
+    });
 
     const subMenu = (
         <div
-            ref={(el) => { props.subMenuRefs[props.parentKey] = el; }}
+            ref={(el) => { subMenuEl = el; }}
             class="menu sub-menu"
             style={{
-                top: `${position()?.top || 0}px`,
-                left: `${position()?.left || 0}px`,
+                top: `${position()?.top ?? 0}px`,
+                left: `${position()?.left ?? 0}px`,
                 position: "absolute",
-                "z-index": 1000,
-                visibility: props.visibleSubMenus[props.parentKey]?.visible && isPositioned() ? "visible" : "hidden",
             }}
+            data-pane-overlay
         >
             <For each={props.subItems}>
                 {(item, idx) => {
@@ -292,8 +316,20 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
                         props.renderMenuItem(item, menuItemProps)
                     ) : (
                         <div {...menuItemProps}>
-                            <Show when={item.icon}>
-                                <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                            <Show
+                                when={item.checked === undefined}
+                                fallback={
+                                    <i
+                                        class={clsx(
+                                            "fa-solid fa-fw menu-item-icon menu-item-check",
+                                            { "fa-check": item.checked === true },
+                                        )}
+                                    />
+                                }
+                            >
+                                <Show when={item.icon}>
+                                    <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                                </Show>
                             </Show>
                             <span class="label">{item.label}</span>
                             <Show when={item.subItems}>
@@ -310,11 +346,11 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
                                     subItems={item.subItems!}
                                     parentKey={newKey}
                                     subMenuPosition={props.subMenuPosition}
+                                    setSubMenuPosition={props.setSubMenuPosition}
                                     visibleSubMenus={props.visibleSubMenus}
                                     hoveredItems={props.hoveredItems}
                                     handleMouseEnterItem={props.handleMouseEnterItem}
                                     handleOnClick={props.handleOnClick}
-                                    subMenuRefs={props.subMenuRefs}
                                     renderMenu={props.renderMenu}
                                     renderMenuItem={props.renderMenuItem}
                                 />

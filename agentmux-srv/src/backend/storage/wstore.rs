@@ -9,12 +9,13 @@
 
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
 use crate::backend::obj::{wave_obj_from_json, wave_obj_to_json, WaveObj};
+use crate::registry::Registry;
 
 use super::error::StoreError;
 use super::migrations::{run_forge_migrations, run_wstore_migrations};
@@ -22,6 +23,11 @@ use super::migrations::{run_forge_migrations, run_wstore_migrations};
 /// SQLite-backed object store for WaveObj types.
 pub struct WaveStore {
     conn: Mutex<Connection>,
+    /// Cross-version named-agent registry. `None` for in-memory test
+    /// stores; `Some` for production srv. Mutations to
+    /// `db_agent_instances` parallel-write to this registry when set.
+    /// See `docs/specs/SPEC_SHARED_AGENT_REGISTRY_2026_05_12.md`.
+    registry: Mutex<Option<Arc<Registry>>>,
 }
 
 impl WaveStore {
@@ -68,7 +74,32 @@ impl WaveStore {
         run_forge_migrations(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            registry: Mutex::new(None),
         })
+    }
+
+    /// Attach a shared cross-version agent registry. Called once on
+    /// srv startup after `WaveStore::open` and before the store is
+    /// wrapped in `Arc`. Mutations to `db_agent_instances` will then
+    /// parallel-write to the registry; the SQLite table remains the
+    /// authoritative read path for PR A.
+    pub fn set_registry(&self, registry: Arc<Registry>) {
+        *self.registry.lock().unwrap_or_else(|e| e.into_inner()) = Some(registry);
+    }
+
+    fn registry(&self) -> Option<Arc<Registry>> {
+        self.registry
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Public accessor for the cross-version named-agent registry.
+    /// Returns `None` when the registry couldn't be resolved at
+    /// startup (CI / unusual envs); callers must handle the absent
+    /// case by falling back to SQLite.
+    pub fn shared_agent_registry(&self) -> Option<Arc<Registry>> {
+        self.registry()
     }
 
     /// Table name for a WaveObj type: `db_<otype>`.
@@ -694,11 +725,40 @@ impl WaveStore {
 
     /// Delete a forge agent by id. Returns true if a row was deleted.
     pub fn forge_delete(&self, id: &str) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let rows = conn.execute(
-            "DELETE FROM db_forge_agents WHERE id=?1",
-            params![id],
-        )?;
+        // Snapshot cascaded instance ids AND issue the parent DELETE
+        // under one lock acquisition so no thread can `instance_create`
+        // a new row for this definition between the two steps. The
+        // SQL DELETE's FK cascade fires inside SQLite while we hold
+        // the mutex, so the snapshot exactly matches the rows that
+        // got removed by the cascade.
+        let (cascaded_instance_ids, rows) = {
+            let conn = self.conn.lock().unwrap();
+            let cascaded_instance_ids: Vec<String> = {
+                let mut stmt = conn
+                    .prepare("SELECT id FROM db_agent_instances WHERE definition_id = ?1")?;
+                let iter = stmt.query_map(params![id], |row| row.get::<_, String>(0))?;
+                iter.collect::<Result<Vec<_>, _>>()?
+            };
+            let rows = conn.execute(
+                "DELETE FROM db_forge_agents WHERE id=?1",
+                params![id],
+            )?;
+            (cascaded_instance_ids, rows)
+        };
+        if rows > 0 {
+            if let Some(reg) = self.registry() {
+                for instance_id in &cascaded_instance_ids {
+                    if let Err(e) = reg.hard_delete(instance_id) {
+                        tracing::warn!(
+                            instance_id = %instance_id,
+                            forge_id = %id,
+                            error = %e,
+                            "registry: failed to mirror forge_delete cascade"
+                        );
+                    }
+                }
+            }
+        }
         Ok(rows > 0)
     }
 
@@ -1214,6 +1274,84 @@ pub struct AgentInstance {
     /// instantiation via the launch modal's Memory dropdown.
     #[serde(default)]
     pub memory_id: String,
+    /// User-chosen instance name (becomes `AGENTMUX_AGENT_ID` in the
+    /// spawn env). Empty for pre-v8 rows and for un-named launches.
+    /// Drives the "Continue agent" dropdown in the launch modal.
+    #[serde(default)]
+    pub instance_name: String,
+    /// Absolute path returned by `allocate_agent_workdir` at spawn.
+    /// Stored explicitly (rather than re-derived from the slug at
+    /// continue-time) so the continue flow is robust against
+    /// slug-rule changes and user-side renames.
+    #[serde(default)]
+    pub working_directory: String,
+    /// Soft-delete flag for the "Forget agent" affordance. Hidden
+    /// rows stay on disk for audit + recovery.
+    #[serde(default)]
+    pub display_hidden: bool,
+}
+
+/// Build a registry record from an `AgentInstance`. Returns an error
+/// if the working directory can't be expressed as a path relative to
+/// the canonical shared agents root (e.g. user pointed an agent at
+/// `~/projects/foo`, which would also fail a naive `"agents"`
+/// segment-scan that happened to match `~/projects/agents/foo`).
+/// Caller logs + skips — agent stays in SQLite, just not in the
+/// cross-version dropdown.
+fn agent_instance_to_record(
+    inst: &AgentInstance,
+    agents_root: &Path,
+) -> Result<crate::registry::NamedAgentRecord, String> {
+    use crate::registry::{NamedAgentRecord, NamedAgentRecordV1, MAX_SUPPORTED_SCHEMA};
+    let rel = relative_workdir(&inst.working_directory, agents_root).ok_or_else(|| {
+        format!(
+            "working_directory {:?} is not under {:?}",
+            inst.working_directory,
+            agents_root.display()
+        )
+    })?;
+    let version = env!("CARGO_PKG_VERSION").to_string();
+    Ok(NamedAgentRecord {
+        schema_version: MAX_SUPPORTED_SCHEMA,
+        data: NamedAgentRecordV1 {
+            instance_id: inst.id.clone(),
+            instance_name: inst.instance_name.clone(),
+            definition_id: inst.definition_id.clone(),
+            identity_id: empty_to_none(&inst.identity_id),
+            memory_id: empty_to_none(&inst.memory_id),
+            working_dir: rel,
+            created_at_ms: inst.created_at,
+            last_launched_at_ms: inst.started_at,
+            created_by_version: version.clone(),
+            last_launched_by_version: version,
+        },
+    })
+}
+
+fn empty_to_none(s: &str) -> Option<String> {
+    if s.is_empty() { None } else { Some(s.to_string()) }
+}
+
+/// Express `abs` as a path relative to `agents_root`. Returns `None`
+/// when `abs` is empty, not under `agents_root`, or after stripping
+/// resolves to an empty path. Anchors against the **resolved** shared
+/// root (passed in by the caller) — never scans for a path segment
+/// named "agents", which would match unrelated user directories like
+/// `/home/me/projects/agents/foo`.
+fn relative_workdir(abs: &str, agents_root: &Path) -> Option<String> {
+    if abs.is_empty() {
+        return None;
+    }
+    let p = std::path::Path::new(abs);
+    let rel = p.strip_prefix(agents_root).ok()?;
+    // Reject empties + traversals (defense in depth — strip_prefix
+    // already rules out `..` escapes, but the registry's own validator
+    // re-checks).
+    let s = rel.to_string_lossy().to_string();
+    if s.is_empty() || s == "." {
+        return None;
+    }
+    Some(s)
 }
 
 impl WaveStore {
@@ -1436,7 +1574,8 @@ impl WaveStore {
         let mut sql = String::from(
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
                     status, github_context, started_at, ended_at, created_at,
-                    identity_id, memory_id
+                    identity_id, memory_id, instance_name, working_directory,
+                    display_hidden
              FROM db_agent_instances",
         );
         let mut clauses: Vec<&str> = Vec::new();
@@ -1476,7 +1615,8 @@ impl WaveStore {
         let mut stmt = conn.prepare(
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
                     status, github_context, started_at, ended_at, created_at,
-                    identity_id, memory_id
+                    identity_id, memory_id, instance_name, working_directory,
+                    display_hidden
              FROM db_agent_instances WHERE id = ?1",
         )?;
         let result = stmt.query_row(params![id], map_instance_row);
@@ -1489,60 +1629,298 @@ impl WaveStore {
 
     /// Insert a new instance row. Caller is responsible for the id (UUID).
     pub fn instance_create(&self, inst: &AgentInstance) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO db_agent_instances
-                (id, definition_id, parent_instance_id, block_id, session_id, status,
-                 github_context, started_at, ended_at, created_at,
-                 identity_id, memory_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-            params![
-                inst.id,
-                inst.definition_id,
-                inst.parent_instance_id,
-                inst.block_id,
-                inst.session_id,
-                inst.status,
-                inst.github_context,
-                inst.started_at,
-                inst.ended_at,
-                inst.created_at,
-                inst.identity_id,
-                inst.memory_id,
-            ],
-        )?;
+        {
+            let conn = self.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_instances
+                    (id, definition_id, parent_instance_id, block_id, session_id, status,
+                     github_context, started_at, ended_at, created_at,
+                     identity_id, memory_id,
+                     instance_name, working_directory, display_hidden)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                         ?13, ?14, ?15)",
+                params![
+                    inst.id,
+                    inst.definition_id,
+                    inst.parent_instance_id,
+                    inst.block_id,
+                    inst.session_id,
+                    inst.status,
+                    inst.github_context,
+                    inst.started_at,
+                    inst.ended_at,
+                    inst.created_at,
+                    inst.identity_id,
+                    inst.memory_id,
+                    inst.instance_name,
+                    inst.working_directory,
+                    if inst.display_hidden { 1_i64 } else { 0_i64 },
+                ],
+            )?;
+        }
+        self.registry_upsert_if_named(inst);
         Ok(())
+    }
+
+    /// Set the `display_hidden` flag on an existing instance row. Used
+    /// by the "Forget agent" affordance — soft-delete only; the row +
+    /// working directory remain on disk for audit + recovery.
+    ///
+    /// Cross-version case: an agent migrated into the registry from
+    /// another version's SQLite won't have a row in the current
+    /// version's SQLite. The UPDATE returns 0 rows, but the registry
+    /// still needs to flip — otherwise "Forget agent" silently no-ops
+    /// on cross-version entries. Returns `true` if either side acted.
+    pub fn instance_set_hidden(&self, id: &str, hidden: bool) -> Result<bool, StoreError> {
+        let rows = {
+            let conn = self.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE db_agent_instances SET display_hidden = ?1 WHERE id = ?2",
+                params![if hidden { 1_i64 } else { 0_i64 }, id],
+            )?
+        };
+        let mut registry_acted = false;
+        if let Some(reg) = self.registry() {
+            // Only act on the registry side if a record exists there
+            // (in either active or retired). Avoids logging spurious
+            // "failed to retire" warnings on a no-op for unrelated ids.
+            if reg.exists_anywhere(id) {
+                let res = if hidden {
+                    reg.retire(id)
+                } else {
+                    reg.unretire(id)
+                };
+                match res {
+                    Ok(()) => registry_acted = true,
+                    Err(e) => tracing::warn!(
+                        instance_id = %id,
+                        hidden,
+                        error = %e,
+                        "registry: failed to mirror instance_set_hidden"
+                    ),
+                }
+            }
+        }
+        Ok(rows > 0 || registry_acted)
+    }
+
+    /// List all instances that the launch modal's "Continue agent"
+    /// dropdown should surface: have a non-empty `instance_name`, not
+    /// hidden, sorted by most-recent start. Capped to keep the
+    /// dropdown's wire payload bounded.
+    ///
+    /// `definition_id`, when provided, restricts the result to
+    /// instances of that definition. Server-side filtering is
+    /// necessary because the launch modal opens per-definition: a
+    /// user with 200+ named agents across many definitions could
+    /// have the current definition's older instances cut off by a
+    /// purely global limit otherwise.
+    pub fn instance_list_named(
+        &self,
+        limit: usize,
+        definition_id: Option<&str>,
+    ) -> Result<Vec<AgentInstance>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let sql = if definition_id.is_some() {
+            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
+                    status, github_context, started_at, ended_at, created_at,
+                    identity_id, memory_id, instance_name, working_directory,
+                    display_hidden
+             FROM db_agent_instances
+             WHERE display_hidden = 0
+               AND instance_name <> ''
+               AND parent_instance_id = ''
+               AND definition_id = ?1
+             ORDER BY started_at DESC
+             LIMIT ?2"
+        } else {
+            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
+                    status, github_context, started_at, ended_at, created_at,
+                    identity_id, memory_id, instance_name, working_directory,
+                    display_hidden
+             FROM db_agent_instances
+             WHERE display_hidden = 0
+               AND instance_name <> ''
+               AND parent_instance_id = ''
+             ORDER BY started_at DESC
+             LIMIT ?1"
+        };
+        let mut stmt = conn.prepare(sql)?;
+        let iter = match definition_id {
+            Some(def) => stmt.query_map(params![def, limit as i64], map_instance_row)?,
+            None => stmt.query_map(params![limit as i64], map_instance_row)?,
+        };
+        let mut out = Vec::new();
+        for r in iter {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Look up the most recent (by `started_at`) named instance that
+    /// matches the given `instance_name`. Used by the launch modal to
+    /// detect name collisions ("did you mean to continue?") and by
+    /// `ContinueNamedAgentCommand` to resolve the canonical row when
+    /// the caller only knows the name. Hidden rows are excluded.
+    pub fn instance_get_by_name(
+        &self,
+        instance_name: &str,
+    ) -> Result<Option<AgentInstance>, StoreError> {
+        if instance_name.is_empty() {
+            return Ok(None);
+        }
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
+                    status, github_context, started_at, ended_at, created_at,
+                    identity_id, memory_id, instance_name, working_directory,
+                    display_hidden
+             FROM db_agent_instances
+             WHERE instance_name = ?1
+               AND display_hidden = 0
+             ORDER BY started_at DESC
+             LIMIT 1",
+        )?;
+        let result = stmt.query_row(params![instance_name], map_instance_row);
+        match result {
+            Ok(a) => Ok(Some(a)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Update mutable instance fields. `id`, `definition_id`,
     /// `parent_instance_id`, `started_at`, `created_at` are immutable
     /// after insert (they describe provenance, not state).
     pub fn instance_update(&self, inst: &AgentInstance) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let rows = conn.execute(
-            "UPDATE db_agent_instances SET
-                block_id = ?1,
-                session_id = ?2,
-                status = ?3,
-                github_context = ?4,
-                ended_at = ?5
-             WHERE id = ?6",
-            params![
-                inst.block_id,
-                inst.session_id,
-                inst.status,
-                inst.github_context,
-                inst.ended_at,
-                inst.id,
-            ],
-        )?;
+        let rows = {
+            let conn = self.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE db_agent_instances SET
+                    block_id = ?1,
+                    session_id = ?2,
+                    status = ?3,
+                    github_context = ?4,
+                    ended_at = ?5
+                 WHERE id = ?6",
+                params![
+                    inst.block_id,
+                    inst.session_id,
+                    inst.status,
+                    inst.github_context,
+                    inst.ended_at,
+                    inst.id,
+                ],
+            )?
+        };
+        if rows > 0 {
+            // Refresh the registry from the post-update authoritative row.
+            // `inst` is the caller's pre-update view; SQL UPDATE only
+            // touches a subset of fields, so we reload to keep registry
+            // mirror exact.
+            if let Ok(Some(fresh)) = self.instance_get(&inst.id) {
+                self.registry_upsert_if_named(&fresh);
+            }
+        }
         Ok(rows > 0)
     }
 
     pub fn instance_delete(&self, id: &str) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let rows = conn.execute("DELETE FROM db_agent_instances WHERE id = ?1", params![id])?;
+        let rows = {
+            let conn = self.conn.lock().unwrap();
+            conn.execute("DELETE FROM db_agent_instances WHERE id = ?1", params![id])?
+        };
+        if rows > 0 {
+            if let Some(reg) = self.registry() {
+                if let Err(e) = reg.hard_delete(id) {
+                    tracing::warn!(
+                        instance_id = %id,
+                        error = %e,
+                        "registry: failed to mirror instance_delete"
+                    );
+                }
+            }
+        }
         Ok(rows > 0)
+    }
+
+    /// Mirror a `db_agent_instances` mutation into the cross-version
+    /// registry. Only fires for **named** rows. Routes by
+    /// `display_hidden` so the registry file ends up in the tree
+    /// matching SQLite's dropdown filter:
+    ///
+    /// - hidden = true  → upsert (atomic write to active/) then
+    ///   retire (atomic rename to retired/). Net: file lives in
+    ///   `retired/<id>.json` with the freshest content. Prevents
+    ///   `instance_update` on a previously-hidden row from
+    ///   resurrecting an active registry file, AND keeps the
+    ///   retired tombstone's content current.
+    /// - hidden = false → unretire (no-op if not retired) then
+    ///   upsert. Net: file in `active/<id>.json`, no orphan retired.
+    ///
+    /// Failures are logged, never propagated: SQLite remains
+    /// authoritative.
+    fn registry_upsert_if_named(&self, inst: &AgentInstance) {
+        // Mirror filter must match SQLite's dropdown filter
+        // (instance_list_named): non-empty instance_name AND
+        // parent_instance_id == ''. Continuation rows (created when
+        // the user resumes an existing named agent) carry the prior
+        // row in parent_instance_id and would otherwise produce a
+        // duplicate registry entry that the registry-sourced read
+        // path would surface as a separate dropdown row.
+        if inst.instance_name.is_empty() || !inst.parent_instance_id.is_empty() {
+            return;
+        }
+        let Some(reg) = self.registry() else { return };
+        let Some(agents_root) = reg.agents_root() else {
+            tracing::warn!("registry: agents_root has no parent — skipping mirror");
+            return;
+        };
+        let rec = match agent_instance_to_record(inst, agents_root) {
+            Ok(rec) => rec,
+            Err(e) => {
+                tracing::warn!(
+                    instance_id = %inst.id,
+                    error = %e,
+                    "registry: instance not representable as record, skipping mirror"
+                );
+                return;
+            }
+        };
+
+        // If the row was previously hidden, the file lives in
+        // `retired/`. Move it back to active before upserting so
+        // upsert's merge-preserves-unknown-fields path operates on
+        // the right file (and we never leave dangling retired files).
+        if let Err(e) = reg.unretire(&inst.id) {
+            tracing::warn!(
+                instance_id = %inst.id,
+                error = %e,
+                "registry: failed to unretire row before upsert"
+            );
+        }
+
+        if let Err(e) = reg.upsert(&rec) {
+            tracing::warn!(
+                instance_id = %inst.id,
+                error = %e,
+                "registry: failed to mirror instance_create/update"
+            );
+            return;
+        }
+
+        // After the upsert, move into retired/ if the row is hidden.
+        // Combined: hidden row's tombstone always has up-to-date
+        // content, and active/ never carries a hidden row.
+        if inst.display_hidden {
+            if let Err(e) = reg.retire(&inst.id) {
+                tracing::warn!(
+                    instance_id = %inst.id,
+                    error = %e,
+                    "registry: failed to retire hidden row post-upsert"
+                );
+            }
+        }
     }
 
     /// Look up the most-recently-created **active** instance for a
@@ -1559,7 +1937,8 @@ impl WaveStore {
         let mut stmt = conn.prepare(
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
                     status, github_context, started_at, ended_at, created_at,
-                    identity_id, memory_id
+                    identity_id, memory_id, instance_name, working_directory,
+                    display_hidden
              FROM db_agent_instances
              WHERE block_id = ?1 AND status IN ('running', 'paused')
              ORDER BY created_at DESC
@@ -1826,6 +2205,7 @@ fn map_memory_row(row: &rusqlite::Row) -> rusqlite::Result<Memory> {
 }
 
 fn map_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
+    let display_hidden_int: i64 = row.get(14)?;
     Ok(AgentInstance {
         id: row.get(0)?,
         definition_id: row.get(1)?,
@@ -1839,6 +2219,9 @@ fn map_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
         created_at: row.get(9)?,
         identity_id: row.get(10)?,
         memory_id: row.get(11)?,
+        instance_name: row.get(12)?,
+        working_directory: row.get(13)?,
+        display_hidden: display_hidden_int != 0,
     })
 }
 
@@ -2373,6 +2756,9 @@ mod tests {
             created_at: 1000,
             identity_id: String::new(),
             memory_id: String::new(),
+            instance_name: String::new(),
+            working_directory: String::new(),
+            display_hidden: false,
         };
         store.instance_create(&inst).unwrap();
 
@@ -2416,6 +2802,9 @@ mod tests {
             created_at: 0,
             identity_id: String::new(),
             memory_id: String::new(),
+            instance_name: String::new(),
+            working_directory: String::new(),
+            display_hidden: false,
         };
         store.instance_create(&inst).unwrap();
 
@@ -2635,5 +3024,274 @@ mod tests {
         // Delete the user memory.
         assert!(store.bundle_memory_delete("mem-coder").unwrap());
         assert_eq!(store.bundle_memory_list().unwrap().len(), 1);
+    }
+
+    // ---- Registry parallel-write mirror (PR A) ----
+
+    fn make_named_inst(id: &str, name: &str, agents_root: &Path) -> AgentInstance {
+        // working_directory must sit under <agents_root>/<slug> so the
+        // relative-path resolver picks it up.
+        let wd = agents_root.join(format!("{name}-fixture")).to_string_lossy().to_string();
+        AgentInstance {
+            id: id.to_string(),
+            definition_id: "def-mirror".to_string(),
+            parent_instance_id: String::new(),
+            block_id: String::new(),
+            session_id: String::new(),
+            status: "running".to_string(),
+            github_context: String::new(),
+            started_at: 1_000,
+            ended_at: 0,
+            created_at: 900,
+            identity_id: String::new(),
+            memory_id: String::new(),
+            instance_name: name.to_string(),
+            working_directory: wd,
+            display_hidden: false,
+        }
+    }
+
+    fn store_with_registry() -> (tempfile::TempDir, WaveStore, Arc<crate::registry::Registry>) {
+        let tmp = tempfile::tempdir().unwrap();
+        let agents_root = tmp.path().join("agents");
+        std::fs::create_dir_all(&agents_root).unwrap();
+        let reg_root = agents_root.join("registry");
+        let reg = Arc::new(crate::registry::Registry::open(reg_root).unwrap());
+        let store = WaveStore::open_in_memory().unwrap();
+        store.set_registry(reg.clone());
+        // Satisfy the FK from db_agent_instances.definition_id.
+        let mut agent = sample_agent("def-mirror", "mirror");
+        store.forge_insert(&mut agent).unwrap();
+        (tmp, store, reg)
+    }
+
+    #[test]
+    fn instance_create_named_writes_registry_file() {
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let inst = make_named_inst("inst-1", "demo", &agents_root);
+        store.instance_create(&inst).unwrap();
+        let records = reg.list_active().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].data.instance_id, "inst-1");
+        assert_eq!(records[0].data.instance_name, "demo");
+        assert_eq!(records[0].data.identity_id, None);
+        assert_eq!(records[0].data.memory_id, None);
+        assert_eq!(records[0].data.working_dir, "demo-fixture");
+    }
+
+    #[test]
+    fn instance_create_unnamed_does_not_mirror() {
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut inst = make_named_inst("inst-2", "demo2", &agents_root);
+        inst.instance_name = String::new(); // unnamed
+        store.instance_create(&inst).unwrap();
+        assert!(reg.list_active().unwrap().is_empty());
+    }
+
+    #[test]
+    fn instance_set_hidden_retires_then_unretires() {
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let inst = make_named_inst("inst-3", "demo3", &agents_root);
+        store.instance_create(&inst).unwrap();
+        store.instance_set_hidden("inst-3", true).unwrap();
+        assert!(reg.list_active().unwrap().is_empty());
+        store.instance_set_hidden("inst-3", false).unwrap();
+        assert_eq!(reg.list_active().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn instance_update_refreshes_registry_record() {
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let inst = make_named_inst("inst-4", "demo4", &agents_root);
+        store.instance_create(&inst).unwrap();
+        let mut updated = inst.clone();
+        updated.status = "paused".to_string();
+        updated.session_id = "sess-xyz".to_string();
+        store.instance_update(&updated).unwrap();
+        // instance_update doesn't bump last_launched_at_ms (started_at is
+        // immutable in the SQL update), so we just verify the record
+        // still exists and is reachable.
+        let records = reg.list_active().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].data.instance_id, "inst-4");
+    }
+
+    #[test]
+    fn instance_delete_removes_registry_file() {
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let inst = make_named_inst("inst-5", "demo5", &agents_root);
+        store.instance_create(&inst).unwrap();
+        store.instance_delete("inst-5").unwrap();
+        assert!(reg.list_active().unwrap().is_empty());
+    }
+
+    #[test]
+    fn instance_create_outside_agents_dir_skips_mirror() {
+        let (tmp, store, reg) = store_with_registry();
+        let mut inst = make_named_inst("inst-6", "demo6", tmp.path());
+        // Override working_dir to live outside any "agents/" segment.
+        inst.working_directory = tmp.path().join("projects").join("myrepo").to_string_lossy().to_string();
+        store.instance_create(&inst).unwrap();
+        // SQL row was written, but mirror is skipped because the working
+        // dir can't be expressed as a relative subpath under agents/.
+        assert!(reg.list_active().unwrap().is_empty());
+    }
+
+    #[test]
+    fn instance_create_user_path_with_agents_segment_is_skipped() {
+        // Anchored-prefix check: a user-owned workspace at
+        // `/home/user/code/agents/myproject` must NOT be mirrored. The
+        // pre-fix scan-for-segment logic matched the inner "agents",
+        // producing `working_dir = "myproject"` that would resolve to
+        // `<shared>/agents/myproject` (wrong) when PR B reads the row.
+        let (tmp, store, reg) = store_with_registry();
+        // tmp is NOT under the registry's agents root, so this is a
+        // user path that happens to include an "agents" component.
+        let outside = tmp.path().join("code").join("agents").join("myproject");
+        let mut inst = make_named_inst("inst-pathconfuse", "confuse", tmp.path());
+        inst.working_directory = outside.to_string_lossy().to_string();
+        store.instance_create(&inst).unwrap();
+        assert!(reg.list_active().unwrap().is_empty(),
+            "user path with inner 'agents' segment must not be mirrored");
+    }
+
+    #[test]
+    fn instance_create_continuation_row_does_not_mirror() {
+        // SQLite's dropdown filter excludes rows where
+        // parent_instance_id != ''. The mirror must agree, otherwise
+        // continuation rows duplicate their parent in the registry.
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let parent = make_named_inst("inst-parent", "demoP", &agents_root);
+        store.instance_create(&parent).unwrap();
+        assert_eq!(reg.list_active().unwrap().len(), 1);
+
+        let mut child = make_named_inst("inst-child", "demoP", &agents_root);
+        child.parent_instance_id = "inst-parent".to_string();
+        store.instance_create(&child).unwrap();
+        // Still only one record — the continuation row is NOT mirrored.
+        let recs = reg.list_active().unwrap();
+        assert_eq!(recs.len(), 1);
+        assert_eq!(recs[0].data.instance_id, "inst-parent");
+    }
+
+    #[test]
+    fn instance_update_does_not_resurrect_hidden_row() {
+        // Sequence: create (active) → set_hidden(true) → update.
+        // The update must NOT move the file from retired/ back to active.
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let inst = make_named_inst("inst-resurrect", "demoR", &agents_root);
+        store.instance_create(&inst).unwrap();
+        assert_eq!(reg.list_active().unwrap().len(), 1);
+
+        store.instance_set_hidden("inst-resurrect", true).unwrap();
+        assert!(reg.list_active().unwrap().is_empty(),
+            "after set_hidden(true), record must be in retired/");
+        assert!(reg.root().join("retired").join("inst-resurrect.json").exists());
+
+        // SQLite still has the row (display_hidden=1). instance_update
+        // would refresh it — the mirror must NOT re-add to active.
+        let mut updated = inst.clone();
+        updated.status = "stopped".to_string();
+        updated.ended_at = 9999;
+        store.instance_update(&updated).unwrap();
+
+        assert!(reg.list_active().unwrap().is_empty(),
+            "instance_update on a hidden row must NOT resurrect it");
+        assert!(reg.root().join("retired").join("inst-resurrect.json").exists());
+    }
+
+    #[test]
+    fn instance_create_with_display_hidden_writes_retired() {
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut inst = make_named_inst("inst-bornhidden", "demoH", &agents_root);
+        inst.display_hidden = true;
+        store.instance_create(&inst).unwrap();
+        assert!(reg.list_active().unwrap().is_empty());
+        assert!(reg.root().join("retired").join("inst-bornhidden.json").exists());
+    }
+
+    #[test]
+    fn instance_update_toggling_hidden_off_unretires() {
+        // Sequence: create → set_hidden(true) → set_hidden(false) →
+        // update. After the toggle off, the file should be in active.
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let inst = make_named_inst("inst-toggle", "demoT", &agents_root);
+        store.instance_create(&inst).unwrap();
+        store.instance_set_hidden("inst-toggle", true).unwrap();
+        store.instance_set_hidden("inst-toggle", false).unwrap();
+        assert_eq!(reg.list_active().unwrap().len(), 1);
+
+        // A subsequent update should preserve active state.
+        let mut updated = inst.clone();
+        updated.status = "paused".to_string();
+        store.instance_update(&updated).unwrap();
+        assert_eq!(reg.list_active().unwrap().len(), 1);
+        assert!(!reg.root().join("retired").join("inst-toggle.json").exists(),
+            "no orphan retired file alongside active");
+    }
+
+    #[test]
+    fn instance_set_hidden_acts_on_registry_only_row() {
+        // Cross-version case: a registry record exists (e.g. migrated
+        // from another version's SQLite) but the current version's
+        // SQLite has no matching row. `instance_set_hidden` must still
+        // flip the registry file and report success.
+        let (tmp, store, reg) = store_with_registry();
+        // Seed a registry record directly — no SQLite row.
+        let agents_root = tmp.path().join("agents");
+        std::fs::create_dir_all(&agents_root).unwrap();
+        let wd = agents_root.join("cross-ver");
+        std::fs::create_dir_all(&wd).unwrap();
+        reg.upsert(&crate::registry::NamedAgentRecord {
+            schema_version: crate::registry::MAX_SUPPORTED_SCHEMA,
+            data: crate::registry::NamedAgentRecordV1 {
+                instance_id: "inst-crossver".to_string(),
+                instance_name: "crossver".to_string(),
+                definition_id: "claude-code".to_string(),
+                identity_id: None,
+                memory_id: None,
+                working_dir: "cross-ver".to_string(),
+                created_at_ms: 100,
+                last_launched_at_ms: 100,
+                created_by_version: "0.33.821".to_string(),
+                last_launched_by_version: "0.33.821".to_string(),
+            },
+        })
+        .unwrap();
+        assert_eq!(reg.list_active().unwrap().len(), 1);
+        assert!(store.instance_get("inst-crossver").unwrap().is_none(),
+            "precondition: no SQLite row for cross-version agent");
+
+        let result = store.instance_set_hidden("inst-crossver", true).unwrap();
+        assert!(result, "must report success even when only registry was affected");
+        assert!(reg.list_active().unwrap().is_empty(),
+            "registry record must be retired");
+        assert!(reg.root().join("retired").join("inst-crossver.json").exists());
+    }
+
+    #[test]
+    fn forge_delete_cascade_removes_registry_files() {
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let inst_a = make_named_inst("inst-cascade-a", "demoA", &agents_root);
+        let inst_b = make_named_inst("inst-cascade-b", "demoB", &agents_root);
+        store.instance_create(&inst_a).unwrap();
+        store.instance_create(&inst_b).unwrap();
+        assert_eq!(reg.list_active().unwrap().len(), 2);
+
+        // Delete the forge agent — SQLite FK cascades both instance
+        // rows; the mirror must also drop both registry files.
+        store.forge_delete("def-mirror").unwrap();
+        assert!(reg.list_active().unwrap().is_empty(),
+            "forge_delete cascade must remove all child instance registry files");
     }
 }

@@ -66,7 +66,7 @@ const TabContextPanel = (props: TabContextPanelProps): JSX.Element => {
 
     return (
         <Portal>
-            <div ref={panelRef!} class="tab-context-panel" style={style()}>
+            <div ref={panelRef!} class="tab-context-panel" style={style()} data-pane-overlay>
                 <div class="tab-context-colors">
                     <For each={TAB_COLORS}>
                         {({ name, hex }) => (

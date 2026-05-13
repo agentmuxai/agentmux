@@ -132,7 +132,10 @@ async fn auth_accepts_valid_header() {
 }
 
 #[tokio::test]
-async fn auth_accepts_query_param() {
+async fn auth_rejects_query_param_on_http_routes() {
+    // 2026-05-11 audit (C3): the query-string `?authkey=` fallback
+    // bypassed CORS preflight and leaked into logs / history. Only
+    // /ws still honors it (browsers can't set headers on WS upgrade).
     let app = test_router();
     let req = Request::builder()
         .uri("/agentmux/service?authkey=test-secret-key")
@@ -143,23 +146,40 @@ async fn auth_accepts_query_param() {
         ))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
-async fn reactive_routes_skip_auth() {
+async fn reactive_routes_require_auth_unauthenticated() {
+    // Audit C1/C2 fix: /agentmux/reactive/* used to skip auth on the
+    // "localhost is trusted" assumption. It isn't — same-host CSRF
+    // via the permissive CORS layer could drive inject + poller-config.
+    // These routes now require X-AuthKey. The previous test
+    // (`reactive_routes_skip_auth`) asserted the bug; this one asserts
+    // the fix.
     let app = test_router();
     let req = Request::builder()
         .uri("/agentmux/reactive/agents")
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
-    assert_ne!(resp.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn reactive_routes_accept_valid_authkey() {
+    let app = test_router();
+    let req = Request::builder()
+        .uri("/agentmux/reactive/agents")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 }
 
 #[tokio::test]
-async fn cors_headers_present() {
+async fn cors_reflects_loopback_origin() {
     let app = test_router();
     let req = Request::builder()
         .method(Method::OPTIONS)
@@ -169,9 +189,32 @@ async fn cors_headers_present() {
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
+    // 2026-05-11 audit (C3): reflect only loopback origins.
+    let allow = resp
+        .headers()
+        .get("access-control-allow-origin")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert_eq!(allow, "http://localhost:5173");
+}
+
+#[tokio::test]
+async fn cors_rejects_non_loopback_origin() {
+    let app = test_router();
+    let req = Request::builder()
+        .method(Method::OPTIONS)
+        .uri("/")
+        .header("Origin", "https://attacker.example")
+        .header("Access-Control-Request-Method", "GET")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    // Predicate denial means no Access-Control-Allow-Origin header is
+    // emitted; browsers will block the cross-origin request as a result.
     assert!(resp
         .headers()
-        .contains_key("access-control-allow-origin"));
+        .get("access-control-allow-origin")
+        .is_none());
 }
 
 #[tokio::test]
@@ -250,6 +293,7 @@ async fn reactive_agents_returns_empty_list() {
     let app = test_router();
     let req = Request::builder()
         .uri("/agentmux/reactive/agents")
+        .header("X-AuthKey", "test-secret-key")
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
@@ -267,6 +311,7 @@ async fn reactive_poller_status() {
     let app = test_router();
     let req = Request::builder()
         .uri("/agentmux/reactive/poller/status")
+        .header("X-AuthKey", "test-secret-key")
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
