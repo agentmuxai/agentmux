@@ -18,6 +18,7 @@ import { EditorViewModel } from "@/app/view/editor/editor";
 import { BrowserViewModel } from "@/app/view/browser/browser";
 import { MemoryViewModel } from "@/app/view/memory/memory";
 import { IdentityPaneViewModel } from "@/app/view/identity/identity-pane";
+import { WorkflowsViewModel } from "@/app/view/workflows/workflows";
 import { invokeCommand } from "@/app/platform/ipc";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
@@ -53,6 +54,7 @@ BlockRegistry.set("editor", EditorViewModel as any);
 BlockRegistry.set("browser", BrowserViewModel as any);
 BlockRegistry.set("memory", MemoryViewModel as any);
 BlockRegistry.set("identity", IdentityPaneViewModel as any);
+BlockRegistry.set("workflows", WorkflowsViewModel as any);
 
 function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel): ViewModel {
     // Migration shim (v0.33.197): forge was folded into the agent pane;

@@ -7,6 +7,7 @@ mod reactive;
 pub(crate) mod service;
 mod tool_handlers;
 mod websocket;
+mod workflow_handlers;
 
 #[cfg(test)]
 pub(crate) mod tests;

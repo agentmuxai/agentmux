@@ -98,6 +98,7 @@ The widget bar's visibility logic is in `frontend/app/window/action-widgets.tsx`
 | `defwidget@devtools` | `devtools` | devtools | Pinned (toggles Chromium DevTools — does not open a pane) |
 | `defwidget@editor` | `editor` | editor | More dropdown |
 | `defwidget@swarm` | `swarm` | swarm | More dropdown |
+| `defwidget@workflows` | `workflows` | workflows | More dropdown |
 | `defwidget@help` | `help` | help | More dropdown |
 
 ### Not widgets

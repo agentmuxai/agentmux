@@ -126,6 +126,7 @@ pub fn run_forge_migrations(conn: &Connection) -> Result<(), StoreError> {
     run_forge_v6_migrations(conn)?;
     run_forge_v7_migrations(conn)?;
     run_forge_v8_migrations(conn)?;
+    run_forge_v9_migrations(conn)?;
     Ok(())
 }
 
@@ -672,6 +673,53 @@ pub fn run_forge_v8_migrations(conn: &Connection) -> Result<(), StoreError> {
         "CREATE INDEX IF NOT EXISTS idx_agent_instances_name_recent
             ON db_agent_instances(instance_name, started_at DESC)
             WHERE display_hidden = 0 AND instance_name != '';",
+    )?;
+
+    Ok(())
+}
+
+/// v9 — Workflows pane (issue #753, RFC: Workflows pane Phase 1).
+///
+/// Adds two tables for the visual DAG-of-blocks workflow engine:
+///
+///   * `db_workflow_definitions` — workflow JSON (nodes, edges, viewport)
+///     keyed by id, used by the canvas + executor.
+///   * `db_workflow_runs` — append-only run history. One row per
+///     `RunWorkflow` invocation. Holds the per-block status snapshot
+///     emitted on completion. High-churn time-series; oldest rows are
+///     evicted by a future retention task.
+///
+/// Renumbered from v8 → v9 during the merge with main, where v8 was
+/// taken by the named-agent-continuation migration (#816).
+pub fn run_forge_v9_migrations(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS db_workflow_definitions (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            graph TEXT NOT NULL DEFAULT '{\"nodes\":[],\"edges\":[]}',
+            viewport TEXT NOT NULL DEFAULT '{\"x\":0,\"y\":0,\"zoom\":1}',
+            created_at INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflow_definitions_updated
+            ON db_workflow_definitions(updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS db_workflow_runs (
+            id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'running',
+            started_at INTEGER NOT NULL DEFAULT 0,
+            ended_at INTEGER NOT NULL DEFAULT 0,
+            block_states TEXT NOT NULL DEFAULT '{}',
+            output TEXT NOT NULL DEFAULT '',
+            error TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY (workflow_id) REFERENCES db_workflow_definitions(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow_started
+            ON db_workflow_runs(workflow_id, started_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_workflow_runs_status
+            ON db_workflow_runs(status);",
     )?;
 
     Ok(())
