@@ -1,6 +1,6 @@
 # Spec: Shared agent registry — cross-version "Continue agent" dropdown
 
-**Status:** Spec (no implementation yet)
+**Status:** PR A landed (parallel-write registry); PR B pending (cut-over reads + migration)
 **Owner:** AgentA
 **Date:** 2026-05-12
 **Driving requirement:** "Agents are shared across versions. The Continue dropdown should show every agent I've ever named, no matter which agentmux version I launched it from. And if a future agentmux version doesn't understand an older agent's schema, it should fail soft — not erase or crash."
