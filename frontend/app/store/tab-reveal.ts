@@ -93,11 +93,14 @@ export function scheduleRevealLift(): void {
 
     if (typeof PerformanceObserver === "undefined") {
         // No PerformanceObserver in this runtime (test env, etc.).
-        // Fall back to the hard cap so we still lift eventually.
+        // Fall back to the hard cap — without longtask data we can't
+        // detect the actual mount-settle moment, so we wait the full
+        // MAX_GATE_MS budget before revealing rather than using the
+        // shorter SETTLE_MS which would reveal mid-mount.
         activeFallbackTimer = setTimeout(() => {
             activeFallbackTimer = null;
             setTabSwitching(false);
-        }, SETTLE_MS);
+        }, MAX_GATE_MS);
         return;
     }
 
@@ -114,11 +117,13 @@ export function scheduleRevealLift(): void {
         activeObserver = observer;
     } catch {
         // longtask observer not supported (Safari historically). Fall
-        // back to fixed SETTLE_MS.
+        // back to the hard cap — same reasoning as the no-PO path:
+        // without longtask data, wait the full MAX_GATE_MS budget
+        // rather than revealing mid-mount at SETTLE_MS.
         activeFallbackTimer = setTimeout(() => {
             activeFallbackTimer = null;
             setTabSwitching(false);
-        }, SETTLE_MS);
+        }, MAX_GATE_MS);
         return;
     }
 

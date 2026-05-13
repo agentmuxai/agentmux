@@ -41,9 +41,10 @@ describe("tab-reveal gate", () => {
     afterEach(() => {
         // Reset so subsequent tests start with the gate down.
         // scheduleRevealLift + fast-forward triggers the fallback
-        // timer to clear the signal; advance enough to drain it.
+        // timer (MAX_GATE_MS=800) to clear the signal; advance past
+        // it to drain.
         scheduleRevealLift();
-        vi.advanceTimersByTime(200);
+        vi.advanceTimersByTime(1000);
         vi.useRealTimers();
     });
 
@@ -69,10 +70,14 @@ describe("tab-reveal gate", () => {
         vi.advanceTimersByTime(500);
         expect(read(tabSwitching)).toBe(true);
         // Pair the hold with a schedule once the simulated async work
-        // completes. The fallback timer arms now (SETTLE_MS=80ms) and
-        // fires, dropping the gate.
+        // completes. The fallback timer arms now (MAX_GATE_MS=800ms)
+        // and fires, dropping the gate.
         scheduleRevealLift();
-        vi.advanceTimersByTime(80);
+        // Still well within the hard cap — gate stays up.
+        vi.advanceTimersByTime(400);
+        expect(read(tabSwitching)).toBe(true);
+        // Past MAX_GATE_MS — fallback fires, gate drops.
+        vi.advanceTimersByTime(500);
         expect(read(tabSwitching)).toBe(false);
     });
 
@@ -83,12 +88,13 @@ describe("tab-reveal gate", () => {
         // shortly after a schedule could see the stale timer fire and
         // drop the gate mid-await.
         scheduleRevealLift();
-        // Don't let the prior timer fire yet — advance just under
-        // SETTLE_MS, then re-enter via holdRevealGate.
-        vi.advanceTimersByTime(50);
+        // Get well into the original fallback window, then re-enter
+        // via holdRevealGate.
+        vi.advanceTimersByTime(400);
         holdRevealGate();
-        // Past where the stale timer would have fired.
-        vi.advanceTimersByTime(200);
+        // Past where the stale timer would have fired (MAX_GATE_MS
+        // total from the schedule call, i.e. 400ms after the hold).
+        vi.advanceTimersByTime(1000);
         expect(read(tabSwitching)).toBe(true);
     });
 
@@ -99,12 +105,12 @@ describe("tab-reveal gate", () => {
         holdRevealGate();
         vi.advanceTimersByTime(30);
         scheduleRevealLift();
-        // 50ms < SETTLE_MS, so the gate is still up.
-        vi.advanceTimersByTime(50);
+        // Well within MAX_GATE_MS, so the gate is still up.
+        vi.advanceTimersByTime(400);
         expect(read(tabSwitching)).toBe(true);
         holdRevealGate();
         // Past where the prior fallback would have fired.
-        vi.advanceTimersByTime(200);
+        vi.advanceTimersByTime(1000);
         expect(read(tabSwitching)).toBe(true);
     });
 });
