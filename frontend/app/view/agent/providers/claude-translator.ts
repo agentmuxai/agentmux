@@ -51,9 +51,10 @@ export class ClaudeTranslator implements OutputTranslator {
             return this.handleAssistantMessage(rawEvent.message);
         }
 
-        // Case 4: Top-level "user" event (tool results)
+        // Case 4: Top-level "user" event (tool results). Pass the full
+        // event so `tool_use_result` (sibling of `message`) is reachable.
         if (rawEvent.type === "user" && rawEvent.message) {
-            return this.handleUserMessage(rawEvent.message);
+            return this.handleUserMessage(rawEvent.message, rawEvent.tool_use_result);
         }
 
         // Case 5a: Top-level "result" event — session complete with stats
@@ -183,9 +184,13 @@ export class ClaudeTranslator implements OutputTranslator {
     }
 
     /**
-     * Top-level "user" event contains tool_result blocks.
+     * Top-level "user" event contains tool_result blocks. The caller
+     * forwards `event.tool_use_result` here so the structured shape
+     * (`stdout/stderr/interrupted`) reaches `buildToolResults` —
+     * keeps this path symmetric with the `message_start` user-role
+     * path.
      */
-    private handleUserMessage(message: any): StreamEvent[] {
+    private handleUserMessage(message: any, structuredResult?: any): StreamEvent[] {
         const content = message.content;
         if (!content) return [];
 
@@ -196,22 +201,7 @@ export class ClaudeTranslator implements OutputTranslator {
 
         // Handle array content with tool_result blocks
         if (Array.isArray(content)) {
-            const results: StreamEvent[] = [];
-            for (const block of content) {
-                if (block.type === "tool_result") {
-                    const isError = block.is_error === true;
-                    const toolId = block.tool_use_id || `tool_${Date.now()}`;
-                    results.push({
-                        type: "tool_result",
-                        tool: block.tool_name || this.toolNameById.get(toolId) || "Unknown",
-                        id: toolId,
-                        status: isError ? "failed" : "success",
-                        result: typeof block.content === "string"
-                            ? { content: block.content }
-                            : block.content,
-                    });
-                }
-            }
+            const results = this.buildToolResults(content, structuredResult);
             return results;
         }
 
@@ -240,46 +230,56 @@ export class ClaudeTranslator implements OutputTranslator {
 
         // Check for tool_result blocks in user messages
         if (message.role === "user" && Array.isArray(message.content)) {
-            const results: StreamEvent[] = [];
-            // `tool_use_result` is a sibling of `message` on the event,
-            // not embedded per-block — it carries structured stdout/
-            // stderr/exitCode for the tool that just ran. With a SINGLE
-            // tool_result block in the message we can confidently apply
-            // it; with multiple blocks (parallel tool use) the structured
-            // result is unattributable (Claude doesn't include a
-            // tool_use_id inside `tool_use_result`), so every block
-            // falls back to the per-block string form. The dropped
-            // structured shape just means BashOutputViewer renders
-            // from `result.content` instead — same visible output,
-            // missing the exitCode field.
-            const structuredResult = event.tool_use_result;
-            const toolResultBlocks = message.content.filter(
-                (b: any) => b && b.type === "tool_result",
-            );
-            const canApplyStructured =
-                toolResultBlocks.length === 1
-                && structuredResult
-                && typeof structuredResult === "object";
-            for (const block of message.content) {
-                if (block.type === "tool_result") {
-                    const isError = block.is_error === true;
-                    const toolId = block.tool_use_id || `tool_${Date.now()}`;
-                    const fallback = typeof block.content === "string"
-                        ? { content: block.content }
-                        : block.content;
-                    results.push({
-                        type: "tool_result",
-                        tool: block.tool_name || this.toolNameById.get(toolId) || "Unknown",
-                        id: toolId,
-                        status: isError ? "failed" : "success",
-                        result: canApplyStructured ? structuredResult : fallback,
-                    });
-                }
-            }
-            return results;
+            return this.buildToolResults(message.content, event.tool_use_result);
         }
 
         return [];
+    }
+
+    /**
+     * Shared tool_result builder used by both entry points
+     * (`message_start` with role:user, and top-level `user` events).
+     *
+     * `tool_use_result` is a sibling of `message` on the event — it
+     * carries structured `{ stdout, stderr, interrupted }` for the
+     * tool that just ran. With a SINGLE tool_result block in the
+     * message we can confidently apply it; with multiple blocks
+     * (parallel tool use) the structured result is unattributable
+     * (Claude doesn't include a `tool_use_id` inside it), so every
+     * block falls back to the per-block string form.
+     *
+     * Note: Claude's `tool_use_result` carries no `exitCode` — only
+     * stdout/stderr/interrupted. The wrapper encodes the exit code
+     * as an `<exited N in Ts>` prefix in stdout; BashOutputViewer
+     * parses it back out at render time so failed bash commands stay
+     * visible even when stderr is empty.
+     */
+    private buildToolResults(content: any[], structuredResult: any): StreamEvent[] {
+        const results: StreamEvent[] = [];
+        const toolResultBlocks = content.filter(
+            (b: any) => b && b.type === "tool_result",
+        );
+        const canApplyStructured =
+            toolResultBlocks.length === 1
+            && structuredResult
+            && typeof structuredResult === "object";
+        for (const block of content) {
+            if (block.type === "tool_result") {
+                const isError = block.is_error === true;
+                const toolId = block.tool_use_id || `tool_${Date.now()}`;
+                const fallback = typeof block.content === "string"
+                    ? { content: block.content }
+                    : block.content;
+                results.push({
+                    type: "tool_result",
+                    tool: block.tool_name || this.toolNameById.get(toolId) || "Unknown",
+                    id: toolId,
+                    status: isError ? "failed" : "success",
+                    result: canApplyStructured ? structuredResult : fallback,
+                });
+            }
+        }
+        return results;
     }
 
     /**
