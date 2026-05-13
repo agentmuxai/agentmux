@@ -1,3 +1,4 @@
+mod agents;
 mod backend;
 mod config;
 mod event_log;
