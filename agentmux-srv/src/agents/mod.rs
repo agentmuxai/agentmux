@@ -16,4 +16,4 @@ pub mod translator;
 pub mod types;
 
 pub use runner::{run_agent, AgentError, AgentRunHandle};
-pub use types::{AgentEvent, AgentRef, AgentRunResult, AgentTask, TokenCounts, Turn};
+pub use types::{AgentEvent, AgentRef, AgentRunResult, AgentTask, TokenCounts, AgentTurn};

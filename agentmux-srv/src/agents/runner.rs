@@ -17,13 +17,16 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::types::{AgentEvent, AgentRef, AgentRunResult, AgentTask};
 
-/// Handle returned by `run_agent`. Callers drain `events` for the
-/// streaming side (UI render or per-event broker publish) and await
-/// `final_result` for the structured terminal value (workflow Agent
-/// block's downstream output).
+/// Handle returned by `run_agent`. The caller already holds the
+/// `mpsc::UnboundedReceiver<AgentEvent>` they paired with the `tx`
+/// passed into `run_agent`; this handle adds the structured terminal
+/// value via `final_result` (workflow Agent block's downstream
+/// output) and the `instance_id` of the backing `db_agent_instances`
+/// row.
 ///
-/// Closing the `events` receiver implicitly cancels the run only if
-/// the runner observes it — Phase 2 adds an explicit AbortHandle.
+/// Dropping the caller's receiver implicitly cancels the run only if
+/// the runner observes the send error — Phase 2 adds an explicit
+/// `AbortHandle`.
 pub struct AgentRunHandle {
     /// `db_agent_instances.id` of the row backing this run. Empty
     /// string until the runner allocates one (PR 1).
