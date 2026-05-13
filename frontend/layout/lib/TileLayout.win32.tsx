@@ -61,13 +61,22 @@ function TileLayoutComponent(props: TileLayoutProps) {
     const overlayTransform = () => layoutModel.overlayTransform();
     const isResizing = () => layoutModel.isResizing();
 
-    // Track animate state
+    // Track animate state.
+    //
+    // Issue #774 / SPEC_TAB_CONTENT_REVEAL_GATE: the prior 50 ms was
+    // too short. Block measurements (block.tsx `getBoundingClientRect`,
+    // virtual-list `measureElement`) haven't completed at the 50 ms
+    // mark, so transitions enable mid-settle and panes snap-then-
+    // animate. Bumped to 150 ms — gives the post-paint measurement
+    // wave time to complete before transitions kick in. Combined with
+    // the reveal gate at the workspace level, the user sees neither
+    // the snap nor the partial paint.
     const [animate, setAnimate] = createSignal(false);
     onMount(() => {
         setTimeout(() => {
             setAnimate(true);
             layoutModel.ready._set(true);
-        }, 50);
+        }, 150);
 
         // Windows 11 safety net: the browser's dragend event can be swallowed
         // when snap-layouts or Alt+Tab interrupts a drag, preventing pragmatic-dnd's

@@ -8,6 +8,7 @@ import { StatusBar } from "@/app/statusbar/StatusBar";
 import { WindowHeader } from "@/app/window/window-header";
 import { TabContent } from "@/app/tab/tabcontent";
 import { atoms } from "@/store/global";
+import { tabSwitching } from "@/store/tab-reveal";
 import { For, Show, createMemo } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -34,7 +35,18 @@ function WorkspaceElem(): JSX.Element {
                             {(tid) => (
                                 <div
                                     class="flex flex-row h-full w-full"
-                                    style={{ display: tid === tabId() ? "flex" : "none" }}
+                                    style={{
+                                        display: tid === tabId() ? "flex" : "none",
+                                        // Reveal gate (issue #774): hide the active tab while
+                                        // it's still settling so the piecemeal mount cascade
+                                        // doesn't paint stage-by-stage. `visibility: hidden`
+                                        // preserves layout and suppresses paint without
+                                        // unmounting children. Lifted by `tab-reveal.ts`'s
+                                        // frame-budget detector. Only applies to the active
+                                        // tab — inactive tabs are `display: none` already.
+                                        visibility:
+                                            tid === tabId() && tabSwitching() ? "hidden" : null,
+                                    }}
                                 >
                                     <ErrorBoundary>
                                         <TabContent tabId={tid} />
