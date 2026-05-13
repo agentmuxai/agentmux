@@ -49,6 +49,35 @@ let activeStartedAt = 0;
 // `tick()` superseded check, but for the no-observer path.
 let activeFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
+function cancelPendingDetector(): void {
+    // Tear down any pending detector from a prior switch — its
+    // observer is still subscribed, and its tick() would race the new
+    // one to disconnect/lift. Same applies to the fallback-timer path.
+    activeObserver?.disconnect();
+    activeObserver = null;
+    if (activeFallbackTimer !== null) {
+        clearTimeout(activeFallbackTimer);
+        activeFallbackTimer = null;
+    }
+}
+
+/**
+ * Pin the reveal gate up without starting the auto-lift detector. Use
+ * before async work (RPC, dynamic import, layout-model polling) where
+ * `scheduleRevealLift()` would let the SETTLE window elapse during the
+ * await with no longtasks firing, prematurely revealing an empty or
+ * half-mounted tab.
+ *
+ * Every `holdRevealGate()` MUST be paired with a follow-up
+ * `scheduleRevealLift()` (typically in a `finally`) once the async
+ * work resolves, otherwise the gate never lifts and the tab stays
+ * hidden forever.
+ */
+export function holdRevealGate(): void {
+    setTabSwitching(true);
+    cancelPendingDetector();
+}
+
 /**
  * Mark the gate active and start watching for clean frames. Idempotent —
  * a second call before the first completes resets the detector. That's
@@ -60,15 +89,7 @@ export function scheduleRevealLift(): void {
     activeStartedAt = performance.now();
     let lastLongTaskAt = activeStartedAt;
 
-    // Tear down any pending detector from a prior switch — its
-    // observer is still subscribed, and its tick() would race the new
-    // one to disconnect/lift. Same applies to the fallback-timer path.
-    activeObserver?.disconnect();
-    activeObserver = null;
-    if (activeFallbackTimer !== null) {
-        clearTimeout(activeFallbackTimer);
-        activeFallbackTimer = null;
-    }
+    cancelPendingDetector();
 
     if (typeof PerformanceObserver === "undefined") {
         // No PerformanceObserver in this runtime (test env, etc.).
