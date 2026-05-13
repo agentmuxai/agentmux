@@ -309,15 +309,24 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
         .map_err(|e| format!("agent run failed: {e}"))?;
 
     // NOTE: This output object is *manually constructed* to match the
-    // existing workflow block convention (snake_case keys, like API's
-    // `status`/`body`, Condition's `result`, Response's `value`).
-    // Do NOT use `serde_json::to_value(&result)` here — that would
-    // emit camelCase (`costUsd`) because AgentRunResult carries
-    // `#[serde(rename_all = "camelCase")]` for IPC consistency with
-    // the frontend, breaking `{{<block_id>.cost_usd}}` templates.
+    // existing workflow block convention (all snake_case keys, like
+    // API's `status`/`body`, Condition's `result`, Response's `value`).
+    // Do NOT use `serde_json::to_value(&result)` or embed
+    // `result.tokens` directly — both AgentRunResult and TokenCounts
+    // carry `#[serde(rename_all = "camelCase")]` for IPC consistency
+    // with the frontend, which would produce `costUsd` / `cacheCreation`
+    // and break `{{<block_id>.cost_usd}}` /
+    // `{{<block_id>.tokens.cache_creation}}` templates. Flatten the
+    // token fields explicitly so the workflow-template surface stays
+    // uniformly snake_case.
     Ok(json!({
         "response": result.response,
-        "tokens": result.tokens,
+        "tokens": {
+            "input": result.tokens.input,
+            "output": result.tokens.output,
+            "cache_creation": result.tokens.cache_creation,
+            "cache_read": result.tokens.cache_read,
+        },
         "cost_usd": result.cost_usd,
     }))
 }
