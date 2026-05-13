@@ -22,8 +22,14 @@ const ICON_SIZE: i32 = 80;
 const BG_COLOR: u32 = 0x001F1A1A;
 
 // HANDLE is a raw pointer; wrap it to cross the thread boundary safely.
+// Use `.take()` (not `.0`) inside move closures: Rust 2021 precise
+// capture would otherwise capture the field `*mut c_void` directly,
+// bypassing the `Send` impl.
 struct SendHandle(HANDLE);
 unsafe impl Send for SendHandle {}
+impl SendHandle {
+    fn take(self) -> HANDLE { self.0 }
+}
 
 /// Spawn the pre-splash thread and return the named Win32 event name
 /// to pass to the CEF host as `AGENTMUX_SPLASH_EVENT`.
@@ -48,7 +54,7 @@ pub fn spawn_splash(dir_hash: &str) -> Option<String> {
     }
 
     let handle = SendHandle(ev);
-    thread::spawn(move || unsafe { run_splash(handle.0) });
+    thread::spawn(move || unsafe { run_splash(handle.take()) });
     Some(event_name)
 }
 
