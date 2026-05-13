@@ -4,7 +4,6 @@
 **Status:** Draft — lands after PR #755 (Workflows Phase 1) merges
 **Author:** AgentA
 **Issue:** RFC #753 (Workflows pane), follow-up to PR #755
-**Related memory:** [`project_workflows_phase_1_5.md`](../../../../.claude/projects/C--Systems/memory/project_workflows_phase_1_5.md)
 
 ---
 
@@ -359,5 +358,4 @@ PRs 0–4 each independently shippable; Phase 1.5 closes when all four land. Est
 - PR #746 (v7 schema: Forge → Identity + Memory)
 - PR #749 (Memory pane), #750 (Identity pane)
 - PR #804 (`agentmux-bashwrap` β.A), #809 (β.B wiring)
-- Existing memory: [`project_workflows_phase_1_5.md`](../../../../.claude/projects/C--Systems/memory/project_workflows_phase_1_5.md)
 - Master reducer status: `docs/specs/MASTER_REDUCER_STACK_STATUS_2026-05-05.md`

@@ -442,7 +442,7 @@ declare global {
     type AgentEvent =
         | { type: "assistant_text"; delta: string }
         | { type: "tool_use"; toolUseId: string; tool: string; input: unknown }
-        | { type: "tool_result"; toolUseId: string; output: unknown; isError?: boolean }
+        | { type: "tool_result"; toolUseId: string; output: unknown; isError: boolean }
         | { type: "cost"; costUsd: number; tokens: TokenCounts }
         | { type: "done"; response: string; transcript: AgentTurn[] }
         | { type: "error"; message: string };
