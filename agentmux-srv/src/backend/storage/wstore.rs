@@ -86,6 +86,14 @@ impl WaveStore {
             .clone()
     }
 
+    /// Public accessor for the cross-version named-agent registry.
+    /// Returns `None` when the registry couldn't be resolved at
+    /// startup (CI / unusual envs); callers must handle the absent
+    /// case by falling back to SQLite.
+    pub fn shared_agent_registry(&self) -> Option<Arc<Registry>> {
+        self.registry()
+    }
+
     /// Table name for a WaveObj type: `db_<otype>`.
     fn table_name<T: WaveObj>() -> String {
         format!("db_{}", T::get_otype())

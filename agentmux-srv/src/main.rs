@@ -323,6 +323,32 @@ async fn main() {
         match registry::Registry::open(root.clone()) {
             Ok(reg) => {
                 tracing::info!(root = %root.display(), "registry: shared agent registry attached");
+                // PR B — one-shot backfill from every per-version
+                // objects.db into the registry. Idempotent via marker
+                // file in the registry root. Read-only on SQLite.
+                let shared_home = root
+                    .parent()
+                    .and_then(|p| p.parent())
+                    .map(|p| p.to_path_buf());
+                if let Some(home) = shared_home {
+                    match registry::migrate_from_sqlite_once(&home, &reg) {
+                        Ok(stats) if stats.versions_scanned > 0 || stats.records_written > 0 => {
+                            tracing::info!(
+                                versions_scanned = stats.versions_scanned,
+                                rows_seen = stats.rows_seen,
+                                records_written = stats.records_written,
+                                records_skipped_existing = stats.records_skipped_existing,
+                                records_skipped_unmappable = stats.records_skipped_unmappable,
+                                "registry: one-shot SQLite migration complete"
+                            );
+                        }
+                        Ok(_) => {} // marker already existed; no-op
+                        Err(e) => tracing::warn!(
+                            error = %e,
+                            "registry: SQLite migration errored — continuing with empty registry; SQLite remains authoritative"
+                        ),
+                    }
+                }
                 wstore_raw.set_registry(Arc::new(reg));
             }
             Err(e) => tracing::warn!(

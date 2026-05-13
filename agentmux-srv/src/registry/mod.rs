@@ -18,6 +18,7 @@
 #![allow(dead_code, unused_imports)]
 
 mod atomic;
+mod migrate;
 mod paths;
 mod schema;
 mod store;
@@ -25,6 +26,7 @@ mod store;
 #[cfg(test)]
 mod tests;
 
+pub use migrate::{migrate_from_sqlite_once, MigrateStats};
 pub use paths::resolve_shared_registry_dir;
 pub use schema::{
     NamedAgentRecord, NamedAgentRecordV1, ValidationError, MAX_SUPPORTED_SCHEMA,
