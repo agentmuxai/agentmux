@@ -133,7 +133,7 @@ pub struct AgentTurn {
 /// workflow Agent block returns to downstream blocks. The agent
 /// pane discards this (it has already rendered the stream) but
 /// constructs the same struct for the audit log.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRunResult {
     pub response: String,
