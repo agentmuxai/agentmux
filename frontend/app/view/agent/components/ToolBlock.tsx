@@ -96,6 +96,12 @@ function findScrollParent(el: HTMLElement): HTMLElement | null {
 // upward instead of downward.
 const OVERLAY_MAX_HEIGHT_PX = 400;
 
+// Hover-expand delays — match docs/specs/tool-collapse.md §"Expanded State (on Hover)".
+// 150ms enter avoids flicker on scroll-through; 300ms leave lets the user move the
+// cursor down into the expanded overlay without it collapsing first.
+const HOVER_ENTER_DELAY_MS = 150;
+const HOVER_LEAVE_DELAY_MS = 300;
+
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // Position of the collapsed row in viewport coordinates, recomputed when
     // pinned flips true. The overlay is rendered via a <Portal> to document.body
@@ -112,8 +118,41 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
 
     let blockRef: HTMLDivElement | undefined;
 
-    const expanded = () => props.pinned;
-    const overlayMode = () => props.pinned;
+    // Hover-expand state. Click pins (props.pinned); mouse hover
+    // expands transiently. The overlay portal uses overlayMode for
+    // styling — same for both hover and pin.
+    const [hovering, setHovering] = createSignal(false);
+    let enterTimer: ReturnType<typeof setTimeout> | undefined;
+    let leaveTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const clearTimers = () => {
+        if (enterTimer !== undefined) { clearTimeout(enterTimer); enterTimer = undefined; }
+        if (leaveTimer !== undefined) { clearTimeout(leaveTimer); leaveTimer = undefined; }
+    };
+
+    const handleMouseEnter = () => {
+        if (props.pinned) return;
+        if (leaveTimer !== undefined) { clearTimeout(leaveTimer); leaveTimer = undefined; }
+        if (hovering()) return;
+        enterTimer = setTimeout(() => {
+            setHovering(true);
+            enterTimer = undefined;
+        }, HOVER_ENTER_DELAY_MS);
+    };
+
+    const handleMouseLeave = () => {
+        if (enterTimer !== undefined) { clearTimeout(enterTimer); enterTimer = undefined; }
+        if (!hovering()) return;
+        leaveTimer = setTimeout(() => {
+            setHovering(false);
+            leaveTimer = undefined;
+        }, HOVER_LEAVE_DELAY_MS);
+    };
+
+    onCleanup(clearTimers);
+
+    const expanded = () => props.pinned || hovering();
+    const overlayMode = () => expanded();
 
     const statusIcon = (): string => STATUS_ICON[props.node.status] || "•";
 
@@ -135,9 +174,11 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         });
     };
 
-    // Measure position when pin flips true so the portal has coordinates on first render.
+    // Measure position when overlay flips visible so the portal has
+    // coordinates on first render. Fires for both pin (click) and
+    // hover paths via the unified `overlayMode()` getter.
     createEffect(() => {
-        if (props.pinned && blockRef) {
+        if (overlayMode() && blockRef) {
             measure();
         }
     });
@@ -216,6 +257,8 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     return (
         <div
             ref={blockRef}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
             class={clsx("agent-tool-block", {
                 collapsed: !expanded(),
                 expanded: expanded(),
@@ -264,6 +307,8 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                         })}
                         style={overlayStyle()}
                         onClick={(e) => e.stopPropagation()}
+                        onMouseEnter={handleMouseEnter}
+                        onMouseLeave={handleMouseLeave}
                     >
                         <ToolBlockOverlay
                             node={props.node}

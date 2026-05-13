@@ -16,8 +16,21 @@ interface BashOutputViewerProps {
 }
 
 export const BashOutputViewer = ({ params, result }: BashOutputViewerProps): JSX.Element => {
-    const hasOutput = result && (result.stdout || result.stderr);
-    const hasError = result && result.exitCode !== 0;
+    // Tool result may come back as either the structured BashResult
+    // shape (Claude Code's tool_use_result: stdout/stderr/exitCode)
+    // or as the loose `{ content: "<string>" }` fallback when the
+    // translator can't find a structured field. Treat both — the
+    // user just wants to see the output.
+    const looseResult = result as Record<string, unknown> | undefined;
+    const stdout =
+        (looseResult?.stdout as string | undefined) ??
+        (looseResult?.content as string | undefined) ??
+        "";
+    const stderr = (looseResult?.stderr as string | undefined) ?? "";
+    const exitCode = looseResult?.exitCode as number | undefined;
+
+    const hasOutput = stdout.length > 0 || stderr.length > 0;
+    const hasError = exitCode !== undefined && exitCode !== 0;
 
     return (
         <div class="agent-bash">
@@ -31,20 +44,20 @@ export const BashOutputViewer = ({ params, result }: BashOutputViewerProps): JSX
             </div>
             <Show when={hasOutput}>
                 <pre class={clsx("agent-bash-output", { "has-error": hasError })}>
-                    {result.stdout}
-                    <Show when={result.stderr}>
-                        <span class="agent-bash-stderr">{result.stderr}</span>
+                    {stdout}
+                    <Show when={stderr}>
+                        <span class="agent-bash-stderr">{stderr}</span>
                     </Show>
                 </pre>
             </Show>
-            <Show when={result}>
+            <Show when={exitCode !== undefined}>
                 <div
                     class={clsx("agent-bash-exit", {
-                        "exit-success": result.exitCode === 0,
-                        "exit-error": result.exitCode !== 0,
+                        "exit-success": exitCode === 0,
+                        "exit-error": exitCode !== 0,
                     })}
                 >
-                    Exit code: {result.exitCode}
+                    Exit code: {exitCode}
                 </div>
             </Show>
         </div>

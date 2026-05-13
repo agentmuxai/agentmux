@@ -220,7 +220,19 @@ export class ClaudeTranslator implements OutputTranslator {
 
     /**
      * message_start may contain tool_result blocks when role is "user"
-     * (these are the results of tool calls being fed back to Claude)
+     * (these are the results of tool calls being fed back to Claude).
+     *
+     * Claude Code emits TWO views of the result:
+     *   - `message.content[N].content` — human-readable string the model
+     *     sees (concatenated stdout/stderr/exit prefix).
+     *   - `event.tool_use_result` — sibling structured object with
+     *     `stdout`, `stderr`, and optional `interrupted`.
+     *
+     * The structured shape is what BashOutputViewer (and other
+     * per-tool viewers) expect — `result.stdout` / `result.stderr`.
+     * Prefer it; fall back to the string-wrapped form when the
+     * provider didn't emit a structured shape (e.g. non-bash tools,
+     * older Claude Code).
      */
     private handleMessageStart(event: any): StreamEvent[] {
         const message = event.message;
@@ -229,18 +241,22 @@ export class ClaudeTranslator implements OutputTranslator {
         // Check for tool_result blocks in user messages
         if (message.role === "user" && Array.isArray(message.content)) {
             const results: StreamEvent[] = [];
+            const structuredResult = event.tool_use_result;
             for (const block of message.content) {
                 if (block.type === "tool_result") {
                     const isError = block.is_error === true;
                     const toolId = block.tool_use_id || `tool_${Date.now()}`;
+                    const fallback = typeof block.content === "string"
+                        ? { content: block.content }
+                        : block.content;
                     results.push({
                         type: "tool_result",
                         tool: block.tool_name || this.toolNameById.get(toolId) || "Unknown",
                         id: toolId,
                         status: isError ? "failed" : "success",
-                        result: typeof block.content === "string"
-                            ? { content: block.content }
-                            : block.content,
+                        result: structuredResult && typeof structuredResult === "object"
+                            ? structuredResult
+                            : fallback,
                     });
                 }
             }
