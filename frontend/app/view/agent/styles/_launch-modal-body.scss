@@ -62,6 +62,15 @@
         opacity: 0.5;
         cursor: not-allowed;
     }
+
+    // <select> dropdown options render in Chromium's native picker —
+    // it doesn't reliably inherit the parent's color, so options
+    // appear with system white-on-white when the OS theme is light.
+    // Pin readable colors against the app's panel background.
+    & > option {
+        color: var(--main-text-color);
+        background-color: var(--main-bg-color);
+    }
 }
 
 .agent-launch-modal-hint {
