@@ -322,8 +322,61 @@ async fn main() {
     if let Some(root) = registry::resolve_shared_registry_dir() {
         match registry::Registry::open(root.clone()) {
             Ok(reg) => {
-                tracing::info!(root = %root.display(), "registry: shared agent registry attached");
-                wstore_raw.set_registry(Arc::new(reg));
+                // PR B — one-shot backfill from every per-version
+                // objects.db into the registry. Idempotent via marker
+                // file in the registry root. Read-only on SQLite.
+                //
+                // Gating: the registry is only attached to wstore if
+                // migration completes (Ok) — that way the read path
+                // never serves a partial view. On Err, mirror writes
+                // are also disabled (registry stays detached); SQLite
+                // remains authoritative and the next launch retries
+                // the migration via the same marker logic.
+                let shared_home = root
+                    .parent()
+                    .and_then(|p| p.parent())
+                    .map(|p| p.to_path_buf());
+                let migration_ok = match shared_home {
+                    Some(home) => match registry::migrate_from_sqlite_once(&home, &reg) {
+                        Ok(stats) => {
+                            if stats.versions_scanned > 0 || stats.records_written > 0 {
+                                tracing::info!(
+                                    versions_scanned = stats.versions_scanned,
+                                    rows_seen = stats.rows_seen,
+                                    records_written = stats.records_written,
+                                    records_skipped_existing = stats.records_skipped_existing,
+                                    records_skipped_unmappable = stats.records_skipped_unmappable,
+                                    complete = stats.complete,
+                                    "registry: one-shot SQLite migration finished"
+                                );
+                            }
+                            // Gate attach on `complete` — partial
+                            // migration leaves the registry detached
+                            // so the read path serves SQLite (full,
+                            // current-version-only view) rather than
+                            // a half-populated registry.
+                            stats.complete
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "registry: SQLite migration errored — leaving registry detached; SQLite stays authoritative, next launch retries"
+                            );
+                            false
+                        }
+                    },
+                    None => {
+                        tracing::warn!(
+                            root = %root.display(),
+                            "registry: cannot resolve shared home (root has fewer than 2 ancestors) — leaving registry detached"
+                        );
+                        false
+                    }
+                };
+                if migration_ok {
+                    tracing::info!(root = %root.display(), "registry: shared agent registry attached");
+                    wstore_raw.set_registry(Arc::new(reg));
+                }
             }
             Err(e) => tracing::warn!(
                 root = %root.display(),

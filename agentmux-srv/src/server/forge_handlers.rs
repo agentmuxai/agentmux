@@ -1153,10 +1153,6 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 } else {
                     cmd.limit.min(1000)
                 };
-                let instances = wstore
-                    .instance_list_named(limit, cmd.definition_id.as_deref())
-                    .map_err(|e| format!("listnamedagents: {e}"))?;
-
                 // Resolve bundle names once per response. With ≤200
                 // rows and typical bundle counts in the low dozens,
                 // a linear lookup on cached lists beats per-row
@@ -1171,50 +1167,160 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .bundle_memory_list()
                     .map_err(|e| format!("listnamedagents: bundle_memory_list: {e}"))?;
 
-                let rows: Vec<NamedAgentRow> = instances
-                    .into_iter()
-                    .map(|inst| {
-                        let def = defs.iter().find(|d| d.id == inst.definition_id);
-                        let identity_name = if inst.identity_id.is_empty() {
-                            "(ambient creds)".to_string()
-                        } else {
-                            identities
-                                .iter()
-                                .find(|i| i.id == inst.identity_id)
-                                .map(|i| i.name.clone())
-                                .unwrap_or_else(|| "(missing identity)".to_string())
-                        };
-                        let memory_name = if inst.memory_id.is_empty() {
-                            "(vanilla CLI)".to_string()
-                        } else {
-                            memories
-                                .iter()
-                                .find(|m| m.id == inst.memory_id)
-                                .map(|m| m.name.clone())
-                                .unwrap_or_else(|| "(missing memory)".to_string())
-                        };
-                        NamedAgentRow {
-                            instance_id: inst.id,
-                            instance_name: inst.instance_name,
-                            definition_id: inst.definition_id.clone(),
-                            definition_name: def
-                                .map(|d| d.name.clone())
-                                .unwrap_or_else(|| "(missing definition)".to_string()),
-                            provider: def
-                                .map(|d| d.provider.clone())
-                                .unwrap_or_default(),
-                            working_directory: inst.working_directory,
-                            identity_id: inst.identity_id,
-                            identity_name,
-                            memory_id: inst.memory_id,
-                            memory_name,
-                            started_at: inst.started_at,
-                            ended_at: inst.ended_at,
-                            status: inst.status,
-                            block_id_hint: inst.block_id,
+                // PR B — read from the cross-version registry when
+                // it's available. Falls back to SQLite when the
+                // registry couldn't be resolved at startup (CI / odd
+                // environments). SQLite remains authoritative for
+                // PR B (parallel-write is still active); the choice
+                // here just affects which surface gets surfaced.
+                let rows: Vec<NamedAgentRow> = match wstore.shared_agent_registry() {
+                    Some(reg) => {
+                        let agents_root = reg.agents_root().map(|p| p.to_path_buf());
+                        let mut records = reg
+                            .list_active()
+                            .map_err(|e| format!("listnamedagents: registry: {e}"))?;
+                        if let Some(def_filter) = cmd.definition_id.as_deref() {
+                            records.retain(|r| r.data.definition_id == def_filter);
                         }
-                    })
-                    .collect();
+                        records.sort_by(|a, b| {
+                            b.data
+                                .last_launched_at_ms
+                                .cmp(&a.data.last_launched_at_ms)
+                        });
+                        records.truncate(limit);
+                        // Pre-fetch all candidate same-version rows
+                        // ONCE so enrichment doesn't issue N+1 queries.
+                        // Indexed by instance_id; rows that aren't in
+                        // current SQLite fall through to sentinels.
+                        let sqlite_rows: Vec<AgentInstance> = wstore
+                            .instance_list_named(records.len().max(1), cmd.definition_id.as_deref())
+                            .unwrap_or_default();
+                        let sqlite_by_id: std::collections::HashMap<&str, &AgentInstance> =
+                            sqlite_rows.iter().map(|i| (i.id.as_str(), i)).collect();
+                        records
+                            .into_iter()
+                            .map(|rec| {
+                                let d = rec.data;
+                                let def = defs.iter().find(|x| x.id == d.definition_id);
+                                let identity_id_str =
+                                    d.identity_id.clone().unwrap_or_default();
+                                let memory_id_str = d.memory_id.clone().unwrap_or_default();
+                                let identity_name = if identity_id_str.is_empty() {
+                                    "(ambient creds)".to_string()
+                                } else {
+                                    identities
+                                        .iter()
+                                        .find(|i| i.id == identity_id_str)
+                                        .map(|i| i.name.clone())
+                                        .unwrap_or_else(|| "(missing identity)".to_string())
+                                };
+                                let memory_name = if memory_id_str.is_empty() {
+                                    "(vanilla CLI)".to_string()
+                                } else {
+                                    memories
+                                        .iter()
+                                        .find(|m| m.id == memory_id_str)
+                                        .map(|m| m.name.clone())
+                                        .unwrap_or_else(|| "(missing memory)".to_string())
+                                };
+                                let working_directory = match agents_root.as_ref() {
+                                    Some(root) => root
+                                        .join(&d.working_dir)
+                                        .to_string_lossy()
+                                        .to_string(),
+                                    None => d.working_dir.clone(),
+                                };
+                                // Same-version enrichment: if this id
+                                // also exists in current SQLite, the
+                                // row carries runtime state (block_id
+                                // for focus-existing-pane, status,
+                                // ended_at) that the registry
+                                // intentionally doesn't track.
+                                // Cross-version rows fall through with
+                                // sentinel "available" status and
+                                // empty block_id_hint.
+                                let (block_id_hint, status, ended_at) =
+                                    match sqlite_by_id.get(d.instance_id.as_str()) {
+                                        Some(inst) => (
+                                            inst.block_id.clone(),
+                                            inst.status.clone(),
+                                            inst.ended_at,
+                                        ),
+                                        None => (String::new(), "available".to_string(), 0),
+                                    };
+                                NamedAgentRow {
+                                    instance_id: d.instance_id,
+                                    instance_name: d.instance_name,
+                                    definition_id: d.definition_id.clone(),
+                                    definition_name: def
+                                        .map(|x| x.name.clone())
+                                        .unwrap_or_else(|| "(missing definition)".to_string()),
+                                    provider: def
+                                        .map(|x| x.provider.clone())
+                                        .unwrap_or_default(),
+                                    working_directory,
+                                    identity_id: identity_id_str,
+                                    identity_name,
+                                    memory_id: memory_id_str,
+                                    memory_name,
+                                    started_at: d.last_launched_at_ms,
+                                    ended_at,
+                                    status,
+                                    block_id_hint,
+                                }
+                            })
+                            .collect()
+                    }
+                    None => {
+                        let instances = wstore
+                            .instance_list_named(limit, cmd.definition_id.as_deref())
+                            .map_err(|e| format!("listnamedagents: {e}"))?;
+                        instances
+                            .into_iter()
+                            .map(|inst| {
+                                let def = defs.iter().find(|d| d.id == inst.definition_id);
+                                let identity_name = if inst.identity_id.is_empty() {
+                                    "(ambient creds)".to_string()
+                                } else {
+                                    identities
+                                        .iter()
+                                        .find(|i| i.id == inst.identity_id)
+                                        .map(|i| i.name.clone())
+                                        .unwrap_or_else(|| "(missing identity)".to_string())
+                                };
+                                let memory_name = if inst.memory_id.is_empty() {
+                                    "(vanilla CLI)".to_string()
+                                } else {
+                                    memories
+                                        .iter()
+                                        .find(|m| m.id == inst.memory_id)
+                                        .map(|m| m.name.clone())
+                                        .unwrap_or_else(|| "(missing memory)".to_string())
+                                };
+                                NamedAgentRow {
+                                    instance_id: inst.id,
+                                    instance_name: inst.instance_name,
+                                    definition_id: inst.definition_id.clone(),
+                                    definition_name: def
+                                        .map(|d| d.name.clone())
+                                        .unwrap_or_else(|| "(missing definition)".to_string()),
+                                    provider: def
+                                        .map(|d| d.provider.clone())
+                                        .unwrap_or_default(),
+                                    working_directory: inst.working_directory,
+                                    identity_id: inst.identity_id,
+                                    identity_name,
+                                    memory_id: inst.memory_id,
+                                    memory_name,
+                                    started_at: inst.started_at,
+                                    ended_at: inst.ended_at,
+                                    status: inst.status,
+                                    block_id_hint: inst.block_id,
+                                }
+                            })
+                            .collect()
+                    }
+                };
 
                 Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
             })
