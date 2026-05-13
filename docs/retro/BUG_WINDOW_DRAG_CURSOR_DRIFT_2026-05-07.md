@@ -195,3 +195,28 @@ If latency is a concern, the initial position can be pre-fetched on title-bar `m
 | `agentmux-cef/src/ui_tasks.rs` (if it exists) | Add `post_set_window_position` for non-Windows paths |
 
 `move_window_by` and `get_window_position` can remain — they may be used elsewhere.
+
+---
+
+## Postscript — 2026-05-13: DPI regression
+
+The fix above shipped (PR #734) and resolved the stale-rect race. **It also introduced a latent unit-mismatch bug** that this retro never caught because all testing was at 100% Windows scale (the Win10 default).
+
+Symptom: cursor drifts off the click point during drag on **Windows 11**, which defaults to 125% scale on most laptops. Was masked on Windows 10 (100% default).
+
+Root cause: `e.screenX` in CEF/Chromium with `use-zoom-for-dsf` (default on Windows since Chrome 54) is in **CSS pixels** (physical ÷ devicePixelRatio). `get_window_position` returns and `set_window_position` consumes **physical pixels** in the PMv2-aware host. The original fix added CSS-pixel deltas to a physical-pixel baseline:
+
+```ts
+// BUGGY (PR #734)
+const tx = initWinX + (e.screenX - clickScreenX);
+```
+
+At Win11 125% (`dpr = 1.25`), the window moves 80% of the cursor distance — the same visible drift the original bug had, with a different mechanism.
+
+Fixed in PR following `docs/specs/SPEC_WINDOW_DRAG_DPI_FIX_2026-05-13.md`. The spec also adds:
+
+1. **DPR multiplier + `Math.round`** in the frontend hook (the core fix).
+2. **Re-read `devicePixelRatio` per mousemove** so cross-monitor mid-drag at different scales picks up the new value.
+3. **Recommended test matrix** for any future drag work: 100% / 125% / 150% / 175% / 200%, single + multi-monitor, homogeneous + differential scale. Adding to the smoke-test checklist as a standing item.
+
+Lesson for future retros: **scale-sensitive Win32 work needs explicit DPI-matrix testing before merge.** A "tested at 100%" implicit assumption is invisible in the retro and bites at user install time.
