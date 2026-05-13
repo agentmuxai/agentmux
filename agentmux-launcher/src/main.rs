@@ -29,6 +29,8 @@ mod host_pipe;
 mod ipc;
 mod reducer;
 mod saga;
+#[cfg(target_os = "windows")]
+mod splash;
 mod srv_spawner;
 mod state;
 mod wrr;
@@ -312,6 +314,15 @@ async fn run_windows(
             std::process::exit(2);
         }
     };
+    // Spawn the native pre-splash immediately after claiming the
+    // single-instance pipe — before srv spawn and CEF init.
+    // The event name is forwarded to the CEF host as
+    // AGENTMUX_SPLASH_EVENT so it can signal dismiss from on_load_end.
+    #[cfg(target_os = "windows")]
+    let splash_event_name = splash::spawn_splash(&dir_hash);
+    #[cfg(not(target_os = "windows"))]
+    let splash_event_name: Option<String> = None;
+
     // Phase B.8 — broadcast bus for reducer-emitted events. Capacity
     // 1024 is comfortable headroom for the launcher's event volume
     // (~10–50 events per user action × handful of subscribers); a
@@ -515,6 +526,9 @@ async fn run_windows(
         .env("AGENTMUX_LAUNCHER_PIPE", &pipe_path)
         .creation_flags(CREATE_SUSPENDED)
         .kill_on_drop(false); // J0 handles cleanup; tokio's kill-on-drop would force-kill on every error path.
+    if let Some(ref name) = splash_event_name {
+        host_cmd.env("AGENTMUX_SPLASH_EVENT", name);
+    }
 
     let mut host_child = match host_cmd.spawn() {
         Ok(c) => c,

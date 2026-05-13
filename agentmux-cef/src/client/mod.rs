@@ -977,6 +977,28 @@ impl AgentMuxHandler {
             url_str
         );
 
+        // Signal the pre-splash to fade out the moment CEF's first frame
+        // is ready. The launcher created this named event and forwarded
+        // its name via AGENTMUX_SPLASH_EVENT. OpenEventW + SetEvent is
+        // fire-and-forget; missing env var means no splash was running.
+        #[cfg(target_os = "windows")]
+        {
+            use windows_sys::Win32::Foundation::CloseHandle;
+            use windows_sys::Win32::System::Threading::{
+                OpenEventW, SetEvent, EVENT_MODIFY_STATE,
+            };
+            if let Ok(event_name) = std::env::var("AGENTMUX_SPLASH_EVENT") {
+                let nul: Vec<u16> = format!("{}\0", event_name).encode_utf16().collect();
+                unsafe {
+                    let ev = OpenEventW(EVENT_MODIFY_STATE, 0, nul.as_ptr());
+                    if !ev.is_null() {
+                        SetEvent(ev);
+                        CloseHandle(ev);
+                    }
+                }
+            }
+        }
+
         // Show window via CEF Views API after content paints.
         // All windows (main + secondary) now use CEF Views.
         let mut browser_cloned = browser.cloned();
