@@ -177,8 +177,14 @@
     .placeholder {
         width: 100%;
         height: 100%;
-        background-color: rgb(var(--accent-color-rgb) / 0.2);
-        border: 1px solid rgb(var(--accent-color-rgb) / 0.5);
+        // `--accent-color-rgb` is comma-separated (`65, 159, 224`) so
+        // it pairs with the legacy `rgba(r, g, b, a)` function rather
+        // than the modern `rgb(r g b / a)` slash-alpha form. Mixing
+        // the two (`rgb(65, 159, 224 / 0.2)`) is invalid CSS and the
+        // declaration is ignored — fill/border would render transparent.
+        // Codex P2 on PR #829.
+        background-color: rgba(var(--accent-color-rgb), 0.2);
+        border: 1px solid rgba(var(--accent-color-rgb), 0.5);
         border-radius: calc(var(--block-border-radius) + 2px);
         box-sizing: border-box;
         opacity: 1;
@@ -199,7 +205,12 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
-        .placeholder {
+        // Suppress every drop-zone transition: the inner `.placeholder`
+        // opacity+scale enter/exit AND the outer `.placeholder-sizer`
+        // drag-move transform animation set by `&.animate` above.
+        // Reagent P2 on PR #829.
+        .placeholder,
+        .placeholder-sizer {
             transition: none;
         }
     }
