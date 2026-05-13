@@ -433,8 +433,7 @@ declare global {
     };
 
     type AgentTurn = {
-        /** "user" | "assistant" | "tool_result" */
-        role: string;
+        role: "user" | "assistant" | "tool_result";
         content: unknown;
         timestampMs: number;
     };
