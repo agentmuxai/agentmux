@@ -211,18 +211,22 @@ struct RowSnapshot {
 
 /// True iff the error is SQLite reporting "this column/table doesn't
 /// exist in this DB's schema." Distinguishes a pre-v8 DB (skip
-/// silently) from corruption (caller logs + continues). Matches on
-/// `SqliteFailure` with `Some(msg)` containing the canonical SQLite
-/// phrases; the underlying `ExtendedCode` for both is
-/// `SQLITE_ERROR` (1), which would also fire for plenty of other
-/// real failures, so message inspection is required.
+/// silently — those agents weren't named, so wouldn't appear in the
+/// dropdown anyway) from corruption (caller logs + continues +
+/// defers the marker).
+///
+/// rusqlite reports prepare-time schema mismatches as
+/// `Error::SqlInputError { msg, sql, offset }` and runtime errors as
+/// `Error::SqliteFailure(_, Some(msg))`. Both shapes carry the
+/// canonical SQLite phrases, but only message inspection
+/// distinguishes them from other failures with the same error code.
 fn is_missing_column_or_table(e: &rusqlite::Error) -> bool {
-    match e {
-        rusqlite::Error::SqliteFailure(_, Some(msg)) => {
-            msg.starts_with("no such column") || msg.starts_with("no such table")
-        }
-        _ => false,
-    }
+    let msg = match e {
+        rusqlite::Error::SqliteFailure(_, Some(msg)) => msg.as_str(),
+        rusqlite::Error::SqlInputError { msg, .. } => msg.as_str(),
+        _ => return false,
+    };
+    msg.starts_with("no such column") || msg.starts_with("no such table")
 }
 
 fn read_named_rows(db_path: &Path) -> Result<Vec<RowSnapshot>, rusqlite::Error> {
@@ -514,6 +518,40 @@ mod tests {
         // Tombstone must remain in retired/, NOT moved to active.
         assert!(reg.list_active().unwrap().is_empty());
         assert!(reg.root().join("retired").join("inst-1.json").exists());
+    }
+
+    #[test]
+    fn migrate_silently_skips_pre_v8_schema() {
+        // Real production case: an older SQLite (pre-v8) lacks the
+        // `instance_name` column. rusqlite reports this as
+        // `Error::SqlInputError` during prepare. The migrator must
+        // treat it as "nothing to migrate from this version" — NOT
+        // as a real DB failure that defers the marker.
+        let (home, reg) = fresh_home();
+        // Build a per-version DB with the OLD schema (no
+        // instance_name / working_directory / display_hidden cols).
+        let v_dir = home.path().join("versions").join("0.33.643");
+        let db_dir = v_dir.join("data").join("db");
+        std::fs::create_dir_all(&db_dir).unwrap();
+        let db_path = db_dir.join("objects.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE db_agent_instances (
+                id TEXT PRIMARY KEY,
+                definition_id TEXT NOT NULL DEFAULT '',
+                parent_instance_id TEXT NOT NULL DEFAULT '',
+                started_at INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT 0
+            );",
+        )
+        .unwrap();
+        drop(conn);
+
+        let stats = migrate_from_sqlite_once(home.path(), &reg).unwrap();
+        assert_eq!(stats.versions_scanned, 1);
+        assert_eq!(stats.rows_seen, 0);
+        assert!(stats.complete, "pre-v8 schema must not block the marker");
+        assert!(reg.root().join(MARKER).exists());
     }
 
     #[test]
