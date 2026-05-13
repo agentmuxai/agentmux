@@ -709,11 +709,38 @@ impl WaveStore {
 
     /// Delete a forge agent by id. Returns true if a row was deleted.
     pub fn forge_delete(&self, id: &str) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let rows = conn.execute(
-            "DELETE FROM db_forge_agents WHERE id=?1",
-            params![id],
-        )?;
+        // Pre-fetch the instance ids that the FK cascade will delete.
+        // The cascade fires inside SQLite without invoking
+        // `instance_delete`, so without this snapshot the registry
+        // mirror would leak orphan JSON files for the cascaded rows.
+        let cascaded_instance_ids: Vec<String> = {
+            let conn = self.conn.lock().unwrap();
+            let mut stmt = conn
+                .prepare("SELECT id FROM db_agent_instances WHERE definition_id = ?1")?;
+            let iter = stmt.query_map(params![id], |row| row.get::<_, String>(0))?;
+            iter.collect::<Result<Vec<_>, _>>()?
+        };
+        let rows = {
+            let conn = self.conn.lock().unwrap();
+            conn.execute(
+                "DELETE FROM db_forge_agents WHERE id=?1",
+                params![id],
+            )?
+        };
+        if rows > 0 {
+            if let Some(reg) = self.registry() {
+                for instance_id in &cascaded_instance_ids {
+                    if let Err(e) = reg.hard_delete(instance_id) {
+                        tracing::warn!(
+                            instance_id = %instance_id,
+                            forge_id = %id,
+                            error = %e,
+                            "registry: failed to mirror forge_delete cascade"
+                        );
+                    }
+                }
+            }
+        }
         Ok(rows > 0)
     }
 
@@ -1246,17 +1273,25 @@ pub struct AgentInstance {
     pub display_hidden: bool,
 }
 
-/// Build a registry record from an `AgentInstance`. Returns an error if
-/// the working directory can't be expressed as a path relative to the
-/// shared agents root (e.g. user pointed an agent at `~/projects/foo`).
-/// Caller is expected to log + skip in that case — the agent stays in
-/// SQLite, just not in the cross-version dropdown.
+/// Build a registry record from an `AgentInstance`. Returns an error
+/// if the working directory can't be expressed as a path relative to
+/// the canonical shared agents root (e.g. user pointed an agent at
+/// `~/projects/foo`, which would also fail a naive `"agents"`
+/// segment-scan that happened to match `~/projects/agents/foo`).
+/// Caller logs + skips — agent stays in SQLite, just not in the
+/// cross-version dropdown.
 fn agent_instance_to_record(
     inst: &AgentInstance,
+    agents_root: &Path,
 ) -> Result<crate::registry::NamedAgentRecord, String> {
     use crate::registry::{NamedAgentRecord, NamedAgentRecordV1, MAX_SUPPORTED_SCHEMA};
-    let rel = relative_workdir(&inst.working_directory)
-        .ok_or_else(|| format!("working_directory {:?} is not under agents/", inst.working_directory))?;
+    let rel = relative_workdir(&inst.working_directory, agents_root).ok_or_else(|| {
+        format!(
+            "working_directory {:?} is not under {:?}",
+            inst.working_directory,
+            agents_root.display()
+        )
+    })?;
     let version = env!("CARGO_PKG_VERSION").to_string();
     Ok(NamedAgentRecord {
         schema_version: MAX_SUPPORTED_SCHEMA,
@@ -1279,34 +1314,26 @@ fn empty_to_none(s: &str) -> Option<String> {
     if s.is_empty() { None } else { Some(s.to_string()) }
 }
 
-/// Strip the `<shared_home>/agents/` prefix from an absolute working
-/// directory. Returns the relative segment (e.g. `livelog-821-0512a`),
-/// or `None` if the path isn't under agents/. Agents living outside
-/// the shared tree (user-specified paths) skip the registry mirror;
-/// they're not surfaced in the cross-version dropdown by design.
-fn relative_workdir(abs: &str) -> Option<String> {
+/// Express `abs` as a path relative to `agents_root`. Returns `None`
+/// when `abs` is empty, not under `agents_root`, or after stripping
+/// resolves to an empty path. Anchors against the **resolved** shared
+/// root (passed in by the caller) — never scans for a path segment
+/// named "agents", which would match unrelated user directories like
+/// `/home/me/projects/agents/foo`.
+fn relative_workdir(abs: &str, agents_root: &Path) -> Option<String> {
     if abs.is_empty() {
         return None;
     }
     let p = std::path::Path::new(abs);
-    let comps: Vec<_> = p.components().collect();
-    // Find the last "agents" segment; the registry-eligible workdir
-    // sits one level beneath it. We scan from the right so a user
-    // home like `/home/agents-user/.agentmux/agents/foo` finds the
-    // right anchor.
-    for i in (0..comps.len()).rev() {
-        if let std::path::Component::Normal(seg) = comps[i] {
-            if seg == "agents" && i + 1 < comps.len() {
-                let rel: std::path::PathBuf = comps[i + 1..].iter().collect();
-                let s = rel.to_string_lossy().to_string();
-                if s.is_empty() {
-                    return None;
-                }
-                return Some(s);
-            }
-        }
+    let rel = p.strip_prefix(agents_root).ok()?;
+    // Reject empties + traversals (defense in depth — strip_prefix
+    // already rules out `..` escapes, but the registry's own validator
+    // re-checks).
+    let s = rel.to_string_lossy().to_string();
+    if s.is_empty() || s == "." {
+        return None;
     }
-    None
+    Some(s)
 }
 
 impl WaveStore {
@@ -1797,7 +1824,11 @@ impl WaveStore {
             return;
         }
         let Some(reg) = self.registry() else { return };
-        let rec = match agent_instance_to_record(inst) {
+        let Some(agents_root) = reg.agents_root() else {
+            tracing::warn!("registry: agents_root has no parent — skipping mirror");
+            return;
+        };
+        let rec = match agent_instance_to_record(inst, agents_root) {
             Ok(rec) => rec,
             Err(e) => {
                 tracing::warn!(
@@ -3034,5 +3065,40 @@ mod tests {
         // SQL row was written, but mirror is skipped because the working
         // dir can't be expressed as a relative subpath under agents/.
         assert!(reg.list_active().unwrap().is_empty());
+    }
+
+    #[test]
+    fn instance_create_user_path_with_agents_segment_is_skipped() {
+        // Anchored-prefix check: a user-owned workspace at
+        // `/home/user/code/agents/myproject` must NOT be mirrored. The
+        // pre-fix scan-for-segment logic matched the inner "agents",
+        // producing `working_dir = "myproject"` that would resolve to
+        // `<shared>/agents/myproject` (wrong) when PR B reads the row.
+        let (tmp, store, reg) = store_with_registry();
+        // tmp is NOT under the registry's agents root, so this is a
+        // user path that happens to include an "agents" component.
+        let outside = tmp.path().join("code").join("agents").join("myproject");
+        let mut inst = make_named_inst("inst-pathconfuse", "confuse", tmp.path());
+        inst.working_directory = outside.to_string_lossy().to_string();
+        store.instance_create(&inst).unwrap();
+        assert!(reg.list_active().unwrap().is_empty(),
+            "user path with inner 'agents' segment must not be mirrored");
+    }
+
+    #[test]
+    fn forge_delete_cascade_removes_registry_files() {
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let inst_a = make_named_inst("inst-cascade-a", "demoA", &agents_root);
+        let inst_b = make_named_inst("inst-cascade-b", "demoB", &agents_root);
+        store.instance_create(&inst_a).unwrap();
+        store.instance_create(&inst_b).unwrap();
+        assert_eq!(reg.list_active().unwrap().len(), 2);
+
+        // Delete the forge agent — SQLite FK cascades both instance
+        // rows; the mirror must also drop both registry files.
+        store.forge_delete("def-mirror").unwrap();
+        assert!(reg.list_active().unwrap().is_empty(),
+            "forge_delete cascade must remove all child instance registry files");
     }
 }

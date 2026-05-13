@@ -49,6 +49,16 @@ impl Registry {
         &self.root
     }
 
+    /// Resolved `<shared_home>/agents/` — one level above `root`.
+    /// Used by callers that need to express working-directory paths
+    /// as relative subpaths under the shared agents tree. Returns
+    /// `None` if the registry root has no parent (only happens in
+    /// pathological filesystem-root setups; production always nests
+    /// under `~/.agentmux/agents/registry`).
+    pub fn agents_root(&self) -> Option<&Path> {
+        self.root.parent()
+    }
+
     fn active_path(&self, instance_id: &str) -> PathBuf {
         self.root.join(format!("{instance_id}.json"))
     }
