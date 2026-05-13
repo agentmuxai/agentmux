@@ -13,6 +13,11 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+/// Only env vars starting with this prefix are exposed to workflow
+/// templates via `{{env.NAME}}`. See `ExecutionScope::lookup` for
+/// the security rationale.
+const WORKFLOW_ENV_PREFIX: &str = "AGENTMUX_WF_";
+
 /// Holds the per-run scope. Maps:
 ///   * `outputs[block_id]` — the JSON output of a completed block
 ///   * `vars[name]` — workflow-scope variables (set by Variables block)
@@ -84,7 +89,17 @@ impl ExecutionScope {
             let v = self.vars.get(*name)?;
             return Some(walk(v.clone(), &rest[1..]));
         } else if head == "env" {
+            // Restrict `{{env.NAME}}` to vars under the workflow
+            // namespace prefix. Without this guard a Response template
+            // could read AWS_*, GITHUB_TOKEN, CLAUDE_API_KEY, etc. and
+            // surface them via the persisted run output, exfiltrating
+            // server-side secrets to any caller with workflow access.
+            // (reagent P1 on PR #755.) Phase 2 introduces a per-workflow
+            // configured allowlist; the prefix is the Phase 1 stopgap.
             let name = rest.first()?;
+            if !name.starts_with(WORKFLOW_ENV_PREFIX) {
+                return None;
+            }
             return std::env::var(name).ok().map(Value::String);
         } else {
             // Treat head as a block id; rest is dot-path inside its output.
@@ -209,5 +224,45 @@ mod tests {
         // Unresolved tokens echo their surrounding context — make
         // sure that path doesn't corrupt the surrounding bytes either.
         assert_eq!(scope.resolve("café {{ghost}} ☕"), "café {{ghost}} ☕");
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Env-var allowlist (reagent P1 on PR #755 v0.33.841)
+    // ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn env_var_allowed_under_workflow_prefix() {
+        let key = "AGENTMUX_WF_TEST_PASS_KEY";
+        std::env::set_var(key, "hello");
+        let scope = ExecutionScope::new();
+        assert_eq!(
+            scope.resolve(&format!("got: {{{{env.{key}}}}}")),
+            "got: hello"
+        );
+        std::env::remove_var(key);
+    }
+
+    #[test]
+    fn env_var_outside_prefix_is_blocked() {
+        // Setting common secret-shaped names would let workflows
+        // exfiltrate them via Response output if the lookup wasn't
+        // namespaced.
+        let secret_key = "AWS_TEST_SECRET_DO_NOT_LEAK";
+        std::env::set_var(secret_key, "TOPSECRET");
+        let scope = ExecutionScope::new();
+        // Without the AGENTMUX_WF_ prefix, lookup returns None —
+        // the template emits the unresolved token (passthrough).
+        let out = scope.resolve(&format!("leak: {{{{env.{secret_key}}}}}"));
+        assert!(!out.contains("TOPSECRET"), "secret value leaked: {out}");
+        std::env::remove_var(secret_key);
+    }
+
+    #[test]
+    fn env_var_path_blocked() {
+        // PATH is universally set; if it leaked, attackers could
+        // confirm a target's directory layout. Plain `env.PATH`
+        // without the prefix is rejected.
+        let scope = ExecutionScope::new();
+        assert_eq!(scope.resolve("{{env.PATH}}"), "{{env.PATH}}");
     }
 }

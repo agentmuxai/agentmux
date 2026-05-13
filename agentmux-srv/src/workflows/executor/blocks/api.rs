@@ -36,6 +36,19 @@ static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 fn http_client() -> &'static reqwest::Client {
     HTTP_CLIENT.get_or_init(|| {
         reqwest::Client::builder()
+            // Re-run SSRF validation on every redirect target —
+            // otherwise a public attacker-controlled URL can return
+            // `302 Location: http://169.254.169.254/...` and bypass
+            // the initial check. (codex P1 on PR #755.)
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if let Err(e) = validate_url_for_safety(attempt.url()) {
+                    return attempt.error(format!("redirect blocked: {e}"));
+                }
+                if attempt.previous().len() >= 10 {
+                    return attempt.error("too many redirects");
+                }
+                attempt.follow()
+            }))
             .build()
             .expect("reqwest client build failed")
     })
@@ -51,6 +64,13 @@ fn http_client() -> &'static reqwest::Client {
 fn validate_url_safety(url_str: &str) -> Result<(), String> {
     let url = reqwest::Url::parse(url_str)
         .map_err(|e| format!("invalid URL: {e}"))?;
+    validate_url_for_safety(&url)
+}
+
+/// Same checks as `validate_url_safety` but takes a pre-parsed
+/// `reqwest::Url`. The redirect-policy closure receives Url values
+/// directly, so this avoids a parse round-trip on every hop.
+fn validate_url_for_safety(url: &reqwest::Url) -> Result<(), String> {
     match url.scheme() {
         "http" | "https" => {}
         other => return Err(format!("URL scheme `{other}` is not allowed (http/https only)")),
