@@ -55,7 +55,16 @@ fn main() {
         let out_dir = std::env::var("OUT_DIR").unwrap();
         let bgra_path = std::path::Path::new(&out_dir).join("brain_bgra.bin");
         std::fs::write(&bgra_path, &buf).expect("write brain_bgra.bin");
-        println!("cargo:rustc-env=AGENTMUX_BRAIN_W={}", info.width);
-        println!("cargo:rustc-env=AGENTMUX_BRAIN_H={}", info.height);
+
+        // Emit dimensions as Rust consts so splash.rs `include!`-s them
+        // and stays in lockstep with whatever brain.png actually contains.
+        // Hardcoded values would silently desync if the PNG is regenerated
+        // at a different size.
+        let dims_rs = format!(
+            "pub const BRAIN_W: i32 = {};\npub const BRAIN_H: i32 = {};\n",
+            info.width, info.height
+        );
+        let dims_path = std::path::Path::new(&out_dir).join("brain_dims.rs");
+        std::fs::write(&dims_path, dims_rs).expect("write brain_dims.rs");
     }
 }
