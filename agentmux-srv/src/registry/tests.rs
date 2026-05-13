@@ -180,6 +180,32 @@ fn upsert_refuses_to_downgrade_schema_version() {
 }
 
 #[test]
+fn upsert_refuses_when_schema_version_overflows_u32() {
+    // A future binary writing `schema_version: u32::MAX + 1` would
+    // wrap to 1 under an unchecked `as u32` cast and bypass the
+    // downgrade guard. With `u32::try_from`, the cast fails and we
+    // treat it the same as a missing/unparseable version — refuse.
+    let (_t, reg) = fresh();
+    let path = reg.root().join("aaa.json");
+    let oversized: u64 = u32::MAX as u64 + 1;
+    let raw = serde_json::json!({
+        "schema_version": oversized,
+        "data": { "instance_id": "aaa", "future_field": "x" }
+    });
+    std::fs::write(&path, serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
+
+    reg.upsert(&record("aaa", "demo", 200)).unwrap();
+
+    let after: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(
+        after.pointer("/schema_version"),
+        Some(&serde_json::json!(oversized)),
+        "schema_version above u32::MAX must not be downgraded via wraparound"
+    );
+}
+
+#[test]
 fn upsert_refuses_when_schema_version_missing() {
     let (_t, reg) = fresh();
     let path = reg.root().join("aaa.json");

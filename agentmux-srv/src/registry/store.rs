@@ -200,10 +200,14 @@ fn merge_for_write(
             return Ok(None);
         }
     };
+    // Use `try_from` so any number above `u32::MAX` is treated as
+    // unparseable rather than wrapping into the supported range. A
+    // wrap would let an oversized envelope downgrade-bypass the
+    // forward-compat guard below.
     let on_disk_version = on_disk
         .get("schema_version")
         .and_then(|v| v.as_u64())
-        .map(|v| v as u32);
+        .and_then(|v| u32::try_from(v).ok());
     match on_disk_version {
         Some(v) if v > MAX_SUPPORTED_SCHEMA => {
             tracing::warn!(

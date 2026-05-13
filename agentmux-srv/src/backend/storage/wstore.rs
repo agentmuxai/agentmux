@@ -709,23 +709,25 @@ impl WaveStore {
 
     /// Delete a forge agent by id. Returns true if a row was deleted.
     pub fn forge_delete(&self, id: &str) -> Result<bool, StoreError> {
-        // Pre-fetch the instance ids that the FK cascade will delete.
-        // The cascade fires inside SQLite without invoking
-        // `instance_delete`, so without this snapshot the registry
-        // mirror would leak orphan JSON files for the cascaded rows.
-        let cascaded_instance_ids: Vec<String> = {
+        // Snapshot cascaded instance ids AND issue the parent DELETE
+        // under one lock acquisition so no thread can `instance_create`
+        // a new row for this definition between the two steps. The
+        // SQL DELETE's FK cascade fires inside SQLite while we hold
+        // the mutex, so the snapshot exactly matches the rows that
+        // got removed by the cascade.
+        let (cascaded_instance_ids, rows) = {
             let conn = self.conn.lock().unwrap();
-            let mut stmt = conn
-                .prepare("SELECT id FROM db_agent_instances WHERE definition_id = ?1")?;
-            let iter = stmt.query_map(params![id], |row| row.get::<_, String>(0))?;
-            iter.collect::<Result<Vec<_>, _>>()?
-        };
-        let rows = {
-            let conn = self.conn.lock().unwrap();
-            conn.execute(
+            let cascaded_instance_ids: Vec<String> = {
+                let mut stmt = conn
+                    .prepare("SELECT id FROM db_agent_instances WHERE definition_id = ?1")?;
+                let iter = stmt.query_map(params![id], |row| row.get::<_, String>(0))?;
+                iter.collect::<Result<Vec<_>, _>>()?
+            };
+            let rows = conn.execute(
                 "DELETE FROM db_forge_agents WHERE id=?1",
                 params![id],
-            )?
+            )?;
+            (cascaded_instance_ids, rows)
         };
         if rows > 0 {
             if let Some(reg) = self.registry() {
