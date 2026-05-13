@@ -779,10 +779,11 @@ impl Controller for ShellController {
                 } else {
                     None
                 };
-            // Per-block line-buffer. Capped to AGENT_LINE_BUFFER_CAP
+            // Per-block line-buffer (raw bytes — see
+            // `extract_agent_events`). Capped to AGENT_LINE_BUFFER_CAP
             // so a producer that never emits a newline can't grow
             // the buffer unboundedly.
-            let mut line_buf = String::new();
+            let mut line_buf: Vec<u8> = Vec::new();
 
             loop {
                 match reader.read(&mut buf) {
@@ -998,29 +999,38 @@ const AGENT_LINE_BUFFER_CAP: usize = 1024 * 1024;
 /// events the translator emitted. Caller is responsible for
 /// publishing them.
 ///
+/// Buffers RAW BYTES (not lossy-decoded strings) so a multi-byte
+/// UTF-8 character split across two PTY reads decodes cleanly when
+/// the complete line arrives. Decoding each chunk lossily would
+/// insert U+FFFD into the middle of words for non-ASCII content
+/// (CJK, emoji, accented chars), silently corrupting
+/// `AssistantText`/`Done.response` while the parallel raw-byte WPS
+/// path stays correct — workflow consumers would have no way to
+/// recover. Reagent P1 + codex P2 on PR #833.
+///
 /// Pure function — split out from `accumulate_and_translate` so the
 /// line-buffering + JSON-fast-reject + translator-call logic is
 /// unit-testable without spinning up a broker.
 fn extract_agent_events(
-    line_buf: &mut String,
+    line_buf: &mut Vec<u8>,
     chunk: &[u8],
     translator: &mut crate::agents::translator::claude::ClaudeTranslator,
 ) -> Vec<crate::agents::types::AgentEvent> {
     use crate::agents::translator::Translator as _;
     let mut out: Vec<crate::agents::types::AgentEvent> = Vec::new();
-    // Lossy UTF-8 — interactive PTYs occasionally emit byte sequences
-    // mid-codepoint at chunk boundaries; replacing invalid bytes with
-    // U+FFFD is correct since the actual byte stream is already
-    // captured by the raw-chunk path.
-    line_buf.push_str(&String::from_utf8_lossy(chunk));
+    line_buf.extend_from_slice(chunk);
     if line_buf.len() > AGENT_LINE_BUFFER_CAP {
         // No newline in a megabyte — definitely not stream-json.
         // Reset to keep memory bounded.
         line_buf.clear();
         return out;
     }
-    while let Some(nl) = line_buf.find('\n') {
-        let line: String = line_buf.drain(..=nl).collect();
+    while let Some(nl) = line_buf.iter().position(|&b| b == b'\n') {
+        let line_bytes: Vec<u8> = line_buf.drain(..=nl).collect();
+        // Decode the COMPLETE line as lossy UTF-8 — split codepoints
+        // are now fully present, so lossy-vs-strict only matters for
+        // genuinely malformed bytes which would also fail strict.
+        let line = String::from_utf8_lossy(&line_bytes);
         let trimmed = line.trim_end_matches(['\n', '\r']);
         if !trimmed.starts_with('{') {
             // Fast-reject: stream-json frames are JSON objects.
@@ -1042,7 +1052,7 @@ fn extract_agent_events(
 fn accumulate_and_translate(
     broker: &wps::Broker,
     block_id: &str,
-    line_buf: &mut String,
+    line_buf: &mut Vec<u8>,
     chunk: &[u8],
     translator: &mut crate::agents::translator::claude::ClaudeTranslator,
 ) {
@@ -1595,7 +1605,7 @@ mod tests {
     #[test]
     fn extract_agent_events_full_line_translates() {
         let mut t = ClaudeTranslator::new();
-        let mut buf = String::new();
+        let mut buf: Vec<u8> = Vec::new();
         let line =
             br#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}}
 "#;
@@ -1615,7 +1625,7 @@ mod tests {
         // calls. The buffer must accumulate across calls and only emit
         // once the newline arrives.
         let mut t = ClaudeTranslator::new();
-        let mut buf = String::new();
+        let mut buf: Vec<u8> = Vec::new();
         // First chunk: prefix of the JSON, no newline.
         let events = extract_agent_events(
             &mut buf,
@@ -1642,7 +1652,7 @@ mod tests {
         // Interactive pane output (ANSI escapes, prompts, blank lines)
         // must not produce events.
         let mut t = ClaudeTranslator::new();
-        let mut buf = String::new();
+        let mut buf: Vec<u8> = Vec::new();
         let pty_text = b"\x1b[2K\x1b[0;0H> some prompt\n[m\nplain text\n";
         let events = extract_agent_events(&mut buf, pty_text, &mut t);
         assert!(events.is_empty(), "got unexpected events: {events:?}");
@@ -1656,7 +1666,7 @@ mod tests {
         // PTYs in cooked mode often emit \r\n. Trimming should accept
         // both.
         let mut t = ClaudeTranslator::new();
-        let mut buf = String::new();
+        let mut buf: Vec<u8> = Vec::new();
         let line = br#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"crlf"}}}
 "#;
         // Replace the \n with \r\n.
@@ -1672,7 +1682,7 @@ mod tests {
         // A line that starts with `{` but isn't valid JSON should be
         // silently dropped.
         let mut t = ClaudeTranslator::new();
-        let mut buf = String::new();
+        let mut buf: Vec<u8> = Vec::new();
         let events = extract_agent_events(&mut buf, b"{not_valid_json\n", &mut t);
         assert!(events.is_empty());
     }
@@ -1682,7 +1692,7 @@ mod tests {
         // A producer that never emits newlines for >1 MiB triggers
         // the buffer reset so memory stays bounded.
         let mut t = ClaudeTranslator::new();
-        let mut buf = String::new();
+        let mut buf: Vec<u8> = Vec::new();
         let chunk = vec![b'x'; AGENT_LINE_BUFFER_CAP + 1];
         let events = extract_agent_events(&mut buf, &chunk, &mut t);
         assert!(events.is_empty());
@@ -1694,11 +1704,53 @@ mod tests {
     }
 
     #[test]
+    fn extract_agent_events_preserves_utf8_across_read_boundary() {
+        // Reagent P1 / Codex P2 on PR #833: a multi-byte UTF-8
+        // character split across two PTY reads must decode cleanly
+        // once the complete line arrives, not lossy-decode each
+        // half into U+FFFD.
+        //
+        // 'こんにちは' = e3 81 93 / e3 82 93 / e3 81 ab / e3 81 a1 / e3 81 af
+        // Each char is 3 bytes. Split a line mid-character to verify
+        // the buffered-bytes path preserves the codepoint.
+        let mut t = ClaudeTranslator::new();
+        let mut buf: Vec<u8> = Vec::new();
+        let frame = r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"こんにちは"}}}
+"#;
+        let frame_bytes = frame.as_bytes();
+        // Split at byte 60 — somewhere inside one of the multi-byte
+        // sequences of こんにちは (which starts around byte 75 in the
+        // JSON). Use a position that's clearly inside the codepoint
+        // run.
+        let split = frame_bytes
+            .iter()
+            .position(|&b| b == 0xe3)
+            .expect("expected to find a multi-byte codepoint")
+            + 1; // split right after the leading byte (mid-codepoint)
+        let (a, b) = frame_bytes.split_at(split);
+        let events = extract_agent_events(&mut buf, a, &mut t);
+        // First chunk had no newline.
+        assert!(events.is_empty());
+        let events = extract_agent_events(&mut buf, b, &mut t);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            AgentEvent::AssistantText { delta } => {
+                assert_eq!(
+                    delta, "こんにちは",
+                    "UTF-8 must round-trip cleanly across read boundary; got {delta:?}"
+                );
+                assert!(!delta.contains('\u{FFFD}'), "no replacement chars");
+            }
+            other => panic!("expected AssistantText, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn extract_agent_events_two_lines_one_chunk() {
         // PTY can also deliver multiple complete lines in a single
         // read(). Verify they're all processed.
         let mut t = ClaudeTranslator::new();
-        let mut buf = String::new();
+        let mut buf: Vec<u8> = Vec::new();
         let two_lines = br#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"a"}}}
 {"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"b"}}}
 "#;

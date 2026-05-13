@@ -148,11 +148,22 @@ fn handle_stream_event(t: &mut ClaudeTranslator, frame: &Value, out: &mut Vec<Ag
         }
         "content_block_stop" => {
             if let Some(pending) = t.pending_tool.take() {
-                // Parse accumulated JSON; on failure, emit the raw
-                // string so downstream sees SOMETHING rather than
-                // silently dropping the call.
-                let input: Value = serde_json::from_str(&pending.partial_json)
-                    .unwrap_or(Value::String(pending.partial_json));
+                // Anthropic's stream starts every tool_use with an
+                // implicit `input: {}` and only sends input_json_delta
+                // chunks when there ARE arguments. Treat an empty
+                // partial_json as the canonical no-arg object instead
+                // of falling through to the parse-failure path, which
+                // would emit Value::String("") and break downstream
+                // tool runners expecting an object. Codex P2 on PR #833.
+                let input: Value = if pending.partial_json.is_empty() {
+                    Value::Object(Map::new())
+                } else {
+                    // Non-empty: parse, fall back to the raw string
+                    // on failure so a malformed stream surfaces
+                    // SOMETHING rather than silently dropping.
+                    serde_json::from_str(&pending.partial_json)
+                        .unwrap_or(Value::String(pending.partial_json))
+                };
                 out.push(AgentEvent::ToolUse {
                     tool_use_id: pending.id,
                     tool: pending.name,
@@ -367,6 +378,23 @@ mod tests {
                 assert_eq!(input, &json!({ "command": "ls" }));
             }
             other => panic!("expected ToolUse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_arg_tool_emits_empty_object() {
+        // No input_json_delta between start and stop — codex P2 on
+        // PR #833. The fallback path used to emit Value::String(""),
+        // which broke downstream tool runners. Now emits {}.
+        let mut t = ClaudeTranslator::new();
+        t.translate(tool_use_start("t1", "Echo"));
+        let events = t.translate(content_block_stop());
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            AgentEvent::ToolUse { input, .. } => {
+                assert_eq!(input, &json!({}));
+            }
+            other => panic!("expected ToolUse with empty object input, got {other:?}"),
         }
     }
 
