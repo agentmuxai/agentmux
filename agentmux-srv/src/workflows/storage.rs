@@ -117,10 +117,18 @@ impl WorkflowStore for WaveStore {
 
     fn workflow_run_insert(&self, run: &WorkflowRun) -> Result<(), StoreError> {
         let conn = self.conn().lock().unwrap();
+        // Plain INSERT — the run-history table is append-only by
+        // design (one row per RunWorkflow invocation). Switching from
+        // INSERT OR REPLACE means a duplicate run_id fails loudly
+        // rather than silently overwriting a historical record (kimi
+        // P1 on PR #755). run_id is a fresh UUID per invocation so
+        // collisions in normal flow are vanishingly unlikely; the
+        // loud failure is the point — anything that does collide is
+        // a real bug worth surfacing.
         let block_states =
             serde_json::to_string(&run.block_states).unwrap_or_else(|_| "{}".to_string());
         conn.execute(
-            "INSERT OR REPLACE INTO db_workflow_runs
+            "INSERT INTO db_workflow_runs
                 (id, workflow_id, status, started_at, ended_at, block_states, output, error)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![

@@ -60,6 +60,13 @@ fn default_limit() -> i64 {
     50
 }
 
+/// Hard cap on `ListRunsReq.limit` — guards against a malicious or
+/// buggy client passing e.g. `i64::MAX` and pulling the entire run
+/// history (DoS / memory blow-up). 200 covers any plausible UI page
+/// size with headroom; Phase 2 pagination cursor work will move this
+/// to client-driven slicing. (kimi P1 on PR #755.)
+const MAX_LIST_LIMIT: i64 = 200;
+
 #[derive(Debug, Serialize)]
 struct DeleteResp {
     deleted: bool,
@@ -184,54 +191,68 @@ pub fn register_workflow_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                 let run_id = handle.run_id.clone();
                 let workflow_id = wf.id.clone();
 
-                // Drain events on a background task so the RPC returns
-                // immediately. The frontend will subscribe to per-run
-                // events via the broker (Phase 1 PR-4 wiring).
-                let wstore_for_drain = wstore.clone();
-                let broker_for_drain = broker.clone();
-                let run_id_for_drain = run_id.clone();
-                let workflow_id_for_drain = workflow_id.clone();
-                let final_states = handle.final_states.clone();
-                tokio::spawn(async move {
-                    let mut last_status = RunStatus::Running;
-                    let mut output = String::new();
-                    let mut error = String::new();
-                    while let Some(ev) = handle.events.recv().await {
-                        // Emit each event for live RunPanel.
-                        broker_for_drain.publish(WaveEvent {
-                            event: format!("workflowrun:{}", run_id_for_drain),
-                            scopes: vec![],
-                            sender: String::new(),
-                            persist: 0,
-                            data: Some(serde_json::to_value(&ev).unwrap_or_default()),
-                        });
-                        match &ev {
-                            RunEvent::RunDone { output: o, .. } => {
-                                last_status = RunStatus::Done;
-                                output = serde_json::to_string(o).unwrap_or_default();
-                            }
-                            RunEvent::RunFailed { error: e, .. } => {
-                                last_status = RunStatus::Failed;
-                                error = e.clone();
-                            }
-                            _ => {}
+                // Drain the event channel inline (vs. tokio::spawn) so
+                // the run record is persisted before this RPC resolves.
+                // Reasons:
+                //   1. A fire-and-forget spawn could be dropped if the
+                //      server restarts between RPC return and task
+                //      completion — the frontend would hold a run_id
+                //      that has no row (kimi P1 on PR #755).
+                //   2. The frontend's `refreshRuns` (called right
+                //      after the RPC resolves to update the UI list)
+                //      races the spawn and shows stale data without
+                //      seeing the new row (codex + reagent P2).
+                // Phase 1 has no live `workflowrun:<id>` subscription
+                // yet, so an awaited drain is correct for Phase 1.
+                // Phase 1 PR-4 polish reintroduces streaming once the
+                // frontend subscribes — the row will then be written
+                // by a spawn AND a running placeholder will be
+                // inserted up-front so the UI never lags the truth.
+                let mut last_status = RunStatus::Running;
+                let mut output = String::new();
+                let mut error = String::new();
+                while let Some(ev) = handle.events.recv().await {
+                    broker.publish(WaveEvent {
+                        event: format!("workflowrun:{}", run_id),
+                        scopes: vec![],
+                        sender: String::new(),
+                        persist: 0,
+                        data: Some(serde_json::to_value(&ev).unwrap_or_default()),
+                    });
+                    match &ev {
+                        RunEvent::RunDone { output: o, .. } => {
+                            last_status = RunStatus::Done;
+                            // The engine already unwraps Response's
+                            // `{ "value": ... }` wrapper, so `o` is
+                            // the bare value (string for the common
+                            // case). Coerce to a single column-friendly
+                            // string for the run-record.
+                            output = match o {
+                                serde_json::Value::String(s) => s.clone(),
+                                other => serde_json::to_string(other).unwrap_or_default(),
+                            };
                         }
+                        RunEvent::RunFailed { error: e, .. } => {
+                            last_status = RunStatus::Failed;
+                            error = e.clone();
+                        }
+                        _ => {}
                     }
-                    let states = final_states.lock().await.clone();
-                    let row = WorkflowRun {
-                        id: run_id_for_drain.clone(),
-                        workflow_id: workflow_id_for_drain,
-                        status: last_status.as_str().to_string(),
-                        started_at,
-                        ended_at: now_ms(),
-                        block_states: states,
-                        output,
-                        error,
-                    };
-                    if let Err(e) = wstore_for_drain.workflow_run_insert(&row) {
-                        tracing::warn!(run_id = %run_id_for_drain, error = %e, "workflow_run_insert failed");
-                    }
-                });
+                }
+                let states = handle.final_states.lock().await.clone();
+                let row = WorkflowRun {
+                    id: run_id.clone(),
+                    workflow_id: workflow_id.clone(),
+                    status: last_status.as_str().to_string(),
+                    started_at,
+                    ended_at: now_ms(),
+                    block_states: states,
+                    output,
+                    error,
+                };
+                if let Err(e) = wstore.workflow_run_insert(&row) {
+                    tracing::warn!(run_id = %run_id, error = %e, "workflow_run_insert failed");
+                }
 
                 Ok(Some(serde_json::to_value(&RunResp { run_id }).unwrap_or_default()))
             })
@@ -246,8 +267,9 @@ pub fn register_workflow_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
             Box::pin(async move {
                 let cmd: ListRunsReq = serde_json::from_value(data)
                     .map_err(|e| format!("listworkflowruns: {e}"))?;
+                let limit = cmd.limit.clamp(0, MAX_LIST_LIMIT);
                 let list = wstore
-                    .workflow_runs_for(&cmd.workflow_id, cmd.limit)
+                    .workflow_runs_for(&cmd.workflow_id, limit)
                     .map_err(|e| format!("listworkflowruns: {e}"))?;
                 Ok(Some(serde_json::to_value(&list).unwrap_or_default()))
             })

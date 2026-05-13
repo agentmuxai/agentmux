@@ -185,7 +185,17 @@ async fn execute(
                     )
                     .await;
                     if matches!(kind, BlockKind::Response) {
-                        response_output = Some(output);
+                        // Response emits `{ "value": <resolved-template> }`;
+                        // unwrap to the bare value so the run's final
+                        // output is the user-facing string (or whatever
+                        // the template resolved to), not the wrapper
+                        // JSON. (codex P3 on PR #755.)
+                        response_output = Some(
+                            output
+                                .get("value")
+                                .cloned()
+                                .unwrap_or(output),
+                        );
                     }
                 }
                 Err(e) => {
@@ -660,10 +670,16 @@ mod tests {
         //                                            ↘ Response("hit_false")
         // Result: cond is false, true-branch Response is skipped,
         // false-branch Response runs and becomes the run output.
+        //
+        // The Variables block reads `entries: [{name, value}]` (not
+        // `vars`), so the data shape mirrors what the canvas emits.
+        // An earlier draft of this test used the wrong key and the
+        // condition passed by coincidence (unresolved `{{var.v}}`
+        // string-compared against `5`); reagent caught it.
         let mut vars_node = n("v1", "variables");
         vars_node.data = json!({
             "kind": "variables",
-            "vars": { "v": 10 }
+            "entries": [{ "name": "v", "value": 10 }]
         });
         let mut cond_node = n("c1", "condition");
         cond_node.data = json!({
@@ -718,7 +734,9 @@ mod tests {
         let rt_state = states.get("rt").expect("rt state recorded");
         assert_eq!(rt_state.status, "skipped");
 
-        // The run's response output is the false-branch's resolution.
-        assert!(final_output.is_some());
+        // The run's response output is the false-branch's resolution,
+        // unwrapped from Response's `{ "value": ... }` envelope so
+        // downstream consumers see the bare string (codex P3).
+        assert_eq!(final_output, Some(json!("hit_false")));
     }
 }

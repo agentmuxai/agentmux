@@ -16,6 +16,7 @@
 //!   ```
 
 use std::collections::HashMap;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -24,6 +25,68 @@ use crate::workflows::data_flow::ExecutionScope;
 use crate::workflows::types::FlowNode;
 
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
+
+/// Validate a resolved URL before dispatching it. Phase 1 SSRF
+/// protection: rejects non-http(s) schemes and literal-IP hosts that
+/// fall into reserved / link-local / private / loopback ranges (the
+/// AWS metadata endpoint 169.254.169.254, RFC1918 space, 127.0.0.1,
+/// fc00::/7, ::1, etc.). DNS-resolved hostnames are not re-checked
+/// post-resolution — that requires a custom `reqwest` resolver and
+/// lands as a follow-up issue. See kimi P1 on PR #755.
+fn validate_url_safety(url_str: &str) -> Result<(), String> {
+    let url = reqwest::Url::parse(url_str)
+        .map_err(|e| format!("invalid URL: {e}"))?;
+    match url.scheme() {
+        "http" | "https" => {}
+        other => return Err(format!("URL scheme `{other}` is not allowed (http/https only)")),
+    }
+    let host = url
+        .host_str()
+        .ok_or_else(|| "URL missing host".to_string())?;
+    // IPv6 literals in URLs are bracketed: `https://[::1]/`. Strip the
+    // brackets before attempting an IP parse; that path also lets us
+    // distinguish a true IPv6 literal from an ambiguous string.
+    if let Some(inner) = host.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+        let v6: Ipv6Addr = inner
+            .parse()
+            .map_err(|e| format!("invalid IPv6 host `{inner}`: {e}"))?;
+        if is_reserved_v6(&v6) {
+            return Err(format!("host `{v6}` is a reserved IPv6 address"));
+        }
+        return Ok(());
+    }
+    if host.eq_ignore_ascii_case("localhost") {
+        return Err("host `localhost` is not allowed".to_string());
+    }
+    if let Ok(v4) = host.parse::<Ipv4Addr>() {
+        if is_reserved_v4(&v4) {
+            return Err(format!("host `{v4}` is a reserved/private IP"));
+        }
+    }
+    // Otherwise it's a domain name — DNS-resolution-time SSRF
+    // validation is out of scope for Phase 1 (see fn doc-comment).
+    Ok(())
+}
+
+fn is_reserved_v4(v4: &Ipv4Addr) -> bool {
+    v4.is_loopback()
+        || v4.is_private()
+        || v4.is_link_local()
+        || v4.is_broadcast()
+        || v4.is_unspecified()
+        || v4.is_multicast()
+}
+
+fn is_reserved_v6(v6: &Ipv6Addr) -> bool {
+    v6.is_loopback()
+        || v6.is_unspecified()
+        || v6.is_multicast()
+        // unique-local fc00::/7 — stable API for this is gated, so
+        // check the segment manually.
+        || (v6.segments()[0] & 0xfe00) == 0xfc00
+        // link-local fe80::/10
+        || (v6.segments()[0] & 0xffc0) == 0xfe80
+}
 
 pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, String> {
     let method_raw = node
@@ -41,6 +104,7 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
     if url.trim().is_empty() {
         return Err("API block resolved URL is empty".to_string());
     }
+    validate_url_safety(&url)?;
 
     let headers_map: HashMap<String, String> = match node.data.get("headers") {
         Some(Value::Object(obj)) => obj
@@ -94,4 +158,63 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
         "body": body_val,
         "headers": resp_headers,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ssrf_rejects_loopback() {
+        assert!(validate_url_safety("http://127.0.0.1/").is_err());
+        assert!(validate_url_safety("http://127.0.0.1:8080/x").is_err());
+        assert!(validate_url_safety("https://[::1]/").is_err());
+    }
+
+    #[test]
+    fn ssrf_rejects_localhost_hostname() {
+        assert!(validate_url_safety("http://localhost/").is_err());
+        assert!(validate_url_safety("http://LocalHost:80/").is_err());
+    }
+
+    #[test]
+    fn ssrf_rejects_aws_metadata_endpoint() {
+        // 169.254.169.254 is link-local (RFC 3927) — covers the cloud
+        // metadata endpoints for AWS, GCP, Azure (all use this address
+        // or other link-local IPs).
+        assert!(validate_url_safety("http://169.254.169.254/latest/meta-data/").is_err());
+    }
+
+    #[test]
+    fn ssrf_rejects_rfc1918_private() {
+        assert!(validate_url_safety("http://10.0.0.1/").is_err());
+        assert!(validate_url_safety("http://172.16.0.1/").is_err());
+        assert!(validate_url_safety("http://192.168.1.1/").is_err());
+    }
+
+    #[test]
+    fn ssrf_rejects_non_http_schemes() {
+        assert!(validate_url_safety("file:///etc/passwd").is_err());
+        assert!(validate_url_safety("ftp://example.com/").is_err());
+        assert!(validate_url_safety("gopher://example.com/").is_err());
+    }
+
+    #[test]
+    fn ssrf_rejects_ipv6_unique_local() {
+        // fc00::/7 — RFC 4193 unique local addresses.
+        assert!(validate_url_safety("http://[fc00::1]/").is_err());
+        assert!(validate_url_safety("http://[fd00::1]/").is_err());
+    }
+
+    #[test]
+    fn ssrf_allows_public_hostnames() {
+        assert!(validate_url_safety("https://api.example.com/v1/users").is_ok());
+        assert!(validate_url_safety("http://example.com:8080/").is_ok());
+    }
+
+    #[test]
+    fn ssrf_allows_public_ip_literal() {
+        // 8.8.8.8 is a public DNS address — not reserved.
+        assert!(validate_url_safety("https://8.8.8.8/").is_ok());
+    }
 }
