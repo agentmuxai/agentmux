@@ -5,6 +5,7 @@ mod identity;
 mod persist;
 mod persist_subscriber;
 mod reducer;
+mod registry;
 mod sagas;
 mod server;
 mod srv_ipc;
@@ -310,10 +311,30 @@ async fn main() {
 
     // Open databases
     let db_dir = base::get_wave_db_dir();
-    let wstore = Arc::new(WaveStore::open(&db_dir.join("objects.db")).unwrap_or_else(|e| {
+    let wstore_raw = WaveStore::open(&db_dir.join("objects.db")).unwrap_or_else(|e| {
         tracing::error!("Failed to open object store: {}", e);
         std::process::exit(1);
-    }));
+    });
+    // Attach the cross-version named-agent registry. Falls back to a
+    // disabled registry when the shared home can't be resolved (CI,
+    // unusual envs); mutations still hit SQLite, just don't mirror.
+    // See docs/specs/SPEC_SHARED_AGENT_REGISTRY_2026_05_12.md.
+    if let Some(root) = registry::resolve_shared_registry_dir() {
+        match registry::Registry::open(root.clone()) {
+            Ok(reg) => {
+                tracing::info!(root = %root.display(), "registry: shared agent registry attached");
+                wstore_raw.set_registry(Arc::new(reg));
+            }
+            Err(e) => tracing::warn!(
+                root = %root.display(),
+                error = %e,
+                "registry: failed to open shared agent registry — SQLite remains authoritative"
+            ),
+        }
+    } else {
+        tracing::warn!("registry: could not resolve shared registry dir — mirror disabled");
+    }
+    let wstore = Arc::new(wstore_raw);
     let filestore = Arc::new(FileStore::open(&db_dir.join("filestore.db")).unwrap_or_else(|e| {
         tracing::error!("Failed to open file store: {}", e);
         std::process::exit(1);
