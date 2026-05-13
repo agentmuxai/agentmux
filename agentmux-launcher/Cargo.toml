@@ -1,7 +1,7 @@
 [package]
 name = "agentmux-launcher"
-version = "0.33.833"
-description = "AgentMux Launcher — tiny exe that sets DLL path then spawns the CEF host"
+version = "0.33.834"
+description = "AgentMux Launcher — Job Object + IPC + saga coordinator + srv lifecycle"
 authors = ["AgentMux Corp"]
 edition = "2021"
 
@@ -78,10 +78,18 @@ windows-sys = { version = "0.59", features = [
     # Phase B.6: MessageBoxW for the user-facing "AgentMux is already
     # running" dialog when the named-pipe single-instance bind fails.
     "Win32_UI_WindowsAndMessaging",
+    # Pre-splash: BeginPaint/EndPaint, CreateSolidBrush, FillRect,
+    # DeleteObject, GetClientRect for the layered popup window.
+    "Win32_Graphics_Gdi",
 ] }
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1"
+# Decode the splash brain logo at compile time. The PNG (RGBA, transparent
+# background) lives at `resources/brain.png`; build.rs decodes it to raw
+# BGRA bytes that splash.rs `include_bytes!`-s — no runtime PNG decoder
+# in the launcher binary.
+png = "0.17"
 
 [dev-dependencies]
 # Phase B.3: property-based testing for the reducer. Generates
