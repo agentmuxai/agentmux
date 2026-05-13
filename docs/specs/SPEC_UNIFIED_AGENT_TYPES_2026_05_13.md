@@ -274,7 +274,7 @@ The agent pane code in `agentmux-srv/src/backend/blockcontroller/shell.rs` keeps
 
 This is an **additive** change — zero risk of breaking the pane's existing behavior. The new `AgentEvent` stream becomes available for the in-pane Identity/Memory cog tabs, future per-turn audit views, etc.
 
-### 4.4 Workflow Agent block integration
+### 4.5 Workflow Agent block integration
 
 `agentmux-srv/src/workflows/executor/blocks/agent.rs` today returns the stub. Replacement:
 
@@ -307,6 +307,13 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
         .map_err(|e| format!("agent runner cancelled: {e}"))?
         .map_err(|e| format!("agent run failed: {e}"))?;
 
+    // NOTE: This output object is *manually constructed* to match the
+    // existing workflow block convention (snake_case keys, like API's
+    // `status`/`body`, Condition's `result`, Response's `value`).
+    // Do NOT use `serde_json::to_value(&result)` here — that would
+    // emit camelCase (`costUsd`) because AgentRunResult carries
+    // `#[serde(rename_all = "camelCase")]` for IPC consistency with
+    // the frontend, breaking `{{<block_id>.cost_usd}}` templates.
     Ok(json!({
         "response": result.response,
         "tokens": result.tokens,
