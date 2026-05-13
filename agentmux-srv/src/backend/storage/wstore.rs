@@ -1832,7 +1832,14 @@ impl WaveStore {
     /// Failures are logged, never propagated: SQLite remains
     /// authoritative.
     fn registry_upsert_if_named(&self, inst: &AgentInstance) {
-        if inst.instance_name.is_empty() {
+        // Mirror filter must match SQLite's dropdown filter
+        // (instance_list_named): non-empty instance_name AND
+        // parent_instance_id == ''. Continuation rows (created when
+        // the user resumes an existing named agent) carry the prior
+        // row in parent_instance_id and would otherwise produce a
+        // duplicate registry entry that the registry-sourced read
+        // path would surface as a separate dropdown row.
+        if inst.instance_name.is_empty() || !inst.parent_instance_id.is_empty() {
             return;
         }
         let Some(reg) = self.registry() else { return };
@@ -3122,6 +3129,26 @@ mod tests {
         store.instance_create(&inst).unwrap();
         assert!(reg.list_active().unwrap().is_empty(),
             "user path with inner 'agents' segment must not be mirrored");
+    }
+
+    #[test]
+    fn instance_create_continuation_row_does_not_mirror() {
+        // SQLite's dropdown filter excludes rows where
+        // parent_instance_id != ''. The mirror must agree, otherwise
+        // continuation rows duplicate their parent in the registry.
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let parent = make_named_inst("inst-parent", "demoP", &agents_root);
+        store.instance_create(&parent).unwrap();
+        assert_eq!(reg.list_active().unwrap().len(), 1);
+
+        let mut child = make_named_inst("inst-child", "demoP", &agents_root);
+        child.parent_instance_id = "inst-parent".to_string();
+        store.instance_create(&child).unwrap();
+        // Still only one record — the continuation row is NOT mirrored.
+        let recs = reg.list_active().unwrap();
+        assert_eq!(recs.len(), 1);
+        assert_eq!(recs[0].data.instance_id, "inst-parent");
     }
 
     #[test]
