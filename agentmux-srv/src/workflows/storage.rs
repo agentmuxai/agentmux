@@ -20,6 +20,11 @@ pub trait WorkflowStore {
     fn workflow_upsert(&self, wf: &WorkflowDefinition) -> Result<(), StoreError>;
     fn workflow_delete(&self, id: &str) -> Result<bool, StoreError>;
     fn workflow_run_insert(&self, run: &WorkflowRun) -> Result<(), StoreError>;
+    /// Update an existing run row in place. Returns rows affected
+    /// (0 if no row matched `run.id`). Used to flip a placeholder
+    /// `running` row into its terminal state once the drain task
+    /// completes, so the row exists from the moment the RPC returns.
+    fn workflow_run_update(&self, run: &WorkflowRun) -> Result<usize, StoreError>;
     fn workflow_runs_for(
         &self,
         workflow_id: &str,
@@ -125,6 +130,10 @@ impl WorkflowStore for WaveStore {
         // collisions in normal flow are vanishingly unlikely; the
         // loud failure is the point — anything that does collide is
         // a real bug worth surfacing.
+        //
+        // Status transitions (running → done/failed) happen via
+        // `workflow_run_update`, NOT a second INSERT. See codex P1
+        // on PR #755 v0.33.842 (RPC timeout truncating the drain).
         let block_states =
             serde_json::to_string(&run.block_states).unwrap_or_else(|_| "{}".to_string());
         conn.execute(
@@ -143,6 +152,30 @@ impl WorkflowStore for WaveStore {
             ],
         )?;
         Ok(())
+    }
+
+    fn workflow_run_update(&self, run: &WorkflowRun) -> Result<usize, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let block_states =
+            serde_json::to_string(&run.block_states).unwrap_or_else(|_| "{}".to_string());
+        let rows = conn.execute(
+            "UPDATE db_workflow_runs SET
+                status      = ?2,
+                ended_at    = ?3,
+                block_states= ?4,
+                output      = ?5,
+                error       = ?6
+             WHERE id = ?1",
+            params![
+                run.id,
+                run.status,
+                run.ended_at,
+                block_states,
+                run.output,
+                run.error,
+            ],
+        )?;
+        Ok(rows)
     }
 
     fn workflow_runs_for(

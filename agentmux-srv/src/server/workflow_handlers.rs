@@ -18,6 +18,7 @@
 //! will tee the channel to the renderer via the existing `wps` event
 //! broker so `RunPanel` shows live per-block status.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -191,73 +192,94 @@ pub fn register_workflow_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                 let run_id = handle.run_id.clone();
                 let workflow_id = wf.id.clone();
 
-                // Drain the event channel inline (vs. tokio::spawn) so
-                // the run record is persisted before this RPC resolves.
-                // Reasons:
-                //   1. A fire-and-forget spawn could be dropped if the
-                //      server restarts between RPC return and task
-                //      completion — the frontend would hold a run_id
-                //      that has no row (kimi P1 on PR #755).
-                //   2. The frontend's `refreshRuns` (called right
-                //      after the RPC resolves to update the UI list)
-                //      races the spawn and shows stale data without
-                //      seeing the new row (codex + reagent P2).
-                // Phase 1 has no live `workflowrun:<id>` subscription
-                // yet, so an awaited drain is correct for Phase 1.
-                // Phase 1 PR-4 polish reintroduces streaming once the
-                // frontend subscribes — the row will then be written
-                // by a spawn AND a running placeholder will be
-                // inserted up-front so the UI never lags the truth.
-                let mut last_status = RunStatus::Running;
-                let mut output = String::new();
-                let mut error = String::new();
-                while let Some(ev) = handle.events.recv().await {
-                    broker.publish(WaveEvent {
-                        event: format!("workflowrun:{}", run_id),
-                        scopes: vec![],
-                        sender: String::new(),
-                        persist: 0,
-                        data: Some(serde_json::to_value(&ev).unwrap_or_default()),
-                    });
-                    match &ev {
-                        RunEvent::RunDone { output: o, .. } => {
-                            last_status = RunStatus::Done;
-                            // The engine already unwraps Response's
-                            // `{ "value": ... }` wrapper, so `o` is
-                            // the bare value (string for the common
-                            // case). Coerce to a single column-friendly
-                            // string for the run-record.
-                            output = match o {
-                                serde_json::Value::String(s) => s.clone(),
-                                other => serde_json::to_string(other).unwrap_or_default(),
-                            };
-                        }
-                        RunEvent::RunFailed { error: e, .. } => {
-                            last_status = RunStatus::Failed;
-                            error = e.clone();
-                        }
-                        _ => {}
-                    }
-                }
-                let states = handle.final_states.lock().await.clone();
-                let row = WorkflowRun {
+                // Persist a `running` placeholder row synchronously
+                // BEFORE returning. Guarantees:
+                //   1. The frontend's `refreshRuns` (called right
+                //      after this RPC resolves) always sees the row,
+                //      no spawn-race against the drain (codex+reagent
+                //      P2 from earlier rounds).
+                //   2. The drain can run as a background spawn
+                //      again — so workflows longer than the RPC
+                //      timeout (5s default) don't get their drain
+                //      truncated mid-flight (codex P1 v0.33.842).
+                //   3. Server-restart safety: an orphaned `running`
+                //      row signals "drain was interrupted" — a
+                //      future startup task can mark stale rows as
+                //      `interrupted` (cleaner than the prior
+                //      fire-and-forget that left no row at all).
+                let placeholder = WorkflowRun {
                     id: run_id.clone(),
                     workflow_id: workflow_id.clone(),
-                    status: last_status.as_str().to_string(),
+                    status: RunStatus::Running.as_str().to_string(),
                     started_at,
-                    ended_at: now_ms(),
-                    block_states: states,
-                    output,
-                    error,
+                    ended_at: 0,
+                    block_states: HashMap::new(),
+                    output: String::new(),
+                    error: String::new(),
                 };
-                // Propagate persistence failures: a swallowed error
-                // here would return a successful run_id to the
-                // frontend that has no backing row, breaking the
-                // audit trail and the refreshRuns lookup. (codex P2
-                // on PR #755.)
                 wstore
-                    .workflow_run_insert(&row)
-                    .map_err(|e| format!("runworkflow persist: {e}"))?;
+                    .workflow_run_insert(&placeholder)
+                    .map_err(|e| format!("runworkflow placeholder: {e}"))?;
+
+                // Drain on a background task; on completion, UPDATE
+                // the placeholder row in place.
+                let wstore_for_drain = wstore.clone();
+                let broker_for_drain = broker.clone();
+                let run_id_for_drain = run_id.clone();
+                let workflow_id_for_drain = workflow_id.clone();
+                tokio::spawn(async move {
+                    let mut last_status = RunStatus::Running;
+                    let mut output = String::new();
+                    let mut error = String::new();
+                    while let Some(ev) = handle.events.recv().await {
+                        broker_for_drain.publish(WaveEvent {
+                            event: format!("workflowrun:{}", run_id_for_drain),
+                            scopes: vec![],
+                            sender: String::new(),
+                            persist: 0,
+                            data: Some(serde_json::to_value(&ev).unwrap_or_default()),
+                        });
+                        match &ev {
+                            RunEvent::RunDone { output: o, .. } => {
+                                last_status = RunStatus::Done;
+                                // Engine already unwraps Response's
+                                // `{ "value": ... }` wrapper.
+                                output = match o {
+                                    serde_json::Value::String(s) => s.clone(),
+                                    other => serde_json::to_string(other).unwrap_or_default(),
+                                };
+                            }
+                            RunEvent::RunFailed { error: e, .. } => {
+                                last_status = RunStatus::Failed;
+                                error = e.clone();
+                            }
+                            _ => {}
+                        }
+                    }
+                    let states = handle.final_states.lock().await.clone();
+                    let row = WorkflowRun {
+                        id: run_id_for_drain.clone(),
+                        workflow_id: workflow_id_for_drain,
+                        status: last_status.as_str().to_string(),
+                        started_at,
+                        ended_at: now_ms(),
+                        block_states: states,
+                        output,
+                        error,
+                    };
+                    match wstore_for_drain.workflow_run_update(&row) {
+                        Ok(0) => tracing::warn!(
+                            run_id = %run_id_for_drain,
+                            "workflow_run_update: placeholder row missing (race?)"
+                        ),
+                        Ok(_) => {}
+                        Err(e) => tracing::warn!(
+                            run_id = %run_id_for_drain,
+                            error = %e,
+                            "workflow_run_update failed"
+                        ),
+                    }
+                });
 
                 Ok(Some(serde_json::to_value(&RunResp { run_id }).unwrap_or_default()))
             })
