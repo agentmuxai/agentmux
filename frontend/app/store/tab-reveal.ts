@@ -68,14 +68,23 @@ function cancelPendingDetector(): void {
  * await with no longtasks firing, prematurely revealing an empty or
  * half-mounted tab.
  *
- * Every `holdRevealGate()` MUST be paired with a follow-up
+ * Callers MUST pair `holdRevealGate()` with a follow-up
  * `scheduleRevealLift()` (typically in a `finally`) once the async
- * work resolves, otherwise the gate never lifts and the tab stays
- * hidden forever.
+ * work resolves. As a safety net for the case where the awaited
+ * promise never settles (e.g. a backend `fetch` that hangs without
+ * timeout — `callBackendService` does not impose one), this also
+ * arms a MAX_GATE_MS fallback so the gate eventually lifts and the
+ * window can't be left blank indefinitely. The normal-path
+ * `scheduleRevealLift()` cancels this timer via
+ * `cancelPendingDetector()` before installing its own detector.
  */
 export function holdRevealGate(): void {
     setTabSwitching(true);
     cancelPendingDetector();
+    activeFallbackTimer = setTimeout(() => {
+        activeFallbackTimer = null;
+        setTabSwitching(false);
+    }, MAX_GATE_MS);
 }
 
 /**

@@ -61,8 +61,20 @@ describe("tab-reveal gate", () => {
         // the fallback timer would lift the gate after 80ms even
         // though the destination tab had not yet mounted.
         holdRevealGate();
-        vi.advanceTimersByTime(500); // way past SETTLE_MS
+        vi.advanceTimersByTime(500); // way past SETTLE_MS, still under MAX_GATE_MS
         expect(read(tabSwitching)).toBe(true);
+    });
+
+    test("holdRevealGate safety-lifts after MAX_GATE_MS if no schedule follows", () => {
+        // Codex P2: if the awaited RPC never settles (callBackendService
+        // has no timeout), the paired scheduleRevealLift in `finally`
+        // never runs and the gate would stay up forever, leaving the
+        // window blank indefinitely. The safety net inside
+        // holdRevealGate prevents this — gate auto-lifts at the hard
+        // cap even with no paired schedule.
+        holdRevealGate();
+        vi.advanceTimersByTime(900); // past MAX_GATE_MS=800
+        expect(read(tabSwitching)).toBe(false);
     });
 
     test("scheduleRevealLift after holdRevealGate eventually lifts via fallback", () => {
@@ -92,9 +104,11 @@ describe("tab-reveal gate", () => {
         // via holdRevealGate.
         vi.advanceTimersByTime(400);
         holdRevealGate();
-        // Past where the stale timer would have fired (MAX_GATE_MS
-        // total from the schedule call, i.e. 400ms after the hold).
-        vi.advanceTimersByTime(1000);
+        // Past where the prior schedule's MAX_GATE_MS would have fired
+        // (800ms from the schedule call, i.e. 400ms after the hold).
+        // Stay under the hold's OWN safety net so we're verifying the
+        // prior timer's cancellation, not gate-still-up by other means.
+        vi.advanceTimersByTime(500);
         expect(read(tabSwitching)).toBe(true);
     });
 
@@ -109,8 +123,9 @@ describe("tab-reveal gate", () => {
         vi.advanceTimersByTime(400);
         expect(read(tabSwitching)).toBe(true);
         holdRevealGate();
-        // Past where the prior fallback would have fired.
-        vi.advanceTimersByTime(1000);
+        // Past where the prior schedule's fallback would have fired,
+        // but under the hold's own safety net.
+        vi.advanceTimersByTime(500);
         expect(read(tabSwitching)).toBe(true);
     });
 });
