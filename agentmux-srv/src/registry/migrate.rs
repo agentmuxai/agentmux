@@ -60,6 +60,11 @@ pub fn migrate_from_sqlite_once(
     }
 
     let mut latest_by_id: HashMap<String, RowSnapshot> = HashMap::new();
+    // True iff any per-version DB threw a non-transient-looking error.
+    // We use this to skip writing the marker so the next launch
+    // retries — otherwise a brief filesystem hiccup permanently
+    // omits those rows from the registry-backed dropdown.
+    let mut any_db_failed = false;
 
     for entry in std::fs::read_dir(&versions_root)? {
         let v_dir = entry?.path();
@@ -77,9 +82,21 @@ pub fn migrate_from_sqlite_once(
                 for row in rows {
                     stats.rows_seen += 1;
                     let key = row.id.clone();
-                    match latest_by_id.get(&key) {
-                        Some(existing) if existing.started_at >= row.started_at => {}
-                        _ => {
+                    match latest_by_id.get_mut(&key) {
+                        Some(existing) if existing.started_at >= row.started_at => {
+                            // Existing snapshot wins on started_at, but
+                            // OR the hidden flag — any version expressing
+                            // "forget" intent is preserved as a tombstone.
+                            existing.display_hidden =
+                                existing.display_hidden || row.display_hidden;
+                        }
+                        Some(existing) => {
+                            let merged_hidden =
+                                existing.display_hidden || row.display_hidden;
+                            *existing = row;
+                            existing.display_hidden = merged_hidden;
+                        }
+                        None => {
                             latest_by_id.insert(key, row);
                         }
                     }
@@ -89,8 +106,9 @@ pub fn migrate_from_sqlite_once(
                 tracing::warn!(
                     db = %db_path.display(),
                     error = %e,
-                    "registry-migrate: skipping unreadable per-version DB"
+                    "registry-migrate: per-version DB unreadable — will retry on next launch"
                 );
+                any_db_failed = true;
             }
         }
     }
@@ -104,6 +122,7 @@ pub fn migrate_from_sqlite_once(
             stats.records_skipped_existing += 1;
             continue;
         }
+        let display_hidden = row.display_hidden;
         let Some(rec) = row_to_record(&row, agents_root) else {
             stats.records_skipped_unmappable += 1;
             continue;
@@ -117,10 +136,33 @@ pub fn migrate_from_sqlite_once(
             stats.records_skipped_unmappable += 1;
             continue;
         }
+        // Preserve pre-registry "forget" intent: if any version's
+        // SQLite had this row hidden, move the freshly-written
+        // registry file to retired/ so the dropdown stays consistent
+        // with the user's prior soft-delete.
+        if display_hidden {
+            if let Err(e) = registry.retire(&id) {
+                tracing::warn!(
+                    instance_id = %id,
+                    error = %e,
+                    "registry-migrate: failed to retire migrated tombstone — record may surface as active"
+                );
+            }
+        }
         stats.records_written += 1;
     }
 
-    write_marker(&marker_path, &stats)?;
+    // Only finalize the migration when every DB we encountered was
+    // readable. On any per-DB error, defer the marker so a future
+    // launch retries the migration. The already-written rows are
+    // idempotency-skipped on retry via `exists_anywhere`.
+    if !any_db_failed {
+        write_marker(&marker_path, &stats)?;
+    } else {
+        tracing::info!(
+            "registry-migrate: deferring marker write; one or more per-version DBs were unreadable and will be retried next launch"
+        );
+    }
     Ok(stats)
 }
 
@@ -151,6 +193,7 @@ struct RowSnapshot {
     working_directory: String,
     started_at: i64,
     created_at: i64,
+    display_hidden: bool,
 }
 
 /// True iff the error is SQLite reporting "this column/table doesn't
@@ -178,13 +221,15 @@ fn read_named_rows(db_path: &Path) -> Result<Vec<RowSnapshot>, rusqlite::Error> 
     // columns. Suppress ONLY the specific "no such column/table"
     // errors — broader SqliteFailures (corruption, locked, etc.) must
     // surface so the caller can log + continue with the next DB.
+    // Include hidden rows — the caller turns them into retired/
+    // tombstones so a pre-registry "Forget agent" intent survives
+    // migration even if another version still has the row visible.
     let mut stmt = match conn.prepare(
         "SELECT id, instance_name, definition_id, identity_id, memory_id,
-                working_directory, started_at, created_at
+                working_directory, started_at, created_at, display_hidden
          FROM db_agent_instances
          WHERE instance_name <> ''
-           AND parent_instance_id = ''
-           AND display_hidden = 0",
+           AND parent_instance_id = ''",
     ) {
         Ok(s) => s,
         Err(e) if is_missing_column_or_table(&e) => return Ok(Vec::new()),
@@ -200,6 +245,7 @@ fn read_named_rows(db_path: &Path) -> Result<Vec<RowSnapshot>, rusqlite::Error> 
             working_directory: row.get(5)?,
             started_at: row.get(6)?,
             created_at: row.get(7)?,
+            display_hidden: row.get::<_, i64>(8)? != 0,
         })
     })?;
     iter.collect()
@@ -248,6 +294,16 @@ mod tests {
     /// Build a per-version SQLite at `<version_dir>/data/db/objects.db`
     /// with a minimal `db_agent_instances` schema and the given rows.
     fn make_version_db(version_dir: &Path, rows: &[(&str, &str, i64, &str)]) {
+        let rows: Vec<_> = rows.iter().map(|(a, b, c, d)| (*a, *b, *c, *d, false)).collect();
+        make_version_db_with_hidden(version_dir, &rows);
+    }
+
+    /// Variant that lets each row carry an explicit `display_hidden`
+    /// flag. Used by tests that exercise tombstone propagation.
+    fn make_version_db_with_hidden(
+        version_dir: &Path,
+        rows: &[(&str, &str, i64, &str, bool)],
+    ) {
         let db_path = version_dir.join("data").join("db");
         std::fs::create_dir_all(&db_path).unwrap();
         let db_path = db_path.join("objects.db");
@@ -272,12 +328,12 @@ mod tests {
             );",
         )
         .unwrap();
-        for (id, name, started_at, working_directory) in rows {
+        for (id, name, started_at, working_directory, hidden) in rows {
             conn.execute(
                 "INSERT INTO db_agent_instances
-                    (id, definition_id, instance_name, working_directory, started_at, created_at)
-                 VALUES (?1, 'claude-code', ?2, ?3, ?4, ?4)",
-                params![id, name, working_directory, started_at],
+                    (id, definition_id, instance_name, working_directory, started_at, created_at, display_hidden)
+                 VALUES (?1, 'claude-code', ?2, ?3, ?4, ?4, ?5)",
+                params![id, name, working_directory, started_at, if *hidden { 1_i64 } else { 0_i64 }],
             )
             .unwrap();
         }
@@ -448,6 +504,102 @@ mod tests {
     }
 
     #[test]
+    fn migrate_writes_legacy_hidden_row_as_tombstone() {
+        // Pre-registry "Forget agent" intent must survive migration:
+        // a single-version row with display_hidden=1 should land in
+        // retired/, not active/.
+        let (home, reg) = fresh_home();
+        let agents_root = home.path().join("agents");
+        std::fs::create_dir_all(&agents_root).unwrap();
+        let wd = agents_root.join("forgotten");
+        std::fs::create_dir_all(&wd).unwrap();
+        let v_dir = home.path().join("versions").join("0.33.821");
+        make_version_db_with_hidden(
+            &v_dir,
+            &[("inst-1", "forgotten", 100, &wd.to_string_lossy(), true)],
+        );
+
+        let stats = migrate_from_sqlite_once(home.path(), &reg).unwrap();
+        assert_eq!(stats.records_written, 1);
+        assert!(reg.list_active().unwrap().is_empty(),
+            "hidden legacy row must NOT appear active");
+        assert!(reg.root().join("retired").join("inst-1.json").exists(),
+            "hidden legacy row must be migrated as retired tombstone");
+    }
+
+    #[test]
+    fn migrate_preserves_forget_intent_across_versions() {
+        // Same id in two versions: one hides it (Forget), the other
+        // still has it visible. The "forget" must win — registry
+        // tombstone, not active record.
+        let (home, reg) = fresh_home();
+        let agents_root = home.path().join("agents");
+        std::fs::create_dir_all(&agents_root).unwrap();
+        let wd = agents_root.join("toggled");
+        std::fs::create_dir_all(&wd).unwrap();
+        let v1 = home.path().join("versions").join("0.33.800");
+        let v2 = home.path().join("versions").join("0.33.821");
+        // v1 has it visible; v2 has it hidden (user later Forgot it).
+        make_version_db_with_hidden(
+            &v1,
+            &[("inst-1", "toggled", 100, &wd.to_string_lossy(), false)],
+        );
+        make_version_db_with_hidden(
+            &v2,
+            &[("inst-1", "toggled", 200, &wd.to_string_lossy(), true)],
+        );
+
+        let stats = migrate_from_sqlite_once(home.path(), &reg).unwrap();
+        assert_eq!(stats.records_written, 1);
+        assert!(reg.list_active().unwrap().is_empty(),
+            "hidden intent in any version must propagate to registry tombstone");
+        assert!(reg.root().join("retired").join("inst-1.json").exists());
+    }
+
+    #[test]
+    fn migrate_defers_marker_on_unreadable_db() {
+        // A briefly-unreadable per-version DB during startup must NOT
+        // bake "permanently skip" into the marker. Marker is only
+        // written when every DB read succeeded.
+        let (home, reg) = fresh_home();
+        // Good DB.
+        let agents_root = home.path().join("agents");
+        std::fs::create_dir_all(&agents_root).unwrap();
+        let wd = agents_root.join("demo");
+        std::fs::create_dir_all(&wd).unwrap();
+        let good_v = home.path().join("versions").join("0.33.821");
+        make_version_db(&good_v, &[("inst-good", "demo", 100, &wd.to_string_lossy())]);
+        // Bad DB — looks like a SQLite file but is corrupt.
+        let bad_v = home.path().join("versions").join("0.33.800");
+        let bad_db_dir = bad_v.join("data").join("db");
+        std::fs::create_dir_all(&bad_db_dir).unwrap();
+        std::fs::write(bad_db_dir.join("objects.db"), b"not actually sqlite").unwrap();
+
+        let stats = migrate_from_sqlite_once(home.path(), &reg).unwrap();
+        assert_eq!(stats.records_written, 1, "good DB still migrated");
+        assert!(
+            !reg.root().join(MARKER).exists(),
+            "marker MUST NOT be written when any DB was unreadable"
+        );
+
+        // Next launch retries the migration; the good rows are
+        // idempotency-skipped (exists_anywhere), and the bad DB now
+        // works (simulate by replacing with a valid file).
+        std::fs::remove_file(bad_db_dir.join("objects.db")).unwrap();
+        make_version_db(&bad_v, &[("inst-other", "demo2", 50, &wd.to_string_lossy())]);
+        std::fs::create_dir_all(agents_root.join("demo2")).unwrap();
+        // ^ wait — demo2 wd: rebuild
+        let stats2 = migrate_from_sqlite_once(home.path(), &reg).unwrap();
+        assert!(
+            reg.root().join(MARKER).exists(),
+            "marker written on the retry once all DBs read successfully"
+        );
+        // Retry: 2 rows seen, 1 new written (inst-other), 1 skipped existing (inst-good).
+        assert_eq!(stats2.records_skipped_existing, 1);
+        assert_eq!(stats2.records_written, 1);
+    }
+
+    #[test]
     fn migrate_skips_unmappable_working_dirs() {
         let (home, reg) = fresh_home();
         // Working dir is OUTSIDE the agents root — unmappable.
@@ -474,9 +626,14 @@ mod tests {
 
         let stats = migrate_from_sqlite_once(home.path(), &reg).unwrap();
         // Both version dirs scanned; only one had a *file*, and it
-        // failed to read — no panic, no rows migrated.
+        // failed to read — no panic, no rows migrated. Marker is
+        // deferred so the next launch retries; see the dedicated
+        // `migrate_defers_marker_on_unreadable_db` test.
         assert_eq!(stats.versions_scanned, 1);
         assert_eq!(stats.records_written, 0);
-        assert!(reg.root().join(MARKER).exists());
+        assert!(
+            !reg.root().join(MARKER).exists(),
+            "marker deferred on unreadable DB"
+        );
     }
 }
