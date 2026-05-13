@@ -78,6 +78,9 @@ windows-sys = { version = "0.59", features = [
     # Phase B.6: MessageBoxW for the user-facing "AgentMux is already
     # running" dialog when the named-pipe single-instance bind fails.
     "Win32_UI_WindowsAndMessaging",
+    # Pre-splash: BeginPaint/EndPaint, CreateSolidBrush, FillRect,
+    # DeleteObject, GetClientRect for the layered popup window.
+    "Win32_Graphics_Gdi",
 ] }
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
