@@ -1,3 +1,4 @@
+mod agents;
 mod backend;
 mod config;
 mod event_log;
@@ -10,6 +11,7 @@ mod sagas;
 mod server;
 mod srv_ipc;
 mod state;
+mod workflows;
 #[cfg(windows)]
 mod crash_monitor;
 

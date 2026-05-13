@@ -323,6 +323,52 @@ declare global {
         updated_at: number;
     };
 
+    /** Workflows pane (issue #753 Phase 1). Mirrors the Rust types in
+     *  agentmux-srv/src/workflows/types.rs. */
+    type WorkflowDefinition = {
+        id: string;
+        name: string;
+        description: string;
+        graph: { nodes: WorkflowFlowNode[]; edges: WorkflowFlowEdge[] };
+        viewport: { x: number; y: number; zoom: number };
+        created_at: number;
+        updated_at: number;
+    };
+
+    type WorkflowFlowNode = {
+        id: string;
+        position: { x: number; y: number };
+        data: Record<string, unknown> & { kind: string };
+        type?: string;
+    };
+
+    type WorkflowFlowEdge = {
+        id: string;
+        source: string;
+        target: string;
+        sourceHandle?: string;
+        targetHandle?: string;
+    };
+
+    type WorkflowRun = {
+        id: string;
+        workflow_id: string;
+        status: string;
+        started_at: number;
+        ended_at: number;
+        block_states: Record<string, WorkflowBlockState>;
+        output: string;
+        error: string;
+    };
+
+    type WorkflowBlockState = {
+        status: "pending" | "running" | "done" | "error" | "skipped";
+        output?: unknown;
+        error?: string;
+        started_at?: number;
+        completed_at?: number;
+    };
+
     type AgentInstanceStatus = "running" | "paused" | "stopped" | "crashed" | "detached";
 
     type GitHubContext = {
@@ -355,6 +401,56 @@ declare global {
         working_directory?: string;
         /** v8 — soft-delete flag for the "Forget agent" affordance. */
         display_hidden?: boolean;
+    };
+
+    // ────────────────────────────────────────────────────────────────
+    // Unified agent types (Workflows Phase 1.5, see
+    // docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md). Shared
+    // between the agent pane and the workflow Agent block. Mirror
+    // of agentmux-srv/src/agents/types.rs — camelCase via serde
+    // rename_all so the field shapes match without translation.
+    // ────────────────────────────────────────────────────────────────
+
+    /** Identifies "which agent" — same shape for launch modal + workflow Agent block. */
+    type AgentRef = {
+        identityId?: string;
+        memoryId?: string;
+        instanceName?: string;
+        workingDirectory?: string;
+    };
+
+    type AgentTask = {
+        prompt: string;
+        context?: Record<string, unknown>;
+        maxTurns?: number;
+    };
+
+    type TokenCounts = {
+        input: number;
+        output: number;
+        cacheCreation: number;
+        cacheRead: number;
+    };
+
+    type AgentTurn = {
+        role: "user" | "assistant" | "tool_result";
+        content: unknown;
+        timestampMs: number;
+    };
+
+    type AgentEvent =
+        | { type: "assistant_text"; delta: string }
+        | { type: "tool_use"; toolUseId: string; tool: string; input: unknown }
+        | { type: "tool_result"; toolUseId: string; output: unknown; isError: boolean }
+        | { type: "cost"; costUsd: number; tokens: TokenCounts }
+        | { type: "done"; response: string; transcript: AgentTurn[] }
+        | { type: "error"; message: string };
+
+    type AgentRunResult = {
+        response: string;
+        tokens: TokenCounts;
+        costUsd: number;
+        transcript: AgentTurn[];
     };
 
     /** v8 — one row of the launch modal's "Continue agent" dropdown.
