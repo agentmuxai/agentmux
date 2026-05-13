@@ -659,6 +659,7 @@ const Placeholder = (props: PlaceholderProps) => {
             setExiting(false);
             setVisible(true);
         } else if (visible()) {
+            if (exitTimer) { clearTimeout(exitTimer); exitTimer = null; }
             setExiting(true);
             exitTimer = setTimeout(() => { setVisible(false); setExiting(false); }, 150);
         }
