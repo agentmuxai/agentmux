@@ -153,10 +153,10 @@
 
     &.animate {
         .tile-node,
-        .placeholder {
+        .placeholder-sizer {
             transition-duration: var(--animation-time-s);
             transition-timing-function: linear;
-            transition-property: transform, width, height, background-color;
+            transition-property: transform;
         }
     }
 
@@ -166,9 +166,41 @@
         width: 100%;
     }
 
+    // Outer div: positions and sizes the drop-zone indicator.
+    // position/size come from setTransform() inline styles; only
+    // transform (translate3d) is animated — no width/height transitions.
+    .placeholder-sizer {
+        pointer-events: none;
+    }
+
+    // Inner div: purely visual — compositor-only opacity + scale animation.
     .placeholder {
-        background-color: var(--accent-color);
-        opacity: 0.5;
+        width: 100%;
+        height: 100%;
+        background-color: rgb(var(--accent-color-rgb) / 0.2);
+        border: 1px solid rgb(var(--accent-color-rgb) / 0.5);
         border-radius: calc(var(--block-border-radius) + 2px);
+        box-sizing: border-box;
+        opacity: 1;
+        transform: scale(1);
+        transition: opacity 120ms ease-out, transform 120ms ease-out;
+
+        @starting-style {
+            opacity: 0;
+            transform: scale(0.92);
+        }
+
+        &.exiting {
+            opacity: 0;
+            transform: scale(0.92);
+            transition-timing-function: ease-in;
+            transition-duration: 150ms;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .placeholder {
+            transition: none;
+        }
     }
 }
