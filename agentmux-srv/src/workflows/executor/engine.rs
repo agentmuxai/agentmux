@@ -139,6 +139,10 @@ async fn execute(
                 run_id: run_id.to_string(),
                 block_id: block_id.clone(),
             });
+            // Captured once at BlockStarted so the running / done / error
+            // transitions all carry the same start timestamp — otherwise
+            // the run-history record loses per-block duration (reagent P2).
+            let started_at = now_ms();
             mark_state(
                 final_states,
                 &block_id,
@@ -146,7 +150,7 @@ async fn execute(
                     status: "running".to_string(),
                     output: None,
                     error: None,
-                    started_at: Some(now_ms()),
+                    started_at: Some(started_at),
                     completed_at: None,
                 },
             )
@@ -175,7 +179,7 @@ async fn execute(
                             status: "done".to_string(),
                             output: Some(output.clone()),
                             error: None,
-                            started_at: None, // preserve started_at? skip in Phase 1
+                            started_at: Some(started_at),
                             completed_at: Some(now_ms()),
                         },
                     )
@@ -197,7 +201,7 @@ async fn execute(
                             status: "error".to_string(),
                             output: None,
                             error: Some(e.clone()),
-                            started_at: None,
+                            started_at: Some(started_at),
                             completed_at: Some(now_ms()),
                         },
                     )
@@ -587,6 +591,67 @@ mod tests {
         let nodes = nodes_map(&g);
         let scope = scope_with_cond("c", false);
         assert!(!should_skip("x", &g, &nodes, &scope, &HashSet::new()));
+    }
+
+    #[tokio::test]
+    async fn execute_preserves_started_at_in_block_state() {
+        // Reagent P2: BlockDone used to overwrite started_at with None,
+        // making per-block duration uncomputable from the persisted
+        // run record. Verify the timestamp survives the running -> done
+        // transition.
+        let mut vars_node = n("v1", "variables");
+        vars_node.data = json!({ "kind": "variables", "vars": { "v": 1 } });
+        let mut resp_node = n("r1", "response");
+        resp_node.data = json!({ "kind": "response", "template": "done" });
+        let g = WorkflowGraph {
+            nodes: vec![vars_node, resp_node],
+            edges: vec![e("e1", "v1", "r1")],
+        };
+
+        let handle = run_workflow("wf1".to_string(), g).await.unwrap();
+        let mut rx = handle.events;
+        while let Some(ev) = rx.recv().await {
+            if matches!(ev, RunEvent::RunDone { .. } | RunEvent::RunFailed { .. }) {
+                break;
+            }
+        }
+
+        let states = handle.final_states.lock().await;
+        let v1 = states.get("v1").expect("v1 state");
+        let r1 = states.get("r1").expect("r1 state");
+        assert_eq!(v1.status, "done");
+        assert!(
+            v1.started_at.is_some() && v1.started_at.unwrap() > 0,
+            "v1 started_at must survive the done transition; got {:?}",
+            v1.started_at
+        );
+        assert!(v1.completed_at.is_some());
+        assert!(v1.completed_at.unwrap() >= v1.started_at.unwrap());
+        assert!(r1.started_at.is_some());
+        assert!(r1.completed_at.is_some());
+    }
+
+    #[test]
+    fn flow_edge_serializes_with_camelcase_handle_fields() {
+        // Wire format must match xyflow + the frontend TS
+        // `WorkflowFlowEdge` shape (sourceHandle / targetHandle).
+        // Snake-case would silently drop the field on the frontend
+        // roundtrip, leaving the executor's branch-pruning permissive.
+        let edge = FlowEdge {
+            id: "e1".to_string(),
+            source: "a".to_string(),
+            target: "b".to_string(),
+            source_handle: Some("true".to_string()),
+            target_handle: None,
+        };
+        let json = serde_json::to_string(&edge).unwrap();
+        assert!(
+            json.contains("\"sourceHandle\":\"true\""),
+            "expected sourceHandle in JSON; got {json}"
+        );
+        // Roundtrip preserves the handle.
+        let parsed: FlowEdge = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.source_handle.as_deref(), Some("true"));
     }
 
     #[tokio::test]

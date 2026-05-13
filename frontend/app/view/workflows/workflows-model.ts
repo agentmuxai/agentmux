@@ -171,6 +171,14 @@ export class WorkflowsViewModel implements ViewModel {
         try {
             const r = await RpcApi.RunWorkflowCommand(TabRpcClient, { workflow_id: id });
             this.setActiveRunId(r.run_id);
+            // Phase 1 has no live SSE wiring (PR #755 §"out of scope"),
+            // so the Runs panel would otherwise stay stuck on the prior
+            // list until the workflow is reopened. The backend drains
+            // the executor + persists the run record before this RPC
+            // resolves, so a refresh here picks up the new row. Phase 1
+            // PR-4 polish replaces this with a `workflowrun:<id>` event
+            // subscription. See codex review on PR #755.
+            await this.refreshRuns(id);
         } catch (e) {
             this.setError(`Run failed: ${(e as Error).message ?? e}`);
         } finally {

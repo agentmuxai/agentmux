@@ -138,7 +138,35 @@ const Canvas = (p: { model: WorkflowsViewModel }): JSX.Element => {
                 return;
             }
             if (edgeStartId !== n.id) {
-                m.addEdge({ source: edgeStartId, target: n.id });
+                // For edges sourced from a Condition block, auto-assign
+                // the branch handle by edge-order: first connection =
+                // "true" branch, second = "false". The executor's
+                // branch-pruning logic (engine.rs `edge_is_active`)
+                // gates on this handle, so without it BOTH branches
+                // run and fire API/agent side effects on the path
+                // that should have been skipped. Phase 1 trades
+                // discoverability for simplicity; Phase 2 / canvas
+                // polish PR introduces a UI affordance (color, label,
+                // right-click "swap branches"). See codex review on
+                // PR #755.
+                const srcId = edgeStartId;
+                const srcNode = m
+                    .draftAtom()
+                    .graph.nodes.find((x) => x.id === srcId);
+                const isCondition =
+                    (srcNode?.data?.kind as string | undefined) === "condition";
+                let sourceHandle: string | undefined;
+                if (isCondition) {
+                    const existing = m
+                        .draftAtom()
+                        .graph.edges.filter((edge) => edge.source === srcId);
+                    sourceHandle = existing.length === 0 ? "true" : "false";
+                }
+                m.addEdge({
+                    source: srcId,
+                    target: n.id,
+                    ...(sourceHandle ? { sourceHandle } : {}),
+                });
             }
             edgeStartId = null;
             return;

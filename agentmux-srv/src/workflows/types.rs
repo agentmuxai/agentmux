@@ -56,7 +56,12 @@ pub struct NodePosition {
 }
 
 /// xyflow `Edge` — source/target ids, optional handle ids.
+///
+/// Wire format matches xyflow's TS shape (camelCase: `sourceHandle` /
+/// `targetHandle`) so JSON roundtrips through the canvas + frontend
+/// `WorkflowFlowEdge` type without field-name translation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FlowEdge {
     pub id: String,
     pub source: String,
