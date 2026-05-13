@@ -1816,9 +1816,21 @@ impl WaveStore {
     }
 
     /// Mirror a `db_agent_instances` mutation into the cross-version
-    /// registry — but only for **named** rows (the dropdown ignores
-    /// nameless instances). Failures are logged, never propagated:
-    /// SQLite remains authoritative in PR A.
+    /// registry. Only fires for **named** rows. Routes by
+    /// `display_hidden` so the registry file ends up in the tree
+    /// matching SQLite's dropdown filter:
+    ///
+    /// - hidden = true  → upsert (atomic write to active/) then
+    ///   retire (atomic rename to retired/). Net: file lives in
+    ///   `retired/<id>.json` with the freshest content. Prevents
+    ///   `instance_update` on a previously-hidden row from
+    ///   resurrecting an active registry file, AND keeps the
+    ///   retired tombstone's content current.
+    /// - hidden = false → unretire (no-op if not retired) then
+    ///   upsert. Net: file in `active/<id>.json`, no orphan retired.
+    ///
+    /// Failures are logged, never propagated: SQLite remains
+    /// authoritative.
     fn registry_upsert_if_named(&self, inst: &AgentInstance) {
         if inst.instance_name.is_empty() {
             return;
@@ -1839,12 +1851,39 @@ impl WaveStore {
                 return;
             }
         };
+
+        // If the row was previously hidden, the file lives in
+        // `retired/`. Move it back to active before upserting so
+        // upsert's merge-preserves-unknown-fields path operates on
+        // the right file (and we never leave dangling retired files).
+        if let Err(e) = reg.unretire(&inst.id) {
+            tracing::warn!(
+                instance_id = %inst.id,
+                error = %e,
+                "registry: failed to unretire row before upsert"
+            );
+        }
+
         if let Err(e) = reg.upsert(&rec) {
             tracing::warn!(
                 instance_id = %inst.id,
                 error = %e,
                 "registry: failed to mirror instance_create/update"
             );
+            return;
+        }
+
+        // After the upsert, move into retired/ if the row is hidden.
+        // Combined: hidden row's tombstone always has up-to-date
+        // content, and active/ never carries a hidden row.
+        if inst.display_hidden {
+            if let Err(e) = reg.retire(&inst.id) {
+                tracing::warn!(
+                    instance_id = %inst.id,
+                    error = %e,
+                    "registry: failed to retire hidden row post-upsert"
+                );
+            }
         }
     }
 
@@ -3083,6 +3122,65 @@ mod tests {
         store.instance_create(&inst).unwrap();
         assert!(reg.list_active().unwrap().is_empty(),
             "user path with inner 'agents' segment must not be mirrored");
+    }
+
+    #[test]
+    fn instance_update_does_not_resurrect_hidden_row() {
+        // Sequence: create (active) → set_hidden(true) → update.
+        // The update must NOT move the file from retired/ back to active.
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let inst = make_named_inst("inst-resurrect", "demoR", &agents_root);
+        store.instance_create(&inst).unwrap();
+        assert_eq!(reg.list_active().unwrap().len(), 1);
+
+        store.instance_set_hidden("inst-resurrect", true).unwrap();
+        assert!(reg.list_active().unwrap().is_empty(),
+            "after set_hidden(true), record must be in retired/");
+        assert!(reg.root().join("retired").join("inst-resurrect.json").exists());
+
+        // SQLite still has the row (display_hidden=1). instance_update
+        // would refresh it — the mirror must NOT re-add to active.
+        let mut updated = inst.clone();
+        updated.status = "stopped".to_string();
+        updated.ended_at = 9999;
+        store.instance_update(&updated).unwrap();
+
+        assert!(reg.list_active().unwrap().is_empty(),
+            "instance_update on a hidden row must NOT resurrect it");
+        assert!(reg.root().join("retired").join("inst-resurrect.json").exists());
+    }
+
+    #[test]
+    fn instance_create_with_display_hidden_writes_retired() {
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut inst = make_named_inst("inst-bornhidden", "demoH", &agents_root);
+        inst.display_hidden = true;
+        store.instance_create(&inst).unwrap();
+        assert!(reg.list_active().unwrap().is_empty());
+        assert!(reg.root().join("retired").join("inst-bornhidden.json").exists());
+    }
+
+    #[test]
+    fn instance_update_toggling_hidden_off_unretires() {
+        // Sequence: create → set_hidden(true) → set_hidden(false) →
+        // update. After the toggle off, the file should be in active.
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let inst = make_named_inst("inst-toggle", "demoT", &agents_root);
+        store.instance_create(&inst).unwrap();
+        store.instance_set_hidden("inst-toggle", true).unwrap();
+        store.instance_set_hidden("inst-toggle", false).unwrap();
+        assert_eq!(reg.list_active().unwrap().len(), 1);
+
+        // A subsequent update should preserve active state.
+        let mut updated = inst.clone();
+        updated.status = "paused".to_string();
+        store.instance_update(&updated).unwrap();
+        assert_eq!(reg.list_active().unwrap().len(), 1);
+        assert!(!reg.root().join("retired").join("inst-toggle.json").exists(),
+            "no orphan retired file alongside active");
     }
 
     #[test]
