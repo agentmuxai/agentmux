@@ -21,6 +21,11 @@ pub struct MigrateStats {
     pub records_written: usize,
     pub records_skipped_existing: usize,
     pub records_skipped_unmappable: usize,
+    /// True iff every per-version DB read cleanly. Callers gate
+    /// registry attachment on this — partial migrations leave the
+    /// registry detached so reads keep falling back to SQLite, and
+    /// the next launch retries (no marker written when `false`).
+    pub complete: bool,
 }
 
 /// Marker filename. Lives in the registry root so the registry's
@@ -42,7 +47,12 @@ pub fn migrate_from_sqlite_once(
 ) -> Result<MigrateStats, RegistryError> {
     let marker_path = registry.root().join(MARKER);
     if marker_path.exists() {
-        return Ok(MigrateStats::default());
+        // Marker present ⇒ a prior run completed; treat as complete
+        // so callers attach the registry.
+        return Ok(MigrateStats {
+            complete: true,
+            ..MigrateStats::default()
+        });
     }
 
     let mut stats = MigrateStats::default();
@@ -55,6 +65,7 @@ pub fn migrate_from_sqlite_once(
 
     let versions_root = shared_home.join("versions");
     if !versions_root.is_dir() {
+        stats.complete = true;
         write_marker(&marker_path, &stats)?;
         return Ok(stats);
     }
@@ -154,9 +165,11 @@ pub fn migrate_from_sqlite_once(
 
     // Only finalize the migration when every DB we encountered was
     // readable. On any per-DB error, defer the marker so a future
-    // launch retries the migration. The already-written rows are
-    // idempotency-skipped on retry via `exists_anywhere`.
-    if !any_db_failed {
+    // launch retries the migration AND signal `complete = false` so
+    // main.rs leaves the registry detached for this session (reads
+    // fall back to SQLite — preferred over serving a partial view).
+    stats.complete = !any_db_failed;
+    if stats.complete {
         write_marker(&marker_path, &stats)?;
     } else {
         tracing::info!(
@@ -584,12 +597,13 @@ mod tests {
 
         // Next launch retries the migration; the good rows are
         // idempotency-skipped (exists_anywhere), and the bad DB now
-        // works (simulate by replacing with a valid file).
+        // works (simulate by replacing with a valid file pointing at
+        // the same `wd` so we don't need a second working-dir
+        // fixture).
         std::fs::remove_file(bad_db_dir.join("objects.db")).unwrap();
-        make_version_db(&bad_v, &[("inst-other", "demo2", 50, &wd.to_string_lossy())]);
-        std::fs::create_dir_all(agents_root.join("demo2")).unwrap();
-        // ^ wait — demo2 wd: rebuild
+        make_version_db(&bad_v, &[("inst-other", "demo", 50, &wd.to_string_lossy())]);
         let stats2 = migrate_from_sqlite_once(home.path(), &reg).unwrap();
+        assert!(stats2.complete, "complete flag set on clean retry");
         assert!(
             reg.root().join(MARKER).exists(),
             "marker written on the retry once all DBs read successfully"

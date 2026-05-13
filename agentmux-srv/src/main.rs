@@ -346,10 +346,16 @@ async fn main() {
                                     records_written = stats.records_written,
                                     records_skipped_existing = stats.records_skipped_existing,
                                     records_skipped_unmappable = stats.records_skipped_unmappable,
-                                    "registry: one-shot SQLite migration complete"
+                                    complete = stats.complete,
+                                    "registry: one-shot SQLite migration finished"
                                 );
                             }
-                            true
+                            // Gate attach on `complete` — partial
+                            // migration leaves the registry detached
+                            // so the read path serves SQLite (full,
+                            // current-version-only view) rather than
+                            // a half-populated registry.
+                            stats.complete
                         }
                         Err(e) => {
                             tracing::warn!(

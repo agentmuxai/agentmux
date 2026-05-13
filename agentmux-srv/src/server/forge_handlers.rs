@@ -1188,6 +1188,15 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 .cmp(&a.data.last_launched_at_ms)
                         });
                         records.truncate(limit);
+                        // Pre-fetch all candidate same-version rows
+                        // ONCE so enrichment doesn't issue N+1 queries.
+                        // Indexed by instance_id; rows that aren't in
+                        // current SQLite fall through to sentinels.
+                        let sqlite_rows: Vec<AgentInstance> = wstore
+                            .instance_list_named(records.len().max(1), cmd.definition_id.as_deref())
+                            .unwrap_or_default();
+                        let sqlite_by_id: std::collections::HashMap<&str, &AgentInstance> =
+                            sqlite_rows.iter().map(|i| (i.id.as_str(), i)).collect();
                         records
                             .into_iter()
                             .map(|rec| {
@@ -1230,11 +1239,15 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 // Cross-version rows fall through with
                                 // sentinel "available" status and
                                 // empty block_id_hint.
-                                let sqlite_view = wstore.instance_get(&d.instance_id).ok().flatten();
-                                let (block_id_hint, status, ended_at) = match sqlite_view {
-                                    Some(inst) => (inst.block_id, inst.status, inst.ended_at),
-                                    None => (String::new(), "available".to_string(), 0),
-                                };
+                                let (block_id_hint, status, ended_at) =
+                                    match sqlite_by_id.get(d.instance_id.as_str()) {
+                                        Some(inst) => (
+                                            inst.block_id.clone(),
+                                            inst.status.clone(),
+                                            inst.ended_at,
+                                        ),
+                                        None => (String::new(), "available".to_string(), 0),
+                                    };
                                 NamedAgentRow {
                                     instance_id: d.instance_id,
                                     instance_name: d.instance_name,
