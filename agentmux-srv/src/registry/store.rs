@@ -16,7 +16,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 use super::atomic::{rename_atomic, write_atomic};
-use super::schema::{validate, NamedAgentRecord, ValidationError};
+use super::schema::{validate, NamedAgentRecord, ValidationError, MAX_SUPPORTED_SCHEMA};
 
 #[derive(Debug, Error)]
 pub enum RegistryError {
@@ -60,11 +60,20 @@ impl Registry {
     /// Insert or update a record. If the file already exists, unknown
     /// top-level + `data` fields are preserved (forward-compat with
     /// future schemas that add columns this binary doesn't know).
+    ///
+    /// Forward-compat invariant (spec §6): never write a higher-schema
+    /// row into a lower schema, never overwrite a corrupt/unparseable
+    /// file. Both cases skip the mirror with a warning — the on-disk
+    /// file stays intact for the binary that authored it (or for ops
+    /// triage). Skipping is `Ok(())`: SQLite remains authoritative.
     pub fn upsert(&self, rec: &NamedAgentRecord) -> Result<(), RegistryError> {
         let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         let path = self.active_path(&rec.data.instance_id);
         let bytes = match std::fs::read(&path) {
-            Ok(existing) => merge_for_write(&existing, rec)?,
+            Ok(existing) => match merge_for_write(&existing, rec)? {
+                Some(b) => b,
+                None => return Ok(()),
+            },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => to_pretty(rec)?,
             Err(e) => return Err(e.into()),
         };
@@ -161,17 +170,53 @@ fn to_pretty(rec: &NamedAgentRecord) -> Result<Vec<u8>, serde_json::Error> {
 }
 
 /// Merge an in-memory record into an on-disk file's raw JSON,
-/// preserving fields beyond this binary's struct shape. Falls back
-/// to the in-memory record verbatim if the on-disk file is corrupt.
-fn merge_for_write(existing: &[u8], rec: &NamedAgentRecord) -> Result<Vec<u8>, RegistryError> {
-    let Ok(mut on_disk) = serde_json::from_slice::<Value>(existing) else {
-        return Ok(to_pretty(rec)?);
+/// preserving fields beyond this binary's struct shape.
+///
+/// Returns `Ok(None)` when the writer must refuse the merge (corrupt
+/// JSON, missing `schema_version`, or `schema_version` above
+/// `MAX_SUPPORTED_SCHEMA`). The caller treats `None` as a skip and
+/// leaves the on-disk file intact.
+fn merge_for_write(
+    existing: &[u8],
+    rec: &NamedAgentRecord,
+) -> Result<Option<Vec<u8>>, RegistryError> {
+    let on_disk: Value = match serde_json::from_slice(existing) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "registry: existing file is unparseable JSON — refusing to overwrite (may be a newer schema)"
+            );
+            return Ok(None);
+        }
     };
+    let on_disk_version = on_disk
+        .get("schema_version")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    match on_disk_version {
+        Some(v) if v > MAX_SUPPORTED_SCHEMA => {
+            tracing::warn!(
+                on_disk = v,
+                writer_max = MAX_SUPPORTED_SCHEMA,
+                "registry: on-disk schema_version > writer max — refusing downgrade"
+            );
+            return Ok(None);
+        }
+        Some(_) => {}
+        None => {
+            tracing::warn!(
+                "registry: existing file lacks schema_version — refusing to overwrite"
+            );
+            return Ok(None);
+        }
+    }
+    let mut merged = on_disk;
     let updates = serde_json::to_value(rec)?;
-    merge_known(&mut on_disk, &updates);
-    let mut bytes = serde_json::to_vec_pretty(&on_disk)?;
+    merge_known(&mut merged, &updates);
+    let mut bytes = serde_json::to_vec_pretty(&merged)?;
     bytes.push(b'\n');
-    Ok(bytes)
+    Ok(Some(bytes))
 }
 
 /// Overwrite `target`'s top-level keys with `updates`' keys. Keys in

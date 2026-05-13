@@ -136,13 +136,64 @@ fn unknown_fields_in_data_survive_round_trip() {
 }
 
 #[test]
-fn corrupt_file_is_overwritten_on_upsert() {
+fn corrupt_file_is_preserved_not_overwritten() {
+    // A corrupt-on-disk file might be a newer-schema file with a
+    // syntax error this binary doesn't understand. Refuse to clobber
+    // it; SQLite remains authoritative for the row.
     let (_t, reg) = fresh();
     let path = reg.root().join("aaa.json");
     std::fs::write(&path, b"{ not json").unwrap();
     reg.upsert(&record("aaa", "demo", 100)).unwrap();
-    let listed = reg.list_active().unwrap();
-    assert_eq!(listed.len(), 1);
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        b"{ not json",
+        "corrupt on-disk file must not be overwritten"
+    );
+}
+
+#[test]
+fn upsert_refuses_to_downgrade_schema_version() {
+    let (_t, reg) = fresh();
+    let path = reg.root().join("aaa.json");
+    // Future v999 envelope already on disk.
+    let v999 = serde_json::json!({
+        "schema_version": 999,
+        "data": { "instance_id": "aaa", "future_only": "field" }
+    });
+    std::fs::write(&path, serde_json::to_vec_pretty(&v999).unwrap()).unwrap();
+
+    // v1 binary calls upsert — must not clobber.
+    reg.upsert(&record("aaa", "demo", 200)).unwrap();
+
+    let after: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(
+        after.pointer("/schema_version"),
+        Some(&serde_json::json!(999)),
+        "schema_version must not be downgraded"
+    );
+    assert_eq!(
+        after.pointer("/data/future_only"),
+        Some(&serde_json::json!("field")),
+        "future_only field must be preserved"
+    );
+}
+
+#[test]
+fn upsert_refuses_when_schema_version_missing() {
+    let (_t, reg) = fresh();
+    let path = reg.root().join("aaa.json");
+    // Envelope with no schema_version at all (some future format we
+    // can't reason about).
+    let raw = serde_json::json!({ "data": { "instance_id": "aaa", "foo": 1 } });
+    std::fs::write(&path, serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
+
+    reg.upsert(&record("aaa", "demo", 200)).unwrap();
+
+    let after: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert!(after.get("schema_version").is_none());
+    assert_eq!(after.pointer("/data/foo"), Some(&serde_json::json!(1)));
 }
 
 #[test]
