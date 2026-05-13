@@ -160,7 +160,7 @@ Per [Electron #14787](https://github.com/electron/electron/issues/14787) — min
 
 ### 5.1 Phase 1 — Hotfix (ship same-day)
 
-Apply §4.1 + §4.6 in `useWindowDrag.win32.ts`. Three locations:
+Apply §4.1 + §4.6 in `useWindowDrag.win32.ts`. Two locations:
 
 ```diff
 + const dpr = window.devicePixelRatio || 1;
