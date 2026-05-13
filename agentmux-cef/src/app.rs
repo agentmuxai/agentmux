@@ -369,14 +369,17 @@ wrap_app! {
                 let ro_val = CefString::from("*");
                 cmd.append_switch_with_value(Some(&ro_key), Some(&ro_val));
 
-                // Eliminate WPAD/PAC proxy auto-detection. On networks with
-                // proxy auto-detect enabled this costs 2–3 s on first
-                // CefInitialize. AgentMux talks only to localhost (sidecar)
-                // and configured AI APIs — no need for proxy discovery.
-                cmd.append_switch(Some(&CefString::from("no-proxy-server")));
-
                 // Skip Chrome features that add startup latency with no
                 // user-visible benefit in this app.
+                //
+                // `--no-proxy-server` was previously included here to skip
+                // WPAD/PAC auto-detect (2–3 s cold-start hit). Removed
+                // because it disables proxy support GLOBALLY — the
+                // `browser` widget loads arbitrary external URLs and
+                // would break for users on corporate networks where
+                // outbound HTTP requires the configured proxy. A future
+                // optimization could disable WPAD only without
+                // disabling explicit proxy config.
                 cmd.append_switch(Some(&CefString::from("disable-sync")));
                 cmd.append_switch(Some(&CefString::from("disable-extensions")));
 
