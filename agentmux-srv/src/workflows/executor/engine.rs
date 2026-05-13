@@ -610,7 +610,15 @@ mod tests {
         // run record. Verify the timestamp survives the running -> done
         // transition.
         let mut vars_node = n("v1", "variables");
-        vars_node.data = json!({ "kind": "variables", "vars": { "v": 1 } });
+        // Variables block reads `entries: [{name, value}]`, not `vars`.
+        // Earlier draft used the wrong key — the test still passed
+        // because it only asserts started_at, but the Variables block
+        // was running an empty-entries no-op rather than the intended
+        // path. (reagent P2 on PR #755 round 7.)
+        vars_node.data = json!({
+            "kind": "variables",
+            "entries": [{ "name": "v", "value": 1 }]
+        });
         let mut resp_node = n("r1", "response");
         resp_node.data = json!({ "kind": "response", "template": "done" });
         let g = WorkflowGraph {
