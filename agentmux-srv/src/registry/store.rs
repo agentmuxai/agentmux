@@ -129,9 +129,19 @@ impl Registry {
     }
 
     /// Whether an active record exists for `instance_id`. Doesn't
-    /// validate — useful for migration idempotency checks.
+    /// validate — useful for migration idempotency checks. Use
+    /// [`Self::exists_anywhere`] when retired records should also
+    /// count (e.g. so migration doesn't resurrect a hidden agent).
     pub fn exists(&self, instance_id: &str) -> bool {
         self.active_path(instance_id).exists()
+    }
+
+    /// Whether a record exists in either active or retired. Used by
+    /// migration to skip already-tombstoned records (avoid
+    /// resurrecting a user's deliberate "Forget agent" via a
+    /// per-version SQLite row that still has `display_hidden = 0`).
+    pub fn exists_anywhere(&self, instance_id: &str) -> bool {
+        self.active_path(instance_id).exists() || self.retired_path(instance_id).exists()
     }
 
     /// Read every valid active record. Invalid files are skipped +

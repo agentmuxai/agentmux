@@ -1221,6 +1221,20 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                         .to_string(),
                                     None => d.working_dir.clone(),
                                 };
+                                // Same-version enrichment: if this id
+                                // also exists in current SQLite, the
+                                // row carries runtime state (block_id
+                                // for focus-existing-pane, status,
+                                // ended_at) that the registry
+                                // intentionally doesn't track.
+                                // Cross-version rows fall through with
+                                // sentinel "available" status and
+                                // empty block_id_hint.
+                                let sqlite_view = wstore.instance_get(&d.instance_id).ok().flatten();
+                                let (block_id_hint, status, ended_at) = match sqlite_view {
+                                    Some(inst) => (inst.block_id, inst.status, inst.ended_at),
+                                    None => (String::new(), "available".to_string(), 0),
+                                };
                                 NamedAgentRow {
                                     instance_id: d.instance_id,
                                     instance_name: d.instance_name,
@@ -1237,9 +1251,9 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                     memory_id: memory_id_str,
                                     memory_name,
                                     started_at: d.last_launched_at_ms,
-                                    ended_at: 0,
-                                    status: "available".to_string(),
-                                    block_id_hint: String::new(),
+                                    ended_at,
+                                    status,
+                                    block_id_hint,
                                 }
                             })
                             .collect()

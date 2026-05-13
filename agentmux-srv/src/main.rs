@@ -330,8 +330,8 @@ async fn main() {
                     .parent()
                     .and_then(|p| p.parent())
                     .map(|p| p.to_path_buf());
-                if let Some(home) = shared_home {
-                    match registry::migrate_from_sqlite_once(&home, &reg) {
+                match shared_home {
+                    Some(home) => match registry::migrate_from_sqlite_once(&home, &reg) {
                         Ok(stats) if stats.versions_scanned > 0 || stats.records_written > 0 => {
                             tracing::info!(
                                 versions_scanned = stats.versions_scanned,
@@ -347,7 +347,11 @@ async fn main() {
                             error = %e,
                             "registry: SQLite migration errored — continuing with empty registry; SQLite remains authoritative"
                         ),
-                    }
+                    },
+                    None => tracing::warn!(
+                        root = %root.display(),
+                        "registry: cannot resolve shared home (root has fewer than 2 ancestors) — skipping one-shot SQLite migration"
+                    ),
                 }
                 wstore_raw.set_registry(Arc::new(reg));
             }

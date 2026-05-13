@@ -1657,6 +1657,12 @@ impl WaveStore {
     /// Set the `display_hidden` flag on an existing instance row. Used
     /// by the "Forget agent" affordance — soft-delete only; the row +
     /// working directory remain on disk for audit + recovery.
+    ///
+    /// Cross-version case: an agent migrated into the registry from
+    /// another version's SQLite won't have a row in the current
+    /// version's SQLite. The UPDATE returns 0 rows, but the registry
+    /// still needs to flip — otherwise "Forget agent" silently no-ops
+    /// on cross-version entries. Returns `true` if either side acted.
     pub fn instance_set_hidden(&self, id: &str, hidden: bool) -> Result<bool, StoreError> {
         let rows = {
             let conn = self.conn.lock().unwrap();
@@ -1665,24 +1671,29 @@ impl WaveStore {
                 params![if hidden { 1_i64 } else { 0_i64 }, id],
             )?
         };
-        if rows > 0 {
-            if let Some(reg) = self.registry() {
+        let mut registry_acted = false;
+        if let Some(reg) = self.registry() {
+            // Only act on the registry side if a record exists there
+            // (in either active or retired). Avoids logging spurious
+            // "failed to retire" warnings on a no-op for unrelated ids.
+            if reg.exists_anywhere(id) {
                 let res = if hidden {
                     reg.retire(id)
                 } else {
                     reg.unretire(id)
                 };
-                if let Err(e) = res {
-                    tracing::warn!(
+                match res {
+                    Ok(()) => registry_acted = true,
+                    Err(e) => tracing::warn!(
                         instance_id = %id,
                         hidden,
                         error = %e,
                         "registry: failed to mirror instance_set_hidden"
-                    );
+                    ),
                 }
             }
         }
-        Ok(rows > 0)
+        Ok(rows > 0 || registry_acted)
     }
 
     /// List all instances that the launch modal's "Continue agent"
@@ -3218,6 +3229,45 @@ mod tests {
         assert_eq!(reg.list_active().unwrap().len(), 1);
         assert!(!reg.root().join("retired").join("inst-toggle.json").exists(),
             "no orphan retired file alongside active");
+    }
+
+    #[test]
+    fn instance_set_hidden_acts_on_registry_only_row() {
+        // Cross-version case: a registry record exists (e.g. migrated
+        // from another version's SQLite) but the current version's
+        // SQLite has no matching row. `instance_set_hidden` must still
+        // flip the registry file and report success.
+        let (tmp, store, reg) = store_with_registry();
+        // Seed a registry record directly — no SQLite row.
+        let agents_root = tmp.path().join("agents");
+        std::fs::create_dir_all(&agents_root).unwrap();
+        let wd = agents_root.join("cross-ver");
+        std::fs::create_dir_all(&wd).unwrap();
+        reg.upsert(&crate::registry::NamedAgentRecord {
+            schema_version: crate::registry::MAX_SUPPORTED_SCHEMA,
+            data: crate::registry::NamedAgentRecordV1 {
+                instance_id: "inst-crossver".to_string(),
+                instance_name: "crossver".to_string(),
+                definition_id: "claude-code".to_string(),
+                identity_id: None,
+                memory_id: None,
+                working_dir: "cross-ver".to_string(),
+                created_at_ms: 100,
+                last_launched_at_ms: 100,
+                created_by_version: "0.33.821".to_string(),
+                last_launched_by_version: "0.33.821".to_string(),
+            },
+        })
+        .unwrap();
+        assert_eq!(reg.list_active().unwrap().len(), 1);
+        assert!(store.instance_get("inst-crossver").unwrap().is_none(),
+            "precondition: no SQLite row for cross-version agent");
+
+        let result = store.instance_set_hidden("inst-crossver", true).unwrap();
+        assert!(result, "must report success even when only registry was affected");
+        assert!(reg.list_active().unwrap().is_empty(),
+            "registry record must be retired");
+        assert!(reg.root().join("retired").join("inst-crossver.json").exists());
     }
 
     #[test]

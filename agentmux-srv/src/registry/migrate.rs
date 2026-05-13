@@ -96,7 +96,11 @@ pub fn migrate_from_sqlite_once(
     }
 
     for (id, row) in latest_by_id {
-        if registry.exists(&id) {
+        // Check active AND retired — a record retired by a newer
+        // version's "Forget agent" must NOT be resurrected just
+        // because an older version's SQLite still lists it as
+        // visible.
+        if registry.exists_anywhere(&id) {
             stats.records_skipped_existing += 1;
             continue;
         }
@@ -149,15 +153,31 @@ struct RowSnapshot {
     created_at: i64,
 }
 
+/// True iff the error is SQLite reporting "this column/table doesn't
+/// exist in this DB's schema." Distinguishes a pre-v8 DB (skip
+/// silently) from corruption (caller logs + continues). Matches on
+/// `SqliteFailure` with `Some(msg)` containing the canonical SQLite
+/// phrases; the underlying `ExtendedCode` for both is
+/// `SQLITE_ERROR` (1), which would also fire for plenty of other
+/// real failures, so message inspection is required.
+fn is_missing_column_or_table(e: &rusqlite::Error) -> bool {
+    match e {
+        rusqlite::Error::SqliteFailure(_, Some(msg)) => {
+            msg.starts_with("no such column") || msg.starts_with("no such table")
+        }
+        _ => false,
+    }
+}
+
 fn read_named_rows(db_path: &Path) -> Result<Vec<RowSnapshot>, rusqlite::Error> {
     let conn = Connection::open_with_flags(
         db_path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     // Older schemas (pre-v8) lack `instance_name` / `working_directory`
-    // columns. Treat a prepare failure as "nothing to migrate from this
-    // version" — those agents weren't named, so wouldn't surface in the
-    // dropdown anyway.
+    // columns. Suppress ONLY the specific "no such column/table"
+    // errors — broader SqliteFailures (corruption, locked, etc.) must
+    // surface so the caller can log + continue with the next DB.
     let mut stmt = match conn.prepare(
         "SELECT id, instance_name, definition_id, identity_id, memory_id,
                 working_directory, started_at, created_at
@@ -167,9 +187,7 @@ fn read_named_rows(db_path: &Path) -> Result<Vec<RowSnapshot>, rusqlite::Error> 
            AND display_hidden = 0",
     ) {
         Ok(s) => s,
-        Err(rusqlite::Error::SqliteFailure(_, _)) | Err(rusqlite::Error::InvalidColumnName(_)) => {
-            return Ok(Vec::new());
-        }
+        Err(e) if is_missing_column_or_table(&e) => return Ok(Vec::new()),
         Err(e) => return Err(e),
     };
     let iter = stmt.query_map([], |row| {
@@ -382,6 +400,51 @@ mod tests {
         let recs = reg.list_active().unwrap();
         assert_eq!(recs.len(), 1);
         assert_eq!(recs[0].data.instance_name, "preexisting");
+    }
+
+    #[test]
+    fn migrate_skips_when_record_is_retired() {
+        // A user "Forgot" an agent (its registry file is in retired/).
+        // Another version's SQLite still has display_hidden=0 for that
+        // id. Migration must NOT resurrect the row into active/.
+        let (home, reg) = fresh_home();
+        let agents_root = home.path().join("agents");
+        std::fs::create_dir_all(&agents_root).unwrap();
+        let wd = agents_root.join("demo");
+        std::fs::create_dir_all(&wd).unwrap();
+
+        // Pre-tombstone a retired record.
+        let retired_record = NamedAgentRecord {
+            schema_version: MAX_SUPPORTED_SCHEMA,
+            data: NamedAgentRecordV1 {
+                instance_id: "inst-1".to_string(),
+                instance_name: "demo".to_string(),
+                definition_id: "claude-code".to_string(),
+                identity_id: None,
+                memory_id: None,
+                working_dir: "demo".to_string(),
+                created_at_ms: 50,
+                last_launched_at_ms: 50,
+                created_by_version: "0.33.823".to_string(),
+                last_launched_by_version: "0.33.823".to_string(),
+            },
+        };
+        reg.upsert(&retired_record).unwrap();
+        reg.retire("inst-1").unwrap();
+        assert!(reg.list_active().unwrap().is_empty());
+        assert!(reg.exists_anywhere("inst-1"));
+
+        // Legacy SQLite still has display_hidden=0 for the same id.
+        let v_dir = home.path().join("versions").join("0.33.821");
+        make_version_db(&v_dir, &[("inst-1", "demo", 100, &wd.to_string_lossy())]);
+
+        let stats = migrate_from_sqlite_once(home.path(), &reg).unwrap();
+        assert_eq!(stats.rows_seen, 1);
+        assert_eq!(stats.records_skipped_existing, 1);
+        assert_eq!(stats.records_written, 0);
+        // Tombstone must remain in retired/, NOT moved to active.
+        assert!(reg.list_active().unwrap().is_empty());
+        assert!(reg.root().join("retired").join("inst-1.json").exists());
     }
 
     #[test]
