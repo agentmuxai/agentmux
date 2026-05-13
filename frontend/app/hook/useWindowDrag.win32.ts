@@ -72,9 +72,20 @@ function installCefDragListener() {
             // Catch-up: if the cursor moved during the IPC, fire one
             // set_window_position immediately against the latest known
             // position so we don't lose the first few pixels of motion.
+            //
+            // DPI scaling: `e.screenX` exposes CSS pixels (Blink divides
+            // physical by combined browser-zoom under use-zoom-for-dsf,
+            // default on Windows since Chrome 54); `initWinX` from
+            // `get_window_position` and `set_window_position` use Win32
+            // physical pixels in this PMv2 process. Multiply the CSS-
+            // pixel delta by devicePixelRatio + round before adding to
+            // the physical baseline. Without this, Win11's default 125%
+            // scale makes the window lag the cursor by ~20%.
+            // See docs/specs/SPEC_WINDOW_DRAG_DPI_FIX_2026-05-13.md.
             if (latestScreenX !== clickScreenX || latestScreenY !== clickScreenY) {
-                const tx = initWinX + (latestScreenX - clickScreenX);
-                const ty = initWinY + (latestScreenY - clickScreenY);
+                const dpr = window.devicePixelRatio || 1;
+                const tx = initWinX + Math.round((latestScreenX - clickScreenX) * dpr);
+                const ty = initWinY + Math.round((latestScreenY - clickScreenY) * dpr);
                 sendPos(tx, ty);
             }
         } catch {
@@ -120,8 +131,15 @@ function installCefDragListener() {
         latestScreenX = e.screenX;
         latestScreenY = e.screenY;
         if (!dragging) return;
-        const tx = initWinX + (e.screenX - clickScreenX);
-        const ty = initWinY + (e.screenY - clickScreenY);
+        // DPI scaling: CSS-pixel delta * devicePixelRatio = physical
+        // delta, added to the physical-pixel baseline from
+        // `get_window_position`. Re-read DPR every move so a mid-drag
+        // monitor crossing (with different scale) picks up the new
+        // value automatically. Spec:
+        // docs/specs/SPEC_WINDOW_DRAG_DPI_FIX_2026-05-13.md §4.1-4.2.
+        const dpr = window.devicePixelRatio || 1;
+        const tx = initWinX + Math.round((e.screenX - clickScreenX) * dpr);
+        const ty = initWinY + Math.round((e.screenY - clickScreenY) * dpr);
         sendPos(tx, ty);
     });
 
