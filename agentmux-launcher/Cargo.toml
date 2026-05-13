@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-launcher"
-version = "0.33.839"
+version = "0.33.840"
 description = "AgentMux Launcher — Job Object + IPC + saga coordinator + srv lifecycle"
 authors = ["AgentMux Corp"]
 edition = "2021"
