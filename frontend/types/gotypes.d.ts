@@ -403,6 +403,56 @@ declare global {
         display_hidden?: boolean;
     };
 
+    // ────────────────────────────────────────────────────────────────
+    // Unified agent types (Workflows Phase 1.5, see
+    // docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md). Shared
+    // between the agent pane and the workflow Agent block. Mirror
+    // of agentmux-srv/src/agents/types.rs — camelCase via serde
+    // rename_all so the field shapes match without translation.
+    // ────────────────────────────────────────────────────────────────
+
+    /** Identifies "which agent" — same shape for launch modal + workflow Agent block. */
+    type AgentRef = {
+        identityId?: string;
+        memoryId?: string;
+        instanceName?: string;
+        workingDirectory?: string;
+    };
+
+    type AgentTask = {
+        prompt: string;
+        context?: Record<string, unknown>;
+        maxTurns?: number;
+    };
+
+    type TokenCounts = {
+        input: number;
+        output: number;
+        cacheCreation: number;
+        cacheRead: number;
+    };
+
+    type AgentTurn = {
+        role: "user" | "assistant" | "tool_result";
+        content: unknown;
+        timestampMs: number;
+    };
+
+    type AgentEvent =
+        | { type: "assistant_text"; delta: string }
+        | { type: "tool_use"; toolUseId: string; tool: string; input: unknown }
+        | { type: "tool_result"; toolUseId: string; output: unknown; isError: boolean }
+        | { type: "cost"; costUsd: number; tokens: TokenCounts }
+        | { type: "done"; response: string; transcript: AgentTurn[] }
+        | { type: "error"; message: string };
+
+    type AgentRunResult = {
+        response: string;
+        tokens: TokenCounts;
+        costUsd: number;
+        transcript: AgentTurn[];
+    };
+
     /** v8 — one row of the launch modal's "Continue agent" dropdown.
      * Server-side join across instance + definition + bundle tables. */
     type NamedAgentRow = {
