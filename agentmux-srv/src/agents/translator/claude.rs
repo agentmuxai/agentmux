@@ -41,8 +41,6 @@ impl ClaudeTranslator {
 }
 
 impl Translator for ClaudeTranslator {
-    type Frame = Value;
-
     fn translate(&mut self, _frame: Value) -> Vec<AgentEvent> {
         // PR 1 lands the translation logic. The skeleton keeps the
         // surface area visible so PR 1 is a focused fill-in.
