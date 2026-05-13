@@ -42,6 +42,12 @@ const LONG_TASK_THRESHOLD_MS = 50;
 
 let activeObserver: PerformanceObserver | null = null;
 let activeStartedAt = 0;
+// Handle of the most recent fallback timer (PerformanceObserver
+// unavailable / longtask unsupported). Cleared + cancelled on re-entry
+// so a stale timer can't fire `setTabSwitching(false)` against a
+// newer gate that's still mid-settle — same class of bug as the
+// `tick()` superseded check, but for the no-observer path.
+let activeFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Mark the gate active and start watching for clean frames. Idempotent —
@@ -56,14 +62,19 @@ export function scheduleRevealLift(): void {
 
     // Tear down any pending detector from a prior switch — its
     // observer is still subscribed, and its tick() would race the new
-    // one to disconnect/lift.
+    // one to disconnect/lift. Same applies to the fallback-timer path.
     activeObserver?.disconnect();
     activeObserver = null;
+    if (activeFallbackTimer !== null) {
+        clearTimeout(activeFallbackTimer);
+        activeFallbackTimer = null;
+    }
 
     if (typeof PerformanceObserver === "undefined") {
         // No PerformanceObserver in this runtime (test env, etc.).
         // Fall back to the hard cap so we still lift eventually.
-        setTimeout(() => {
+        activeFallbackTimer = setTimeout(() => {
+            activeFallbackTimer = null;
             setTabSwitching(false);
         }, SETTLE_MS);
         return;
@@ -83,7 +94,8 @@ export function scheduleRevealLift(): void {
     } catch {
         // longtask observer not supported (Safari historically). Fall
         // back to fixed SETTLE_MS.
-        setTimeout(() => {
+        activeFallbackTimer = setTimeout(() => {
+            activeFallbackTimer = null;
             setTabSwitching(false);
         }, SETTLE_MS);
         return;
