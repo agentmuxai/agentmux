@@ -17,6 +17,7 @@
 
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -25,6 +26,20 @@ use crate::workflows::data_flow::ExecutionScope;
 use crate::workflows::types::FlowNode;
 
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
+
+/// Shared `reqwest::Client` so workflows with multiple API blocks
+/// reuse one connection pool instead of building a new pool per
+/// request. Per-request timeouts move to the RequestBuilder.
+/// (reagent P2 on PR #755.)
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn http_client() -> &'static reqwest::Client {
+    HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .build()
+            .expect("reqwest client build failed")
+    })
+}
 
 /// Validate a resolved URL before dispatching it. Phase 1 SSRF
 /// protection: rejects non-http(s) schemes and literal-IP hosts that
@@ -78,7 +93,11 @@ fn is_reserved_v4(v4: &Ipv4Addr) -> bool {
 }
 
 fn is_reserved_v6(v6: &Ipv6Addr) -> bool {
-    v6.is_loopback()
+    // Check pure-v6 reserved ranges first. Order matters: `::1` is
+    // v6 loopback AND happens to satisfy `to_ipv4()` (lower 32 bits
+    // map to 0.0.0.1, a public v4). Catching loopback up here avoids
+    // misclassifying it as "public v4 embedded in v6".
+    if v6.is_loopback()
         || v6.is_unspecified()
         || v6.is_multicast()
         // unique-local fc00::/7 — stable API for this is gated, so
@@ -86,6 +105,25 @@ fn is_reserved_v6(v6: &Ipv6Addr) -> bool {
         || (v6.segments()[0] & 0xfe00) == 0xfc00
         // link-local fe80::/10
         || (v6.segments()[0] & 0xffc0) == 0xfe80
+    {
+        return true;
+    }
+    // IPv4-mapped (`::ffff:a.b.c.d`) and IPv4-compatible (`::a.b.c.d`,
+    // deprecated) literals route to the embedded IPv4 address on
+    // most kernels, bypassing v6-only checks. Delegate to the v4
+    // predicate so private/loopback IPv4 in v6 form is caught.
+    // (codex P1 on PR #755.)
+    if let Some(v4) = v6.to_ipv4_mapped() {
+        return is_reserved_v4(&v4);
+    }
+    #[allow(deprecated)]
+    if let Some(v4) = v6.to_ipv4() {
+        // `to_ipv4` returns Some for mapped (handled above) AND
+        // IPv4-compatible (`::a.b.c.d`). This branch catches the
+        // compatible form.
+        return is_reserved_v4(&v4);
+    }
+    false
 }
 
 pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, String> {
@@ -126,13 +164,12 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
         .and_then(|v| v.as_u64())
         .unwrap_or(DEFAULT_TIMEOUT_MS);
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(timeout_ms))
-        .build()
-        .map_err(|e| format!("reqwest build: {e}"))?;
+    let client = http_client();
     let method = reqwest::Method::from_bytes(method_raw.as_bytes())
         .map_err(|e| format!("invalid method `{method_raw}`: {e}"))?;
-    let mut req = client.request(method, &url);
+    let mut req = client
+        .request(method, &url)
+        .timeout(Duration::from_millis(timeout_ms));
     for (k, v) in &headers_map {
         req = req.header(k, v);
     }
@@ -204,6 +241,31 @@ mod tests {
         // fc00::/7 — RFC 4193 unique local addresses.
         assert!(validate_url_safety("http://[fc00::1]/").is_err());
         assert!(validate_url_safety("http://[fd00::1]/").is_err());
+    }
+
+    #[test]
+    fn ssrf_rejects_ipv4_mapped_ipv6_to_reserved() {
+        // ::ffff:a.b.c.d routes to a.b.c.d on most kernels. The v6
+        // path must delegate to the v4 reserved check or these slip
+        // past the SSRF guard. (codex P1.)
+        assert!(validate_url_safety("http://[::ffff:127.0.0.1]/").is_err());
+        assert!(validate_url_safety("http://[::ffff:169.254.169.254]/").is_err());
+        assert!(validate_url_safety("http://[::ffff:10.0.0.1]/").is_err());
+        assert!(validate_url_safety("http://[::ffff:192.168.1.1]/").is_err());
+    }
+
+    #[test]
+    fn ssrf_rejects_ipv4_compatible_ipv6_to_reserved() {
+        // ::a.b.c.d (IPv4-compatible, deprecated form). Defense in
+        // depth — some kernels still honor it.
+        assert!(validate_url_safety("http://[::127.0.0.1]/").is_err());
+    }
+
+    #[test]
+    fn ssrf_allows_public_ipv4_in_mapped_form() {
+        // Mapped form of a public IP is consistent with allowing the
+        // plain form — block only the reserved range, not the wrapper.
+        assert!(validate_url_safety("https://[::ffff:8.8.8.8]/").is_ok());
     }
 
     #[test]

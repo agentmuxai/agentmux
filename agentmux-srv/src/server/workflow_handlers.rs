@@ -250,9 +250,14 @@ pub fn register_workflow_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                     output,
                     error,
                 };
-                if let Err(e) = wstore.workflow_run_insert(&row) {
-                    tracing::warn!(run_id = %run_id, error = %e, "workflow_run_insert failed");
-                }
+                // Propagate persistence failures: a swallowed error
+                // here would return a successful run_id to the
+                // frontend that has no backing row, breaking the
+                // audit trail and the refreshRuns lookup. (codex P2
+                // on PR #755.)
+                wstore
+                    .workflow_run_insert(&row)
+                    .map_err(|e| format!("runworkflow persist: {e}"))?;
 
                 Ok(Some(serde_json::to_value(&RunResp { run_id }).unwrap_or_default()))
             })
