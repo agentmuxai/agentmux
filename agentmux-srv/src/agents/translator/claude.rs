@@ -164,7 +164,7 @@ fn handle_stream_event(t: &mut ClaudeTranslator, frame: &Value, out: &mut Vec<Ag
     }
 }
 
-fn handle_user_message(_t: &mut ClaudeTranslator, frame: &Value, out: &mut Vec<AgentEvent>) {
+fn handle_user_message(t: &mut ClaudeTranslator, frame: &Value, out: &mut Vec<AgentEvent>) {
     let Some(content) = frame
         .get("message")
         .and_then(|m| m.get("content"))
@@ -189,14 +189,37 @@ fn handle_user_message(_t: &mut ClaudeTranslator, frame: &Value, out: &mut Vec<A
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         out.push(AgentEvent::ToolResult {
-            tool_use_id,
-            output,
+            tool_use_id: tool_use_id.clone(),
+            output: output.clone(),
             is_error,
+        });
+        // Also record the tool_result in the transcript so Done.transcript
+        // is the full ordered turn list (assistant turns + tool_result
+        // turns), not just the assistant side. Codex P2 on PR #833.
+        t.transcript.push(AgentTurn {
+            role: "tool_result".to_string(),
+            content: serde_json::json!({
+                "tool_use_id": tool_use_id,
+                "content": output,
+                "is_error": is_error,
+            }),
+            timestamp_ms: now_ms(),
         });
     }
 }
 
 fn handle_assistant_message(t: &mut ClaudeTranslator, frame: &Value, _out: &mut Vec<AgentEvent>) {
+    // Skip partial snapshots — when Claude is launched with
+    // --include-partial-messages it emits top-level `assistant`
+    // frames with `partial: true` for each streaming delta before
+    // the final consolidated turn. Recording every snapshot would
+    // produce duplicate transcript entries per turn. Frontend
+    // translator does the same skip
+    // (frontend/app/view/agent/providers/claude-translator.ts).
+    // Reagent P1 + codex P2 on PR #833.
+    if frame.get("partial").and_then(|v| v.as_bool()) == Some(true) {
+        return;
+    }
     // Record the turn into the transcript — used as part of `Done`.
     // Don't emit per-block events here; the streaming path already
     // emitted them via stream_event deltas.
@@ -485,6 +508,102 @@ mod tests {
         assert!(t.translate(json!(null)).is_empty());
         assert!(t.translate(json!("not an object")).is_empty());
         assert!(t.translate(json!(42)).is_empty());
+    }
+
+    #[test]
+    fn skips_partial_assistant_snapshots() {
+        // When Claude is launched with --include-partial-messages it
+        // streams partial assistant frames with `partial: true` before
+        // the final consolidated turn. Recording each would duplicate
+        // transcript entries. Reagent P1 on PR #833.
+        let mut t = ClaudeTranslator::new();
+        // Three partial snapshots — all should be ignored.
+        t.translate(json!({
+            "type": "assistant",
+            "partial": true,
+            "message": { "content": [{ "type": "text", "text": "h" }] }
+        }));
+        t.translate(json!({
+            "type": "assistant",
+            "partial": true,
+            "message": { "content": [{ "type": "text", "text": "he" }] }
+        }));
+        t.translate(json!({
+            "type": "assistant",
+            "partial": true,
+            "message": { "content": [{ "type": "text", "text": "hello" }] }
+        }));
+        // Now the consolidated turn (partial: false / absent).
+        t.translate(json!({
+            "type": "assistant",
+            "message": { "content": [{ "type": "text", "text": "hello" }] }
+        }));
+        let done = t.translate(json!({ "type": "result", "cost_usd": 0.0 }));
+        match &done[1] {
+            AgentEvent::Done { transcript, .. } => {
+                assert_eq!(
+                    transcript.len(),
+                    1,
+                    "only the consolidated turn should land; got {transcript:?}"
+                );
+            }
+            other => panic!("expected Done, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_result_recorded_in_transcript() {
+        // Codex P2 on PR #833: Done.transcript must be the full
+        // ordered turn list (assistant + tool_result), not just the
+        // assistant side. Audit/replay needs the whole conversation.
+        let mut t = ClaudeTranslator::new();
+        // Assistant turn 1.
+        t.translate(json!({
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "id": "t1",
+                    "name": "Bash",
+                    "input": { "command": "ls" }
+                }]
+            }
+        }));
+        // Tool result.
+        t.translate(json!({
+            "type": "user",
+            "message": {
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "t1",
+                    "content": "output",
+                    "is_error": false
+                }]
+            }
+        }));
+        // Final assistant turn.
+        t.translate(json!({
+            "type": "assistant",
+            "message": {
+                "content": [{ "type": "text", "text": "done" }]
+            }
+        }));
+        let done = t.translate(json!({ "type": "result", "cost_usd": 0.0 }));
+        match &done[1] {
+            AgentEvent::Done { transcript, .. } => {
+                assert_eq!(transcript.len(), 3, "got {transcript:?}");
+                assert_eq!(transcript[0].role, "assistant");
+                assert_eq!(transcript[1].role, "tool_result");
+                assert_eq!(transcript[2].role, "assistant");
+                // Verify the tool_result turn carries the structured
+                // content payload — not just the bare output.
+                let tr = &transcript[1].content;
+                assert_eq!(tr["tool_use_id"], json!("t1"));
+                assert_eq!(tr["content"], json!("output"));
+                assert_eq!(tr["is_error"], json!(false));
+            }
+            other => panic!("expected Done, got {other:?}"),
+        }
     }
 
     #[test]
