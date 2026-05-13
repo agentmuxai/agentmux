@@ -96,6 +96,7 @@ pub enum AgentEvent {
     ToolResult {
         tool_use_id: String,
         output: serde_json::Value,
+        #[serde(default)]
         is_error: bool,
     },
     /// Final cost + token accounting. Emitted once per run.
