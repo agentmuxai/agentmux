@@ -615,7 +615,14 @@ tasks:
                   exit 1
                 fi
                 echo "Vite ready."
-                cd "$DEV_DIR" && LD_LIBRARY_PATH=. AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url=http://localhost:5173
+                # `LD_LIBRARY_PATH` is a Unix-only convention; on Windows
+                # it has no effect but is inconsistent with the `dev:serve`
+                # OS gate above. Mirror that gate here.
+                if [ "{{OS}}" = "windows" ]; then
+                  cd "$DEV_DIR" && AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url=http://localhost:5173
+                else
+                  cd "$DEV_DIR" && LD_LIBRARY_PATH=. AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url=http://localhost:5173
+                fi
 
     run:
         desc: Run the host (must be built and bundled first).
