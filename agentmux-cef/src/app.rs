@@ -369,6 +369,17 @@ wrap_app! {
                 let ro_val = CefString::from("*");
                 cmd.append_switch_with_value(Some(&ro_key), Some(&ro_val));
 
+                // Eliminate WPAD/PAC proxy auto-detection. On networks with
+                // proxy auto-detect enabled this costs 2–3 s on first
+                // CefInitialize. AgentMux talks only to localhost (sidecar)
+                // and configured AI APIs — no need for proxy discovery.
+                cmd.append_switch(Some(&CefString::from("no-proxy-server")));
+
+                // Skip Chrome features that add startup latency with no
+                // user-visible benefit in this app.
+                cmd.append_switch(Some(&CefString::from("disable-sync")));
+                cmd.append_switch(Some(&CefString::from("disable-extensions")));
+
                 // GPU compositing runs in a separate process (Chromium default).
                 // This allows Chromium to restart the GPU process transparently
                 // after driver resets (TDR, DXGI device removal, display power
