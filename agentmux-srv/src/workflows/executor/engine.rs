@@ -104,6 +104,12 @@ async fn execute(
     let mut response_output: Option<Value> = None;
     let nodes_by_id: HashMap<String, &FlowNode> =
         graph.nodes.iter().map(|n| (n.id.clone(), n)).collect();
+    // Blocks whose execution is pruned by a Condition's non-matching
+    // branch (or transitively, because all their incoming edges came
+    // from skipped/pruned sources). They consume no events and run no
+    // block runner — important so the false-branch's API/agent calls
+    // do not fire side effects when the condition is true.
+    let mut skipped: HashSet<String> = HashSet::new();
 
     for layer in layers {
         for block_id in layer {
@@ -111,6 +117,23 @@ async fn execute(
                 .get(&block_id)
                 .ok_or_else(|| format!("internal: missing node {block_id}"))?;
             let kind = block_kind_of(node)?;
+
+            if should_skip(&block_id, graph, &nodes_by_id, &scope, &skipped) {
+                skipped.insert(block_id.clone());
+                mark_state(
+                    final_states,
+                    &block_id,
+                    BlockState {
+                        status: "skipped".to_string(),
+                        output: None,
+                        error: None,
+                        started_at: None,
+                        completed_at: Some(now_ms()),
+                    },
+                )
+                .await;
+                continue;
+            }
 
             let _ = tx.send(RunEvent::BlockStarted {
                 run_id: run_id.to_string(),
@@ -276,8 +299,76 @@ fn block_kind_of(node: &FlowNode) -> Result<BlockKind, String> {
     BlockKind::parse(kind).ok_or_else(|| format!("unknown block kind: {kind}"))
 }
 
-#[allow(dead_code)]
-fn _unused_edge(_e: &FlowEdge) {}
+/// Decide whether `node_id` should be pruned given the per-run state.
+///
+/// A block runs iff at least one of its incoming edges is "active":
+///   * The edge's source is NOT in `skipped`, AND
+///   * If the source is a Condition block, the edge's `source_handle`
+///     ("true" / "false") matches the boolean stored in the Condition's
+///     `result` output.
+///
+/// Blocks with no incoming edges are root nodes and never skip.
+/// Topological ordering guarantees every source has already been
+/// processed (run or skipped) by the time we evaluate a target here.
+fn should_skip(
+    node_id: &str,
+    graph: &WorkflowGraph,
+    nodes_by_id: &HashMap<String, &FlowNode>,
+    scope: &ExecutionScope,
+    skipped: &HashSet<String>,
+) -> bool {
+    let mut had_incoming = false;
+    let mut had_active = false;
+    for edge in &graph.edges {
+        if edge.target != node_id {
+            continue;
+        }
+        had_incoming = true;
+        if edge_is_active(edge, nodes_by_id, scope, skipped) {
+            had_active = true;
+            break;
+        }
+    }
+    had_incoming && !had_active
+}
+
+/// True iff the given edge carries control + data flow under the
+/// current scope. See `should_skip` for the full ruleset.
+fn edge_is_active(
+    edge: &FlowEdge,
+    nodes_by_id: &HashMap<String, &FlowNode>,
+    scope: &ExecutionScope,
+    skipped: &HashSet<String>,
+) -> bool {
+    if skipped.contains(&edge.source) {
+        return false;
+    }
+    let src_node = match nodes_by_id.get(&edge.source) {
+        Some(n) => n,
+        None => return true,
+    };
+    let is_condition = src_node
+        .data
+        .get("kind")
+        .and_then(|v| v.as_str())
+        == Some("condition");
+    if !is_condition {
+        return true;
+    }
+    let cond_result = scope
+        .outputs
+        .get(&edge.source)
+        .and_then(|v| v.get("result"))
+        .and_then(|v| v.as_bool());
+    match (edge.source_handle.as_deref(), cond_result) {
+        (Some("true"), Some(r)) => r,
+        (Some("false"), Some(r)) => !r,
+        // Unhandled / pre-spec edges off a Condition — be permissive
+        // (Phase 2 will tighten this once the canvas always sets a
+        // source_handle on condition edges).
+        _ => true,
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -349,5 +440,220 @@ mod tests {
         };
         let layers = topological_layers(&g).unwrap();
         assert_eq!(layers, vec![vec!["a".to_string()]]);
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Condition branch pruning (codex P2 on PR #755)
+    // ────────────────────────────────────────────────────────────────
+
+    fn eh(id: &str, src: &str, dst: &str, handle: Option<&str>) -> FlowEdge {
+        FlowEdge {
+            id: id.to_string(),
+            source: src.to_string(),
+            target: dst.to_string(),
+            source_handle: handle.map(|s| s.to_string()),
+            target_handle: None,
+        }
+    }
+
+    fn nodes_map<'a>(g: &'a WorkflowGraph) -> HashMap<String, &'a FlowNode> {
+        g.nodes.iter().map(|n| (n.id.clone(), n)).collect()
+    }
+
+    fn scope_with_cond(cond_id: &str, result: bool) -> ExecutionScope {
+        let mut scope = ExecutionScope::new();
+        scope
+            .outputs
+            .insert(cond_id.to_string(), json!({ "result": result }));
+        scope
+    }
+
+    #[test]
+    fn skip_root_node_runs() {
+        // No incoming edges — always runs regardless of state.
+        let g = WorkflowGraph {
+            nodes: vec![n("a", "variables")],
+            edges: vec![],
+        };
+        let nodes = nodes_map(&g);
+        assert!(!should_skip(
+            "a",
+            &g,
+            &nodes,
+            &ExecutionScope::new(),
+            &HashSet::new()
+        ));
+    }
+
+    #[test]
+    fn skip_unconditional_chain_runs() {
+        // a → b (a is plain Variables, not a condition).
+        let g = WorkflowGraph {
+            nodes: vec![n("a", "variables"), n("b", "api")],
+            edges: vec![e("e1", "a", "b")],
+        };
+        let nodes = nodes_map(&g);
+        assert!(!should_skip(
+            "b",
+            &g,
+            &nodes,
+            &ExecutionScope::new(),
+            &HashSet::new()
+        ));
+    }
+
+    #[test]
+    fn skip_condition_false_branch_when_result_true() {
+        // c (condition, true) → t via "true" handle (active)
+        //                    → f via "false" handle (inactive)
+        let g = WorkflowGraph {
+            nodes: vec![n("c", "condition"), n("t", "api"), n("f", "api")],
+            edges: vec![
+                eh("e1", "c", "t", Some("true")),
+                eh("e2", "c", "f", Some("false")),
+            ],
+        };
+        let nodes = nodes_map(&g);
+        let scope = scope_with_cond("c", true);
+        let skipped = HashSet::new();
+        assert!(!should_skip("t", &g, &nodes, &scope, &skipped));
+        assert!(should_skip("f", &g, &nodes, &scope, &skipped));
+    }
+
+    #[test]
+    fn skip_condition_true_branch_when_result_false() {
+        let g = WorkflowGraph {
+            nodes: vec![n("c", "condition"), n("t", "api"), n("f", "api")],
+            edges: vec![
+                eh("e1", "c", "t", Some("true")),
+                eh("e2", "c", "f", Some("false")),
+            ],
+        };
+        let nodes = nodes_map(&g);
+        let scope = scope_with_cond("c", false);
+        let skipped = HashSet::new();
+        assert!(should_skip("t", &g, &nodes, &scope, &skipped));
+        assert!(!should_skip("f", &g, &nodes, &scope, &skipped));
+    }
+
+    #[test]
+    fn skip_transitive_through_skipped_source() {
+        // c (condition, true) → f via "false" (skipped) → x
+        // x's only incoming is from skipped `f`, so x must also skip
+        // — guards against false-branch side effects past depth 1.
+        let g = WorkflowGraph {
+            nodes: vec![n("c", "condition"), n("f", "api"), n("x", "agent")],
+            edges: vec![
+                eh("e1", "c", "f", Some("false")),
+                e("e2", "f", "x"),
+            ],
+        };
+        let nodes = nodes_map(&g);
+        let scope = scope_with_cond("c", true);
+        let mut skipped = HashSet::new();
+        skipped.insert("f".to_string());
+        assert!(should_skip("x", &g, &nodes, &scope, &skipped));
+    }
+
+    #[test]
+    fn join_runs_if_any_incoming_active() {
+        // a (active) → d, b (skipped) → d
+        // d has one active source — Phase 1 any-active semantics.
+        let g = WorkflowGraph {
+            nodes: vec![n("a", "variables"), n("b", "api"), n("d", "response")],
+            edges: vec![e("e1", "a", "d"), e("e2", "b", "d")],
+        };
+        let nodes = nodes_map(&g);
+        let mut skipped = HashSet::new();
+        skipped.insert("b".to_string());
+        assert!(!should_skip(
+            "d",
+            &g,
+            &nodes,
+            &ExecutionScope::new(),
+            &skipped
+        ));
+    }
+
+    #[test]
+    fn condition_edge_without_handle_is_permissive() {
+        // Pre-spec edges off a Condition block lack a source_handle.
+        // Don't accidentally prune them — Phase 2 will require the
+        // handle once the canvas always sets it.
+        let g = WorkflowGraph {
+            nodes: vec![n("c", "condition"), n("x", "api")],
+            edges: vec![eh("e1", "c", "x", None)],
+        };
+        let nodes = nodes_map(&g);
+        let scope = scope_with_cond("c", false);
+        assert!(!should_skip("x", &g, &nodes, &scope, &HashSet::new()));
+    }
+
+    #[tokio::test]
+    async fn execute_skips_pruned_branch_end_to_end() {
+        // Variables(v=10) → Condition({{var.v}} < 5) → Response("hit_true")
+        //                                            ↘ Response("hit_false")
+        // Result: cond is false, true-branch Response is skipped,
+        // false-branch Response runs and becomes the run output.
+        let mut vars_node = n("v1", "variables");
+        vars_node.data = json!({
+            "kind": "variables",
+            "vars": { "v": 10 }
+        });
+        let mut cond_node = n("c1", "condition");
+        cond_node.data = json!({
+            "kind": "condition",
+            "expr": "{{var.v}} < 5"
+        });
+        let mut t_resp = n("rt", "response");
+        t_resp.data = json!({
+            "kind": "response",
+            "template": "hit_true"
+        });
+        let mut f_resp = n("rf", "response");
+        f_resp.data = json!({
+            "kind": "response",
+            "template": "hit_false"
+        });
+        let g = WorkflowGraph {
+            nodes: vec![vars_node, cond_node, t_resp, f_resp],
+            edges: vec![
+                e("e1", "v1", "c1"),
+                eh("e2", "c1", "rt", Some("true")),
+                eh("e3", "c1", "rf", Some("false")),
+            ],
+        };
+
+        let handle = run_workflow("wf1".to_string(), g).await.unwrap();
+        // Drain events to completion.
+        let mut rx = handle.events;
+        let mut got_done_ids: Vec<String> = Vec::new();
+        let mut final_output: Option<Value> = None;
+        while let Some(ev) = rx.recv().await {
+            match ev {
+                RunEvent::BlockDone { block_id, .. } => got_done_ids.push(block_id),
+                RunEvent::RunDone { output, .. } => {
+                    final_output = Some(output);
+                    break;
+                }
+                RunEvent::RunFailed { error, .. } => panic!("run failed: {error}"),
+                _ => {}
+            }
+        }
+
+        // false-branch ran; true-branch was skipped — no BlockDone for "rt".
+        assert!(got_done_ids.contains(&"rf".to_string()));
+        assert!(
+            !got_done_ids.contains(&"rt".to_string()),
+            "true branch must NOT run when condition is false; got: {got_done_ids:?}"
+        );
+
+        // Final state for the skipped block records "skipped".
+        let states = handle.final_states.lock().await;
+        let rt_state = states.get("rt").expect("rt state recorded");
+        assert_eq!(rt_state.status, "skipped");
+
+        // The run's response output is the false-branch's resolution.
+        assert!(final_output.is_some());
     }
 }

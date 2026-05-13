@@ -35,6 +35,12 @@ impl ExecutionScope {
         let bytes = input.as_bytes();
         let mut i = 0;
         while i < bytes.len() {
+            // `{` is ASCII so the byte-level scan for `{{` is safe to
+            // run at any byte offset — UTF-8 continuation bytes are
+            // always >= 0x80 and never equal `{` (0x7B). The non-token
+            // emit path below walks one full Unicode scalar at a time
+            // to avoid splitting multi-byte sequences into separate
+            // Latin-1 `char`s (mojibake).
             if i + 1 < bytes.len() && bytes[i] == b'{' && bytes[i + 1] == b'{' {
                 // Find the matching `}}`.
                 if let Some(end_rel) = find_close(&input[i + 2..]) {
@@ -53,8 +59,15 @@ impl ExecutionScope {
                     continue;
                 }
             }
-            out.push(bytes[i] as char);
-            i += 1;
+            // Copy one full Unicode scalar from `input` starting at
+            // byte i. `&str` guarantees a valid char starts here.
+            let ch_len = input[i..]
+                .chars()
+                .next()
+                .expect("byte index inside &str must start a valid char")
+                .len_utf8();
+            out.push_str(&input[i..i + ch_len]);
+            i += ch_len;
         }
         out
     }
@@ -160,5 +173,41 @@ mod tests {
     fn empty_input_is_empty() {
         let scope = ExecutionScope::new();
         assert_eq!(scope.resolve(""), "");
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // UTF-8 preservation (reagent P1 + codex P2 on PR #755)
+    // ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn preserves_multibyte_chars_around_tokens() {
+        let mut scope = ExecutionScope::new();
+        scope.vars.insert("name".to_string(), json!("world"));
+        // 'Olá' has a 2-byte codepoint (á = 0xC3 0xA1).
+        assert_eq!(scope.resolve("Olá {{var.name}}"), "Olá world");
+    }
+
+    #[test]
+    fn preserves_multibyte_token_value() {
+        let mut scope = ExecutionScope::new();
+        scope.vars.insert("greeting".to_string(), json!("こんにちは"));
+        assert_eq!(scope.resolve("hi: {{var.greeting}}"), "hi: こんにちは");
+    }
+
+    #[test]
+    fn preserves_emoji_passthrough() {
+        let scope = ExecutionScope::new();
+        // No tokens — pure passthrough. The pre-fix byte-wise copy
+        // would turn each UTF-8 byte of 🚀 (0xF0 0x9F 0x9A 0x80) into
+        // four separate Latin-1 chars; this assertion catches that.
+        assert_eq!(scope.resolve("ship it 🚀"), "ship it 🚀");
+    }
+
+    #[test]
+    fn preserves_multibyte_in_unresolved_token_passthrough() {
+        let scope = ExecutionScope::new();
+        // Unresolved tokens echo their surrounding context — make
+        // sure that path doesn't corrupt the surrounding bytes either.
+        assert_eq!(scope.resolve("café {{ghost}} ☕"), "café {{ghost}} ☕");
     }
 }
