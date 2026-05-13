@@ -241,7 +241,25 @@ export class ClaudeTranslator implements OutputTranslator {
         // Check for tool_result blocks in user messages
         if (message.role === "user" && Array.isArray(message.content)) {
             const results: StreamEvent[] = [];
+            // `tool_use_result` is a sibling of `message` on the event,
+            // not embedded per-block — it carries structured stdout/
+            // stderr/exitCode for the tool that just ran. With a SINGLE
+            // tool_result block in the message we can confidently apply
+            // it; with multiple blocks (parallel tool use) the structured
+            // result is unattributable (Claude doesn't include a
+            // tool_use_id inside `tool_use_result`), so every block
+            // falls back to the per-block string form. The dropped
+            // structured shape just means BashOutputViewer renders
+            // from `result.content` instead — same visible output,
+            // missing the exitCode field.
             const structuredResult = event.tool_use_result;
+            const toolResultBlocks = message.content.filter(
+                (b: any) => b && b.type === "tool_result",
+            );
+            const canApplyStructured =
+                toolResultBlocks.length === 1
+                && structuredResult
+                && typeof structuredResult === "object";
             for (const block of message.content) {
                 if (block.type === "tool_result") {
                     const isError = block.is_error === true;
@@ -254,9 +272,7 @@ export class ClaudeTranslator implements OutputTranslator {
                         tool: block.tool_name || this.toolNameById.get(toolId) || "Unknown",
                         id: toolId,
                         status: isError ? "failed" : "success",
-                        result: structuredResult && typeof structuredResult === "object"
-                            ? structuredResult
-                            : fallback,
+                        result: canApplyStructured ? structuredResult : fallback,
                     });
                 }
             }
