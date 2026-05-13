@@ -33,7 +33,7 @@ import {
 import { modalsModel } from "./modalmodel";
 import { TAB_COLORS } from "@/app/tab/tab";
 import { ClientService, ObjectService, WorkspaceService } from "./services";
-import { scheduleRevealLift } from "./tab-reveal";
+import { holdRevealGate, scheduleRevealLift } from "./tab-reveal";
 import * as WOS from "./wos";
 import { getFileSubject, waveEventSubscribe } from "./wps";
 
@@ -850,6 +850,17 @@ export function createTab() {
     const ws = workspace();
     if (ws == null) return;
     fireAndForget(async () => {
+        // Pin the gate while CreateTab + UpdateObjectMeta + preset import
+        // + applyTabPreset run. Calling scheduleRevealLift here would let
+        // the 80ms SETTLE window elapse during the (longtask-free) RPCs
+        // and layout-model polling inside applyTabPreset, so the gate
+        // would lift before the agent/sysinfo/swarm blocks have mounted
+        // and the user would still see the piecemeal cascade. The
+        // detector is started in `finally` once the preset apply has
+        // returned (or failed) — at that point SETTLE / MAX_GATE measure
+        // the actual mount window. See issue #774 /
+        // SPEC_TAB_CONTENT_REVEAL_GATE.md.
+        holdRevealGate();
         try {
             const tabId = await WorkspaceService.CreateTab(ws.oid, "", true, false);
             await ObjectService.UpdateObjectMeta(
@@ -862,16 +873,13 @@ export function createTab() {
             // can reuse the same panes layout. See
             // frontend/app/tab/tab-presets.ts.
             const { applyTabPreset, DEFAULT_TAB_PRESET } = await import("@/app/tab/tab-presets");
-            // Hide the tab content while the new tab's preset (agent /
-            // sysinfo / swarm blocks) mounts and settles. The gate is
-            // started AFTER `CreateTab` returns so the SETTLE / hard-cap
-            // timers measure the actual mount-and-settle window, not
-            // the async RPC latency that ran beforehand. See issue
-            // #774 / SPEC_TAB_CONTENT_REVEAL_GATE.md.
-            scheduleRevealLift();
             await applyTabPreset(tabId, DEFAULT_TAB_PRESET);
         } catch (e) {
             console.error("[createTab] failed:", e);
+        } finally {
+            // Pair with holdRevealGate above — without this the gate
+            // would stay pinned forever on the error path.
+            scheduleRevealLift();
         }
     });
 }
@@ -907,14 +915,21 @@ export async function setActiveTab(tabId: string): Promise<void> {
     const mySeq = ++tabSwitchSeq;
     tabSwitchInFlight = true;
     markStart("tab-switch", { from: fromTabId, to: tabId });
-    // Hide the destination tab's content during the switch so the
-    // 3-5-stage piecemeal mount cascade isn't visible. See issue #774 /
-    // SPEC_TAB_CONTENT_REVEAL_GATE.md. Honours rapid Ctrl-Tab spam —
-    // each call resets the detector.
-    scheduleRevealLift();
+    // Pin the gate during the SetActiveTab RPC so the destination
+    // tab can't paint piecemeal once the workspace update lands.
+    // The auto-lift detector is started in `finally` (i.e. AFTER
+    // the active-tab update lands) so SETTLE / MAX_GATE measure the
+    // destination mount window, not the longtask-free RPC duration.
+    // Honours rapid Ctrl-Tab spam — each call resets the detector.
+    // See issue #774 / SPEC_TAB_CONTENT_REVEAL_GATE.md.
+    holdRevealGate();
     try {
         await WorkspaceService.SetActiveTab(ws.oid, tabId);
     } finally {
+        // Pair with holdRevealGate above. Also lifts the gate on
+        // the RPC-throws path so the user isn't stuck on a hidden
+        // source tab.
+        scheduleRevealLift();
         requestAnimationFrame(() =>
             requestAnimationFrame(() => {
                 if (mySeq === tabSwitchSeq) {
