@@ -516,7 +516,13 @@ async function reinitWave() {
  * Spec: docs/specs/SPEC_WINDOW_TITLE_FORMAT_2026-05-13.md
  */
 function installWindowTitleEffect(windowId: string): void {
-    createRoot(() => {
+    // Capture dispose so the reactive root can be torn down explicitly.
+    // In practice the CEF renderer is destroyed when the window closes,
+    // taking the JS context (and the effect) with it — but routing
+    // through `beforeunload` keeps the pattern correct if the renderer
+    // ever outlives a single window load (e.g. in-place navigation,
+    // future host-driven reload paths). Per ReAgent review on PR #841.
+    const dispose = createRoot((disposeFn) => {
         createEffect(() => {
             const activeTabId = atoms.activeTabId();
             const tab = activeTabId
@@ -534,7 +540,9 @@ function installWindowTitleEffect(windowId: string): void {
             });
             document.title = formatWindowTitle(windowName, tab?.name);
         });
+        return disposeFn;
     });
+    window.addEventListener("beforeunload", () => dispose(), { once: true });
 }
 
 function reloadAllWorkspaceTabs(ws: Workspace) {
