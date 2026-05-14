@@ -384,6 +384,73 @@ describe("auth-state reducer", () => {
             expect(r.state.kind).toBe("ready");
             expect(r.state.bundleId).toBe("new-key-bundle");
         });
+
+        // Reagent P1 on #845: previously ApiKeySubmitted spread
+        // `...state` which preserved an in-flight OAuth sessionId,
+        // letting a late OAuth `success` poll match and bind the
+        // wrong bundle. The reducer now clears those transients.
+        it("ApiKeySubmitted clears any prior OAuth session id + transients", () => {
+            const seeded = seed({
+                kind: "unauthenticated",
+                providerId: "openclaw",
+                bundleId: "",
+                sessionId: "stale-oauth-s1",
+                authUrl: "https://x",
+                deviceCode: { code: "X", verificationUrl: "Y" },
+            });
+            const r = update(seeded, {
+                type: "ApiKeySubmitted",
+                apiKey: "sk",
+                accountName: "x",
+            });
+            expect(r.state.sessionId).toBe("");
+            expect(r.state.authUrl).toBe("");
+            expect(r.state.deviceCode).toBeNull();
+            expect(r.state.kind).toBe("waiting");
+        });
+
+        it("ApiKeySubmitted is dropped from `ready` / `waiting`", () => {
+            for (const kind of ["ready", "waiting"] as const) {
+                const seeded = seed({ kind, providerId: "openclaw" });
+                const r = update(seeded, {
+                    type: "ApiKeySubmitted",
+                    apiKey: "sk",
+                    accountName: "x",
+                });
+                expect(r.state).toBe(seeded);
+                expect(r.events[0]).toMatchObject({
+                    type: "post-close-command-dropped",
+                    commandType: "ApiKeySubmitted",
+                });
+            }
+        });
+    });
+
+    // Reagent P2 on #845: SessionStarted lacked test coverage.
+    describe("SessionStarted", () => {
+        it("records sessionId + auth URL emitted by the inline RPC response", () => {
+            const seeded = seed({ kind: "waiting", providerId: "claude" });
+            const r = update(seeded, {
+                type: "SessionStarted",
+                sessionId: "s1",
+                authUrl: "https://x",
+            });
+            expect(r.state.sessionId).toBe("s1");
+            expect(r.state.authUrl).toBe("https://x");
+            expect(r.state.kind).toBe("waiting");
+            expect(r.events[0]).toMatchObject({
+                type: "session-started",
+                sessionId: "s1",
+                authUrl: "https://x",
+            });
+        });
+
+        it("works without a captured URL (CLI emits it asynchronously via Polled)", () => {
+            const seeded = seed({ kind: "waiting", providerId: "claude" });
+            const r = update(seeded, { type: "SessionStarted", sessionId: "s1" });
+            expect(r.state.sessionId).toBe("s1");
+            expect(r.state.authUrl).toBe("");
+        });
     });
 
     describe("Disposed gate", () => {
