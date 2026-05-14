@@ -796,7 +796,7 @@ class RpcApiType {
             accountName: string;
         },
         opts?: RpcOpts,
-    ): Promise<{ success: boolean; error?: string }> {
+    ): Promise<{ success: boolean; bundleId?: string; error?: string }> {
         return client.rpcCall("auth.submitapikey", data, opts);
     }
 

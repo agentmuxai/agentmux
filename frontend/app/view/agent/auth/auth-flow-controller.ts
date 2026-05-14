@@ -84,19 +84,17 @@ export const defaultAuthRpc: AuthRpc = {
         if (!r.success) {
             throw new Error(r.error ?? "auth.submitapikey rejected");
         }
-        // Reagent P1 on #850: previously this synthesized an empty
-        // bundleId when the backend omitted one, letting the flow
-        // transition to `ready` with an unusable identity reference.
-        // Until PR C of the spec wires the actual bundle row creation
-        // on the backend, treat a missing bundleId as a failure so
-        // the view surfaces it instead of silently breaking downstream.
-        const bundleId = (r as { bundleId?: string }).bundleId ?? "";
-        if (!bundleId) {
+        // Reagent P1 on #850: until PR C of the spec wires the actual
+        // bundle row creation on the backend, `bundleId` may be
+        // missing on success. Treat that as a failure so the view
+        // surfaces it instead of silently transitioning to `ready`
+        // with an unusable identity reference.
+        if (!r.bundleId) {
             throw new Error(
                 "auth.submitapikey accepted the key but backend did not return a bundleId (PR C of the spec wires this).",
             );
         }
-        return { bundleId };
+        return { bundleId: r.bundleId };
     },
 };
 
