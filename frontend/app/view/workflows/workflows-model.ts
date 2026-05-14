@@ -2,13 +2,27 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // WorkflowsViewModel — owns the per-pane state for the Workflows widget.
-// Mirrors MemoryViewModel's pattern (see frontend/app/view/memory/memory-model.ts):
-// SolidJS signals for UI state, RPC calls for persistence + run, no
-// global stores.
+//
+// Phase 1.5 PR 4 (`docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md`
+// §6 row 4) routes per-run state through the `workflow-run-state` slice
+// (#10) — same lifecycle pattern as slice #9 (browser-pane-state).
+//
+// What's reducer-backed (slot store, `recordDispatch` audit ring):
+//   - activeRunId, status, blockResults, run output, run error
+//
+// What stays as view-model state (pure UI editing, no event-folded):
+//   - draft graph, selection, running button-flag, runs list, errors
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import {
+    dispatch as dispatchWorkflowRun,
+    registerPane,
+    unregisterPane,
+    type AgentBlockResult,
+    type WorkflowRunStatus,
+} from "@/app/store/workflow-run-state-store";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, createSignal, type Accessor } from "solid-js";
@@ -67,18 +81,36 @@ export class WorkflowsViewModel implements ViewModel {
     setSelected = this._selected[1];
 
     // --- run state
+    //
+    // `_running` is the in-flight `await RunWorkflowCommand` flag — bound
+    // to the Toolbar's button disable. It's a UI thing, separate from the
+    // slot's `status` (which is "idle"|"running"|"done"|"failed", folded
+    // from `workflowrun:<id>` events). Keeping it in the view.
     private _running = createSignal<boolean>(false);
     runningAtom: Accessor<boolean> = this._running[0];
     setRunning = this._running[1];
 
-    private _runEvents = createSignal<RunEventEntry[]>([]);
-    runEventsAtom: Accessor<RunEventEntry[]> = this._runEvents[0];
-    setRunEvents = this._runEvents[1];
-
+    // ── Slot-projected cells (reducer-backed via slice #10) ────────
+    //
+    // These signals are written ONLY by the slot's projector. The
+    // view dispatches `RunStarted` / `BlockDone` / etc. and the slot
+    // calls back into the projector setters below to keep these in
+    // sync. Reads stay through the accessors so the rest of the
+    // codebase doesn't notice the migration.
     private _activeRunId = createSignal<string | null>(null);
     activeRunIdAtom: Accessor<string | null> = this._activeRunId[0];
-    setActiveRunId = this._activeRunId[1];
 
+    private _status = createSignal<WorkflowRunStatus>("idle");
+    statusAtom: Accessor<WorkflowRunStatus> = this._status[0];
+
+    private _blockResults = createSignal<Record<string, AgentBlockResult>>({});
+    blockResultsAtom: Accessor<Record<string, AgentBlockResult>> = this._blockResults[0];
+
+    blockResultAtom(blockId: string): AgentBlockResult | undefined {
+        return this.blockResultsAtom()[blockId];
+    }
+
+    // ── Non-reducer-backed view-only cells ─────────────────────────
     private _runs = createSignal<WorkflowRun[]>([]);
     runsAtom: Accessor<WorkflowRun[]> = this._runs[0];
     setRuns = this._runs[1];
@@ -86,19 +118,6 @@ export class WorkflowsViewModel implements ViewModel {
     private _error = createSignal<string | null>(null);
     errorAtom: Accessor<string | null> = this._error[0];
     setError = this._error[1];
-
-    // ── Per-block last-run result (Phase 1.5 PR 3 — #830) ──────────
-    //
-    // Keyed by the workflow block id. Populated from `BlockDone` /
-    // `BlockError` events on the active run; cleared on `newWorkflow`
-    // and when the user starts a new run.
-    private _blockResults = createSignal<Record<string, AgentBlockResult>>({});
-    blockResultsAtom: Accessor<Record<string, AgentBlockResult>> = this._blockResults[0];
-    setBlockResults = this._blockResults[1];
-
-    blockResultAtom(blockId: string): AgentBlockResult | undefined {
-        return this.blockResultsAtom()[blockId];
-    }
 
     // Active `workflowrun:<id>` subscription. Stored so we can
     // unsubscribe on dispose / when the run changes.
@@ -118,6 +137,33 @@ export class WorkflowsViewModel implements ViewModel {
             const id = this.selectedAtom();
             if (!id) return null;
             return this.draftAtom().graph.nodes.find((n) => n.id === id) ?? null;
+        });
+
+        // Register the slot SYNCHRONOUSLY so the first dispatch (in
+        // `run()`) never races against a missing pane.
+        registerPane(this.blockId, {
+            closed: () => {
+                // Closed-flag transitions are handled via `dispose()`'s
+                // unregisterPane — no view-model signal to mirror.
+            },
+            runId: (next) => this._activeRunId[1](next === "" ? null : next),
+            workflowId: () => {
+                // Not mirrored — the view reads draft.id, not the slot's
+                // workflowId. Keeping the projection a no-op so the slot
+                // surface stays uniform with slice #9.
+            },
+            status: (next) => this._status[1](next),
+            blockResults: (next) => this._blockResults[1](next),
+            output: () => {
+                // The terminal `output` projection is unused today — the
+                // Run panel reads the runs-list row instead, and the
+                // inspector reads blockResults. Reserved for Phase 2
+                // when a workflow-level result panel lands.
+            },
+            error: () => {
+                // Same rationale as `output` — terminal error surfaces
+                // via the runs-list row. Reserved for Phase 2.
+            },
         });
 
         void this.refreshList();
@@ -140,8 +186,7 @@ export class WorkflowsViewModel implements ViewModel {
             if (wf) {
                 this.setDraft(wf);
                 this.setSelected(null);
-                this.setRunEvents([]);
-                this.setActiveRunId(null);
+                dispatchWorkflowRun(this.blockId, { type: "Reset" }, "user");
                 await this.refreshRuns(id);
             }
         } catch (e) {
@@ -153,10 +198,8 @@ export class WorkflowsViewModel implements ViewModel {
     newWorkflow(): void {
         this.setDraft(BLANK_WORKFLOW());
         this.setSelected(null);
-        this.setRunEvents([]);
-        this.setActiveRunId(null);
         this.setRuns([]);
-        this.setBlockResults({});
+        dispatchWorkflowRun(this.blockId, { type: "Reset" }, "user");
         if (this.activeRunUnsub) {
             this.activeRunUnsub();
             this.activeRunUnsub = null;
@@ -190,23 +233,24 @@ export class WorkflowsViewModel implements ViewModel {
             if (!ok) return;
         }
         this.setRunning(true);
-        this.setRunEvents([]);
-        this.setBlockResults({});
         try {
             const r = await RpcApi.RunWorkflowCommand(TabRpcClient, { workflow_id: id });
-            this.setActiveRunId(r.run_id);
+            dispatchWorkflowRun(
+                this.blockId,
+                { type: "RunStarted", runId: r.run_id, workflowId: id },
+                "user",
+            );
             this.subscribeRun(r.run_id, id);
             // Backend inserts a `running` placeholder row synchronously
             // before this RPC resolves; the subscription above picks up
-            // the `RunDone` / `RunFailed` transition and re-refreshes
-            // the runs list (Phase 1.5 PR 3, closes #830).
+            // `RunDone` / `RunFailed` and re-refreshes the runs list
+            // (Phase 1.5 PR 3, #830).
             await this.refreshRuns(id);
             // Race recovery: ultra-fast workflows can finish + persist
             // their final row before we subscribe (codex P2 on #843).
-            // If the just-refreshed row is already terminal, backfill
-            // blockResults from `block_states` so the inspector still
-            // shows per-block output.
-            this.maybeBackfillFromTerminalRun(r.run_id);
+            // Dispatched as `BackfilledFromRow`, the reducer treats
+            // backfill as the authoritative final state.
+            this.maybeBackfillFromTerminalRun(r.run_id, id);
         } catch (e) {
             this.setError(`Run failed: ${(e as Error).message ?? e}`);
         } finally {
@@ -216,8 +260,8 @@ export class WorkflowsViewModel implements ViewModel {
 
     /** Subscribe to `workflowrun:<runId>` WPS events for the active run.
      *  Replaces any prior subscription. The backend publishes one event
-     *  per `RunEvent` variant — we drive the run-panel + per-block
-     *  result cache off them and refresh the run row on terminal events. */
+     *  per `RunEvent` variant — we route every event into the slot
+     *  reducer and refresh the run row on terminal events. */
     private subscribeRun(runId: string, workflowId: string): void {
         if (this.activeRunUnsub) {
             this.activeRunUnsub();
@@ -229,11 +273,11 @@ export class WorkflowsViewModel implements ViewModel {
             handler: (event) => {
                 const data = (event as { data?: RunEventWire }).data;
                 if (!data) return;
-                this.applyRunEvent(data);
+                this.dispatchWireEvent(data);
                 if (data.kind === "run_done" || data.kind === "run_failed") {
-                    // Backend now writes the row update BEFORE
-                    // publishing the terminal event (codex P2 on #843),
-                    // so a refresh here lands the final state.
+                    // Backend writes the row update BEFORE publishing
+                    // the terminal event (codex P2 on #843), so a
+                    // refresh here lands the final state.
                     void this.refreshRuns(workflowId);
                     if (this.activeRunUnsub) {
                         this.activeRunUnsub();
@@ -244,65 +288,91 @@ export class WorkflowsViewModel implements ViewModel {
         });
     }
 
-    /** Look up the active run in the just-refreshed runs list and, if
-     *  it's already terminal, populate `blockResults` from its
-     *  `block_states` map. Covers the codex P2 race for fast workflows
-     *  whose `workflowrun:<id>` events fire before this client
-     *  subscribes. Subscription teardown happens regardless. */
-    private maybeBackfillFromTerminalRun(runId: string): void {
-        // Already populated by streaming events? Nothing to do.
-        if (Object.keys(this.blockResultsAtom()).length > 0) return;
-        const row = this.runsAtom().find((r) => r.id === runId);
-        if (!row || (row.status !== "done" && row.status !== "failed")) return;
-        const states = row.block_states ?? {};
-        const next: Record<string, AgentBlockResult> = {};
-        for (const [blockId, st] of Object.entries(states)) {
-            if (st.status === "done") {
-                next[blockId] = parseBlockOutput(st.output);
-            } else if (st.status === "error") {
-                next[blockId] = { response: "", error: st.error ?? "block failed" };
-            }
-        }
-        if (Object.keys(next).length > 0) {
-            this.setBlockResults(next);
-        }
-        if (this.activeRunUnsub) {
-            this.activeRunUnsub();
-            this.activeRunUnsub = null;
-        }
-    }
-
-    /** Fold one `RunEvent` into the model's reactive state. Kept in the
-     *  view model for Phase 1.5; slice #10 (PR 4) will move this into a
-     *  pure reducer per the master reducer-stack pattern. */
-    private applyRunEvent(ev: RunEventWire): void {
+    /** Translate a wire `RunEvent` into a slice-#10 command. */
+    private dispatchWireEvent(ev: RunEventWire): void {
         switch (ev.kind) {
+            case "run_started":
+                // RunStarted already dispatched eagerly from `run()` —
+                // the wire event is redundant. Skip to avoid double-firing.
+                break;
+            case "block_started":
+                if (ev.block_id) {
+                    dispatchWorkflowRun(this.blockId, {
+                        type: "BlockStarted",
+                        blockId: ev.block_id,
+                    });
+                }
+                break;
             case "block_done":
                 if (ev.block_id) {
-                    this.setBlockResults((prev) => ({
-                        ...prev,
-                        [ev.block_id!]: parseBlockOutput(ev.output),
-                    }));
+                    dispatchWorkflowRun(this.blockId, {
+                        type: "BlockDone",
+                        blockId: ev.block_id,
+                        output: ev.output,
+                    });
                 }
                 break;
             case "block_error":
                 if (ev.block_id) {
-                    this.setBlockResults((prev) => ({
-                        ...prev,
-                        [ev.block_id!]: { response: "", error: ev.error ?? "block failed" },
-                    }));
+                    dispatchWorkflowRun(this.blockId, {
+                        type: "BlockError",
+                        blockId: ev.block_id,
+                        error: ev.error ?? "block failed",
+                    });
                 }
                 break;
-            default:
+            case "run_done":
+                dispatchWorkflowRun(this.blockId, {
+                    type: "RunDone",
+                    output: ev.output ?? "",
+                });
+                break;
+            case "run_failed":
+                dispatchWorkflowRun(this.blockId, {
+                    type: "RunFailed",
+                    error: ev.error ?? "run failed",
+                });
                 break;
         }
-        this.appendRunEvent({
-            kind: ev.kind,
-            block_id: ev.block_id,
-            output: ev.output,
-            error: ev.error,
-            at: Date.now(),
-        });
+    }
+
+    /** Look up the active run in the just-refreshed runs list and, if
+     *  it's already terminal, dispatch `BackfilledFromRow` so the slot
+     *  populates `blockResults` from persistence. Covers the codex P2
+     *  race for fast workflows whose events fire before we subscribe. */
+    private maybeBackfillFromTerminalRun(runId: string, workflowId: string): void {
+        // If streaming events already populated, the reducer treats
+        // backfill as authoritative — but the BlockDone events from the
+        // stream are equally authoritative. Skip to avoid clobbering
+        // a partial-but-correct mid-flight backlog.
+        if (Object.keys(this.blockResultsAtom()).length > 0) return;
+        const row = this.runsAtom().find((r) => r.id === runId);
+        if (!row || (row.status !== "done" && row.status !== "failed")) return;
+        const blocks = Object.entries(row.block_states ?? {}).map(
+            ([blockId, st]) => ({
+                blockId,
+                status: st.status,
+                output: st.output,
+                error: st.error,
+            }),
+        );
+        dispatchWorkflowRun(
+            this.blockId,
+            {
+                type: "BackfilledFromRow",
+                runId,
+                workflowId,
+                status: row.status === "done" ? "done" : "failed",
+                output: row.output,
+                error: row.error,
+                blocks,
+            },
+            "system",
+        );
+        if (this.activeRunUnsub) {
+            this.activeRunUnsub();
+            this.activeRunUnsub = null;
+        }
     }
 
     async refreshRuns(workflowId: string): Promise<void> {
@@ -388,14 +458,6 @@ export class WorkflowsViewModel implements ViewModel {
         this.setDraft((prev) => ({ ...prev, name }));
     }
 
-    appendRunEvent(ev: RunEventEntry): void {
-        this.setRunEvents((prev) => [...prev, ev]);
-    }
-
-    clearRunEvents(): void {
-        this.setRunEvents([]);
-    }
-
     /** Validation surface read by the Toolbar before enabling Run. */
     validate(): { ok: boolean; errors: string[] } {
         const errors: string[] = [];
@@ -414,15 +476,9 @@ export class WorkflowsViewModel implements ViewModel {
             this.activeRunUnsub();
             this.activeRunUnsub = null;
         }
+        dispatchWorkflowRun(this.blockId, { type: "Disposed" });
+        unregisterPane(this.blockId);
     }
-}
-
-export interface RunEventEntry {
-    kind: string;
-    block_id?: string;
-    output?: unknown;
-    error?: string;
-    at: number;
 }
 
 /** Shape of one `workflowrun:<id>` event payload as emitted by
@@ -443,30 +499,10 @@ interface RunEventWire {
     error?: string;
 }
 
-/** What we render in the Agent block inspector for the last run. */
-export interface AgentBlockResult {
-    response: string;
-    costUsd?: number;
-    error?: string;
-}
-
-/** Pull the response text + cost out of the `BlockDone.output` shape
- *  emitted by `workflows/executor/blocks/agent.rs` (spec §4.3). The
- *  block returns `{ response, tokens, cost_usd }` — variables/api/etc.
- *  blocks return arbitrary shapes that we fall back to JSON-stringify. */
-function parseBlockOutput(output: unknown): AgentBlockResult {
-    if (output && typeof output === "object") {
-        const o = output as Record<string, unknown>;
-        if (typeof o["response"] === "string") {
-            return {
-                response: o["response"],
-                costUsd: typeof o["cost_usd"] === "number" ? (o["cost_usd"] as number) : undefined,
-            };
-        }
-    }
-    return { response: typeof output === "string" ? output : JSON.stringify(output ?? null) };
-}
-
 function makeId(prefix: string): string {
     return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
+
+// Re-export the slot's per-block result type for view consumers that
+// still import from the view-model module.
+export type { AgentBlockResult } from "@/app/store/workflow-run-state-store";
