@@ -23,9 +23,11 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ObjectService } from "@/store/services";
 import { getObjectValue, makeORef } from "@/store/wos";
 import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
-
-const DISPLAY_NAME_META_KEY = "window:displayname";
-const DISPLAY_NAME_MAX_LEN = 64;
+import {
+    DISPLAY_NAME_MAX_LEN,
+    DISPLAY_NAME_META_KEY,
+    resolveWindowName,
+} from "@/util/window-title";
 
 interface InstancePanelProps {
     anchorRect: DOMRect | null;
@@ -133,23 +135,22 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         }
     };
 
-    // Resolve a row's display name in priority order:
-    //   1. user-set name in Window meta (`window:displayname`)
-    //   2. workspace.name (when the user has named the workspace)
-    //   3. index-based fallback "Window N"
-    // Returns the resolved string for rendering. Reactive via Wave's
-    // object subscriptions because getObjectValue reads through atoms.
+    // Resolve a row's display name via the shared helper so the panel and
+    // the OS window title (driven from app-init.ts) agree by construction.
+    // Reactive via Wave's object subscriptions because getObjectValue reads
+    // through atoms — when meta or workspace.name changes, this re-runs.
     const resolveName = (entry: WindowEntry, idx: number): string => {
+        let displayName: string | undefined;
+        let workspaceName: string | undefined;
         if (entry.windowId) {
             const win = getObjectValue<WaveWindow>(makeORef("window", entry.windowId));
-            const userName = (win?.meta?.[DISPLAY_NAME_META_KEY] as string | undefined)?.trim();
-            if (userName) return userName;
+            displayName = win?.meta?.[DISPLAY_NAME_META_KEY] as string | undefined;
             if (win?.workspaceid) {
                 const ws = getObjectValue<Workspace>(makeORef("workspace", win.workspaceid));
-                if (ws?.name?.trim()) return ws.name.trim();
+                workspaceName = ws?.name;
             }
         }
-        return `Window ${idx + 1}`;
+        return resolveWindowName({ displayName, workspaceName, indexInOpenWindows: idx });
     };
 
     const enterRename = (entry: WindowEntry, currentName: string) => {
