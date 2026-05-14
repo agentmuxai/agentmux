@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux-bashwrap"
-version = "0.33.870"
+version = "0.33.871"
 dependencies = [
  "anyhow",
  "base64",
@@ -27,7 +27,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-cef"
-version = "0.33.870"
+version = "0.33.871"
 dependencies = [
  "agentmux-common",
  "axum 0.8.9",
@@ -55,7 +55,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-common"
-version = "0.33.870"
+version = "0.33.871"
 dependencies = [
  "dirs",
  "serde",
@@ -67,7 +67,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.33.870"
+version = "0.33.871"
 dependencies = [
  "agentmux-common",
  "chrono",
@@ -88,7 +88,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-srv"
-version = "0.33.870"
+version = "0.33.871"
 dependencies = [
  "agentmux-common",
  "async-stream",
@@ -1546,9 +1546,9 @@ dependencies = [
 
 [[package]]
 name = "kqueue-sys"
-version = "1.1.1"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "285efcf12ef41bec907b3000d5ffaeb54191d4d9d83c0d6157e6cbc2db255e64"
+checksum = "07293a4e297ac234359b510362495713f75ea345d5307140414f20c69ffeb087"
 dependencies = [
  "bitflags 2.11.1",
  "libc",

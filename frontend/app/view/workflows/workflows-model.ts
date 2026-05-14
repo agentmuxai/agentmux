@@ -123,6 +123,13 @@ export class WorkflowsViewModel implements ViewModel {
     // unsubscribe on dispose / when the run changes.
     private activeRunUnsub: (() => void) | null = null;
 
+    // Idempotency flag — block-cleanup paths can call dispose() more
+    // than once on the same view model. A second call would re-fire
+    // `dispatchWorkflowRun(..., Disposed)` against a slot the first
+    // call already removed, throwing "unregistered pane" out of
+    // teardown. Codex P2 on PR #844.
+    private disposed = false;
+
     selectedNodeAtom: Accessor<FlowNode | null>;
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
@@ -186,7 +193,7 @@ export class WorkflowsViewModel implements ViewModel {
             if (wf) {
                 this.setDraft(wf);
                 this.setSelected(null);
-                dispatchWorkflowRun(this.blockId, { type: "Reset" }, "user");
+                this.dispatchIfAlive({ type: "Reset" }, "user");
                 await this.refreshRuns(id);
             }
         } catch (e) {
@@ -199,7 +206,7 @@ export class WorkflowsViewModel implements ViewModel {
         this.setDraft(BLANK_WORKFLOW());
         this.setSelected(null);
         this.setRuns([]);
-        dispatchWorkflowRun(this.blockId, { type: "Reset" }, "user");
+        this.dispatchIfAlive({ type: "Reset" }, "user");
         if (this.activeRunUnsub) {
             this.activeRunUnsub();
             this.activeRunUnsub = null;
@@ -235,8 +242,7 @@ export class WorkflowsViewModel implements ViewModel {
         this.setRunning(true);
         try {
             const r = await RpcApi.RunWorkflowCommand(TabRpcClient, { workflow_id: id });
-            dispatchWorkflowRun(
-                this.blockId,
+            this.dispatchIfAlive(
                 { type: "RunStarted", runId: r.run_id, workflowId: id },
                 "user",
             );
@@ -297,7 +303,7 @@ export class WorkflowsViewModel implements ViewModel {
                 break;
             case "block_started":
                 if (ev.block_id) {
-                    dispatchWorkflowRun(this.blockId, {
+                    this.dispatchIfAlive({
                         type: "BlockStarted",
                         blockId: ev.block_id,
                     });
@@ -305,7 +311,7 @@ export class WorkflowsViewModel implements ViewModel {
                 break;
             case "block_done":
                 if (ev.block_id) {
-                    dispatchWorkflowRun(this.blockId, {
+                    this.dispatchIfAlive({
                         type: "BlockDone",
                         blockId: ev.block_id,
                         output: ev.output,
@@ -314,7 +320,7 @@ export class WorkflowsViewModel implements ViewModel {
                 break;
             case "block_error":
                 if (ev.block_id) {
-                    dispatchWorkflowRun(this.blockId, {
+                    this.dispatchIfAlive({
                         type: "BlockError",
                         blockId: ev.block_id,
                         error: ev.error ?? "block failed",
@@ -322,13 +328,13 @@ export class WorkflowsViewModel implements ViewModel {
                 }
                 break;
             case "run_done":
-                dispatchWorkflowRun(this.blockId, {
+                this.dispatchIfAlive({
                     type: "RunDone",
                     output: ev.output ?? "",
                 });
                 break;
             case "run_failed":
-                dispatchWorkflowRun(this.blockId, {
+                this.dispatchIfAlive({
                     type: "RunFailed",
                     error: ev.error ?? "run failed",
                 });
@@ -356,8 +362,7 @@ export class WorkflowsViewModel implements ViewModel {
                 error: st.error,
             }),
         );
-        dispatchWorkflowRun(
-            this.blockId,
+        this.dispatchIfAlive(
             {
                 type: "BackfilledFromRow",
                 runId,
@@ -472,12 +477,29 @@ export class WorkflowsViewModel implements ViewModel {
     }
 
     dispose(): void {
+        if (this.disposed) return;
+        this.disposed = true;
         if (this.activeRunUnsub) {
             this.activeRunUnsub();
             this.activeRunUnsub = null;
         }
         dispatchWorkflowRun(this.blockId, { type: "Disposed" });
         unregisterPane(this.blockId);
+    }
+
+    /** Guarded dispatch — every async path that could resolve after
+     *  `dispose()` (e.g. an in-flight `run()` whose `refreshRuns`
+     *  finishes after the pane unmounts) routes through this helper
+     *  so the dispatch never lands on an unregistered slot.
+     *  Codex P2 on PR #844 (dispose idempotency) generalized: the
+     *  same race exists for ANY post-dispose dispatch, not just a
+     *  second `Disposed`. */
+    private dispatchIfAlive(
+        command: Parameters<typeof dispatchWorkflowRun>[1],
+        source?: Parameters<typeof dispatchWorkflowRun>[2],
+    ): void {
+        if (this.disposed) return;
+        dispatchWorkflowRun(this.blockId, command, source);
     }
 }
 
