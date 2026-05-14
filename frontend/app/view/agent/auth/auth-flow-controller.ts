@@ -41,7 +41,7 @@ export interface AuthRpc {
         authLoginArgs: string[];
         authCheckArgs: string[];
         authEnv?: Record<string, string>;
-    }): Promise<{ sessionId: string; status: AuthSessionStatusWire }>;
+    }): Promise<{ sessionId: string; authUrl?: string }>;
     poll(sessionId: string): Promise<AuthSessionStatusWire>;
     submitCallback(sessionId: string, callbackUrl: string): Promise<void>;
     cancel(sessionId: string): Promise<void>;
@@ -58,7 +58,14 @@ export const defaultAuthRpc: AuthRpc = {
         return RpcApi.AuthStartCommand(TabRpcClient, req);
     },
     async poll(sessionId) {
-        return RpcApi.AuthPollCommand(TabRpcClient, { sessionId });
+        // Backend flattens `providerId` alongside the status fields;
+        // the reducer only cares about the status tag + its arms, so
+        // drop providerId before handing to the controller.
+        const { providerId: _providerId, ...status } = await RpcApi.AuthPollCommand(
+            TabRpcClient,
+            { sessionId },
+        );
+        return status as AuthSessionStatusWire;
     },
     async submitCallback(sessionId, callbackUrl) {
         const r = await RpcApi.AuthSubmitCallbackCommand(TabRpcClient, {
@@ -152,7 +159,11 @@ export class AuthFlowController {
         }
         this.dispatch({ type: "ConnectClicked" });
         try {
-            const { sessionId, status } = await this.rpc.start({
+            // Reagent P1 on #850: backend's auth.start returns
+            // `{ sessionId, authUrl? }` (not `{ sessionId, status }`).
+            // The initial status is "pending" until the CLI prints
+            // something; the poll loop picks it up on the first tick.
+            const { sessionId, authUrl } = await this.rpc.start({
                 providerId: s.providerId,
                 intoBundleId: s.bundleId || undefined,
                 cliPath: cli.cliPath,
@@ -160,20 +171,8 @@ export class AuthFlowController {
                 authCheckArgs: cli.authCheckArgs,
                 authEnv: cli.authEnv,
             });
-            // The reducer reads `sessionId` from this dispatch — even
-            // if `status.status === "url-available"` came back inline,
-            // we record the session id first so subsequent `Polled`
-            // dispatches gate properly.
-            this.dispatch({
-                type: "SessionStarted",
-                sessionId,
-                authUrl: status.status === "url-available" ? status.authUrl : undefined,
-            });
-            // Fold the initial status as if it had arrived via poll.
-            this.dispatch({ type: "Polled", sessionId, status });
-            if (!isTerminal(status)) {
-                this.schedulePoll(sessionId);
-            }
+            this.dispatch({ type: "SessionStarted", sessionId, authUrl });
+            this.schedulePoll(sessionId);
         } catch (e) {
             this.dispatch({
                 type: "Polled",
@@ -259,6 +258,16 @@ export class AuthFlowController {
     }
 
     dispose(): void {
+        // Fire-and-forget auth.cancel for any in-flight session so we
+        // don't leave an orphan CLI subprocess on the backend. Codex
+        // P2 on #850: previously dispose() only cleared the local
+        // timer + marked closed.
+        const s = this.state();
+        if (s.kind === "waiting" && s.sessionId !== "") {
+            void this.rpc.cancel(s.sessionId).catch(() => {
+                // Best-effort: the session times out backend-side too.
+            });
+        }
         this.stopPolling();
         this.dispatch({ type: "Disposed" });
     }
