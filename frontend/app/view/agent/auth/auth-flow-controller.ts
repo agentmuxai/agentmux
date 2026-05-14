@@ -84,19 +84,17 @@ export const defaultAuthRpc: AuthRpc = {
         if (!r.success) {
             throw new Error(r.error ?? "auth.submitapikey rejected");
         }
-        // Reagent P1 on #850: previously this synthesized an empty
-        // bundleId when the backend omitted one, letting the flow
-        // transition to `ready` with an unusable identity reference.
-        // Until PR C of the spec wires the actual bundle row creation
-        // on the backend, treat a missing bundleId as a failure so
-        // the view surfaces it instead of silently breaking downstream.
-        const bundleId = (r as { bundleId?: string }).bundleId ?? "";
-        if (!bundleId) {
+        // Reagent P1 on #850: until PR C of the spec wires the actual
+        // bundle row creation on the backend, `bundleId` may be
+        // missing on success. Treat that as a failure so the view
+        // surfaces it instead of silently transitioning to `ready`
+        // with an unusable identity reference.
+        if (!r.bundleId) {
             throw new Error(
                 "auth.submitapikey accepted the key but backend did not return a bundleId (PR C of the spec wires this).",
             );
         }
-        return { bundleId };
+        return { bundleId: r.bundleId };
     },
 };
 
@@ -257,28 +255,6 @@ export class AuthFlowController {
                 status: { status: "failed", error: errMsg(e) },
             });
         }
-    }
-
-    /** Surface a view-side connect-prep failure (e.g. `ResolveCli`
-     *  threw before we could call `auth.start`) as a `failed` state.
-     *  The reducer's terminal-fold path then renders the error in
-     *  the FailedBanner instead of the user seeing a misleading
-     *  empty-cliPath backend error (reagent P1 on #847). */
-    failConnect(error: unknown): void {
-        const message = error instanceof Error ? error.message : String(error);
-        // Must be in `waiting` for the Polled gate to pass — `connect()`'s
-        // ConnectClicked already moved us there; if not, synthesize the
-        // transition first.
-        if (this.state().kind !== "waiting") {
-            this.dispatch({ type: "ConnectClicked" });
-        }
-        const synthSessionId = "cli-resolve-failed";
-        this.dispatch({ type: "SessionStarted", sessionId: synthSessionId });
-        this.dispatch({
-            type: "Polled",
-            sessionId: synthSessionId,
-            status: { status: "failed", error: message },
-        });
     }
 
     dispose(): void {
