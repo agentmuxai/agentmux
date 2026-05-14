@@ -640,14 +640,39 @@ interface PlaceholderProps {
 
 /**
  * An overlay to preview pending actions on the layout tree.
+ * Two-div split: outer .placeholder-sizer handles position/size (transform + w/h, not animated),
+ * inner .placeholder handles appearance (opacity + scale, compositor-only).
+ * Delayed unmount gives the CSS exit transition 150 ms to play before the DOM node is removed.
  */
 const Placeholder = (props: PlaceholderProps) => {
     const placeholderTransform = () => props.layoutModel.placeholderTransform();
+    const [visible, setVisible] = createSignal(false);
+    const [exiting, setExiting] = createSignal(false);
+    const [lastTransform, setLastTransform] = createSignal<JSX.CSSProperties | null>(null);
+    let exitTimer: ReturnType<typeof setTimeout> | null = null;
+
+    createEffect(() => {
+        const xf = placeholderTransform();
+        if (xf) {
+            setLastTransform(xf as JSX.CSSProperties);
+            if (exitTimer) { clearTimeout(exitTimer); exitTimer = null; }
+            setExiting(false);
+            setVisible(true);
+        } else if (visible()) {
+            if (exitTimer) { clearTimeout(exitTimer); exitTimer = null; }
+            setExiting(true);
+            exitTimer = setTimeout(() => { setVisible(false); setExiting(false); }, 150);
+        }
+    });
+
+    onCleanup(() => { if (exitTimer) clearTimeout(exitTimer); });
 
     return (
         <div class="placeholder-container" style={props.style}>
-            <Show when={placeholderTransform()}>
-                <div class="placeholder" style={placeholderTransform() as JSX.CSSProperties} />
+            <Show when={visible()}>
+                <div class="placeholder-sizer" style={lastTransform() ?? {}}>
+                    <div class={clsx("placeholder", exiting() && "exiting")} />
+                </div>
             </Show>
         </div>
     );
