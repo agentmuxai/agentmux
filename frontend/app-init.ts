@@ -21,6 +21,7 @@ import {
     initGlobal,
     initGlobalEventSubs,
     loadConnStatus,
+    openWindowEntriesAtom,
     pushFlashError,
     pushNotification,
     removeNotificationById,
@@ -32,6 +33,12 @@ import {
     setFullConfigAtom,
 } from "@/app/store/global";
 import * as WOS from "@/app/store/wos";
+import { createEffect, createRoot } from "solid-js";
+import {
+    DISPLAY_NAME_META_KEY,
+    formatWindowTitle,
+    resolveWindowName,
+} from "@/util/window-title";
 import { loadFonts } from "@/util/fontutil";
 import { primeAccountCache } from "@/app/view/identity/identity-model";
 import { setKeyUtilPlatform } from "@/util/keyutil";
@@ -53,7 +60,6 @@ import {
 // Do NOT call getApi() at module level: this file is statically imported by
 // bootstrap.ts before setupCefApi() runs, so window.api does not exist yet.
 let platform: NodeJS.Platform;
-let appVersion: string;
 let savedInitOpts: AgentMuxInitOpts = null;
 
 window.WOS = WOS;
@@ -302,8 +308,10 @@ export async function initApp() {
     }
     // Assign deferred module-level values now.
     platform = getApi().getPlatform();
-    appVersion = getApi().getAboutModalDetails().version;
-    document.title = `AgentMux ${appVersion}`;
+    // Note: document.title is left at the index.html default ("AgentMux")
+    // until installWindowTitleEffect() runs at the end of initWave(). The
+    // body is `visibility: hidden` during init so users don't see the
+    // bare "AgentMux" pre-init title.
 
     // Phase B.7.3.1 — install `window.__agentmux_launcher_event` BEFORE
     // any host-touching call. The host's `launcher_event_bridge` may
@@ -482,7 +490,9 @@ async function reinitWave() {
     const initialTab = await WOS.reloadWaveObject<Tab>(WOS.makeORef("tab", savedInitOpts.tabId));
     await WOS.reloadWaveObject<LayoutState>(WOS.makeORef("layout", initialTab.layoutstate));
     reloadAllWorkspaceTabs(ws);
-    document.title = `AgentMux ${appVersion} - ${initialTab.name}`; // TODO update with tab name change
+    // Title is driven by installWindowTitleEffect() (set up in initWave)
+    // and reacts to atom changes — reinitWave's reloads update the atoms,
+    // the effect re-runs, document.title updates. No imperative write needed.
     getApi().setWindowInitStatus("wave-ready");
     setReinitVersion((v) => v + 1);
     setUpdaterStatusAtom(getApi().getUpdaterStatus());
@@ -490,6 +500,41 @@ async function reinitWave() {
     setTimeout(() => {
         globalRefocus();
     }, 50);
+}
+
+/**
+ * Install the reactive document.title effect for this window. Title format:
+ *
+ *     {Window Name} - {Tab Name} - AgentMux
+ *
+ * Window Name resolves via the same three-tier rule the InstancePanel uses
+ * (user display name → workspace name → "Window N"). The effect re-runs
+ * automatically whenever any input atom changes — tab switches, window
+ * rename, workspace re-assign, or the window's position in
+ * `openWindowEntriesAtom` shifts.
+ *
+ * Spec: docs/specs/SPEC_WINDOW_TITLE_FORMAT_2026-05-13.md
+ */
+function installWindowTitleEffect(windowId: string): void {
+    createRoot(() => {
+        createEffect(() => {
+            const activeTabId = atoms.activeTabId();
+            const tab = activeTabId
+                ? WOS.getObjectValue<Tab>(WOS.makeORef("tab", activeTabId))
+                : undefined;
+            const win = WOS.getObjectValue<WaveWindow>(WOS.makeORef("window", windowId));
+            const ws = atoms.workspace();
+            const entries = openWindowEntriesAtom();
+            const idx = entries.findIndex((e) => e.windowId === windowId);
+
+            const windowName = resolveWindowName({
+                displayName: win?.meta?.[DISPLAY_NAME_META_KEY] as string | undefined,
+                workspaceName: ws?.name,
+                indexInOpenWindows: idx >= 0 ? idx : 0,
+            });
+            document.title = formatWindowTitle(windowName, tab?.name);
+        });
+    });
 }
 
 function reloadAllWorkspaceTabs(ws: Workspace) {
@@ -587,7 +632,7 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     WOS.wpsSubscribeToObject(WOS.makeORef("workspace", waveWindow.workspaceid));
     tlog("loadAllWorkspaceTabs", t);
 
-    document.title = `AgentMux ${appVersion} - ${initialTab.name}`; // TODO update with tab name change
+    installWindowTitleEffect(initOpts.windowId);
 
     t = performance.now();
     registerGlobalKeys();
