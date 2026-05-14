@@ -1,8 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { For, Show, type JSX } from "solid-js";
+import { createResource, For, Show, type JSX } from "solid-js";
 
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { BLOCK_KINDS, blockMeta } from "./block-registry";
 import type { WorkflowsViewModel } from "./workflows-model";
 import type { BlockKind, FlowNode } from "./workflows-types";
@@ -241,8 +243,12 @@ const Canvas = (p: { model: WorkflowsViewModel }): JSX.Element => {
 
 function nodeSummary(n: FlowNode): string {
     switch (n.data.kind) {
-        case "agent":
-            return `task: ${truncate((n.data["task"] as string) ?? "")}`;
+        case "agent": {
+            const ref = readAgentRef(n);
+            const task = (n.data["task"] as string) ?? "";
+            const who = ref.instanceName || ref.identityId || "blank";
+            return `${who} · ${truncate(task)}`;
+        }
         case "api":
             return `${(n.data["method"] as string) ?? "GET"} ${truncate((n.data["url"] as string) ?? "")}`;
         case "condition":
@@ -292,13 +298,7 @@ const InspectorForm = (p: { model: WorkflowsViewModel; node: FlowNode }): JSX.El
             <div class="workflows-inspector-title">{meta.label}</div>
             <div class="workflows-inspector-id">{p.node.id}</div>
             <Show when={p.node.data.kind === "agent"}>
-                <Field label="Forge agent id">
-                    <input
-                        class="workflows-input"
-                        value={(p.node.data["forge_agent_id"] as string) ?? ""}
-                        onInput={(e) => update({ forge_agent_id: e.currentTarget.value })}
-                    />
-                </Field>
+                <AgentRefEditor node={p.node} update={update} />
                 <Field label="Task ({{...}} interpolation supported)">
                     <textarea
                         class="workflows-input"
@@ -307,6 +307,7 @@ const InspectorForm = (p: { model: WorkflowsViewModel; node: FlowNode }): JSX.El
                         onInput={(e) => update({ task: e.currentTarget.value })}
                     />
                 </Field>
+                <AgentResultPanel model={p.model} blockId={p.node.id} />
             </Show>
             <Show when={p.node.data.kind === "api"}>
                 <Field label="Method">
@@ -419,6 +420,132 @@ const VariablesEditor = (p: {
                 + Add
             </button>
         </div>
+    );
+};
+
+// ── AgentRef editor ───────────────────────────────────────────────────
+//
+// PR 3 of Phase 1.5 (closes #835). Replaces the prior single
+// `forge_agent_id` text field with separate identity / memory /
+// instance-name pickers backed by the launch-modal RPCs.
+
+interface AgentRefShape {
+    identityId: string;
+    memoryId: string;
+    instanceName: string;
+    workingDirectory: string;
+}
+
+function readAgentRef(n: FlowNode): AgentRefShape {
+    const raw = n.data["agent_ref"] as Partial<AgentRefShape> | undefined;
+    if (raw && typeof raw === "object") {
+        return {
+            identityId: raw.identityId ?? "",
+            memoryId: raw.memoryId ?? "",
+            instanceName: raw.instanceName ?? "",
+            workingDirectory: raw.workingDirectory ?? "",
+        };
+    }
+    // Legacy pre-#835 nodes persisted `forge_agent_id`. Phase 1.5 PR 2
+    // (#834) wired the executor to read `agent_ref` only — a legacy
+    // node now launches blank claude. Surface that explicitly rather
+    // than silently coercing the old id into anything.
+    const legacy = n.data["forge_agent_id"];
+    if (typeof legacy === "string" && legacy.length > 0) {
+        console.warn(
+            `[workflows] Agent block ${n.id} uses legacy forge_agent_id="${legacy}"; re-pick identity/memory after PR 3.`,
+        );
+    }
+    return { identityId: "", memoryId: "", instanceName: "", workingDirectory: "" };
+}
+
+const AgentRefEditor = (p: {
+    node: FlowNode;
+    update: (patch: Record<string, unknown>) => void;
+}): JSX.Element => {
+    const [identities] = createResource(() =>
+        RpcApi.ListIdentityBundlesCommand(TabRpcClient, {}).catch(() => [] as IdentityBundle[]),
+    );
+    const [memories] = createResource(() =>
+        RpcApi.ListMemoriesCommand(TabRpcClient, {}).catch(() => [] as Memory[]),
+    );
+    const ref = () => readAgentRef(p.node);
+    const setRef = (patch: Partial<AgentRefShape>) =>
+        p.update({ agent_ref: { ...ref(), ...patch } });
+
+    return (
+        <>
+            <Field label="Identity">
+                <select
+                    class="workflows-input"
+                    value={ref().identityId}
+                    onChange={(e) => setRef({ identityId: e.currentTarget.value })}
+                >
+                    <option value="">— Blank (ambient creds) —</option>
+                    <For each={(identities() ?? []).filter((b) => !b.is_blank)}>
+                        {(bundle) => <option value={bundle.id}>{bundle.name}</option>}
+                    </For>
+                </select>
+            </Field>
+            <Field label="Memory">
+                <select
+                    class="workflows-input"
+                    value={ref().memoryId}
+                    onChange={(e) => setRef({ memoryId: e.currentTarget.value })}
+                >
+                    <option value="">— Blank (vanilla CLI) —</option>
+                    <For each={(memories() ?? []).filter((m) => !m.is_blank)}>
+                        {(memory) => <option value={memory.id}>{memory.name}</option>}
+                    </For>
+                </select>
+            </Field>
+            <Field label="Instance name (optional, for named-agent continuation)">
+                <input
+                    class="workflows-input"
+                    value={ref().instanceName}
+                    onInput={(e) => setRef({ instanceName: e.currentTarget.value })}
+                    placeholder="leave blank for one-shot"
+                />
+            </Field>
+        </>
+    );
+};
+
+// ── Agent result panel ────────────────────────────────────────────────
+//
+// Shows the most recent run's BlockDone output for the selected Agent
+// block. Subscribed via the model (`workflowrun:<id>` events → §5.2).
+// Phase 1.5 ships final-result rendering only; hover-expand tool stream
+// is deferred to Phase 2 polish.
+
+const AgentResultPanel = (p: {
+    model: WorkflowsViewModel;
+    blockId: string;
+}): JSX.Element => {
+    const result = () => p.model.blockResultAtom(p.blockId);
+    return (
+        <Show when={result()}>
+            {(r) => (
+                <div class="workflows-agent-result">
+                    <div class="workflows-agent-result-label">Last run</div>
+                    <Show
+                        when={r().error}
+                        fallback={
+                            <>
+                                <pre class="workflows-agent-result-text">{r().response}</pre>
+                                <Show when={r().costUsd != null}>
+                                    <div class="workflows-agent-result-cost">
+                                        ${r().costUsd!.toFixed(4)}
+                                    </div>
+                                </Show>
+                            </>
+                        }
+                    >
+                        <pre class="workflows-agent-result-error">{r().error}</pre>
+                    </Show>
+                </div>
+            )}
+        </Show>
     );
 };
 
