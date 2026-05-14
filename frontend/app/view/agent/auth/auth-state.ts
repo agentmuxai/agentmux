@@ -350,8 +350,33 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
         }
 
         case "ApiKeySubmitted": {
+            // Reagent P1 on PR #845: ApiKeySubmitted previously
+            // spread `...state` into `waiting`, preserving any
+            // stale OAuth `sessionId`. A late OAuth poll `success`
+            // could then match (sessionId !== "") and flip state
+            // to `ready` with the WRONG bundle. Drop the OAuth
+            // session id + URL + device-code so this attempt is
+            // unambiguously the API-key path.
+            if (state.kind !== "unauthenticated" && state.kind !== "expired" && state.kind !== "failed") {
+                return {
+                    state,
+                    events: [
+                        {
+                            type: "post-close-command-dropped",
+                            commandType: "ApiKeySubmitted",
+                        },
+                    ],
+                };
+            }
             return {
-                state: { ...state, kind: "waiting", error: "" },
+                state: {
+                    ...state,
+                    kind: "waiting",
+                    sessionId: "",
+                    authUrl: "",
+                    deviceCode: null,
+                    error: "",
+                },
                 events: [
                     {
                         type: "api-key-submit-requested",
