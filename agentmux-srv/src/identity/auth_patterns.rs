@@ -136,6 +136,19 @@ fn match_copilot_device_code(line: &str) -> Option<AuthPatternMatch> {
 
 fn match_logged_in_as(line: &str) -> Option<AuthPatternMatch> {
     let line_low = line.to_lowercase();
+    // Negative forms ("not authenticated", "not logged in", "isn't
+    // authenticated", "n't logged in", "failed to authenticate") are
+    // status messages, not success — fall through. Reagent caught the
+    // bare `contains("authenticated")` matching error lines on PR #840.
+    if line_low.contains("not authenticated")
+        || line_low.contains("not logged in")
+        || line_low.contains("n't authenticated")
+        || line_low.contains("n't logged in")
+        || line_low.contains("failed to authenticate")
+        || line_low.contains("authentication failed")
+    {
+        return None;
+    }
     if !line_low.contains("logged in") && !line_low.contains("authenticated") {
         return None;
     }
@@ -295,6 +308,24 @@ mod tests {
     fn login_success_without_email() {
         let m = match_line("claude", "You are now authenticated.");
         assert!(matches!(m, Some(AuthPatternMatch::LoginSuccess { email: None })));
+    }
+
+    #[test]
+    fn login_success_skips_negative_forms() {
+        // Reagent P2 on PR #840: bare `contains("authenticated")`
+        // matched "Error: not authenticated" and "Authentication
+        // failed" lines, falsely promoting them to LoginSuccess.
+        for line in [
+            "Error: not authenticated",
+            "you are not authenticated",
+            "user isn't authenticated yet",
+            "You aren't logged in",
+            "failed to authenticate",
+            "Authentication failed",
+        ] {
+            let m = match_line("claude", line);
+            assert!(m.is_none(), "expected None for {line:?}, got {m:?}");
+        }
     }
 
     #[test]
