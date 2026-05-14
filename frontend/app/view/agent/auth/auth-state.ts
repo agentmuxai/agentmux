@@ -105,11 +105,14 @@ export type AuthCommand =
      */
     | { type: "SessionStarted"; sessionId: string; authUrl?: string }
     /**
-     * Poll returned a non-terminal status. The reducer extracts
-     * the relevant fields. Multiple polls returning the same data
-     * are idempotent (no event re-fired).
+     * Poll returned a status for the session identified by
+     * `sessionId`. The reducer drops the result if it doesn't match
+     * the currently-active session — guards against stale polls from
+     * a cancelled or superseded session that would otherwise flip
+     * state to a wrong `bundleId` (codex P1 on PR #845). Multiple
+     * polls returning the same data are idempotent (no event re-fired).
      */
-    | { type: "Polled"; status: AuthSessionStatusWire }
+    | { type: "Polled"; sessionId: string; status: AuthSessionStatusWire }
     /**
      * The user clicked "Cancel login". The view fires
      * `CancelProviderAuth` on the corresponding event.
@@ -275,6 +278,26 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
         }
 
         case "Polled": {
+            // Drop stale polls from cancelled / superseded sessions
+            // (codex P1 on PR #845). The view passes the sessionId
+            // the RPC was issued against; if it doesn't match the
+            // currently-active session the result is from an old
+            // attempt that the user already left behind.
+            if (
+                state.kind !== "waiting" ||
+                state.sessionId === "" ||
+                command.sessionId !== state.sessionId
+            ) {
+                return {
+                    state,
+                    events: [
+                        {
+                            type: "post-close-command-dropped",
+                            commandType: "Polled",
+                        },
+                    ],
+                };
+            }
             return foldPolled(state, command.status);
         }
 

@@ -134,6 +134,7 @@ describe("auth-state reducer", () => {
             const seeded = seed({ kind: "waiting", sessionId: "s1" });
             const r = update(seeded, {
                 type: "Polled",
+                sessionId: "s1",
                 status: { status: "pending" },
             });
             expect(r.state).toBe(seeded);
@@ -144,11 +145,13 @@ describe("auth-state reducer", () => {
             const seeded = seed({ kind: "waiting", sessionId: "s1" });
             const r1 = update(seeded, {
                 type: "Polled",
+                sessionId: "s1",
                 status: { status: "url-available", authUrl: "https://x" },
             });
             expect(r1.state.authUrl).toBe("https://x");
             const r2 = update(r1.state, {
                 type: "Polled",
+                sessionId: "s1",
                 status: { status: "url-available", authUrl: "https://x" },
             });
             expect(r2.events).toEqual([]);
@@ -158,6 +161,7 @@ describe("auth-state reducer", () => {
             const seeded = seed({ kind: "waiting", sessionId: "s1" });
             const r1 = update(seeded, {
                 type: "Polled",
+                sessionId: "s1",
                 status: {
                     status: "code-emitted",
                     deviceCode: "ABCD-1234",
@@ -170,6 +174,7 @@ describe("auth-state reducer", () => {
             });
             const r2 = update(r1.state, {
                 type: "Polled",
+                sessionId: "s1",
                 status: {
                     status: "code-emitted",
                     deviceCode: "ABCD-1234",
@@ -188,6 +193,7 @@ describe("auth-state reducer", () => {
             });
             const r = update(seeded, {
                 type: "Polled",
+                sessionId: "s1",
                 status: {
                     status: "success",
                     bundleId: "new-bundle",
@@ -210,11 +216,89 @@ describe("auth-state reducer", () => {
             const seeded = seed({ kind: "waiting", sessionId: "s1" });
             const r = update(seeded, {
                 type: "Polled",
+                sessionId: "s1",
                 status: { status: "failed", error: "timeout" },
             });
             expect(r.state.kind).toBe("failed");
             expect(r.state.error).toBe("timeout");
             expect(r.state.sessionId).toBe("");
+        });
+
+        // Codex P1 on PR #845: a poll response from a cancelled or
+        // superseded session must NOT mutate state.
+        it("drops a stale `success` for a different session", () => {
+            const seeded = seed({
+                kind: "waiting",
+                sessionId: "s2",
+                providerId: "claude",
+                bundleId: "current-bundle",
+            });
+            const r = update(seeded, {
+                type: "Polled",
+                sessionId: "s1", // old session
+                status: {
+                    status: "success",
+                    bundleId: "wrong-bundle",
+                    email: "u@x.com",
+                },
+            });
+            expect(r.state).toBe(seeded);
+            expect(r.events[0]).toMatchObject({
+                type: "post-close-command-dropped",
+                commandType: "Polled",
+            });
+        });
+
+        it("drops a stale `failed` after CancelClicked cleared sessionId", () => {
+            // User clicks Connect → s1 starts → user clicks Cancel →
+            // state.sessionId becomes "" → late `failed` from s1 must
+            // not flip state to "failed" with the old error.
+            const seeded = seed({
+                kind: "unauthenticated",
+                sessionId: "",
+                providerId: "claude",
+            });
+            const r = update(seeded, {
+                type: "Polled",
+                sessionId: "s1",
+                status: { status: "failed", error: "old timeout" },
+            });
+            expect(r.state).toBe(seeded);
+            expect(r.state.error).toBe("");
+            expect(r.events[0]).toMatchObject({
+                type: "post-close-command-dropped",
+            });
+        });
+
+        it("drops a stale poll after Selected swapped the bundle", () => {
+            // Mid-OAuth on session s1 (bundle b1) → user picks bundle
+            // b2 → state.sessionId cleared → late `success` from s1
+            // must not flip state to ready with bundle from old session.
+            const sessionGoingOn = seed({
+                kind: "waiting",
+                sessionId: "s1",
+                providerId: "claude",
+                bundleId: "b1",
+            });
+            const afterSelected = update(sessionGoingOn, {
+                type: "Selected",
+                providerId: "claude",
+                bundleId: "b2",
+                outcome: "ready",
+            }).state;
+            expect(afterSelected.sessionId).toBe(""); // sanity
+            const r = update(afterSelected, {
+                type: "Polled",
+                sessionId: "s1",
+                status: {
+                    status: "success",
+                    bundleId: "wrong",
+                    email: null,
+                },
+            });
+            expect(r.state).toBe(afterSelected);
+            expect(r.state.bundleId).toBe("b2");
+            expect(r.state.kind).toBe("ready");
         });
     });
 
