@@ -61,6 +61,44 @@ function TileLayoutComponent(props: TileLayoutProps) {
     const overlayTransform = () => layoutModel.overlayTransform();
     const isResizing = () => layoutModel.isResizing();
 
+    // Issue #836: hold the on-screen overlayTransform for 150ms after
+    // activeDrag flips false, so the Placeholder's inner-div exit fade
+    // (also 150ms) stays visible. Without this, overlayTransform()
+    // recomputes the moment onDrop fires and moves the entire
+    // .placeholder-container off-screen (top = 2*height) before the
+    // .exiting CSS transition can play. We cache the last in-drag
+    // transform and serve it during the hold window, then release.
+    const [heldOverlayTransform, setHeldOverlayTransform] = createSignal<JSX.CSSProperties | undefined>(undefined);
+    const [overlayHold, setOverlayHold] = createSignal(false);
+    let overlayHoldTimer: ReturnType<typeof setTimeout> | null = null;
+    createEffect(() => {
+        const active = layoutModel.activeDrag();
+        const xf = overlayTransform();
+        if (active) {
+            // Drag in progress: cache the live transform and clear any pending release.
+            setHeldOverlayTransform(xf as JSX.CSSProperties);
+            if (overlayHoldTimer) { clearTimeout(overlayHoldTimer); overlayHoldTimer = null; }
+            setOverlayHold(false);
+        } else if (heldOverlayTransform()) {
+            // Drag just ended (or page initial state with no cached value, skip).
+            // Hold the last in-drag transform for 150ms to match the Placeholder
+            // exit-fade duration, then release. A new drag during the hold window
+            // resets cleanly via the active branch above.
+            if (overlayHoldTimer) clearTimeout(overlayHoldTimer);
+            setOverlayHold(true);
+            overlayHoldTimer = setTimeout(() => {
+                setOverlayHold(false);
+                setHeldOverlayTransform(undefined);
+                overlayHoldTimer = null;
+            }, 150);
+        }
+    });
+    onCleanup(() => { if (overlayHoldTimer) clearTimeout(overlayHoldTimer); });
+    // Effective transform for overlay-positioned surfaces: hold the last
+    // in-drag transform during the exit window, otherwise use the live one.
+    const effectiveOverlayTransform = (): JSX.CSSProperties | undefined =>
+        overlayHold() ? heldOverlayTransform() ?? undefined : (overlayTransform() as JSX.CSSProperties | undefined);
+
     // Track animate state.
     //
     // Issue #774 / SPEC_TAB_CONTENT_REVEAL_GATE: the prior 50 ms was
@@ -154,8 +192,8 @@ function TileLayoutComponent(props: TileLayoutProps) {
             <NodeBackdrops layoutModel={layoutModel} />
             <MagnifiedPaneOverlay layoutModel={layoutModel} />
 
-            <Placeholder layoutModel={layoutModel} style={{ top: "10000px", ...overlayTransform() }} />
-            <OverlayNodeWrapper layoutModel={layoutModel} />
+            <Placeholder layoutModel={layoutModel} style={{ top: "10000px", ...effectiveOverlayTransform() }} />
+            <OverlayNodeWrapper layoutModel={layoutModel} effectiveOverlayTransform={effectiveOverlayTransform} />
         </div>
     );
 }
@@ -476,11 +514,14 @@ const DisplayNode = (props: DisplayNodeProps) => {
 
 interface OverlayNodeWrapperProps {
     layoutModel: LayoutModel;
+    // Issue #836: effective overlay transform that holds the last in-drag
+    // value for 150ms after onDrop so .placeholder-container does not
+    // teleport off-screen before the inner .placeholder exit fade plays.
+    effectiveOverlayTransform: () => JSX.CSSProperties | undefined;
 }
 
 const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
     const leafs = () => props.layoutModel.leafs();
-    const overlayTransform = () => props.layoutModel.overlayTransform();
     const activeDrag = () => props.layoutModel.activeDrag();
     let overlayContainerRef: HTMLDivElement | undefined;
 
@@ -489,9 +530,14 @@ const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
     // "none" (pass-through for normal clicks) and "auto" (receive drag events).
     // activeDrag is set by pragmatic-dnd's onDragStart callback which fires
     // AFTER the browser commits the drag, so this toggle is safe.
+    //
+    // Issue #836: the transform comes from effectiveOverlayTransform (held
+    // during the 150ms exit window) but pointer-events flips to "none"
+    // IMMEDIATELY when activeDrag goes false — we don't want the held
+    // overlay to intercept clicks during the hold.
     const isActiveDrag = () => props.layoutModel.activeDrag();
     const overlayStyle = createMemo<JSX.CSSProperties>(() => ({
-        ...overlayTransform(),
+        ...props.effectiveOverlayTransform(),
         top: "0px",
         "pointer-events": isActiveDrag() ? "auto" : "none",
     }));
