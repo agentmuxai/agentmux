@@ -232,6 +232,59 @@ pub fn register_workflow_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                     let mut output = String::new();
                     let mut error = String::new();
                     while let Some(ev) = handle.events.recv().await {
+                        // For terminal events, persist the final row
+                        // BEFORE publishing the event. The frontend
+                        // subscription path refreshes the runs list on
+                        // RunDone / RunFailed, and if the publish
+                        // happens first the refresh sees a stale
+                        // `running` row (codex P2 on PR #843).
+                        let is_terminal = matches!(
+                            ev,
+                            RunEvent::RunDone { .. } | RunEvent::RunFailed { .. }
+                        );
+                        if is_terminal {
+                            match &ev {
+                                RunEvent::RunDone { output: o, .. } => {
+                                    last_status = RunStatus::Done;
+                                    // Engine already unwraps Response's
+                                    // `{ "value": ... }` wrapper.
+                                    output = match o {
+                                        serde_json::Value::String(s) => s.clone(),
+                                        other => {
+                                            serde_json::to_string(other).unwrap_or_default()
+                                        }
+                                    };
+                                }
+                                RunEvent::RunFailed { error: e, .. } => {
+                                    last_status = RunStatus::Failed;
+                                    error = e.clone();
+                                }
+                                _ => unreachable!(),
+                            }
+                            let states = handle.final_states.lock().await.clone();
+                            let row = WorkflowRun {
+                                id: run_id_for_drain.clone(),
+                                workflow_id: workflow_id_for_drain.clone(),
+                                status: last_status.as_str().to_string(),
+                                started_at,
+                                ended_at: now_ms(),
+                                block_states: states,
+                                output: output.clone(),
+                                error: error.clone(),
+                            };
+                            match wstore_for_drain.workflow_run_update(&row) {
+                                Ok(0) => tracing::warn!(
+                                    run_id = %run_id_for_drain,
+                                    "workflow_run_update: placeholder row missing (race?)"
+                                ),
+                                Ok(_) => {}
+                                Err(e) => tracing::warn!(
+                                    run_id = %run_id_for_drain,
+                                    error = %e,
+                                    "workflow_run_update failed"
+                                ),
+                            }
+                        }
                         broker_for_drain.publish(WaveEvent {
                             event: format!("workflowrun:{}", run_id_for_drain),
                             scopes: vec![],
@@ -239,45 +292,6 @@ pub fn register_workflow_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                             persist: 0,
                             data: Some(serde_json::to_value(&ev).unwrap_or_default()),
                         });
-                        match &ev {
-                            RunEvent::RunDone { output: o, .. } => {
-                                last_status = RunStatus::Done;
-                                // Engine already unwraps Response's
-                                // `{ "value": ... }` wrapper.
-                                output = match o {
-                                    serde_json::Value::String(s) => s.clone(),
-                                    other => serde_json::to_string(other).unwrap_or_default(),
-                                };
-                            }
-                            RunEvent::RunFailed { error: e, .. } => {
-                                last_status = RunStatus::Failed;
-                                error = e.clone();
-                            }
-                            _ => {}
-                        }
-                    }
-                    let states = handle.final_states.lock().await.clone();
-                    let row = WorkflowRun {
-                        id: run_id_for_drain.clone(),
-                        workflow_id: workflow_id_for_drain,
-                        status: last_status.as_str().to_string(),
-                        started_at,
-                        ended_at: now_ms(),
-                        block_states: states,
-                        output,
-                        error,
-                    };
-                    match wstore_for_drain.workflow_run_update(&row) {
-                        Ok(0) => tracing::warn!(
-                            run_id = %run_id_for_drain,
-                            "workflow_run_update: placeholder row missing (race?)"
-                        ),
-                        Ok(_) => {}
-                        Err(e) => tracing::warn!(
-                            run_id = %run_id_for_drain,
-                            error = %e,
-                            "workflow_run_update failed"
-                        ),
                     }
                 });
 
