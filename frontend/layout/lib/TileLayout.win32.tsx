@@ -482,6 +482,7 @@ const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
     const leafs = () => props.layoutModel.leafs();
     const overlayTransform = () => props.layoutModel.overlayTransform();
     const activeDrag = () => props.layoutModel.activeDrag();
+    let overlayContainerRef: HTMLDivElement | undefined;
 
     // Overlay is always positioned at top:0 so pragmatic-dnd drop targets
     // are registered in the correct location. pointer-events toggles between
@@ -495,8 +496,124 @@ const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
         "pointer-events": isActiveDrag() ? "auto" : "none",
     }));
 
+    // Fallback nearest-pane drop computation for "dead spots" inside the
+    // overlay container but outside any per-pane overlay-node (gutters
+    // between panes, edges of the layout, etc.). Each per-pane overlay
+    // is sized exactly to its tile's bounding rect, so cursors landing
+    // in the gap have no per-pane drop target — without this fallback
+    // the drag produces no placeholder and a release in that gap
+    // either does nothing or (if pragmatic-dnd's drop never fires) is
+    // misinterpreted by the cross-window monitor as a tear-off.
+    //
+    // The fallback finds the nearest leaf to the cursor (Euclidean
+    // distance to rect center) and runs the same ComputeMove action
+    // the per-pane onDrag would have run. Only fires when this
+    // container is the INNERMOST matched drop target — when the
+    // cursor is over an overlay-node, the per-pane logic takes
+    // precedence and this no-ops.
+    const fallbackComputeDropDirection = throttle(50, (clientX: number, clientY: number) => {
+        const dragNodeId = globalDragNodeId;
+        if (!dragNodeId) return;
+        const container = props.layoutModel.displayContainerRef?.current;
+        if (!container) return;
+        const containerRect = container.getBoundingClientRect();
+        const offset = { x: clientX - containerRect.x, y: clientY - containerRect.y };
+
+        // If the cursor is inside the ORIGIN pane's rect, treat as a
+        // no-op drag — the user's slight wiggle within their own pane
+        // should not pick a "nearest other pane" target. Without this,
+        // a tiny drag-and-release on the same pane in a multi-pane
+        // layout would commit a Move to the closest neighbor on
+        // release. The drop is still caught by onDrop below (clearing
+        // the payload) so the cross-window monitor won't tear off.
+        const originRect = props.layoutModel.getNodeRectById(dragNodeId);
+        if (
+            originRect &&
+            offset.x >= originRect.left &&
+            offset.x <= originRect.left + originRect.width &&
+            offset.y >= originRect.top &&
+            offset.y <= originRect.top + originRect.height
+        ) {
+            props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+            return;
+        }
+
+        let bestLeafId: string | null = null;
+        let bestRect: { top: number; left: number; width: number; height: number } | null = null;
+        let bestDist = Infinity;
+        for (const leaf of props.layoutModel.leafs()) {
+            if (leaf.id === dragNodeId) continue;
+            const rect = props.layoutModel.getNodeRectById(leaf.id);
+            if (!rect) continue;
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top + rect.height / 2;
+            const dx = offset.x - cx;
+            const dy = offset.y - cy;
+            const dist = dx * dx + dy * dy;
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestLeafId = leaf.id;
+                bestRect = rect;
+            }
+        }
+        if (!bestLeafId || !bestRect) return;
+
+        // Clamp the cursor offset to the chosen rect — by definition
+        // the cursor is OUTSIDE every pane rect when this fallback
+        // runs (dead spot). determineDropDirection returns undefined
+        // for any point outside the supplied dimensions, which would
+        // make this fallback a no-op without clamping. Clamping
+        // resolves the cursor to the nearest edge of the chosen rect,
+        // which gives the natural quadrant for the drop: drag-into-
+        // gutter-right-of-paneA → clamps to paneA.right → returns
+        // Right quadrant of paneA → pane lands between A and B.
+        // (codex P2 on PR #838.)
+        const clampedOffset = {
+            x: Math.max(bestRect.left, Math.min(bestRect.left + bestRect.width, offset.x)),
+            y: Math.max(bestRect.top, Math.min(bestRect.top + bestRect.height, offset.y)),
+        };
+
+        props.layoutModel.treeReducer({
+            type: LayoutTreeActionType.ComputeMove,
+            nodeId: bestLeafId,
+            nodeToMoveId: dragNodeId,
+            direction: determineDropDirection(bestRect, clampedOffset),
+        } as LayoutTreeComputeMoveNodeAction);
+    });
+
+    onMount(() => {
+        if (!overlayContainerRef) return;
+        const cleanup = dropTargetForElements({
+            element: overlayContainerRef,
+            canDrop: ({ source }) => source.data.type === tileItemType,
+            onDrag: ({ location }) => {
+                // Skip when an inner per-pane overlay also matches — that
+                // path has higher specificity and already handled this.
+                if (location.current.dropTargets[0]?.element !== overlayContainerRef) return;
+                const cursor = location.current.input;
+                fallbackComputeDropDirection(cursor.clientX, cursor.clientY);
+            },
+            onDragLeave: () => {
+                // Only clear when this container was the innermost match;
+                // a transition INTO an inner overlay-node should not
+                // clear (the inner's onDrag will set a fresh action).
+                props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+            },
+            onDrop: () => {
+                // Catches drops that landed in a dead spot. Clearing the
+                // payload here is critical — without it, the cross-window
+                // dragend monitor (CrossWindowDragMonitor.win32.tsx) would
+                // see a still-set payload and either return-to-source or
+                // (in some race paths) trigger an unwanted tear-off.
+                setCurrentDragPayload(null);
+                props.layoutModel.onDrop();
+            },
+        });
+        onCleanup(cleanup);
+    });
+
     return (
-        <div class="overlay-container" style={overlayStyle()}>
+        <div ref={overlayContainerRef} class="overlay-container" style={overlayStyle()}>
             <Key each={leafs()} by={(node) => node.id}>
                 {(node) => <OverlayNode layoutModel={props.layoutModel} node={node()} />}
             </Key>

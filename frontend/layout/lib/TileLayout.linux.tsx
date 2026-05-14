@@ -413,6 +413,7 @@ const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
     const leafs = () => props.layoutModel.leafs();
     const overlayTransform = () => props.layoutModel.overlayTransform();
     const activeDrag = () => props.layoutModel.activeDrag();
+    let overlayContainerRef: HTMLDivElement | undefined;
 
     // Overlay is always positioned at top:0 so pragmatic-dnd drop targets
     // are registered in the correct location. pointer-events toggles between
@@ -426,8 +427,88 @@ const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
         "pointer-events": isActiveDrag() ? "auto" : "none",
     }));
 
+    // Fallback nearest-pane drop computation for dead spots between
+    // per-pane overlay-nodes. Mirrors TileLayout.win32.tsx — see that
+    // file for the design rationale.
+    const fallbackComputeDropDirection = throttle(50, (clientX: number, clientY: number) => {
+        const dragNodeId = globalDragNodeId;
+        if (!dragNodeId) return;
+        const container = props.layoutModel.displayContainerRef?.current;
+        if (!container) return;
+        const containerRect = container.getBoundingClientRect();
+        const offset = { x: clientX - containerRect.x, y: clientY - containerRect.y };
+
+        // Origin-rect guard — see TileLayout.win32.tsx for rationale.
+        const originRect = props.layoutModel.getNodeRectById(dragNodeId);
+        if (
+            originRect &&
+            offset.x >= originRect.left &&
+            offset.x <= originRect.left + originRect.width &&
+            offset.y >= originRect.top &&
+            offset.y <= originRect.top + originRect.height
+        ) {
+            props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+            return;
+        }
+
+        let bestLeafId: string | null = null;
+        let bestRect: { top: number; left: number; width: number; height: number } | null = null;
+        let bestDist = Infinity;
+        for (const leaf of props.layoutModel.leafs()) {
+            if (leaf.id === dragNodeId) continue;
+            const rect = props.layoutModel.getNodeRectById(leaf.id);
+            if (!rect) continue;
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top + rect.height / 2;
+            const dx = offset.x - cx;
+            const dy = offset.y - cy;
+            const dist = dx * dx + dy * dy;
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestLeafId = leaf.id;
+                bestRect = rect;
+            }
+        }
+        if (!bestLeafId || !bestRect) return;
+
+        // Clamp the cursor offset to the chosen rect — see
+        // TileLayout.win32.tsx for full rationale. (codex P2 on PR #838.)
+        const clampedOffset = {
+            x: Math.max(bestRect.left, Math.min(bestRect.left + bestRect.width, offset.x)),
+            y: Math.max(bestRect.top, Math.min(bestRect.top + bestRect.height, offset.y)),
+        };
+
+        props.layoutModel.treeReducer({
+            type: LayoutTreeActionType.ComputeMove,
+            nodeId: bestLeafId,
+            nodeToMoveId: dragNodeId,
+            direction: determineDropDirection(bestRect, clampedOffset),
+        } as LayoutTreeComputeMoveNodeAction);
+    });
+
+    onMount(() => {
+        if (!overlayContainerRef) return;
+        const cleanup = dropTargetForElements({
+            element: overlayContainerRef,
+            canDrop: ({ source }) => source.data.type === tileItemType,
+            onDrag: ({ location }) => {
+                if (location.current.dropTargets[0]?.element !== overlayContainerRef) return;
+                const cursor = location.current.input;
+                fallbackComputeDropDirection(cursor.clientX, cursor.clientY);
+            },
+            onDragLeave: () => {
+                props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+            },
+            onDrop: () => {
+                setCurrentDragPayload(null);
+                props.layoutModel.onDrop();
+            },
+        });
+        onCleanup(cleanup);
+    });
+
     return (
-        <div class="overlay-container" style={overlayStyle()}>
+        <div ref={overlayContainerRef} class="overlay-container" style={overlayStyle()}>
             <Key each={leafs()} by={(node) => node.id}>
                 {(node) => <OverlayNode layoutModel={props.layoutModel} node={node()} />}
             </Key>
