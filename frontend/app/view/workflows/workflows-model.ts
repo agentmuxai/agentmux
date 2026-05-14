@@ -240,8 +240,19 @@ export class WorkflowsViewModel implements ViewModel {
             if (!ok) return;
         }
         this.setRunning(true);
+        // Reset folded run state BEFORE the RPC fires (reagent P2 on
+        // #848): if the RPC throws, we still want the prior run's
+        // blockResults / output / error cleared so the inspector
+        // doesn't show stale results alongside the new error banner.
+        this.dispatchIfAlive({ type: "Reset" }, "user");
         try {
             const r = await RpcApi.RunWorkflowCommand(TabRpcClient, { workflow_id: id });
+            // The dispose-during-await race: if `dispose()` ran while
+            // we were awaiting the RPC, `this.disposed === true` now
+            // and `dispatchIfAlive` no-ops below. `subscribeRun`
+            // creates a WPS listener — gate it too so we don't leak
+            // the subscription past dispose (reagent P1 on #848).
+            if (this.disposed) return;
             this.dispatchIfAlive(
                 { type: "RunStarted", runId: r.run_id, workflowId: id },
                 "user",
@@ -252,6 +263,7 @@ export class WorkflowsViewModel implements ViewModel {
             // `RunDone` / `RunFailed` and re-refreshes the runs list
             // (Phase 1.5 PR 3, #830).
             await this.refreshRuns(id);
+            if (this.disposed) return;
             // Race recovery: ultra-fast workflows can finish + persist
             // their final row before we subscribe (codex P2 on #843).
             // Dispatched as `BackfilledFromRow`, the reducer treats
