@@ -755,16 +755,16 @@ class RpcApiType {
             authEnv?: Record<string, string>;
         },
         opts?: RpcOpts,
-    ): Promise<{ sessionId: string; status: AuthSessionStatus }> {
+    ): Promise<{ sessionId: string; authUrl?: string }> {
         return client.rpcCall("auth.start", data, opts);
     }
 
-    // command "auth.poll"
+    // command "auth.poll" — flattened `{ providerId, ...AuthSessionStatus }`
     AuthPollCommand(
         client: RpcClient,
         data: { sessionId: string },
         opts?: RpcOpts,
-    ): Promise<AuthSessionStatus> {
+    ): Promise<AuthSessionStatus & { providerId: string }> {
         return client.rpcCall("auth.poll", data, opts);
     }
 

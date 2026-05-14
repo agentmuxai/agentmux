@@ -42,10 +42,7 @@ function fakeTimers(): FakeTimers {
 
 function fakeRpc(overrides: Partial<AuthRpc> = {}): AuthRpc {
     return {
-        start: async () => ({
-            sessionId: "s1",
-            status: { status: "pending" } as AuthSessionStatusWire,
-        }),
+        start: async () => ({ sessionId: "s1" }),
         poll: async () => ({ status: "pending" }) as AuthSessionStatusWire,
         submitCallback: async () => {},
         cancel: async () => {},
@@ -72,10 +69,7 @@ describe("AuthFlowController", () => {
             let pollCount = 0;
             const ctrl = new AuthFlowController({
                 rpc: fakeRpc({
-                    start: async () => ({
-                        sessionId: "s1",
-                        status: { status: "url-available", authUrl: "https://x" },
-                    }),
+                    start: async () => ({ sessionId: "s1", authUrl: "https://x" }),
                     poll: async () => {
                         pollCount += 1;
                         return { status: "pending" };
@@ -106,10 +100,7 @@ describe("AuthFlowController", () => {
             let pollCount = 0;
             const ctrl = new AuthFlowController({
                 rpc: fakeRpc({
-                    start: async () => ({
-                        sessionId: "s1",
-                        status: { status: "pending" },
-                    }),
+                    start: async () => ({ sessionId: "s1" }),
                     poll: async () => {
                         pollCount += 1;
                         return {
@@ -142,10 +133,7 @@ describe("AuthFlowController", () => {
             let cancelCalls = 0;
             const ctrl = new AuthFlowController({
                 rpc: fakeRpc({
-                    start: async () => ({
-                        sessionId: "s1",
-                        status: { status: "pending" },
-                    }),
+                    start: async () => ({ sessionId: "s1" }),
                     cancel: async () => {
                         cancelCalls += 1;
                     },
@@ -173,10 +161,7 @@ describe("AuthFlowController", () => {
             let cbCall: { sessionId: string; url: string } | null = null;
             const ctrl = new AuthFlowController({
                 rpc: fakeRpc({
-                    start: async () => ({
-                        sessionId: "s1",
-                        status: { status: "url-available", authUrl: "https://x" },
-                    }),
+                    start: async () => ({ sessionId: "s1", authUrl: "https://x" }),
                     submitCallback: async (sessionId, url) => {
                         cbCall = { sessionId, url };
                     },
@@ -262,10 +247,7 @@ describe("AuthFlowController", () => {
             const timers = fakeTimers();
             const ctrl = new AuthFlowController({
                 rpc: fakeRpc({
-                    start: async () => ({
-                        sessionId: "s1",
-                        status: { status: "pending" },
-                    }),
+                    start: async () => ({ sessionId: "s1" }),
                 }),
                 timers,
             });
@@ -292,10 +274,7 @@ describe("AuthFlowController", () => {
             });
             const ctrl = new AuthFlowController({
                 rpc: fakeRpc({
-                    start: async () => ({
-                        sessionId: "s1",
-                        status: { status: "pending" },
-                    }),
+                    start: async () => ({ sessionId: "s1" }),
                     poll: () => pollPromise,
                 }),
                 timers,
@@ -328,10 +307,7 @@ describe("AuthFlowController", () => {
             const timers = fakeTimers();
             const ctrl = new AuthFlowController({
                 rpc: fakeRpc({
-                    start: async () => ({
-                        sessionId: "s1",
-                        status: { status: "pending" },
-                    }),
+                    start: async () => ({ sessionId: "s1" }),
                 }),
                 timers,
             });
