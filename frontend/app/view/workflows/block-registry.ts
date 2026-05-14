@@ -45,11 +45,18 @@ export const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
     agent: {
         kind: "agent",
         label: "Agent",
-        description: "Run a Forge agent with a per-call task prompt.",
+        description: "Run an agent with a per-call task prompt.",
         color: "#3b82f6",
         icon: "sparkles",
         defaultData: {
-            forge_agent_id: "",
+            // Phase 1.5: forge_agent_id was replaced by AgentRef (#835).
+            // Empty strings = blank singletons (ambient creds, vanilla CLI).
+            agent_ref: {
+                identityId: "",
+                memoryId: "",
+                instanceName: "",
+                workingDirectory: "",
+            },
             task: "",
         },
         inputs: [{ id: "in", label: "in", type: "any" }],
