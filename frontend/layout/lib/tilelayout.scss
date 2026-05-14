@@ -162,13 +162,17 @@
         }
         // `.placeholder-sizer` only changes transform during drag-move
         // (width/height are set once per zone change and snap instantly
-        // — that's the whole point of the two-div split). Keeping the
-        // transition-property narrow to `transform` is what makes the
-        // drag-move compositor-only.
+        // — that's the whole point of the two-div split). Use a
+        // FIXED 120ms duration rather than var(--animation-time-s)
+        // because that variable defaults to 0 for all current layouts
+        // (see DefaultAnimationTimeS in layoutModel.ts — never
+        // overridden in production), so deriving the placeholder
+        // animation from it makes drag-move instantaneous and defeats
+        // the whole point of the two-div split. 120ms matches the
+        // inner `.placeholder` opacity/scale transitions so the
+        // visual response is uniform across enter / drag-move / exit.
         .placeholder-sizer {
-            transition-duration: var(--animation-time-s);
-            transition-timing-function: linear;
-            transition-property: transform;
+            transition: transform 120ms ease-out;
         }
     }
 
