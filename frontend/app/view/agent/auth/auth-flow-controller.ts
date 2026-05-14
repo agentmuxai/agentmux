@@ -257,6 +257,28 @@ export class AuthFlowController {
         }
     }
 
+    /** Surface a view-side connect-prep failure (e.g. `ResolveCli`
+     *  threw before we could call `auth.start`) as a `failed` state.
+     *  The reducer's terminal-fold path then renders the error in
+     *  the FailedBanner instead of the user seeing a misleading
+     *  empty-cliPath backend error (reagent P1 on #847). */
+    failConnect(error: unknown): void {
+        const message = error instanceof Error ? error.message : String(error);
+        // Must be in `waiting` for the Polled gate to pass — `connect()`'s
+        // ConnectClicked already moved us there; if not, synthesize the
+        // transition first.
+        if (this.state().kind !== "waiting") {
+            this.dispatch({ type: "ConnectClicked" });
+        }
+        const synthSessionId = "cli-resolve-failed";
+        this.dispatch({ type: "SessionStarted", sessionId: synthSessionId });
+        this.dispatch({
+            type: "Polled",
+            sessionId: synthSessionId,
+            status: { status: "failed", error: message },
+        });
+    }
+
     dispose(): void {
         // Fire-and-forget auth.cancel for any in-flight session so we
         // don't leave an orphan CLI subprocess on the backend. Codex
