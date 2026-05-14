@@ -673,6 +673,9 @@ async fn main() {
         // `seed + 1`; on a fresh DB seed=0, first saga gets id 1.
         saga_id_alloc: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(saga_id_seed)),
         saga_log: Arc::clone(&saga_log),
+        auth_session_manager: std::sync::Arc::new(
+            crate::identity::auth_session::AuthSessionManager::new(),
+        ),
     };
 
     // Saga durability PR 2 — resume-on-startup. Walk any sagas the
