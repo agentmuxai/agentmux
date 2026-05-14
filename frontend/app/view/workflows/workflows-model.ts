@@ -201,6 +201,12 @@ export class WorkflowsViewModel implements ViewModel {
             // the `RunDone` / `RunFailed` transition and re-refreshes
             // the runs list (Phase 1.5 PR 3, closes #830).
             await this.refreshRuns(id);
+            // Race recovery: ultra-fast workflows can finish + persist
+            // their final row before we subscribe (codex P2 on #843).
+            // If the just-refreshed row is already terminal, backfill
+            // blockResults from `block_states` so the inspector still
+            // shows per-block output.
+            this.maybeBackfillFromTerminalRun(r.run_id);
         } catch (e) {
             this.setError(`Run failed: ${(e as Error).message ?? e}`);
         } finally {
@@ -225,10 +231,9 @@ export class WorkflowsViewModel implements ViewModel {
                 if (!data) return;
                 this.applyRunEvent(data);
                 if (data.kind === "run_done" || data.kind === "run_failed") {
-                    // Refresh once the placeholder row has been UPDATEd
-                    // by the backend's drain task. Backend writes the
-                    // row after sending the terminal event, so a small
-                    // microtask delay is enough.
+                    // Backend now writes the row update BEFORE
+                    // publishing the terminal event (codex P2 on #843),
+                    // so a refresh here lands the final state.
                     void this.refreshRuns(workflowId);
                     if (this.activeRunUnsub) {
                         this.activeRunUnsub();
@@ -237,6 +242,34 @@ export class WorkflowsViewModel implements ViewModel {
                 }
             },
         });
+    }
+
+    /** Look up the active run in the just-refreshed runs list and, if
+     *  it's already terminal, populate `blockResults` from its
+     *  `block_states` map. Covers the codex P2 race for fast workflows
+     *  whose `workflowrun:<id>` events fire before this client
+     *  subscribes. Subscription teardown happens regardless. */
+    private maybeBackfillFromTerminalRun(runId: string): void {
+        // Already populated by streaming events? Nothing to do.
+        if (Object.keys(this.blockResultsAtom()).length > 0) return;
+        const row = this.runsAtom().find((r) => r.id === runId);
+        if (!row || (row.status !== "done" && row.status !== "failed")) return;
+        const states = row.block_states ?? {};
+        const next: Record<string, AgentBlockResult> = {};
+        for (const [blockId, st] of Object.entries(states)) {
+            if (st.status === "done") {
+                next[blockId] = parseBlockOutput(st.output);
+            } else if (st.status === "error") {
+                next[blockId] = { response: "", error: st.error ?? "block failed" };
+            }
+        }
+        if (Object.keys(next).length > 0) {
+            this.setBlockResults(next);
+        }
+        if (this.activeRunUnsub) {
+            this.activeRunUnsub();
+            this.activeRunUnsub = null;
+        }
     }
 
     /** Fold one `RunEvent` into the model's reactive state. Kept in the
