@@ -643,6 +643,18 @@ async fn main() {
         std::sync::Arc::clone(&srv_state),
     );
 
+    // Phase 1 of the WaveObjUpdate bridge: subscribe to srv_events_tx and
+    // translate workspace mutations into `waveobj:update` WS broadcasts.
+    // Fixes the workspace-rename reactivity gap where UpdateWorkspace
+    // returned `success_empty()` and the response loop had nothing to
+    // broadcast — see docs/specs/SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md.
+    let bridge_rx = srv_events_tx.subscribe();
+    server::wave_obj_bridge::spawn_wave_obj_bridge(
+        bridge_rx,
+        std::sync::Arc::clone(&wstore_for_persist),
+        std::sync::Arc::clone(&event_bus),
+    );
+
     let state = AppState {
         auth_key: config.auth_key.clone(),
         version: version.clone(),
