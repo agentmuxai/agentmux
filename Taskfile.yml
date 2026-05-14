@@ -541,8 +541,25 @@ tasks:
                     || echo "⚠ install-linux-desktop.sh failed; icon may be wrong but launch continues"
                 fi
 
-                npx vite --config vite.config.ts --port 5173 &
-                VITE_PID=$!
+                # Refuse to attach the host to a foreign Vite. If port 5173
+                # is already held by another AgentMux dev session, our spawn
+                # would silently die and the curl readiness probe would still
+                # pass against the *other* Vite — the host then loads that
+                # workspace's source, surfacing confusing cross-tree errors.
+                # Pre-check the port before spawning so a collision fails
+                # fast with a clear message.
+                #
+                # Note: we can't use `$!` here for liveness/cleanup because
+                # go-task's embedded shell (mvdan/sh) tracks background jobs
+                # as goroutine IDs ("g1"), not real OS PIDs — so $! is never
+                # a kill-able pid in this context.
+                if curl -s --max-time 1 http://localhost:5173 > /dev/null 2>&1; then
+                  echo "❌ Port 5173 is already in use by another process."
+                  echo "   Close any other AgentMux dev session first. To kill an orphan:"
+                  echo "   pwsh -NoProfile -Command \"Get-NetTCPConnection -LocalPort 5173 | Select-Object -First 1 | ForEach-Object { Stop-Process -Id \$_.OwningProcess -Force }\""
+                  exit 1
+                fi
+
                 # Don't `rm -rf $DEV_DIR` on exit — install-linux-desktop.sh
                 # writes Exec=$DEV_DIR/agentmux-cef into the user's
                 # ~/.local/share/applications/agentmux.desktop, and that path
@@ -550,27 +567,13 @@ tasks:
                 # work. Each new `dev:serve` start wipes + recreates $DEV_DIR
                 # at the top of this command, so leaving it around is safe
                 # (no stale binaries leak across versions).
-                trap "kill $VITE_PID 2>/dev/null" EXIT
-                # Guard against attaching the host to a foreign Vite. If our
-                # spawned Vite dies (e.g. port 5173 already held by another
-                # AgentMux dev session), the curl probe would still pass
-                # against the *other* Vite — and the host would load that
-                # workspace's source, surfacing confusing cross-tree errors.
-                # Check $VITE_PID liveness in the loop and again after, so a
-                # collision fails fast with a clear message instead.
-                echo "Waiting for Vite on port 5173 (pid $VITE_PID)..."
+                npx vite --config vite.config.ts --port 5173 &
+
+                echo "Waiting for Vite on port 5173..."
                 for i in $(seq 1 30); do
-                  if ! kill -0 "$VITE_PID" 2>/dev/null; then
-                    echo "❌ Vite (pid $VITE_PID) exited before becoming ready — port 5173 likely held by another process"
-                    exit 1
-                  fi
                   curl -s http://localhost:5173 > /dev/null 2>&1 && break
                   sleep 1
                 done
-                if ! kill -0 "$VITE_PID" 2>/dev/null; then
-                  echo "❌ Vite (pid $VITE_PID) exited — refusing to attach host to a foreign Vite on :5173"
-                  exit 1
-                fi
                 if ! curl -s http://localhost:5173 > /dev/null 2>&1; then
                   echo "❌ Vite failed to start within 30 seconds"
                   exit 1
