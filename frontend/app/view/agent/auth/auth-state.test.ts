@@ -385,6 +385,26 @@ describe("auth-state reducer", () => {
             expect(r.state.bundleId).toBe("new-key-bundle");
         });
 
+        // Reagent P2 on #849: ApiKeyAccepted must drop if the user
+        // exited `waiting` (e.g. swapped bundle, cancelled) during
+        // the API-key RPC await — otherwise the stale bundleId
+        // overrides the user's new selection.
+        it("ApiKeyAccepted drops if kind has left `waiting`", () => {
+            for (const kind of ["unauthenticated", "ready", "failed", "expired"] as const) {
+                const seeded = seed({ kind, providerId: "openclaw", bundleId: "user-pick" });
+                const r = update(seeded, {
+                    type: "ApiKeyAccepted",
+                    bundleId: "stale-bundle",
+                });
+                expect(r.state).toBe(seeded);
+                expect(r.state.bundleId).toBe("user-pick"); // unchanged
+                expect(r.events[0]).toMatchObject({
+                    type: "post-close-command-dropped",
+                    commandType: "ApiKeyAccepted",
+                });
+            }
+        });
+
         // Reagent P1 on #845: previously ApiKeySubmitted spread
         // `...state` which preserved an in-flight OAuth sessionId,
         // letting a late OAuth `success` poll match and bind the
@@ -450,6 +470,28 @@ describe("auth-state reducer", () => {
             const r = update(seeded, { type: "SessionStarted", sessionId: "s1" });
             expect(r.state.sessionId).toBe("s1");
             expect(r.state.authUrl).toBe("");
+        });
+
+        // Reagent P1 on #849: if the user cancelled during the
+        // auth.start RPC await, kind leaves "waiting" before
+        // SessionStarted arrives. The late SessionStarted must NOT
+        // resurrect a zombie session (because CancelClicked would
+        // then refuse to clear it — sessionId mismatch on the cancel
+        // path).
+        it("drops if kind has already left `waiting` (cancel-during-start race)", () => {
+            for (const kind of ["unauthenticated", "ready", "failed", "expired"] as const) {
+                const seeded = seed({ kind, providerId: "claude", sessionId: "" });
+                const r = update(seeded, {
+                    type: "SessionStarted",
+                    sessionId: "s1",
+                    authUrl: "https://x",
+                });
+                expect(r.state).toBe(seeded);
+                expect(r.events[0]).toMatchObject({
+                    type: "post-close-command-dropped",
+                    commandType: "SessionStarted",
+                });
+            }
         });
     });
 
