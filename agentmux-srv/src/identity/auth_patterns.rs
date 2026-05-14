@@ -36,16 +36,25 @@ pub fn match_line(provider_id: &str, line: &str) -> Option<AuthPatternMatch> {
             return Some(m);
         }
     }
-    // Universal fallback — any https URL during the auth phase is
-    // *probably* an OAuth URL. Last-resort: keep the URL but mark
-    // it as a generic OAuthUrl. The frontend will surface this for
-    // user paste-back if the specific matcher missed it.
+    // Universal fallback — any oauth-ish https URL gets surfaced for
+    // user paste-back if the specific matcher missed it. Skipped
+    // entirely for API-key providers because their onboarding output
+    // ("get your key at https://.../auth") would otherwise be
+    // mis-classified as OAuth and drive the wrong UI branch.
+    // (reagent P1 + codex P2 on PR #840.)
+    if is_api_key_provider(provider_id) {
+        return None;
+    }
     if let Some(url) = extract_first_https_url(line) {
         if looks_like_oauth_url(&url) {
             return Some(AuthPatternMatch::OAuthUrl(url));
         }
     }
     None
+}
+
+fn is_api_key_provider(provider_id: &str) -> bool {
+    matches!(provider_id, "openclaw" | "kimi" | "pi")
 }
 
 type LineMatcher = fn(&str) -> Option<AuthPatternMatch>;
@@ -143,12 +152,23 @@ fn match_logged_in_as(line: &str) -> Option<AuthPatternMatch> {
 fn extract_first_https_url(line: &str) -> Option<String> {
     let start = line.find("https://")?;
     let tail = &line[start..];
-    // URL ends at whitespace, quote, or backtick. Conservative — keeps
-    // ports, paths, query strings, fragments.
+    // URL ends at whitespace, quote, backtick, or closing bracket.
+    // Keeps ports, paths, query strings, fragments.
     let end = tail
         .find(|c: char| c.is_whitespace() || c == '\'' || c == '"' || c == '`' || c == ')')
         .unwrap_or(tail.len());
-    Some(tail[..end].to_string())
+    let url = &tail[..end];
+    // Trim trailing sentence punctuation that a CLI message might
+    // append (e.g. "Authorize at https://...?state=xyz."). The
+    // browser would otherwise see an invalid URL. Be conservative —
+    // only strip end-of-sentence chars, not anything that could be
+    // part of a legitimate URL token. (reagent P1 on PR #840.)
+    let trimmed = url.trim_end_matches(|c: char| matches!(c, '.' | ',' | ';' | '!' | '?'));
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 fn looks_like_oauth_url(url: &str) -> bool {
@@ -168,7 +188,15 @@ fn extract_email(line: &str) -> Option<String> {
         if !token.contains('@') {
             continue;
         }
-        let (local, domain) = token.split_once('@')?;
+        // `if let` (not `?`) — `?` would exit the function and abort
+        // the search instead of just skipping this token. The `@`
+        // check above means split_once should always be Some here in
+        // practice, but the safe pattern is to never `?` inside a
+        // for-loop unless the function-exit semantics are intended.
+        // (reagent P1 / codex P2 on PR #840.)
+        let Some((local, domain)) = token.split_once('@') else {
+            continue;
+        };
         if local.is_empty() || domain.is_empty() {
             continue;
         }
@@ -301,14 +329,45 @@ mod tests {
 
     #[test]
     fn url_extraction_trims_trailing_punctuation() {
-        let line = "Go to https://example.com/login. Press enter when done.";
+        // Period, comma, semicolon, !, ? at the END of a URL are
+        // almost certainly sentence terminators, not URL chars.
+        // The browser would reject the URL with them attached.
+        // (reagent P1 on PR #840.)
+        let cases = [
+            ("Go to https://example.com/login.", "https://example.com/login"),
+            ("Open https://example.com/auth, then press Enter", "https://example.com/auth"),
+            ("Visit https://example.com/login!", "https://example.com/login"),
+            ("Done at https://example.com/oauth?state=xyz?", "https://example.com/oauth?state=xyz"),
+        ];
+        for (line, expected) in cases {
+            let url = extract_first_https_url(line).expect("url");
+            assert_eq!(url, expected, "for line: {line}");
+        }
+    }
+
+    #[test]
+    fn url_extraction_preserves_internal_punctuation() {
+        // Make sure we don't over-trim — query strings legitimately
+        // have `&` and `=`, paths can have `.`, etc.
+        let line = "Open https://example.com/path.html?key=value&other=v2";
         let url = extract_first_https_url(line).expect("url");
-        // Period after the URL — extractor trims at the end. The exact
-        // behaviour depends on whether `.` counts as a URL char; for
-        // our use we accept either the URL with or without trailing
-        // dot — what matters is the user can paste it back and the
-        // provider's server tolerates the trailing punctuation.
-        assert!(url.starts_with("https://example.com/login"));
+        assert_eq!(url, "https://example.com/path.html?key=value&other=v2");
+    }
+
+    #[test]
+    fn api_key_provider_fallback_returns_none() {
+        // Reagent P1 + codex P2 on PR #840: the universal fallback
+        // used to run for API-key providers. Their onboarding output
+        // ("get your key at https://.../auth") would mis-classify
+        // as OAuth and drive the wrong UI branch. Now: no fallback
+        // for openclaw/kimi/pi at all.
+        for provider in ["openclaw", "kimi", "pi"] {
+            let line = "Get your API key at https://example.com/auth/keys";
+            assert!(match_line(provider, line).is_none(), "{provider} matched");
+        }
+        // Whereas an unknown provider still gets the fallback.
+        let m = match_line("unknown-provider", "Open https://example.com/oauth/authorize");
+        assert!(matches!(m, Some(AuthPatternMatch::OAuthUrl(_))));
     }
 
     #[test]

@@ -31,7 +31,11 @@ use super::auth_patterns::{match_line, AuthPatternMatch};
 const SESSION_TIMEOUT_SECS: u64 = 600;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "status", rename_all = "kebab-case")]
+#[serde(
+    tag = "status",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
 pub enum AuthSessionStatus {
     /// CLI is spawned, we're waiting for it to emit either a URL,
     /// a device code, or a success line.
@@ -123,9 +127,20 @@ pub struct PollSessionResult {
     pub status: AuthSessionStatus,
 }
 
+/// Per-session "process refs" — the join handle for the drain task
+/// and the stdin sender for the callback-paste-back path. Held
+/// outside the `sessions` Mutex so cancellation can `.abort()` /
+/// drop without holding the state lock across an await.
+#[derive(Default)]
+struct ProcessRefs {
+    drain_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
+    stdin_senders: HashMap<String, tokio::sync::mpsc::Sender<String>>,
+}
+
 #[derive(Default)]
 pub struct AuthSessionManager {
     sessions: Arc<Mutex<HashMap<String, Session>>>,
+    process_refs: Arc<Mutex<ProcessRefs>>,
 }
 
 impl AuthSessionManager {
@@ -256,10 +271,57 @@ impl AuthSessionManager {
         })
     }
 
-    /// Cancel a session. Returns true if the session existed and was
-    /// transitioned (caller's responsibility to kill any spawned CLI).
+    /// Cancel a session: transition state to Failed + abort the
+    /// spawned drain task (which kills the child via kill_on_drop).
+    /// Returns true if the state transition happened (false on
+    /// unknown / already-terminal session — the process refs are
+    /// torn down either way so a re-fired cancel is a no-op).
     pub fn cancel_session(&self, session_id: &str) -> bool {
-        self.finish_failure(session_id, "cancelled by user".to_string())
+        let transitioned =
+            self.finish_failure(session_id, "cancelled by user".to_string());
+        let mut refs = self.process_refs.lock().unwrap();
+        if let Some(handle) = refs.drain_tasks.remove(session_id) {
+            handle.abort();
+        }
+        refs.stdin_senders.remove(session_id);
+        transitioned
+    }
+
+    /// Register the drain task + stdin sender for a session. Called
+    /// by the handler immediately after spawning the CLI.
+    pub fn attach_process(
+        &self,
+        session_id: &str,
+        drain_task: tokio::task::JoinHandle<()>,
+        stdin_sender: tokio::sync::mpsc::Sender<String>,
+    ) {
+        let mut refs = self.process_refs.lock().unwrap();
+        refs.drain_tasks.insert(session_id.to_string(), drain_task);
+        refs.stdin_senders.insert(session_id.to_string(), stdin_sender);
+    }
+
+    /// Forward a pasted callback URL to the spawned CLI's stdin.
+    /// Returns true if the session has an attached stdin sender;
+    /// false if the session never spawned a CLI or the sender's
+    /// receiver was dropped.
+    pub async fn send_to_stdin(&self, session_id: &str, line: String) -> bool {
+        let sender = {
+            let refs = self.process_refs.lock().unwrap();
+            refs.stdin_senders.get(session_id).cloned()
+        };
+        match sender {
+            Some(s) => s.send(line).await.is_ok(),
+            None => false,
+        }
+    }
+
+    /// Drop a session's process refs without aborting them. Called
+    /// by the drain task itself when it exits normally so terminal
+    /// state lookups still work but the resources are reclaimed.
+    pub fn detach_process(&self, session_id: &str) {
+        let mut refs = self.process_refs.lock().unwrap();
+        refs.drain_tasks.remove(session_id);
+        refs.stdin_senders.remove(session_id);
     }
 
     /// Remove a session from the map. Caller should only invoke this
@@ -440,6 +502,53 @@ mod tests {
         let r = m.start_session("claude".to_string(), None);
         m.remove(&r.session_id);
         assert!(m.poll_session(&r.session_id).is_none());
+    }
+
+    #[test]
+    fn status_serializes_with_camelcase_field_names() {
+        // Codex P2 on PR #840: the per-variant fields used to
+        // serialize as auth_url / device_code / etc. (snake_case)
+        // while the rest of the wire is camelCase. Now uniformly
+        // camelCase via rename_all_fields.
+        let s = AuthSessionStatus::UrlAvailable {
+            auth_url: "https://example.com/oauth".to_string(),
+        };
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({
+                "status": "url-available",
+                "authUrl": "https://example.com/oauth"
+            })
+        );
+
+        let s = AuthSessionStatus::CodeEmitted {
+            device_code: "ABCD-1234".to_string(),
+            verification_url: "https://github.com/login/device".to_string(),
+        };
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({
+                "status": "code-emitted",
+                "deviceCode": "ABCD-1234",
+                "verificationUrl": "https://github.com/login/device"
+            })
+        );
+
+        let s = AuthSessionStatus::Success {
+            bundle_id: "bundle-1".to_string(),
+            email: Some("asaf@example.com".to_string()),
+        };
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({
+                "status": "success",
+                "bundleId": "bundle-1",
+                "email": "asaf@example.com"
+            })
+        );
     }
 
     #[test]
