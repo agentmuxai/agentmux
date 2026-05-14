@@ -161,72 +161,47 @@ Why this works without double-counting: the parent's `version` is bumped exactly
 
 ### 5.3 Mapping module
 
-Implement as a single file, `agentmux-srv/src/server/wave_obj_bridge.rs`. The `wstore` argument is borrowed inside the per-event match (synchronous lock, no `.await` while held — see §11.2):
+Implement as a single file, `agentmux-srv/src/server/wave_obj_bridge.rs`. **Each per-event dispatch is `async fn`** so it can offload the SQLite read into `tokio::task::spawn_blocking` — `WaveStore::get<T>()` acquires `std::sync::Mutex<Connection>`, and even though the hold is brief in steady state, a long reducer transaction would block the tokio worker thread otherwise (per ReAgent P1 on PR #852, §11.2):
 
 ```rust
-pub fn event_to_wave_obj_updates(
-    event: &Event,
-    wstore: &WaveStore,
-) -> Vec<WaveObjUpdate> {
+async fn dispatch_event(event: Event, wstore: Arc<WaveStore>, event_bus: Arc<EventBus>) {
     match event {
         Event::WorkspaceRenamed { workspace_id, .. }
-        | Event::WorkspaceMetaUpdated { workspace_id, .. } => {
-            wstore.get::<Workspace>(workspace_id)
-                .ok().flatten()
-                .map(|ws| vec![WaveObjUpdate {
-                    updatetype: "update".into(),
-                    otype: OTYPE_WORKSPACE.into(),
-                    oid: workspace_id.clone(),
-                    obj: Some(wave_obj_to_value(&ws)),
-                }])
-                .unwrap_or_default()
-        }
-
-        Event::WorkspaceDeleted { workspace_id } => vec![WaveObjUpdate {
-            updatetype: "delete".into(),
-            otype: OTYPE_WORKSPACE.into(),
-            oid: workspace_id.clone(),
-            obj: None,
-        }],
-
-        // Compound: tab created + parent workspace tab_ids mutated.
-        Event::TabCreated { workspace_id, tab_id, .. } => {
-            let mut updates = Vec::with_capacity(2);
-            if let Ok(Some(tab)) = wstore.get::<Tab>(tab_id) {
-                updates.push(WaveObjUpdate {
-                    updatetype: "create".into(),
-                    otype: OTYPE_TAB.into(),
-                    oid: tab_id.clone(),
-                    obj: Some(wave_obj_to_value(&tab)),
-                });
+        | Event::WorkspaceMetaUpdated { workspace_id, .. }
+        | Event::WorkspaceCreated { workspace_id, .. } => {
+            let id = workspace_id.clone();
+            let store = Arc::clone(&wstore);
+            // Offload SQLite read to the blocking thread pool.
+            let result = tokio::task::spawn_blocking(move || store.get::<Workspace>(&id)).await;
+            match result {
+                Ok(Ok(Some(ws))) => {
+                    emit(&event_bus, "update", OTYPE_WORKSPACE, &workspace_id,
+                         Some(wave_obj_to_value(&ws)));
+                }
+                Ok(Ok(None)) => log_warn_missing(&workspace_id),
+                Ok(Err(e)) => log_err_fetch(&workspace_id, &e),
+                Err(join_err) => log_err_panic(&workspace_id, &join_err),
             }
-            if let Ok(Some(ws)) = wstore.get::<Workspace>(workspace_id) {
-                updates.push(WaveObjUpdate {
-                    updatetype: "update".into(),
-                    otype: OTYPE_WORKSPACE.into(),
-                    oid: workspace_id.clone(),
-                    obj: Some(wave_obj_to_value(&ws)),
-                });
-            }
-            updates
         }
 
-        Event::ActiveTabChanged { workspace_id, .. } => {
-            wstore.get::<Workspace>(workspace_id)
-                .ok().flatten()
-                .map(|ws| vec![/* workspace update */])
-                .unwrap_or_default()
+        Event::WorkspaceDeleted { workspace_id, .. } => {
+            // No fetch needed — frontend just needs the oid + delete tag.
+            emit(&event_bus, "delete", OTYPE_WORKSPACE, &workspace_id, None);
         }
 
-        // … one arm per event variant in the table above …
+        // Compound: tab created + parent workspace.tab_ids was also
+        // mutated. Phase 2 should fetch both and emit two broadcasts.
+        // Event::TabCreated { workspace_id, tab_id, .. } => { … }
 
         // Saga events, OS facts, etc. — not WaveObj changes.
-        _ => vec![],
+        _ => {}
     }
 }
 ```
 
-Per §11.2, the lock acquired by `wstore.get::<T>()` is `std::sync::Mutex<Connection>`. Synchronous, brief. The bridge task must NOT `.await` between `get<T>()` and the next `get<T>()`; collecting into a `Vec` and broadcasting after is fine.
+The actual implementation in `agentmux-srv/src/server/wave_obj_bridge.rs` includes the full error logging + the per-event panic isolation that wraps each `dispatch_event` call in `tokio::spawn(...).await` so a panic in one event can't kill the bridge loop. The pseudocode above shows the conceptual structure.
+
+**Phase 2 implementors:** every new event-variant arm in `dispatch_event` MUST follow the `spawn_blocking` pattern for any `wstore.get<T>()` call, otherwise the tokio worker thread will block under contention. Don't write a synchronous `dispatch_event(&Event, &WaveStore)` shape — it's a footgun.
 
 ### 5.4 Events that should NOT broadcast
 
@@ -237,57 +212,6 @@ Some `srv_events_tx` events are internal-only and don't represent WaveObj change
 - Disk-writer ack events
 
 For these, the mapping function returns an empty vec — the bridge silently skips them. The catch-all `_ => vec![]` arm in §5.3 makes this the default.
-
-### 5.1 Mapping module
-
-Implement as a single file, `agentmux-srv/src/server/wave_obj_bridge.rs`:
-
-```rust
-pub fn event_to_wave_obj_updates(event: &Event, wstore: &WaveStore)
-    -> Vec<WaveObjUpdate>
-{
-    match event {
-        Event::WorkspaceRenamed { workspace_id, .. } => {
-            wstore.get_workspace(workspace_id)
-                .map(|ws| vec![WaveObjUpdate {
-                    updatetype: "update".into(),
-                    otype: OTYPE_WORKSPACE.into(),
-                    oid: workspace_id.clone(),
-                    obj: Some(wave_obj_to_value(&ws)),
-                }])
-                .unwrap_or_default()
-        }
-        Event::WorkspaceTabAdded { workspace_id, tab_id, .. } => {
-            let mut updates = vec![];
-            if let Some(ws) = wstore.get_workspace(workspace_id) {
-                updates.push(WaveObjUpdate { /* ws update */ });
-            }
-            if let Some(tab) = wstore.get_tab(tab_id) {
-                updates.push(WaveObjUpdate { /* tab create */ });
-            }
-            updates
-        }
-        Event::WindowClosed { window_id } => vec![WaveObjUpdate {
-            updatetype: "delete".into(),
-            otype: OTYPE_WINDOW.into(),
-            oid: window_id.clone(),
-            obj: None,
-        }],
-        // … one arm per event variant that affects a WaveObj …
-        _ => vec![],  // not all events translate (e.g. internal launcher facts)
-    }
-}
-```
-
-### 5.2 Events that should NOT broadcast
-
-Some `srv_events_tx` events are internal-only and don't represent WaveObj changes:
-
-- Saga lifecycle (`SagaStepStarted`, `SagaStepCompleted`)
-- Launcher-domain facts (window-pool reuse, OS focus events that the host already mirrors)
-- Disk-writer ack events
-
-For these, the mapping function returns an empty vec — the bridge silently skips them.
 
 ---
 
