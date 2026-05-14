@@ -519,6 +519,25 @@ const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
         const containerRect = container.getBoundingClientRect();
         const offset = { x: clientX - containerRect.x, y: clientY - containerRect.y };
 
+        // If the cursor is inside the ORIGIN pane's rect, treat as a
+        // no-op drag — the user's slight wiggle within their own pane
+        // should not pick a "nearest other pane" target. Without this,
+        // a tiny drag-and-release on the same pane in a multi-pane
+        // layout would commit a Move to the closest neighbor on
+        // release. The drop is still caught by onDrop below (clearing
+        // the payload) so the cross-window monitor won't tear off.
+        const originRect = props.layoutModel.getNodeRectById(dragNodeId);
+        if (
+            originRect &&
+            offset.x >= originRect.left &&
+            offset.x <= originRect.left + originRect.width &&
+            offset.y >= originRect.top &&
+            offset.y <= originRect.top + originRect.height
+        ) {
+            props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+            return;
+        }
+
         let bestLeafId: string | null = null;
         let bestRect: { top: number; left: number; width: number; height: number } | null = null;
         let bestDist = Infinity;

@@ -457,6 +457,19 @@ const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
         const containerRect = container.getBoundingClientRect();
         const offset = { x: clientX - containerRect.x, y: clientY - containerRect.y };
 
+        // Origin-rect guard — see TileLayout.win32.tsx for rationale.
+        const originRect = props.layoutModel.getNodeRectById(dragNodeId);
+        if (
+            originRect &&
+            offset.x >= originRect.left &&
+            offset.x <= originRect.left + originRect.width &&
+            offset.y >= originRect.top &&
+            offset.y <= originRect.top + originRect.height
+        ) {
+            props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+            return;
+        }
+
         let bestLeafId: string | null = null;
         let bestRect: { top: number; left: number; width: number; height: number } | null = null;
         let bestDist = Infinity;
