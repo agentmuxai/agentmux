@@ -741,6 +741,65 @@ class RpcApiType {
         return client.rpcCall("deletememory", data, opts);
     }
 
+    // ── Pre-launch OAuth (spec: SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md)
+
+    // command "auth.start"
+    AuthStartCommand(
+        client: RpcClient,
+        data: {
+            providerId: string;
+            intoBundleId?: string;
+            cliPath: string;
+            authLoginArgs: string[];
+            authCheckArgs: string[];
+            authEnv?: Record<string, string>;
+        },
+        opts?: RpcOpts,
+    ): Promise<{ sessionId: string; status: AuthSessionStatus }> {
+        return client.rpcCall("auth.start", data, opts);
+    }
+
+    // command "auth.poll"
+    AuthPollCommand(
+        client: RpcClient,
+        data: { sessionId: string },
+        opts?: RpcOpts,
+    ): Promise<AuthSessionStatus> {
+        return client.rpcCall("auth.poll", data, opts);
+    }
+
+    // command "auth.submitcallback"
+    AuthSubmitCallbackCommand(
+        client: RpcClient,
+        data: { sessionId: string; callbackUrl: string },
+        opts?: RpcOpts,
+    ): Promise<{ success: boolean; error?: string }> {
+        return client.rpcCall("auth.submitcallback", data, opts);
+    }
+
+    // command "auth.cancel"
+    AuthCancelCommand(
+        client: RpcClient,
+        data: { sessionId: string },
+        opts?: RpcOpts,
+    ): Promise<{ success: boolean; error?: string }> {
+        return client.rpcCall("auth.cancel", data, opts);
+    }
+
+    // command "auth.submitapikey"
+    AuthSubmitApiKeyCommand(
+        client: RpcClient,
+        data: {
+            providerId: string;
+            intoBundleId?: string;
+            apiKey: string;
+            accountName: string;
+        },
+        opts?: RpcOpts,
+    ): Promise<{ success: boolean; error?: string }> {
+        return client.rpcCall("auth.submitapikey", data, opts);
+    }
+
     // ── Workflows pane (issue #753) ─────────────────────────────────
 
     ListWorkflowsCommand(
