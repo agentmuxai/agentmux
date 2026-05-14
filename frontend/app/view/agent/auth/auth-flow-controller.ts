@@ -84,9 +84,19 @@ export const defaultAuthRpc: AuthRpc = {
         if (!r.success) {
             throw new Error(r.error ?? "auth.submitapikey rejected");
         }
-        // PR C of the spec attaches a bundleId; until then the
-        // backend returns `success` only. Synthesize a placeholder.
-        return { bundleId: (r as { bundleId?: string }).bundleId ?? "" };
+        // Reagent P1 on #850: previously this synthesized an empty
+        // bundleId when the backend omitted one, letting the flow
+        // transition to `ready` with an unusable identity reference.
+        // Until PR C of the spec wires the actual bundle row creation
+        // on the backend, treat a missing bundleId as a failure so
+        // the view surfaces it instead of silently breaking downstream.
+        const bundleId = (r as { bundleId?: string }).bundleId ?? "";
+        if (!bundleId) {
+            throw new Error(
+                "auth.submitapikey accepted the key but backend did not return a bundleId (PR C of the spec wires this).",
+            );
+        }
+        return { bundleId };
     },
 };
 
@@ -174,19 +184,11 @@ export class AuthFlowController {
             this.dispatch({ type: "SessionStarted", sessionId, authUrl });
             this.schedulePoll(sessionId);
         } catch (e) {
-            this.dispatch({
-                type: "Polled",
-                sessionId: "", // synthetic — falls through the stale-poll gate
-                status: { status: "failed", error: errMsg(e) },
-            });
-            // Force the failure transition (the gate would have
-            // dropped the above). Use the reducer's `Polled` with the
-            // current session id (which is "" after ConnectClicked
-            // failed before SessionStarted landed). Workaround: emit
-            // a synthetic failure via the reducer's foldPolled by
-            // setting sessionId on the state first. Simpler: bail to
-            // a manual state-write here is incorrect (couples view to
-            // reducer internals); use SessionStarted + Polled.
+            // Force the failure transition through the reducer's
+            // SessionStarted → Polled(failed) pair so the sessionId
+            // gate passes. Reagent P2 on #850: previously this also
+            // dispatched a `Polled { sessionId: "" }` that was always
+            // dropped by the gate — removed as dead code.
             const synthSessionId = "auth-start-failed";
             this.dispatch({ type: "SessionStarted", sessionId: synthSessionId });
             this.dispatch({
