@@ -152,11 +152,23 @@
     }
 
     &.animate {
-        .tile-node,
-        .placeholder {
+        // `.tile-node` inline styles include width/height alongside
+        // transform — pane split/close/rebalance needs all three
+        // animated for the resize to be smooth. Codex P2 on PR #829.
+        .tile-node {
             transition-duration: var(--animation-time-s);
             transition-timing-function: linear;
-            transition-property: transform, width, height, background-color;
+            transition-property: width, height, transform;
+        }
+        // `.placeholder-sizer` only changes transform during drag-move
+        // (width/height are set once per zone change and snap instantly
+        // — that's the whole point of the two-div split). Keeping the
+        // transition-property narrow to `transform` is what makes the
+        // drag-move compositor-only.
+        .placeholder-sizer {
+            transition-duration: var(--animation-time-s);
+            transition-timing-function: linear;
+            transition-property: transform;
         }
     }
 
@@ -166,9 +178,62 @@
         width: 100%;
     }
 
+    // Outer div: positions and sizes the drop-zone indicator.
+    // position/size come from setTransform() inline styles; only
+    // transform (translate3d) is animated — no width/height transitions.
+    .placeholder-sizer {
+        pointer-events: none;
+    }
+
+    // Inner div: purely visual — compositor-only opacity + scale animation.
     .placeholder {
-        background-color: var(--accent-color);
-        opacity: 0.5;
+        width: 100%;
+        height: 100%;
+        // `--accent-color-rgb` is comma-separated (`65, 159, 224`) so
+        // it pairs with the legacy `rgba(r, g, b, a)` function rather
+        // than the modern `rgb(r g b / a)` slash-alpha form. Mixing
+        // the two (`rgb(65, 159, 224 / 0.2)`) is invalid CSS and the
+        // declaration is ignored — fill/border would render transparent.
+        // Codex P2 on PR #829.
+        background-color: rgba(var(--accent-color-rgb), 0.2);
+        border: 1px solid rgba(var(--accent-color-rgb), 0.5);
         border-radius: calc(var(--block-border-radius) + 2px);
+        box-sizing: border-box;
+        opacity: 1;
+        transform: scale(1);
+        transition: opacity 120ms ease-out, transform 120ms ease-out;
+
+        @starting-style {
+            opacity: 0;
+            transform: scale(0.92);
+        }
+
+        &.exiting {
+            opacity: 0;
+            transform: scale(0.92);
+            transition-timing-function: ease-in;
+            transition-duration: 150ms;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        // Suppress every drop-zone transition: the inner `.placeholder`
+        // opacity+scale enter/exit AND the outer `.placeholder-sizer`
+        // drag-move transform animation set by `&.animate` above.
+        //
+        // The `&.animate` nesting on the sizer rule is deliberate —
+        // the existing `.tile-layout.animate .placeholder-sizer`
+        // selector has 0,3,0 specificity, so a plain
+        // `.tile-layout .placeholder-sizer` override (0,2,0) would
+        // not actually win. Matching the `.animate` selector inside
+        // the media query keeps specificity equal and lets source
+        // order (reduced-motion block comes later) take effect.
+        // Reagent P2 + codex P2 on PR #829.
+        .placeholder {
+            transition: none;
+        }
+        &.animate .placeholder-sizer {
+            transition: none;
+        }
     }
 }
