@@ -446,6 +446,20 @@ declare global {
         | { type: "done"; response: string; transcript: AgentTurn[] }
         | { type: "error"; message: string };
 
+    /**
+     * Wire shape of one pre-launch OAuth session's current status.
+     * Mirror of `agentmux-srv/src/identity/auth_session.rs::AuthSessionStatus`
+     * (`#[serde(tag = "status", rename_all = "kebab-case",
+     * rename_all_fields = "camelCase")]`). Spec:
+     * `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` §7.
+     */
+    type AuthSessionStatus =
+        | { status: "pending" }
+        | { status: "url-available"; authUrl: string }
+        | { status: "code-emitted"; deviceCode: string; verificationUrl: string }
+        | { status: "success"; bundleId: string; email: string | null }
+        | { status: "failed"; error: string };
+
     type AgentRunResult = {
         response: string;
         tokens: TokenCounts;

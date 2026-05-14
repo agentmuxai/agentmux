@@ -10,3 +10,5 @@ export type {
     SelectionOutcome,
 } from "./auth-state";
 export { initialState, update } from "./auth-state";
+export type { AuthFlowOptions, AuthRpc, ProviderCliMeta } from "./auth-flow-controller";
+export { AuthFlowController, defaultAuthRpc } from "./auth-flow-controller";
