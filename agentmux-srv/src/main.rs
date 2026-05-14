@@ -648,12 +648,37 @@ async fn main() {
     // Fixes the workspace-rename reactivity gap where UpdateWorkspace
     // returned `success_empty()` and the response loop had nothing to
     // broadcast — see docs/specs/SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md.
+    //
+    // Watchdog: capture the JoinHandle and observe it from a sibling task
+    // so a panic in the bridge's loop scaffolding (vs. an inner
+    // dispatch_event panic, which is already caught per-event) is logged
+    // loudly. Without this, a silent bridge death would manifest as
+    // "renaming a workspace stopped propagating" with no log evidence.
+    // (Per ReAgent P2 follow-up on PR #852.)
     let bridge_rx = srv_events_tx.subscribe();
-    server::wave_obj_bridge::spawn_wave_obj_bridge(
+    let bridge_handle = server::wave_obj_bridge::spawn_wave_obj_bridge(
         bridge_rx,
         std::sync::Arc::clone(&wstore_for_persist),
         std::sync::Arc::clone(&event_bus),
     );
+    tokio::spawn(async move {
+        match bridge_handle.await {
+            Ok(()) => tracing::info!(
+                target: "wave-obj-bridge",
+                "bridge task exited normally (events channel closed at srv shutdown)"
+            ),
+            Err(e) if e.is_panic() => tracing::error!(
+                target: "wave-obj-bridge",
+                "bridge task PANICKED at top level — frontend WOS will stop receiving updates until srv restart. Panic: {}",
+                e
+            ),
+            Err(e) => tracing::error!(
+                target: "wave-obj-bridge",
+                "bridge task terminated unexpectedly (non-panic JoinError): {}",
+                e
+            ),
+        }
+    });
 
     let state = AppState {
         auth_key: config.auth_key.clone(),
