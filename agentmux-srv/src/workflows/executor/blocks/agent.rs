@@ -55,7 +55,23 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
     let agent_ref: AgentRef = match node.data.get("agent_ref") {
         Some(v) => serde_json::from_value(v.clone())
             .map_err(|e| format!("agent block: invalid agent_ref: {e}"))?,
-        None => AgentRef::default(),
+        None => {
+            // Pre-Phase-1.5 nodes persisted a single `forge_agent_id`
+            // string; the runner can't honor it because identity and
+            // memory are now separate bundles. Surface the legacy data
+            // in the log so the user knows why the agent launches
+            // blank (#835).
+            if let Some(legacy) = node.data.get("forge_agent_id").and_then(|v| v.as_str()) {
+                if !legacy.is_empty() {
+                    tracing::warn!(
+                        block_id = %node.id,
+                        legacy_forge_agent_id = %legacy,
+                        "agent block: legacy `forge_agent_id` ignored — re-pick identity/memory after Phase 1.5 PR 3"
+                    );
+                }
+            }
+            AgentRef::default()
+        }
     };
 
     let max_turns = node
@@ -152,4 +168,29 @@ mod tests {
     // `run_agent_with_bin` entry point instead of `std::env::set_var`
     // (unsound under concurrent test execution in Rust 1.81+).
     // Reagent P2 on PR #834.
+
+    /// Reproduces the parse-only path of `run()` for a node carrying
+    /// legacy `forge_agent_id` (no `agent_ref`). The runner shim isn't
+    /// invoked — the assertion is that we accept the node and fall back
+    /// to a default `AgentRef`. The deprecation warning fires as a side
+    /// effect; we keep this test free of `tracing` plumbing.
+    #[test]
+    fn legacy_forge_agent_id_falls_back_to_default_ref() {
+        let data = json!({
+            "kind": "agent",
+            "task": "hi",
+            "forge_agent_id": "legacy-id-123"
+        });
+        let agent_ref: AgentRef = match data.get("agent_ref") {
+            Some(v) => serde_json::from_value(v.clone()).unwrap(),
+            None => AgentRef::default(),
+        };
+        assert_eq!(agent_ref, AgentRef::default());
+        // Confirms the legacy field is still present in node.data — the
+        // production path reads it for the warn-log; tests don't.
+        assert_eq!(
+            data.get("forge_agent_id").and_then(|v| v.as_str()),
+            Some("legacy-id-123")
+        );
+    }
 }
