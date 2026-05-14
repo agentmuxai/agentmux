@@ -259,6 +259,26 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
         }
 
         case "SessionStarted": {
+            // Reagent P1 on #849: only honor SessionStarted while
+            // the reducer is still in `waiting`. If the user clicked
+            // Cancel during the auth.start RPC await, kind has moved
+            // to `unauthenticated` and sessionId is "" — a late
+            // SessionStarted would otherwise create a zombie session
+            // (kind back to "waiting" with a fresh sessionId) that
+            // CancelClicked can no longer clear because the controller
+            // already invoked cancel on the previous (cleared)
+            // sessionId.
+            if (state.kind !== "waiting") {
+                return {
+                    state,
+                    events: [
+                        {
+                            type: "post-close-command-dropped",
+                            commandType: "SessionStarted",
+                        },
+                    ],
+                };
+            }
             const authUrl = command.authUrl ?? "";
             return {
                 state: {
@@ -390,6 +410,23 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
         }
 
         case "ApiKeyAccepted": {
+            // Reagent P2 on #849: only honor ApiKeyAccepted while
+            // the reducer is still in `waiting` for this submit. If
+            // the user picked a different bundle or cancelled during
+            // the API-key RPC await, kind has left `waiting` — a late
+            // accept would otherwise flip state to `ready` with the
+            // wrong (stale) bundleId.
+            if (state.kind !== "waiting") {
+                return {
+                    state,
+                    events: [
+                        {
+                            type: "post-close-command-dropped",
+                            commandType: "ApiKeyAccepted",
+                        },
+                    ],
+                };
+            }
             return {
                 state: {
                     ...state,
