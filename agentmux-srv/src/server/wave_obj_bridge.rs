@@ -74,34 +74,61 @@ fn emit(event_bus: &EventBus, otype: &str, oid: &str, payload: serde_json::Value
 /// WaveObj-affecting (saga lifecycle, OS facts, etc.) or scheduled for
 /// Phase 2 expansion.
 ///
-/// Per `SPEC_OBJ_UPDATE_BRIDGE §11.1`: when this function runs, the
-/// reducer has already mutated the in-memory store and the persist
-/// subscriber has written SQLite. `wstore.get<T>()` therefore sees
-/// post-event state with no race.
-fn dispatch_event(event: &Event, wstore: &WaveStore, event_bus: &EventBus) {
+/// **Read source — post-event state guarantee:**
+/// For Phase 1 (workspace events), every workspace mutation flows through
+/// the HTTP `service.rs:UpdateWorkspace` handler which calls
+/// `apply_event_to_wstore` synchronously (`service.rs:1297-1304`) before
+/// `publish_events` (`service.rs:1305`). So when the bridge receives a
+/// workspace event, SQLite is already up-to-date.
+///
+/// **Phase 2 caveat:** for tab/block events that the launcher → IPC path
+/// in `srv_ipc/server.rs:295` may publish without first applying to
+/// SQLite, the persist subscriber and bridge race. Phase 2 should either
+/// (a) make the IPC path apply synchronously like the HTTP path does, or
+/// (b) read from the in-memory `srv_state` reducer rather than SQLite.
+/// Tracked in `SPEC_OBJ_UPDATE_BRIDGE §11.1` follow-up.
+///
+/// **Lock discipline (per ReAgent P1 on PR #852):** `WaveStore::get<T>()`
+/// acquires `std::sync::Mutex<Connection>` (blocking). Even though the
+/// hold is brief in steady state, a long reducer transaction could block
+/// this tokio worker thread. We therefore do the SQLite read inside
+/// `tokio::task::spawn_blocking` so the async runtime stays responsive.
+async fn dispatch_event(event: Event, wstore: Arc<WaveStore>, event_bus: Arc<EventBus>) {
     use crate::backend::obj::Workspace;
 
     match event {
         Event::WorkspaceRenamed { workspace_id, .. }
-        | Event::WorkspaceMetaUpdated { workspace_id, .. } => {
-            match wstore.get::<Workspace>(workspace_id) {
-                Ok(Some(ws)) => {
+        | Event::WorkspaceMetaUpdated { workspace_id, .. }
+        | Event::WorkspaceCreated { workspace_id, .. } => {
+            // Offload the blocking SQLite read to the blocking thread pool
+            // so async worker threads stay free for I/O-bound work.
+            let id = workspace_id.clone();
+            let store = Arc::clone(&wstore);
+            let result = tokio::task::spawn_blocking(move || store.get::<Workspace>(&id)).await;
+            match result {
+                Ok(Ok(Some(ws))) => {
+                    // "update" for both create and update — the frontend's
+                    // updateWaveObject (`wos.ts:259-279`) treats anything
+                    // not "delete" identically. Sending "update" uniformly
+                    // simplifies the bridge's logic and matches what the
+                    // existing response-broadcast loop emits for the same
+                    // events.
                     let payload = build_update_payload(
                         "update",
                         OTYPE_WORKSPACE,
-                        workspace_id,
+                        &workspace_id,
                         Some(wave_obj_to_value(&ws)),
                     );
-                    emit(event_bus, OTYPE_WORKSPACE, workspace_id, payload);
+                    emit(&event_bus, OTYPE_WORKSPACE, &workspace_id, payload);
                 }
-                Ok(None) => {
+                Ok(Ok(None)) => {
                     tracing::warn!(
                         target: "wave-obj-bridge",
                         workspace_id = %workspace_id,
                         "workspace event for missing workspace; skipping broadcast"
                     );
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     tracing::error!(
                         target: "wave-obj-bridge",
                         workspace_id = %workspace_id,
@@ -109,33 +136,12 @@ fn dispatch_event(event: &Event, wstore: &WaveStore, event_bus: &EventBus) {
                         "wstore.get::<Workspace> failed; skipping broadcast"
                     );
                 }
-            }
-        }
-
-        Event::WorkspaceCreated { workspace_id, .. } => {
-            match wstore.get::<Workspace>(workspace_id) {
-                Ok(Some(ws)) => {
-                    let payload = build_update_payload(
-                        "update", // CEF host's WOS handles "update" for both create + update
-                        OTYPE_WORKSPACE,
-                        workspace_id,
-                        Some(wave_obj_to_value(&ws)),
-                    );
-                    emit(event_bus, OTYPE_WORKSPACE, workspace_id, payload);
-                }
-                Ok(None) => {
-                    tracing::warn!(
-                        target: "wave-obj-bridge",
-                        workspace_id = %workspace_id,
-                        "WorkspaceCreated for missing workspace; skipping broadcast"
-                    );
-                }
-                Err(e) => {
+                Err(join_err) => {
                     tracing::error!(
                         target: "wave-obj-bridge",
                         workspace_id = %workspace_id,
-                        error = %e,
-                        "wstore.get::<Workspace> failed; skipping broadcast"
+                        error = %join_err,
+                        "spawn_blocking join failed (likely panicked); skipping broadcast"
                     );
                 }
             }
@@ -143,8 +149,8 @@ fn dispatch_event(event: &Event, wstore: &WaveStore, event_bus: &EventBus) {
 
         Event::WorkspaceDeleted { workspace_id, .. } => {
             // No object to fetch — frontend just needs the oid + delete tag.
-            let payload = build_update_payload("delete", OTYPE_WORKSPACE, workspace_id, None);
-            emit(event_bus, OTYPE_WORKSPACE, workspace_id, payload);
+            let payload = build_update_payload("delete", OTYPE_WORKSPACE, &workspace_id, None);
+            emit(&event_bus, OTYPE_WORKSPACE, &workspace_id, payload);
         }
 
         // All other event variants are either not WaveObj-affecting (saga
@@ -157,12 +163,16 @@ fn dispatch_event(event: &Event, wstore: &WaveStore, event_bus: &EventBus) {
 
 /// Spawn the bridge task. Returns the `JoinHandle` so callers can keep it
 /// alive (typically forever — the task lives for the lifetime of the srv
-/// process).
+/// process). Per ReAgent P1 on PR #852: the loop is panic-resilient — a
+/// panic inside `dispatch_event` is caught and logged, and the loop
+/// continues processing subsequent events. Without this, a single
+/// malformed event could silently kill the entire bridge task and
+/// frontend WOS would stop seeing updates.
 ///
 /// Subscribe ordering: per `SPEC §11.1` the bridge can subscribe in any
-/// order relative to the persist subscriber. Both consume from the same
-/// broadcast channel; the in-memory store is updated by the reducer
-/// **before** the event is sent, so neither subscriber races.
+/// order relative to the persist subscriber. For Phase 1's workspace
+/// events the HTTP RPC handler applies SQLite synchronously before
+/// publishing the event, so the bridge always sees post-event state.
 pub fn spawn_wave_obj_bridge(
     events_rx: broadcast::Receiver<Event>,
     wstore: Arc<WaveStore>,
@@ -179,7 +189,37 @@ async fn run_wave_obj_bridge(
     tracing::info!(target: "wave-obj-bridge", "[wave-obj-bridge] started (Phase 1: workspace events)");
     loop {
         match events_rx.recv().await {
-            Ok(event) => dispatch_event(&event, &wstore, &event_bus),
+            Ok(event) => {
+                // Per-event panic isolation (ReAgent P1 on PR #852): use
+                // FuturesUnordered with a catch_unwind future would be the
+                // textbook fix, but for a single event-at-a-time loop the
+                // simpler pattern is to spawn the dispatch as its own task
+                // and observe the JoinError if it panics. We `await` it
+                // immediately so events still process serially (matching
+                // the broadcast channel's send order), but a panic in one
+                // event can't kill the bridge.
+                let store = Arc::clone(&wstore);
+                let bus = Arc::clone(&event_bus);
+                let event_dbg = format!("{:?}", &event);
+                let join = tokio::spawn(dispatch_event(event, store, bus)).await;
+                if let Err(join_err) = join {
+                    if join_err.is_panic() {
+                        tracing::error!(
+                            target: "wave-obj-bridge",
+                            event = %event_dbg,
+                            "dispatch_event panicked; bridge continues with next event. Panic: {}",
+                            join_err,
+                        );
+                    } else {
+                        tracing::error!(
+                            target: "wave-obj-bridge",
+                            event = %event_dbg,
+                            error = %join_err,
+                            "dispatch_event task aborted unexpectedly"
+                        );
+                    }
+                }
+            }
             Err(broadcast::error::RecvError::Lagged(n)) => {
                 // The broadcast channel has 1024 capacity (main.rs:624).
                 // If we lag, frontend WOS state diverges silently — log it

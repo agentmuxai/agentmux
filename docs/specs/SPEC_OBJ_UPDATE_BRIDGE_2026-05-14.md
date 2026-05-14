@@ -133,21 +133,23 @@ Event names below come from `agentmux-srv/src/reducer/{workspace,tab,block,layou
 | Reducer event | WaveObjs to fetch + broadcast | `updatetype` per obj | Phase |
 |---|---|---|---|
 | **`WorkspaceRenamed { workspace_id, … }`** | workspace | `update` | **1** |
-| `WorkspaceCreated { workspace_id, … }` | workspace | `create` | 1 |
+| `WorkspaceCreated { workspace_id, … }` | workspace | `update` | 1 |
 | `WorkspaceDeleted { workspace_id }` | workspace | `delete` (oid only) | 1 |
-| `WorkspaceMetaUpdated { workspace_id, … }` (if any) | workspace | `update` | 1 |
-| `TabCreated { workspace_id, tab_id, … }` | tab + **workspace** ← dependent | `create` + `update` | 2 |
+| `WorkspaceMetaUpdated { workspace_id, … }` | workspace | `update` | 1 |
+| `TabCreated { workspace_id, tab_id, … }` | tab + **workspace** ← dependent | `update` + `update` | 2 |
 | `TabDeleted { workspace_id, tab_id, … }` | tab + **workspace** ← dependent | `delete` + `update` | 2 |
 | `TabRenamed { tab_id, name, … }` | tab | `update` | 2 |
 | `ActiveTabChanged { workspace_id, tab_id }` | workspace | `update` | 2 |
-| `BlockCreated { tab_id, block_id, … }` | block + **tab** ← dependent | `create` + `update` | 2 |
+| `BlockCreated { tab_id, block_id, … }` | block + **tab** ← dependent | `update` + `update` | 2 |
 | `BlockDeleted { tab_id, block_id, … }` | block + **tab** ← dependent | `delete` + `update` | 2 |
 | `BlockUpdated { block_id, … }` | block | `update` | 2 |
 | `LayoutUpdated { layout_id, … }` | layout | `update` | 2 |
-| `WindowOpened { window_id, … }` | window | `create` | 2 |
+| `WindowOpened { window_id, … }` | window | `update` | 2 |
 | `WindowClosed { window_id }` | window | `delete` | 2 |
 | `WindowMetaUpdated { window_id, … }` | window | `update` | 2 |
 | `ClientUpdated { client_id, … }` (if any) | client | `update` | 2 |
+
+> **Why `update` for both create and update:** The frontend's `updateWaveObject` (`wos.ts:259-279`) treats every `updatetype` other than `"delete"` identically — whether the local cache is empty (treat-as-create) or populated (treat-as-update). Sending `"update"` uniformly simplifies bridge logic and matches what the existing response-broadcast loop already emits for create-shaped events. The `"create"` discriminator is unused in this codebase (per ReAgent P2 on PR #852).
 
 > **Authoritative mapping:** the actual `Event` enum is the source of truth. Phase 2's first task is `grep -nE "Event::" agentmux-srv/src/reducer/` and crossing the result against this table. Any variant in the enum but not in the table is either a (a) non-WaveObj event (saga, OS, window-pool) → `_ => vec![]` arm, or (b) a missing entry to add.
 
