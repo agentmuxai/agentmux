@@ -558,11 +558,26 @@ const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
         }
         if (!bestLeafId || !bestRect) return;
 
+        // Clamp the cursor offset to the chosen rect — by definition
+        // the cursor is OUTSIDE every pane rect when this fallback
+        // runs (dead spot). determineDropDirection returns undefined
+        // for any point outside the supplied dimensions, which would
+        // make this fallback a no-op without clamping. Clamping
+        // resolves the cursor to the nearest edge of the chosen rect,
+        // which gives the natural quadrant for the drop: drag-into-
+        // gutter-right-of-paneA → clamps to paneA.right → returns
+        // Right quadrant of paneA → pane lands between A and B.
+        // (codex P2 on PR #838.)
+        const clampedOffset = {
+            x: Math.max(bestRect.left, Math.min(bestRect.left + bestRect.width, offset.x)),
+            y: Math.max(bestRect.top, Math.min(bestRect.top + bestRect.height, offset.y)),
+        };
+
         props.layoutModel.treeReducer({
             type: LayoutTreeActionType.ComputeMove,
             nodeId: bestLeafId,
             nodeToMoveId: dragNodeId,
-            direction: determineDropDirection(bestRect, offset),
+            direction: determineDropDirection(bestRect, clampedOffset),
         } as LayoutTreeComputeMoveNodeAction);
     });
 

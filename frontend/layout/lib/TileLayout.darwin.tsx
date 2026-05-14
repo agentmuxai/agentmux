@@ -490,11 +490,18 @@ const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
         }
         if (!bestLeafId || !bestRect) return;
 
+        // Clamp the cursor offset to the chosen rect — see
+        // TileLayout.win32.tsx for full rationale. (codex P2 on PR #838.)
+        const clampedOffset = {
+            x: Math.max(bestRect.left, Math.min(bestRect.left + bestRect.width, offset.x)),
+            y: Math.max(bestRect.top, Math.min(bestRect.top + bestRect.height, offset.y)),
+        };
+
         props.layoutModel.treeReducer({
             type: LayoutTreeActionType.ComputeMove,
             nodeId: bestLeafId,
             nodeToMoveId: dragNodeId,
-            direction: determineDropDirection(bestRect, offset),
+            direction: determineDropDirection(bestRect, clampedOffset),
         } as LayoutTreeComputeMoveNodeAction);
     });
 
