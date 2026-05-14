@@ -167,8 +167,13 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         setIdentityId(bundleId);
     };
     const provider = createMemo(() => getProvider(props.agent.provider));
+    // Auth gate applies ONLY to fresh launches with the blank singleton.
+    // Continuing a past agent (isContinue) bypasses the gate even when
+    // the saved identity was "blank" — the prior launch already
+    // produced credentials we trust, and the panel itself is hidden in
+    // that flow (reagent P1 on #847).
     const authRequired = () =>
-        identityId() === "blank" || identityId() === "";
+        !isContinue() && (identityId() === "blank" || identityId() === "");
     const authReady = () => !authRequired() || authStateKind() === "ready";
     const canSubmit = () =>
         !submitting() && slugifyInstanceName(name()).length > 0 && authReady();

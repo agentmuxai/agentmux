@@ -27,7 +27,6 @@ import {
     createSignal,
     Match,
     onCleanup,
-    onMount,
     Show,
     Switch,
     type Accessor,
@@ -175,18 +174,11 @@ async function startConnect(
         );
         cliPath = r.cli_path;
     } catch (e) {
-        // Surface as a controller-side failure so the FailedBanner
-        // shows up. We piggyback on the API-key error path because
-        // it transitions to `failed`; the actual `submitApiKey` is
-        // never run because the controller short-circuits on the
-        // missing apiKey response. Simpler: build a synthetic
-        // failure directly via `connect()` with an unresolvable
-        // cliPath, but the user sees the error sooner here.
-        await controller.connect({
-            cliPath: "",
-            authLoginArgs: provider.authLoginCommand,
-            authCheckArgs: provider.authCheckCommand,
-        });
+        // Surface the real ResolveCli error in the FailedBanner —
+        // reagent P1 on #847: previously this discarded `e` and
+        // called connect with an empty cliPath, producing a
+        // misleading backend "CLI not found at ''" message.
+        controller.failConnect(e);
         return;
     }
     await controller.connect({
