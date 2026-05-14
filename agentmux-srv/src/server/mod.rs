@@ -2,6 +2,7 @@ pub(crate) mod cli_handlers;
 mod files;
 mod app_api;
 mod forge_handlers;
+mod identity_handlers;
 mod messagebus;
 mod reactive;
 pub(crate) mod service;
@@ -92,6 +93,10 @@ pub struct AppState {
     /// adds resume-on-startup + `--diag sagas`.
     /// See `docs/specs/SPEC_SAGA_DURABILITY_2026-05-01.md`.
     pub saga_log: std::sync::Arc<crate::sagas::log::SagaLog>,
+    /// Pre-launch OAuth session state — one entry per in-flight
+    /// "Connect with OAuth" attempt from the launch modal. See
+    /// `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md`.
+    pub auth_session_manager: std::sync::Arc<crate::identity::auth_session::AuthSessionManager>,
 }
 
 /// Build the Axum router with all routes, auth middleware, and CORS.
