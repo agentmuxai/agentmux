@@ -208,9 +208,19 @@
         // Suppress every drop-zone transition: the inner `.placeholder`
         // opacity+scale enter/exit AND the outer `.placeholder-sizer`
         // drag-move transform animation set by `&.animate` above.
-        // Reagent P2 on PR #829.
-        .placeholder,
-        .placeholder-sizer {
+        //
+        // The `&.animate` nesting on the sizer rule is deliberate —
+        // the existing `.tile-layout.animate .placeholder-sizer`
+        // selector has 0,3,0 specificity, so a plain
+        // `.tile-layout .placeholder-sizer` override (0,2,0) would
+        // not actually win. Matching the `.animate` selector inside
+        // the media query keeps specificity equal and lets source
+        // order (reduced-motion block comes later) take effect.
+        // Reagent P2 + codex P2 on PR #829.
+        .placeholder {
+            transition: none;
+        }
+        &.animate .placeholder-sizer {
             transition: none;
         }
     }
