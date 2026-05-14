@@ -152,7 +152,19 @@
     }
 
     &.animate {
-        .tile-node,
+        // `.tile-node` inline styles include width/height alongside
+        // transform — pane split/close/rebalance needs all three
+        // animated for the resize to be smooth. Codex P2 on PR #829.
+        .tile-node {
+            transition-duration: var(--animation-time-s);
+            transition-timing-function: linear;
+            transition-property: width, height, transform;
+        }
+        // `.placeholder-sizer` only changes transform during drag-move
+        // (width/height are set once per zone change and snap instantly
+        // — that's the whole point of the two-div split). Keeping the
+        // transition-property narrow to `transform` is what makes the
+        // drag-move compositor-only.
         .placeholder-sizer {
             transition-duration: var(--animation-time-s);
             transition-timing-function: linear;
