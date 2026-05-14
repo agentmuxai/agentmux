@@ -57,6 +57,7 @@ pub(crate) fn test_state() -> AppState {
         // Saga durability (PR 1) — in-memory log so tests stay
         // hermetic. Production opens a file under the data dir.
         saga_log: Arc::new(crate::sagas::log::SagaLog::open_in_memory().unwrap()),
+        auth_session_manager: Arc::new(crate::identity::auth_session::AuthSessionManager::new()),
     }
 }
 

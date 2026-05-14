@@ -28,6 +28,8 @@
 //! entity) were prerequisites; Phase 3 (encrypted vault, OAuth flows)
 //! is deferred.
 
+pub mod auth_patterns;
+pub mod auth_session;
 pub mod resolver;
 
 pub use resolver::inject_identity_env;

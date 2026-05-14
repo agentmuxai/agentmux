@@ -1183,6 +1183,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
     // Workflow handlers (issue #753 — Workflows pane DAG executor)
     super::workflow_handlers::register_workflow_handlers(engine, &state);
 
+    // Pre-launch OAuth handlers (auth.start / poll / submitcallback /
+    // cancel / submitapikey — see docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md)
+    super::identity_handlers::register_identity_handlers(engine, &state);
+
     // App API handlers (agent.open, agent.send, agent.stop, agent.status, agent.list, agent.output)
     super::app_api::register_app_api_handlers(engine, &state);
 }
