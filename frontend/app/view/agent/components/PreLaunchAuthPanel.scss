@@ -1,0 +1,204 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Layout for the pre-launch OAuth panel inside AgentLaunchModal.
+// Button colors / hover / focus all inherit from `.wave-button.green.solid`
+// (see element/button.scss) — this file only handles panel layout, the
+// inline-icon row inside the button, and the surrounding banner / hint copy.
+
+.pre-launch-auth-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    margin: var(--space-3) 0;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background-color: var(--panel-bg, rgba(255, 255, 255, 0.02));
+}
+
+.pre-launch-auth-panel-cta,
+.pre-launch-auth-panel-apikey {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.pre-launch-auth-panel-warning {
+    color: var(--warning-text-color, #d97706);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.pre-launch-auth-panel-connect {
+    // Aligns the provider glyph with the label inside the standard
+    // wave-button. The button itself stays at its default vertical
+    // padding so it matches every other Connect / Submit button.
+    align-self: flex-start;
+    gap: var(--space-2);
+    font-weight: 500;
+    padding-left: var(--space-4);
+    padding-right: var(--space-5);
+}
+
+.pre-launch-auth-panel-connect-icon {
+    font-size: 18px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+}
+
+.pre-launch-auth-panel-connect-label {
+    display: inline-block;
+}
+
+.pre-launch-auth-panel-hint {
+    color: var(--secondary-text-color);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+// ── Waiting panel ─────────────────────────────────────────────
+
+.pre-launch-auth-panel-waiting {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.pre-launch-auth-panel-waiting-title {
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.pre-launch-auth-panel-waiting-steps {
+    margin: 0;
+    padding-left: var(--space-5);
+    font-size: 13px;
+    color: var(--secondary-text-color);
+
+    li {
+        line-height: 1.5;
+    }
+}
+
+.pre-launch-auth-panel-url-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+}
+
+.pre-launch-auth-panel-callback-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.pre-launch-auth-panel-url-label {
+    font-size: 12px;
+    color: var(--secondary-text-color);
+}
+
+// The captured OAuth URL. One line, ellipsis-truncate so a 500-char
+// state= query string doesn't blow the panel layout. The full URL is
+// in the `title` attr for hover-reveal; clicking Copy grabs the
+// full value from the underlying signal.
+.pre-launch-auth-panel-url-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: var(--space-2) var(--space-3);
+    background-color: var(--input-bg, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--main-text-color);
+    font-family: var(--mono-font-family);
+    font-size: 12px;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    user-select: text;
+}
+
+.pre-launch-auth-panel-url-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: var(--space-2) var(--space-3);
+    background-color: var(--input-bg, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--main-text-color);
+    font-family: var(--mono-font-family);
+    font-size: 12px;
+
+    &:focus {
+        outline: 1px solid var(--accent-color);
+        outline-offset: -1px;
+    }
+}
+
+// ── Device-code panel (Copilot) ───────────────────────────────
+
+.pre-launch-auth-panel-device-code {
+    padding: var(--space-3);
+    background-color: var(--input-bg, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.pre-launch-auth-panel-device-code-label {
+    font-size: 12px;
+    color: var(--secondary-text-color);
+
+    a {
+        color: var(--accent-color);
+        text-decoration: none;
+
+        &:hover {
+            text-decoration: underline;
+        }
+    }
+}
+
+.pre-launch-auth-panel-device-code-value {
+    font-family: var(--mono-font-family);
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    color: var(--main-text-color);
+}
+
+// ── Terminal banners ──────────────────────────────────────────
+
+.pre-launch-auth-panel-ready {
+    color: var(--success-text-color, #10b981);
+    font-size: 13px;
+    font-weight: 500;
+    padding: var(--space-2) var(--space-3);
+    background-color: rgba(16, 185, 129, 0.08);
+    border-radius: 4px;
+}
+
+.pre-launch-auth-panel-failed {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    background-color: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 4px;
+}
+
+.pre-launch-auth-panel-failed-message {
+    color: var(--error-text-color, #ef4444);
+    font-size: 13px;
+    line-height: 1.4;
+}

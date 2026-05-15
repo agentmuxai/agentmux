@@ -17,7 +17,7 @@
  * testable without a DOM.
  */
 
-import { createSignal, type Accessor } from "solid-js";
+import { createSignal, untrack, type Accessor } from "solid-js";
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -142,13 +142,21 @@ export class AuthFlowController {
         };
     }
 
-    /** Dispatch a command into the reducer, project state. */
+    /** Dispatch a command into the reducer, project state.
+     *  Wrapped in `untrack` so callers running inside a Solid
+     *  reactive scope (e.g. a createEffect) don't accidentally
+     *  subscribe to `_state` via this read — that subscription
+     *  would re-fire the calling effect on every subsequent
+     *  dispatch and silently invalidate any session the caller
+     *  had just started. */
     dispatch(command: AuthCommand): void {
-        const prev = this._state[0]();
-        const result = update(prev, command);
-        if (result.state !== prev) {
-            this._state[1](result.state);
-        }
+        untrack(() => {
+            const prev = this._state[0]();
+            const result = update(prev, command);
+            if (result.state !== prev) {
+                this._state[1](result.state);
+            }
+        });
     }
 
     // ── View-facing actions ───────────────────────────────────────
@@ -167,10 +175,6 @@ export class AuthFlowController {
         }
         this.dispatch({ type: "ConnectClicked" });
         try {
-            // Reagent P1 on #850: backend's auth.start returns
-            // `{ sessionId, authUrl? }` (not `{ sessionId, status }`).
-            // The initial status is "pending" until the CLI prints
-            // something; the poll loop picks it up on the first tick.
             const { sessionId, authUrl } = await this.rpc.start({
                 providerId: s.providerId,
                 intoBundleId: s.bundleId || undefined,
@@ -259,14 +263,10 @@ export class AuthFlowController {
 
     dispose(): void {
         // Fire-and-forget auth.cancel for any in-flight session so we
-        // don't leave an orphan CLI subprocess on the backend. Codex
-        // P2 on #850: previously dispose() only cleared the local
-        // timer + marked closed.
+        // don't leave an orphan CLI subprocess on the backend.
         const s = this.state();
         if (s.kind === "waiting" && s.sessionId !== "") {
-            void this.rpc.cancel(s.sessionId).catch(() => {
-                // Best-effort: the session times out backend-side too.
-            });
+            void this.rpc.cancel(s.sessionId).catch(() => {});
         }
         this.stopPolling();
         this.dispatch({ type: "Disposed" });
@@ -289,7 +289,7 @@ export class AuthFlowController {
     }
 
     private async pollOnce(sessionId: string): Promise<void> {
-        // The reducer gates stale results, but we also short-circuit
+        // The reducer gates stale polls, but we also short-circuit
         // here so we don't fire RPCs for sessions the user already
         // left behind.
         const current = this.state();
