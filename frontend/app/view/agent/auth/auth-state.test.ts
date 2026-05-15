@@ -739,6 +739,50 @@ describe("auth-state reducer", () => {
         });
     });
 
+    describe("ConnectFailed (reagent P2 on #853)", () => {
+        it("flips any non-terminal state to failed with error", () => {
+            for (const kind of [
+                "idle",
+                "unauthenticated",
+                "waiting",
+                "authenticated",
+                "saving",
+                "expired",
+                "failed",
+            ] as const) {
+                const seeded = seed({
+                    kind,
+                    sessionId: "s1",
+                    authUrl: "https://x",
+                    deviceCode: { code: "Z", verificationUrl: "V" },
+                });
+                const r = update(seeded, {
+                    type: "ConnectFailed",
+                    error: "cli not found",
+                });
+                expect(r.state.kind).toBe("failed");
+                expect(r.state.error).toBe("cli not found");
+                expect(r.state.sessionId).toBe("");
+                expect(r.state.authUrl).toBe("");
+                expect(r.state.deviceCode).toBeNull();
+                expect(r.events[0]).toMatchObject({
+                    type: "failed",
+                    error: "cli not found",
+                });
+            }
+        });
+
+        it("is dropped after Disposed (post-close gate)", () => {
+            const closed = update(initialState(), { type: "Disposed" }).state;
+            const r = update(closed, { type: "ConnectFailed", error: "x" });
+            expect(r.state).toBe(closed);
+            expect(r.events[0]).toMatchObject({
+                type: "post-close-command-dropped",
+                commandType: "ConnectFailed",
+            });
+        });
+    });
+
     describe("Disposed gate", () => {
         it("Disposed sets closed=true", () => {
             const r = update(initialState(), { type: "Disposed" });
