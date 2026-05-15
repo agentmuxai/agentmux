@@ -103,7 +103,14 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         const id = props.identityId();
         const prov = props.provider;
         if (!prov) return;
-        untrack(() => controller.selected(prov.id, id, outcomeFor(id)));
+        // Codex P2 on #847 round 8: "blank" is a UI sentinel meaning
+        // "no bundle selected", not a real bundleId. Normalize it to
+        // "" before handing to the controller so `auth.start` /
+        // `auth.submitapikey` receive `intoBundleId: undefined`
+        // (= "create new bundle") rather than `"blank"` (= "attach
+        // to bundle named blank", which doesn't exist in wstore).
+        const bundleArg = id === "blank" ? "" : id;
+        untrack(() => controller.selected(prov.id, bundleArg, outcomeFor(id)));
     });
 
     onCleanup(() => {
