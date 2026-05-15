@@ -202,12 +202,13 @@ export type AuthCommand =
     | { type: "BundleSaveFailed"; error: string }
     /**
      * View-side prep failure (e.g. `ResolveCli` threw before
-     * `auth.start` could fire, network preflight, etc.). Honored from
-     * any non-terminal kind — there's no existing session to clean up.
-     * The controller's `failConnect` dispatches this to surface the
-     * error inline regardless of which state the user was in. Reagent
-     * P2 on #853 caught the previous failConnect's silent-swallow bug
-     * for non-Connect-valid kinds.
+     * `auth.start` could fire, network preflight, etc.). The
+     * controller's `failConnect` dispatches this to surface the
+     * error inline. Honored only from connect-attempt kinds
+     * (`unauthenticated`/`waiting`/`expired`/`failed`) — codex P2
+     * on #853 round 7: stale rejections from abandoned connects
+     * must NOT clobber a newer `ready`/`authenticated`/`saving`/
+     * `idle` state.
      */
     | { type: "ConnectFailed"; error: string }
     /**
