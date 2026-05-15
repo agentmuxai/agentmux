@@ -143,11 +143,18 @@ export function update(
 
         case "UrlConfirmed": {
             if (state.url === command.url) return { state, events: [] };
+            // Reagent P2 on #876: preserve a CEF-reported favicon across
+            // redirects + hash-changes. Only re-derive the heuristic favicon
+            // if no real favicon has overridden it. Otherwise the user sees
+            // the real favicon flash to the heuristic on every nav event.
+            const faviconUrl = state.faviconOverridden
+                ? state.faviconUrl
+                : deriveFaviconUrl(command.url);
             return {
                 state: {
                     ...state,
                     url: command.url,
-                    faviconUrl: deriveFaviconUrl(command.url),
+                    faviconUrl,
                 },
                 events: [{ type: "url-confirmed", url: command.url }],
             };

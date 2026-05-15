@@ -300,6 +300,15 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
                         alt=""
                         width={14}
                         height={14}
+                        onLoad={(e) => {
+                            // Reagent P2 on #876: SolidJS reuses the same
+                            // <img> DOM node when `src` reactively changes,
+                            // so a `display:none` from a prior failed
+                            // favicon persists across `src` swaps and hides
+                            // all subsequent valid favicons. Reset on every
+                            // successful load.
+                            (e.currentTarget as HTMLImageElement).style.display = "";
+                        }}
                         onError={(e) => {
                             (e.currentTarget as HTMLImageElement).style.display = "none";
                         }}
