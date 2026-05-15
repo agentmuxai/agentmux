@@ -157,22 +157,24 @@ Output: `~/Desktop/agentmux-{version}-x64-portable/` and `.zip`
 
 ---
 
-## Version Management
+## Version Management (Changesets — RFC #857 Phase 2)
 
-**Before releasing, ensure version consistency across all files:**
+**Feature PRs do not bump the version.** Add a changeset instead:
 
 ```bash
-# Bump version (updates package.json, Cargo.toml, etc.)
-./bump-version.sh patch --message "Your change description"
-
-# Verify consistency
-bump verify
-
-# Push with tags
-git push origin <branch> --tags
+task changeset -- patch "fix(scope): short description"
+# Allowed bump types: patch | minor | major
 ```
 
-**Critical:** Always use `bump-version.sh` — never manually edit version numbers.
+This creates `.changesets/<id>.md`. Commit it with your code. Version bumps live in dedicated **release PRs** which consume all pending changesets at once:
+
+```bash
+task release         # processes .changesets/, bumps version, updates VERSION_HISTORY
+git commit -m "chore: release v<X.Y.Z>"
+git push -u origin agenta/release-vX.Y.Z
+```
+
+See `.changesets/README.md` and `docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md` for rationale.
 
 ---
 
