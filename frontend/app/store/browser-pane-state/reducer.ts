@@ -180,12 +180,21 @@ export function update(
         }
 
         case "FaviconUrlsReceived": {
-            const next = command.urls[0] ?? "";
-            if (next === state.faviconUrl && state.faviconOverridden === (next !== "")) {
+            // Reagent P2 on #876: when CEF reports an empty favicon-URL list
+            // (page has no <link rel="icon"> tags), fall back to the
+            // heuristic-derived favicon from the page URL rather than ""
+            // — matches the types.ts doc comment for FaviconUrlsReceived
+            // and the page-navigation paths above that already derive on
+            // navigation. The override flag stays false so a later real
+            // favicon report can replace it.
+            const cefUrl = command.urls[0];
+            const next = cefUrl ?? deriveFaviconUrl(state.url);
+            const overridden = cefUrl !== undefined;
+            if (next === state.faviconUrl && state.faviconOverridden === overridden) {
                 return { state, events: [] };
             }
             return {
-                state: { ...state, faviconUrl: next, faviconOverridden: next !== "" },
+                state: { ...state, faviconUrl: next, faviconOverridden: overridden },
                 events: [{ type: "favicon-urls-received", url: next }],
             };
         }
