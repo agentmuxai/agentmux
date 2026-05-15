@@ -58,6 +58,27 @@ export type AgentDocumentCommand =
     /** Persisted history (older messages from blockfile) — prepended. */
     | { type: "HistoryLoaded"; nodes: DocumentNode[] }
     /**
+     * Restore from a snapshot file (`output.state.json`). Semantically
+     * identical to `HistoryLoaded` (prepend with id-dedup), with one
+     * additional effect: `sessionPhase` jumps directly to `"active"`
+     * because the snapshot represents the full pre-close history —
+     * there is no further history to page in.
+     *
+     * Why prepend (not full-replace): `useAgentStream` may dispatch
+     * `StreamFlush` during the async snapshot read window. A full
+     * replace would wipe those live arrivals. Codex P1 on PR #877
+     * round 4. Existing nodes (live arrivals) win on id collision; the
+     * snapshot version is dropped.
+     *
+     * `fromSnapshot: true` is a discriminator field per spec §4.5 — the
+     * view layer reads it from the audit event (history-restored) to
+     * distinguish snapshot restore from partial `HistoryLoaded` prepend,
+     * and suppress the "Loading older messages" affordance.
+     *
+     * Spec: docs/specs/SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md §4.5.
+     */
+    | { type: "HistoryRestored"; nodes: DocumentNode[]; fromSnapshot: true }
+    /**
      * Generic merge: `newNodes` are appends (with dedup against existing
      * IDs — collisions route to in-place update), `updatedNodes` are
      * targeted mutations against existing IDs. The primary caller is the
@@ -95,6 +116,7 @@ export type AgentDocumentEvent =
     | { type: "session-started"; at: number }
     | { type: "session-ended"; at: number }
     | { type: "history-loaded"; addedCount: number; duplicatesDropped: number }
+    | { type: "history-restored"; restoredCount: number; fromSnapshot: true }
     | {
           type: "stream-flushed";
           appendedNew: number;

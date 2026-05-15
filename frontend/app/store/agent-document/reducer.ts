@@ -86,6 +86,42 @@ export function update(
             };
         }
 
+        case "HistoryRestored": {
+            // Prepend snapshot nodes (older) onto whatever live-stream
+            // nodes have already landed during the async snapshot read
+            // window. Dedup by id so any overlap (snapshot saved 30s
+            // ago + live replay of those same lines on reconnect) is
+            // harmless. Codex P1 on PR #877 round 4 — a prior version
+            // full-replaced and would wipe live events that arrived
+            // between subscribe-time and snapshot-arrival-time.
+            //
+            // `sessionPhase` jumps to "active" — the snapshot represents
+            // the full pre-close history; nothing further to load.
+            // Spec docs/specs/SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md §4.5.
+            const nextIdSet = new Set(state.nodeIdSet);
+            const fresh: DocumentNode[] = [];
+            for (const n of command.nodes) {
+                if (nextIdSet.has(n.id)) continue;
+                nextIdSet.add(n.id);
+                fresh.push(n);
+            }
+            return {
+                state: {
+                    ...state,
+                    nodes: [...fresh, ...state.nodes],
+                    nodeIdSet: nextIdSet,
+                    sessionPhase: "active",
+                },
+                events: [
+                    {
+                        type: "history-restored",
+                        restoredCount: fresh.length,
+                        fromSnapshot: true,
+                    },
+                ],
+            };
+        }
+
         case "StreamFlush": {
             const noWork = command.newNodes.length === 0 && command.updatedNodes.length === 0;
             if (noWork) return { state, events: [] };

@@ -35,6 +35,8 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_pane_open(engine, state);
     register_blockfile_line_count(engine, state);
     register_blockfile_read_range(engine, state);
+    register_blockfile_read_state(engine, state);
+    register_blockfile_write_state(engine, state);
     register_session_digest(engine, state);
     register_session_archive_handler(engine, state);
     register_session_restore_handler(engine, state);
@@ -1080,6 +1082,90 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     lines,
                     total,
                 }).unwrap()))
+            })
+        }),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// blockfile:read_state — sidecar JSON snapshot read
+// Spec: docs/specs/SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md §4.6
+// ---------------------------------------------------------------------------
+
+fn register_blockfile_read_state(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let filestore = state.filestore.clone();
+    engine.register_handler(
+        COMMAND_BLOCKFILE_READ_STATE,
+        Box::new(move |data, _ctx| {
+            let filestore = filestore.clone();
+            Box::pin(async move {
+                let cmd: CommandBlockfileReadStateData = serde_json::from_value(data)
+                    .map_err(|e| format!("blockfile:read_state: {e}"))?;
+                if cmd.filename.contains('/') || cmd.filename.contains('\\') || cmd.filename.contains("..") {
+                    return Err("blockfile:read_state: filename must not contain path separators".to_string());
+                }
+                tracing::debug!(block_id = %cmd.block_id, filename = %cmd.filename, "blockfile:read_state");
+
+                let content = match filestore.read_file(&cmd.block_id, &cmd.filename) {
+                    Ok(Some(bytes)) => Some(String::from_utf8_lossy(&bytes).into_owned()),
+                    Ok(None) => None,
+                    Err(e) => {
+                        // NotFound is the common case (no snapshot yet). Suppress.
+                        if matches!(e, crate::backend::storage::StoreError::NotFound) {
+                            None
+                        } else {
+                            tracing::warn!(block_id = %cmd.block_id, error = %e, "blockfile:read_state: read failed");
+                            None
+                        }
+                    }
+                };
+
+                Ok(Some(serde_json::to_value(&BlockfileReadStateResult { content }).unwrap()))
+            })
+        }),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// blockfile:write_state — sidecar JSON snapshot write (atomic via DB tx)
+// Spec: docs/specs/SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md §4.3
+// ---------------------------------------------------------------------------
+
+fn register_blockfile_write_state(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let filestore = state.filestore.clone();
+    engine.register_handler(
+        COMMAND_BLOCKFILE_WRITE_STATE,
+        Box::new(move |data, _ctx| {
+            let filestore = filestore.clone();
+            Box::pin(async move {
+                let cmd: CommandBlockfileWriteStateData = serde_json::from_value(data)
+                    .map_err(|e| format!("blockfile:write_state: {e}"))?;
+                if cmd.filename.contains('/') || cmd.filename.contains('\\') || cmd.filename.contains("..") {
+                    return Err("blockfile:write_state: filename must not contain path separators".to_string());
+                }
+                let bytes = cmd.content.as_bytes();
+                let bytes_written = bytes.len() as u64;
+                tracing::debug!(block_id = %cmd.block_id, filename = %cmd.filename, bytes = bytes_written, "blockfile:write_state");
+
+                // FileStore.write_file is atomic at the DB level (single
+                // tx replaces all data parts) — no torn write surfaces.
+                // Need make_file first if the sidecar doesn't yet exist.
+                use crate::backend::storage::filestore::{FileMeta, FileOpts};
+                use crate::backend::storage::StoreError;
+                match filestore.write_file(&cmd.block_id, &cmd.filename, bytes) {
+                    Ok(()) => {}
+                    Err(StoreError::NotFound) => {
+                        filestore
+                            .make_file(&cmd.block_id, &cmd.filename, FileMeta::default(), FileOpts::default())
+                            .map_err(|e| format!("blockfile:write_state: make_file: {e}"))?;
+                        filestore
+                            .write_file(&cmd.block_id, &cmd.filename, bytes)
+                            .map_err(|e| format!("blockfile:write_state: write_file: {e}"))?;
+                    }
+                    Err(e) => return Err(format!("blockfile:write_state: {e}")),
+                }
+
+                Ok(Some(serde_json::to_value(&BlockfileWriteStateResult { bytes_written }).unwrap()))
             })
         }),
     );

@@ -1967,6 +1967,29 @@ declare global {
         total: number;
     };
 
+    // wshrpc.CommandBlockfileReadStateData
+    type CommandBlockfileReadStateData = {
+        block_id: string;
+        filename: string;
+    };
+
+    // wshrpc.BlockfileReadStateResult
+    type BlockfileReadStateResult = {
+        content: string | null;
+    };
+
+    // wshrpc.CommandBlockfileWriteStateData
+    type CommandBlockfileWriteStateData = {
+        block_id: string;
+        filename: string;
+        content: string;
+    };
+
+    // wshrpc.BlockfileWriteStateResult
+    type BlockfileWriteStateResult = {
+        bytes_written: number;
+    };
+
     // wshrpc.CommandSessionDigestData
     type CommandSessionDigestData = {
         block_id: string;

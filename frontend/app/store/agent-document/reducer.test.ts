@@ -70,6 +70,73 @@ describe("agent document reducer", () => {
         });
     });
 
+    describe("HistoryRestored (snapshot)", () => {
+        it("prepends nodes onto an empty document and jumps to active", () => {
+            const r = update(initialState(), {
+                type: "HistoryRestored",
+                fromSnapshot: true,
+                nodes: [md("s1"), md("s2"), md("s3")],
+            });
+            expect(r.state.nodes.map((n) => n.id)).toEqual(["s1", "s2", "s3"]);
+            expect(r.state.sessionPhase).toBe("active");
+            expect(r.state.nodeIdSet).toEqual(new Set(["s1", "s2", "s3"]));
+            expect(r.events).toEqual([{ type: "history-restored", restoredCount: 3, fromSnapshot: true }]);
+        });
+
+        it("preserves live nodes that arrived during the snapshot read window", () => {
+            // Race fix (codex P1 round 4): useAgentStream may dispatch
+            // StreamFlush before BlockfileReadStateCommand resolves. The
+            // restored snapshot must NOT wipe those live arrivals — it
+            // prepends as "older" history with dedup, like HistoryLoaded.
+            const start = seed([md("live1"), md("live2")]);
+            const r = update(start, {
+                type: "HistoryRestored",
+                fromSnapshot: true,
+                nodes: [md("snap1"), md("snap2")],
+            });
+            expect(r.state.nodes.map((n) => n.id)).toEqual(["snap1", "snap2", "live1", "live2"]);
+            expect(r.state.nodeIdSet).toEqual(new Set(["snap1", "snap2", "live1", "live2"]));
+            expect(r.state.sessionPhase).toBe("active");
+        });
+
+        it("dedups snapshot nodes against existing live nodes (live version wins)", () => {
+            const start = seed([md("shared", "live-content"), md("live-only")]);
+            const r = update(start, {
+                type: "HistoryRestored",
+                fromSnapshot: true,
+                nodes: [md("shared", "snap-content"), md("snap-only")],
+            });
+            // "shared" stays as the live version (existing node unchanged);
+            // snap-only prepends; live-only stays.
+            expect(r.state.nodes.map((n) => n.id)).toEqual(["snap-only", "shared", "live-only"]);
+            const sharedNode = r.state.nodes.find((n) => n.id === "shared") as any;
+            expect(sharedNode.content).toBe("live-content");
+            // Audit event counts only the freshly-prepended snapshot nodes.
+            expect(r.events).toEqual([{ type: "history-restored", restoredCount: 1, fromSnapshot: true }]);
+        });
+
+        it("empty restore is allowed and still flips sessionPhase to active", () => {
+            const start = seed([md("live")]);
+            const r = update(start, { type: "HistoryRestored", fromSnapshot: true, nodes: [] });
+            expect(r.state.nodes.map((n) => n.id)).toEqual(["live"]);
+            expect(r.state.sessionPhase).toBe("active");
+        });
+
+        it("subsequent StreamFlush appends on top of restored nodes", () => {
+            const s0 = update(initialState(), {
+                type: "HistoryRestored",
+                fromSnapshot: true,
+                nodes: [md("r1"), md("r2")],
+            }).state;
+            const s1 = update(s0, {
+                type: "StreamFlush",
+                newNodes: [md("live")],
+                updatedNodes: [],
+            }).state;
+            expect(s1.nodes.map((n) => n.id)).toEqual(["r1", "r2", "live"]);
+        });
+    });
+
     describe("StreamFlush", () => {
         it("appends new nodes", () => {
             const r = update(initialState(), {

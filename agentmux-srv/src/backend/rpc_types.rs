@@ -376,6 +376,8 @@ pub const COMMAND_PANE_OPEN: &str = "pane.open";
 // App API Tier 1 — blockfile pagination commands
 pub const COMMAND_BLOCKFILE_LINE_COUNT: &str = "blockfile:line_count";
 pub const COMMAND_BLOCKFILE_READ_RANGE: &str = "blockfile:read_range";
+pub const COMMAND_BLOCKFILE_READ_STATE: &str = "blockfile:read_state";
+pub const COMMAND_BLOCKFILE_WRITE_STATE: &str = "blockfile:write_state";
 
 // App API Tier 1 — session archival commands
 pub const COMMAND_SESSION_ARCHIVE: &str = "session:archive";
@@ -933,6 +935,44 @@ pub struct CommandBlockfileReadRangeData {
 pub struct BlockfileReadRangeResult {
     pub lines: Vec<String>,
     pub total: u64,
+}
+
+/// Request for blockfile:read_state — read a sidecar JSON file
+/// (e.g. `output.state.json`) associated with a block.
+/// Spec: docs/specs/SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandBlockfileReadStateData {
+    pub block_id: String,
+    /// Sidecar filename — e.g. "output.state.json". Resolved within the
+    /// block's filestore directory; must not contain path separators.
+    pub filename: String,
+}
+
+/// Response from blockfile:read_state. `content` is the raw file bytes
+/// as a UTF-8 string, or null if the sidecar does not exist.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct BlockfileReadStateResult {
+    pub content: Option<String>,
+}
+
+/// Request for blockfile:write_state — atomically write a sidecar JSON
+/// file for a block. Uses tmp + fsync + rename to guarantee partial
+/// writes never surface to readers.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandBlockfileWriteStateData {
+    pub block_id: String,
+    pub filename: String,
+    pub content: String,
+}
+
+/// Response from blockfile:write_state.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct BlockfileWriteStateResult {
+    pub bytes_written: u64,
 }
 
 // ---- Session digest types ----

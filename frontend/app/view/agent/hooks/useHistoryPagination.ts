@@ -62,6 +62,11 @@ export interface UseHistoryPagination {
 
 const PAGE_SIZE = 200;
 
+/** Sidecar filename for reducer-state snapshots, sibling to "output". */
+export const SNAPSHOT_FILENAME = "output.state.json";
+/** Current snapshot schema version. Bump on any breaking shape change. */
+export const SNAPSHOT_SCHEMA_VERSION = 1;
+
 export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHistoryPagination {
     const [historyOffset, setHistoryOffset] = createSignal(0);
     const [historyTotal, setHistoryTotal] = createSignal(0);
@@ -129,6 +134,49 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
         // sends while history is still loading.
         dispatchPane(opts.blockId, { type: "InitStart" });
         (async () => {
+            // Fast path: try the reducer-state snapshot first. If it exists
+            // and the schema version matches, restore wholesale and skip
+            // the lossy 200-line NDJSON replay. Spec
+            // docs/specs/SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md §4.4.
+            try {
+                const stateResp = await RpcApi.BlockfileReadStateCommand(TabRpcClient, {
+                    block_id: opts.blockId,
+                    filename: SNAPSHOT_FILENAME,
+                }, { timeout: 5000 });
+                if (!mounted) return;
+                if (stateResp.content) {
+                    const snapshot = JSON.parse(stateResp.content);
+                    if (snapshot && snapshot.schemaVersion === SNAPSHOT_SCHEMA_VERSION && Array.isArray(snapshot.nodes)) {
+                        dispatchDoc(opts.blockId, { type: "HistoryRestored", fromSnapshot: true, nodes: snapshot.nodes });
+
+                        const offset = typeof snapshot.historyOffset === "number" && snapshot.historyOffset >= 0
+                            ? snapshot.historyOffset
+                            : 0;
+                        setHistoryOffset(offset);
+                        setHistoryTotal(typeof snapshot.highWaterMark === "number" ? snapshot.highWaterMark : snapshot.nodes.length);
+                        opts.log(
+                            "history",
+                            `restored ${snapshot.nodes.length} nodes from snapshot ` +
+                                `(savedAt=${snapshot.savedAt ?? "unknown"}, loadOlder offset=${offset})`,
+                        );
+                        dispatchPane(opts.blockId, { type: "InitReady" });
+                        return;
+                    }
+                    opts.log(
+                        "history",
+                        `snapshot schema mismatch (got v${snapshot?.schemaVersion}); falling back to NDJSON replay`,
+                        "warn",
+                    );
+                }
+            } catch (err: any) {
+                // Most common: snapshot doesn't exist yet — silent fall-through.
+                // Anything else logs but still falls through to NDJSON.
+                const reason = err?.message ?? String(err);
+                if (!/not\s*found|no\s*such|enoent/i.test(reason)) {
+                    opts.log("history", `snapshot read failed: ${reason}; falling back to NDJSON replay`, "warn");
+                }
+                if (!mounted) return;
+            }
             try {
                 const countResp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
                     block_id: opts.blockId,
