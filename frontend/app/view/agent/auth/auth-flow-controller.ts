@@ -243,13 +243,18 @@ export class AuthFlowController {
             accountName,
         });
         try {
-            const { bundleId } = await this.rpc.submitApiKey({
+            // PR C-1 reducer extension: ApiKeyAccepted now transitions
+            // to `authenticated`, not `ready`. The user names + saves
+            // the bundle in the SaveBundle panel (same 2-phase as OAuth).
+            // TODO PR C-2: backend `auth.submitapikey` will surface the
+            // validated email here instead of synthesizing a bundleId.
+            await this.rpc.submitApiKey({
                 providerId: s.providerId,
                 intoBundleId: s.bundleId || undefined,
                 apiKey,
                 accountName,
             });
-            this.dispatch({ type: "ApiKeyAccepted", bundleId });
+            this.dispatch({ type: "ApiKeyAccepted", email: accountName });
         } catch (e) {
             const synthSessionId = "apikey-submit-failed";
             this.dispatch({ type: "SessionStarted", sessionId: synthSessionId });
@@ -259,6 +264,25 @@ export class AuthFlowController {
                 status: { status: "failed", error: errMsg(e) },
             });
         }
+    }
+
+    /** Surface a view-side connect-prep failure (e.g. `ResolveCli`
+     *  threw before we could call `auth.start`) as a `failed` state.
+     *  Without this, an empty cliPath would propagate to the backend
+     *  and produce a misleading "CLI not found at ''" message
+     *  (reagent P1 on #847). */
+    failConnect(error: unknown): void {
+        const message = error instanceof Error ? error.message : String(error);
+        if (this.state().kind !== "waiting") {
+            this.dispatch({ type: "ConnectClicked" });
+        }
+        const synthSessionId = "cli-resolve-failed";
+        this.dispatch({ type: "SessionStarted", sessionId: synthSessionId });
+        this.dispatch({
+            type: "Polled",
+            sessionId: synthSessionId,
+            status: { status: "failed", error: message },
+        });
     }
 
     dispose(): void {

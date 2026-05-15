@@ -27,12 +27,19 @@
 
 /** Mirrors the wire `AuthSessionStatus` from
  *  `agentmux-srv/src/identity/auth_session.rs` (camelCase via
- *  `rename_all_fields`). Pulled inline here as a TS type because the
- *  Rust enum doesn't currently surface in `gotypes.d.ts`. */
+ *  `rename_all_fields`).
+ *
+ *  Two terminal-ish variants:
+ *  - `authenticated`: CLI auth confirmed but no bundle row exists yet.
+ *    User chooses a name → frontend fires `auth.savebundle` → backend
+ *    transitions to `success` with the real bundleId.
+ *  - `success`: post-save final state, bundleId is the real row id.
+ */
 export type AuthSessionStatusWire =
     | { status: "pending" }
     | { status: "url-available"; authUrl: string }
     | { status: "code-emitted"; deviceCode: string; verificationUrl: string }
+    | { status: "authenticated"; email: string | null }
     | { status: "success"; bundleId: string; email: string | null }
     | { status: "failed"; error: string };
 
@@ -48,21 +55,46 @@ export type SelectionOutcome =
 export interface AuthState {
     /** Terminal flag set by `Disposed`. Post-close commands are no-ops. */
     closed: boolean;
-    /** What the view should render. The `unauthenticated` and
-     *  `expired` kinds drive different copy in the inline CTA. */
-    kind: "idle" | "unauthenticated" | "waiting" | "ready" | "expired" | "failed";
+    /**
+     * What the view should render.
+     * - `idle`: pre-selection, view has not dispatched `Selected` yet.
+     * - `unauthenticated`: Connect CTA visible. Launch disabled.
+     * - `waiting`: OAuth/api-key RPC in flight, CLI running. Cancel button.
+     * - `authenticated`: CLI auth done, awaiting `SaveBundleClicked`. SaveBundle panel.
+     * - `saving`: `auth.savebundle` RPC in flight. Spinner.
+     * - `ready`: bundle row exists in DB. Launch enabled.
+     * - `expired`: bundle has provider account but creds stale. "Re-authenticate" CTA.
+     * - `failed`: terminal failure. FailedBanner with Retry.
+     *
+     * See `docs/specs/SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14.md` §4.
+     */
+    kind:
+        | "idle"
+        | "unauthenticated"
+        | "waiting"
+        | "authenticated"
+        | "saving"
+        | "ready"
+        | "expired"
+        | "failed";
     /** Selected provider id ("claude", "codex", "openclaw", ...). */
     providerId: string;
     /** Selected identity bundle id. Empty when no bundle picked OR
      *  blank singleton (`needs-bundle`). */
     bundleId: string;
-    /** Active backend session id when `kind === "waiting"`. */
+    /** When the connect is a "re-auth" or "add account" flow, the
+     *  existing bundle id to update on save. Empty = create new bundle. */
+    intoBundleId: string;
+    /** Active backend session id when `kind === "waiting" | "authenticated" | "saving"`. */
     sessionId: string;
     /** Captured OAuth URL — surface in the inline panel if the
      *  browser didn't open. */
     authUrl: string;
     /** Captured device-flow code (Copilot path). */
     deviceCode: { code: string; verificationUrl: string } | null;
+    /** Email captured from the auth-success line (OAuth) or accountName
+     *  (API-key). The view uses this to prefill the SaveBundle name input. */
+    email: string;
     /** Last error message — populated on `Failed` so the inline
      *  banner can render it. Cleared by the next selection or
      *  connect attempt. */
@@ -74,9 +106,11 @@ export const initialState = (): AuthState => ({
     kind: "idle",
     providerId: "",
     bundleId: "",
+    intoBundleId: "",
     sessionId: "",
     authUrl: "",
     deviceCode: null,
+    email: "",
     error: "",
 });
 
@@ -131,10 +165,30 @@ export type AuthCommand =
      */
     | { type: "ApiKeySubmitted"; apiKey: string; accountName: string }
     /**
-     * Backend confirmed an API-key bundle creation. Mirrors
-     * `Polled { status: "success" }` for the API-key path.
+     * Backend confirmed an API-key validation (key works). Transitions
+     * to `authenticated`. The bundle row is created on the subsequent
+     * `SaveBundleClicked` step — same 2-phase shape as OAuth.
      */
-    | { type: "ApiKeyAccepted"; bundleId: string }
+    | { type: "ApiKeyAccepted"; email: string }
+    /**
+     * User confirmed the bundle name in the SaveBundle panel. View
+     * fires `auth.savebundle` RPC on the emitted event. Transitions
+     * to `saving`. Reagent-pinned: only honored from `authenticated`.
+     */
+    | { type: "SaveBundleClicked"; name: string }
+    /**
+     * `auth.savebundle` RPC returned successfully. The bundle row +
+     * account row + binding row are persisted. Transitions to
+     * `ready` with the real bundleId. Only honored from `saving`.
+     */
+    | { type: "BundleSaved"; bundleId: string }
+    /**
+     * `auth.savebundle` RPC failed (e.g. UNIQUE constraint on bundle
+     * name, transaction error). Transitions back to `authenticated`
+     * (preserves email / sessionId so the user can edit the name and
+     * retry). Only honored from `saving`.
+     */
+    | { type: "BundleSaveFailed"; error: string }
     /**
      * Modal close / unmount. Idempotent.
      */
@@ -155,6 +209,21 @@ export type AuthEvent =
           code: string;
           verificationUrl: string;
       }
+    /** CLI authenticated; SaveBundle panel should appear. Email is the
+     *  account identifier captured from the provider (best-effort). */
+    | { type: "authenticated"; email: string }
+    /** User clicked Save with `name`; controller should fire
+     *  `auth.savebundle` RPC against `sessionId`. */
+    | {
+          type: "save-bundle-requested";
+          sessionId: string;
+          intoBundleId: string;
+          name: string;
+      }
+    /** Save RPC succeeded — bundle id now exists in `db_identities`. */
+    | { type: "bundle-saved"; bundleId: string }
+    /** Save RPC failed — name conflict, DB error, etc. */
+    | { type: "bundle-save-failed"; error: string }
     | { type: "succeeded"; bundleId: string; email: string | null }
     | { type: "failed"; error: string }
     | { type: "cancel-requested"; sessionId: string }
@@ -166,7 +235,7 @@ export type AuthEvent =
           apiKey: string;
           accountName: string;
       }
-    | { type: "api-key-accepted"; bundleId: string }
+    | { type: "api-key-accepted"; email: string }
     | { type: "disposed" }
     | { type: "post-close-command-dropped"; commandType: string };
 
@@ -200,14 +269,23 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
     switch (command.type) {
         case "Selected": {
             const nextKind = selectionKind(command.outcome);
+            // Derive intoBundleId from outcome: re-auth (`expired`) and
+            // add-account (`needs-account`) flows save into the existing
+            // bundle row; `needs-bundle` (blank) creates new.
+            const intoBundleId =
+                command.outcome === "expired" || command.outcome === "needs-account"
+                    ? command.bundleId
+                    : "";
             const next: AuthState = {
                 ...state,
                 providerId: command.providerId,
                 bundleId: command.bundleId,
                 kind: nextKind,
+                intoBundleId,
                 sessionId: "",
                 authUrl: "",
                 deviceCode: null,
+                email: "",
                 error: "",
             };
             // Idempotency: same provider+bundle+outcome → no event.
@@ -322,7 +400,14 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
         }
 
         case "CancelClicked": {
-            if (state.kind !== "waiting" || state.sessionId === "") {
+            // PR C-1: also allow cancel from `authenticated` (S21:
+            // user changed their mind in the SaveBundle panel — backend
+            // session is still alive until savebundle commits, so we
+            // need to tell the backend to drop it).
+            if (
+                (state.kind !== "waiting" && state.kind !== "authenticated") ||
+                state.sessionId === ""
+            ) {
                 return {
                     state,
                     events: [
@@ -340,6 +425,7 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
                     sessionId: "",
                     authUrl: "",
                     deviceCode: null,
+                    email: "",
                 },
                 events: [{ type: "cancel-requested", sessionId: state.sessionId }],
             };
@@ -414,8 +500,7 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
             // the reducer is still in `waiting` for this submit. If
             // the user picked a different bundle or cancelled during
             // the API-key RPC await, kind has left `waiting` — a late
-            // accept would otherwise flip state to `ready` with the
-            // wrong (stale) bundleId.
+            // accept would otherwise flip state forward with stale data.
             if (state.kind !== "waiting") {
                 return {
                     state,
@@ -427,17 +512,92 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
                     ],
                 };
             }
+            // PR C-1: api-key path now ALSO goes through `authenticated`
+            // → SaveBundleClicked → BundleSaved → ready (same 2-phase
+            // as OAuth) so the user gets to name the bundle. Backend
+            // `auth.submitapikey` validates the key but no longer
+            // persists the bundle row.
+            return {
+                state: {
+                    ...state,
+                    kind: "authenticated",
+                    email: command.email,
+                    authUrl: "",
+                    deviceCode: null,
+                    error: "",
+                },
+                events: [{ type: "api-key-accepted", email: command.email }],
+            };
+        }
+
+        case "SaveBundleClicked": {
+            if (state.kind !== "authenticated") {
+                return {
+                    state,
+                    events: [
+                        {
+                            type: "post-close-command-dropped",
+                            commandType: "SaveBundleClicked",
+                        },
+                    ],
+                };
+            }
+            return {
+                state: { ...state, kind: "saving", error: "" },
+                events: [
+                    {
+                        type: "save-bundle-requested",
+                        sessionId: state.sessionId,
+                        intoBundleId: state.intoBundleId,
+                        name: command.name,
+                    },
+                ],
+            };
+        }
+
+        case "BundleSaved": {
+            if (state.kind !== "saving") {
+                return {
+                    state,
+                    events: [
+                        {
+                            type: "post-close-command-dropped",
+                            commandType: "BundleSaved",
+                        },
+                    ],
+                };
+            }
             return {
                 state: {
                     ...state,
                     kind: "ready",
                     bundleId: command.bundleId,
                     sessionId: "",
-                    authUrl: "",
-                    deviceCode: null,
                     error: "",
                 },
-                events: [{ type: "api-key-accepted", bundleId: command.bundleId }],
+                events: [{ type: "bundle-saved", bundleId: command.bundleId }],
+            };
+        }
+
+        case "BundleSaveFailed": {
+            if (state.kind !== "saving") {
+                return {
+                    state,
+                    events: [
+                        {
+                            type: "post-close-command-dropped",
+                            commandType: "BundleSaveFailed",
+                        },
+                    ],
+                };
+            }
+            // Return to `authenticated` so the user can edit the name
+            // (e.g. resolve a name-collision) and retry. Keep sessionId
+            // + email so the next SaveBundleClicked can fire savebundle
+            // against the same backend session.
+            return {
+                state: { ...state, kind: "authenticated", error: command.error },
+                events: [{ type: "bundle-save-failed", error: command.error }],
             };
         }
 
@@ -491,7 +651,30 @@ function foldPolled(state: AuthState, status: AuthSessionStatusWire): ReducerRes
                 ],
             };
         }
+        case "authenticated": {
+            // CLI auth confirmed but no bundle row yet. Transition
+            // into `authenticated`, capture email for the SaveBundle
+            // panel's prefill. Session id stays — it's needed for
+            // the subsequent `auth.savebundle` RPC.
+            const email = status.email ?? "";
+            return {
+                state: {
+                    ...state,
+                    kind: "authenticated",
+                    email,
+                    authUrl: "",
+                    deviceCode: null,
+                    error: "",
+                },
+                events: [{ type: "authenticated", email }],
+            };
+        }
         case "success": {
+            // Post-save terminal: bundle row exists. Reachable from
+            // the API-key fast path (where the backend persists in
+            // the same RPC) or as a defensive late-Polled landing
+            // after BundleSaved. The OAuth path goes through
+            // `authenticated` → SaveBundleClicked → BundleSaved → ready.
             return {
                 state: {
                     ...state,

@@ -183,19 +183,30 @@ describe("AuthFlowController", () => {
         });
     });
 
-    it("submitApiKey() transitions to ready on success", async () => {
+    it("submitApiKey() transitions to authenticated (2-phase, PR C-1)", async () => {
+        // PR C-1 reducer extension: api-key path now mirrors OAuth —
+        // backend validates the key but the controller dispatches
+        // ApiKeyAccepted which transitions to `authenticated`. User
+        // names + saves the bundle in the SaveBundle panel.
+        // Backend bundle persistence moves to PR C-2's auth.savebundle.
         await createRoot(async (dispose) => {
             const timers = fakeTimers();
             const ctrl = new AuthFlowController({
                 rpc: fakeRpc({
-                    submitApiKey: async () => ({ bundleId: "key-bundle" }),
+                    submitApiKey: async () => ({ bundleId: "ignored-until-c2" }),
                 }),
                 timers,
             });
             ctrl.selected("openclaw", "", "needs-bundle");
-            await ctrl.submitApiKey("sk-test", "default");
-            expect(ctrl.state().kind).toBe("ready");
-            expect(ctrl.state().bundleId).toBe("key-bundle");
+            await ctrl.submitApiKey("sk-test", "my-key-account");
+            expect(ctrl.state().kind).toBe("authenticated");
+            // Until C-2, controller passes accountName as the email
+            // placeholder so the SaveBundle prefill has something to
+            // show. C-2 will replace this with backend-surfaced email.
+            expect(ctrl.state().email).toBe("my-key-account");
+            // bundleId stays empty — only set when BundleSaved fires
+            // after auth.savebundle commits.
+            expect(ctrl.state().bundleId).toBe("");
             dispose();
         });
     });
