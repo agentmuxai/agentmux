@@ -325,6 +325,29 @@ export class AuthFlowController {
         }
     }
 
+    /** Surface a view-side connect-prep failure (e.g. `ResolveCli`
+     *  threw before `auth.start` could fire) as a `failed` state.
+     *  Goes through ConnectClicked → SessionStarted(synthetic) →
+     *  Polled(failed). PR C-1's `ConnectFailed` command supersedes
+     *  this with a single dispatch from any kind; until that ships
+     *  the synthesize-via-Polled pattern is what we have. Reagent P1
+     *  on #847 round 5 caught a regression that removed this method
+     *  during an earlier merge. */
+    failConnect(error: unknown): void {
+        const message = error instanceof Error ? error.message : String(error);
+        const k = this.state().kind;
+        if (k === "unauthenticated" || k === "expired" || k === "failed") {
+            this.dispatch({ type: "ConnectClicked" });
+        }
+        const synthSessionId = "cli-resolve-failed";
+        this.dispatch({ type: "SessionStarted", sessionId: synthSessionId });
+        this.dispatch({
+            type: "Polled",
+            sessionId: synthSessionId,
+            status: { status: "failed", error: message },
+        });
+    }
+
     dispose(): void {
         // Fire-and-forget auth.cancel for any in-flight session so we
         // don't leave an orphan CLI subprocess on the backend.

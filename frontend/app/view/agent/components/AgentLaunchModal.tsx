@@ -408,7 +408,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                      * trusted (PR B-4 / D will tighten this with a
                      * per-bundle binding lookup).
                      */}
-                    <Show when={authRequired() && !isContinue()}>
+                    <Show when={authRequired()}>
                         <PreLaunchAuthPanel
                             provider={provider()}
                             identityId={identityId}
