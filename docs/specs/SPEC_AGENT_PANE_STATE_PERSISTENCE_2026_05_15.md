@@ -141,7 +141,7 @@ useHistoryPagination.onMount:
   }
 ```
 
-`HistoryRestored` is a **full replace** of `nodes[]` (vs `HistoryLoaded` which prepends a partial chunk). The `fromSnapshot: true` discriminator lets the view layer distinguish snapshot restore from partial pagination and skip the "Loading older messages" affordance.
+`HistoryRestored` prepends snapshot nodes onto current state with id-dedup (same semantics as `HistoryLoaded`), and additionally flips `sessionPhase` directly to `"active"`. The prepend semantics — rather than a full replace — are necessary because `useAgentStream` subscribes to the live event subject in the same component mount; `StreamFlush` can land before the async `BlockfileReadStateCommand` resolves, and a full replace would wipe those live arrivals (codex P1 on round 4). On id collision the existing (live) node wins; the snapshot's stale copy is dropped. The `fromSnapshot: true` discriminator lets the view layer distinguish snapshot restore from partial pagination and skip the "Loading older messages" affordance.
 
 ### 4.6 Backend RPCs
 

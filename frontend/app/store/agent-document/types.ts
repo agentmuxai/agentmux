@@ -58,14 +58,17 @@ export type AgentDocumentCommand =
     /** Persisted history (older messages from blockfile) — prepended. */
     | { type: "HistoryLoaded"; nodes: DocumentNode[] }
     /**
-     * Full-replace restore from a snapshot file
-     * (`output.state.json`). Unlike `HistoryLoaded` (prepend with dedup),
-     * this replaces `nodes[]` wholesale because the snapshot IS the
-     * authoritative pre-close reducer state.
+     * Restore from a snapshot file (`output.state.json`). Semantically
+     * identical to `HistoryLoaded` (prepend with id-dedup), with one
+     * additional effect: `sessionPhase` jumps directly to `"active"`
+     * because the snapshot represents the full pre-close history —
+     * there is no further history to page in.
      *
-     * `sessionPhase` jumps directly to `"active"` — there is no further
-     * history to load. Subsequent live-stream events `StreamFlush` on top
-     * of the restored nodes via the normal id-collision merge path.
+     * Why prepend (not full-replace): `useAgentStream` may dispatch
+     * `StreamFlush` during the async snapshot read window. A full
+     * replace would wipe those live arrivals. Codex P1 on PR #877
+     * round 4. Existing nodes (live arrivals) win on id collision; the
+     * snapshot version is dropped.
      *
      * `fromSnapshot: true` is a discriminator field per spec §4.5 — the
      * view layer reads it from the audit event (history-restored) to
