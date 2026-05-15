@@ -164,6 +164,15 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         // and let the next refetch (on dropdown change or modal
         // reopen) load the row. The bundle id alone is what the
         // launch payload needs.
+        //
+        // Codex P2 on #847 round 9: defense-in-depth — `PreLaunchAuthPanel`
+        // already filters `pending-bundle-for-...` placeholders before
+        // invoking this callback, but guard here too so any future
+        // call site that bypasses the panel filter can't poison the
+        // dropdown with a non-existent bundle row.
+        if (!bundleId || bundleId === "blank" || bundleId.startsWith("pending-bundle-for-")) {
+            return;
+        }
         setIdentityId(bundleId);
     };
     const provider = createMemo(() => getProvider(props.agent.provider));
