@@ -421,14 +421,18 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
         }
 
         case "CancelClicked": {
-            // PR C-1: also allow cancel from `authenticated` (S21:
-            // user changed their mind in the SaveBundle panel — backend
+            // PR C-1 (S21): also allow cancel from `authenticated` —
+            // user changed their mind in the SaveBundle panel; backend
             // session is still alive until savebundle commits, so we
-            // need to tell the backend to drop it).
-            if (
-                (state.kind !== "waiting" && state.kind !== "authenticated") ||
-                state.sessionId === ""
-            ) {
+            // need to tell the backend to drop it.
+            //
+            // Reagent P1 on #850: allow cancel from `waiting` even when
+            // sessionId === "" — that's the startup window between
+            // ConnectClicked and SessionStarted (auth.start in flight).
+            // The controller bumps actionToken so the pending start's
+            // stale-token gate fires and the orphan SessionStarted is
+            // dropped. User's cancel intent always wins.
+            if (state.kind !== "waiting" && state.kind !== "authenticated") {
                 return {
                     state,
                     events: [
