@@ -175,10 +175,7 @@ export class AuthFlowController {
         // running until timeout because `Selected` wipes `sessionId`
         // and dispose()/cancel() can't find it anymore.
         const prev = this.state();
-        if (
-            (prev.kind === "waiting" || prev.kind === "authenticated") &&
-            prev.sessionId !== ""
-        ) {
+        if (prev.kind === "waiting" && prev.sessionId !== "") {
             void this.rpc.cancel(prev.sessionId).catch(() => {});
         }
         // Bump the action token so any in-flight RPC completions for
