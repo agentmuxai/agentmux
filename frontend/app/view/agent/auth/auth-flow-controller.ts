@@ -206,7 +206,7 @@ export class AuthFlowController {
         try {
             const { sessionId, authUrl } = await this.rpc.start({
                 providerId: s.providerId,
-                intoBundleId: s.bundleId || undefined,
+                intoBundleId: s.intoBundleId || undefined,
                 cliPath: cli.cliPath,
                 authLoginArgs: cli.authLoginArgs,
                 authCheckArgs: cli.authCheckArgs,
@@ -332,7 +332,7 @@ export class AuthFlowController {
         try {
             const { bundleId } = await this.rpc.submitApiKey({
                 providerId: s.providerId,
-                intoBundleId: s.bundleId || undefined,
+                intoBundleId: s.intoBundleId || undefined,
                 apiKey,
                 accountName,
             });
@@ -364,10 +364,12 @@ export class AuthFlowController {
 
     /** Surface a view-side connect-prep failure (e.g. `ResolveCli`
      *  threw before `auth.start` could fire) as a `failed` state.
-     *  Uses the dedicated `ConnectFailed` command (PR C-1 reducer
-     *  extension) which is honored from any non-terminal kind, so
-     *  the error always surfaces in the FailedBanner regardless of
-     *  which state the user was in. */
+     *  Uses the `ConnectFailed` command, which the reducer honors
+     *  only from connect-attempt kinds (`unauthenticated`/`expired`/
+     *  `failed`/`waiting`). If the user has already moved to
+     *  `authenticated`/`saving`/`ready`/`idle`, a stale rejection from
+     *  an abandoned connect is dropped instead of clobbering the
+     *  newer state — codex P2 on #853 round 7. */
     failConnect(error: unknown): void {
         const message = error instanceof Error ? error.message : String(error);
         this.dispatch({ type: "ConnectFailed", error: message });
