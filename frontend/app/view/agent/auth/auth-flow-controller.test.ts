@@ -155,6 +155,51 @@ describe("AuthFlowController", () => {
         });
     });
 
+    it("cancel() during startup window drops in-flight auth.start", async () => {
+        // Reagent P1 on #850: when the user clicks Cancel after
+        // ConnectClicked dispatched but before SessionStarted (auth.start
+        // still in flight, sessionId === ""), cancel must bump
+        // actionToken so the pending start's stale-token gate fires
+        // and SessionStarted is never dispatched.
+        await createRoot(async (dispose) => {
+            const timers = fakeTimers();
+            let startCancelCalls = 0;
+            let resolveStart: ((v: { sessionId: string }) => void) | null = null;
+            const ctrl = new AuthFlowController({
+                rpc: fakeRpc({
+                    start: () =>
+                        new Promise<{ sessionId: string }>((resolve) => {
+                            resolveStart = resolve;
+                        }),
+                    cancel: async () => {
+                        startCancelCalls += 1;
+                    },
+                }),
+                timers,
+            });
+            ctrl.selected("claude", "", "needs-bundle");
+            const connectP = ctrl.connect({
+                cliPath: "/x",
+                authLoginArgs: [],
+                authCheckArgs: [],
+            });
+            // We are now in the startup window: kind="waiting",
+            // sessionId="". User cancels.
+            expect(ctrl.state().kind).toBe("waiting");
+            expect(ctrl.state().sessionId).toBe("");
+            await ctrl.cancel();
+            expect(ctrl.state().kind).toBe("unauthenticated");
+            // Now resolve auth.start. The connect()'s stale-token gate
+            // must fire, cancel the orphan session, and bail before
+            // dispatching SessionStarted.
+            resolveStart!({ sessionId: "orphan-s1" });
+            await connectP;
+            expect(ctrl.state().kind).toBe("unauthenticated");
+            expect(startCancelCalls).toBe(1);
+            dispose();
+        });
+    });
+
     it("submitCallback() invokes backend with active sessionId", async () => {
         await createRoot(async (dispose) => {
             const timers = fakeTimers();
