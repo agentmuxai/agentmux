@@ -1,0 +1,30 @@
+---
+type: patch
+---
+
+fix(linux): multi-window pane crash + new-window invisibility
+
+Two related Linux-only correctness fixes that only surface with more than
+one top-level window:
+
+- **Pane crash in 2nd/3rd window** (`browser_pane/creation_views.rs`):
+  opening a browser pane in any non-first window FATAL-crashed the CEF host
+  with `observer_list.h:318 NOTREACHED — Observers can only be added once!`.
+  Root cause: every isolated `RequestContext` yields a different `Profile*`
+  pointer but they share one `ThemeService` instance (chrome's
+  `ThemeServiceFactory` redirects to the original profile). The pane passed
+  `None` for `request_context` → different `Profile*` than the parent
+  window's main browser → `CefWidgetImpl::AddAssociatedProfile` map miss →
+  re-`AddObserver` on the shared `ThemeService`. Fix: pane reuses the
+  parent window's `RequestContext` via
+  `state.get_browser(window_label).host().request_context()`.
+
+- **"New Window" creates a CEF browser but no OS window appears**
+  (`ui_tasks.rs`): with at least one pane open,
+  `state.first_browser()`'s HashMap iteration order could pick a pane
+  browser. The new window inherited its `is_browser_pane=true` client.
+  `on_load_end`'s pane early-return then skipped the `window.show()`
+  call. Fix: filter `list_browsers()` to a top-level (non-pane) browser
+  when picking the client to reuse.
+
+Spec: `docs/specs/multi-window-pane-and-newwindow-fixes-linux-2026-05-15.md`

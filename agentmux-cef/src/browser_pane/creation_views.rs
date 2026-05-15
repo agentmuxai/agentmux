@@ -137,14 +137,40 @@ pub fn create_browser_pane_view(
 
     let url_cef = CefString::from(url.as_str());
 
-    // 5. Create the BrowserView. Underlying Browser is constructed lazily on
+    // 5. Resolve the parent window's RequestContext. Critical for the
+    //    multi-window observer-list crash fix (see spec
+    //    docs/specs/pane-shares-window-request-context-linux-2026-05-13.md):
+    //    every isolated RequestContext yields a different `Profile*` pointer
+    //    but they all share one `ThemeService` instance (chrome's
+    //    `ThemeServiceFactory` redirects to the original profile). The pane
+    //    used to pass `None` here, getting the global default Profile —
+    //    different from the parent window's Profile — and
+    //    `CefWidgetImpl::AddAssociatedProfile` would then re-add the widget
+    //    as an observer of the shared ThemeService, tripping the
+    //    "Observers can only be added once!" CHECK and FATAL-crashing the
+    //    host. Reusing the parent window's RequestContext means the
+    //    pane's Profile matches the window's main browser's Profile, so
+    //    the map check fires and AddObserver is skipped.
+    let parent_request_context = state
+        .get_browser(&window_label)
+        .and_then(|b| b.host())
+        .and_then(|h| h.request_context());
+    tracing::info!(
+        block_id = %block_id, label = %label,
+        window_label = %window_label,
+        has_parent_context = parent_request_context.is_some(),
+        "[browser-pane] views: resolved parent window's RequestContext"
+    );
+    let mut request_context = parent_request_context;
+
+    // 6. Create the BrowserView. Underlying Browser is constructed lazily on
     //    AddedToWidget below.
     let pane_view = match browser_view_create(
         client.as_mut(),
         Some(&url_cef),
         Some(&settings),
         None,
-        None,
+        request_context.as_mut(),
         Some(&mut view_delegate),
     ) {
         Some(v) => v,
@@ -161,7 +187,7 @@ pub fn create_browser_pane_view(
         "[browser-pane] views: browser_view_create succeeded"
     );
 
-    // 6. Add as an OVERLAY (not a regular child). Overlays are positioned
+    // 7. Add as an OVERLAY (not a regular child). Overlays are positioned
     //    via OverlayController::set_bounds rather than the parent's layout,
     //    so they cohabit cleanly with the host UI's full-window BrowserView.
     //    DockingMode::CUSTOM tells CEF "don't auto-dock, I'll set bounds
