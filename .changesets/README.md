@@ -12,8 +12,10 @@ Multiple agents commit to this repo concurrently. When every PR ran
 "version downgrade P1" finding from reagent fired on every forward-merge.
 
 Changesets fix this: a feature PR adds **one new file** with a unique name
-(`<timestamp>-<slug>.md`). That file never conflicts with another PR's
-changeset. The version bump happens once, in a dedicated release commit.
+(`<timestamp>-<slug>-<rand4>.md` — the 4-char random suffix prevents the rare
+case where two agents create a changeset in the same second with the same
+slug). That file never conflicts with another PR's changeset. The version
+bump happens once, in a dedicated release commit.
 
 ## Author flow (in a feature PR)
 
@@ -61,6 +63,38 @@ touches `package.json` / `Cargo.toml` / lockfiles.
 ## What if I'm fixing a small thing and don't need a release?
 
 Then don't add a changeset. The PR ships without forcing a version bump.
+
+## Escape hatch: local-only version bumps for build labels
+
+When iterating on a feature, you may want to bump the version locally so
+your build artifacts (e.g. `agentmux-0.33.897-x64-portable.zip`) are
+distinguishable from the previous build on disk for side-by-side comparison.
+That's fine — the changesets pattern only governs what hits a PR's commit
+history, not what you do on your own checkout.
+
+**Recommended:**
+
+```bash
+task package:local           # patch bump (default)
+task package:local -- minor  # or minor / major
+```
+
+This temporarily bumps the version, runs `task package`, and **restores all
+version files to their original content on exit** — including on Ctrl-C or
+build failure. Zero git mutation. The artifact lands on Desktop with the
+bumped-label filename you can compare against the previous build.
+
+**If you need the raw `bump` for some reason:**
+
+```bash
+bump patch -m "local: smoke" --commit
+task package
+git reset --hard HEAD~1      # discard the bump commit before pushing
+```
+
+**Don't** push a `chore: bump version` commit from your feature branch —
+it'll cause the same version-conflict mess the changesets pattern is
+designed to avoid. The release PR owns canonical version bumps.
 
 ## Conflict surface comparison
 

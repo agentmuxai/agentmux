@@ -48,16 +48,19 @@ fi
 DIR="$REPO_ROOT/.changesets"
 mkdir -p "$DIR"
 
-# Build a filename: <unix-ts>-<slug-of-description>.md
+# Build a filename: <unix-ts>-<slug>-<rand4>.md
 # Slug: lowercase, replace anything non-alphanumeric with `-`, collapse, trim.
+# rand4 suffix: codex P2 on #865 — two agents running this in the same second
+# with the same slug would otherwise overwrite each other's changeset.
 TS="$(date +%s)"
 SLUG="$(printf '%s' "$DESC" \
     | tr '[:upper:]' '[:lower:]' \
     | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' \
     | cut -c1-60)"
 [[ -z "$SLUG" ]] && SLUG="change"
+RAND="$(head -c 100 /dev/urandom | tr -dc 'a-z0-9' | head -c 4)"
 
-FILE="$DIR/${TS}-${SLUG}.md"
+FILE="$DIR/${TS}-${SLUG}-${RAND}.md"
 
 cat >"$FILE" <<EOF
 ---
