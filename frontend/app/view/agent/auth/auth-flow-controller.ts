@@ -175,7 +175,17 @@ export class AuthFlowController {
         // running until timeout because `Selected` wipes `sessionId`
         // and dispose()/cancel() can't find it anymore.
         const prev = this.state();
-        if (prev.kind === "waiting" && prev.sessionId !== "") {
+        // #853 also covers `authenticated` and `saving` — same
+        // orphan-CLI hazard: OAuth has authenticated→saving→ready,
+        // so a selection swap mid-savebundle would leak the backend
+        // session. Reagent P1 on #853 round 10 caught the `saving`
+        // gap; cancel/dispose already cover it.
+        if (
+            (prev.kind === "waiting" ||
+                prev.kind === "authenticated" ||
+                prev.kind === "saving") &&
+            prev.sessionId !== ""
+        ) {
             void this.rpc.cancel(prev.sessionId).catch(() => {});
         }
         // Bump the action token so any in-flight RPC completions for
@@ -207,7 +217,7 @@ export class AuthFlowController {
         try {
             const { sessionId, authUrl } = await this.rpc.start({
                 providerId: s.providerId,
-                intoBundleId: s.bundleId || undefined,
+                intoBundleId: s.intoBundleId || undefined,
                 cliPath: cli.cliPath,
                 authLoginArgs: cli.authLoginArgs,
                 authCheckArgs: cli.authCheckArgs,
@@ -258,14 +268,25 @@ export class AuthFlowController {
 
     async cancel(): Promise<void> {
         const s = this.state();
-        if (s.kind !== "waiting") return;
+        // Reagent P1 on #853: also honor `authenticated` — backend
+        // session is held alive there too (awaiting auth.savebundle).
+        // Clicking Cancel from the SaveBundle panel must fire
+        // auth.cancel so the orphan session is released. Mirrors
+        // dispose()'s coverage of both kinds.
+        //
         // Reagent P1 on #850: bump actionToken even when sessionId is
         // still "" (the startup window between ConnectClicked dispatch
-        // and SessionStarted dispatch — auth.start is in flight). The
-        // bump invalidates the pending connect()'s actionToken gate so
-        // its SessionStarted dispatch is dropped and the orphan
-        // session gets cancelled by connect()'s stale-token path. The
-        // user's cancel intent always wins.
+        // and SessionStarted dispatch — auth.start in flight). The bump
+        // invalidates the pending connect()'s actionToken gate so its
+        // SessionStarted is dropped and the orphan session gets
+        // cancelled by connect()'s stale-token path. User intent wins.
+        // Reagent P1 on #853 round 9: also cover `saving` — the
+        // backend session is still alive during the `auth.savebundle`
+        // RPC (cleared only by `BundleSaved`); Cancel clicked there
+        // must release it like in `waiting`/`authenticated`.
+        if (s.kind !== "waiting" && s.kind !== "authenticated" && s.kind !== "saving") {
+            return;
+        }
         this.actionToken += 1;
         this.stopPolling();
         this.dispatch({ type: "CancelClicked" });
@@ -275,8 +296,8 @@ export class AuthFlowController {
             await this.rpc.cancel(sessionId);
         } catch {
             // Cancel is best-effort. The reducer already moved out
-            // of `waiting`; a stale backend session times out on
-            // its own.
+            // of the live-session kinds; a stale backend session
+            // times out on its own.
         }
     }
 
@@ -328,15 +349,18 @@ export class AuthFlowController {
         try {
             const { bundleId } = await this.rpc.submitApiKey({
                 providerId: s.providerId,
-                intoBundleId: s.bundleId || undefined,
+                intoBundleId: s.intoBundleId || undefined,
                 apiKey,
                 accountName,
             });
             if (this.actionToken !== myToken) {
                 // Stale completion: user changed selection or started
-                // another submit while this was in flight. Drop result.
+                // another submit while this was in flight. Codex P2
+                // on #850.
                 return;
             }
+            // API-key flow stays single-phase until backend C-2 lands
+            // (see `auth-state.ts` ApiKeyAccepted comment).
             this.dispatch({ type: "ApiKeyAccepted", bundleId });
         } catch (e) {
             if (this.actionToken !== myToken) {
@@ -357,41 +381,31 @@ export class AuthFlowController {
 
     /** Surface a view-side connect-prep failure (e.g. `ResolveCli`
      *  threw before `auth.start` could fire) as a `failed` state.
-     *  Goes through ConnectClicked → SessionStarted(synthetic) →
-     *  Polled(failed). PR C-1's `ConnectFailed` command supersedes
-     *  this with a single dispatch from any kind; until that ships
-     *  the synthesize-via-Polled pattern is what we have. Reagent P1
-     *  on #847 round 5 caught a regression that removed this method
-     *  during an earlier merge. */
+     *  Uses the `ConnectFailed` command, which the reducer honors
+     *  only from connect-attempt kinds (`unauthenticated`/`expired`/
+     *  `failed`/`waiting`). If the user has already moved to
+     *  `authenticated`/`saving`/`ready`/`idle`, a stale rejection from
+     *  an abandoned connect is dropped instead of clobbering the
+     *  newer state — codex P2 on #853 round 7 + codex P2 on #854. */
     failConnect(error: unknown): void {
-        const s = this.state();
-        // Codex P2 on #854: only honor failConnect from connect-prep
-        // states. A stale ResolveCli/ensureAuthDir rejection from an
-        // abandoned connect must not clobber a newer attempt — whether
-        // it's already in `waiting` with sessionId === "" (startup
-        // window between ConnectClicked and SessionStarted) or with a
-        // real sessionId. Also skip from terminal/idle/ready where a
-        // synthetic failure makes no sense.
-        if (s.kind !== "unauthenticated" && s.kind !== "expired" && s.kind !== "failed") {
-            return;
-        }
         const message = error instanceof Error ? error.message : String(error);
-        this.dispatch({ type: "ConnectClicked" });
-        const synthSessionId = "cli-resolve-failed";
-        this.dispatch({ type: "SessionStarted", sessionId: synthSessionId });
-        this.dispatch({
-            type: "Polled",
-            sessionId: synthSessionId,
-            status: { status: "failed", error: message },
-        });
+        this.dispatch({ type: "ConnectFailed", error: message });
     }
 
     dispose(): void {
         // Fire-and-forget auth.cancel for any in-flight session so we
-        // don't leave an orphan CLI subprocess on the backend.
+        // don't leave an orphan CLI subprocess on the backend. Reagent
+        // P1 on #853: covers `authenticated` (CLI is done, backend
+        // session held alive awaiting `auth.savebundle`) AND `saving`
+        // (savebundle RPC in flight, session cleared only by
+        // BundleSaved) — unmounting from any of these kinds must
+        // still tell the backend to release the session.
         this.actionToken += 1;
         const s = this.state();
-        if (s.kind === "waiting" && s.sessionId !== "") {
+        const hasLiveSession =
+            (s.kind === "waiting" || s.kind === "authenticated" || s.kind === "saving") &&
+            s.sessionId !== "";
+        if (hasLiveSession) {
             void this.rpc.cancel(s.sessionId).catch(() => {});
         }
         this.stopPolling();

@@ -295,19 +295,23 @@ describe("AuthFlowController", () => {
         });
     });
 
-    it("submitApiKey() transitions to ready on success", async () => {
+    it("submitApiKey() transitions to ready with the persisted bundleId (single-phase)", async () => {
+        // API-key flow stays single-phase until backend C-2's
+        // auth.savebundle lands. Backend persists the bundle inside
+        // auth.submitapikey itself; controller dispatches the real
+        // bundleId straight through to `ready`.
         await createRoot(async (dispose) => {
             const timers = fakeTimers();
             const ctrl = new AuthFlowController({
                 rpc: fakeRpc({
-                    submitApiKey: async () => ({ bundleId: "key-bundle" }),
+                    submitApiKey: async () => ({ bundleId: "persisted-bundle" }),
                 }),
                 timers,
             });
             ctrl.selected("openclaw", "", "needs-bundle");
-            await ctrl.submitApiKey("sk-test", "default");
+            await ctrl.submitApiKey("sk-test", "my-key-account");
             expect(ctrl.state().kind).toBe("ready");
-            expect(ctrl.state().bundleId).toBe("key-bundle");
+            expect(ctrl.state().bundleId).toBe("persisted-bundle");
             dispose();
         });
     });
