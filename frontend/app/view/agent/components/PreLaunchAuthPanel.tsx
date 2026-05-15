@@ -24,7 +24,6 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import {
     createEffect,
-    createMemo,
     createSignal,
     Match,
     onCleanup,
@@ -124,27 +123,12 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
                         controller.state().kind === "expired"
                     }
                 >
-                    <Show
-                        when={props.provider?.authType === "api-key"}
-                        fallback={
-                            <ConnectCta
-                                provider={props.provider}
-                                state={controller.state()}
-                                onConnect={() =>
-                                    void startConnect(controller, props.provider)
-                                }
-                                disabled={props.disabled ?? false}
-                            />
-                        }
-                    >
-                        <ApiKeyCta
-                            provider={props.provider}
-                            onSubmit={(key, accountName) =>
-                                void controller.submitApiKey(key, accountName)
-                            }
-                            disabled={props.disabled ?? false}
-                        />
-                    </Show>
+                    <ConnectCta
+                        provider={props.provider}
+                        state={controller.state()}
+                        onConnect={() => void startConnect(controller, props.provider)}
+                        disabled={props.disabled ?? false}
+                    />
                 </Match>
             </Switch>
         </div>
@@ -353,44 +337,3 @@ const FailedBanner = (p: {
     </div>
 );
 
-const ApiKeyCta = (p: {
-    provider: ProviderDefinition | undefined;
-    onSubmit: (apiKey: string, accountName: string) => void;
-    disabled: boolean;
-}): JSX.Element => {
-    const [key, setKey] = createSignal("");
-    const [accountName, setAccountName] = createSignal("default");
-    const canSubmit = createMemo(() => key().trim().length > 0 && !p.disabled);
-    return (
-        <div class="pre-launch-auth-panel-apikey">
-            <div class="pre-launch-auth-panel-warning">
-                ⚠ {p.provider?.displayName ?? "This agent"} requires an API key before launch.
-            </div>
-            <input
-                class="pre-launch-auth-panel-url-input"
-                type="password"
-                placeholder="Paste your API key…"
-                value={key()}
-                onInput={(e) => setKey(e.currentTarget.value)}
-                disabled={p.disabled}
-            />
-            <input
-                class="pre-launch-auth-panel-url-input"
-                placeholder="Account name (for the new bundle)"
-                value={accountName()}
-                onInput={(e) => setAccountName(e.currentTarget.value)}
-                disabled={p.disabled}
-            />
-            <Button
-                onClick={() => p.onSubmit(key().trim(), accountName().trim() || "default")}
-                disabled={!canSubmit()}
-            >
-                Save API key
-            </Button>
-            <div class="pre-launch-auth-panel-hint">
-                The key is validated against{" "}
-                <code>{(p.provider?.authCheckCommand ?? []).join(" ")}</code> before saving.
-            </div>
-        </div>
-    );
-};
