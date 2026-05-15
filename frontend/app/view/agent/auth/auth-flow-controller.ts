@@ -357,9 +357,22 @@ export class AuthFlowController {
      *  on #847 round 5 caught a regression that removed this method
      *  during an earlier merge. */
     failConnect(error: unknown): void {
+        const s = this.state();
+        // Codex P2 on #854: a stale ResolveCli/ensureAuthDir rejection
+        // from an abandoned connect must not clobber a real in-flight
+        // session. Skip the synthesize-via-Polled dispatches when a
+        // newer session is already active (kind=waiting with non-empty
+        // sessionId), or when state is terminal/idle/ready where a
+        // synthetic failure is wrong.
+        if (
+            s.kind === "ready" ||
+            s.kind === "idle" ||
+            (s.kind === "waiting" && s.sessionId !== "")
+        ) {
+            return;
+        }
         const message = error instanceof Error ? error.message : String(error);
-        const k = this.state().kind;
-        if (k === "unauthenticated" || k === "expired" || k === "failed") {
+        if (s.kind === "unauthenticated" || s.kind === "expired" || s.kind === "failed") {
             this.dispatch({ type: "ConnectClicked" });
         }
         const synthSessionId = "cli-resolve-failed";
