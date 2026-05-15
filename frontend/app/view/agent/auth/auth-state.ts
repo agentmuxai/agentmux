@@ -627,10 +627,23 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
         }
 
         case "ConnectFailed": {
-            // Honored from any non-terminal kind. Clears in-flight
-            // transients but doesn't fire backend cancel — this
-            // command is for view-prep failures BEFORE we held a
-            // backend session.
+            // Codex P2 on #853 round 7: gate on connect-attempt kinds
+            // so a stale ResolveCli/ensureAuthDir rejection from an
+            // abandoned connect can't clobber a newer `ready`/
+            // `authenticated`/`saving` selection. Only honored where
+            // a connect was actually in progress.
+            if (state.kind !== "waiting" && state.kind !== "unauthenticated" &&
+                state.kind !== "expired" && state.kind !== "failed") {
+                return {
+                    state,
+                    events: [
+                        {
+                            type: "post-close-command-dropped",
+                            commandType: "ConnectFailed",
+                        },
+                    ],
+                };
+            }
             return {
                 state: {
                     ...state,

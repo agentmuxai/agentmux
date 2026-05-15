@@ -740,13 +740,14 @@ describe("auth-state reducer", () => {
     });
 
     describe("ConnectFailed (reagent P2 on #853)", () => {
-        it("flips any non-terminal state to failed with error", () => {
+        it("flips connect-attempt states to failed with error", () => {
+            // Codex P2 on #853 round 7: gated on connect-attempt kinds
+            // only. `idle`/`ready`/`authenticated`/`saving` are NOT
+            // connect-attempt states — a stale ResolveCli reject
+            // landing there would clobber the user's newer selection.
             for (const kind of [
-                "idle",
                 "unauthenticated",
                 "waiting",
-                "authenticated",
-                "saving",
                 "expired",
                 "failed",
             ] as const) {
@@ -768,6 +769,24 @@ describe("auth-state reducer", () => {
                 expect(r.events[0]).toMatchObject({
                     type: "failed",
                     error: "cli not found",
+                });
+            }
+        });
+
+        it("is dropped from non-connect-attempt states", () => {
+            // Codex P2 on #853 round 7: a stale ResolveCli reject
+            // arriving after the user moved to ready/authenticated/
+            // saving must NOT clobber the newer state.
+            for (const kind of ["idle", "ready", "authenticated", "saving"] as const) {
+                const seeded = seed({ kind, sessionId: "s1" });
+                const r = update(seeded, {
+                    type: "ConnectFailed",
+                    error: "stale cli error",
+                });
+                expect(r.state).toBe(seeded);
+                expect(r.events[0]).toMatchObject({
+                    type: "post-close-command-dropped",
+                    commandType: "ConnectFailed",
                 });
             }
         });
