@@ -169,10 +169,20 @@ export class AuthFlowController {
     // ── View-facing actions ───────────────────────────────────────
 
     selected(providerId: string, bundleId: string, outcome: SelectionOutcome): void {
-        // Selecting clears any prior session; if there was an
-        // in-flight poll, stop it. Bump the action token so any
-        // in-flight RPC completions for the previous selection are
-        // recognized as stale and dropped.
+        // Reagent + Codex P2 on #850 (round 6): cancel any live OAuth
+        // session before clearing local state. Without this, switching
+        // selection mid-login leaves the backend CLI subprocess
+        // running until timeout because `Selected` wipes `sessionId`
+        // and dispose()/cancel() can't find it anymore.
+        const prev = this.state();
+        if (
+            (prev.kind === "waiting" || prev.kind === "authenticated") &&
+            prev.sessionId !== ""
+        ) {
+            void this.rpc.cancel(prev.sessionId).catch(() => {});
+        }
+        // Bump the action token so any in-flight RPC completions for
+        // the previous selection are recognized as stale and dropped.
         this.actionToken += 1;
         this.stopPolling();
         this.dispatch({ type: "Selected", providerId, bundleId, outcome });
@@ -294,6 +304,14 @@ export class AuthFlowController {
 
     async submitApiKey(apiKey: string, accountName: string): Promise<void> {
         const s = this.state();
+        // Codex P2 on #850 (round 6): mirror the reducer's
+        // ApiKeySubmitted gate (unauthenticated|expired|failed) so
+        // double-clicks and stale invocations don't double-submit to
+        // the backend nor flip an OAuth waiting flow to ready with a
+        // bundleId from a wrong-state submit.
+        if (s.kind !== "unauthenticated" && s.kind !== "expired" && s.kind !== "failed") {
+            return;
+        }
         // Bump action token + capture so a late completion can detect
         // that the user already started another submit (codex P2 on #850).
         this.actionToken += 1;
