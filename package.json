@@ -6,7 +6,7 @@
   "productName": "AgentMux",
   "description": "Open-Source AI-Native Terminal Built for Seamless Workflows",
   "license": "Apache-2.0",
-  "version": "0.33.895",
+  "version": "0.33.896",
   "homepage": "https://github.com/agentmuxai/agentmux",
   "build": {
     "appId": "ai.agentmux.app"
@@ -25,7 +25,9 @@
     "test": "vitest",
     "coverage": "vitest run --coverage",
     "clean": "task clean",
-    "lint:scss": "stylelint \"frontend/**/*.scss\" --allow-empty-input"
+    "lint:scss": "stylelint \"frontend/**/*.scss\" --allow-empty-input",
+    "setup-hooks": "git config core.hooksPath .githooks",
+    "prepare": "npm run setup-hooks"
   },
   "devDependencies": {
     "@eslint/js": "^8.57.0",

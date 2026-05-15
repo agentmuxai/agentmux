@@ -1,0 +1,30 @@
+#!/bin/sh
+# Block commits that contain unresolved merge conflict markers in staged
+# changes. Uses `git diff --check` (the same check git's own commit
+# machinery runs) so spec/docs files that legitimately contain
+# `<<<<<<< HEAD` as prose don't false-positive.
+#
+# See: docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md §5 Phase 0
+#
+# Install: `git config core.hooksPath .githooks` (run `npm run setup-hooks`).
+# Bypass for one commit (don't use casually): `git commit --no-verify`.
+
+if git diff --cached --check; then
+    exit 0
+fi
+
+cat >&2 <<'EOF'
+
+✗ Pre-commit blocked: staged changes contain conflict markers or whitespace
+  errors flagged by `git diff --check`.
+
+  Resolve the conflicts/whitespace shown above and re-stage:
+      git add -p   # interactive — inspect each hunk
+      # or fix the specific files, then:
+      git add <files>
+
+  To bypass intentionally (e.g. authored prose containing `<<<<<<< HEAD`):
+      git commit --no-verify
+
+EOF
+exit 1
