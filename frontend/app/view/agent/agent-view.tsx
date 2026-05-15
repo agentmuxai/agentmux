@@ -165,21 +165,20 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     //     the lossy 200-line NDJSON replay;
     // (b) during the pane lifetime, write a snapshot every 30s if the
     //     document changed since the last save. Bounds crash-loss to ~30s.
+    // Serialize concurrent writes through a single promise chain
+    // (codex P2 on #877 round 5): the 30s interval and the on-close
+    // cleanup can both call writeSnapshotNow() with their own captured
+    // `nodes` snapshot, then race through an async line-count RPC and
+    // write. Without ordering, the older interval write can resolve
+    // LAST and overwrite the close-time snapshot, losing recent nodes.
+    let inFlightSnapshot: Promise<void> = Promise.resolve();
     const writeSnapshotNow = () => {
         const nodes = getDocument();
         if (!nodes || nodes.length === 0) return;
-        // Reagent P2 on #877: defer JSON.stringify by one microtask so it
-        // doesn't block the main thread during pane teardown (~50-100ms
-        // for a 5MB session). On clean close the unmount finishes first
-        // and the serialization+RPC happens just after.
-        void Promise.resolve().then(async () => {
-            // Reagent P1 on #877: fetch NDJSON line count at save time so
-            // the snapshot records the high-water mark (spec §4.2). v1
-            // does not yet act on it — the live-stream subscription only
-            // delivers events from subscribe-time forward — but writing
-            // it now lets a future phase replay events between
-            // highWaterMark and current line count on reopen (closes the
-            // background-agent-while-pane-closed gap).
+        // Capture historyOffset SYNCHRONOUSLY at call time so a later
+        // queued write doesn't read a stale accessor value.
+        const capturedOffset = history.historyOffset();
+        inFlightSnapshot = inFlightSnapshot.then(async () => {
             let highWaterMark = 0;
             try {
                 const countResp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
@@ -194,7 +193,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 schemaVersion: SNAPSHOT_SCHEMA_VERSION,
                 savedAt: new Date().toISOString(),
                 highWaterMark,
-                historyOffset: history.historyOffset(),
+                historyOffset: capturedOffset,
                 nodes,
             };
             await RpcApi.BlockfileWriteStateCommand(TabRpcClient, {
