@@ -2,6 +2,12 @@
 resolver = "2"
 members = ["agentmux-srv", "agentmux-cef", "agentmux-launcher", "agentmux-common", "agentmux-bashwrap"]
 
+# Shared workspace metadata — members inherit `version` via
+# `version.workspace = true` so a single bump touches one Cargo.toml.
+# RFC #857 Phase 1.
+[workspace.package]
+version = "0.33.896"
+
 [profile.release]
 strip = true
 lto = true
