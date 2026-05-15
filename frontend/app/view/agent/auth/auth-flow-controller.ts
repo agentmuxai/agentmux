@@ -218,11 +218,16 @@ export class AuthFlowController {
             }
             this.schedulePoll(sessionId);
         } catch (e) {
+            if (this.actionToken !== myToken) {
+                // Stale rejection: another action invalidated this
+                // connect attempt while auth.start was failing. Don't
+                // clobber the newer state with this old error. Codex
+                // P2 on #850 (round 3).
+                return;
+            }
             // Force the failure transition through the reducer's
             // SessionStarted → Polled(failed) pair so the sessionId
-            // gate passes. Reagent P2 on #850: previously this also
-            // dispatched a `Polled { sessionId: "" }` that was always
-            // dropped by the gate — removed as dead code.
+            // gate passes.
             const synthSessionId = "auth-start-failed";
             this.dispatch({ type: "SessionStarted", sessionId: synthSessionId });
             this.dispatch({
