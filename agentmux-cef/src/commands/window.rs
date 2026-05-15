@@ -837,22 +837,33 @@ pub fn set_window_opacity(
     });
 
     // Apply Win32 side-effect synchronously based on emitted event.
+    // Reagent P1 on #868: the reducer emits `WindowOpacityApplied` for
+    // opacity < 1.0 (clamped translucent value) and `WindowOpacityCleared`
+    // for opacity >= 1.0. Matching only `WindowOpacityApplied` left
+    // windows semi-transparent after the user restored full opacity.
+    // Match both arms.
     #[cfg(target_os = "windows")]
     for ev in &out.events {
-        if let crate::reducer::HostEvent::WindowOpacityApplied { label: ev_label, opacity: ev_opacity } = ev {
-            let hwnd_raw = state.window_hwnds.lock().get(ev_label.as_str()).copied();
-            if let Some(raw) = hwnd_raw {
-                let hwnd = raw as *mut std::ffi::c_void;
-                unsafe {
-                    if *ev_opacity >= 1.0 {
-                        remove_window_opacity(hwnd);
-                    } else {
-                        apply_window_opacity(hwnd, *ev_opacity as f64);
-                    }
+        match ev {
+            crate::reducer::HostEvent::WindowOpacityApplied { label: ev_label, opacity: ev_opacity } => {
+                let hwnd_raw = state.window_hwnds.lock().get(ev_label.as_str()).copied();
+                if let Some(raw) = hwnd_raw {
+                    let hwnd = raw as *mut std::ffi::c_void;
+                    unsafe { apply_window_opacity(hwnd, *ev_opacity as f64); }
+                } else {
+                    tracing::warn!("[opacity] set_window_opacity: no hwnd for label={}", ev_label);
                 }
-            } else {
-                tracing::warn!("[opacity] set_window_opacity: no hwnd for label={}", ev_label);
             }
+            crate::reducer::HostEvent::WindowOpacityCleared { label: ev_label } => {
+                let hwnd_raw = state.window_hwnds.lock().get(ev_label.as_str()).copied();
+                if let Some(raw) = hwnd_raw {
+                    let hwnd = raw as *mut std::ffi::c_void;
+                    unsafe { remove_window_opacity(hwnd); }
+                } else {
+                    tracing::warn!("[opacity] set_window_opacity: no hwnd for label={} (clear)", ev_label);
+                }
+            }
+            _ => {}
         }
     }
 
