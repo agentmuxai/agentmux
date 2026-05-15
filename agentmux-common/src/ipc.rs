@@ -395,6 +395,16 @@ pub enum Command {
         block_id: String,
         meta_patch: serde_json::Value,
     },
+    /// Phase E.5.x — apply a meta-patch to a window's `meta` map.
+    /// Same pass-through shape as `UpdateWorkspaceMeta`. Migrated
+    /// through the reducer per issue #855 so `Event::WindowMetaUpdated`
+    /// lands on `srv_events_tx` and the WaveObjUpdate broadcast bridge
+    /// picks it up — replaces the wcore-direct fallback that bypassed
+    /// reducer + bridge entirely.
+    UpdateWindowMeta {
+        window_id: String,
+        meta_patch: serde_json::Value,
+    },
     /// Phase E.5.5 — move a tab from one workspace to another.
     /// Reducer:
     /// * Removes `tab_id` from `src_workspace_id.tab_ids`.
@@ -1274,6 +1284,15 @@ pub enum Event {
     /// what changed without needing the prior state.
     WorkspaceMetaUpdated {
         workspace_id: String,
+        meta_patch: serde_json::Value,
+        version: u64,
+    },
+    /// Phase E.5.x (issue #855) — meta-patch applied to a window's
+    /// `meta` map. Same shape as `WorkspaceMetaUpdated`. Persist
+    /// subscriber merges into wstore; WaveObjUpdate bridge translates
+    /// to a frontend `waveobj:update` broadcast.
+    WindowMetaUpdated {
+        window_id: String,
         meta_patch: serde_json::Value,
         version: u64,
     },
