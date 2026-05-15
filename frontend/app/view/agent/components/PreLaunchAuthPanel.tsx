@@ -29,6 +29,7 @@ import {
     onCleanup,
     Show,
     Switch,
+    untrack,
     type Accessor,
     type JSX,
 } from "solid-js";
@@ -38,7 +39,9 @@ import {
     type AuthState,
     type SelectionOutcome,
 } from "../auth";
+import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import type { ProviderDefinition } from "../providers";
+import "./PreLaunchAuthPanel.scss";
 
 export interface PreLaunchAuthPanelProps {
     /** The provider to authenticate. */
@@ -60,7 +63,6 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     const controller = new AuthFlowController();
 
     // Mirror controller.state() through createEffect → parent prop.
-    // The parent re-renders the Launch button on every state change.
     createEffect(() => {
         props.onStateChange(controller.state());
     });
@@ -76,11 +78,19 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
 
     // When the identity dropdown changes, drive the controller's
     // `selected` action. The outcome is computed below.
+    //
+    // `untrack` around the controller call: `controller.selected()`
+    // calls `dispatch()` which reads `_state` internally. Without
+    // untrack, Solid would add `_state` as a tracked dep of THIS
+    // effect — every subsequent dispatch (from connect/poll/etc.)
+    // would re-fire `selected`, which calls `stopPolling()` and
+    // dispatches `Selected`, wiping any in-flight session. That's
+    // exactly the bug the diagnostic logs caught.
     createEffect(() => {
         const id = props.identityId();
         const prov = props.provider;
         if (!prov) return;
-        controller.selected(prov.id, id, outcomeFor(id));
+        untrack(() => controller.selected(prov.id, id, outcomeFor(id)));
     });
 
     onCleanup(() => {
@@ -196,25 +206,35 @@ const ConnectCta = (p: {
     state: AuthState;
     onConnect: () => void;
     disabled: boolean;
-}): JSX.Element => (
-    <div class="pre-launch-auth-panel-cta">
-        <div class="pre-launch-auth-panel-warning">
-            ⚠ {p.provider?.displayName ?? "This agent"} requires an OAuth login before launch.
+}): JSX.Element => {
+    const catalog = () =>
+        p.provider ? getCliCatalogEntry(p.provider.id) : undefined;
+    const providerLabel = () => p.provider?.displayName ?? "this provider";
+    return (
+        <div class="pre-launch-auth-panel-cta">
+            <div class="pre-launch-auth-panel-warning">
+                ⚠ {providerLabel()} requires an OAuth login before launch.
+            </div>
+            <Button
+                onClick={() => p.onConnect()}
+                disabled={p.disabled}
+                className="pre-launch-auth-panel-connect green solid"
+            >
+                <span class="pre-launch-auth-panel-connect-icon" aria-hidden="true">
+                    {catalog()?.icon ?? "🔐"}
+                </span>
+                <span class="pre-launch-auth-panel-connect-label">
+                    Connect to {providerLabel()}
+                </span>
+            </Button>
+            <div class="pre-launch-auth-panel-hint">
+                Opens browser → {providerLabel()} login → returns to AgentMux.
+                Tokens get saved into a new Identity bundle so the next
+                agent doesn't have to re-authenticate.
+            </div>
         </div>
-        <Button
-            onClick={() => p.onConnect()}
-            disabled={p.disabled}
-            class="pre-launch-auth-panel-connect"
-        >
-            🔐 Connect with OAuth
-        </Button>
-        <div class="pre-launch-auth-panel-hint">
-            Opens browser → {p.provider?.displayName ?? "provider"} login → returns to AgentMux.
-            Tokens get saved into a new Identity bundle so the next agent
-            doesn't have to re-authenticate.
-        </div>
-    </div>
-);
+    );
+};
 
 const WaitingPanel = (p: {
     state: AuthState;
@@ -232,17 +252,18 @@ const WaitingPanel = (p: {
                 <li>We'll detect the redirect and continue.</li>
             </ol>
             <Show when={p.state.authUrl}>
+                <div class="pre-launch-auth-panel-url-label">
+                    Auth URL (browser should have opened — if not, copy this):
+                </div>
                 <div class="pre-launch-auth-panel-url-row">
-                    <span class="pre-launch-auth-panel-url-label">
-                        URL not opening? Copy this and paste anywhere:
-                    </span>
-                    <input
-                        class="pre-launch-auth-panel-url-input"
-                        readOnly
-                        value={p.state.authUrl}
-                        onClick={(e) => e.currentTarget.select()}
-                    />
+                    <code
+                        class="pre-launch-auth-panel-url-text"
+                        title={p.state.authUrl}
+                    >
+                        {p.state.authUrl}
+                    </code>
                     <Button
+                        className="grey solid"
                         onClick={() => {
                             void navigator.clipboard.writeText(p.state.authUrl);
                         }}
@@ -258,6 +279,7 @@ const WaitingPanel = (p: {
                         onInput={(e) => setPasted(e.currentTarget.value)}
                     />
                     <Button
+                        className="grey solid"
                         onClick={() => {
                             const url = pasted().trim();
                             if (url) p.onSubmitCallback(url);
