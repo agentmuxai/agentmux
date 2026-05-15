@@ -260,6 +260,7 @@ fn spawn_auth_cli(
             session_id = %session_id_for_task,
             provider_id = %provider_id,
             cli_path = %cli_path,
+            auth_login_args = ?auth_login_args,
             "auth.spawn: launching provider CLI"
         );
 
@@ -274,8 +275,20 @@ fn spawn_auth_cli(
             .kill_on_drop(true)
             .spawn()
         {
-            Ok(c) => c,
+            Ok(c) => {
+                tracing::info!(
+                    session_id = %session_id_for_task,
+                    pid = ?c.id(),
+                    "auth.spawn: child started"
+                );
+                c
+            }
             Err(e) => {
+                tracing::error!(
+                    session_id = %session_id_for_task,
+                    error = %e,
+                    "auth.spawn: Command::spawn failed"
+                );
                 mgr_for_task.finish_failure(
                     &session_id_for_task,
                     format!("spawn `{cli_path}` failed: {e}"),
@@ -325,6 +338,12 @@ fn spawn_auth_cli(
             let mut lines = BufReader::new(stdout).lines();
             let mut success_transitioned = false;
             while let Ok(Some(line)) = lines.next_line().await {
+                // NOT logging the raw line — OAuth providers print
+                // auth URLs / callback codes / device codes on stdout
+                // and even debug-level logs would persist those into
+                // ~/.agentmux/logs/. Length-only is enough for "the
+                // CLI emitted something" diagnostics. Reagent P2 on #847.
+                tracing::debug!(session_id = %sid_stdout, bytes = line.len(), "auth.spawn: stdout line");
                 let m = mgr_stdout.record_line(&sid_stdout, &line);
                 if !success_transitioned
                     && matches!(
@@ -360,6 +379,8 @@ fn spawn_auth_cli(
         let stderr_drain = tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                // Same redaction rationale as stdout above.
+                tracing::debug!(session_id = %sid_stderr, bytes = line.len(), "auth.spawn: stderr line");
                 let _ = mgr_stderr.record_line(&sid_stderr, &line);
             }
         });
@@ -368,6 +389,7 @@ fn spawn_auth_cli(
         // by cancel_session — in which case kill_on_drop handles the
         // child).
         let exit = child.wait().await;
+        tracing::info!(session_id = %session_id_for_task, exit = ?exit, "auth.spawn: child exited");
 
         // Let stdout/stderr drains catch any final lines.
         let _ = stdout_drain.await;
