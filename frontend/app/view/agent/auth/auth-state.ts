@@ -427,13 +427,20 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
             // session is still alive until savebundle commits, so we
             // need to tell the backend to drop it.
             //
+            // Reagent P1 on #853 round 10: also allow cancel from
+            // `saving` — the backend session is held alive for the
+            // savebundle RPC; without this guard the controller's
+            // CancelClicked dispatch is silently dropped and the
+            // SaveBundle spinner is stuck forever.
+            //
             // Reagent P1 on #850: allow cancel from `waiting` even when
             // sessionId === "" — that's the startup window between
             // ConnectClicked and SessionStarted (auth.start in flight).
             // The controller bumps actionToken so the pending start's
             // stale-token gate fires and the orphan SessionStarted is
             // dropped. User's cancel intent always wins.
-            if (state.kind !== "waiting" && state.kind !== "authenticated") {
+            if (state.kind !== "waiting" && state.kind !== "authenticated" &&
+                state.kind !== "saving") {
                 return {
                     state,
                     events: [

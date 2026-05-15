@@ -175,11 +175,15 @@ export class AuthFlowController {
         // running until timeout because `Selected` wipes `sessionId`
         // and dispose()/cancel() can't find it anymore.
         const prev = this.state();
-        // #853 also covers `authenticated` — same orphan-CLI hazard:
-        // OAuth has authenticated→saving→ready, so a selection swap
-        // mid-savebundle would leak the backend session.
+        // #853 also covers `authenticated` and `saving` — same
+        // orphan-CLI hazard: OAuth has authenticated→saving→ready,
+        // so a selection swap mid-savebundle would leak the backend
+        // session. Reagent P1 on #853 round 10 caught the `saving`
+        // gap; cancel/dispose already cover it.
         if (
-            (prev.kind === "waiting" || prev.kind === "authenticated") &&
+            (prev.kind === "waiting" ||
+                prev.kind === "authenticated" ||
+                prev.kind === "saving") &&
             prev.sessionId !== ""
         ) {
             void this.rpc.cancel(prev.sessionId).catch(() => {});
