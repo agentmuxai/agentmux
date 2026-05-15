@@ -1073,6 +1073,17 @@ class RpcApiType {
         return client.rpcCall("blockfile:read_range", data, opts);
     }
 
+    // command "blockfile:read_state" [call] — sidecar JSON snapshot read
+    // Spec: docs/specs/SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md
+    BlockfileReadStateCommand(client: RpcClient, data: CommandBlockfileReadStateData, opts?: RpcOpts): Promise<BlockfileReadStateResult> {
+        return client.rpcCall("blockfile:read_state", data, opts);
+    }
+
+    // command "blockfile:write_state" [call] — sidecar JSON snapshot write
+    BlockfileWriteStateCommand(client: RpcClient, data: CommandBlockfileWriteStateData, opts?: RpcOpts): Promise<BlockfileWriteStateResult> {
+        return client.rpcCall("blockfile:write_state", data, opts);
+    }
+
     // command "session:digest" [call]
     SessionDigestCommand(client: RpcClient, data: CommandSessionDigestData, opts?: RpcOpts): Promise<SessionDigestResult> {
         return client.rpcCall("session:digest", data, opts);
