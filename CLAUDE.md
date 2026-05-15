@@ -133,43 +133,38 @@ Works identically across `task dev`, portable, and install builds. Logs auto-rot
 
 ## Version Management
 
-**CRITICAL:** Always use `@a5af/bump-cli` - never manually edit version numbers.
+**As of RFC #857 Phase 2, feature PRs use the changesets workflow — do NOT run `bump patch` in feature PRs.** Version bumps happen in dedicated release PRs that consume pending changesets.
 
-### Install bump-cli (one-time)
+### Feature PR workflow
+
+Add a changeset describing your change:
 
 ```bash
-# Configure npm for @a5af GitHub Packages (requires GITHUB_TOKEN with read:packages)
-echo "@a5af:registry=https://npm.pkg.github.com" >> ~/.npmrc
-echo "//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}" >> ~/.npmrc
-npm install -g @a5af/bump-cli
+task changeset -- patch "fix(auth): short description"
+# OR: task changeset -- minor "feat(...): description"
+# OR: task changeset -- major "breaking change description"
 ```
 
-### Mandatory Workflow
+This creates `.changesets/<unix-ts>-<slug>.md`. Commit it alongside your code changes. **Do not bump `package.json` or any Cargo.toml** — the release step owns that.
 
-**Step 1: Bump version** (updates ALL files automatically via `.bump.json`)
+The conflict surface is now zero version files per feature PR: agents committing in parallel get unique filenames automatically.
+
+### Release PR workflow (separate, periodic)
+
 ```bash
-bump patch -m "Description"
-# OR: bump minor / bump major / bump 1.2.3
+task release            # consume all .changesets/, bump, update history (no commit yet)
+git diff --staged       # review what would land
+git commit -m "chore: release v<X.Y.Z>"
+git push -u origin agenta/release-vX.Y.Z
 ```
 
-This updates: `package.json`, `package-lock.json`, `Cargo.lock`, `agentmux-srv/Cargo.toml`, `agentmux-cef/Cargo.toml`, `agentmux-launcher/Cargo.toml`, `agentmux-common/Cargo.toml`, `VERSION_HISTORY.md`
+The release script picks the highest bump type across pending changesets (major > minor > patch), runs `scripts/bump-wrapper.sh`, appends to `VERSION_HISTORY.md`, and deletes the consumed changesets.
 
-**Step 2: Verify consistency**
-```bash
-bump verify
-```
+### Background
 
-**Step 3: Rebuild binaries**
-```bash
-task build:backend
-```
+`@a5af/bump-cli` is still installed and used internally by the release script. The `.bump.json` config now targets only the workspace root (`Cargo.toml` + `package.json` + lockfiles) thanks to Phase 1's workspace-version-inheritance — see `docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md`.
 
-**Step 4: Commit and push**
-```bash
-# bump --commit stages and commits all version files automatically:
-bump patch -m "Description" --commit
-git push origin <branch>
-```
+If you absolutely need to manually bump (e.g. rebuilding tooling locally), `bump patch -m "..." --commit` still works — but **don't push it in a feature PR**.
 
 ---
 
