@@ -167,13 +167,19 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         setIdentityId(bundleId);
     };
     const provider = createMemo(() => getProvider(props.agent.provider));
-    // Auth gate applies ONLY to fresh launches with the blank singleton.
-    // Continuing a past agent (isContinue) bypasses the gate even when
-    // the saved identity was "blank" — the prior launch already
-    // produced credentials we trust, and the panel itself is hidden in
-    // that flow (reagent P1 on #847).
+    // Auth gate applies ONLY to fresh launches of OAuth providers with
+    // the blank singleton selected.
+    //
+    // - `isContinue` bypasses: prior launch already produced creds.
+    // - API-key providers (openclaw/kimi/pi) bypass: until the backend
+    //   `auth.submitapikey` persists bundles (PR C-2), the gate would
+    //   deadlock — the user can't reach `ready` because save is a
+    //   stub. Their existing `launch-flow.ts` Phase 2 prompts for the
+    //   key in-line. Reagent + codex P1 on #847.
     const authRequired = () =>
-        !isContinue() && (identityId() === "blank" || identityId() === "");
+        !isContinue()
+        && provider()?.authType === "oauth"
+        && (identityId() === "blank" || identityId() === "");
     const authReady = () => !authRequired() || authStateKind() === "ready";
     const canSubmit = () =>
         !submitting() && slugifyInstanceName(name()).length > 0 && authReady();
