@@ -118,6 +118,13 @@ pub struct HostState {
     #[allow(dead_code)]
     pub top_level_creation: TopLevelCreationState,
 
+    /// Per-window opacity state. Keyed by label, value is clamped [0.0, 1.0].
+    /// Absent means fully opaque (1.0). Mutated by `SetWindowOpacity`; read by
+    /// `get_window_opacity` and the restore path in app-init. Win32 side-effect
+    /// (SetLayeredWindowAttributes) is applied by the IPC handler AFTER dispatch,
+    /// not inside the reducer. See SPEC_PER_WINDOW_OPACITY_2026-05-14.md §7.1.
+    pub window_opacities: HashMap<String, f32>,
+
     /// Lifecycle phase. `Running` is the operating state; the others
     /// gate command acceptance.
     pub lifecycle: HostLifecyclePhase,
@@ -139,6 +146,7 @@ impl Default for HostState {
             pool: PoolState::default(),
             quit_state: QuitState::default(),
             top_level_creation: TopLevelCreationState::default(),
+            window_opacities: HashMap::new(),
             // Boot directly into Running — nothing in F.1 needs the
             // pre-init guard yet. Future PRs (drag, tear-off hooks)
             // will move boot through Bootstrapping → Running.
@@ -336,6 +344,13 @@ pub enum HostCommand {
     /// CEF on_before_close fired for `label` while still in-flight.
     /// User or external code closed the window mid-creation. Mark Failed.
     TopLevelExternallyClosed { label: String },
+
+    // ── Opacity ─────────────────────────────────────────────────────────────
+
+    /// Set per-window opacity. Reducer stores the clamped value in
+    /// `window_opacities`; the IPC handler applies the Win32 side-effect
+    /// after `host_dispatch` returns (pure reducer, no I/O inside).
+    SetWindowOpacity { label: String, opacity: f32 },
 }
 
 impl std::fmt::Debug for HostCommand {
@@ -438,6 +453,11 @@ impl std::fmt::Debug for HostCommand {
             HostCommand::TopLevelExternallyClosed { label } => f
                 .debug_struct("TopLevelExternallyClosed")
                 .field("label", label)
+                .finish(),
+            HostCommand::SetWindowOpacity { label, opacity } => f
+                .debug_struct("SetWindowOpacity")
+                .field("label", label)
+                .field("opacity", opacity)
                 .finish(),
         }
     }
@@ -601,6 +621,13 @@ pub enum HostEvent {
         len: usize,
         version: u64,
     },
+
+    // ── Opacity events ──────────────────────────────────────────────────
+
+    /// Opacity set successfully. IPC handler applies Win32 side-effect.
+    WindowOpacityApplied { label: String, opacity: f32, version: u64 },
+    /// Opacity cleared (opacity >= 1.0 → remove WS_EX_LAYERED).
+    WindowOpacityCleared { label: String, version: u64 },
 
     // ── Effect carrier ──────────────────────────────────────────────────
 
@@ -789,6 +816,10 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         HostCommand::TopLevelExternallyClosed { label } => {
             top_level::handle_top_level_externally_closed(state, label)
         }
+        // Opacity
+        HostCommand::SetWindowOpacity { label, opacity } => {
+            handle_set_window_opacity(state, label, opacity)
+        }
     }
 }
 
@@ -863,6 +894,24 @@ pub(super) fn emit_error(state: &mut HostState, message: String) -> DispatchOutp
     DispatchOutput {
         events: vec![HostEvent::Error { message, version: v }],
         ..Default::default()
+    }
+}
+
+fn handle_set_window_opacity(state: &mut HostState, label: String, opacity: f32) -> DispatchOutput {
+    let clamped = opacity.clamp(0.0, 1.0);
+    let v = state.bump_version();
+    if clamped >= 1.0 {
+        state.window_opacities.remove(&label);
+        DispatchOutput {
+            events: vec![HostEvent::WindowOpacityCleared { label, version: v }],
+            ..Default::default()
+        }
+    } else {
+        state.window_opacities.insert(label.clone(), clamped);
+        DispatchOutput {
+            events: vec![HostEvent::WindowOpacityApplied { label, opacity: clamped, version: v }],
+            ..Default::default()
+        }
     }
 }
 

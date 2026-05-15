@@ -118,6 +118,8 @@ declare global {
         maximizeWindow: () => void;
         toggleDevtools: () => void;
         setWindowTransparency: (transparent: boolean, blur: boolean, opacity: number) => void;
+        setWindowOpacity: (label: string, opacity: number) => Promise<void>;
+        getWindowOpacity: (label: string) => Promise<number>;
         getWindowLabel: () => Promise<string>;
         isMainWindow: () => Promise<boolean>;
         registerBackendWindow: (label: string, windowId: string) => void;
@@ -388,6 +390,9 @@ declare global {
         // spacer for false (so radio groups stay aligned). When
         // unset, the regular `icon` field renders.
         checked?: boolean;
+        // Pre-formatted keyboard shortcut hint shown right-aligned
+        // (e.g. "Ctrl+P" or "⌘T"). Not shown on items that have subItems.
+        shortcut?: string;
     };
 
     type MenuButtonProps = {

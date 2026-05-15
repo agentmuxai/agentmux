@@ -198,6 +198,9 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
                                             </Show>
                                         </Show>
                                         <span class="label">{item.label}</span>
+                                        <Show when={item.shortcut && !item.subItems}>
+                                            <span class="menu-item-shortcut">{item.shortcut}</span>
+                                        </Show>
                                         <Show when={item.subItems}>
                                             <i class="fa-sharp fa-solid fa-chevron-right" />
                                         </Show>
@@ -332,6 +335,9 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
                                 </Show>
                             </Show>
                             <span class="label">{item.label}</span>
+                            <Show when={item.shortcut && !item.subItems}>
+                                <span class="menu-item-shortcut">{item.shortcut}</span>
+                            </Show>
                             <Show when={item.subItems}>
                                 <i class="fa-sharp fa-solid fa-chevron-right" />
                             </Show>
