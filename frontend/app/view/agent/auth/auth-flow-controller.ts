@@ -175,6 +175,12 @@ export class AuthFlowController {
         if (s.kind !== "unauthenticated" && s.kind !== "expired" && s.kind !== "failed") {
             return;
         }
+        // Bump action token + capture so any pre-existing connect()
+        // that's still awaiting auth.start can detect it's stale and
+        // bail. Codex P1 on #850 (re-iterated): two concurrent
+        // connect() calls would race; the older one must not dispatch.
+        this.actionToken += 1;
+        const myToken = this.actionToken;
         this.dispatch({ type: "ConnectClicked" });
         try {
             // Reagent P1 on #850: backend's auth.start returns
@@ -189,6 +195,14 @@ export class AuthFlowController {
                 authCheckArgs: cli.authCheckArgs,
                 authEnv: cli.authEnv,
             });
+            if (this.actionToken !== myToken) {
+                // The user did something else (selected/cancelled/
+                // started another connect) while auth.start was in
+                // flight. Tell the backend to drop the orphan session
+                // and bail before dispatching SessionStarted.
+                void this.rpc.cancel(sessionId).catch(() => {});
+                return;
+            }
             this.dispatch({ type: "SessionStarted", sessionId, authUrl });
             // Codex P1 on #850: if the user changed the selection /
             // cancelled / disposed during the `await rpc.start`, the
@@ -239,10 +253,17 @@ export class AuthFlowController {
         const s = this.state();
         if (s.kind !== "waiting" || s.sessionId === "") return;
         const sessionId = s.sessionId;
+        const myToken = this.actionToken;
         this.dispatch({ type: "CallbackSubmitted", callbackUrl });
         try {
             await this.rpc.submitCallback(sessionId, callbackUrl);
         } catch (e) {
+            if (this.actionToken !== myToken) {
+                // Stale rejection: user has moved on (selected/
+                // cancelled/disposed). Don't clobber the newer state
+                // with this old failure. Codex P2 on #850.
+                return;
+            }
             // Failure here means the URL was rejected; transition
             // to failed so the user sees the error.
             this.dispatch({
