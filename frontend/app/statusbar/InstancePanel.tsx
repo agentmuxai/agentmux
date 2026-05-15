@@ -22,6 +22,7 @@ import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ObjectService } from "@/store/services";
 import { getObjectValue, makeORef } from "@/store/wos";
+import { dispatchWindowOpacity } from "@/app/store/window-opacity-store";
 import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import {
     DISPLAY_NAME_MAX_LEN,
@@ -315,7 +316,13 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                         const isCurrent = () => entry.label === myLabel();
                         const isEditing = () => editingLabel() === entry.label;
                         const currentName = () => resolveName(entry, i());
+                        const currentOpacity = () => {
+                            if (!entry.windowId) return 1.0;
+                            const win = getObjectValue<WaveWindow>(makeORef("window", entry.windowId));
+                            return (win?.meta?.["window:opacity"] as number | undefined) ?? 1.0;
+                        };
                         return (
+                            <>
                             <div
                                 class="instance-panel-window-row"
                                 classList={{
@@ -404,6 +411,53 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                     <span class="instance-panel-window-badge">this</span>
                                 </Show>
                             </div>
+                            <Show when={!!entry.windowId}>
+                                <div
+                                    class="instance-panel-opacity-row"
+                                    onClick={(e) => e.stopPropagation()}
+                                >
+                                    <span class="instance-panel-opacity-label">Opacity</span>
+                                    <input
+                                        type="range"
+                                        class="instance-panel-opacity-slider"
+                                        min={0.35}
+                                        max={1.0}
+                                        step={0.05}
+                                        value={currentOpacity()}
+                                        onInput={(e) => {
+                                            const val = parseFloat(e.currentTarget.value);
+                                            dispatchWindowOpacity({
+                                                type: "SetWindowOpacity",
+                                                windowId: entry.windowId!,
+                                                label: entry.label,
+                                                opacity: val,
+                                                source: "user",
+                                            });
+                                        }}
+                                        onChange={(e) => {
+                                            const raw = parseFloat(e.currentTarget.value);
+                                            const val = Math.round(raw * 100) / 100;
+                                            if (!entry.windowId) return;
+                                            // Set window:transparent alongside window:opacity so
+                                            // AppSettingsUpdater applies it correctly on restore.
+                                            const fullyOpaque = val >= 1.0;
+                                            ObjectService.UpdateObjectMeta(
+                                                makeORef("window", entry.windowId),
+                                                {
+                                                    "window:opacity": fullyOpaque ? null : val,
+                                                    "window:transparent": fullyOpaque ? false : true,
+                                                } as MetaType,
+                                            ).catch((err) =>
+                                                console.error("[InstancePanel] opacity persist failed:", err),
+                                            );
+                                        }}
+                                    />
+                                    <span class="instance-panel-opacity-value">
+                                        {Math.round(currentOpacity() * 100)}%
+                                    </span>
+                                </div>
+                            </Show>
+                            </>
                         );
                     }}
                 </For>
