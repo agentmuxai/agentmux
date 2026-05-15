@@ -196,6 +196,15 @@ wrap_display_handler! {
             let mut inner = self.inner.lock();
             inner.on_title_change(browser, title);
         }
+
+        fn on_favicon_urlchange(
+            &self,
+            browser: Option<&mut Browser>,
+            icon_urls: Option<&mut CefStringList>,
+        ) {
+            let mut inner = self.inner.lock();
+            inner.on_favicon_urlchange(browser, icon_urls);
+        }
     }
 }
 

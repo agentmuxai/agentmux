@@ -288,7 +288,36 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
     const onContextMenu = (e: MouseEvent) => {
         handleHeaderContextMenu(e, blockData(), props.viewModel, props.nodeModel.isMagnified(), props.nodeModel.toggleMagnify, props.nodeModel.onClose);
     };
-    const viewIconElem = createMemo(() => getViewIconElem(viewIconUnion(), blockData()));
+    const viewFaviconUrl = createMemo(() => util.useAtomValueSafe(props.viewModel?.viewFaviconUrl));
+    const viewIconElem = createMemo(() => {
+        const favUrl = viewFaviconUrl();
+        if (favUrl) {
+            return (
+                <div class="block-frame-view-icon">
+                    <img
+                        class="browser-pane-favicon"
+                        src={favUrl}
+                        alt=""
+                        width={14}
+                        height={14}
+                        onLoad={(e) => {
+                            // Reagent P2 on #876: SolidJS reuses the same
+                            // <img> DOM node when `src` reactively changes,
+                            // so a `display:none` from a prior failed
+                            // favicon persists across `src` swaps and hides
+                            // all subsequent valid favicons. Reset on every
+                            // successful load.
+                            (e.currentTarget as HTMLImageElement).style.display = "";
+                        }}
+                        onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.display = "none";
+                        }}
+                    />
+                </div>
+            );
+        }
+        return getViewIconElem(viewIconUnion(), blockData());
+    });
 
     const preIconButtonElem: JSX.Element = preIconButton
         ? <IconButton decl={preIconButton} className="block-frame-preicon-button" />
