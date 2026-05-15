@@ -330,7 +330,13 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
         }
 
         case "CancelClicked": {
-            if (state.kind !== "waiting" || state.sessionId === "") {
+            // Reagent P1 on #850: allow cancel from `waiting` even when
+            // sessionId === "" — that's the startup window between
+            // ConnectClicked and SessionStarted (auth.start in flight).
+            // The controller bumps actionToken so the pending start's
+            // stale-token gate fires and the orphan session never
+            // dispatches SessionStarted. User's cancel intent always wins.
+            if (state.kind !== "waiting") {
                 return {
                     state,
                     events: [
