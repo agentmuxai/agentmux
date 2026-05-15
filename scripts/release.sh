@@ -117,8 +117,11 @@ mv "$TMP" "$HISTORY"
 # Delete consumed changesets.
 git rm -q -- "${CHANGESETS[@]}"
 
-# Stage version history + bump-cli's outputs.
-git add -- "$HISTORY"
+# Stage version history + lockfiles. bump-wrapper.sh in no-commit mode
+# syncs `package-lock.json` on-disk but does NOT stage it (see its line
+# 23-24); we stage explicitly here so the release commit ships consistent
+# versions across package.json + package-lock.json. Reagent P1 on #865.
+git add -- "$HISTORY" package-lock.json
 
 echo >&2
 echo "Release prepared (NOT committed). Review with: git diff --staged" >&2
