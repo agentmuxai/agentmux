@@ -98,6 +98,15 @@ npm install
 
 If you have build issues later, run `npm install` again to refresh dependencies.
 
+`npm install` also runs the `prepare` script which installs the project's git
+hooks (`.githooks/pre-commit`) by setting `core.hooksPath`. The pre-commit
+hook runs `git diff --check` to block commits that contain unresolved merge
+conflict markers or whitespace errors in staged changes. To bypass for one
+commit (e.g. authoring prose that legitimately contains `<<<<<<< HEAD` as
+example text), use `git commit --no-verify`. See spec
+`docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md` §5 Phase 0
+for rationale.
+
 ---
 
 ## Build Commands
