@@ -141,8 +141,13 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
                         the new `authenticated`/`saving` kinds. The
                         rich SaveBundle UI lands in PR C-4 along with
                         the backend `auth.savebundle` RPC; this stub
-                        keeps the user informed in the interim. */}
-                    <AuthenticatedStub state={controller.state()} />
+                        keeps the user informed in the interim.
+                        Reagent P2 on #853 round 11: surface the Cancel
+                        action so users aren't forced to close the modal. */}
+                    <AuthenticatedStub
+                        state={controller.state()}
+                        onCancel={() => void controller.cancel()}
+                    />
                 </Match>
                 <Match when={controller.state().kind === "failed"}>
                     <FailedBanner
@@ -363,10 +368,18 @@ const ReadyBanner = (): JSX.Element => (
     </div>
 );
 
-const AuthenticatedStub = (p: { state: AuthState }): JSX.Element => (
+const AuthenticatedStub = (p: {
+    state: AuthState;
+    onCancel: () => void;
+}): JSX.Element => (
     <div class="pre-launch-auth-panel-ready">
-        ✓ Authenticated{p.state.email ? ` as ${p.state.email}` : ""}.
-        {" "}Awaiting bundle save…
+        <div>
+            ✓ Authenticated{p.state.email ? ` as ${p.state.email}` : ""}.
+            {" "}Awaiting bundle save…
+        </div>
+        <Button onClick={() => p.onCancel()} className="pre-launch-auth-panel-cancel">
+            Cancel
+        </Button>
     </div>
 );
 
