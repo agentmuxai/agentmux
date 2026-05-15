@@ -102,7 +102,7 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         <div class="pre-launch-auth-panel">
             <Switch>
                 <Match when={controller.state().kind === "ready"}>
-                    <ReadyBanner state={controller.state()} />
+                    <ReadyBanner />
                 </Match>
                 <Match when={controller.state().kind === "waiting"}>
                     <WaitingPanel
@@ -332,7 +332,7 @@ const WaitingPanel = (p: {
     );
 };
 
-const ReadyBanner = (p: { state: AuthState }): JSX.Element => (
+const ReadyBanner = (): JSX.Element => (
     <div class="pre-launch-auth-panel-ready">
         ✓ Connected. Ready to launch.
     </div>
