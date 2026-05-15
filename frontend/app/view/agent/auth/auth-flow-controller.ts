@@ -372,6 +372,11 @@ export class AuthFlowController {
                 this.schedulePoll(sessionId);
             }
         } catch (e) {
+            // Cancel the backend session BEFORE dispatching the
+            // failed transition — the reducer clears `sessionId` on
+            // `failed`, after which `dispose()` can no longer reach
+            // the auth.cancel path. Reagent P1 on #850 round 5.
+            void this.rpc.cancel(sessionId).catch(() => {});
             this.dispatch({
                 type: "Polled",
                 sessionId,
