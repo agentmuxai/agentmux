@@ -527,11 +527,12 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         | Command::LayoutSplitHorizontal { .. }
         | Command::LayoutSplitVertical { .. }
         | Command::LayoutClear { .. }
-        | Command::LayoutSetTree { .. } => {
+        | Command::LayoutSetTree { .. }
+        | Command::UpdateWindowMeta { .. } => {
             let v = state.bump_version();
             vec![Event::Error {
                 code: agentmux_common::ipc::ErrorCode::InvalidCommand,
-                message: "Layout command is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+                message: "Srv-pipe command (Layout/UpdateWindowMeta) sent to launcher pipe by mistake".to_string(),
                 fatal: false,
                 version: v,
             }]
