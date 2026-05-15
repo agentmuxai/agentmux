@@ -8,6 +8,8 @@ import { THEME_OPTIONS } from "@/app/menu/base-menus";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
 import { invokeCommand } from "@/app/platform/ipc";
 import { fireAndForget } from "@/util/util";
+import { modalsModel } from "@/app/store/modalmodel";
+import { isMacOS } from "@/util/platformutil";
 import { getTabGrabOffset } from "./tab-grab-offset";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
@@ -638,16 +640,28 @@ function TabBar(props: TabBarProps): JSX.Element {
             });
         }
 
+        const mac = isMacOS();
+        const kbd = (m: string, w: string) => (mac ? m : w);
+
         return [
+            {
+                label: "Command Palette",
+                icon: "magnifying-glass",
+                shortcut: kbd("⌘P", "Ctrl+P"),
+                onClick: () => modalsModel.pushModal("CommandPaletteModal"),
+            },
+            { label: "", divider: true },
             {
                 label: "New Tab",
                 icon: "plus",
+                shortcut: kbd("⌘T", "Ctrl+T"),
                 onClick: () => createTab(),
             },
             { label: "", divider: true },
             {
                 label: "New Window",
                 icon: "window-restore",
+                shortcut: kbd("⌘⇧N", "Ctrl+Shift+N"),
                 onClick: () => getApi().openNewWindow().catch(console.error),
             },
             { label: "", divider: true },
