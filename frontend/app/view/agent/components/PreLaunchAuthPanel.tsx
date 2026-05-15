@@ -19,6 +19,7 @@
  */
 
 import { Button } from "@/element/button";
+import { getApi } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import {
@@ -191,11 +192,30 @@ async function startConnect(
         controller.failConnect(e);
         return;
     }
+    // Codex P1 on #847: pass the full provider-isolated auth env. Setting
+    // `authConfigDirEnvVar` (e.g. CLAUDE_CONFIG_DIR) to the per-provider
+    // isolated dir matters because the CLI writes creds to whatever this
+    // env var points at; without it, the auth.start subprocess writes
+    // into the user's global ~/.claude, not the version-isolated dir
+    // the subsequent agent launch reads from.
+    const authEnv: Record<string, string> = {};
+    if (provider.authConfigDirEnvVar) {
+        try {
+            const authDir = await getApi().ensureAuthDir(provider.id);
+            authEnv[provider.authConfigDirEnvVar] = authDir;
+        } catch (e) {
+            controller.failConnect(e);
+            return;
+        }
+    }
+    if (provider.authExtraEnv) {
+        Object.assign(authEnv, provider.authExtraEnv);
+    }
     await controller.connect({
         cliPath,
         authLoginArgs: provider.authLoginCommand,
         authCheckArgs: provider.authCheckCommand,
-        authEnv: provider.authExtraEnv,
+        authEnv,
     });
 }
 
