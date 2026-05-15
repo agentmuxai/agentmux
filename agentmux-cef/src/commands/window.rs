@@ -789,11 +789,13 @@ pub(crate) fn capture_hwnd_for_label(state: &Arc<AppState>, label: &str) {
     use cef::ImplBrowserHost;
     // Fast path.
     if let Some(mut browser) = state.get_browser(label) {
-        let hwnd = browser.host().window_handle();
-        if !hwnd.is_null() {
-            state.window_hwnds.lock().insert(label.to_string(), hwnd as isize);
-            tracing::debug!("[opacity] captured hwnd fast-path label={} hwnd={:#x}", label, hwnd as isize);
-            return;
+        if let Some(host) = browser.host() {
+            let hwnd = host.window_handle();
+            if !hwnd.0.is_null() {
+                state.window_hwnds.lock().insert(label.to_string(), hwnd.0 as isize);
+                tracing::debug!("[opacity] captured hwnd fast-path label={} hwnd={:#x}", label, hwnd.0 as isize);
+                return;
+            }
         }
     }
     // Fallback: pick the first visible HWND not already mapped.
@@ -845,7 +847,7 @@ pub fn set_window_opacity(
     #[cfg(target_os = "windows")]
     for ev in &out.events {
         match ev {
-            crate::reducer::HostEvent::WindowOpacityApplied { label: ev_label, opacity: ev_opacity } => {
+            crate::reducer::HostEvent::WindowOpacityApplied { label: ev_label, opacity: ev_opacity, .. } => {
                 let hwnd_raw = state.window_hwnds.lock().get(ev_label.as_str()).copied();
                 if let Some(raw) = hwnd_raw {
                     let hwnd = raw as *mut std::ffi::c_void;
@@ -854,7 +856,7 @@ pub fn set_window_opacity(
                     tracing::warn!("[opacity] set_window_opacity: no hwnd for label={}", ev_label);
                 }
             }
-            crate::reducer::HostEvent::WindowOpacityCleared { label: ev_label } => {
+            crate::reducer::HostEvent::WindowOpacityCleared { label: ev_label, .. } => {
                 let hwnd_raw = state.window_hwnds.lock().get(ev_label.as_str()).copied();
                 if let Some(raw) = hwnd_raw {
                     let hwnd = raw as *mut std::ffi::c_void;
