@@ -3,9 +3,25 @@
 **Date:** 2026-05-14
 **Author:** AgentX
 **Status:** Draft
+**Parent architecture:** [`MASTER_REDUCER_STACK_STATUS_2026-05-05.md`](./MASTER_REDUCER_STACK_STATUS_2026-05-05.md) — this work adds a peer subscriber to `srv_events_tx` alongside `persist_subscriber`, codified there as §8.15 (the srv-event subscriber idempotency contract — companion to §8.14 for launcher events).
+**Discussion thread:** [#707 — Reducer-stack architecture: long-term tracking thread](https://github.com/agentmuxai/agentmux/discussions/707)
 **Replaces / supersedes:** the per-handler "Option A" path proposed in `SPEC_REACTIVE_WORKSPACE_SYNC_2026-05-14.md`
-**Sequenced after:** `SPEC_WAVE_TO_MUX_RENAME_2026-05-14.md` — this spec uses post-rename names (`WaveObj`, `WaveObjUpdate`, `WaveStore`, `wos.ts`, etc.). When implementing pre-rename, mentally substitute the old `Wave*` equivalents.
+**Naming note:** uses existing `WaveObj*` / `WaveStore` / `wos.ts` names; the Wave→Mux rename was deferred mid-implementation (issue #851).
 **Motivating bug:** workspace renames don't propagate to the OS title or InstancePanel — `UpdateWorkspace` returned `success_empty()` and the response-broadcast loop had nothing to send. See §2 for the deeper class.
+
+## How this fits the reducer architecture
+
+The bridge is a **second consumer** of the existing srv reducer event bus (`srv_events_tx`), parallel to the persist subscriber:
+
+```
+reducer → emits Event → srv_events_tx ─┬─► persist subscriber → SQLite (existing, Phase E.2c.1–5a)
+                                       ├─► disk writer → JSONL log (existing, Phase D)
+                                       └─► wave_obj_bridge → WaveObjUpdate → broadcast (NEW, this PR)
+```
+
+This adds nothing to the reducer story — the reducer already emits the right events. The bridge just routes them to a new downstream the frontend cares about. Both subscribers must satisfy the §8.15 idempotency contract; this bridge satisfies it by construction (each broadcast is a fresh `wstore.get<T>()`).
+
+**Phase E migration status caveat:** commands that haven't yet been migrated through the srv reducer (notably `UpdateObjectMeta` for `OTYPE_WINDOW`, `OTYPE_LAYOUT`, `OTYPE_CLIENT`) bypass `srv_events_tx` entirely — they go straight to `wcore` and never emit a reducer event. The bridge can't see them. PR #852 includes a temporary inline-update workaround for `OTYPE_WINDOW` in `service.rs:308`'s `_ => other` fallback arm; the proper fix is the Phase E.5.x migration of `UpdateWindowMeta` to go through the reducer (tracked separately).
 
 ---
 

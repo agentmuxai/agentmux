@@ -220,6 +220,7 @@ Per [`frontend-reducer-architecture-2026-05-03.md`](./frontend-reducer-architect
 **Status: ✅ Persist subscriber + event log shipped.**
 
 - **Persist subscriber** (Phase E.2c.1–5a): idempotent apply to SQLite, wrapped in transactions (F1.A). Sole writer path for Workspace/Tab/Block state.
+- **WaveObjUpdate broadcast bridge** (PR #852, [`SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md`](./SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md)): a peer subscriber to `srv_events_tx` that translates reducer events into frontend `waveobj:update` WS broadcasts via the existing `event_bus`. Idempotent by construction — each broadcast is a fresh `wstore.get<T>()`, so re-delivery yields the same WaveObjUpdate (frontend dedups on `version` at `wos.ts:272`). Phase 1 covers workspace events; Phase 2 expands to tab/block/window/layout. Closes the class of bug where mutation RPCs returned `success_empty()` and the response broadcast loop had nothing to fan out.
 - **SQLite files** (per memory `reference_persistence_files.md`):
   - `objects.db` — Workspace/Tab/Block/Layout/Window/Agent/Identity domain state
   - `filestore.db` — file-store cache
@@ -268,6 +269,12 @@ These came out of the multi-reducer proposal sessions and have been reaffirmed a
     - **Host shadow projection** (`apply_shadow_projection` in `agentmux-cef/src/launcher_ipc.rs`, extracted from `apply_event_to_shadow`) — `HashMap::insert`/`remove` keyed by `label`, idempotent by construction. Property tests in this PR (`shadow_projection_tests`).
 
     **Drift-storm motivation:** prior to PR #708 the renderer-side dispatcher was idempotent only via the tracker's global monotonic-version drop, which fails when a fresh JS context resets `lastVersion=0` (pool window bootstrap) — same launcher event re-dispatched ~600× → V8 stack exhaustion → Crashpad. See [`ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`](./ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md).
+
+15. **`srv_events_tx` subscribers MUST be idempotent under `(event, oid, version)`.** Companion contract to §8.14 covering the srv-side reducer event bus. Each subscriber may observe the same reducer event multiple times (replay, restart re-bootstrap, future cross-process dispatch). Two subscriber sites:
+    - **`persist_subscriber`** (`agentmux-srv/src/persist_subscriber.rs`): SQLite write-back. Idempotent via `INSERT OR REPLACE` + `apply_event_to_wstore` arms keyed by oid + version.
+    - **`wave_obj_bridge`** (`agentmux-srv/src/server/wave_obj_bridge.rs`, PR #852): translates events → frontend `waveobj:update` broadcasts. Idempotent by construction — each call fetches fresh state from `wstore`. Frontend dedups on `version` at `wos.ts:272`, so duplicate broadcasts collapse to a single signal update.
+
+    **Migration arc:** every Phase E command that's been migrated through the reducer (UpdateWorkspace, UpdateWorkspaceMeta, UpdateTabMeta, UpdateBlockMeta, …) emits an event onto this bus. The persist subscriber writes SQLite; the bridge propagates to the frontend. Commands NOT yet migrated (UpdateWindowMeta, UpdateLayoutMeta, …) bypass the reducer entirely and fall back to `wcore` direct writes — they'll inherit reactivity automatically when their Phase E.5.x migration lands. See PR #852's spec for the bridge architecture and Phase 2 mapping table.
 
 ---
 
