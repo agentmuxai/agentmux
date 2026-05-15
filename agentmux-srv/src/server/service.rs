@@ -332,35 +332,22 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                     block_id: oref.oid.clone(),
                     meta_patch: meta_value,
                 },
+                t if t == OTYPE_WINDOW => agentmux_common::ipc::Command::UpdateWindowMeta {
+                    window_id: oref.oid.clone(),
+                    meta_patch: meta_value,
+                },
                 other => {
-                    // Layouts + Windows aren't meta-mutated via the
-                    // reducer; fall back to wcore for forward-compat.
-                    //
-                    // For OTYPE_WINDOW, return the updated object inline
-                    // (matches the BLOCK/TAB inline-update pattern below).
-                    // Without this, UpdateObjectMeta on a Window returns
-                    // success_empty() and the frontend WOS cache never
-                    // sees the change — the change persists in SQLite
-                    // but the in-session UI shows stale data, so e.g. an
-                    // InstancePanel rename of `window:displayname`
-                    // "reverts" visually until app restart. (Reported by
-                    // user during PR #852 manual verification.)
+                    // Remaining otypes (Layout, Client, Temp) aren't
+                    // meta-mutated via the reducer yet; fall back to
+                    // wcore for forward-compat. They publish no event,
+                    // so the WaveObjUpdate bridge can't see them — the
+                    // frontend cache stays stale until next bootstrap
+                    // (deemed acceptable since these aren't user-edited).
+                    // Future Phase E.5.x migrations can add reducer arms
+                    // for any of these following the OTYPE_WINDOW pattern
+                    // above (per issue #855 retro).
                     return match update_object_meta(store, &oref_str, &meta_update) {
-                        Ok(()) => {
-                            if oref.otype == OTYPE_WINDOW {
-                                if let Ok(window) = store.must_get::<Window>(&oref.oid) {
-                                    return WebReturnType::success_with_updates(vec![
-                                        WaveObjUpdate {
-                                            updatetype: "update".into(),
-                                            otype: OTYPE_WINDOW.to_string(),
-                                            oid: oref.oid.clone(),
-                                            obj: Some(wave_obj_to_value(&window)),
-                                        },
-                                    ]);
-                                }
-                            }
-                            WebReturnType::success_empty()
-                        }
+                        Ok(()) => WebReturnType::success_empty(),
                         Err(e) => WebReturnType::error(format!(
                             "UpdateObjectMeta: unsupported otype {} via reducer; wcore fallback failed: {}",
                             other, e
