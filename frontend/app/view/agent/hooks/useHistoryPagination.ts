@@ -147,7 +147,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 if (stateResp.content) {
                     const snapshot = JSON.parse(stateResp.content);
                     if (snapshot && snapshot.schemaVersion === SNAPSHOT_SCHEMA_VERSION && Array.isArray(snapshot.nodes)) {
-                        dispatchDoc(opts.blockId, { type: "HistoryRestored", nodes: snapshot.nodes });
+                        dispatchDoc(opts.blockId, { type: "HistoryRestored", fromSnapshot: true, nodes: snapshot.nodes });
                         setHistoryOffset(0);
                         setHistoryTotal(snapshot.nodes.length);
                         opts.log(

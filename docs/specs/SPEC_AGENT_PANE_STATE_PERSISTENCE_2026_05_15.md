@@ -72,10 +72,22 @@ interface AgentPaneStateSnapshot {
   highWaterMark: number;
   /** Full reducer state — see frontend/app/store/agent-document/types.ts. */
   nodes: DocumentNode[];
-  /** Sticky-scroll flag from AgentViewState. */
-  stickToBottom: boolean;
-  /** Scroll anchor, or null if user was at bottom. */
-  headAnchor: { nodeId: string; offsetPx: number } | null;
+  /**
+   * Sticky-scroll flag from AgentViewState.
+   *
+   * v1 status: NOT YET PERSISTED. `AgentViewState` is created inside
+   * `AgentDocumentView` (a child of `agent-view.tsx` where the snapshot
+   * save lives). Lifting it requires either a callback-ref prop or
+   * moving `createAgentViewState` up. Deferred to Phase 4.
+   */
+  stickToBottom?: boolean;
+  /**
+   * Scroll anchor, or null if user was at bottom.
+   *
+   * v1 status: NOT YET PERSISTED — same wiring concern as `stickToBottom`.
+   * Deferred to Phase 4.
+   */
+  headAnchor?: { nodeId: string; offsetPx: number } | null;
   /** Optional: collapsedNodes / pinnedNodes (already persisted via block meta — keep both during transition; deprecate meta later). */
   collapsedNodeIds?: string[];
   pinnedNodeIds?: string[];

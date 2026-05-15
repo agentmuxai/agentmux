@@ -74,18 +74,20 @@ describe("agent document reducer", () => {
         it("full-replaces nodes from empty state and jumps to active", () => {
             const r = update(initialState(), {
                 type: "HistoryRestored",
+                fromSnapshot: true,
                 nodes: [md("s1"), md("s2"), md("s3")],
             });
             expect(r.state.nodes.map((n) => n.id)).toEqual(["s1", "s2", "s3"]);
             expect(r.state.sessionPhase).toBe("active");
             expect(r.state.nodeIdSet).toEqual(new Set(["s1", "s2", "s3"]));
-            expect(r.events).toEqual([{ type: "history-restored", restoredCount: 3 }]);
+            expect(r.events).toEqual([{ type: "history-restored", restoredCount: 3, fromSnapshot: true }]);
         });
 
         it("full-replaces existing nodes (unlike HistoryLoaded which prepends+dedups)", () => {
             const start = seed([md("old1"), md("old2")]);
             const r = update(start, {
                 type: "HistoryRestored",
+                fromSnapshot: true,
                 nodes: [md("new1"), md("new2")],
             });
             // Old nodes are gone — snapshot IS the authoritative state.
@@ -94,7 +96,7 @@ describe("agent document reducer", () => {
         });
 
         it("empty restore is allowed (snapshot from a wiped session)", () => {
-            const r = update(seed([md("a")]), { type: "HistoryRestored", nodes: [] });
+            const r = update(seed([md("a")]), { type: "HistoryRestored", fromSnapshot: true, nodes: [] });
             expect(r.state.nodes).toEqual([]);
             expect(r.state.nodeIdSet.size).toBe(0);
             expect(r.state.sessionPhase).toBe("active");
@@ -103,6 +105,7 @@ describe("agent document reducer", () => {
         it("subsequent StreamFlush appends on top of restored nodes", () => {
             const s0 = update(initialState(), {
                 type: "HistoryRestored",
+                fromSnapshot: true,
                 nodes: [md("r1"), md("r2")],
             }).state;
             const s1 = update(s0, {

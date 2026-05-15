@@ -101,7 +101,11 @@ export function update(
                     sessionPhase: "active",
                 },
                 events: [
-                    { type: "history-restored", restoredCount: command.nodes.length },
+                    {
+                        type: "history-restored",
+                        restoredCount: command.nodes.length,
+                        fromSnapshot: true,
+                    },
                 ],
             };
         }
