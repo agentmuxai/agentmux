@@ -737,6 +737,26 @@ describe("auth-state reducer", () => {
                 sessionId: "s1",
             });
         });
+
+        it("CancelClicked also works from saving (reagent P1 round 10 — spinner cancellable)", () => {
+            // Without honoring `saving`, clicking Cancel during the
+            // auth.savebundle RPC would silently drop the dispatch and
+            // leave the spinner forever. The controller's cancel() also
+            // fires rpc.cancel for the live session.
+            const seeded = seed({
+                kind: "saving",
+                sessionId: "s1",
+                email: "asaf@x.com",
+            });
+            const r = update(seeded, { type: "CancelClicked" });
+            expect(r.state.kind).toBe("unauthenticated");
+            expect(r.state.sessionId).toBe("");
+            expect(r.state.email).toBe("");
+            expect(r.events[0]).toMatchObject({
+                type: "cancel-requested",
+                sessionId: "s1",
+            });
+        });
     });
 
     describe("ConnectFailed (reagent P2 on #853)", () => {
