@@ -229,6 +229,10 @@ async function startConnect(
     if (provider.authExtraEnv) {
         Object.assign(authEnv, provider.authExtraEnv);
     }
+    // Codex P2 on #854 round 4: bail before connect() if the modal
+    // closed mid-prep. The controller itself also gates on `closed`,
+    // but skipping the call avoids the extra RPC bookkeeping.
+    if (controller.state().closed) return;
     await controller.connect({
         cliPath,
         authLoginArgs: provider.authLoginCommand,
@@ -248,10 +252,13 @@ const ConnectCta = (p: {
     const catalog = () =>
         p.provider ? getCliCatalogEntry(p.provider.id) : undefined;
     const providerLabel = () => p.provider?.displayName ?? "this provider";
+    const isExpired = () => p.state.kind === "expired";
     return (
         <div class="pre-launch-auth-panel-cta">
             <div class="pre-launch-auth-panel-warning">
-                ⚠ {providerLabel()} requires an OAuth login before launch.
+                {isExpired()
+                    ? `⚠ Your ${providerLabel()} session is expired. Re-authenticate before launching.`
+                    : `⚠ ${providerLabel()} requires an OAuth login before launch.`}
             </div>
             <Button
                 onClick={() => p.onConnect()}
@@ -262,7 +269,7 @@ const ConnectCta = (p: {
                     {catalog()?.icon ?? "🔐"}
                 </span>
                 <span class="pre-launch-auth-panel-connect-label">
-                    Connect to {providerLabel()}
+                    {isExpired() ? "Re-authenticate" : `Connect to ${providerLabel()}`}
                 </span>
             </Button>
             <div class="pre-launch-auth-panel-hint">
