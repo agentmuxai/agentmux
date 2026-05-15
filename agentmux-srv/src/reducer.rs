@@ -152,6 +152,10 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             block_id,
             meta_patch,
         } => block::handle_update_block_meta(state, block_id, meta_patch),
+        Command::UpdateWindowMeta {
+            window_id,
+            meta_patch,
+        } => window::handle_update_window_meta(state, window_id, meta_patch),
         Command::MoveTab {
             tab_id,
             src_workspace_id,

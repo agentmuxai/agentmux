@@ -247,6 +247,11 @@ pub(crate) fn apply_event_to_wstore(
             meta_patch,
             ..
         } => apply_workspace_meta_updated(wstore, workspace_id, meta_patch),
+        Event::WindowMetaUpdated {
+            window_id,
+            meta_patch,
+            ..
+        } => apply_window_meta_updated(wstore, window_id, meta_patch),
         Event::TabMetaUpdated {
             tab_id,
             meta_patch,
@@ -729,6 +734,24 @@ fn apply_workspace_meta_updated(
     Ok(())
 }
 
+/// Phase E.5.x (issue #855) — apply a meta-patch to a window's `meta`
+/// map. Same shape as `apply_workspace_meta_updated`. Silent no-op if
+/// the window doesn't exist in wstore (preserves the idempotency
+/// contract — duplicate or stale events fold to no-op).
+fn apply_window_meta_updated(
+    wstore: &WaveStore,
+    window_id: &str,
+    meta_patch: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(mut window) = wstore.get::<Window>(window_id)? else {
+        return Ok(());
+    };
+    if merge_meta_patch(&mut window.meta, meta_patch) {
+        wstore.update(&mut window)?;
+    }
+    Ok(())
+}
+
 /// Phase E.5.3 — apply a meta-patch to a tab's `meta` map.
 fn apply_tab_meta_updated(
     wstore: &WaveStore,
@@ -965,6 +988,7 @@ fn event_kind(event: &Event) -> &'static str {
         Event::WorkspaceRenamed { .. } => "WorkspaceRenamed",
         Event::TabRenamed { .. } => "TabRenamed",
         Event::WorkspaceMetaUpdated { .. } => "WorkspaceMetaUpdated",
+        Event::WindowMetaUpdated { .. } => "WindowMetaUpdated",
         Event::TabMetaUpdated { .. } => "TabMetaUpdated",
         Event::BlockMetaUpdated { .. } => "BlockMetaUpdated",
         Event::TabMoved { .. } => "TabMoved",

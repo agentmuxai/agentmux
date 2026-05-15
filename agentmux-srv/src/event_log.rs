@@ -283,6 +283,7 @@ fn event_version(e: &Event) -> u64 {
         | Event::WorkspaceRenamed { version, .. }
         | Event::TabRenamed { version, .. }
         | Event::WorkspaceMetaUpdated { version, .. }
+        | Event::WindowMetaUpdated { version, .. }
         | Event::TabMetaUpdated { version, .. }
         | Event::BlockMetaUpdated { version, .. }
         | Event::TabMoved { version, .. }

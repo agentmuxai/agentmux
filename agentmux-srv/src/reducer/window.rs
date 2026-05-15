@@ -100,3 +100,32 @@ pub(super) fn handle_switch_workspace(
         version: v,
     }]
 }
+
+/// Phase E.5.x (issue #855) — apply a meta-patch to a window. Pass-
+/// through to `Event::WindowMetaUpdated`; the persist subscriber
+/// performs the merge against wstore. Same shape as
+/// `handle_update_workspace_meta` — reducer state does NOT track
+/// window meta, the migration property is "every mutation goes
+/// through the reducer's broadcast bus" so the WaveObjUpdate bridge
+/// can fan out to the frontend.
+///
+/// The validation is best-effort: reducer state's `windows` map only
+/// holds windows for which a workspace mapping has been registered
+/// (via `handle_create_window`). Windows created via wcore-direct
+/// paths (legacy bootstrap) won't appear there but still exist in
+/// wstore. So we don't error on missing — the persist subscriber's
+/// `apply_window_meta_updated` will silently no-op if the window
+/// genuinely doesn't exist in wstore either, matching the
+/// idempotency contract for the bridge to broadcast (or skip).
+pub(super) fn handle_update_window_meta(
+    state: &mut State,
+    window_id: String,
+    meta_patch: serde_json::Value,
+) -> Vec<Event> {
+    let v = state.bump_version();
+    vec![Event::WindowMetaUpdated {
+        window_id,
+        meta_patch,
+        version: v,
+    }]
+}
