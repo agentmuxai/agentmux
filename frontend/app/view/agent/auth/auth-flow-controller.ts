@@ -132,6 +132,13 @@ export class AuthFlowController {
     private pollIntervalMs: number;
     private timers: NonNullable<AuthFlowOptions["timers"]>;
     private pollHandle: unknown = null;
+    /** Monotonically-increasing token incremented on every action that
+     *  invalidates an in-flight RPC (selected, cancel, dispose, new
+     *  submit). RPC completions check the token at start vs. now —
+     *  stale results are ignored. Codex P2 on #850: prevents a slow
+     *  `auth.submitapikey` completion from landing after the user
+     *  swapped to a different bundle and submitted again. */
+    private actionToken = 0;
 
     constructor(opts: AuthFlowOptions = {}) {
         this.rpc = opts.rpc ?? defaultAuthRpc;
@@ -155,7 +162,10 @@ export class AuthFlowController {
 
     selected(providerId: string, bundleId: string, outcome: SelectionOutcome): void {
         // Selecting clears any prior session; if there was an
-        // in-flight poll, stop it.
+        // in-flight poll, stop it. Bump the action token so any
+        // in-flight RPC completions for the previous selection are
+        // recognized as stale and dropped.
+        this.actionToken += 1;
         this.stopPolling();
         this.dispatch({ type: "Selected", providerId, bundleId, outcome });
     }
@@ -180,6 +190,18 @@ export class AuthFlowController {
                 authEnv: cli.authEnv,
             });
             this.dispatch({ type: "SessionStarted", sessionId, authUrl });
+            // Codex P1 on #850: if the user changed the selection /
+            // cancelled / disposed during the `await rpc.start`, the
+            // reducer dropped SessionStarted (kind guard). Without
+            // this check we'd still `schedulePoll(sessionId)` for a
+            // session the user already left, polling — and keeping
+            // alive — an orphan backend session. Detect via state
+            // and tell the backend to drop the session.
+            const after = this.state();
+            if (after.kind !== "waiting" || after.sessionId !== sessionId) {
+                void this.rpc.cancel(sessionId).catch(() => {});
+                return;
+            }
             this.schedulePoll(sessionId);
         } catch (e) {
             // Force the failure transition through the reducer's
@@ -201,6 +223,7 @@ export class AuthFlowController {
         const s = this.state();
         if (s.kind !== "waiting" || s.sessionId === "") return;
         const sessionId = s.sessionId;
+        this.actionToken += 1;
         this.stopPolling();
         this.dispatch({ type: "CancelClicked" });
         try {
@@ -233,6 +256,10 @@ export class AuthFlowController {
 
     async submitApiKey(apiKey: string, accountName: string): Promise<void> {
         const s = this.state();
+        // Bump action token + capture so a late completion can detect
+        // that the user already started another submit (codex P2 on #850).
+        this.actionToken += 1;
+        const myToken = this.actionToken;
         this.dispatch({
             type: "ApiKeySubmitted",
             apiKey,
@@ -245,6 +272,11 @@ export class AuthFlowController {
                 apiKey,
                 accountName,
             });
+            if (this.actionToken !== myToken) {
+                // Stale completion: user changed selection or started
+                // another submit while this was in flight. Drop result.
+                return;
+            }
             this.dispatch({ type: "ApiKeyAccepted", bundleId });
         } catch (e) {
             const synthSessionId = "apikey-submit-failed";
@@ -260,8 +292,8 @@ export class AuthFlowController {
     dispose(): void {
         // Fire-and-forget auth.cancel for any in-flight session so we
         // don't leave an orphan CLI subprocess on the backend. Codex
-        // P2 on #850: previously dispose() only cleared the local
-        // timer + marked closed.
+        // P2 on #850.
+        this.actionToken += 1;
         const s = this.state();
         if (s.kind === "waiting" && s.sessionId !== "") {
             void this.rpc.cancel(s.sessionId).catch(() => {
