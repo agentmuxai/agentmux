@@ -149,25 +149,15 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     if (snapshot && snapshot.schemaVersion === SNAPSHOT_SCHEMA_VERSION && Array.isArray(snapshot.nodes)) {
                         dispatchDoc(opts.blockId, { type: "HistoryRestored", fromSnapshot: true, nodes: snapshot.nodes });
 
-                        let total = snapshot.nodes.length;
-                        try {
-                            const countResp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
-                                block_id: opts.blockId,
-                                filename: "output",
-                            }, { timeout: 3000 });
-                            if (!mounted) return;
-                            total = countResp?.count ?? snapshot.nodes.length;
-                        } catch {
-                            // soft fail — fallback to snapshot.nodes.length
-                        }
-                        const offset = Math.max(0, total - snapshot.nodes.length);
+                        const offset = typeof snapshot.historyOffset === "number" && snapshot.historyOffset >= 0
+                            ? snapshot.historyOffset
+                            : 0;
                         setHistoryOffset(offset);
-                        setHistoryTotal(total);
+                        setHistoryTotal(typeof snapshot.highWaterMark === "number" ? snapshot.highWaterMark : snapshot.nodes.length);
                         opts.log(
                             "history",
                             `restored ${snapshot.nodes.length} nodes from snapshot ` +
-                                `(savedAt=${snapshot.savedAt ?? "unknown"}, ` +
-                                `NDJSON total=${total}, loadOlder offset=${offset})`,
+                                `(savedAt=${snapshot.savedAt ?? "unknown"}, loadOlder offset=${offset})`,
                         );
                         dispatchPane(opts.blockId, { type: "InitReady" });
                         return;

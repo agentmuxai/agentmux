@@ -194,6 +194,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 schemaVersion: SNAPSHOT_SCHEMA_VERSION,
                 savedAt: new Date().toISOString(),
                 highWaterMark,
+                historyOffset: history.historyOffset(),
                 nodes,
             };
             await RpcApi.BlockfileWriteStateCommand(TabRpcClient, {

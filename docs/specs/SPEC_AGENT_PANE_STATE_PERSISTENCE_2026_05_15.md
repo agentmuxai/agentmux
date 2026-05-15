@@ -70,6 +70,19 @@ interface AgentPaneStateSnapshot {
    * normal StreamFlush path before the live subscription starts.
    */
   highWaterMark: number;
+  /**
+   * NDJSON line index where the loaded slice begins. On restore, this
+   * becomes the `loadOlder` cursor — calls fetch lines in
+   * `[offset - PAGE_SIZE, offset)` and prepend the parsed nodes via
+   * `HistoryLoaded` (which dedupes by id, so any overlap with the
+   * snapshot is harmless).
+   *
+   * MUST be the actual NDJSON line index, not derived from
+   * `nodes.length` — streaming produces many NDJSON lines per
+   * `DocumentNode` (token deltas, partial tool events), so node count
+   * is not a proxy for line count. Reagent P1 on PR #877 round 3.
+   */
+  historyOffset: number;
   /** Full reducer state — see frontend/app/store/agent-document/types.ts. */
   nodes: DocumentNode[];
   /**
