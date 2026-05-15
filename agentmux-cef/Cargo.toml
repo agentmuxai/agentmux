@@ -1,10 +1,6 @@
 [package]
 name = "agentmux-cef"
-<<<<<<< HEAD
-version = "0.33.891"
-=======
-version = "0.33.892"
->>>>>>> main
+version = "0.33.894"
 description = "AgentMux Host — Desktop app with bundled Chromium"
 authors = ["AgentMux Corp"]
 edition = "2021"
