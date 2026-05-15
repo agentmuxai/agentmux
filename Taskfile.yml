@@ -23,17 +23,17 @@ vars:
 
 tasks:
     changeset:
-        desc: Author a new changeset file. Usage — task changeset -- patch "fix(...): description"
+        desc: 'Author a new changeset file. Usage: task changeset -- patch "fix(...): description"'
         cmds:
             - bash scripts/changeset.sh {{.CLI_ARGS}}
 
     release:
-        desc: Consume pending changesets, bump version, update VERSION_HISTORY (no commit). Pass `--dry-run` to preview. RFC #857 Phase 2.
+        desc: 'Consume pending changesets, bump version, update VERSION_HISTORY (no commit). Pass --dry-run to preview. RFC #857 Phase 2.'
         cmds:
             - bash scripts/release.sh {{.CLI_ARGS}}
 
     package:local:
-        desc: Build a portable ZIP with a temporarily-bumped version label (for side-by-side build comparisons). Restores version files on exit — no git mutation, no pushed bump commit. Usage — task package:local (defaults to patch bump) or task package:local -- minor.
+        desc: 'Build a portable ZIP with a temporarily-bumped version label (for side-by-side build comparisons). Restores version files on exit. Usage: task package:local (defaults to patch bump) or task package:local -- minor.'
         cmds:
             - bash scripts/package-local.sh {{.CLI_ARGS}}
 
