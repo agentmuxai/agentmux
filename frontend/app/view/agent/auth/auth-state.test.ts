@@ -375,7 +375,9 @@ describe("auth-state reducer", () => {
             });
         });
 
-        it("ApiKeyAccepted flips to ready with the new bundle", () => {
+        it("ApiKeyAccepted transitions to ready with the new bundleId (single-phase)", () => {
+            // PR C-1 (revised): api-key stays single-phase until C-2
+            // backend lands. Backend persists in submitapikey itself.
             const seeded = seed({ kind: "waiting", providerId: "openclaw" });
             const r = update(seeded, {
                 type: "ApiKeyAccepted",
@@ -383,14 +385,22 @@ describe("auth-state reducer", () => {
             });
             expect(r.state.kind).toBe("ready");
             expect(r.state.bundleId).toBe("new-key-bundle");
+            expect(r.events[0]).toMatchObject({
+                type: "api-key-accepted",
+                bundleId: "new-key-bundle",
+            });
         });
 
         // Reagent P2 on #849: ApiKeyAccepted must drop if the user
-        // exited `waiting` (e.g. swapped bundle, cancelled) during
-        // the API-key RPC await — otherwise the stale bundleId
-        // overrides the user's new selection.
+        // exited `waiting` during the API-key RPC await.
         it("ApiKeyAccepted drops if kind has left `waiting`", () => {
-            for (const kind of ["unauthenticated", "ready", "failed", "expired"] as const) {
+            for (const kind of [
+                "unauthenticated",
+                "ready",
+                "failed",
+                "expired",
+                "authenticated",
+            ] as const) {
                 const seeded = seed({ kind, providerId: "openclaw", bundleId: "user-pick" });
                 const r = update(seeded, {
                     type: "ApiKeyAccepted",
@@ -492,6 +502,323 @@ describe("auth-state reducer", () => {
                     commandType: "SessionStarted",
                 });
             }
+        });
+    });
+
+    // ── PR C-1: 2-phase commit (authenticated → saving → ready) ─────
+    describe("2-phase commit (PR C-1)", () => {
+        describe("Polled.authenticated", () => {
+            it("flips waiting → authenticated, captures email, clears authUrl/deviceCode", () => {
+                const seeded = seed({
+                    kind: "waiting",
+                    sessionId: "s1",
+                    authUrl: "https://x",
+                    deviceCode: { code: "Z", verificationUrl: "V" },
+                });
+                const r = update(seeded, {
+                    type: "Polled",
+                    sessionId: "s1",
+                    status: { status: "authenticated", email: "asaf@x.com" },
+                });
+                expect(r.state.kind).toBe("authenticated");
+                expect(r.state.email).toBe("asaf@x.com");
+                expect(r.state.sessionId).toBe("s1"); // preserved for savebundle
+                expect(r.state.authUrl).toBe("");
+                expect(r.state.deviceCode).toBeNull();
+                expect(r.events[0]).toMatchObject({
+                    type: "authenticated",
+                    email: "asaf@x.com",
+                });
+            });
+
+            it("handles null email (CLI didn't print a logged-in-as line)", () => {
+                const seeded = seed({ kind: "waiting", sessionId: "s1" });
+                const r = update(seeded, {
+                    type: "Polled",
+                    sessionId: "s1",
+                    status: { status: "authenticated", email: null },
+                });
+                expect(r.state.kind).toBe("authenticated");
+                expect(r.state.email).toBe("");
+            });
+        });
+
+        describe("SaveBundleClicked", () => {
+            it("transitions authenticated → saving and emits save-bundle-requested", () => {
+                const seeded = seed({
+                    kind: "authenticated",
+                    sessionId: "s1",
+                    email: "asaf@x.com",
+                    intoBundleId: "",
+                });
+                const r = update(seeded, {
+                    type: "SaveBundleClicked",
+                    name: "Claude (asaf@x.com)",
+                });
+                expect(r.state.kind).toBe("saving");
+                expect(r.state.error).toBe("");
+                expect(r.events[0]).toMatchObject({
+                    type: "save-bundle-requested",
+                    sessionId: "s1",
+                    intoBundleId: "",
+                    name: "Claude (asaf@x.com)",
+                });
+            });
+
+            it("forwards intoBundleId for the re-auth/add-account path", () => {
+                const seeded = seed({
+                    kind: "authenticated",
+                    sessionId: "s1",
+                    email: "asaf@x.com",
+                    intoBundleId: "existing-b1",
+                });
+                const r = update(seeded, {
+                    type: "SaveBundleClicked",
+                    name: "Claude (asaf@x.com)",
+                });
+                expect(r.events[0]).toMatchObject({
+                    type: "save-bundle-requested",
+                    intoBundleId: "existing-b1",
+                });
+            });
+
+            it("drops from non-authenticated states", () => {
+                for (const kind of [
+                    "idle",
+                    "unauthenticated",
+                    "waiting",
+                    "saving",
+                    "ready",
+                    "expired",
+                    "failed",
+                ] as const) {
+                    const seeded = seed({ kind, sessionId: "s1" });
+                    const r = update(seeded, {
+                        type: "SaveBundleClicked",
+                        name: "x",
+                    });
+                    expect(r.state).toBe(seeded);
+                    expect(r.events[0]).toMatchObject({
+                        type: "post-close-command-dropped",
+                        commandType: "SaveBundleClicked",
+                    });
+                }
+            });
+        });
+
+        describe("BundleSaved", () => {
+            it("transitions saving → ready with the real bundleId", () => {
+                const seeded = seed({
+                    kind: "saving",
+                    sessionId: "s1",
+                    email: "asaf@x.com",
+                });
+                const r = update(seeded, {
+                    type: "BundleSaved",
+                    bundleId: "bundle-uuid-1",
+                });
+                expect(r.state.kind).toBe("ready");
+                expect(r.state.bundleId).toBe("bundle-uuid-1");
+                expect(r.state.sessionId).toBe("");
+                expect(r.events[0]).toMatchObject({
+                    type: "bundle-saved",
+                    bundleId: "bundle-uuid-1",
+                });
+            });
+
+            it("drops from non-saving states", () => {
+                for (const kind of [
+                    "authenticated",
+                    "waiting",
+                    "ready",
+                    "failed",
+                ] as const) {
+                    const seeded = seed({ kind });
+                    const r = update(seeded, {
+                        type: "BundleSaved",
+                        bundleId: "x",
+                    });
+                    expect(r.state).toBe(seeded);
+                    expect(r.events[0]).toMatchObject({
+                        type: "post-close-command-dropped",
+                        commandType: "BundleSaved",
+                    });
+                }
+            });
+        });
+
+        describe("BundleSaveFailed", () => {
+            it("returns to authenticated (preserve email + session) with error", () => {
+                const seeded = seed({
+                    kind: "saving",
+                    sessionId: "s1",
+                    email: "asaf@x.com",
+                });
+                const r = update(seeded, {
+                    type: "BundleSaveFailed",
+                    error: "UNIQUE constraint failed: db_identities.name",
+                });
+                expect(r.state.kind).toBe("authenticated");
+                expect(r.state.email).toBe("asaf@x.com");
+                expect(r.state.sessionId).toBe("s1");
+                expect(r.state.error).toContain("UNIQUE");
+                expect(r.events[0]).toMatchObject({
+                    type: "bundle-save-failed",
+                });
+            });
+
+            it("drops from non-saving states", () => {
+                const seeded = seed({ kind: "authenticated" });
+                const r = update(seeded, {
+                    type: "BundleSaveFailed",
+                    error: "boom",
+                });
+                expect(r.events[0]).toMatchObject({
+                    type: "post-close-command-dropped",
+                    commandType: "BundleSaveFailed",
+                });
+            });
+        });
+
+        describe("Selected populates intoBundleId from outcome", () => {
+            it("expired → intoBundleId = bundleId (re-auth)", () => {
+                const r = update(initialState(), {
+                    type: "Selected",
+                    providerId: "claude",
+                    bundleId: "existing-b1",
+                    outcome: "expired",
+                });
+                expect(r.state.intoBundleId).toBe("existing-b1");
+            });
+
+            it("needs-account → intoBundleId = bundleId (add account)", () => {
+                const r = update(initialState(), {
+                    type: "Selected",
+                    providerId: "claude",
+                    bundleId: "existing-b1",
+                    outcome: "needs-account",
+                });
+                expect(r.state.intoBundleId).toBe("existing-b1");
+            });
+
+            it("needs-bundle → intoBundleId = '' (new bundle)", () => {
+                const r = update(initialState(), {
+                    type: "Selected",
+                    providerId: "claude",
+                    bundleId: "",
+                    outcome: "needs-bundle",
+                });
+                expect(r.state.intoBundleId).toBe("");
+            });
+
+            it("ready → intoBundleId = '' (no save flow needed)", () => {
+                const r = update(initialState(), {
+                    type: "Selected",
+                    providerId: "claude",
+                    bundleId: "existing-b1",
+                    outcome: "ready",
+                });
+                expect(r.state.intoBundleId).toBe("");
+            });
+        });
+
+        it("CancelClicked also works from authenticated (S21 — user changed mind)", () => {
+            const seeded = seed({
+                kind: "authenticated",
+                sessionId: "s1",
+                email: "asaf@x.com",
+            });
+            const r = update(seeded, { type: "CancelClicked" });
+            expect(r.state.kind).toBe("unauthenticated");
+            expect(r.state.sessionId).toBe("");
+            expect(r.state.email).toBe("");
+            expect(r.events[0]).toMatchObject({
+                type: "cancel-requested",
+                sessionId: "s1",
+            });
+        });
+
+        it("CancelClicked also works from saving (reagent P1 round 10 — spinner cancellable)", () => {
+            // Without honoring `saving`, clicking Cancel during the
+            // auth.savebundle RPC would silently drop the dispatch and
+            // leave the spinner forever. The controller's cancel() also
+            // fires rpc.cancel for the live session.
+            const seeded = seed({
+                kind: "saving",
+                sessionId: "s1",
+                email: "asaf@x.com",
+            });
+            const r = update(seeded, { type: "CancelClicked" });
+            expect(r.state.kind).toBe("unauthenticated");
+            expect(r.state.sessionId).toBe("");
+            expect(r.state.email).toBe("");
+            expect(r.events[0]).toMatchObject({
+                type: "cancel-requested",
+                sessionId: "s1",
+            });
+        });
+    });
+
+    describe("ConnectFailed (reagent P2 on #853)", () => {
+        it("flips connect-attempt states to failed with error", () => {
+            // Codex P2 on #853 round 7: gated on connect-attempt kinds
+            // only. `idle`/`ready`/`authenticated`/`saving` are NOT
+            // connect-attempt states — a stale ResolveCli reject
+            // landing there would clobber the user's newer selection.
+            for (const kind of [
+                "unauthenticated",
+                "waiting",
+                "expired",
+                "failed",
+            ] as const) {
+                const seeded = seed({
+                    kind,
+                    sessionId: "s1",
+                    authUrl: "https://x",
+                    deviceCode: { code: "Z", verificationUrl: "V" },
+                });
+                const r = update(seeded, {
+                    type: "ConnectFailed",
+                    error: "cli not found",
+                });
+                expect(r.state.kind).toBe("failed");
+                expect(r.state.error).toBe("cli not found");
+                expect(r.state.sessionId).toBe("");
+                expect(r.state.authUrl).toBe("");
+                expect(r.state.deviceCode).toBeNull();
+                expect(r.events[0]).toMatchObject({
+                    type: "failed",
+                    error: "cli not found",
+                });
+            }
+        });
+
+        it("is dropped from non-connect-attempt states", () => {
+            // Codex P2 on #853 round 7: a stale ResolveCli reject
+            // arriving after the user moved to ready/authenticated/
+            // saving must NOT clobber the newer state.
+            for (const kind of ["idle", "ready", "authenticated", "saving"] as const) {
+                const seeded = seed({ kind, sessionId: "s1" });
+                const r = update(seeded, {
+                    type: "ConnectFailed",
+                    error: "stale cli error",
+                });
+                expect(r.state).toBe(seeded);
+                expect(r.events[0]).toMatchObject({
+                    type: "post-close-command-dropped",
+                    commandType: "ConnectFailed",
+                });
+            }
+        });
+
+        it("is dropped after Disposed (post-close gate)", () => {
+            const closed = update(initialState(), { type: "Disposed" }).state;
+            const r = update(closed, { type: "ConnectFailed", error: "x" });
+            expect(r.state).toBe(closed);
+            expect(r.events[0]).toMatchObject({
+                type: "post-close-command-dropped",
+                commandType: "ConnectFailed",
+            });
         });
     });
 
