@@ -1,7 +1,7 @@
 [package]
 name = "agentmux-cef"
 <<<<<<< HEAD
-version = "0.33.890"
+version = "0.33.891"
 =======
 version = "0.33.892"
 >>>>>>> main
