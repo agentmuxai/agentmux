@@ -80,15 +80,17 @@ export interface BrowserPaneState {
      *  and superseded by `UrlConfirmed` (host's `browser-pane-nav-state`
      *  reporting the post-redirect final URL). */
     url: string;
-    /** Pane favicon URL — derived from `url`'s origin via
-     *  `${origin}/favicon.ico`. Empty string when `url` is empty or
-     *  unparseable; the view falls back to a globe icon in that case.
-     *  Computed by `deriveFaviconUrl` inside every transition that
-     *  writes `url` (Navigate, UrlConfirmed, UrlCleared) — there is
-     *  no `FaviconChanged` command, since the cell isn't an
-     *  independent input. Catalog reference: row 1.faviconUrlAtom in
-     *  `docs/specs/browser-pane-state-catalog.md`. */
+    /** Pane favicon URL. Initially derived from `url`'s origin via
+     *  `${origin}/favicon.ico`; overridden by a real URL when CEF
+     *  fires `on_favicon_urlchange` (command `FaviconUrlsReceived`).
+     *  Empty string when `url` is empty or unparseable; the view
+     *  falls back to the globe icon in that case. */
     faviconUrl: string;
+    /** True once a `FaviconUrlsReceived` command with a non-empty
+     *  URL has been applied — prevents the derived-from-URL heuristic
+     *  from overwriting a real favicon. Cleared by `Navigate` so each
+     *  new page starts fresh from the heuristic until CEF reports. */
+    faviconOverridden: boolean;
 }
 
 /**
@@ -127,6 +129,7 @@ export const initialState = (): BrowserPaneState => ({
     title: TITLE_FALLBACK,
     url: "",
     faviconUrl: "",
+    faviconOverridden: false,
 });
 
 export type BrowserPaneCommand =
@@ -205,6 +208,12 @@ export type BrowserPaneCommand =
      */
     | { type: "PaneClicked" }
     /**
+     * CEF fired `on_favicon_urlchange` with the page's real favicon URL list.
+     * The first URL is used; an empty array clears the override and falls back
+     * to the heuristic derivation. Idempotent on identical URL.
+     */
+    | { type: "FaviconUrlsReceived"; urls: string[] }
+    /**
      * The pane is being torn down. After this command runs, every
      * subsequent command on this state is a no-op. Idempotent —
      * dispatching `Disposed` twice is a no-op the second time.
@@ -225,6 +234,7 @@ export type BrowserPaneEvent =
     | { type: "url-confirmed"; url: string }
     | { type: "url-cleared" }
     | { type: "pane-clicked" }
+    | { type: "favicon-urls-received"; url: string }
     | { type: "disposed" }
     /** Invariant fire — emitted instead of mutating state when a
      *  command targets a closed pane. Surfaced for diagnostics so
