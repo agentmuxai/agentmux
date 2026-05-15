@@ -375,22 +375,19 @@ describe("auth-state reducer", () => {
             });
         });
 
-        it("ApiKeyAccepted transitions to authenticated with email (2-phase save)", () => {
-            // PR C-1: api-key path now mirrors OAuth — backend validates
-            // the key but doesn't persist; user names the bundle in the
-            // SaveBundle panel; SaveBundleClicked → BundleSaved → ready.
+        it("ApiKeyAccepted transitions to ready with the new bundleId (single-phase)", () => {
+            // PR C-1 (revised): api-key stays single-phase until C-2
+            // backend lands. Backend persists in submitapikey itself.
             const seeded = seed({ kind: "waiting", providerId: "openclaw" });
             const r = update(seeded, {
                 type: "ApiKeyAccepted",
-                email: "u@x.com",
+                bundleId: "new-key-bundle",
             });
-            expect(r.state.kind).toBe("authenticated");
-            expect(r.state.email).toBe("u@x.com");
-            // bundleId stays empty until SaveBundleClicked + BundleSaved.
-            expect(r.state.bundleId).toBe("");
+            expect(r.state.kind).toBe("ready");
+            expect(r.state.bundleId).toBe("new-key-bundle");
             expect(r.events[0]).toMatchObject({
                 type: "api-key-accepted",
-                email: "u@x.com",
+                bundleId: "new-key-bundle",
             });
         });
 
@@ -407,7 +404,7 @@ describe("auth-state reducer", () => {
                 const seeded = seed({ kind, providerId: "openclaw", bundleId: "user-pick" });
                 const r = update(seeded, {
                     type: "ApiKeyAccepted",
-                    email: "stale@x.com",
+                    bundleId: "stale-bundle",
                 });
                 expect(r.state).toBe(seeded);
                 expect(r.state.bundleId).toBe("user-pick"); // unchanged
