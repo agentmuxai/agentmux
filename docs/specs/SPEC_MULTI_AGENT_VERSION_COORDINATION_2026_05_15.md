@@ -115,24 +115,46 @@ enforce_admins: false
 
 ### Phase 0 — Loud-fail conflict markers (1 commit, no design risk)
 
-Add a pre-commit hook (or CI check) that fails if any tracked file contains
-`<<<<<<< HEAD` or `>>>>>>>` lines.
+Add a pre-commit hook (or CI check) that fails if **staged changes** contain
+unresolved merge conflict markers.
 
 ```bash
 #!/bin/sh
 # .githooks/pre-commit
 if git diff --cached --check; then exit 0; fi
-echo "Aborting: unresolved merge conflict markers found." >&2
+echo "Aborting: unresolved merge conflict markers in staged changes." >&2
 exit 1
 ```
 
-`git diff --check` already does this exact check — just wire it in. Also add
-the same check to CI (Cargo job's first step) so it catches anything that
-bypasses local hooks.
+**Use `git diff --check`, NOT a `grep -rn '<<<<<<< HEAD'`.** Git's `--check`:
 
-**Cost:** ~10 LOC + hook install instructions.
-**Risk:** Zero.
-**Effect:** Eliminates the round-9 P0 class.
+1. Only inspects **lines being added** in the staging area — not all tracked
+   files. So a spec file that legitimately contains the literal string
+   `<<<<<<< HEAD` as documentation (this very file, §9 examples) doesn't
+   trigger the hook.
+2. Also catches whitespace errors (trailing whitespace on new lines, mixed
+   tabs/spaces) for free.
+3. Is what git's own commit machinery uses internally.
+
+**Precedent:** `scripts/verify-version.sh` (PR #16) tried the brittle approach
+of grep-scanning every file for version-like strings. It false-positived on
+`.rs` test fixtures (`0.12.15`, `0.19.0`, `v0.10.4`) which are unit-test
+values, not real references. The fix (`97bf56bf`) made it `continue-on-error`
+in CI, and PR #54 (`317bb414`) deleted it entirely in favor of `bump verify`
+(which only checks declared targets). Don't repeat that pattern here — `git
+diff --check` is the right tool because it operates on the *diff*, not the
+full tree.
+
+Also wire the same check to CI as the first job step so it catches anything
+that bypasses local hooks (e.g. `git commit -n`).
+
+**Cost:** ~10 LOC + hook install instructions in `BUILD.md`.
+**Risk:** Zero — git already runs this check internally; we're just enforcing it.
+**False-positive surface:** None for `git diff --check`; the brittle grep
+alternative would false-positive on docs/specs containing the strings as
+prose.
+**Effect:** Eliminates the round-9 P0 class (committed conflict markers in
+unlisted files post `git checkout --ours`).
 
 ### Phase 1 — Cargo workspace version inheritance (1 PR)
 
