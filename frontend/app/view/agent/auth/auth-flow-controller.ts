@@ -197,6 +197,13 @@ export class AuthFlowController {
 
     async connect(cli: ProviderCliMeta): Promise<void> {
         const s = this.state();
+        // Codex P2 on #854 round 2: bail if disposed. Without this,
+        // `startConnect`'s ResolveCli/ensureAuthDir await chain can
+        // call connect() after the modal was closed — the reducer
+        // drops the resulting dispatches via state.closed, but
+        // `rpc.start` still fires and spawns the provider CLI in the
+        // background.
+        if (s.closed) return;
         if (s.kind !== "unauthenticated" && s.kind !== "expired" && s.kind !== "failed") {
             return;
         }
@@ -379,7 +386,7 @@ export class AuthFlowController {
      *  `failed`/`waiting`). If the user has already moved to
      *  `authenticated`/`saving`/`ready`/`idle`, a stale rejection from
      *  an abandoned connect is dropped instead of clobbering the
-     *  newer state — codex P2 on #853 round 7. */
+     *  newer state — codex P2 on #853 round 7 + codex P2 on #854. */
     failConnect(error: unknown): void {
         const message = error instanceof Error ? error.message : String(error);
         this.dispatch({ type: "ConnectFailed", error: message });
