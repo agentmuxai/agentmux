@@ -80,6 +80,7 @@ export function update(
                     error: null,
                     url: command.url,
                     faviconUrl: deriveFaviconUrl(command.url),
+                    faviconOverridden: false,
                 },
                 events: [{ type: "navigate", url: command.url }],
             };
@@ -142,11 +143,18 @@ export function update(
 
         case "UrlConfirmed": {
             if (state.url === command.url) return { state, events: [] };
+            // Reagent P2 on #876: preserve a CEF-reported favicon across
+            // redirects + hash-changes. Only re-derive the heuristic favicon
+            // if no real favicon has overridden it. Otherwise the user sees
+            // the real favicon flash to the heuristic on every nav event.
+            const faviconUrl = state.faviconOverridden
+                ? state.faviconUrl
+                : deriveFaviconUrl(command.url);
             return {
                 state: {
                     ...state,
                     url: command.url,
-                    faviconUrl: deriveFaviconUrl(command.url),
+                    faviconUrl,
                 },
                 events: [{ type: "url-confirmed", url: command.url }],
             };
@@ -175,6 +183,26 @@ export function update(
             return {
                 state: { ...state, title: next },
                 events: [{ type: "title-changed", title: next }],
+            };
+        }
+
+        case "FaviconUrlsReceived": {
+            // Reagent P2 on #876: when CEF reports an empty favicon-URL list
+            // (page has no <link rel="icon"> tags), fall back to the
+            // heuristic-derived favicon from the page URL rather than ""
+            // — matches the types.ts doc comment for FaviconUrlsReceived
+            // and the page-navigation paths above that already derive on
+            // navigation. The override flag stays false so a later real
+            // favicon report can replace it.
+            const cefUrl = command.urls[0];
+            const next = cefUrl ?? deriveFaviconUrl(state.url);
+            const overridden = cefUrl !== undefined;
+            if (next === state.faviconUrl && state.faviconOverridden === overridden) {
+                return { state, events: [] };
+            }
+            return {
+                state: { ...state, faviconUrl: next, faviconOverridden: overridden },
+                events: [{ type: "favicon-urls-received", url: next }],
             };
         }
 

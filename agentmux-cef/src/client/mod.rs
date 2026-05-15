@@ -107,6 +107,8 @@ impl AgentMuxHandler {
     fn on_title_change(&mut self, browser: Option<&mut Browser>, title: Option<&CefString>) {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
 
+        let title_str = title.map(|t| t.to_string()).unwrap_or_default();
+
         // Update the window title via CEF Views.
         let mut browser = browser.cloned();
         if let Some(browser_view) = browser_view_get_for_browser(browser.as_mut()) {
@@ -115,14 +117,19 @@ impl AgentMuxHandler {
             }
         }
         // For Alloy-style native windows on Windows, update via Win32 API.
+        // Reagent P1 on #876: only call SetWindowTextW when CEF gave us an
+        // actual title. CEF fires `on_title_change` with `title = None` in
+        // several paths (e.g. about:blank, popup blockers) — passing "" to
+        // SetWindowTextW would blank the application window title in those
+        // cases. Preserve the existing title by skipping the Win32 update
+        // when title is None.
         #[cfg(target_os = "windows")]
-        {
-            if let (Some(browser), Some(title)) = (browser.as_ref(), title) {
+        if title.is_some() {
+            if let Some(browser) = browser.as_ref() {
                 if let Some(host) = browser.host() {
                     let hwnd = host.window_handle();
                     if !hwnd.0.is_null() {
-                        let title_wide: Vec<u16> = title
-                            .to_string()
+                        let title_wide: Vec<u16> = title_str
                             .encode_utf16()
                             .chain(std::iter::once(0))
                             .collect();
@@ -136,6 +143,92 @@ impl AgentMuxHandler {
                 }
             }
         }
+
+        // Emit live title to frontend for browser panes.
+        if self.is_browser_pane {
+            if let Some(b) = browser.as_ref() {
+                if let Some(block_id) =
+                    crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b)
+                {
+                    let block_id_short: String = block_id.chars().take(7).collect();
+                    tracing::info!(
+                        "[browser-pane:diag][{}] emit-title-change title={:?}",
+                        block_id_short,
+                        title_str,
+                    );
+                    crate::events::emit_event_from_state(
+                        &self.state,
+                        "browser-pane-title-change",
+                        &serde_json::json!({ "block_id": block_id, "title": title_str }),
+                    );
+                }
+            }
+        }
+    }
+
+    fn on_favicon_urlchange(
+        &mut self,
+        browser: Option<&mut Browser>,
+        icon_urls: Option<&mut CefStringList>,
+    ) {
+        if !self.is_browser_pane {
+            return;
+        }
+        let Some(b) = browser.as_deref() else { return };
+        let Some(block_id) =
+            crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b)
+        else {
+            return;
+        };
+
+        // Collect favicon URLs from the CefStringList. The list is an in-param
+        // provided by CEF — we read via the raw sys API so we don't need to
+        // consume (move) the borrowed reference.
+        //
+        // Reagent P1 on #876: `cef_string_list_value` writes into a
+        // `cef_string_t` whose `str_` field points at a freshly-allocated
+        // buffer owned by the list value (with `dtor` set to release it).
+        // Dropping `value` as a plain Rust struct would leak that buffer on
+        // every favicon URL CEF reports. After reading the string, we must
+        // invoke the dtor manually to free the buffer.
+        let urls: Vec<String> = if let Some(list) = icon_urls {
+            let raw: *mut cef::sys::_cef_string_list_t = list.into();
+            if let Some(raw_ref) = unsafe { raw.as_mut() } {
+                let count = unsafe { cef::sys::cef_string_list_size(raw_ref) };
+                (0..count)
+                    .filter_map(|i| unsafe {
+                        let mut value: cef::sys::cef_string_t = std::mem::zeroed();
+                        if cef::sys::cef_string_list_value(raw_ref, i, &mut value) > 0 {
+                            let s = CefString::from(std::ptr::from_ref(&value)).to_string();
+                            // Free the buffer CEF allocated into `value.str_`.
+                            if let Some(dtor) = value.dtor {
+                                dtor(value.str_);
+                            }
+                            Some(s)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+
+        let block_id_short: String = block_id.chars().take(7).collect();
+        tracing::info!(
+            "[browser-pane:diag][{}] emit-favicon-urls count={} first={:?}",
+            block_id_short,
+            urls.len(),
+            urls.first(),
+        );
+        crate::events::emit_event_from_state(
+            &self.state,
+            "browser-pane-favicon-urls",
+            &serde_json::json!({ "block_id": block_id, "urls": urls }),
+        );
     }
 
     fn on_after_created(&mut self, browser: Option<&mut Browser>) {

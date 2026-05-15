@@ -433,6 +433,9 @@ declare global {
     interface ViewModel {
         viewType: string;
         viewIcon?: Accessor<string | IconButtonDecl>;
+        /** When set, overrides the FA icon in the block header with a favicon <img>.
+         *  The consumer (blockframe) falls back to viewIcon if this is empty string. */
+        viewFaviconUrl?: Accessor<string>;
         viewName?: Accessor<string>;
         /** When provided, the header name becomes an inline editable text field. */
         setViewName?: (name: string) => Promise<void>;
