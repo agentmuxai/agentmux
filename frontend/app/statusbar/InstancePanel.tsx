@@ -15,7 +15,7 @@
  * Per-window token totals deferred until token-usage is per-window.
  */
 
-import { getApi, openWindowEntriesAtom, type WindowEntry } from "@/store/global";
+import { atoms, getApi, openWindowEntriesAtom, type WindowEntry } from "@/store/global";
 import { reconcileKnownEntriesFromSnapshot } from "@/app/store/launcher-event-reducer";
 import { launcherEventsActive } from "@/util/launcher-events";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
@@ -135,6 +135,20 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         }
     };
 
+    // For THIS window's row, fall back to atoms.waveWindow()?.oid when
+    // the entry's windowId is still null. WindowEntry.windowId is null
+    // for the first ~100ms after a window opens — until the
+    // registerBackendWindow IPC round-trip completes (see comment at
+    // global.ts:145). Without this fallback, the panel shows "Window N"
+    // for the current window during early-startup while the OS title
+    // (which uses initOpts.windowId directly) correctly shows the
+    // workspace name — visible inconsistency the user reported.
+    const resolveEntryWindowId = (entry: WindowEntry): string | null => {
+        if (entry.windowId) return entry.windowId;
+        if (entry.label === myLabel()) return atoms.waveWindow()?.oid ?? null;
+        return null;
+    };
+
     // Resolve a row's display name via the shared helper so the panel and
     // the OS window title (driven from app-init.ts) agree by construction.
     // Reactive via Wave's object subscriptions because getObjectValue reads
@@ -142,8 +156,9 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     const resolveName = (entry: WindowEntry, idx: number): string => {
         let displayName: string | undefined;
         let workspaceName: string | undefined;
-        if (entry.windowId) {
-            const win = getObjectValue<WaveWindow>(makeORef("window", entry.windowId));
+        const windowId = resolveEntryWindowId(entry);
+        if (windowId) {
+            const win = getObjectValue<WaveWindow>(makeORef("window", windowId));
             displayName = win?.meta?.[DISPLAY_NAME_META_KEY] as string | undefined;
             if (win?.workspaceid) {
                 const ws = getObjectValue<Workspace>(makeORef("workspace", win.workspaceid));
@@ -154,7 +169,10 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     };
 
     const enterRename = (entry: WindowEntry, currentName: string) => {
-        if (!entry.windowId) return; // can't rename a window without a backend record yet
+        // Same fallback as resolveName: for this window's row we can use
+        // atoms.waveWindow()?.oid when the entry's windowId hasn't been
+        // populated yet via the registerBackendWindow round-trip.
+        if (!resolveEntryWindowId(entry)) return;
         setEditingLabel(entry.label);
         setEditValue(currentName);
     };
@@ -178,7 +196,8 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     const commitRename = (entry: WindowEntry) => {
         const editing = editingLabel();
         if (editing !== entry.label) return; // stale
-        if (!entry.windowId) {
+        const windowId = resolveEntryWindowId(entry);
+        if (!windowId) {
             cancelRename();
             return;
         }
@@ -187,7 +206,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         setEditingLabel(null);
         setEditValue("");
         if (!trimmed) return;
-        performRename(entry.windowId, trimmed);
+        performRename(windowId, trimmed);
     };
 
     // Panel-unmount cleanup:
@@ -204,10 +223,12 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         const editing = editingLabel();
         if (!editing) return;
         const entry = entries().find((e) => e.label === editing);
-        if (!entry || !entry.windowId) return;
+        if (!entry) return;
+        const windowId = resolveEntryWindowId(entry);
+        if (!windowId) return;
         const trimmed = editValue().trim().slice(0, DISPLAY_NAME_MAX_LEN);
         if (!trimmed) return;
-        performRename(entry.windowId, trimmed);
+        performRename(windowId, trimmed);
     });
 
     const handleOpenNewWindow = async () => {
