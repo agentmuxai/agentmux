@@ -155,6 +155,73 @@ describe("AuthFlowController", () => {
         });
     });
 
+    it("selected() during waiting cancels the backend session", async () => {
+        // Reagent + Codex P2 on #850 round 6: switching selection
+        // mid-OAuth must fire auth.cancel for the live sessionId so
+        // the backend CLI subprocess doesn't run until timeout.
+        await createRoot(async (dispose) => {
+            const timers = fakeTimers();
+            const cancelled: string[] = [];
+            const ctrl = new AuthFlowController({
+                rpc: fakeRpc({
+                    start: async () => ({ sessionId: "s1", authUrl: "https://x" }),
+                    cancel: async (sessionId) => {
+                        cancelled.push(sessionId);
+                    },
+                }),
+                timers,
+            });
+            ctrl.selected("claude", "", "needs-bundle");
+            await ctrl.connect({
+                cliPath: "/x",
+                authLoginArgs: [],
+                authCheckArgs: [],
+            });
+            expect(ctrl.state().kind).toBe("waiting");
+            expect(ctrl.state().sessionId).toBe("s1");
+            // User switches provider while OAuth is in-flight.
+            ctrl.selected("openai", "", "needs-bundle");
+            // Microtask flush so the fire-and-forget cancel resolves.
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(cancelled).toEqual(["s1"]);
+            expect(ctrl.state().kind).toBe("unauthenticated");
+            expect(ctrl.state().providerId).toBe("openai");
+            dispose();
+        });
+    });
+
+    it("submitApiKey() is dropped from non-entry states", async () => {
+        // Codex P2 on #850 round 6: controller must mirror the
+        // reducer's ApiKeySubmitted gate so double-clicks and stale
+        // invocations don't double-submit.
+        await createRoot(async (dispose) => {
+            const timers = fakeTimers();
+            let submitCalls = 0;
+            const ctrl = new AuthFlowController({
+                rpc: fakeRpc({
+                    start: async () => ({ sessionId: "s1", authUrl: "https://x" }),
+                    submitApiKey: async () => {
+                        submitCalls += 1;
+                        return { bundleId: "b1" };
+                    },
+                }),
+                timers,
+            });
+            ctrl.selected("claude", "", "needs-bundle");
+            await ctrl.connect({
+                cliPath: "/x",
+                authLoginArgs: [],
+                authCheckArgs: [],
+            });
+            // Kind is now "waiting" — submitApiKey should be a no-op.
+            await ctrl.submitApiKey("sk-x", "acc");
+            expect(submitCalls).toBe(0);
+            expect(ctrl.state().kind).toBe("waiting");
+            dispose();
+        });
+    });
+
     it("cancel() during startup window drops in-flight auth.start", async () => {
         // Reagent P1 on #850: when the user clicks Cancel after
         // ConnectClicked dispatched but before SessionStarted (auth.start
