@@ -33,7 +33,7 @@ import {
     setFullConfigAtom,
 } from "@/app/store/global";
 import * as WOS from "@/app/store/wos";
-import { createEffect, createRoot } from "solid-js";
+import { createEffect, createRoot, createSignal } from "solid-js";
 import {
     DISPLAY_NAME_META_KEY,
     formatWindowTitle,
