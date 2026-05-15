@@ -27,8 +27,16 @@
 
 /** Mirrors the wire `AuthSessionStatus` from
  *  `agentmux-srv/src/identity/auth_session.rs` (camelCase via
- *  `rename_all_fields`). Pulled inline here as a TS type because the
- *  Rust enum doesn't currently surface in `gotypes.d.ts`. */
+ *  `rename_all_fields`).
+ *
+ *  This intentionally duplicates the global `AuthSessionStatus`
+ *  type that lives in `frontend/types/gotypes.d.ts` (added in PR
+ *  #850). The duplication is so that the reducer's command surface
+ *  is self-contained — `auth-state.ts` declares its own command +
+ *  event types without depending on the ambient global `declare`,
+ *  which makes the file importable and pure-testable. The two
+ *  shapes must stay in lockstep; reagent P2 on #850 round 5.
+ */
 export type AuthSessionStatusWire =
     | { status: "pending" }
     | { status: "url-available"; authUrl: string }
@@ -322,7 +330,13 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
         }
 
         case "CancelClicked": {
-            if (state.kind !== "waiting" || state.sessionId === "") {
+            // Reagent P1 on #850: allow cancel from `waiting` even when
+            // sessionId === "" — that's the startup window between
+            // ConnectClicked and SessionStarted (auth.start in flight).
+            // The controller bumps actionToken so the pending start's
+            // stale-token gate fires and the orphan session never
+            // dispatches SessionStarted. User's cancel intent always wins.
+            if (state.kind !== "waiting") {
                 return {
                     state,
                     events: [
