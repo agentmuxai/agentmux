@@ -7,29 +7,9 @@
       "path": "version"
     },
     {
-      "file": "agentmux-srv/Cargo.toml",
+      "file": "Cargo.toml",
       "type": "toml",
-      "path": "package.version"
-    },
-    {
-      "file": "agentmux-cef/Cargo.toml",
-      "type": "toml",
-      "path": "package.version"
-    },
-    {
-      "file": "agentmux-launcher/Cargo.toml",
-      "type": "toml",
-      "path": "package.version"
-    },
-    {
-      "file": "agentmux-common/Cargo.toml",
-      "type": "toml",
-      "path": "package.version"
-    },
-    {
-      "file": "agentmux-bashwrap/Cargo.toml",
-      "type": "toml",
-      "path": "package.version"
+      "path": "workspace.package.version"
     }
   ],
   "lockfiles": [
@@ -39,16 +19,13 @@
     }
   ],
   "_npm_lockfile_note": "npm lockfile sync is handled by scripts/bump-wrapper.sh because bump-cli's 'npm-version' strategy fails with 'Unknown error' inside its temporary git state and silently skips the lockfile. Use scripts/bump-wrapper.sh instead of bare bump.",
+  "_phase1_note": "RFC #857 Phase 1: 5 member Cargo.toml entries collapsed to 1 workspace root entry using Cargo workspace.package inheritance (version.workspace = true on each member).",
   "git": {
     "add": [
       "package.json",
       "package-lock.json",
       "Cargo.lock",
-      "agentmux-srv/Cargo.toml",
-      "agentmux-cef/Cargo.toml",
-      "agentmux-launcher/Cargo.toml",
-      "agentmux-common/Cargo.toml",
-      "agentmux-bashwrap/Cargo.toml"
+      "Cargo.toml"
     ],
     "commitMessage": "chore: bump version to {{version}}"
   }
