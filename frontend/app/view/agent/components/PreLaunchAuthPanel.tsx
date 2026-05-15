@@ -215,6 +215,10 @@ async function startConnect(
     if (provider.authExtraEnv) {
         Object.assign(authEnv, provider.authExtraEnv);
     }
+    // Codex P2 on #854 round 4: bail before connect() if the modal
+    // closed mid-prep. The controller itself also gates on `closed`,
+    // but skipping the call avoids the extra RPC bookkeeping.
+    if (controller.state().closed) return;
     await controller.connect({
         cliPath,
         authLoginArgs: provider.authLoginCommand,
