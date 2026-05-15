@@ -174,9 +174,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     let inFlightSnapshot: Promise<void> = Promise.resolve();
     const writeSnapshotNow = () => {
         const nodes = getDocument();
-        if (!nodes || nodes.length === 0) return;
-        // Capture historyOffset SYNCHRONOUSLY at call time so a later
-        // queued write doesn't read a stale accessor value.
+        if (!nodes) return;
         const capturedOffset = history.historyOffset();
         inFlightSnapshot = inFlightSnapshot.then(async () => {
             let highWaterMark = 0;
@@ -225,7 +223,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         writeSnapshotNow();
     }, SNAPSHOT_INTERVAL_MS);
     onCleanup(() => clearInterval(snapshotInterval));
-    onCleanup(() => writeSnapshotNow());
+    onCleanup(() => {
+        if (!dirty) return;
+        writeSnapshotNow();
+    });
 
     // Pending decision queue — every ToolNode whose
     // `status === "pending_approval"`, oldest first. The decision
