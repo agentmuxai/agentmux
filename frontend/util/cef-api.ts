@@ -390,7 +390,15 @@ export function buildCefApi(): AppApi {
             invokeCommand("maximize_window", { label }).catch(console.error);
         },
         setWindowTransparency: (transparent: boolean, blur: boolean, opacity: number) => {
-            invokeCommand("set_window_transparency", { transparent, blur, opacity }).catch(console.error);
+            const label = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+            invokeCommand("set_window_transparency", { transparent, blur, opacity, label }).catch(console.error);
+        },
+        setWindowOpacity: async (label: string, opacity: number): Promise<void> => {
+            await invokeCommand("set_window_opacity", { label, opacity });
+        },
+        getWindowOpacity: async (label: string): Promise<number> => {
+            const result = await invokeCommand("get_window_opacity", { label });
+            return typeof result === "number" ? result : 1.0;
         },
         toggleDevtools: () => {
             const params = new URLSearchParams(window.location.search);
@@ -457,7 +465,8 @@ export function buildCefApi(): AppApi {
 
         // --- Init ---
         setWindowInitStatus: (status: "ready" | "wave-ready") => {
-            invokeCommand("set_window_init_status", { status }).catch(console.error);
+            const label = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+            invokeCommand("set_window_init_status", { status, label }).catch(console.error);
         },
         onAgentMuxInit: (callback: (initOpts: AgentMuxInitOpts) => void) => {
             listenEvent<AgentMuxInitOpts>("agentmux-init", (payload) => {

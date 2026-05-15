@@ -649,6 +649,14 @@ pub struct AppState {
 
     // Phase B.1 removed `job_handle` (was Windows-only). Launcher
     // owns J0 wrapping srv now; host no longer needs its own job.
+
+    /// Per-window opacity HWND registry. Populated by `set_window_init_status`
+    /// once the window is fully shown (CEF Views returns NULL at on_after_created
+    /// time). Stored as `isize` (the raw HWND value) so the map is `Send`.
+    /// Read by `set_window_opacity` to target exactly one HWND instead of
+    /// enumerating all process windows. See SPEC_PER_WINDOW_OPACITY_2026-05-14.md §5.
+    #[cfg(target_os = "windows")]
+    pub window_hwnds: Mutex<HashMap<String, isize>>,
 }
 
 impl Default for AppState {
@@ -700,6 +708,8 @@ impl Default for AppState {
             browser_panes: crate::browser_panes::BrowserPaneManager::new(),
             browser_api: crate::browser_api::BrowserApiState::new(),
             debug_port: Mutex::new(0),
+            #[cfg(target_os = "windows")]
+            window_hwnds: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -1211,6 +1221,17 @@ fn log_host_event(ev: &crate::reducer::HostEvent) {
             target: "host-reducer",
             event = "TopLevelQueueLengthChanged",
             len, version,
+        ),
+        // ── Opacity ──────────────────────────────────────────────────────
+        HostEvent::WindowOpacityApplied { label, opacity, version } => tracing::debug!(
+            target: "host-reducer",
+            event = "WindowOpacityApplied",
+            label = %label, opacity, version,
+        ),
+        HostEvent::WindowOpacityCleared { label, version } => tracing::debug!(
+            target: "host-reducer",
+            event = "WindowOpacityCleared",
+            label = %label, version,
         ),
         // ── Effect carrier ───────────────────────────────────────────────
         HostEvent::Effect { effect, version } => tracing::debug!(

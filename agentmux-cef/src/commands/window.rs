@@ -284,17 +284,30 @@ pub fn start_window_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Res
     Ok(serde_json::Value::Null)
 }
 
-/// Set window transparency/blur effects.
-/// Uses DWM Mica/Acrylic on Win11, or SetWindowCompositionAttribute on Win10.
+/// Set window transparency/blur effects for a single window.
+///
+/// Targets exactly the window identified by `label` (from the frontend's URL
+/// `windowLabel` param). Uses the `window_hwnds` map populated by
+/// `capture_hwnd_for_label`. Falls back to `find_all_own_windows()` only
+/// if the label's HWND hasn't been captured yet (e.g. very early startup).
 pub fn set_window_transparency(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let transparent = args.get("transparent").and_then(|v| v.as_bool()).unwrap_or(false);
     let opacity = args.get("opacity").and_then(|v| v.as_f64()).unwrap_or(0.8);
-    tracing::info!("set_window_transparency: transparent={} opacity={}", transparent, opacity);
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main").to_string();
+    tracing::info!("set_window_transparency: label={} transparent={} opacity={}", label, transparent, opacity);
 
     #[cfg(target_os = "windows")]
     {
-        // Collect all visible HWNDs for this process, then apply opacity.
-        let hwnds = find_all_own_windows();
+        let hwnd_raw = state.window_hwnds.lock().get(label.as_str()).copied();
+        let hwnds: Vec<*mut std::ffi::c_void> = if let Some(raw) = hwnd_raw {
+            vec![raw as *mut std::ffi::c_void]
+        } else {
+            // HWND not yet captured (early startup). Fall back to process
+            // enumeration as a best-effort. This path is temporary — once
+            // set_window_init_status fires, future calls use the map.
+            tracing::warn!("set_window_transparency: no hwnd for label={}, falling back to find_all_own_windows", label);
+            find_all_own_windows()
+        };
         for hwnd in hwnds {
             unsafe {
                 if transparent {
@@ -758,4 +771,114 @@ fn get_secondary_window_size(px: i32, py: i32) -> (i32, i32) {
         }
     }
     (1200, 800)
+}
+
+// ── Per-window opacity (SPEC_PER_WINDOW_OPACITY_2026-05-14.md) ───────────────
+
+/// Capture and store the HWND for `label` in `AppState::window_hwnds`.
+///
+/// Called from `set_window_init_status` once the frontend signals "ready".
+/// Two-pass approach:
+/// 1. Fast path: `browser.host().window_handle()` — may be non-NULL by this
+///    point even in CEF Views mode (window fully shown).
+/// 2. Fallback: enumerate all process-owned visible HWNDs and pick the one
+///    not yet registered in `window_hwnds`. Reliable because windows are
+///    opened sequentially (pool windows are hidden before promotion).
+#[cfg(target_os = "windows")]
+pub(crate) fn capture_hwnd_for_label(state: &Arc<AppState>, label: &str) {
+    use cef::ImplBrowserHost;
+    // Fast path.
+    if let Some(mut browser) = state.get_browser(label) {
+        let hwnd = browser.host().window_handle();
+        if !hwnd.is_null() {
+            state.window_hwnds.lock().insert(label.to_string(), hwnd as isize);
+            tracing::debug!("[opacity] captured hwnd fast-path label={} hwnd={:#x}", label, hwnd as isize);
+            return;
+        }
+    }
+    // Fallback: pick the first visible HWND not already mapped.
+    let known: std::collections::HashSet<isize> = state.window_hwnds.lock().values().cloned().collect();
+    for hwnd_raw in find_all_own_windows() {
+        let raw = hwnd_raw as isize;
+        if !known.contains(&raw) {
+            state.window_hwnds.lock().insert(label.to_string(), raw);
+            tracing::debug!("[opacity] captured hwnd fallback label={} hwnd={:#x}", label, raw);
+            return;
+        }
+    }
+    tracing::warn!("[opacity] capture_hwnd_for_label: no available HWND for label={}", label);
+}
+
+/// Set opacity on exactly one window by label.
+///
+/// Routes through the host reducer (`HostCommand::SetWindowOpacity`) so the
+/// change is auditable. The reducer emits `WindowOpacityApplied`; `host_dispatch`
+/// reads the event and calls the Win32 helper directly (Win32 window-style ops
+/// are safe from any thread). Replaces the global `set_window_transparency` path
+/// for per-window calls.
+pub fn set_window_opacity(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let label = args
+        .get("label")
+        .and_then(|v| v.as_str())
+        .ok_or("set_window_opacity: missing label")?
+        .to_string();
+    let opacity = args
+        .get("opacity")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0)
+        .clamp(0.0, 1.0);
+
+    let out = state.host_dispatch(crate::reducer::HostCommand::SetWindowOpacity {
+        label: label.clone(),
+        opacity: opacity as f32,
+    });
+
+    // Apply Win32 side-effect synchronously based on emitted event.
+    #[cfg(target_os = "windows")]
+    for ev in &out.events {
+        if let crate::reducer::HostEvent::WindowOpacityApplied { label: ev_label, opacity: ev_opacity } = ev {
+            let hwnd_raw = state.window_hwnds.lock().get(ev_label.as_str()).copied();
+            if let Some(raw) = hwnd_raw {
+                let hwnd = raw as *mut std::ffi::c_void;
+                unsafe {
+                    if *ev_opacity >= 1.0 {
+                        remove_window_opacity(hwnd);
+                    } else {
+                        apply_window_opacity(hwnd, *ev_opacity as f64);
+                    }
+                }
+            } else {
+                tracing::warn!("[opacity] set_window_opacity: no hwnd for label={}", ev_label);
+            }
+        }
+    }
+
+    let _ = out;
+    Ok(serde_json::Value::Null)
+}
+
+/// Return the currently tracked opacity for a label.
+///
+/// Reads from `HostState.window_opacities` — reflects the last value applied
+/// via `set_window_opacity`, not the Win32 layer. Used by the frontend to
+/// restore opacity on window init without an extra IPC round-trip.
+pub fn get_window_opacity(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let label = args
+        .get("label")
+        .and_then(|v| v.as_str())
+        .unwrap_or("main");
+    let opacity = state
+        .host_state
+        .lock()
+        .window_opacities
+        .get(label)
+        .copied()
+        .unwrap_or(1.0);
+    Ok(serde_json::json!(opacity))
 }
