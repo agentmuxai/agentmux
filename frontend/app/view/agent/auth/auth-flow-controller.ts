@@ -244,11 +244,19 @@ export class AuthFlowController {
 
     async cancel(): Promise<void> {
         const s = this.state();
-        if (s.kind !== "waiting" || s.sessionId === "") return;
-        const sessionId = s.sessionId;
+        if (s.kind !== "waiting") return;
+        // Reagent P1 on #850: bump actionToken even when sessionId is
+        // still "" (the startup window between ConnectClicked dispatch
+        // and SessionStarted dispatch — auth.start is in flight). The
+        // bump invalidates the pending connect()'s actionToken gate so
+        // its SessionStarted dispatch is dropped and the orphan
+        // session gets cancelled by connect()'s stale-token path. The
+        // user's cancel intent always wins.
         this.actionToken += 1;
         this.stopPolling();
         this.dispatch({ type: "CancelClicked" });
+        const sessionId = s.sessionId;
+        if (sessionId === "") return;
         try {
             await this.rpc.cancel(sessionId);
         } catch {
