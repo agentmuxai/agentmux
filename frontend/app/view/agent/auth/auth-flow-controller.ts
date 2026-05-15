@@ -291,12 +291,7 @@ export class AuthFlowController {
             accountName,
         });
         try {
-            // PR C-1 reducer extension: ApiKeyAccepted now transitions
-            // to `authenticated`, not `ready`. The user names + saves
-            // the bundle in the SaveBundle panel (same 2-phase as OAuth).
-            // TODO PR C-2: backend `auth.submitapikey` will surface the
-            // validated email here instead of synthesizing a bundleId.
-            await this.rpc.submitApiKey({
+            const { bundleId } = await this.rpc.submitApiKey({
                 providerId: s.providerId,
                 intoBundleId: s.bundleId || undefined,
                 apiKey,
@@ -304,15 +299,13 @@ export class AuthFlowController {
             });
             if (this.actionToken !== myToken) {
                 // Stale completion: user changed selection or started
-                // another submit while this was in flight. Drop result.
-                // Codex P2 on #850.
+                // another submit while this was in flight. Codex P2
+                // on #850.
                 return;
             }
-            // PR C-1: ApiKeyAccepted now transitions to `authenticated`
-            // (not `ready`) with the user-supplied accountName as the
-            // email placeholder. PR C-2 will surface the real validated
-            // email from the backend.
-            this.dispatch({ type: "ApiKeyAccepted", email: accountName });
+            // API-key flow stays single-phase until backend C-2 lands
+            // (see `auth-state.ts` ApiKeyAccepted comment).
+            this.dispatch({ type: "ApiKeyAccepted", bundleId });
         } catch (e) {
             const synthSessionId = "apikey-submit-failed";
             this.dispatch({ type: "SessionStarted", sessionId: synthSessionId });

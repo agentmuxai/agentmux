@@ -165,11 +165,15 @@ export type AuthCommand =
      */
     | { type: "ApiKeySubmitted"; apiKey: string; accountName: string }
     /**
-     * Backend confirmed an API-key validation (key works). Transitions
-     * to `authenticated`. The bundle row is created on the subsequent
-     * `SaveBundleClicked` step — same 2-phase shape as OAuth.
+     * Backend confirmed an API-key bundle creation. API-key flow is
+     * SINGLE-phase (backend persists the bundle in `auth.submitapikey`
+     * itself) — distinct from the 2-phase OAuth path. Codex P1/P2 on
+     * #853 + reagent on #847: the spec's 2-phase api-key flow needs a
+     * backend `auth.savebundle` that doesn't exist yet (PR C-2). Until
+     * then we keep the existing single-phase: validate-and-persist in
+     * one RPC, transition straight to `ready`.
      */
-    | { type: "ApiKeyAccepted"; email: string }
+    | { type: "ApiKeyAccepted"; bundleId: string }
     /**
      * User confirmed the bundle name in the SaveBundle panel. View
      * fires `auth.savebundle` RPC on the emitted event. Transitions
@@ -235,7 +239,7 @@ export type AuthEvent =
           apiKey: string;
           accountName: string;
       }
-    | { type: "api-key-accepted"; email: string }
+    | { type: "api-key-accepted"; bundleId: string }
     | { type: "disposed" }
     | { type: "post-close-command-dropped"; commandType: string };
 
@@ -512,21 +516,21 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
                     ],
                 };
             }
-            // PR C-1: api-key path now ALSO goes through `authenticated`
-            // → SaveBundleClicked → BundleSaved → ready (same 2-phase
-            // as OAuth) so the user gets to name the bundle. Backend
-            // `auth.submitapikey` validates the key but no longer
-            // persists the bundle row.
+            // PR C-1 (revised): api-key stays SINGLE-phase until C-2
+            // backend `auth.savebundle` lands. Backend persists the
+            // bundle in `auth.submitapikey`; we go straight to `ready`
+            // with the real bundleId.
             return {
                 state: {
                     ...state,
-                    kind: "authenticated",
-                    email: command.email,
+                    kind: "ready",
+                    bundleId: command.bundleId,
+                    sessionId: "",
                     authUrl: "",
                     deviceCode: null,
                     error: "",
                 },
-                events: [{ type: "api-key-accepted", email: command.email }],
+                events: [{ type: "api-key-accepted", bundleId: command.bundleId }],
             };
         }
 
