@@ -61,6 +61,13 @@ interface AgentPaneStateSnapshot {
    * NDJSON line count at the time of the snapshot. On restore, the live
    * stream resumes reading lines >= highWaterMark. Without this, restored
    * state + new live events would either gap or double-emit.
+   *
+   * v1 status: WRITTEN but NOT YET ACTED ON. The live-stream subscription
+   * currently only delivers events from subscribe-time forward (no gap
+   * replay). The "background agent ran while pane closed" gap is a known
+   * v1 limitation. Phase 4 (deferred) will read NDJSON lines from
+   * `highWaterMark..total` on reopen and dispatch them through the
+   * normal StreamFlush path before the live subscription starts.
    */
   highWaterMark: number;
   /** Full reducer state — see frontend/app/store/agent-document/types.ts. */

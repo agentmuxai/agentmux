@@ -168,16 +168,40 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const writeSnapshotNow = () => {
         const nodes = getDocument();
         if (!nodes || nodes.length === 0) return;
-        const snapshot = {
-            schemaVersion: SNAPSHOT_SCHEMA_VERSION,
-            savedAt: new Date().toISOString(),
-            nodes,
-        };
-        void RpcApi.BlockfileWriteStateCommand(TabRpcClient, {
-            block_id: model.blockId,
-            filename: SNAPSHOT_FILENAME,
-            content: JSON.stringify(snapshot),
-        }, { timeout: 10000 }).catch((e) => {
+        // Reagent P2 on #877: defer JSON.stringify by one microtask so it
+        // doesn't block the main thread during pane teardown (~50-100ms
+        // for a 5MB session). On clean close the unmount finishes first
+        // and the serialization+RPC happens just after.
+        void Promise.resolve().then(async () => {
+            // Reagent P1 on #877: fetch NDJSON line count at save time so
+            // the snapshot records the high-water mark (spec §4.2). v1
+            // does not yet act on it — the live-stream subscription only
+            // delivers events from subscribe-time forward — but writing
+            // it now lets a future phase replay events between
+            // highWaterMark and current line count on reopen (closes the
+            // background-agent-while-pane-closed gap).
+            let highWaterMark = 0;
+            try {
+                const countResp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
+                    block_id: model.blockId,
+                    filename: "output",
+                }, { timeout: 3000 });
+                highWaterMark = countResp?.count ?? 0;
+            } catch {
+                // Soft fail — snapshot still ships without the mark.
+            }
+            const snapshot = {
+                schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+                savedAt: new Date().toISOString(),
+                highWaterMark,
+                nodes,
+            };
+            await RpcApi.BlockfileWriteStateCommand(TabRpcClient, {
+                block_id: model.blockId,
+                filename: SNAPSHOT_FILENAME,
+                content: JSON.stringify(snapshot),
+            }, { timeout: 10000 });
+        }).catch((e) => {
             log("history", `snapshot write failed: ${e?.message ?? e}`, "warn");
         });
     };
