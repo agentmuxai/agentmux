@@ -43,6 +43,11 @@ test-results/
 backend-test/
 test/screenshots/
 
+# Legacy Tauri build artifacts. The Tauri host was removed (CLAUDE.md
+# "There is only one host"); leftover dirs from old branches/checkouts
+# can be tens of GB of cargo target output that should never get tracked.
+src-tauri/
+
 # CEF binaries (downloaded at build time by cef-dll-sys)
 agentmux-cef/cef_binary/
 agentmux-cef/resources/
