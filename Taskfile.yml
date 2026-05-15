@@ -33,7 +33,7 @@ tasks:
             - bash scripts/release.sh {{.CLI_ARGS}}
 
     package:local:
-        desc: 'Build a portable ZIP with a temporarily-bumped version label (for side-by-side build comparisons). Restores version files on exit. Usage: task package:local (defaults to patch bump) or task package:local -- minor.'
+        desc: 'Build a portable ZIP with a temporarily-bumped version label (for side-by-side build comparisons). Restores version files on exit — no git mutation, no pushed bump commit. Usage: task package:local (defaults to patch bump) or task package:local -- minor.'
         cmds:
             - bash scripts/package-local.sh {{.CLI_ARGS}}
 
