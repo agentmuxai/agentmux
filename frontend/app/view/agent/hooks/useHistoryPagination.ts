@@ -148,11 +148,26 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     const snapshot = JSON.parse(stateResp.content);
                     if (snapshot && snapshot.schemaVersion === SNAPSHOT_SCHEMA_VERSION && Array.isArray(snapshot.nodes)) {
                         dispatchDoc(opts.blockId, { type: "HistoryRestored", fromSnapshot: true, nodes: snapshot.nodes });
-                        setHistoryOffset(0);
-                        setHistoryTotal(snapshot.nodes.length);
+
+                        let total = snapshot.nodes.length;
+                        try {
+                            const countResp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
+                                block_id: opts.blockId,
+                                filename: "output",
+                            }, { timeout: 3000 });
+                            if (!mounted) return;
+                            total = countResp?.count ?? snapshot.nodes.length;
+                        } catch {
+                            // soft fail — fallback to snapshot.nodes.length
+                        }
+                        const offset = Math.max(0, total - snapshot.nodes.length);
+                        setHistoryOffset(offset);
+                        setHistoryTotal(total);
                         opts.log(
                             "history",
-                            `restored ${snapshot.nodes.length} nodes from snapshot (savedAt=${snapshot.savedAt ?? "unknown"})`,
+                            `restored ${snapshot.nodes.length} nodes from snapshot ` +
+                                `(savedAt=${snapshot.savedAt ?? "unknown"}, ` +
+                                `NDJSON total=${total}, loadOlder offset=${offset})`,
                         );
                         dispatchPane(opts.blockId, { type: "InitReady" });
                         return;
