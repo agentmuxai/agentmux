@@ -244,7 +244,14 @@ export class AuthFlowController {
 
     async cancel(): Promise<void> {
         const s = this.state();
-        if (s.kind !== "waiting" || s.sessionId === "") return;
+        // Reagent P1 on #853: also honors `authenticated` — backend
+        // session is held alive there too (awaiting auth.savebundle).
+        // Clicking Cancel from the SaveBundle panel must fire
+        // auth.cancel so the orphan session is released. Mirrors
+        // dispose()'s coverage of both kinds.
+        const isLive =
+            (s.kind === "waiting" || s.kind === "authenticated") && s.sessionId !== "";
+        if (!isLive) return;
         const sessionId = s.sessionId;
         this.actionToken += 1;
         this.stopPolling();
@@ -253,8 +260,8 @@ export class AuthFlowController {
             await this.rpc.cancel(sessionId);
         } catch {
             // Cancel is best-effort. The reducer already moved out
-            // of `waiting`; a stale backend session times out on
-            // its own.
+            // of `waiting`/`authenticated`; a stale backend session
+            // times out on its own.
         }
     }
 
@@ -392,6 +399,11 @@ export class AuthFlowController {
                 this.schedulePoll(sessionId);
             }
         } catch (e) {
+            // Cancel the backend session BEFORE dispatching the
+            // failed transition — the reducer clears `sessionId` on
+            // `failed`, after which `dispose()` can no longer reach
+            // the auth.cancel path. Reagent P1 on #850 round 5.
+            void this.rpc.cancel(sessionId).catch(() => {});
             this.dispatch({
                 type: "Polled",
                 sessionId,
