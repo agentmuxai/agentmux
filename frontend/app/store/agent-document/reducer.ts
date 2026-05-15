@@ -86,6 +86,26 @@ export function update(
             };
         }
 
+        case "HistoryRestored": {
+            // Full replace from a snapshot file. The snapshot IS the
+            // authoritative reducer state at pre-close — drop whatever
+            // partial state initialState() seeded, install nodes wholesale,
+            // and jump straight to "active" so the live-stream subscription
+            // can resume on top. Spec
+            // docs/specs/SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md §4.5.
+            return {
+                state: {
+                    ...state,
+                    nodes: command.nodes,
+                    nodeIdSet: new Set(command.nodes.map((n) => n.id)),
+                    sessionPhase: "active",
+                },
+                events: [
+                    { type: "history-restored", restoredCount: command.nodes.length },
+                ],
+            };
+        }
+
         case "StreamFlush": {
             const noWork = command.newNodes.length === 0 && command.updatedNodes.length === 0;
             if (noWork) return { state, events: [] };

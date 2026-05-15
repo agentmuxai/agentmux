@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
 import { getProvider } from "./providers";
 import { createAgentAtoms } from "./state";
@@ -21,7 +21,7 @@ import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-
 import { useAgentStream } from "./useAgentStream";
 import { useActivityLog } from "./hooks/useActivityLog";
 import { useSessionDigest } from "./hooks/useSessionDigest";
-import { useHistoryPagination } from "./hooks/useHistoryPagination";
+import { useHistoryPagination, SNAPSHOT_FILENAME, SNAPSHOT_SCHEMA_VERSION } from "./hooks/useHistoryPagination";
 import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
 import { useInSessionSearch } from "./hooks/useInSessionSearch";
 import { useBookmarks } from "./hooks/useBookmarks";
@@ -157,6 +157,51 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // `getDocument` is read-only; for writes we MUST dispatch through
     // agent-document-store so slot.state stays in sync (codex P1 PR #681).
     const [getDocument] = agentAtoms().documentAtom;
+
+    // Agent-pane state-persistence (RFC #857 + spec
+    // SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md):
+    // (a) on pane close, write a snapshot of `nodes[]` so the next reopen
+    //     restores the full conversation via HistoryRestored rather than
+    //     the lossy 200-line NDJSON replay;
+    // (b) during the pane lifetime, write a snapshot every 30s if the
+    //     document changed since the last save. Bounds crash-loss to ~30s.
+    const writeSnapshotNow = () => {
+        const nodes = getDocument();
+        if (!nodes || nodes.length === 0) return;
+        const snapshot = {
+            schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+            savedAt: new Date().toISOString(),
+            nodes,
+        };
+        void RpcApi.BlockfileWriteStateCommand(TabRpcClient, {
+            block_id: model.blockId,
+            filename: SNAPSHOT_FILENAME,
+            content: JSON.stringify(snapshot),
+        }, { timeout: 10000 }).catch((e) => {
+            log("history", `snapshot write failed: ${e?.message ?? e}`, "warn");
+        });
+    };
+    // Dirty-flag interval: avoids resetting a debounce timer on every
+    // token chunk during streaming (would block all crash-time saves)
+    // and avoids dispatching a save on every reactive change. A change
+    // sets `dirty`; the 30s tick flushes if dirty and resets.
+    let dirty = false;
+    let lastNodes = getDocument();
+    createEffect(() => {
+        const next = getDocument();
+        if (next !== lastNodes) {
+            dirty = true;
+            lastNodes = next;
+        }
+    });
+    const SNAPSHOT_INTERVAL_MS = 30_000;
+    const snapshotInterval = setInterval(() => {
+        if (!dirty) return;
+        dirty = false;
+        writeSnapshotNow();
+    }, SNAPSHOT_INTERVAL_MS);
+    onCleanup(() => clearInterval(snapshotInterval));
+    onCleanup(() => writeSnapshotNow());
 
     // Pending decision queue — every ToolNode whose
     // `status === "pending_approval"`, oldest first. The decision

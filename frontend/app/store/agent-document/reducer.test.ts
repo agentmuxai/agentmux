@@ -70,6 +70,50 @@ describe("agent document reducer", () => {
         });
     });
 
+    describe("HistoryRestored (snapshot)", () => {
+        it("full-replaces nodes from empty state and jumps to active", () => {
+            const r = update(initialState(), {
+                type: "HistoryRestored",
+                nodes: [md("s1"), md("s2"), md("s3")],
+            });
+            expect(r.state.nodes.map((n) => n.id)).toEqual(["s1", "s2", "s3"]);
+            expect(r.state.sessionPhase).toBe("active");
+            expect(r.state.nodeIdSet).toEqual(new Set(["s1", "s2", "s3"]));
+            expect(r.events).toEqual([{ type: "history-restored", restoredCount: 3 }]);
+        });
+
+        it("full-replaces existing nodes (unlike HistoryLoaded which prepends+dedups)", () => {
+            const start = seed([md("old1"), md("old2")]);
+            const r = update(start, {
+                type: "HistoryRestored",
+                nodes: [md("new1"), md("new2")],
+            });
+            // Old nodes are gone — snapshot IS the authoritative state.
+            expect(r.state.nodes.map((n) => n.id)).toEqual(["new1", "new2"]);
+            expect(r.state.nodeIdSet).toEqual(new Set(["new1", "new2"]));
+        });
+
+        it("empty restore is allowed (snapshot from a wiped session)", () => {
+            const r = update(seed([md("a")]), { type: "HistoryRestored", nodes: [] });
+            expect(r.state.nodes).toEqual([]);
+            expect(r.state.nodeIdSet.size).toBe(0);
+            expect(r.state.sessionPhase).toBe("active");
+        });
+
+        it("subsequent StreamFlush appends on top of restored nodes", () => {
+            const s0 = update(initialState(), {
+                type: "HistoryRestored",
+                nodes: [md("r1"), md("r2")],
+            }).state;
+            const s1 = update(s0, {
+                type: "StreamFlush",
+                newNodes: [md("live")],
+                updatedNodes: [],
+            }).state;
+            expect(s1.nodes.map((n) => n.id)).toEqual(["r1", "r2", "live"]);
+        });
+    });
+
     describe("StreamFlush", () => {
         it("appends new nodes", () => {
             const r = update(initialState(), {

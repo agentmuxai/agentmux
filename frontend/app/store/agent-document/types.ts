@@ -58,6 +58,19 @@ export type AgentDocumentCommand =
     /** Persisted history (older messages from blockfile) — prepended. */
     | { type: "HistoryLoaded"; nodes: DocumentNode[] }
     /**
+     * Full-replace restore from a snapshot file
+     * (`output.state.json`). Unlike `HistoryLoaded` (prepend with dedup),
+     * this replaces `nodes[]` wholesale because the snapshot IS the
+     * authoritative pre-close reducer state.
+     *
+     * `sessionPhase` jumps directly to `"active"` — there is no further
+     * history to load. Subsequent live-stream events `StreamFlush` on top
+     * of the restored nodes via the normal id-collision merge path.
+     *
+     * Spec: docs/specs/SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md §4.5.
+     */
+    | { type: "HistoryRestored"; nodes: DocumentNode[] }
+    /**
      * Generic merge: `newNodes` are appends (with dedup against existing
      * IDs — collisions route to in-place update), `updatedNodes` are
      * targeted mutations against existing IDs. The primary caller is the
@@ -95,6 +108,7 @@ export type AgentDocumentEvent =
     | { type: "session-started"; at: number }
     | { type: "session-ended"; at: number }
     | { type: "history-loaded"; addedCount: number; duplicatesDropped: number }
+    | { type: "history-restored"; restoredCount: number }
     | {
           type: "stream-flushed";
           appendedNew: number;
