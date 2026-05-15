@@ -872,6 +872,10 @@ async fn enforce_register_first(
             "Layout command is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
             false,
         ),
+        Command::UpdateWindowMeta { .. } => (
+            "UpdateWindowMeta is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
     };
     // Phase E.1b — connection-private error; sentinel version=0
     // (codex P2 #610). See parse-error path for rationale.
