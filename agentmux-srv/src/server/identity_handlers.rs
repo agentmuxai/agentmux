@@ -338,7 +338,12 @@ fn spawn_auth_cli(
             let mut lines = BufReader::new(stdout).lines();
             let mut success_transitioned = false;
             while let Ok(Some(line)) = lines.next_line().await {
-                tracing::debug!(session_id = %sid_stdout, line = %line, "auth.spawn: stdout");
+                // NOT logging the raw line — OAuth providers print
+                // auth URLs / callback codes / device codes on stdout
+                // and even debug-level logs would persist those into
+                // ~/.agentmux/logs/. Length-only is enough for "the
+                // CLI emitted something" diagnostics. Reagent P2 on #847.
+                tracing::debug!(session_id = %sid_stdout, bytes = line.len(), "auth.spawn: stdout line");
                 let m = mgr_stdout.record_line(&sid_stdout, &line);
                 if !success_transitioned
                     && matches!(
@@ -374,7 +379,8 @@ fn spawn_auth_cli(
         let stderr_drain = tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                tracing::debug!(session_id = %sid_stderr, line = %line, "auth.spawn: stderr");
+                // Same redaction rationale as stdout above.
+                tracing::debug!(session_id = %sid_stderr, bytes = line.len(), "auth.spawn: stderr line");
                 let _ = mgr_stderr.record_line(&sid_stderr, &line);
             }
         });
