@@ -37,8 +37,7 @@ echo ">>> package-local: starting at v$ORIG_VERSION" >&2
 # Capture working-tree state of files bump-cli will rewrite, so we can
 # restore them byte-for-byte regardless of whether bump-cli leaves staged
 # changes behind.
-TMPDIR="$(mktemp -d)"
-trap 'rm -rf "$TMPDIR"' EXIT
+BACKUP_DIR="$(mktemp -d)"
 
 VERSION_FILES=(
     package.json
@@ -48,30 +47,33 @@ VERSION_FILES=(
 )
 for f in "${VERSION_FILES[@]}"; do
     if [[ -f "$f" ]]; then
-        cp "$f" "$TMPDIR/$(basename "$f").bak"
+        cp "$f" "$BACKUP_DIR/$(basename "$f").bak"
     fi
 done
 
-# Bump in-place (no --commit). bump-cli handles Cargo workspace inheritance
-# via .bump.json (Phase 1 collapsed 5 member Cargo.toml targets to 1 root).
-bump "$BUMP_TYPE"
-NEW_VERSION="$(node -p "require('./package.json').version")"
-echo ">>> package-local: temporarily bumped to v$NEW_VERSION for build" >&2
-
 # Restore on exit no matter what (build failure, Ctrl-C, etc).
+# Reagent P1 on #865 round 2: restore_files MUST run before BACKUP_DIR is
+# deleted, otherwise the rm wipes the backups before they can be read. The
+# trap below runs restore first, then cleans up.
 restore_files() {
     echo >&2
     echo ">>> package-local: restoring working-tree to v$ORIG_VERSION" >&2
     for f in "${VERSION_FILES[@]}"; do
-        if [[ -f "$TMPDIR/$(basename "$f").bak" ]]; then
-            cp "$TMPDIR/$(basename "$f").bak" "$f"
+        if [[ -f "$BACKUP_DIR/$(basename "$f").bak" ]]; then
+            cp "$BACKUP_DIR/$(basename "$f").bak" "$f"
         fi
     done
     # Drop any staging bump-cli did.
     git reset -q -- "${VERSION_FILES[@]}" 2>/dev/null || true
     echo ">>> package-local: working tree restored." >&2
 }
-trap 'rm -rf "$TMPDIR"; restore_files' EXIT
+trap 'restore_files; rm -rf "$BACKUP_DIR"' EXIT
+
+# Bump in-place (no --commit). bump-cli handles Cargo workspace inheritance
+# via .bump.json (Phase 1 collapsed 5 member Cargo.toml targets to 1 root).
+bump "$BUMP_TYPE"
+NEW_VERSION="$(node -p "require('./package.json').version")"
+echo ">>> package-local: temporarily bumped to v$NEW_VERSION for build" >&2
 
 # Run the actual package build.
 task package
