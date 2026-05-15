@@ -269,7 +269,13 @@ export class AuthFlowController {
         // invalidates the pending connect()'s actionToken gate so its
         // SessionStarted is dropped and the orphan session gets
         // cancelled by connect()'s stale-token path. User intent wins.
-        if (s.kind !== "waiting" && s.kind !== "authenticated") return;
+        // Reagent P1 on #853 round 9: also cover `saving` — the
+        // backend session is still alive during the `auth.savebundle`
+        // RPC (cleared only by `BundleSaved`); Cancel clicked there
+        // must release it like in `waiting`/`authenticated`.
+        if (s.kind !== "waiting" && s.kind !== "authenticated" && s.kind !== "saving") {
+            return;
+        }
         this.actionToken += 1;
         this.stopPolling();
         this.dispatch({ type: "CancelClicked" });
@@ -279,7 +285,7 @@ export class AuthFlowController {
             await this.rpc.cancel(sessionId);
         } catch {
             // Cancel is best-effort. The reducer already moved out
-            // of `waiting`/`authenticated`; a stale backend session
+            // of the live-session kinds; a stale backend session
             // times out on its own.
         }
     }
@@ -378,14 +384,16 @@ export class AuthFlowController {
     dispose(): void {
         // Fire-and-forget auth.cancel for any in-flight session so we
         // don't leave an orphan CLI subprocess on the backend. Reagent
-        // P1 on #853: also covers `authenticated` (CLI is done but the
-        // backend session is held alive awaiting `auth.savebundle`;
-        // unmounting from this state must still tell the backend to
-        // release it).
+        // P1 on #853: covers `authenticated` (CLI is done, backend
+        // session held alive awaiting `auth.savebundle`) AND `saving`
+        // (savebundle RPC in flight, session cleared only by
+        // BundleSaved) — unmounting from any of these kinds must
+        // still tell the backend to release the session.
         this.actionToken += 1;
         const s = this.state();
         const hasLiveSession =
-            (s.kind === "waiting" || s.kind === "authenticated") && s.sessionId !== "";
+            (s.kind === "waiting" || s.kind === "authenticated" || s.kind === "saving") &&
+            s.sessionId !== "";
         if (hasLiveSession) {
             void this.rpc.cancel(s.sessionId).catch(() => {});
         }
