@@ -32,7 +32,7 @@ use agentmux_common::ipc::Event;
 use tokio::sync::broadcast;
 
 use crate::backend::eventbus::{EventBus, WSEventType};
-use crate::backend::obj::{wave_obj_to_value, OTYPE_WORKSPACE};
+use crate::backend::obj::{wave_obj_to_value, OTYPE_WINDOW, OTYPE_WORKSPACE};
 use crate::backend::storage::wstore::WaveStore;
 
 /// JSON shape that gets broadcast as the `data` payload of a
@@ -94,7 +94,7 @@ fn emit(event_bus: &EventBus, otype: &str, oid: &str, payload: serde_json::Value
 /// this tokio worker thread. We therefore do the SQLite read inside
 /// `tokio::task::spawn_blocking` so the async runtime stays responsive.
 async fn dispatch_event(event: Event, wstore: Arc<WaveStore>, event_bus: Arc<EventBus>) {
-    use crate::backend::obj::Workspace;
+    use crate::backend::obj::{Window, Workspace};
 
     match event {
         Event::WorkspaceRenamed { workspace_id, .. }
@@ -151,6 +151,51 @@ async fn dispatch_event(event: Event, wstore: Arc<WaveStore>, event_bus: Arc<Eve
             // No object to fetch — frontend just needs the oid + delete tag.
             let payload = build_update_payload("delete", OTYPE_WORKSPACE, &workspace_id, None);
             emit(&event_bus, OTYPE_WORKSPACE, &workspace_id, payload);
+        }
+
+        // Phase E.5.x (issue #855) — window meta updates now flow through
+        // the reducer; this arm picks them up and broadcasts the updated
+        // Window to the frontend WOS cache. Replaces the previous
+        // service.rs:308 wcore-direct workaround that had to inline the
+        // WaveObjUpdate in the handler response.
+        Event::WindowMetaUpdated { window_id, .. } => {
+            let id = window_id.clone();
+            let store = Arc::clone(&wstore);
+            let result = tokio::task::spawn_blocking(move || store.get::<Window>(&id)).await;
+            match result {
+                Ok(Ok(Some(window))) => {
+                    let payload = build_update_payload(
+                        "update",
+                        OTYPE_WINDOW,
+                        &window_id,
+                        Some(wave_obj_to_value(&window)),
+                    );
+                    emit(&event_bus, OTYPE_WINDOW, &window_id, payload);
+                }
+                Ok(Ok(None)) => {
+                    tracing::warn!(
+                        target: "wave-obj-bridge",
+                        window_id = %window_id,
+                        "WindowMetaUpdated for missing window; skipping broadcast"
+                    );
+                }
+                Ok(Err(e)) => {
+                    tracing::error!(
+                        target: "wave-obj-bridge",
+                        window_id = %window_id,
+                        error = %e,
+                        "wstore.get::<Window> failed; skipping broadcast"
+                    );
+                }
+                Err(join_err) => {
+                    tracing::error!(
+                        target: "wave-obj-bridge",
+                        window_id = %window_id,
+                        error = %join_err,
+                        "spawn_blocking join failed (likely panicked); skipping broadcast"
+                    );
+                }
+            }
         }
 
         // All other event variants are either not WaveObj-affecting (saga
