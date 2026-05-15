@@ -333,10 +333,34 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                     meta_patch: meta_value,
                 },
                 other => {
-                    // Layouts + Windows aren't meta-mutated via this path
-                    // today; fall back to wcore for forward-compat.
+                    // Layouts + Windows aren't meta-mutated via the
+                    // reducer; fall back to wcore for forward-compat.
+                    //
+                    // For OTYPE_WINDOW, return the updated object inline
+                    // (matches the BLOCK/TAB inline-update pattern below).
+                    // Without this, UpdateObjectMeta on a Window returns
+                    // success_empty() and the frontend WOS cache never
+                    // sees the change — the change persists in SQLite
+                    // but the in-session UI shows stale data, so e.g. an
+                    // InstancePanel rename of `window:displayname`
+                    // "reverts" visually until app restart. (Reported by
+                    // user during PR #852 manual verification.)
                     return match update_object_meta(store, &oref_str, &meta_update) {
-                        Ok(()) => WebReturnType::success_empty(),
+                        Ok(()) => {
+                            if oref.otype == OTYPE_WINDOW {
+                                if let Ok(window) = store.must_get::<Window>(&oref.oid) {
+                                    return WebReturnType::success_with_updates(vec![
+                                        WaveObjUpdate {
+                                            updatetype: "update".into(),
+                                            otype: OTYPE_WINDOW.to_string(),
+                                            oid: oref.oid.clone(),
+                                            obj: Some(wave_obj_to_value(&window)),
+                                        },
+                                    ]);
+                                }
+                            }
+                            WebReturnType::success_empty()
+                        }
                         Err(e) => WebReturnType::error(format!(
                             "UpdateObjectMeta: unsupported otype {} via reducer; wcore fallback failed: {}",
                             other, e
