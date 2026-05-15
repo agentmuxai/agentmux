@@ -165,7 +165,26 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                 workspaceName = ws?.name;
             }
         }
-        return resolveWindowName({ displayName, workspaceName, indexInOpenWindows: idx });
+        const name = resolveWindowName({ displayName, workspaceName, indexInOpenWindows: idx });
+
+        // Diagnostic — for this window's row only, log the same shape as
+        // [wave-title] in app-init.ts. If both surfaces resolve the same
+        // window with different `name` values, the inputs disagree and
+        // the bug is the inputs (typically: idx mismatch from the
+        // registerBackendWindow race). Tail with:
+        //   muxlog host '\[fe\] \[wave-(title|panel)\]'
+        if (entry.label === myLabel()) {
+            console.debug(
+                "[wave-panel]",
+                "windowId=" + (windowId ?? "<null>"),
+                "label=" + entry.label,
+                "idx=" + idx,
+                "displayName=" + (displayName ?? "<none>"),
+                "workspaceName=" + (workspaceName ?? "<none>"),
+                "→ name=" + JSON.stringify(name),
+            );
+        }
+        return name;
     };
 
     const enterRename = (entry: WindowEntry, currentName: string) => {

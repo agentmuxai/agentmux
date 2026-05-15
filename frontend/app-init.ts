@@ -516,6 +516,17 @@ async function reinitWave() {
  * Spec: docs/specs/SPEC_WINDOW_TITLE_FORMAT_2026-05-13.md
  */
 function installWindowTitleEffect(windowId: string): void {
+    // This window's launcher label, fetched async. Used as a fallback
+    // when entry.windowId-based findIndex returns -1 (which happens at
+    // startup before registerBackendWindow has populated the entry's
+    // windowId — see global.ts:145 comment). Without the label fallback,
+    // a freshly-opened second window resolves to idx=0 and the title
+    // shows "Window 1" while the InstancePanel correctly shows "Window 2"
+    // (because the panel iterates entries with positional indices).
+    // Same root cause as the InstancePanel resolveEntryWindowId fallback.
+    const [myLabel, setMyLabel] = createSignal<string | null>(null);
+    getApi().getWindowLabel().then((l) => setMyLabel(l)).catch(() => setMyLabel(null));
+
     // Capture dispose so the reactive root can be torn down explicitly.
     // In practice the CEF renderer is destroyed when the window closes,
     // taking the JS context (and the effect) with it — but routing
@@ -531,14 +542,50 @@ function installWindowTitleEffect(windowId: string): void {
             const win = WOS.getObjectValue<WaveWindow>(WOS.makeORef("window", windowId));
             const ws = atoms.workspace();
             const entries = openWindowEntriesAtom();
-            const idx = entries.findIndex((e) => e.windowId === windowId);
 
+            // Find this window's entry. Prefer windowId match; fall back
+            // to label when entry.windowId is null (registration race).
+            // If both fail, use 0 — a wrong rank is better than no title.
+            let idx = entries.findIndex((e) => e.windowId === windowId);
+            let idxSource: "windowId" | "label" | "fallback" = "windowId";
+            if (idx < 0) {
+                const lbl = myLabel();
+                if (lbl) {
+                    idx = entries.findIndex((e) => e.label === lbl);
+                    if (idx >= 0) idxSource = "label";
+                }
+            }
+            if (idx < 0) {
+                idx = 0;
+                idxSource = "fallback";
+            }
+
+            const displayName = win?.meta?.[DISPLAY_NAME_META_KEY] as string | undefined;
+            const workspaceName = ws?.name;
             const windowName = resolveWindowName({
-                displayName: win?.meta?.[DISPLAY_NAME_META_KEY] as string | undefined,
-                workspaceName: ws?.name,
-                indexInOpenWindows: idx >= 0 ? idx : 0,
+                displayName,
+                workspaceName,
+                indexInOpenWindows: idx,
             });
-            document.title = formatWindowTitle(windowName, tab?.name);
+            const title = formatWindowTitle(windowName, tab?.name);
+            document.title = title;
+
+            // Diagnostic log — cross-reference with [wave-panel] logs in
+            // InstancePanel.tsx to spot inconsistencies. Same windowId/label
+            // should produce the same windowName in both surfaces.
+            // Goes through frontend's [fe] log pipe → host log; tail with
+            // `muxlog host '\[fe\] \[wave-title\]'`.
+            console.debug(
+                "[wave-title]",
+                "windowId=" + windowId,
+                "label=" + (myLabel() ?? "<unknown>"),
+                "idx=" + idx,
+                "idxSource=" + idxSource,
+                "displayName=" + (displayName ?? "<none>"),
+                "workspaceName=" + (workspaceName ?? "<none>"),
+                "tab=" + (tab?.name ?? "<none>"),
+                "→ title=" + JSON.stringify(title),
+            );
         });
         return disposeFn;
     });
