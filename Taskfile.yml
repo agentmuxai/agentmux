@@ -556,8 +556,25 @@ tasks:
                     || echo "⚠ install-linux-desktop.sh failed; icon may be wrong but launch continues"
                 fi
 
-                npx vite --config vite.config.ts --port 5173 &
-                VITE_PID=$!
+                # Refuse to attach the host to a foreign Vite. If port 5173
+                # is already held by another AgentMux dev session, our spawn
+                # would silently die and the curl readiness probe would still
+                # pass against the *other* Vite — the host then loads that
+                # workspace's source, surfacing confusing cross-tree errors.
+                # Pre-check the port before spawning so a collision fails
+                # fast with a clear message.
+                #
+                # Note: we can't use `$!` here for liveness/cleanup because
+                # go-task's embedded shell (mvdan/sh) tracks background jobs
+                # as goroutine IDs ("g1"), not real OS PIDs — so $! is never
+                # a kill-able pid in this context.
+                if curl -s --max-time 1 http://localhost:5173 > /dev/null 2>&1; then
+                  echo "❌ Port 5173 is already in use by another process."
+                  echo "   Close any other AgentMux dev session first. To kill an orphan:"
+                  echo "   pwsh -NoProfile -Command \"Get-NetTCPConnection -LocalPort 5173 | Select-Object -First 1 | ForEach-Object { Stop-Process -Id \$_.OwningProcess -Force }\""
+                  exit 1
+                fi
+
                 # Don't `rm -rf $DEV_DIR` on exit — install-linux-desktop.sh
                 # writes Exec=$DEV_DIR/agentmux-cef into the user's
                 # ~/.local/share/applications/agentmux.desktop, and that path
@@ -565,8 +582,15 @@ tasks:
                 # work. Each new `dev:serve` start wipes + recreates $DEV_DIR
                 # at the top of this command, so leaving it around is safe
                 # (no stale binaries leak across versions).
-                trap "kill $VITE_PID 2>/dev/null" EXIT
-                echo "Waiting for Vite on port 5173 (pid $VITE_PID)..."
+                #
+                # --strictPort closes the TOCTOU window: if something binds
+                # :5173 between our pre-check and Vite startup, Vite errors
+                # out instead of silently rebinding to :5174 (which would
+                # let the readiness loop succeed against the foreign Vite
+                # we're trying to avoid attaching to). Reagent P1 on #866.
+                npx vite --config vite.config.ts --port 5173 --strictPort &
+
+                echo "Waiting for Vite on port 5173..."
                 for i in $(seq 1 30); do
                   curl -s http://localhost:5173 > /dev/null 2>&1 && break
                   sleep 1
@@ -617,10 +641,19 @@ tasks:
                     || echo "⚠ install-linux-desktop.sh failed; icon may be wrong but launch continues"
                 fi
 
-                npx vite --config vite.config.ts --port 5173 &
-                VITE_PID=$!
-                trap "kill $VITE_PID 2>/dev/null" EXIT
-                echo "Waiting for Vite on port 5173 (pid $VITE_PID)..."
+                # Mirror dev:serve's pre-check + strictPort pattern. The
+                # previous `kill -0 "$VITE_PID"` check was broken under
+                # go-task's mvdan/sh shell — $! returns a goroutine ID
+                # ("g1"), not a real OS PID, so `kill -0 g1` exits non-zero
+                # immediately and the loop reported a false "Vite exited"
+                # on every run. Reagent P1 on #866.
+                if curl -s --max-time 1 http://localhost:5173 > /dev/null 2>&1; then
+                  echo "❌ Port 5173 is already in use by another process."
+                  echo "   Close any other AgentMux dev session first."
+                  exit 1
+                fi
+                npx vite --config vite.config.ts --port 5173 --strictPort &
+                echo "Waiting for Vite on port 5173..."
                 for i in $(seq 1 30); do
                   curl -s http://localhost:5173 > /dev/null 2>&1 && break
                   sleep 1
