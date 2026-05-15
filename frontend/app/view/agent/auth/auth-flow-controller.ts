@@ -17,7 +17,7 @@
  * testable without a DOM.
  */
 
-import { createSignal, type Accessor } from "solid-js";
+import { createSignal, untrack, type Accessor } from "solid-js";
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -149,13 +149,21 @@ export class AuthFlowController {
         };
     }
 
-    /** Dispatch a command into the reducer, project state. */
+    /** Dispatch a command into the reducer, project state.
+     *  Wrapped in `untrack` so callers running inside a Solid
+     *  reactive scope (e.g. a createEffect) don't accidentally
+     *  subscribe to `_state` via this read — that subscription
+     *  would re-fire the calling effect on every subsequent
+     *  dispatch and silently invalidate any session the caller
+     *  had just started. */
     dispatch(command: AuthCommand): void {
-        const prev = this._state[0]();
-        const result = update(prev, command);
-        if (result.state !== prev) {
-            this._state[1](result.state);
-        }
+        untrack(() => {
+            const prev = this._state[0]();
+            const result = update(prev, command);
+            if (result.state !== prev) {
+                this._state[1](result.state);
+            }
+        });
     }
 
     // ── View-facing actions ───────────────────────────────────────
@@ -179,6 +187,13 @@ export class AuthFlowController {
 
     async connect(cli: ProviderCliMeta): Promise<void> {
         const s = this.state();
+        // Codex P2 on #854 round 2: bail if disposed. Without this,
+        // `startConnect`'s ResolveCli/ensureAuthDir await chain can
+        // call connect() after the modal was closed — the reducer
+        // drops the resulting dispatches via state.closed, but
+        // `rpc.start` still fires and spawns the provider CLI in the
+        // background.
+        if (s.closed) return;
         if (s.kind !== "unauthenticated" && s.kind !== "expired" && s.kind !== "failed") {
             return;
         }
@@ -190,10 +205,6 @@ export class AuthFlowController {
         const myToken = this.actionToken;
         this.dispatch({ type: "ConnectClicked" });
         try {
-            // Reagent P1 on #850: backend's auth.start returns
-            // `{ sessionId, authUrl? }` (not `{ sessionId, status }`).
-            // The initial status is "pending" until the CLI prints
-            // something; the poll loop picks it up on the first tick.
             const { sessionId, authUrl } = await this.rpc.start({
                 providerId: s.providerId,
                 intoBundleId: s.bundleId || undefined,
@@ -344,16 +355,44 @@ export class AuthFlowController {
         }
     }
 
+    /** Surface a view-side connect-prep failure (e.g. `ResolveCli`
+     *  threw before `auth.start` could fire) as a `failed` state.
+     *  Goes through ConnectClicked → SessionStarted(synthetic) →
+     *  Polled(failed). PR C-1's `ConnectFailed` command supersedes
+     *  this with a single dispatch from any kind; until that ships
+     *  the synthesize-via-Polled pattern is what we have. Reagent P1
+     *  on #847 round 5 caught a regression that removed this method
+     *  during an earlier merge. */
+    failConnect(error: unknown): void {
+        const s = this.state();
+        // Codex P2 on #854: only honor failConnect from connect-prep
+        // states. A stale ResolveCli/ensureAuthDir rejection from an
+        // abandoned connect must not clobber a newer attempt — whether
+        // it's already in `waiting` with sessionId === "" (startup
+        // window between ConnectClicked and SessionStarted) or with a
+        // real sessionId. Also skip from terminal/idle/ready where a
+        // synthetic failure makes no sense.
+        if (s.kind !== "unauthenticated" && s.kind !== "expired" && s.kind !== "failed") {
+            return;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        this.dispatch({ type: "ConnectClicked" });
+        const synthSessionId = "cli-resolve-failed";
+        this.dispatch({ type: "SessionStarted", sessionId: synthSessionId });
+        this.dispatch({
+            type: "Polled",
+            sessionId: synthSessionId,
+            status: { status: "failed", error: message },
+        });
+    }
+
     dispose(): void {
         // Fire-and-forget auth.cancel for any in-flight session so we
-        // don't leave an orphan CLI subprocess on the backend. Codex
-        // P2 on #850.
+        // don't leave an orphan CLI subprocess on the backend.
         this.actionToken += 1;
         const s = this.state();
         if (s.kind === "waiting" && s.sessionId !== "") {
-            void this.rpc.cancel(s.sessionId).catch(() => {
-                // Best-effort: the session times out backend-side too.
-            });
+            void this.rpc.cancel(s.sessionId).catch(() => {});
         }
         this.stopPolling();
         this.dispatch({ type: "Disposed" });
@@ -376,7 +415,7 @@ export class AuthFlowController {
     }
 
     private async pollOnce(sessionId: string): Promise<void> {
-        // The reducer gates stale results, but we also short-circuit
+        // The reducer gates stale polls, but we also short-circuit
         // here so we don't fire RPCs for sessions the user already
         // left behind.
         const current = this.state();
