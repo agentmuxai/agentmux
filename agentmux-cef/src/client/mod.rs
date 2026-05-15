@@ -117,8 +117,14 @@ impl AgentMuxHandler {
             }
         }
         // For Alloy-style native windows on Windows, update via Win32 API.
+        // Reagent P1 on #876: only call SetWindowTextW when CEF gave us an
+        // actual title. CEF fires `on_title_change` with `title = None` in
+        // several paths (e.g. about:blank, popup blockers) — passing "" to
+        // SetWindowTextW would blank the application window title in those
+        // cases. Preserve the existing title by skipping the Win32 update
+        // when title is None.
         #[cfg(target_os = "windows")]
-        {
+        if title.is_some() {
             if let Some(browser) = browser.as_ref() {
                 if let Some(host) = browser.host() {
                     let hwnd = host.window_handle();
@@ -178,18 +184,30 @@ impl AgentMuxHandler {
         // Collect favicon URLs from the CefStringList. The list is an in-param
         // provided by CEF — we read via the raw sys API so we don't need to
         // consume (move) the borrowed reference.
+        //
+        // Reagent P1 on #876: `cef_string_list_value` writes into a
+        // `cef_string_t` whose `str_` field points at a freshly-allocated
+        // buffer owned by the list value (with `dtor` set to release it).
+        // Dropping `value` as a plain Rust struct would leak that buffer on
+        // every favicon URL CEF reports. After reading the string, we must
+        // invoke the dtor manually to free the buffer.
         let urls: Vec<String> = if let Some(list) = icon_urls {
             let raw: *mut cef::sys::_cef_string_list_t = list.into();
             if let Some(raw_ref) = unsafe { raw.as_mut() } {
                 let count = unsafe { cef::sys::cef_string_list_size(raw_ref) };
                 (0..count)
                     .filter_map(|i| unsafe {
-                        let mut value = std::mem::zeroed();
-                        (cef::sys::cef_string_list_value(raw_ref, i, &mut value) > 0)
-                            .then_some(value)
-                    })
-                    .map(|value| {
-                        CefString::from(std::ptr::from_ref(&value)).to_string()
+                        let mut value: cef::sys::cef_string_t = std::mem::zeroed();
+                        if cef::sys::cef_string_list_value(raw_ref, i, &mut value) > 0 {
+                            let s = CefString::from(std::ptr::from_ref(&value)).to_string();
+                            // Free the buffer CEF allocated into `value.str_`.
+                            if let Some(dtor) = value.dtor {
+                                dtor(value.str_);
+                            }
+                            Some(s)
+                        } else {
+                            None
+                        }
                     })
                     .collect()
             } else {
