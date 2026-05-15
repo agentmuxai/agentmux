@@ -149,7 +149,18 @@ pub fn set_window_init_status(state: &Arc<AppState>, args: &serde_json::Value) -
         .get("status")
         .and_then(|v| v.as_str())
         .unwrap_or_default();
-    tracing::debug!("set_window_init_status status={}", status);
+    let label = args
+        .get("label")
+        .and_then(|v| v.as_str())
+        .unwrap_or("main")
+        .to_string();
+    tracing::debug!("set_window_init_status status={} label={}", status, label);
     *state.window_init_status.lock() = status.to_string();
+    // Capture HWND once the window is fully shown (CEF Views returns NULL at
+    // on_after_created time; the renderer-ready callback is the earliest safe moment).
+    #[cfg(target_os = "windows")]
+    if status == "ready" {
+        crate::commands::window::capture_hwnd_for_label(state, &label);
+    }
     serde_json::Value::Null
 }
