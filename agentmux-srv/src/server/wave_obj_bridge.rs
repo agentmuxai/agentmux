@@ -32,7 +32,10 @@ use agentmux_common::ipc::Event;
 use tokio::sync::broadcast;
 
 use crate::backend::eventbus::{EventBus, WSEventType};
-use crate::backend::obj::{wave_obj_to_value, OTYPE_WINDOW, OTYPE_WORKSPACE};
+use crate::backend::obj::{
+    wave_obj_to_value, Tab, WaveObj, OTYPE_BLOCK, OTYPE_LAYOUT, OTYPE_TAB, OTYPE_WINDOW,
+    OTYPE_WORKSPACE,
+};
 use crate::backend::storage::wstore::WaveStore;
 
 /// JSON shape that gets broadcast as the `data` payload of a
@@ -67,141 +70,319 @@ fn emit(event_bus: &EventBus, otype: &str, oid: &str, payload: serde_json::Value
     });
 }
 
+/// Fetch one WaveObj by oid and broadcast it as a `waveobj:update`. The
+/// SQLite read is offloaded to the blocking thread pool per ReAgent P1
+/// on PR #852 (WaveStore is `std::sync::Mutex<Connection>`; brief in
+/// steady state but a long reducer transaction would block the tokio
+/// worker thread). Silently logs + skips on missing/error to satisfy
+/// the §8.15 idempotency contract — duplicate or stale events fold to
+/// no-op.
+async fn emit_fetched<T: WaveObj + Send + 'static>(
+    wstore: &Arc<WaveStore>,
+    event_bus: &Arc<EventBus>,
+    otype: &'static str,
+    oid: String,
+    context: &'static str,
+) {
+    let id = oid.clone();
+    let store = Arc::clone(wstore);
+    let result = tokio::task::spawn_blocking(move || store.get::<T>(&id)).await;
+    match result {
+        Ok(Ok(Some(obj))) => {
+            let payload = build_update_payload(
+                "update",
+                otype,
+                &oid,
+                Some(wave_obj_to_value(&obj)),
+            );
+            emit(event_bus, otype, &oid, payload);
+        }
+        Ok(Ok(None)) => {
+            tracing::warn!(
+                target: "wave-obj-bridge",
+                oid = %oid, otype = otype, ctx = context,
+                "object not found in wstore; skipping broadcast"
+            );
+        }
+        Ok(Err(e)) => {
+            tracing::error!(
+                target: "wave-obj-bridge",
+                oid = %oid, otype = otype, ctx = context, error = %e,
+                "wstore.get failed; skipping broadcast"
+            );
+        }
+        Err(join_err) => {
+            tracing::error!(
+                target: "wave-obj-bridge",
+                oid = %oid, otype = otype, ctx = context, error = %join_err,
+                "spawn_blocking join failed (likely panicked); skipping broadcast"
+            );
+        }
+    }
+}
+
+/// Broadcast a "delete" `waveobj:update` for the given oid. No fetch
+/// needed — the frontend's `updateWaveObject` (`wos.ts:263-265`) handles
+/// the delete arm with just the oid.
+fn emit_delete(event_bus: &EventBus, otype: &'static str, oid: &str) {
+    let payload = build_update_payload("delete", otype, oid, None);
+    emit(event_bus, otype, oid, payload);
+}
+
+/// Layout events all reference a `tab_id`; the affected WaveObj is the
+/// `LayoutState` referenced by the tab's `layoutstate` field. Two
+/// SQLite reads chained inside one `spawn_blocking` to keep the lock
+/// hold short.
+async fn emit_layout_for_tab(
+    wstore: &Arc<WaveStore>,
+    event_bus: &Arc<EventBus>,
+    tab_id: String,
+    context: &'static str,
+) {
+    use crate::backend::obj::LayoutState;
+    let id_for_log = tab_id.clone();
+    let store = Arc::clone(wstore);
+    let result = tokio::task::spawn_blocking(move || -> Result<Option<LayoutState>, _> {
+        match store.get::<Tab>(&tab_id) {
+            Ok(Some(tab)) => {
+                if tab.layoutstate.is_empty() {
+                    Ok(None)
+                } else {
+                    store.get::<LayoutState>(&tab.layoutstate)
+                }
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(e),
+        }
+    })
+    .await;
+    match result {
+        Ok(Ok(Some(layout))) => {
+            let layout_id = layout.oid.clone();
+            let payload = build_update_payload(
+                "update",
+                OTYPE_LAYOUT,
+                &layout_id,
+                Some(wave_obj_to_value(&layout)),
+            );
+            emit(event_bus, OTYPE_LAYOUT, &layout_id, payload);
+        }
+        Ok(Ok(None)) => {
+            tracing::warn!(
+                target: "wave-obj-bridge",
+                tab_id = %id_for_log, ctx = context,
+                "layout event but tab/layoutstate not found; skipping broadcast"
+            );
+        }
+        Ok(Err(e)) => {
+            tracing::error!(
+                target: "wave-obj-bridge",
+                tab_id = %id_for_log, ctx = context, error = %e,
+                "wstore.get failed during layout resolution; skipping broadcast"
+            );
+        }
+        Err(join_err) => {
+            tracing::error!(
+                target: "wave-obj-bridge",
+                tab_id = %id_for_log, ctx = context, error = %join_err,
+                "spawn_blocking join failed during layout resolution"
+            );
+        }
+    }
+}
+
 /// Translate one reducer event into zero or more `waveobj:update` broadcasts.
 ///
-/// Phase 1 covers the four workspace events. Other variants intentionally
-/// fall through to the catch-all `_ => {}` arm — they're either not
-/// WaveObj-affecting (saga lifecycle, OS facts, etc.) or scheduled for
-/// Phase 2 expansion.
-///
 /// **Read source — post-event state guarantee:**
-/// For Phase 1 (workspace events), every workspace mutation flows through
-/// the HTTP `service.rs:UpdateWorkspace` handler which calls
-/// `apply_event_to_wstore` synchronously (`service.rs:1297-1304`) before
-/// `publish_events` (`service.rs:1305`). So when the bridge receives a
-/// workspace event, SQLite is already up-to-date.
+/// For events emitted via the HTTP `service.rs` RPC handlers,
+/// `apply_event_to_wstore` is called synchronously (`service.rs:1297-1304`
+/// for workspace; equivalent path for tab/block/window/layout commands)
+/// before `publish_events` (`service.rs:1305`). So when the bridge
+/// receives such an event, SQLite is already up-to-date.
 ///
-/// **Phase 2 caveat:** for tab/block events that the launcher → IPC path
-/// in `srv_ipc/server.rs:295` may publish without first applying to
-/// SQLite, the persist subscriber and bridge race. Phase 2 should either
-/// (a) make the IPC path apply synchronously like the HTTP path does, or
-/// (b) read from the in-memory `srv_state` reducer rather than SQLite.
-/// Tracked in `SPEC_OBJ_UPDATE_BRIDGE §11.1` follow-up.
+/// **IPC-path caveat:** the launcher → IPC path in `srv_ipc/server.rs:295`
+/// dispatches reducer events directly without first calling
+/// `apply_event_to_wstore`; the persist subscriber and bridge then race.
+/// At time of writing none of the events the bridge handles are emitted
+/// via that path (verified for `Command::UpdateWindowMeta` and the
+/// workspace family). When that changes, options are: (a) make the IPC
+/// path apply synchronously like HTTP does, or (b) read from the
+/// in-memory `srv_state` reducer rather than SQLite. Tracked in
+/// `SPEC_OBJ_UPDATE_BRIDGE §11.1`.
 ///
-/// **Lock discipline (per ReAgent P1 on PR #852):** `WaveStore::get<T>()`
-/// acquires `std::sync::Mutex<Connection>` (blocking). Even though the
-/// hold is brief in steady state, a long reducer transaction could block
-/// this tokio worker thread. We therefore do the SQLite read inside
-/// `tokio::task::spawn_blocking` so the async runtime stays responsive.
+/// **Lock discipline (per ReAgent P1 on PR #852):** every `wstore.get<T>()`
+/// is wrapped in `tokio::task::spawn_blocking` via the helpers above so
+/// the async runtime stays responsive even under reducer-transaction
+/// contention.
+///
+/// **Coverage:** Phase 1 + 2 covers workspace, window, tab, block, layout
+/// events. Saga events, OS facts, launcher-domain events all fall through
+/// to the catch-all `_ => {}` arm.
 async fn dispatch_event(event: Event, wstore: Arc<WaveStore>, event_bus: Arc<EventBus>) {
-    use crate::backend::obj::{Window, Workspace};
+    use crate::backend::obj::{Block, Window, Workspace};
 
     match event {
+        // ----- Workspace -----
         Event::WorkspaceRenamed { workspace_id, .. }
         | Event::WorkspaceMetaUpdated { workspace_id, .. }
         | Event::WorkspaceCreated { workspace_id, .. } => {
-            // Offload the blocking SQLite read to the blocking thread pool
-            // so async worker threads stay free for I/O-bound work.
-            let id = workspace_id.clone();
-            let store = Arc::clone(&wstore);
-            let result = tokio::task::spawn_blocking(move || store.get::<Workspace>(&id)).await;
-            match result {
-                Ok(Ok(Some(ws))) => {
-                    // "update" for both create and update — the frontend's
-                    // updateWaveObject (`wos.ts:259-279`) treats anything
-                    // not "delete" identically. Sending "update" uniformly
-                    // simplifies the bridge's logic and matches what the
-                    // existing response-broadcast loop emits for the same
-                    // events.
-                    let payload = build_update_payload(
-                        "update",
-                        OTYPE_WORKSPACE,
-                        &workspace_id,
-                        Some(wave_obj_to_value(&ws)),
-                    );
-                    emit(&event_bus, OTYPE_WORKSPACE, &workspace_id, payload);
-                }
-                Ok(Ok(None)) => {
-                    tracing::warn!(
-                        target: "wave-obj-bridge",
-                        workspace_id = %workspace_id,
-                        "workspace event for missing workspace; skipping broadcast"
-                    );
-                }
-                Ok(Err(e)) => {
-                    tracing::error!(
-                        target: "wave-obj-bridge",
-                        workspace_id = %workspace_id,
-                        error = %e,
-                        "wstore.get::<Workspace> failed; skipping broadcast"
-                    );
-                }
-                Err(join_err) => {
-                    tracing::error!(
-                        target: "wave-obj-bridge",
-                        workspace_id = %workspace_id,
-                        error = %join_err,
-                        "spawn_blocking join failed (likely panicked); skipping broadcast"
-                    );
-                }
-            }
+            emit_fetched::<Workspace>(
+                &wstore, &event_bus, OTYPE_WORKSPACE, workspace_id, "Workspace*",
+            )
+            .await;
         }
-
         Event::WorkspaceDeleted { workspace_id, .. } => {
-            // No object to fetch — frontend just needs the oid + delete tag.
-            let payload = build_update_payload("delete", OTYPE_WORKSPACE, &workspace_id, None);
-            emit(&event_bus, OTYPE_WORKSPACE, &workspace_id, payload);
+            emit_delete(&event_bus, OTYPE_WORKSPACE, &workspace_id);
         }
 
-        // Phase E.5.x (issue #855) — window meta updates now flow through
-        // the reducer; this arm picks them up and broadcasts the updated
-        // Window to the frontend WOS cache. Replaces the previous
-        // service.rs:308 wcore-direct workaround that had to inline the
-        // WaveObjUpdate in the handler response.
-        Event::WindowMetaUpdated { window_id, .. } => {
-            let id = window_id.clone();
-            let store = Arc::clone(&wstore);
-            let result = tokio::task::spawn_blocking(move || store.get::<Window>(&id)).await;
-            match result {
-                Ok(Ok(Some(window))) => {
-                    let payload = build_update_payload(
-                        "update",
-                        OTYPE_WINDOW,
-                        &window_id,
-                        Some(wave_obj_to_value(&window)),
-                    );
-                    emit(&event_bus, OTYPE_WINDOW, &window_id, payload);
-                }
-                Ok(Ok(None)) => {
-                    tracing::warn!(
-                        target: "wave-obj-bridge",
-                        window_id = %window_id,
-                        "WindowMetaUpdated for missing window; skipping broadcast"
-                    );
-                }
-                Ok(Err(e)) => {
-                    tracing::error!(
-                        target: "wave-obj-bridge",
-                        window_id = %window_id,
-                        error = %e,
-                        "wstore.get::<Window> failed; skipping broadcast"
-                    );
-                }
-                Err(join_err) => {
-                    tracing::error!(
-                        target: "wave-obj-bridge",
-                        window_id = %window_id,
-                        error = %join_err,
-                        "spawn_blocking join failed (likely panicked); skipping broadcast"
-                    );
-                }
-            }
+        // ----- Window (Phase 2 + #855) -----
+        Event::WindowMetaUpdated { window_id, .. }
+        | Event::SrvWindowOpened { window_id, .. }
+        | Event::SrvWindowWorkspaceChanged { window_id, .. } => {
+            emit_fetched::<Window>(
+                &wstore, &event_bus, OTYPE_WINDOW, window_id, "Window*",
+            )
+            .await;
+        }
+        Event::SrvWindowClosed { window_id, .. } => {
+            emit_delete(&event_bus, OTYPE_WINDOW, &window_id);
         }
 
-        // All other event variants are either not WaveObj-affecting (saga
-        // lifecycle, OS facts, …) or pending Phase 2 coverage. Silent skip
-        // is correct — the catch-all _ arm makes this future-proof for new
-        // event variants the reducer may add.
+        // ----- Tab (Phase 2) -----
+        // TabCreated also touches the parent workspace's tab_ids field
+        // (reducer mutates both in one dispatch). Broadcast both so the
+        // frontend WOS sees the new Tab AND the updated parent ordering.
+        Event::TabCreated {
+            workspace_id,
+            tab_id,
+            ..
+        } => {
+            emit_fetched::<Tab>(&wstore, &event_bus, OTYPE_TAB, tab_id, "TabCreated").await;
+            emit_fetched::<Workspace>(
+                &wstore, &event_bus, OTYPE_WORKSPACE, workspace_id, "TabCreated parent",
+            )
+            .await;
+        }
+        Event::TabDeleted {
+            workspace_id,
+            tab_id,
+            ..
+        } => {
+            emit_delete(&event_bus, OTYPE_TAB, &tab_id);
+            emit_fetched::<Workspace>(
+                &wstore, &event_bus, OTYPE_WORKSPACE, workspace_id, "TabDeleted parent",
+            )
+            .await;
+        }
+        Event::TabRenamed { tab_id, .. } | Event::TabMetaUpdated { tab_id, .. } => {
+            emit_fetched::<Tab>(&wstore, &event_bus, OTYPE_TAB, tab_id, "Tab*").await;
+        }
+        Event::ActiveTabChanged { workspace_id, .. }
+        | Event::TabReordered { workspace_id, .. }
+        | Event::TabsReorderedBulk { workspace_id, .. } => {
+            emit_fetched::<Workspace>(
+                &wstore,
+                &event_bus,
+                OTYPE_WORKSPACE,
+                workspace_id,
+                "ActiveTab/Reorder",
+            )
+            .await;
+        }
+        Event::TabMoved {
+            tab_id,
+            src_workspace_id,
+            dst_workspace_id,
+            ..
+        } => {
+            emit_fetched::<Tab>(&wstore, &event_bus, OTYPE_TAB, tab_id, "TabMoved").await;
+            emit_fetched::<Workspace>(
+                &wstore,
+                &event_bus,
+                OTYPE_WORKSPACE,
+                src_workspace_id,
+                "TabMoved src",
+            )
+            .await;
+            emit_fetched::<Workspace>(
+                &wstore,
+                &event_bus,
+                OTYPE_WORKSPACE,
+                dst_workspace_id,
+                "TabMoved dst",
+            )
+            .await;
+        }
+
+        // ----- Block (Phase 2) -----
+        // BlockCreated/BlockDeleted touch the parent tab's blockids field.
+        Event::BlockCreated {
+            tab_id, block_id, ..
+        } => {
+            emit_fetched::<Block>(
+                &wstore, &event_bus, OTYPE_BLOCK, block_id, "BlockCreated",
+            )
+            .await;
+            emit_fetched::<Tab>(
+                &wstore, &event_bus, OTYPE_TAB, tab_id, "BlockCreated parent",
+            )
+            .await;
+        }
+        Event::BlockDeleted {
+            tab_id, block_id, ..
+        } => {
+            emit_delete(&event_bus, OTYPE_BLOCK, &block_id);
+            emit_fetched::<Tab>(
+                &wstore, &event_bus, OTYPE_TAB, tab_id, "BlockDeleted parent",
+            )
+            .await;
+        }
+        Event::BlockMetaUpdated { block_id, .. } => {
+            emit_fetched::<Block>(
+                &wstore,
+                &event_bus,
+                OTYPE_BLOCK,
+                block_id,
+                "BlockMetaUpdated",
+            )
+            .await;
+        }
+        Event::BlockMoved {
+            block_id,
+            src_tab_id,
+            dst_tab_id,
+            ..
+        } => {
+            emit_fetched::<Block>(&wstore, &event_bus, OTYPE_BLOCK, block_id, "BlockMoved").await;
+            emit_fetched::<Tab>(&wstore, &event_bus, OTYPE_TAB, src_tab_id, "BlockMoved src")
+                .await;
+            emit_fetched::<Tab>(&wstore, &event_bus, OTYPE_TAB, dst_tab_id, "BlockMoved dst")
+                .await;
+        }
+
+        // ----- Layout (Phase 2) -----
+        // All layout events affect the LayoutState that the named tab
+        // references via `tab.layoutstate`. emit_layout_for_tab handles
+        // the tab → layoutstate id → LayoutState chain.
+        Event::FocusedNodeChanged { tab_id, .. }
+        | Event::MagnifiedNodeChanged { tab_id, .. }
+        | Event::LayoutNodeInserted { tab_id, .. }
+        | Event::LayoutNodeInsertedAtIndex { tab_id, .. }
+        | Event::LayoutNodeDeleted { tab_id, .. }
+        | Event::LayoutNodeMoved { tab_id, .. }
+        | Event::LayoutNodesSwapped { tab_id, .. }
+        | Event::LayoutNodesResized { tab_id, .. }
+        | Event::LayoutNodeReplaced { tab_id, .. }
+        | Event::LayoutSplitHorizontalApplied { tab_id, .. }
+        | Event::LayoutSplitVerticalApplied { tab_id, .. }
+        | Event::LayoutCleared { tab_id, .. }
+        | Event::LayoutTreeReplaced { tab_id, .. } => {
+            emit_layout_for_tab(&wstore, &event_bus, tab_id, "Layout*").await;
+        }
+
+        // Saga lifecycle, launcher-domain events, OS facts, etc. — not
+        // WaveObj changes. The catch-all keeps the bridge future-proof
+        // for new event variants the reducer may add.
         _ => {}
     }
 }
