@@ -123,29 +123,63 @@ function AppSettingsUpdater() {
             (windowSettings?.["window:transparent"] || windowSettings?.["window:blur"]) ?? false;
         const opacity = util.boundNumber(windowSettings?.["window:opacity"] ?? 0.8, 0, 1);
         const baseBgColor = windowSettings?.["window:bgcolor"];
+        // `#main` may not exist on the first effect run: AppSettingsUpdater is
+        // a sibling of <Workspace /> (which owns the main div), and SolidJS's
+        // mount order is sibling-by-sibling. Without a null guard, this
+        // effect threw on the first run and SolidJS lost the subscription —
+        // settings.json could say `window:transparent: true` and the effect
+        // would never re-fire on later settings ticks. Optional chaining
+        // means the effect runs cleanly on the first (mainDiv-less) tick,
+        // subscribes to windowSettingsAtom, and gets re-fired once both
+        // settings AND the main div are ready.
         const mainDiv = document.getElementById("main");
-        // console.log("window settings", windowSettings, isTransparentOrBlur, opacity, baseBgColor, mainDiv);
+        // `--window-opacity` MUST be set on :root, not body. theme.scss declares
+        // `--main-bg-color: rgba(34, 34, 34, var(--window-opacity, 1))` on
+        // :root. CSS substitutes var() at the element where the custom
+        // property is computed — so at :root, with :root's --window-opacity.
+        // Descendants inherit the already-substituted value. Setting
+        // --window-opacity only on body leaves :root's --main-bg-color at
+        // alpha=1, and all 30+ panes that use `background: var(--main-bg-color)`
+        // stay fully opaque even with window:transparent on.
         if (isTransparentOrBlur) {
-            mainDiv.classList.add("is-transparent");
+            mainDiv?.classList.add("is-transparent");
             document.documentElement.style.background = "transparent";
             if (opacity != null) {
-                document.body.style.setProperty("--window-opacity", `${opacity}`);
+                document.documentElement.style.setProperty("--window-opacity", `${opacity}`);
             } else {
-                document.body.style.removeProperty("--window-opacity");
+                document.documentElement.style.removeProperty("--window-opacity");
             }
         } else {
-            mainDiv.classList.remove("is-transparent");
+            mainDiv?.classList.remove("is-transparent");
             document.documentElement.style.removeProperty("background");
-            document.body.style.removeProperty("--window-opacity");
+            // Explicitly set opacity=1 to override theme.scss's translucent
+            // default (0.45). The default is chosen for first-paint
+            // alpha-awareness in the common transparent-window case;
+            // non-transparent windows need to flip it back to fully opaque.
+            document.documentElement.style.setProperty("--window-opacity", "1");
         }
         if (baseBgColor != null) {
             document.body.style.setProperty("--main-bg-color", baseBgColor);
         } else {
             document.body.style.removeProperty("--main-bg-color");
         }
-        // Apply Tauri-level window transparency and platform blur effects
+        // Apply Tauri-level window transparency and platform blur effects.
+        // The IPC call can throw early in startup if window.api hasn't been
+        // wired yet (visible as "[getApi] called before window.api exists" in
+        // the console). Without try/catch the throw aborts this effect and
+        // SolidJS never re-runs it on the next settings tick — leaving the
+        // CSS classes set above untouched, and the body opaque. The CEF host
+        // also reads CefSettings.background_color directly at init time, so
+        // the IPC is only the "Tauri-side window.transparent" mirror; we can
+        // safely skip it when the API isn't ready.
         const isBlur = windowSettings?.["window:blur"] ?? false;
-        getApi().setWindowTransparency(isTransparentOrBlur, isBlur, opacity);
+        try {
+            getApi().setWindowTransparency(isTransparentOrBlur, isBlur, opacity);
+        } catch (e) {
+            // Swallow — the CSS path above is what actually drives visual
+            // transparency on Linux/Wayland under CEF. The Tauri-era IPC
+            // mirror is best-effort.
+        }
 
         // Apply color theme
         const theme = windowSettings?.["window:theme"];
