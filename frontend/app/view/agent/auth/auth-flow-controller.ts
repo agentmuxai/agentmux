@@ -337,35 +337,13 @@ export class AuthFlowController {
 
     /** Surface a view-side connect-prep failure (e.g. `ResolveCli`
      *  threw before `auth.start` could fire) as a `failed` state.
-<<<<<<< HEAD
-     *  Uses the dedicated `ConnectFailed` command which is honored
-     *  from any non-terminal kind, so the error always surfaces in
-     *  the FailedBanner regardless of which state the user was in.
-     *  Reagent P2 on #853. */
+     *  Uses the dedicated `ConnectFailed` command (PR C-1 reducer
+     *  extension) which is honored from any non-terminal kind, so
+     *  the error always surfaces in the FailedBanner regardless of
+     *  which state the user was in. */
     failConnect(error: unknown): void {
         const message = error instanceof Error ? error.message : String(error);
         this.dispatch({ type: "ConnectFailed", error: message });
-=======
-     *  Goes through ConnectClicked → SessionStarted(synthetic) →
-     *  Polled(failed). PR C-1's `ConnectFailed` command supersedes
-     *  this with a single dispatch from any kind; until that ships
-     *  the synthesize-via-Polled pattern is what we have. Reagent P1
-     *  on #847 round 5 caught a regression that removed this method
-     *  during an earlier merge. */
-    failConnect(error: unknown): void {
-        const message = error instanceof Error ? error.message : String(error);
-        const k = this.state().kind;
-        if (k === "unauthenticated" || k === "expired" || k === "failed") {
-            this.dispatch({ type: "ConnectClicked" });
-        }
-        const synthSessionId = "cli-resolve-failed";
-        this.dispatch({ type: "SessionStarted", sessionId: synthSessionId });
-        this.dispatch({
-            type: "Polled",
-            sessionId: synthSessionId,
-            status: { status: "failed", error: message },
-        });
->>>>>>> agenta/oauth-prelaunch-modal
     }
 
     dispose(): void {
