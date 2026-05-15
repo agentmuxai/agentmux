@@ -33,8 +33,8 @@ use tokio::sync::broadcast;
 
 use crate::backend::eventbus::{EventBus, WSEventType};
 use crate::backend::obj::{
-    wave_obj_to_value, Tab, WaveObj, OTYPE_BLOCK, OTYPE_LAYOUT, OTYPE_TAB, OTYPE_WINDOW,
-    OTYPE_WORKSPACE,
+    wave_obj_to_value, Client, Tab, WaveObj, OTYPE_BLOCK, OTYPE_CLIENT, OTYPE_LAYOUT, OTYPE_TAB,
+    OTYPE_WINDOW, OTYPE_WORKSPACE,
 };
 use crate::backend::storage::wstore::WaveStore;
 
@@ -127,6 +127,58 @@ async fn emit_fetched<T: WaveObj + Send + 'static>(
 fn emit_delete(event_bus: &EventBus, otype: &'static str, oid: &str) {
     let payload = build_update_payload("delete", otype, oid, None);
     emit(event_bus, otype, oid, payload);
+}
+
+/// Broadcast the singleton `Client` WaveObj. SrvWindowOpened /
+/// SrvWindowClosed mutate `Client.windowids` (per
+/// `apply_srv_window_opened` in persist_subscriber.rs:518) so renderers
+/// holding a pinned Client need to see the new windowids list — without
+/// this broadcast they'd render stale window membership until reload.
+/// Codex P2 on PR #861.
+///
+/// Client is a singleton — the first `get_all::<Client>()` row is THE
+/// client. Same lookup pattern persist_subscriber uses.
+async fn emit_client_singleton(
+    wstore: &Arc<WaveStore>,
+    event_bus: &Arc<EventBus>,
+    context: &'static str,
+) {
+    let store = Arc::clone(wstore);
+    let result = tokio::task::spawn_blocking(move || store.get_all::<Client>()).await;
+    match result {
+        Ok(Ok(clients)) => {
+            if let Some(client) = clients.into_iter().next() {
+                let oid = client.oid.clone();
+                let payload = build_update_payload(
+                    "update",
+                    OTYPE_CLIENT,
+                    &oid,
+                    Some(wave_obj_to_value(&client)),
+                );
+                emit(event_bus, OTYPE_CLIENT, &oid, payload);
+            } else {
+                tracing::warn!(
+                    target: "wave-obj-bridge",
+                    ctx = context,
+                    "no Client row in wstore; skipping Client broadcast"
+                );
+            }
+        }
+        Ok(Err(e)) => {
+            tracing::error!(
+                target: "wave-obj-bridge",
+                ctx = context, error = %e,
+                "wstore.get_all::<Client> failed; skipping broadcast"
+            );
+        }
+        Err(je) => {
+            tracing::error!(
+                target: "wave-obj-bridge",
+                ctx = context, error = %je,
+                "spawn_blocking join failed during Client lookup"
+            );
+        }
+    }
 }
 
 /// Layout events all reference a `tab_id`; the affected WaveObj is the
@@ -236,16 +288,34 @@ async fn dispatch_event(event: Event, wstore: Arc<WaveStore>, event_bus: Arc<Eve
         }
 
         // ----- Window (Phase 2 + #855) -----
-        Event::WindowMetaUpdated { window_id, .. }
-        | Event::SrvWindowOpened { window_id, .. }
-        | Event::SrvWindowWorkspaceChanged { window_id, .. } => {
+        Event::WindowMetaUpdated { window_id, .. } => {
             emit_fetched::<Window>(
-                &wstore, &event_bus, OTYPE_WINDOW, window_id, "Window*",
+                &wstore, &event_bus, OTYPE_WINDOW, window_id, "WindowMetaUpdated",
             )
             .await;
         }
+        Event::SrvWindowWorkspaceChanged { window_id, .. } => {
+            emit_fetched::<Window>(
+                &wstore, &event_bus, OTYPE_WINDOW, window_id, "SrvWindowWorkspaceChanged",
+            )
+            .await;
+        }
+        // SrvWindowOpened/Closed: the persist path
+        // (apply_srv_window_opened / apply_srv_window_closed) ALSO
+        // mutates Client.windowids inside the same transaction, so
+        // renderers with a pinned Client need to see the updated
+        // singleton too — otherwise their window list lags behind
+        // until reload. (Codex P2 on PR #861.)
+        Event::SrvWindowOpened { window_id, .. } => {
+            emit_fetched::<Window>(
+                &wstore, &event_bus, OTYPE_WINDOW, window_id, "SrvWindowOpened",
+            )
+            .await;
+            emit_client_singleton(&wstore, &event_bus, "SrvWindowOpened").await;
+        }
         Event::SrvWindowClosed { window_id, .. } => {
             emit_delete(&event_bus, OTYPE_WINDOW, &window_id);
+            emit_client_singleton(&wstore, &event_bus, "SrvWindowClosed").await;
         }
 
         // ----- Tab (Phase 2) -----
@@ -360,24 +430,22 @@ async fn dispatch_event(event: Event, wstore: Arc<WaveStore>, event_bus: Arc<Eve
                 .await;
         }
 
-        // ----- Layout (Phase 2) -----
-        // All layout events affect the LayoutState that the named tab
-        // references via `tab.layoutstate`. emit_layout_for_tab handles
-        // the tab → layoutstate id → LayoutState chain.
+        // ----- Layout (Phase 2 — partial) -----
+        // ONLY the focused/magnified events are persisted by
+        // `apply_event_to_wstore` (persist_subscriber.rs:289-292).
+        // The other 11 layout-tree events (Insert/Delete/Move/Swap/
+        // Resize/Replace/Split*/Clear/TreeReplaced) are persisted via
+        // wcore-direct in their RPC handlers — they DON'T appear in
+        // `apply_event_to_wstore`. If the bridge tried to broadcast
+        // LayoutState for those, `wstore.get<LayoutState>` could return
+        // pre-event tree state (subscriber and bridge race; only this
+        // one is the unsafe direction). Tracked as a follow-up issue
+        // for the layout-tree-event persistence migration. Until then,
+        // those handlers' existing `success_with_updates(...)` response
+        // broadcasts cover the frontend (Codex P2 on PR #861).
         Event::FocusedNodeChanged { tab_id, .. }
-        | Event::MagnifiedNodeChanged { tab_id, .. }
-        | Event::LayoutNodeInserted { tab_id, .. }
-        | Event::LayoutNodeInsertedAtIndex { tab_id, .. }
-        | Event::LayoutNodeDeleted { tab_id, .. }
-        | Event::LayoutNodeMoved { tab_id, .. }
-        | Event::LayoutNodesSwapped { tab_id, .. }
-        | Event::LayoutNodesResized { tab_id, .. }
-        | Event::LayoutNodeReplaced { tab_id, .. }
-        | Event::LayoutSplitHorizontalApplied { tab_id, .. }
-        | Event::LayoutSplitVerticalApplied { tab_id, .. }
-        | Event::LayoutCleared { tab_id, .. }
-        | Event::LayoutTreeReplaced { tab_id, .. } => {
-            emit_layout_for_tab(&wstore, &event_bus, tab_id, "Layout*").await;
+        | Event::MagnifiedNodeChanged { tab_id, .. } => {
+            emit_layout_for_tab(&wstore, &event_bus, tab_id, "Focused/MagnifiedNodeChanged").await;
         }
 
         // Saga lifecycle, launcher-domain events, OS facts, etc. — not
