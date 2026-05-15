@@ -80,6 +80,7 @@ export function update(
                     error: null,
                     url: command.url,
                     faviconUrl: deriveFaviconUrl(command.url),
+                    faviconOverridden: false,
                 },
                 events: [{ type: "navigate", url: command.url }],
             };
@@ -175,6 +176,17 @@ export function update(
             return {
                 state: { ...state, title: next },
                 events: [{ type: "title-changed", title: next }],
+            };
+        }
+
+        case "FaviconUrlsReceived": {
+            const next = command.urls[0] ?? "";
+            if (next === state.faviconUrl && state.faviconOverridden === (next !== "")) {
+                return { state, events: [] };
+            }
+            return {
+                state: { ...state, faviconUrl: next, faviconOverridden: next !== "" },
+                events: [{ type: "favicon-urls-received", url: next }],
             };
         }
 

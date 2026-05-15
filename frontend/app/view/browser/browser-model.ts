@@ -87,6 +87,7 @@ export class BrowserViewModel implements ViewModel {
 
     viewIcon: Accessor<string> = () => "globe";
     viewName: Accessor<string>;
+    viewFaviconUrl: Accessor<string>;
     viewText: Accessor<string | HeaderElem[]> = () => [];
     noPadding: Accessor<boolean> = () => true;
 
@@ -141,6 +142,12 @@ export class BrowserViewModel implements ViewModel {
      * shows the blue focus border and keyboard shortcuts target it.
      */
     private _clickUnsub: (() => void) | null = null;
+
+    /** Unsubscribe from `browser-pane-title-change` IPC events. */
+    private _titleUnsub: (() => void) | null = null;
+
+    /** Unsubscribe from `browser-pane-favicon-urls` IPC events. */
+    private _faviconUnsub: (() => void) | null = null;
 
     blockAtom: Accessor<Block | undefined>;
 
@@ -248,6 +255,43 @@ export class BrowserViewModel implements ViewModel {
         installEventSinkOnce();
 
         this.viewName = createMemo(() => this.titleAtom());
+        this.viewFaviconUrl = createMemo(() => this.faviconUrlAtom());
+
+        // Subscribe to live title changes fired by CEF's on_title_change.
+        void listenEvent<{ block_id: string; title: string }>(
+            "browser-pane-title-change",
+            (payload) => {
+                if (this.closed) {
+                    this.diag(`post-close-event-dropped name=browser-pane-title-change`);
+                    return;
+                }
+                if (payload.block_id !== this.blockId) return;
+                this.diag(`title-change recv title=${JSON.stringify(payload.title)}`);
+                this._dispatch({ type: "TitleChanged", title: payload.title }, "title-change");
+            },
+        ).then((unsub) => {
+            this.diag(`sub-registered name=browser-pane-title-change`);
+            if (this.closed) unsub();
+            else this._titleUnsub = unsub;
+        });
+
+        // Subscribe to real favicon URLs fired by CEF's on_favicon_urlchange.
+        void listenEvent<{ block_id: string; urls: string[] }>(
+            "browser-pane-favicon-urls",
+            (payload) => {
+                if (this.closed) {
+                    this.diag(`post-close-event-dropped name=browser-pane-favicon-urls`);
+                    return;
+                }
+                if (payload.block_id !== this.blockId) return;
+                this.diag(`favicon-urls recv count=${payload.urls.length}`);
+                this._dispatch({ type: "FaviconUrlsReceived", urls: payload.urls }, "favicon-urls");
+            },
+        ).then((unsub) => {
+            this.diag(`sub-registered name=browser-pane-favicon-urls`);
+            if (this.closed) unsub();
+            else this._faviconUnsub = unsub;
+        });
 
         // Subscribe to nav-state updates fired by the backend on every
         // `on_load_end_pane`. This is the source of truth for address bar +
@@ -444,6 +488,14 @@ export class BrowserViewModel implements ViewModel {
         if (this._clickUnsub) {
             this._clickUnsub();
             this._clickUnsub = null;
+        }
+        if (this._titleUnsub) {
+            this._titleUnsub();
+            this._titleUnsub = null;
+        }
+        if (this._faviconUnsub) {
+            this._faviconUnsub();
+            this._faviconUnsub = null;
         }
         // Drop the slot AFTER the Disposed dispatch — the projection
         // for `closed:true` runs first, so any consumer reading

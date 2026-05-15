@@ -1,6 +1,14 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+.browser-pane-favicon {
+    width: 14px;
+    height: 14px;
+    object-fit: contain;
+    display: block;
+    border-radius: 2px;
+}
+
 .browser-view {
     display: flex;
     flex-direction: column;
