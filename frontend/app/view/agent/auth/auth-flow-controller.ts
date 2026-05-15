@@ -309,6 +309,12 @@ export class AuthFlowController {
             }
             this.dispatch({ type: "ApiKeyAccepted", bundleId });
         } catch (e) {
+            if (this.actionToken !== myToken) {
+                // Stale rejection: a newer submit already succeeded
+                // and moved state to `ready`. Don't clobber it with
+                // this old failure. Reagent P1 on #850 round 4.
+                return;
+            }
             const synthSessionId = "apikey-submit-failed";
             this.dispatch({ type: "SessionStarted", sessionId: synthSessionId });
             this.dispatch({
