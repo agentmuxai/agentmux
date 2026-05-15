@@ -323,45 +323,28 @@ export class AuthFlowController {
     }
 
     /** Surface a view-side connect-prep failure (e.g. `ResolveCli`
-     *  threw before we could call `auth.start`) as a `failed` state.
-     *  Without this, an empty cliPath would propagate to the backend
-     *  and produce a misleading "CLI not found at ''" message
-     *  (reagent P1 on #847).
-     *
-     *  Reagent P2 on #853: the previous guard `kind !== "waiting"`
-     *  would dispatch ConnectClicked from `idle`/`authenticated`/
-     *  `saving` — but ConnectClicked is only honored from
-     *  `unauthenticated`/`expired`/`failed`, so the error would be
-     *  silently swallowed. Guard now narrows to the kinds where
-     *  Connect is valid; from other kinds we directly synthesize a
-     *  failed state via Polled. */
+     *  threw before `auth.start` could fire) as a `failed` state.
+     *  Uses the dedicated `ConnectFailed` command which is honored
+     *  from any non-terminal kind, so the error always surfaces in
+     *  the FailedBanner regardless of which state the user was in.
+     *  Reagent P2 on #853. */
     failConnect(error: unknown): void {
         const message = error instanceof Error ? error.message : String(error);
-        const k = this.state().kind;
-        const synthSessionId = "cli-resolve-failed";
-        // Only ConnectClicked → waiting from kinds the reducer honors.
-        // From `waiting` we're already there; from anything else,
-        // synthesize the transition into waiting first via
-        // ConnectClicked (dropped harmlessly if not honored) and
-        // proceed — the downstream SessionStarted + Polled(failed)
-        // pair lands us in `failed` from any valid path.
-        if (k === "unauthenticated" || k === "expired" || k === "failed") {
-            this.dispatch({ type: "ConnectClicked" });
-        }
-        this.dispatch({ type: "SessionStarted", sessionId: synthSessionId });
-        this.dispatch({
-            type: "Polled",
-            sessionId: synthSessionId,
-            status: { status: "failed", error: message },
-        });
+        this.dispatch({ type: "ConnectFailed", error: message });
     }
 
     dispose(): void {
         // Fire-and-forget auth.cancel for any in-flight session so we
-        // don't leave an orphan CLI subprocess on the backend.
+        // don't leave an orphan CLI subprocess on the backend. Reagent
+        // P1 on #853: also covers `authenticated` (CLI is done but the
+        // backend session is held alive awaiting `auth.savebundle`;
+        // unmounting from this state must still tell the backend to
+        // release it).
         this.actionToken += 1;
         const s = this.state();
-        if (s.kind === "waiting" && s.sessionId !== "") {
+        const hasLiveSession =
+            (s.kind === "waiting" || s.kind === "authenticated") && s.sessionId !== "";
+        if (hasLiveSession) {
             void this.rpc.cancel(s.sessionId).catch(() => {});
         }
         this.stopPolling();

@@ -194,6 +194,16 @@ export type AuthCommand =
      */
     | { type: "BundleSaveFailed"; error: string }
     /**
+     * View-side prep failure (e.g. `ResolveCli` threw before
+     * `auth.start` could fire, network preflight, etc.). Honored from
+     * any non-terminal kind — there's no existing session to clean up.
+     * The controller's `failConnect` dispatches this to surface the
+     * error inline regardless of which state the user was in. Reagent
+     * P2 on #853 caught the previous failConnect's silent-swallow bug
+     * for non-Connect-valid kinds.
+     */
+    | { type: "ConnectFailed"; error: string }
+    /**
      * Modal close / unmount. Idempotent.
      */
     | { type: "Disposed" };
@@ -602,6 +612,24 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
             return {
                 state: { ...state, kind: "authenticated", error: command.error },
                 events: [{ type: "bundle-save-failed", error: command.error }],
+            };
+        }
+
+        case "ConnectFailed": {
+            // Honored from any non-terminal kind. Clears in-flight
+            // transients but doesn't fire backend cancel — this
+            // command is for view-prep failures BEFORE we held a
+            // backend session.
+            return {
+                state: {
+                    ...state,
+                    kind: "failed",
+                    sessionId: "",
+                    authUrl: "",
+                    deviceCode: null,
+                    error: command.error,
+                },
+                events: [{ type: "failed", error: command.error }],
             };
         }
 
