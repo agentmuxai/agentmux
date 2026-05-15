@@ -244,18 +244,24 @@ export class AuthFlowController {
 
     async cancel(): Promise<void> {
         const s = this.state();
-        // Reagent P1 on #853: also honors `authenticated` — backend
+        // Reagent P1 on #853: also honor `authenticated` — backend
         // session is held alive there too (awaiting auth.savebundle).
         // Clicking Cancel from the SaveBundle panel must fire
         // auth.cancel so the orphan session is released. Mirrors
         // dispose()'s coverage of both kinds.
-        const isLive =
-            (s.kind === "waiting" || s.kind === "authenticated") && s.sessionId !== "";
-        if (!isLive) return;
-        const sessionId = s.sessionId;
+        //
+        // Reagent P1 on #850: bump actionToken even when sessionId is
+        // still "" (the startup window between ConnectClicked dispatch
+        // and SessionStarted dispatch — auth.start in flight). The bump
+        // invalidates the pending connect()'s actionToken gate so its
+        // SessionStarted is dropped and the orphan session gets
+        // cancelled by connect()'s stale-token path. User intent wins.
+        if (s.kind !== "waiting" && s.kind !== "authenticated") return;
         this.actionToken += 1;
         this.stopPolling();
         this.dispatch({ type: "CancelClicked" });
+        const sessionId = s.sessionId;
+        if (sessionId === "") return;
         try {
             await this.rpc.cancel(sessionId);
         } catch {
