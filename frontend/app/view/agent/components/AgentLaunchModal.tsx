@@ -21,6 +21,9 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { buildInstanceSlug, slugifyInstanceName } from "../defaults/instance-slug";
+import { getProvider } from "../providers";
+import { PreLaunchAuthPanel } from "./PreLaunchAuthPanel";
+import type { AuthState } from "../auth";
 
 export interface LaunchOverrides {
     /** Instance name — written into AGENTMUX_AGENT_ID and used to
@@ -142,8 +145,53 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     };
 
     const hasName = () => name().trim().length > 0;
-    const canSubmit = () => !submitting() && slugifyInstanceName(name()).length > 0;
     const containerSupported = () => catalog()?.containerSupported ?? true;
+
+    // Pre-launch OAuth (spec: SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md).
+    // The PreLaunchAuthPanel owns the AuthFlowController; we mirror
+    // its state.kind here to gate the Launch button. Existing
+    // non-blank bundles bypass the gate — they came from a prior
+    // OAuth, so trust them (PR B-4 / PR D will tighten this with a
+    // per-bundle binding check).
+    const [authStateKind, setAuthStateKind] = createSignal<AuthState["kind"]>("idle");
+    const onAuthStateChange = (s: AuthState) => setAuthStateKind(s.kind);
+    const onBundleCreated = (bundleId: string) => {
+        // The new bundle was just persisted backend-side. Force the
+        // resource to refetch and switch the dropdown to it.
+        // `createResource.refetch()` isn't exposed by destructure — we
+        // re-trigger by re-mounting the resource via a key signal.
+        // Lightweight alternative: optimistically set the dropdown
+        // and let the next refetch (on dropdown change or modal
+        // reopen) load the row. The bundle id alone is what the
+        // launch payload needs.
+        //
+        // Codex P2 on #847 round 9: defense-in-depth — `PreLaunchAuthPanel`
+        // already filters `pending-bundle-for-...` placeholders before
+        // invoking this callback, but guard here too so any future
+        // call site that bypasses the panel filter can't poison the
+        // dropdown with a non-existent bundle row.
+        if (!bundleId || bundleId === "blank" || bundleId.startsWith("pending-bundle-for-")) {
+            return;
+        }
+        setIdentityId(bundleId);
+    };
+    const provider = createMemo(() => getProvider(props.agent.provider));
+    // Auth gate applies ONLY to fresh launches of OAuth providers with
+    // the blank singleton selected.
+    //
+    // - `isContinue` bypasses: prior launch already produced creds.
+    // - API-key providers (openclaw/kimi/pi) bypass: until the backend
+    //   `auth.submitapikey` persists bundles (PR C-2), the gate would
+    //   deadlock — the user can't reach `ready` because save is a
+    //   stub. Their existing `launch-flow.ts` Phase 2 prompts for the
+    //   key in-line. Reagent + codex P1 on #847.
+    const authRequired = () =>
+        !isContinue()
+        && provider()?.authType === "oauth"
+        && (identityId() === "blank" || identityId() === "");
+    const authReady = () => !authRequired() || authStateKind() === "ready";
+    const canSubmit = () =>
+        !submitting() && slugifyInstanceName(name()).length > 0 && authReady();
 
     const resolvedImage = () => {
         const v = image().trim();
@@ -360,6 +408,24 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                             </select>
                         </label>
                     </fieldset>
+
+                    {/*
+                     * Pre-launch OAuth panel (spec:
+                     * SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md).
+                     * Shows the Connect CTA when the user has the
+                     * blank singleton picked. Non-blank bundles are
+                     * trusted (PR B-4 / D will tighten this with a
+                     * per-bundle binding lookup).
+                     */}
+                    <Show when={authRequired()}>
+                        <PreLaunchAuthPanel
+                            provider={provider()}
+                            identityId={identityId}
+                            onStateChange={onAuthStateChange}
+                            onBundleCreated={onBundleCreated}
+                            disabled={submitting()}
+                        />
+                    </Show>
 
                     <Show when={error()}>
                         <div class="agent-launch-modal-error">{error()}</div>
