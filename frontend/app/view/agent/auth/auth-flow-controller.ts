@@ -358,23 +358,18 @@ export class AuthFlowController {
      *  during an earlier merge. */
     failConnect(error: unknown): void {
         const s = this.state();
-        // Codex P2 on #854: a stale ResolveCli/ensureAuthDir rejection
-        // from an abandoned connect must not clobber a real in-flight
-        // session. Skip the synthesize-via-Polled dispatches when a
-        // newer session is already active (kind=waiting with non-empty
-        // sessionId), or when state is terminal/idle/ready where a
-        // synthetic failure is wrong.
-        if (
-            s.kind === "ready" ||
-            s.kind === "idle" ||
-            (s.kind === "waiting" && s.sessionId !== "")
-        ) {
+        // Codex P2 on #854: only honor failConnect from connect-prep
+        // states. A stale ResolveCli/ensureAuthDir rejection from an
+        // abandoned connect must not clobber a newer attempt — whether
+        // it's already in `waiting` with sessionId === "" (startup
+        // window between ConnectClicked and SessionStarted) or with a
+        // real sessionId. Also skip from terminal/idle/ready where a
+        // synthetic failure makes no sense.
+        if (s.kind !== "unauthenticated" && s.kind !== "expired" && s.kind !== "failed") {
             return;
         }
         const message = error instanceof Error ? error.message : String(error);
-        if (s.kind === "unauthenticated" || s.kind === "expired" || s.kind === "failed") {
-            this.dispatch({ type: "ConnectClicked" });
-        }
+        this.dispatch({ type: "ConnectClicked" });
         const synthSessionId = "cli-resolve-failed";
         this.dispatch({ type: "SessionStarted", sessionId: synthSessionId });
         this.dispatch({
