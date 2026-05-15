@@ -204,17 +204,25 @@ Local build outputs from `task package` on the host platform:
 
 Other platform tasks (`task package:macos`, `task package:msix`) are TODO stubs in `Taskfile.yml`. The full release artifact set (macOS DMG, Windows installer, Windows MSIX, Linux .deb) is produced by [`agentmuxai/agentmux-builder`](https://github.com/agentmuxai/agentmux-builder) — see [§Releases](#releases) for the artifact catalog.
 
-## Version Management
+## Version Management (Changesets)
 
-Always use [`@a5af/bump-cli`](https://github.com/a5af/bump-cli) — never edit version numbers manually.
+**Feature PRs add a changeset, not a version bump.** RFC #857 Phase 2.
 
 ```bash
-bump patch -m "Description" --commit   # bump, stage, and commit all version files
-bump verify                            # check all files are consistent
-bump show                              # display current version state
+task changeset -- patch "fix(scope): short description"
+# Allowed bump types: patch | minor | major
 ```
 
-Config lives in `.bump.json`. See [BUILD.md](./BUILD.md) for the full workflow.
+This creates a uniquely-named `.changesets/<id>.md` you commit with your code. Parallel-agent PRs never conflict on version files because they each have their own changeset filename.
+
+A separate **release PR** consumes pending changesets:
+
+```bash
+task release    # processes .changesets/, bumps version, updates VERSION_HISTORY
+git commit -m "chore: release v<X.Y.Z>"
+```
+
+The release flow internally uses [`@a5af/bump-cli`](https://github.com/a5af/bump-cli) via `scripts/bump-wrapper.sh`. Config lives in `.bump.json`. See [BUILD.md](./BUILD.md), [.changesets/README.md](./.changesets/README.md), and [docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md](./docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md) for the full workflow.
 
 ## Releases
 
@@ -249,12 +257,15 @@ gh workflow run tauri-build.yml -R agentmuxai/agentmux-builder -f ref=v0.33.0
 ### Full release checklist
 
 ```bash
-# 1. Bump version and commit
-bump patch -m "Description" --commit
-bump verify
+# 1. Consume pending changesets, bump version, update VERSION_HISTORY
+task release
+git diff --staged                      # review what would land
+git commit -m "chore: release v0.X.Y"
+git push -u origin agenta/release-v0.X.Y
+# ... open release PR, merge to main after review
 
-# 2. Push and tag
-git push origin main
+# 2. Tag once merged on main
+git checkout main && git pull
 git tag v0.X.Y && git push origin v0.X.Y
 
 # 3. Trigger the builder (builds all platforms, creates GitHub Release)

@@ -173,38 +173,50 @@ Update `.bump.json` to point at the workspace root only.
 **Effect:** Conflict surface drops from 9 → 4 files (root Cargo.toml, package.json,
 Cargo.lock, package-lock.json + VERSION_HISTORY.md).
 
-### Phase 2 — Don't bump in feature PRs (changeset-style)
+### Phase 2 — Don't bump in feature PRs (changeset-style) — IMPLEMENTED
 
-Adopt the [Changesets](https://github.com/changesets/changesets) pattern:
+Adopted a lightweight, self-hosted changesets pattern (not the
+`@changesets/cli` npm package — that's built for npm monorepos and would
+have needed adaptation for our mixed Cargo + npm workspace anyway):
 
-- Feature PRs add a **changeset file** (`.changesets/<hash>.md`) instead of
-  bumping version. Format:
+**Files added:**
+- `.changesets/README.md` — workflow + format docs
+- `.changesets/.gitkeep` — placeholder so the dir exists post-rm
+- `scripts/changeset.sh` — author tool (creates `.changesets/<ts>-<slug>.md`)
+- `scripts/release.sh` — consumer tool (aggregates, bumps, history, deletes,
+  stages; does NOT commit — caller commits + PRs)
+- `Taskfile.yml` — `task changeset` + `task release` wrappers
+- `CLAUDE.md` + `BUILD.md` — updated workflow docs
 
-  ```markdown
-  ---
-  type: patch
-  ---
-  fix(auth): cancel in-flight session on selection change
-  ```
+**Feature PR workflow now:**
+```bash
+task changeset -- patch "fix(scope): description"
+# Creates .changesets/<unix-ts>-<slug>.md — UNIQUE filename, never conflicts.
+# Commit it alongside your code. DO NOT run `bump patch`.
+```
 
-- A `release` PR (opened by a bot on schedule, or manually) consumes all
-  pending changeset files, bumps version, regenerates lockfiles, updates
-  `VERSION_HISTORY.md`, and merges to main.
+**Release PR workflow:**
+```bash
+task release           # processes pending changesets, bumps, updates VERSION_HISTORY
+git diff --staged      # review
+git commit -m "chore: release v<X.Y.Z>"
+git push -u origin agenta/release-vX.Y.Z
+```
 
-This eliminates the version-bump conflict entirely — feature PRs only touch
-their own `.changesets/<hash>.md` file (unique hash per PR = no conflict).
+Bump type aggregation: highest of all pending changesets wins
+(major > minor > patch).
 
-**Cost:**
-- Bot config (~1 day setup, can use existing tools or hand-roll).
-- Reagent rule update: don't flag missing version bump on feature PRs.
-- Tooling migration: agents stop running `bump patch`; they run
-  `bump changeset` or just write the changeset file directly.
+**Reagent prompt update (separate, lives in `a5af/reagent`):**
+The prompt's "Version Bump Validation" section currently flags any PR
+without a version diff as P1. Once reagent's container redeploys with an
+update to `prompts/review.md` recognizing `.changesets/*.md` as satisfying
+the rule, all feature PRs go through reagent cleanly. Until then, feature
+PRs will get a stale P1 — addressed by a brief comment or a5af approval
+override.
 
-**Risk:** Medium — depends on whether the release PR can be auto-merged or
-needs human review (acceptable either way).
-
-**Effect:** Conflict surface drops to **zero** version-files per feature PR.
-Lockfile noise concentrates on one release PR.
+**Conflict surface:** zero version files per feature PR. Concurrent agents
+get unique changeset filenames automatically. Lockfile noise concentrates
+on the release PR only.
 
 ### Phase 3 — Enable `dismiss_stale_reviews`
 
