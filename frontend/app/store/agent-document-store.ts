@@ -51,6 +51,16 @@ let eventSink: EventSink = (blockId, event) => {
         console.warn(
             `[agent-document-store] dropped ${event.updateDropped} stream updates for unknown ids in ${blockId.slice(0, 7)}`,
         );
+    } else if (event.type === "tool-chunk-dropped") {
+        // Live-log diagnostic (temporary): surface reducer drops so we
+        // can tell if chunks arrive before the matching ToolNode exists.
+        console.warn(
+            `[live-log-diag] reducer dropped chunk for ${blockId.slice(0, 7)} toolId=${event.toolId.slice(0, 14)} reason=${event.reason}`,
+        );
+    } else if (event.type === "tool-chunk-appended") {
+        console.log(
+            `[live-log-diag] reducer appended chunk for ${blockId.slice(0, 7)} toolId=${event.toolId.slice(0, 14)} totalChunks=${event.chunkCount}`,
+        );
     }
 };
 
