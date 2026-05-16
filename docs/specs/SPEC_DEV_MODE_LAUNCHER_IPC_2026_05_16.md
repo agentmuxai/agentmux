@@ -119,7 +119,9 @@ const ACCEPTED_PARENT_STEMS: &[&str] = &["agentmux-launcher", "agentmux"];
 pub fn parent_is_agentmux_launcher() -> Option<bool> { ... }
 ```
 
-Implementation: Windows `CreateToolhelp32Snapshot` + `Process32FirstW/NextW` to find the parent PID, then `OpenProcess` + `QueryFullProcessImageNameW` for its exe path. Case-insensitive compare to either accepted stem.
+Implementation: Windows `CreateToolhelp32Snapshot` + `Process32FirstW/NextW` in two passes — first finds the current PID's `th32ParentProcessID`, second finds the entry where `th32ProcessID == parent_pid` and reads its `PROCESSENTRY32W.szExeFile`. The exe filename is then lower-cased, `.exe` stripped, and compared case-insensitively against either accepted stem.
+
+**Why `szExeFile` instead of `QueryFullProcessImageNameW`** (codex P2 on round 2): the latter requires a caller-allocated buffer; using a fixed `MAX_PATH` (260 wide chars) buffer would fail when the staged launcher path on a developer's Windows checkout exceeds that length, returning `None` and falling through to the dev guard — re-introducing the very regression this PR fixes. `szExeFile` is the filename only (no path), bounded by `MAX_PATH` wide chars by Win32 design, never overflows for typical exe names.
 
 **Why two accepted stems** (codex P1 on PR #882 round 1 caught this):
 - `agentmux-launcher` — Cargo bin name. Used in dev (`task dev` copies `target/release/agentmux-launcher.exe` to `dist/cef-dev/agentmux-launcher.exe`).
@@ -129,24 +131,27 @@ Implementation: Windows `CreateToolhelp32Snapshot` + `Process32FirstW/NextW` to 
 
 ```rust
 // agentmux-cef/src/main.rs ~295
-let parent_is_launcher = agentmux_common::parent_process_name()
-    .map(|n| n == "agentmux-launcher")
-    .unwrap_or(false);
-
-let should_connect_launcher_ipc =
-    std::env::var("AGENTMUX_LAUNCHER_PIPE").is_ok() &&
-    (parent_is_launcher || !agentmux_common::is_dev_build_exe(&host_exe_dir));
-
-let _launcher_ipc = if should_connect_launcher_ipc {
+let parent_is_launcher = parent_process::parent_is_agentmux_launcher();
+let should_connect_launcher = match parent_is_launcher {
+    Some(true) => true,
+    Some(false) => false,
+    // Parent detection failed — fall back to the path-based guard
+    // so production builds still connect (env var is set) and dev
+    // builds still skip.
+    None => !agentmux_common::is_dev_build_exe(&host_exe_dir),
+};
+let _launcher_ipc = if should_connect_launcher {
     runtime.block_on(launcher_ipc::connect_to_launcher(app_state.clone()))
 } else {
     None
 };
 ```
 
-Equivalent to: "connect if the env var is set AND (we're a production build OR our parent is the launcher itself)".
+`launcher_ipc::connect_to_launcher` already checks `std::env::var("AGENTMUX_LAUNCHER_PIPE")` at its own entry (`launcher_ipc.rs:78`) and returns `None` if unset, so the env-var check doesn't need to be duplicated at the guard site. The guard's job is only to decide *whether to attempt the connection at all* based on parent identity / build mode.
 
-Same shape applied at line 312-316 for srv IPC.
+Equivalent semantics to: "connect if our parent is the launcher (deterministic case) OR — when parent detection fails — when we're a production build (path-based fallback)."
+
+Same `should_connect_launcher` reused at line 312-316 for srv IPC (both pipes are launcher-owned, so the guard is the same).
 
 ### 5.3 Why parent-process is the right discriminator
 

@@ -46,10 +46,14 @@ const ACCEPTED_PARENT_STEMS: &[&str] = &["agentmux-launcher", "agentmux"];
 #[cfg(target_os = "windows")]
 pub fn parent_is_agentmux_launcher() -> Option<bool> {
     let parent_exe = parent_exe_file_windows()?;
-    let stem = parent_exe
+    // Lower-case once, then strip the lowercase suffix — handles any
+    // capitalization of the extension (`.exe`, `.EXE`, `.Exe`, etc.)
+    // in a single branch. Reagent P2 on round 3 noted the previous
+    // two-arm `or_else` chain missed mixed-case variants.
+    let parent_exe_lower = parent_exe.to_ascii_lowercase();
+    let stem = parent_exe_lower
         .strip_suffix(".exe")
-        .or_else(|| parent_exe.strip_suffix(".EXE"))
-        .unwrap_or(&parent_exe);
+        .unwrap_or(&parent_exe_lower);
     Some(
         ACCEPTED_PARENT_STEMS
             .iter()
