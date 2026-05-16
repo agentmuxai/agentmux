@@ -37,6 +37,11 @@ tasks:
         cmds:
             - bash scripts/package-local.sh {{.CLI_ARGS}}
 
+    dev:local:
+        desc: 'Run task dev with a temporarily-bumped version label so the dev build advertises a unique version and cargo''s incremental cache cannot serve stale .o files. Restores version files on Ctrl+C — no git mutation, no pushed bump commit. Usage: task dev:local (defaults to patch bump) or task dev:local -- minor.'
+        cmds:
+            - bash scripts/dev-local.sh {{.CLI_ARGS}}
+
     dev:
         desc: Run AgentMux in development mode (Vite hot reload).
         cmds:

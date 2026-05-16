@@ -16,10 +16,14 @@
 | Command | Use When | Auto-Updates? |
 |---------|----------|---------------|
 | `task dev` | **Development** (Vite hot reload, launcher-in-loop on Windows) | Yes - hot reload |
+| `task dev:local` | **Dev with ephemeral version bump** — same as `task dev` but temporarily bumps `package.json`/`Cargo.toml` for this session and restores on Ctrl+C. Use when you want the dev build to advertise a unique version (so you can tell which merge it corresponds to) and when you need to force cargo's incremental cache to recompile after a workspace-version-affecting change. No git mutation. | Yes - hot reload |
 | `task dev:standalone` | Debug the no-launcher fallback path (host invoked directly, Phase B features bypassed) | Yes - hot reload |
 | `task package` | **Portable release builds** | No |
+| `task package:local` | **Portable build with ephemeral version bump** — same as `task package` but bumps the version for this build only and restores on exit. Use when you want side-by-side portable comparisons or just a unique version label. No git mutation. | No |
 
 On Windows, `task dev` builds a production-parallel layout in `dist/cef-dev/` (launcher at root, host + DLLs + srv in `runtime/`) and invokes `agentmux-launcher.exe` — so the Job Object, single-instance pipe, saga coordinator, splash, and launcher-spawned srv paths are exercised in dev exactly as in package builds. On Linux/macOS, `task dev` still invokes the host directly (Phase 7 cross-platform parity will integrate the launcher). See `docs/specs/SPEC_LAUNCHER_DEV_INTEGRATION_2026-05-13.md`.
+
+**Why `:local` variants exist:** under the RFC #857 changeset workflow, feature PRs no longer bump `package.json` / `Cargo.toml` — version files stay pinned across many merges until a release PR consumes the pending changesets. That's clean for git history but it means dev/portable builds across multiple merges share the same version label, and cargo's incremental cache may serve stale `.o` files because `CARGO_PKG_VERSION` doesn't change. The `:local` scripts (`scripts/dev-local.sh`, `scripts/package-local.sh`) wrap an ephemeral `bump patch` around the build, then restore the working tree on exit (including Ctrl+C and crashes). The bump is per-build only — never committed, never pushed. See `.changesets/README.md` for the broader RFC #857 context.
 
 ### Build System
 
