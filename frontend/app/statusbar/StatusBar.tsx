@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getApi, windowInstanceNumAtom, windowCountAtom, backendStatusAtom } from "@/store/global";
+import { getApi, windowCountAtom, backendStatusAtom } from "@/store/global";
 import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { BackendStatus } from "./BackendStatus";
 import { ConfigStatus } from "./ConfigStatus";
@@ -14,7 +14,6 @@ import "./StatusBar.scss";
 
 const StatusBar = (): JSX.Element => {
     const version = getApi().getAboutModalDetails()?.version ?? "";
-    const instanceNum = windowInstanceNumAtom;
     const windowCount = windowCountAtom;
 
     let versionRef!: HTMLButtonElement;
@@ -89,7 +88,7 @@ const StatusBar = (): JSX.Element => {
                         >
                             v{version}
                             <Show when={windowCount() > 1}>
-                                <span class="instance-num"> ({instanceNum()})</span>
+                                <span class="instance-num"> ({windowCount()})</span>
                             </Show>
                         </button>
                     </Show>
