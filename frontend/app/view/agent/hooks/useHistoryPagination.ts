@@ -34,10 +34,7 @@
 import { createSignal, onCleanup, onMount, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import {
-    dispatch as dispatchDoc,
-    dispatchIfRegistered as dispatchDocIfRegistered,
-} from "@/app/store/agent-document-store";
+import { dispatchIfRegistered as dispatchDocIfRegistered } from "@/app/store/agent-document-store";
 import {
     dispatch as dispatchPane,
     dispatchIfRegistered as dispatchPaneIfRegistered,
