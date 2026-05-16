@@ -38,7 +38,15 @@ const KIND_CLASS: Record<string, string> = {
 export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     let scrollRef: HTMLDivElement | undefined;
 
-    const chunks = createMemo(() => props.node.log?.chunks ?? []);
+    const chunks = createMemo(() => {
+        const c = props.node.log?.chunks ?? [];
+        // Live-log diag: report render-side view of chunks so we can
+        // diff against reducer-side append count. If reducer says 58
+        // appended but this memo evaluates to length=0, the render
+        // is reading a stale node reference (prop reactivity break).
+        console.log(`[live-log-diag] overlay chunks memo toolId=${(props.node.id ?? "?").slice(0, 14)} renderedLen=${c.length} logOpen=${props.node.log?.open}`);
+        return c;
+    });
     /**
      * Phase 3 fallback rules — refined after codex P1 on PR #803.
      *
