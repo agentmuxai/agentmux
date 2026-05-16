@@ -1,4 +1,4 @@
-# Multi-window correctness on Linux: pane RequestContext + new-window client
+# Multi-window correctness on Linux: pane RequestContext, new-window client, tab-switch overlay visibility
 
 **Status:** Spec — implemented in this PR
 **Date:** 2026-05-15
@@ -7,8 +7,7 @@
 
 ## TL;DR
 
-Two related Linux-only bugs in the Views-based window/pane flow that surface
-once you have more than one top-level window:
+Three related Linux-only bugs in the Views-based window/pane flow:
 
 1. **Pane crash in the 2nd/3rd window.** Opening a `defwidget@browser` pane
    in any non-first window FATAL-crashes the CEF host with
@@ -21,12 +20,21 @@ once you have more than one top-level window:
    `state.list_browsers()` to a top-level (non-pane) browser when picking the
    client to reuse, instead of `first_browser()`'s HashMap-iteration-order
    "any" browser.
+3. **Inactive-tab browser pane overlays bleed into the active tab.** With
+   multiple browser panes across multiple tabs, switching tabs leaves the
+   previous tab's `OverlayController`s drawing a borderless residual quad
+   on top of the active tab's DOM (e.g. obscuring an agent pane). Fixed in
+   `agentmux-cef/src/browser_pane/creation_views.rs::resize_browser_pane_view`
+   by gating `controller.set_visible()` on rect dimensions — `set_visible(0)`
+   when width or height is zero (which is exactly what the frontend sends
+   when its placeholder element goes `display:none`).
 
-Both bugs are Linux-only because both root causes route through the CEF
-Views attachment path (`browser_view_create` + `AddOverlayView` /
+All three bugs are Linux-only because all three root causes route through
+the CEF Views attachment path (`browser_view_create` + `AddOverlayView` /
 `window_create_top_level`). Windows uses the native HWND-child path
 (`browser_host_create_browser` with `WindowInfo::set_as_child`) which doesn't
-touch the same machinery.
+touch the same machinery — bugs 1 and 2 are unreachable there, and bug 3's
+HWND `SetWindowPos` to 0x0 already naturally hides the child window.
 
 ## Bug 1: Pane in 2nd window FATAL-crashes the host
 
@@ -227,6 +235,67 @@ are shown via the WindowDelegate / native APIs earlier in the flow), so
 the symptom would be invisible on Windows even without this fix. Either
 way, no regression.
 
+## Bug 3: Inactive-tab pane overlays bleed into the active tab
+
+### Symptom
+
+User reports: "I created 3 browsers in a tab, then created a new tab, and a
+borderless DOM is incorrectly overlayed [over] the agent pane." Switching
+back and forth shows the previous tab's `OverlayController`s drawing on top
+of whatever the active tab's DOM contains.
+
+### Mechanism
+
+The frontend's `browser-view.tsx` component stays mounted when its tab goes
+inactive — the tab system applies `display:none` to the inactive tab's
+content. A 200 ms safety-net interval calls `syncPosition`, which reads
+`getBoundingClientRect()` of the (now hidden) placeholder. Spec-wise, a
+`display:none` element returns `{x:0, y:0, width:0, height:0}`, so
+`syncPosition` fires `browser_pane_resize` IPC with all zeros.
+
+The backend's `resize_browser_pane_view` then did:
+
+```rust
+controller.set_size(Some(&Size { width: 0, height: 0 }));
+controller.set_position(Some(&Point { x: 0, y: 0 }));
+// no set_visible(...) call — controller stays at set_visible(1) from creation
+window.layout();
+```
+
+Aura's `OverlayController` at `(0,0,0,0)` with `set_visible(1)` apparently
+still composites a residual borderless quad on Wayland — visible as the
+old pane's content over the new tab. Windows handled this incidentally
+because the equivalent code path uses `SetWindowPos` with width/height 0,
+and Win32 auto-hides 0-sized child windows.
+
+### Fix
+
+`agentmux-cef/src/browser_pane/creation_views.rs::resize_browser_pane_view`:
+
+```rust
+controller.set_size(Some(&Size { width: rect.width, height: rect.height }));
+controller.set_position(Some(&Point { x: rect.x, y: rect.y }));
+let should_be_visible = rect.width > 0 && rect.height > 0;
+controller.set_visible(if should_be_visible { 1 } else { 0 });
+```
+
+The reverse direction (`visible=1` when rect goes back to non-zero) is
+also covered: when the user switches BACK to the original tab, the
+placeholder re-shows, `getBoundingClientRect` returns the real rect, and
+the next `syncPosition` (within 200 ms) re-fires the resize IPC with
+non-zero dimensions → `set_visible(1)`.
+
+No new IPC surface — the existing `browser_pane_resize` channel carries
+the visibility intent implicitly via dimensions. No frontend change
+required.
+
+### Windows impact: none
+
+Windows path uses `SetWindowPos` (`browser_panes.rs::resize`) which
+already hides 0-sized child windows automatically. The `set_visible` toggle
+only runs on the non-Windows path (`resize_browser_pane_view`). No
+Windows code touched.
+
 ## Test plan
 
 Multi-window pane (Bug 1):
@@ -247,12 +316,28 @@ New Window with a pane open (Bug 2):
 - [ ] Check log: `[create-window] got client client_found=true`.
 - [ ] Check log: `Injected IPC port …` fires for the new window.
 
+Tab-switch overlay visibility (Bug 3):
+
+- [ ] Open 3 browser panes in a tab.
+- [ ] Create a new tab.
+- [ ] Verify: the new tab shows its own content (e.g. an agent pane)
+      with no leftover browser overlay drawn on top.
+- [ ] Switch back to the original tab.
+- [ ] Verify: the 3 browser panes are visible and laid out correctly.
+- [ ] Run with debug logs enabled (`RUST_LOG=agentmux_cef=debug`) and
+      check `[browser-pane] views: resize applied … visible=false` fires
+      on the panes in the tab you switched away from, `visible=true`
+      when you switch back.
+
 Regression checks:
 
 - [ ] Single-window session with no panes: New Window still works
       (only top-level in `list_browsers`).
-- [ ] Multiple panes in the same window: still positioned correctly.
-- [ ] Windows (separate machine): pane creation and New Window unchanged.
+- [ ] Multiple panes in the same window's same tab: still positioned
+      correctly, no spurious hide/show flicker (the rect-dedupe gate in
+      `browser-view.tsx::syncPosition` should skip no-op resizes).
+- [ ] Windows (separate machine): pane creation, New Window, and
+      tab switching unchanged.
 
 ## References
 
