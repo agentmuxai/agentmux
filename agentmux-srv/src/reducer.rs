@@ -249,6 +249,7 @@ mod tests {
             | Event::WorkspaceMetaUpdated { version, .. }
             | Event::TabMetaUpdated { version, .. }
             | Event::BlockMetaUpdated { version, .. }
+            | Event::WindowMetaUpdated { version, .. }
             | Event::TabMoved { version, .. }
             | Event::BlockMoved { version, .. }
             | Event::FocusedNodeChanged { version, .. }

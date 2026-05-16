@@ -325,3 +325,60 @@ async fn reactive_poller_status() {
     assert!(json.is_object());
 }
 
+
+#[tokio::test]
+async fn wps_publish_accepts_persist_field() {
+    // Regression for SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §6.1
+    // (and PR β.B): WpsPublishRequest previously dropped the `persist`
+    // field on deserialization, so every tool_chunk publish went to
+    // the broker with persist=0. Late-subscribing frontends never got
+    // replay history, defeating the per-block subscription strategy.
+    //
+    // This test exercises the deserialize + handler-200 path with a
+    // 1024-persist body matching what agentmux-bashwrap actually
+    // sends. Broker-level persistence semantics are covered by
+    // wps.rs::tests::test_event_persistence.
+    let app = test_router();
+    let body = serde_json::json!({
+        "event": "tool_chunk",
+        "scopes": ["block:abc123"],
+        "persist": 1024,
+        "data": {
+            "op": "chunk",
+            "kind": "stdout",
+            "content": "hello\n",
+            "timestamp": 1_700_000_000_000_u64,
+            "tool_id": "toolu_test"
+        }
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/wps/publish")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn wps_publish_omits_persist_defaults_to_zero() {
+    // Defensive: a publisher that doesn't include the persist field
+    // should still succeed (serde default 0 → pure fan-out, no replay).
+    let app = test_router();
+    let body = serde_json::json!({
+        "event": "tool_chunk",
+        "scopes": ["block:abc123"],
+        "data": { "op": "chunk", "kind": "stdout", "content": "x", "timestamp": 0_u64, "tool_id": "t" }
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/wps/publish")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
