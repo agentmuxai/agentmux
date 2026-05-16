@@ -315,10 +315,35 @@ impl Broker {
 
         let client = match &inner.client {
             Some(c) => c,
-            None => return,
+            None => {
+                // Live-log diagnostic.
+                if event.event == "tool_chunk" {
+                    tracing::warn!(
+                        target: "live-log-diag",
+                        event = %event.event,
+                        scopes = ?event.scopes,
+                        "broker has no client — event dropped before delivery",
+                    );
+                }
+                return;
+            }
         };
 
         let route_ids = Self::get_matching_routes(&inner, &event);
+        // Live-log diagnostic — log how many routes the tool_chunk
+        // event matched. Zero matches = no subscriber registered for
+        // the event/scope combo at publish time.
+        if event.event == "tool_chunk" {
+            let sub_for_event_exists = inner.sub_map.contains_key(&event.event);
+            tracing::info!(
+                target: "live-log-diag",
+                event = %event.event,
+                scopes = ?event.scopes,
+                matched_routes = route_ids.len(),
+                has_subs_for_event = sub_for_event_exists,
+                "broker publish — route match summary",
+            );
+        }
         for route_id in route_ids {
             client.send_event(&route_id, event.clone());
         }
