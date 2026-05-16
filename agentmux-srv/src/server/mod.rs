@@ -332,6 +332,24 @@ async fn handle_wps_publish(
     State(state): State<AppState>,
     Json(req): Json<WpsPublishRequest>,
 ) -> impl IntoResponse {
+    // Live-log diagnostic (temporary — track gap from
+    // SPEC_STREAMING_BASH_RUNNER §6 user-visible regression).
+    // Logs every publish so we can see whether tool_chunk events
+    // reach the endpoint and how the broker routes them.
+    if req.event == "tool_chunk" {
+        let data_preview = serde_json::to_string(&req.data)
+            .ok()
+            .map(|s| s.chars().take(120).collect::<String>())
+            .unwrap_or_default();
+        tracing::info!(
+            target: "live-log-diag",
+            event = %req.event,
+            scopes = ?req.scopes,
+            persist = req.persist,
+            data_preview = %data_preview,
+            "wps publish received",
+        );
+    }
     let event = crate::backend::wps::WaveEvent {
         event: req.event,
         scopes: req.scopes,
