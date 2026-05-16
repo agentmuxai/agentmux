@@ -144,6 +144,27 @@ export function dispatch(
     return result.events;
 }
 
+/**
+ * Soft-dispatch variant. Returns an empty event array if the slot is
+ * already gone, instead of throwing. Use ONLY from async contexts
+ * (RAF / setTimeout / setInterval / await continuations / subscription
+ * handlers) where a normal dispatch can race against the pane's
+ * onCleanup unregistering the slot — see
+ * docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md §6.1 option B.
+ *
+ * Synchronous component-body dispatches MUST continue to use `dispatch`
+ * — a missing slot there is a registration-order bug and the throw is
+ * the right signal.
+ */
+export function dispatchIfRegistered(
+    blockId: string,
+    command: AgentPaneCommand,
+    source: CommandSource = "system",
+): AgentPaneEvent[] {
+    if (!slots.has(blockId)) return [];
+    return dispatch(blockId, command, source);
+}
+
 /** Snapshot — diagnostics + tests only. */
 export function snapshot(blockId: string): AgentPaneState | null {
     return slots.get(blockId)?.state ?? null;

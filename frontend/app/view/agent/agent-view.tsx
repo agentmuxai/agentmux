@@ -8,6 +8,7 @@ import { getProvider } from "./providers";
 import { createAgentAtoms } from "./state";
 import {
     dispatch as dispatchDoc,
+    dispatchIfRegistered as dispatchDocIfRegistered,
     registerPane as registerAgentDocPane,
     unregisterPane as unregisterAgentDocPane,
 } from "@/app/store/agent-document-store";
@@ -297,7 +298,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 id: `login_success_${Date.now()}`,
                 content: `\u2713 ${display}`,
             } as import("./types").MarkdownNode;
-            dispatchDoc(model.blockId, {
+            dispatchDocIfRegistered(model.blockId, {
                 type: "StreamFlush",
                 newNodes: [node],
                 updatedNodes: [],

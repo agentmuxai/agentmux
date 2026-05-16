@@ -440,6 +440,7 @@ export class BrowserViewModel implements ViewModel {
             this._dispatch({ type: "UrlCleared" }, "reload-clear");
             // Force iframe reload by briefly clearing then re-setting
             requestAnimationFrame(() => {
+                if (this.closed) return;
                 this._dispatch({ type: "Navigate", url }, "reload-restore");
             });
         }

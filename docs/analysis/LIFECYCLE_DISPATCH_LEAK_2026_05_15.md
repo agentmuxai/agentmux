@@ -295,24 +295,34 @@ The createEffect reads `getDocument()` (the documentAtom). So the cascade hypoth
 
 | # | Action | Status | Owner |
 |---|---|---|---|
-| 1 | Add `dispatchIfRegistered` soft-variant to both pane stores | PENDING | AgentA |
-| 2 | Migrate the 11 async dispatch sites in `useAgentStream.ts` to soft variant | PENDING | AgentA |
-| 3 | Migrate the 2 RPC `.catch()` sites in `useAgentCommands.ts` to soft variant | PENDING | AgentA |
-| 4 | Fix `browser-model.reload()` RAF — add `if (this.closed) return;` inside the RAF callback | PENDING | AgentA |
-| 5 | Migrate `useHistoryPagination` post-await dispatches to soft variant (belt-and-suspenders) | PENDING | AgentA |
-| 6 | Add a Vitest that exercises the cascade: setter calls `unregisterPane`, verify CASCADE_DETECTED log fires + subsequent dispatch throws | PENDING | AgentA |
-| 7 | Cascade-detection instrumentation in both pane stores | **DONE** 2026-05-15 | AgentA |
-| 8 | Reproduce the crash on a build with the instrumentation; capture the `cascadeSetter` value from the log | PENDING | user |
+| 1 | Add `dispatchIfRegistered` soft-variant to both pane stores | **DONE** 2026-05-15 (PR #878) | AgentA |
+| 2 | Migrate the 11 async dispatch sites in `useAgentStream.ts` to soft variant | **DONE** 2026-05-15 (PR #878) | AgentA |
+| 3 | Migrate the 2 RPC `.catch()` sites + 1 setTimeout in `useAgentCommands.ts` to soft variant | **DONE** 2026-05-15 (PR #878) | AgentA |
+| 4 | Fix `browser-model.reload()` RAF — add `if (this.closed) return;` inside the RAF callback | **DONE** 2026-05-15 (PR #878) | AgentA |
+| 5 | Migrate `useHistoryPagination` post-await dispatches + `agent-view.onLoginSuccess` to soft variant | **DONE** 2026-05-15 (PR #878) | AgentA |
+| 6 | Add a Vitest that exercises the cascade: setter calls `unregisterPane`, verify CASCADE_DETECTED log fires + soft variant no-ops + throwing variant still throws | **DONE** 2026-05-15 (PR #878, `agent-pane-state-store.test.ts`) | AgentA |
+| 7 | Cascade-detection instrumentation in both pane stores | **DONE** 2026-05-15 (PR #878) | AgentA |
+| 8 | Reproduce the crash on a v0.33.900 build with the instrumentation; capture the `cascadeSetter` value from the log | **DONE** 2026-05-15 (confirmed Shape B — documentAtom subscriber) | user |
 | 9 | Follow-up tracking issue: unify per-pane store registration into one atomic step | PENDING | AgentA → #707 |
 | 10 | (Optional) lint rule or grep CI gate: forbid bare `dispatch(` inside `requestAnimationFrame`/`setTimeout`/`setInterval`/`subscribe(`/`.then(`/`.catch(` | PENDING | AgentA |
 
-### 9.1 Recommended PR sequencing
+### 9.1 PR scope
 
-- **PR-1 (this work)**: instrumentation only. Lands on main; next portable build captures cascade data the next time the crash repros.
-- **PR-2 (informed by PR-1's data)**: `dispatchIfRegistered` soft-variant + migrations + vitest. Scope of action items 1–6.
-- **PR-3 (architectural)**: unified per-pane registration. Action item 9.
+The original §9 sequencing (PR-1 instrumentation, PR-2 migrations) was collapsed into a single PR (#878) after the v0.33.900 reproduction confirmed Shape B — a documentAtom subscriber unmounts the pane during `StreamFlush`'s setter call. Rather than ship logging-only and ask the user to reproduce again on a future build, the soft-dispatch migration ships alongside.
 
-This sequencing lets PR-2's design choices be informed by the actual cascade source rather than designed-around the predicted-but-unconfirmed one.
+What's in #878:
+- `dispatchIfRegistered` soft-variant on `agent-pane-state-store.ts` and `agent-document-store.ts`.
+- Cascade-detection logging in both stores (per-setter granularity for the pane-state store).
+- 12 dispatch sites migrated in `useAgentStream.ts`; 4 sites kept as throwing (synchronous in `onMount` body / cleanup-time dispatches into a slot guaranteed-registered).
+- 3 sites migrated in `useAgentCommands.ts` (2x `.catch()`, 1x `setTimeout`); 2 sync-body sites stay throwing.
+- 6 sites migrated in `useHistoryPagination.ts` (all post-await); 1 in-onMount-body site stays throwing.
+- 1 site migrated in `agent-view.tsx` (auth-flow `onLoginSuccess` callback).
+- `browser-model.ts:442` RAF callback gains its own `if (this.closed) return;` (matches the model's other IPC handlers).
+- New `agent-pane-state-store.test.ts` with 5 tests covering both throw and silent-no-op contracts.
+
+What deliberately stayed throwing: every synchronous dispatch in component body or first-tick `onMount` — those slots are guaranteed registered, and a missing slot there is still a registration-order bug we want to fail loud.
+
+Follow-ups still pending (action items 9–10) shipped as separate PRs against discussion #707.
 
 ---
 

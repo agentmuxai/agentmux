@@ -34,8 +34,14 @@
 import { createSignal, onCleanup, onMount, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { dispatch as dispatchDoc } from "@/app/store/agent-document-store";
-import { dispatch as dispatchPane } from "@/app/store/agent-pane-state-store";
+import {
+    dispatch as dispatchDoc,
+    dispatchIfRegistered as dispatchDocIfRegistered,
+} from "@/app/store/agent-document-store";
+import {
+    dispatch as dispatchPane,
+    dispatchIfRegistered as dispatchPaneIfRegistered,
+} from "@/app/store/agent-pane-state-store";
 import { parseHistoryLines } from "../parseHistoryLines";
 
 import type { LogFn } from "../types";
@@ -97,7 +103,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
 
             const newNodes = parseHistoryLines(resp.lines ?? [], opts.outputFormat());
             if (newNodes.length > 0) {
-                dispatchDoc(opts.blockId, { type: "HistoryLoaded", nodes: newNodes });
+                dispatchDocIfRegistered(opts.blockId, { type: "HistoryLoaded", nodes: newNodes });
             }
 
             setHistoryOffset(newOffset);
@@ -147,7 +153,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 if (stateResp.content) {
                     const snapshot = JSON.parse(stateResp.content);
                     if (snapshot && snapshot.schemaVersion === SNAPSHOT_SCHEMA_VERSION && Array.isArray(snapshot.nodes)) {
-                        dispatchDoc(opts.blockId, { type: "HistoryRestored", fromSnapshot: true, nodes: snapshot.nodes });
+                        dispatchDocIfRegistered(opts.blockId, { type: "HistoryRestored", fromSnapshot: true, nodes: snapshot.nodes });
 
                         const offset = typeof snapshot.historyOffset === "number" && snapshot.historyOffset >= 0
                             ? snapshot.historyOffset
@@ -159,7 +165,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                             `restored ${snapshot.nodes.length} nodes from snapshot ` +
                                 `(savedAt=${snapshot.savedAt ?? "unknown"}, loadOlder offset=${offset})`,
                         );
-                        dispatchPane(opts.blockId, { type: "InitReady" });
+                        dispatchPaneIfRegistered(opts.blockId, { type: "InitReady" });
                         return;
                     }
                     opts.log(
@@ -186,7 +192,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
 
                 const total = countResp?.count ?? 0;
                 if (total === 0) {
-                    dispatchPane(opts.blockId, { type: "InitReady" });
+                    dispatchPaneIfRegistered(opts.blockId, { type: "InitReady" });
                     return;
                 }
 
@@ -203,7 +209,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
 
                 const nodes = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat());
                 if (nodes.length > 0) {
-                    dispatchDoc(opts.blockId, { type: "HistoryLoaded", nodes });
+                    dispatchDocIfRegistered(opts.blockId, { type: "HistoryLoaded", nodes });
                 }
 
                 // `resp.total` from the backend is the actual available
@@ -216,7 +222,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 setHistoryTotal(available);
 
                 opts.log("history", `loaded ${nodes.length} of ${available} previous messages`);
-                dispatchPane(opts.blockId, { type: "InitReady" });
+                dispatchPaneIfRegistered(opts.blockId, { type: "InitReady" });
             } catch (err: any) {
                 if (!mounted) return;
                 // Non-fatal — fresh session or backend not ready yet.
@@ -229,7 +235,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 // TurnStart guard treats `error` as fail-open (only
                 // `loading` blocks sends), so no follow-up InitReady
                 // is needed — the user can still send.
-                dispatchPane(opts.blockId, { type: "InitFailed", reason });
+                dispatchPaneIfRegistered(opts.blockId, { type: "InitFailed", reason });
             }
         })();
     });

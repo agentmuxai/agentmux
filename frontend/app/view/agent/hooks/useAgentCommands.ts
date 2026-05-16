@@ -27,7 +27,11 @@ import { type Accessor, createMemo, createSignal, onCleanup } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
-import { dispatch as dispatchPane, snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
+import {
+    dispatch as dispatchPane,
+    dispatchIfRegistered as dispatchPaneIfRegistered,
+    snapshot as paneSnapshot,
+} from "@/app/store/agent-pane-state-store";
 import { buildRuntimeArgs, getRuntimeConfig } from "../buildRuntimeArgs";
 import { dispatchSlashCommand } from "../commands/dispatch";
 import { buildRegistry } from "../commands/registry";
@@ -311,7 +315,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // RPC outright failed — remove the pending entry so the user
             // doesn't see a ghost row for a message the backend never
             // received. Log already surfaces the error elsewhere.
-            dispatchPane(opts.blockId, {
+            dispatchPaneIfRegistered(opts.blockId, {
                 type: "PendingMessageRejected",
                 id: messageId,
             });
@@ -325,7 +329,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // an unregistered slot (which throws).
         const expiryId = setTimeout(() => {
             pendingExpiryTimers.delete(expiryId);
-            dispatchPane(opts.blockId, {
+            dispatchPaneIfRegistered(opts.blockId, {
                 type: "PendingMessageExpired",
                 id: messageId,
             });
@@ -352,7 +356,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             signame: "SIGINT",
         }).catch((err) => {
             opts.log("warn", `stop failed: ${err?.message ?? String(err)}`, "warn");
-            dispatchPane(opts.blockId, { type: "StopFailed" });
+            dispatchPaneIfRegistered(opts.blockId, { type: "StopFailed" });
         });
     };
 

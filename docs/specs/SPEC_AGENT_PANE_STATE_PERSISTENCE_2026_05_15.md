@@ -216,9 +216,9 @@ This PR is the likely **trigger** (the new `createEffect` on `documentAtom` is t
 
 Full breakdown: `docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md`. Cascade-detection instrumentation has been installed in `agent-pane-state-store.ts` and `agent-document-store.ts`; the next reproduction will identify the exact projection setter that triggers the cascade.
 
-**Followup PRs** (sequenced):
-- **PR-2**: `dispatchIfRegistered` soft-variant on both pane stores, migrate the 11 async dispatch sites in `useAgentStream.ts`, fix the unguarded RAF in `browser-model.reload()`, add a regression vitest.
-- **PR-3** (architectural): unify per-pane registration so both stores' slots are added/removed atomically. Pre-discussion in #707.
+**Followup PRs** (status):
+- **PR #878** ships the cascade-detection instrumentation AND the soft-dispatch migration in a single bundle. Adds `dispatchIfRegistered` to both pane stores, migrates 22 async dispatch sites across `useAgentStream.ts`, `useAgentCommands.ts`, `useHistoryPagination.ts`, `agent-view.tsx` (onLoginSuccess callback), and fixes the unguarded RAF in `browser-model.reload()`. Backed by 5 new regression tests in `agent-pane-state-store.test.ts`.
+- **PR-3** (architectural, pending): unify per-pane registration so both stores' slots are added/removed atomically. Pre-discussion in #707.
 
 ### 11.2 Phase 4 still deferred
 
