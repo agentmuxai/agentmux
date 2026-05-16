@@ -54,11 +54,9 @@ pub fn parent_is_agentmux_launcher() -> Option<bool> {
     let stem = parent_exe_lower
         .strip_suffix(".exe")
         .unwrap_or(&parent_exe_lower);
-    Some(
-        ACCEPTED_PARENT_STEMS
-            .iter()
-            .any(|accepted| stem.eq_ignore_ascii_case(accepted)),
-    )
+    // `stem` is already lowercased above and `ACCEPTED_PARENT_STEMS`
+    // entries are lowercase literals — plain `==` is sufficient.
+    Some(ACCEPTED_PARENT_STEMS.iter().any(|accepted| stem == *accepted))
 }
 
 #[cfg(not(target_os = "windows"))]

@@ -168,7 +168,7 @@ The fourth row is the case the original guard protected. The new guard catches i
 
 | Case | Handling |
 |---|---|
-| Parent process exits during host startup | `parent_process_name` returns None → fall through to `is_dev_build_exe` check. Production build still connects (env var set, not a dev build). Dev build skips. Safe. |
+| Parent process exits during host startup | `parent_is_agentmux_launcher` returns None → fall through to `is_dev_build_exe` check. Production build still connects (env var set, not a dev build). Dev build skips. Safe. |
 | Symlinks or renamed launcher exe | Exe filename comparison is filename-only (after extension strip), so `agentmux-launcher` matches `agentmux-launcher.exe`, `agentmux-launcher`, but not `my-renamed-launcher.exe`. Document the rename constraint. |
 | Multi-host single launcher | Each host's parent IS the launcher; both connect to the same pipe. Pipe server already handles N clients (`agentmux-launcher/src/ipc/server.rs`). |
 | Tests that mock the host | Tests run from `target/debug` typically without env var; new guard skips connection. Same behavior as today. |
@@ -180,7 +180,7 @@ Single PR. Files touched:
 
 | File | Change | LOC |
 |---|---|---|
-| `agentmux-common/src/runtime_mode.rs` (or new `parent_process.rs`) | New `parent_process_name()` helper, Windows-only for v1 | ~30 |
+| `agentmux-cef/src/parent_process.rs` (new) | `parent_is_agentmux_launcher() -> Option<bool>` helper, Windows-only for v1 | ~140 |
 | `agentmux-cef/src/main.rs:295-316` | Replace both guards (launcher IPC + srv IPC) | ~10 |
 | Tests | Unit test for the helper (mockable via env or test harness) + integration smoke that asserts the bridge fires in dev | ~50 |
 
@@ -188,14 +188,15 @@ Phase split unnecessary — both fixes ride together because they share the help
 
 ## 8. Risk
 
-- **Windows API correctness**: `parent_process_name` walks the process tree via Win32. Bugs in the snapshot loop (stale PID, race with parent exit) would return None and degrade to today's behavior. Mitigation: comprehensive unit test + structured fallback.
+- **Windows API correctness**: `parent_is_agentmux_launcher` walks the process tree via Win32. Bugs in the snapshot loop (stale PID, race with parent exit) would return None and degrade to today's behavior. Mitigation: comprehensive unit test + structured fallback.
 - **Re-introducing the parent-inheritance bug**: only if parent-process detection fails AND `is_dev_build_exe` returns false. By construction (the new gate's `||`), failure of detection means production builds still connect (correct) and dev builds skip (correct). The guard is strictly tighter than today's, not looser, in dev cases.
-- **Performance**: `parent_process_name` is called once at host startup. ~1ms cost.
+- **Performance**: `parent_is_agentmux_launcher` is called once at host startup. ~1ms cost.
 
 ## 9. Test plan
 
-- [ ] Unit: `parent_process_name` returns `"agentmux-launcher"` when invoked from a process spawned by `agentmux-launcher.exe`.
-- [ ] Unit: `parent_process_name` returns the right name when launched directly from a shell (`cmd`, `bash`).
+- [ ] Unit: `parent_is_agentmux_launcher` returns `Some(true)` when invoked from a process spawned by `agentmux-launcher.exe` (or `agentmux.exe` in portable builds).
+- [ ] Unit: `parent_is_agentmux_launcher` returns `Some(false)` when launched directly from a shell (`cmd`, `bash`).
+- [ ] Unit: `parent_is_agentmux_launcher` returns `None` on non-Windows targets.
 - [ ] Integration: in a `task dev` session, open 3 windows. All status bars show `v<X.Y.Z> (3)`.
 - [ ] Integration: in a `task dev` session, open 1 window, then a 2nd. Both status bars update from `()` and `(1)` to `(2)`.
 - [ ] Integration: in a `task dev` session, click the version chip in any window. Each entry in the InstancePanel shows an opacity slider (gated on `entry.windowId`, which is now populated).
