@@ -21,20 +21,38 @@
 //! happened to inherit `AGENTMUX_LAUNCHER_PIPE` from a parent shell
 //! (also correct — that's the original isolation concern).
 
-/// The expected parent exe stem when the host is spawned by the
-/// launcher. Compared case-insensitively against the OS reading.
-const EXPECTED_PARENT_STEM: &str = "agentmux-launcher";
+/// Exe stems we accept as "the AgentMux launcher." Compared
+/// case-insensitively against the OS reading.
+///
+/// - `agentmux-launcher` — the Cargo bin name. Used directly in dev
+///   (`task dev` copies `target/release/agentmux-launcher.exe` into
+///   `dist/cef-dev/`) and is the underlying file on the package build
+///   too.
+/// - `agentmux` — the user-facing name in portable / installed builds.
+///   `scripts/package-portable.sh` (and the equivalent installer
+///   paths) copy the launcher to `agentmux.exe` so the icon a user
+///   double-clicks reads as "AgentMux", not "AgentMux Launcher."
+///   `QueryFullProcessImageNameW` returns the on-disk path, so the
+///   parent stem from a production launch is `agentmux`, not
+///   `agentmux-launcher` — codex P1 on PR #882 caught this would
+///   regress every portable build's IPC connection.
+const ACCEPTED_PARENT_STEMS: &[&str] = &["agentmux-launcher", "agentmux"];
 
 /// Returns `Some(true)` if the host's parent process is the AgentMux
-/// launcher, `Some(false)` if it's something else, or `None` if the
-/// parent identity couldn't be determined (process exited, permission
-/// denied, snapshot iteration failed). Callers should treat `None` as
-/// "fall through to the path-based guard" — see the call site.
+/// launcher (under any of its on-disk names), `Some(false)` if it's
+/// something else, or `None` if the parent identity couldn't be
+/// determined (process exited, permission denied, snapshot iteration
+/// failed). Callers should treat `None` as "fall through to the
+/// path-based guard" — see the call site.
 #[cfg(target_os = "windows")]
 pub fn parent_is_agentmux_launcher() -> Option<bool> {
     let parent_pid = parent_pid_windows()?;
     let parent_name = process_image_stem_windows(parent_pid)?;
-    Some(parent_name.eq_ignore_ascii_case(EXPECTED_PARENT_STEM))
+    Some(
+        ACCEPTED_PARENT_STEMS
+            .iter()
+            .any(|s| parent_name.eq_ignore_ascii_case(s)),
+    )
 }
 
 #[cfg(not(target_os = "windows"))]

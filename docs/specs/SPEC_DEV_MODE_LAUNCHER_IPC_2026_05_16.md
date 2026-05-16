@@ -106,20 +106,24 @@ This is rare but real. The fix needs to allow case (1) while still preventing ca
 
 ## 5. Proposed design
 
-Replace the path-based `is_dev_build_exe` guard with a parent-process identity check. The host connects to the launcher pipe only when its **parent process is `agentmux-launcher.exe`**.
+Replace the path-based `is_dev_build_exe` guard with a parent-process identity check. The host connects to the launcher pipe only when its **parent process is the AgentMux launcher** (under any of its on-disk names — see §5.1).
 
 ### 5.1 New helper
 
-`agentmux-common/src/runtime_mode.rs` (or a new `parent_process.rs`):
+`agentmux-cef/src/parent_process.rs` — host-only helper, doesn't pollute `agentmux-common`:
 
 ```rust
-/// Returns the parent process's executable file stem (Windows: lower-cased),
-/// or None if it can't be determined.
+const ACCEPTED_PARENT_STEMS: &[&str] = &["agentmux-launcher", "agentmux"];
+
 #[cfg(target_os = "windows")]
-pub fn parent_process_name() -> Option<String> { ... }
+pub fn parent_is_agentmux_launcher() -> Option<bool> { ... }
 ```
 
-Implementation: Windows `CreateToolhelp32Snapshot` + `Process32First/Next` to find the parent PID, then `OpenProcess` + `QueryFullProcessImageName` for its exe path. The same approach already exists elsewhere in the codebase (search for `GetCurrentProcessId` callers in `agentmux-cef`).
+Implementation: Windows `CreateToolhelp32Snapshot` + `Process32FirstW/NextW` to find the parent PID, then `OpenProcess` + `QueryFullProcessImageNameW` for its exe path. Case-insensitive compare to either accepted stem.
+
+**Why two accepted stems** (codex P1 on PR #882 round 1 caught this):
+- `agentmux-launcher` — Cargo bin name. Used in dev (`task dev` copies `target/release/agentmux-launcher.exe` to `dist/cef-dev/agentmux-launcher.exe`).
+- `agentmux` — user-facing name in portable / installed builds. `scripts/package-portable.sh:38` copies the launcher binary to `agentmux.exe` so the user-facing icon reads as "AgentMux", not "AgentMux Launcher". `QueryFullProcessImageNameW` returns the on-disk path, so the parent's stem from a production launch is `agentmux`, not `agentmux-launcher`. Accepting only the Cargo bin name would regress every portable build's IPC connection.
 
 ### 5.2 New guard
 
