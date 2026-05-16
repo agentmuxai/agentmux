@@ -298,16 +298,26 @@ async fn stub_501() -> impl IntoResponse {
 
 /// Wire shape for `POST /agentmux/wps/publish`. Mirrors `WaveEvent`
 /// but keeps the field set narrow for what `agentmux-bashwrap`
-/// actually needs (no `sender`, no `persist`).
+/// actually needs (no `sender`).
 #[derive(serde::Deserialize)]
 struct WpsPublishRequest {
-    /// WPS event name. We use `tool_chunk:<tool_use_id>` for
-    /// streaming chunks, but the handler is general-purpose.
+    /// WPS event name. We use a fixed `tool_chunk` for every
+    /// streaming chunk (the tool_use_id lives in the payload), but
+    /// the handler is general-purpose.
     event: String,
     /// Optional scope filters (e.g. `["block:<id>"]`) so only
     /// subscribers watching that block receive the event.
     #[serde(default)]
     scopes: Vec<String>,
+    /// Per-scope event ring size. Lets late subscribers replay
+    /// events that landed before they subscribed. agentmux-bashwrap
+    /// sets this to 1024 for `tool_chunk` so the frontend's
+    /// subscription (installed on pane mount) picks up chunks that
+    /// flew before Claude's stream-json caught up enough to surface
+    /// the tool_use_id. Zero (or omitted) disables persistence —
+    /// pure fan-out. See SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §6.
+    #[serde(default)]
+    persist: usize,
     /// Free-form payload. For tool_chunk events this is the
     /// `{op, kind, content, timestamp}` shape from
     /// `SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §4.3.
@@ -326,7 +336,7 @@ async fn handle_wps_publish(
         event: req.event,
         scopes: req.scopes,
         sender: String::new(),
-        persist: 0,
+        persist: req.persist,
         data: Some(req.data),
     };
     state.broker.publish(event);
