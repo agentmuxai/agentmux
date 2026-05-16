@@ -115,6 +115,19 @@ export function dispatch(
     // Avoids no-op signal writes that would still schedule a Solid effect.
     if (slot.state.nodes !== prevNodes) {
         slot.setter(slot.state.nodes);
+        // Cascade detection: docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md.
+        // documentAtom subscribers can unmount the pane synchronously
+        // during this setter; the slot then vanishes mid-dispatch and
+        // the caller's next dispatch (often dispatchPane on a sibling
+        // store) throws. Log so the trigger is identifiable.
+        if (!slots.has(blockId)) {
+            console.warn(
+                `[agent-document-store] CASCADE_DETECTED: slot disposed mid-dispatch ` +
+                `(cmd=${command.type}, blockId=${blockId.slice(0, 7)}, source=${source}). ` +
+                `A documentAtom subscriber unmounted the pane during this dispatch. ` +
+                `Subsequent dispatches in the same callback will throw.`,
+            );
+        }
     }
     for (const ev of result.events) eventSink(blockId, ev);
     recordDispatch({
