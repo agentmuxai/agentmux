@@ -239,7 +239,7 @@ The first is what the banner (§5.3) calls. The second is what the runtime auth-
 | **3** | Banner UI for already-orphaned agents | ~150 (TS) | Low |
 | **4** | Multi-provider extension (Codex, Aider, ...) | Variable | Low — additive |
 
-Phases 1–3 ship together as the next PR. Phase 4 lands per-provider as demand surfaces.
+Phase 1 ships first on its own (PR #879) — the display fallback is independent and unblocks the visible bug immediately. Phases 2–3 ship together as a follow-up PR since they share the runtime AuthSession surface area. Phase 4 lands per-provider as demand surfaces.
 
 ### 9.1 Bug A short-term remediation
 
