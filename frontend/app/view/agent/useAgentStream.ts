@@ -122,10 +122,25 @@ export function useAgentStream({
         eventType: "tool_chunk",
         scope: `block:${blockId}`,
         handler: (event: any) => {
+            // Live-log diagnostic — temporary, ship-and-strip after we
+            // confirm the chunks-not-showing-live regression closes.
+            // Logs every tool_chunk receipt + the reason for each
+            // early-return so we can see, in the host log, exactly
+            // where the chain breaks (subscribe → receive → dispatch).
+            // Metadata-only logging — do NOT log `data` or `event`.
+            // Bash tool output (chunk content) can carry secrets;
+            // codex P2 #884 round 2.
             const data = event?.data;
-            if (!data || typeof data !== "object") return;
+            if (!data || typeof data !== "object") {
+                console.warn(`[live-log-diag] tool_chunk dropped: no data object (event-keys=${Object.keys(event ?? {}).join(",")})`);
+                return;
+            }
             const toolId = typeof data.tool_id === "string" ? data.tool_id : "";
-            if (!toolId) return;
+            if (!toolId) {
+                console.warn(`[live-log-diag] tool_chunk dropped: no tool_id (op=${data.op ?? "?"} kind=${data.kind ?? "?"} contentLen=${(data.content ?? "").length})`);
+                return;
+            }
+            console.log(`[live-log-diag] tool_chunk received op=${data.op} toolId=${toolId.slice(0, 14)} contentLen=${(data.content ?? "").length}`);
             if (data.op === "terminal") {
                 dispatchDocIfRegistered(blockId, {
                     type: "ToolChunkAppend",
@@ -138,7 +153,10 @@ export function useAgentStream({
                 });
                 return;
             }
-            if (data.op !== "chunk") return;
+            if (data.op !== "chunk") {
+                console.warn(`[live-log-diag] tool_chunk dropped: op=${data.op} (expected chunk|terminal) toolId=${toolId.slice(0, 14)} kind=${data.kind ?? "?"} contentLen=${(data.content ?? "").length}`);
+                return;
+            }
             dispatchDocIfRegistered(blockId, {
                 type: "ToolChunkAppend",
                 toolId,
