@@ -96,7 +96,7 @@ This is rare but real. The fix needs to allow case (1) while still preventing ca
 - **G2** Window-count atom synchronizes across windows: opening / closing any window updates every other window's count within reactive frame.
 - **G3** Opacity slider renders in every window's InstancePanel in dev.
 - **G4** The original isolation guard's intent is preserved: a *standalone* host that happened to inherit `AGENTMUX_LAUNCHER_PIPE` from a parent pane's environment doesn't accidentally connect.
-- **G5** Symmetric fix for the srv IPC pipe at line 312-316 (same bug, same shape).
+- ~~**G5** Symmetric fix for the srv IPC pipe at line 312-316 (same bug, same shape).~~ **Descoped during review** — the srv IPC guard fix is a no-op in dev because `AGENTMUX_SRV_PIPE_PATH` is set by the launcher only on the *srv child* (`agentmux-launcher/src/srv_spawner.rs:142`), never on the host spawn (`agentmux-launcher/src/main.rs:526` only passes `AGENTMUX_LAUNCHER_PIPE`). So `connect_to_srv` short-circuits at `srv_ipc.rs:62-68` regardless of any guard. Restoring srv-IPC parity in dev needs an upstream launcher change to propagate the pipe path to the host as well; see §11.
 
 ## 4. Non-goals
 
@@ -207,8 +207,18 @@ Phase split unnecessary — both fixes ride together because they share the help
 
 - **Q1** Should we replace the path-only `is_dev_build_exe` discriminator entirely, since parent-process is strictly more informative? Lean **no** for this PR — keep both checks composed via `||` for defense-in-depth. Revisit when cross-platform parity ships.
 - **Q2** The launcher's pipe naming uses `dir_hash` of the data dir. Should the host *also* check that the pipe path embedded in `AGENTMUX_LAUNCHER_PIPE` corresponds to its own data dir? That would be an even stronger guard, surfacing config drift. Lean **defer** — parent-process check is sufficient and simpler to validate.
-- **Q3** Symmetric fix for srv IPC at line 312-316 — same guard pattern, identical shape. Include in this PR or split? Lean **include** — same bug, same fix, no extra surface.
+- **Q3** ~~Symmetric fix for srv IPC at line 312-316 — same guard pattern, identical shape. Include in this PR or split?~~ **Resolved during review (round 6)** — split. The srv IPC connection is gated on `AGENTMUX_SRV_PIPE_PATH` which the launcher never sets on the host spawn (only on the srv child); changing the host-side guard is a no-op until the launcher is taught to propagate the pipe path. See §11.
+
+## 11. Known follow-up — srv IPC in dev
+
+Restoring srv-IPC parity in `task dev` requires a launcher-side change that's out of scope for this PR:
+
+1. `agentmux-launcher/src/srv_spawner.rs:142` already computes the srv pipe path and passes it to the srv child as `AGENTMUX_SRV_PIPE_PATH`.
+2. `agentmux-launcher/src/main.rs:526` passes `AGENTMUX_LAUNCHER_PIPE` to the host spawn but NOT `AGENTMUX_SRV_PIPE_PATH`.
+3. Until that env var is also passed to the host, `srv_ipc::connect_to_srv` short-circuits at the env-var check (`agentmux-cef/src/srv_ipc.rs:62-68`) regardless of any host-side guard.
+
+The host-side dev guard for srv IPC therefore stays as the original `is_dev_build_exe` check until the launcher is updated. Filing a follow-up to wire `AGENTMUX_SRV_PIPE_PATH` from launcher's main to its host-spawn `.env()` chain; expected one-line change in `agentmux-launcher/src/main.rs` after `srv_spawner` returns the pipe path back to the parent.
 
 ---
 
-🤖 Authored by AgentA, 2026-05-16. Implementation ships in the same PR per `feedback_no_doc_only_prs.md`. Likely PR #881 or #882 depending on what merges first.
+🤖 Authored by AgentA, 2026-05-16. Implementation ships in the same PR per `feedback_no_doc_only_prs.md`. PR #882.

@@ -320,21 +320,18 @@ fn main() {
     // srv events (workspace / tab / block lifecycle) to every
     // top-level renderer via the JS bridge. Renderer-side handler
     // (`window.__agentmux_srv_event`) lands in E.2c.5b. Non-fatal
-    // if absent: a standalone host (no parent launcher, no
-    // `AGENTMUX_SRV_PIPE_PATH`) runs without the bridge and the
-    // frontend uses the legacy waveobj:update path.
-    //
-    // Same env-isolation guard as launcher_ipc above — a dev build
-    // inheriting `AGENTMUX_SRV_PIPE_PATH` from a parent AgentMux pane
-    // would bridge its srv events into the parent's renderer fan-out.
-    // Parent-process check (replaces the older path-only guard that
-    // over-fired in `task dev` after SPEC_LAUNCHER_DEV_INTEGRATION
-    // made `task dev` invoke the launcher) — see
-    // SPEC_DEV_MODE_LAUNCHER_IPC_2026_05_16.md.
-    let _srv_ipc = if should_connect_launcher {
-        runtime.block_on(srv_ipc::connect_to_srv(app_state.clone()))
-    } else {
+    // if absent: `AGENTMUX_SRV_PIPE_PATH` is only set on the srv
+    // child by the launcher (`agentmux-launcher/src/srv_spawner.rs`),
+    // not on the host spawn — so today the host never has the env
+    // var and `connect_to_srv` short-circuits to None at
+    // `srv_ipc.rs:62-68`. Path-based dev guard is the right gate
+    // for this branch; restoring full srv-IPC parity in dev needs
+    // the launcher to propagate the env var to the host first.
+    // See spec §11 of SPEC_DEV_MODE_LAUNCHER_IPC_2026_05_16.md.
+    let _srv_ipc = if agentmux_common::is_dev_build_exe(&host_exe_dir) {
         None
+    } else {
+        runtime.block_on(srv_ipc::connect_to_srv(app_state.clone()))
     };
 
     // Phase B.1: if launcher already spawned srv (the normal portable
