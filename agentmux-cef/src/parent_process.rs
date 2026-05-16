@@ -3,7 +3,7 @@
 
 //! Parent-process identity check used by the launcher-IPC connection
 //! guard in `main.rs`. Returns true when the host's parent process is
-//! `agentmux-launcher.exe`.
+//! the AgentMux launcher.
 //!
 //! Background — see `docs/specs/SPEC_DEV_MODE_LAUNCHER_IPC_2026_05_16.md`.
 //! Before this helper, the connect-to-launcher gate used
@@ -21,37 +21,39 @@
 //! happened to inherit `AGENTMUX_LAUNCHER_PIPE` from a parent shell
 //! (also correct — that's the original isolation concern).
 
-/// Exe stems we accept as "the AgentMux launcher." Compared
-/// case-insensitively against the OS reading.
+/// Exe filenames we accept as "the AgentMux launcher." Compared
+/// case-insensitively after stripping the `.exe` extension.
 ///
 /// - `agentmux-launcher` — the Cargo bin name. Used directly in dev
 ///   (`task dev` copies `target/release/agentmux-launcher.exe` into
-///   `dist/cef-dev/`) and is the underlying file on the package build
-///   too.
+///   `dist/cef-dev/`).
 /// - `agentmux` — the user-facing name in portable / installed builds.
-///   `scripts/package-portable.sh` (and the equivalent installer
-///   paths) copy the launcher to `agentmux.exe` so the icon a user
-///   double-clicks reads as "AgentMux", not "AgentMux Launcher."
-///   `QueryFullProcessImageNameW` returns the on-disk path, so the
-///   parent stem from a production launch is `agentmux`, not
-///   `agentmux-launcher` — codex P1 on PR #882 caught this would
-///   regress every portable build's IPC connection.
+///   `scripts/package-portable.sh` copies the launcher to
+///   `agentmux.exe` so the icon the user double-clicks reads as
+///   "AgentMux", not "AgentMux Launcher." `PROCESSENTRY32W.szExeFile`
+///   returns the on-disk file name, so the parent stem from a
+///   production launch is `agentmux`, not `agentmux-launcher` —
+///   codex P1 on PR #882 round 1 caught this would regress every
+///   portable build.
 const ACCEPTED_PARENT_STEMS: &[&str] = &["agentmux-launcher", "agentmux"];
 
 /// Returns `Some(true)` if the host's parent process is the AgentMux
 /// launcher (under any of its on-disk names), `Some(false)` if it's
 /// something else, or `None` if the parent identity couldn't be
-/// determined (process exited, permission denied, snapshot iteration
-/// failed). Callers should treat `None` as "fall through to the
-/// path-based guard" — see the call site.
+/// determined (snapshot creation failed, parent process exited
+/// between PID discovery and lookup). Callers treat `None` as "fall
+/// through to the path-based guard" — see the call site.
 #[cfg(target_os = "windows")]
 pub fn parent_is_agentmux_launcher() -> Option<bool> {
-    let parent_pid = parent_pid_windows()?;
-    let parent_name = process_image_stem_windows(parent_pid)?;
+    let parent_exe = parent_exe_file_windows()?;
+    let stem = parent_exe
+        .strip_suffix(".exe")
+        .or_else(|| parent_exe.strip_suffix(".EXE"))
+        .unwrap_or(&parent_exe);
     Some(
         ACCEPTED_PARENT_STEMS
             .iter()
-            .any(|s| parent_name.eq_ignore_ascii_case(s)),
+            .any(|accepted| stem.eq_ignore_ascii_case(accepted)),
     )
 }
 
@@ -66,8 +68,19 @@ pub fn parent_is_agentmux_launcher() -> Option<bool> {
     None
 }
 
+/// Walk the Toolhelp32 process snapshot in a single pass to:
+///   1. Find the current PID's entry → record `th32ParentProcessID`.
+///   2. Find the entry where `th32ProcessID == parent_pid` → capture
+///      its `szExeFile`.
+///
+/// Uses `PROCESSENTRY32W.szExeFile` (a fixed 260-wide-char buffer of
+/// the executable's *filename only*, no path) rather than
+/// `QueryFullProcessImageNameW`. Per codex P2 on PR #882 round 2,
+/// the latter could fail when a Windows checkout's staged launcher
+/// path exceeds MAX_PATH — `szExeFile` is filename-only and never
+/// hits that limit.
 #[cfg(target_os = "windows")]
-fn parent_pid_windows() -> Option<u32> {
+fn parent_exe_file_windows() -> Option<String> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
@@ -87,48 +100,53 @@ fn parent_pid_windows() -> Option<u32> {
         }
         let mut entry: PROCESSENTRY32W = std::mem::zeroed();
         entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+
+        // First pass: find current PID's parent PID.
+        let mut parent_pid: Option<u32> = None;
         let mut ok = Process32FirstW(snap, &mut entry);
-        let mut parent: Option<u32> = None;
         while ok != 0 {
             if entry.th32ProcessID == me {
-                parent = Some(entry.th32ParentProcessID);
+                parent_pid = Some(entry.th32ParentProcessID);
+                break;
+            }
+            ok = Process32NextW(snap, &mut entry);
+        }
+
+        let parent_pid = match parent_pid {
+            Some(p) => p,
+            None => {
+                CloseHandle(snap);
+                return None;
+            }
+        };
+
+        // Second pass: re-snapshot to walk from start. CreateToolhelp32Snapshot's
+        // cursor isn't documented as rewindable, so the safest approach is a
+        // fresh snapshot rather than relying on iterator state after `break`.
+        CloseHandle(snap);
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+
+        let mut parent_exe: Option<String> = None;
+        let mut ok = Process32FirstW(snap, &mut entry);
+        while ok != 0 {
+            if entry.th32ProcessID == parent_pid {
+                let len = entry
+                    .szExeFile
+                    .iter()
+                    .position(|&c| c == 0)
+                    .unwrap_or(entry.szExeFile.len());
+                parent_exe = Some(String::from_utf16_lossy(&entry.szExeFile[..len]));
                 break;
             }
             ok = Process32NextW(snap, &mut entry);
         }
         CloseHandle(snap);
-        parent
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn process_image_stem_windows(pid: u32) -> Option<String> {
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
-    };
-
-    // SAFETY: OpenProcess returns a handle we close on every exit
-    // path. The path buffer is sized at MAX_PATH (260) wide chars
-    // and we pass the buffer length to QueryFullProcessImageNameW;
-    // the API writes the actual length back into the same arg.
-    unsafe {
-        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if handle.is_null() {
-            return None;
-        }
-        let mut buf = [0u16; 260];
-        let mut len: u32 = buf.len() as u32;
-        let ok = QueryFullProcessImageNameW(handle, 0, buf.as_mut_ptr(), &mut len);
-        CloseHandle(handle);
-        if ok == 0 {
-            return None;
-        }
-        let path = String::from_utf16_lossy(&buf[..len as usize]);
-        let path = std::path::PathBuf::from(path);
-        path.file_stem()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_string())
+        parent_exe
     }
 }
 
@@ -147,9 +165,9 @@ mod tests {
             // Some platforms / CI runners may fail the snapshot under
             // restricted permissions; we accept None there. What we DO
             // assert: when it returns Some, it must be false (cargo /
-            // vstest are never named "agentmux-launcher").
+            // vstest are never named "agentmux-launcher" or "agentmux").
             if let Some(b) = result {
-                assert!(!b, "parent should not be agentmux-launcher under test");
+                assert!(!b, "parent should not be the AgentMux launcher under test");
             }
         }
         #[cfg(not(target_os = "windows"))]
