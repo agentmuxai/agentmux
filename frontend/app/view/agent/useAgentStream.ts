@@ -18,9 +18,13 @@ import type { DocumentNode, SessionStats, StreamingState, TurnTokens, UserMessag
 import { recordTurn } from "@/store/token-usage";
 import {
     dispatch as dispatchDoc,
+    dispatchIfRegistered as dispatchDocIfRegistered,
     getNodeIdSet,
 } from "@/app/store/agent-document-store";
-import { dispatch as dispatchPane } from "@/app/store/agent-pane-state-store";
+import {
+    dispatch as dispatchPane,
+    dispatchIfRegistered as dispatchPaneIfRegistered,
+} from "@/app/store/agent-pane-state-store";
 
 const OutputFileName = "output";
 
@@ -123,7 +127,7 @@ export function useAgentStream({
             const toolId = typeof data.tool_id === "string" ? data.tool_id : "";
             if (!toolId) return;
             if (data.op === "terminal") {
-                dispatchDoc(blockId, {
+                dispatchDocIfRegistered(blockId, {
                     type: "ToolChunkAppend",
                     toolId,
                     chunk: {
@@ -135,7 +139,7 @@ export function useAgentStream({
                 return;
             }
             if (data.op !== "chunk") return;
-            dispatchDoc(blockId, {
+            dispatchDocIfRegistered(blockId, {
                 type: "ToolChunkAppend",
                 toolId,
                 chunk: {
@@ -158,14 +162,14 @@ export function useAgentStream({
 
         // Document mutation — the reducer owns dedup, in-place updates,
         // and the markdown-content merge. See agent-document-store.ts.
-        dispatchDoc(blockId, {
+        dispatchDocIfRegistered(blockId, {
             type: "StreamFlush",
             newNodes: batchNew,
             updatedNodes: batchUpdates,
         });
         // Lifecycle counter bump — agent-pane-state owns streaming
         // metadata (active flag + bufferSize + lastEventTime).
-        dispatchPane(blockId, {
+        dispatchPaneIfRegistered(blockId, {
             type: "StreamFlushObserved",
             addedCount: batchNew.length,
             at: Date.now(),
@@ -221,7 +225,7 @@ export function useAgentStream({
             // tokens/turnActive, AND clears stopping (the latter cascade
             // replaces the explicit setStopping(false) below).
             const wasStopping = getStopping?.() === true;
-            dispatchPane(blockId, { type: "TurnEnd", stats });
+            dispatchPaneIfRegistered(blockId, { type: "TurnEnd", stats });
             if (wasStopping) {
                 const interruptedNode: DocumentNode = {
                     type: "markdown",
@@ -287,7 +291,7 @@ export function useAgentStream({
                         return;
                     }
                     // Reducer removes the entry + emits pending-accepted.
-                    dispatchPane(blockId, {
+                    dispatchPaneIfRegistered(blockId, {
                         type: "PendingMessageAccepted",
                         id: messageId,
                     });
@@ -298,7 +302,7 @@ export function useAgentStream({
                     // and nothing else flips it back, leaving the status
                     // line stuck on "Worked" with no running animation
                     // even though the CLI is processing the next message).
-                    dispatchPane(blockId, { type: "TurnStart", at: Date.now() });
+                    dispatchPaneIfRegistered(blockId, { type: "TurnStart", at: Date.now() });
                     // Append as a normal user_message so it joins the
                     // conversation stream. Keeps the same id so the new
                     // node ties back to the pending entry 1:1.
@@ -339,7 +343,7 @@ export function useAgentStream({
         // event when the gap exceeds `STUCK_THRESHOLD_MS`. The interval
         // cleans up via the same effect cleanup as the subscription.
         const watchdogId = setInterval(() => {
-            dispatchPane(blockId, {
+            dispatchPaneIfRegistered(blockId, {
                 type: "StreamWatchdogTick",
                 nowMs: Date.now(),
             });
@@ -356,7 +360,7 @@ export function useAgentStream({
                 // hook-local parser/stats/etc. when the truncate is actually
                 // honored; if suppressed, the live stream is still flowing
                 // and resetting would corrupt in-flight parse state.
-                const events = dispatchDoc(blockId, {
+                const events = dispatchDocIfRegistered(blockId, {
                     type: "StreamTruncate",
                     reason: "fileop",
                 });
@@ -371,7 +375,7 @@ export function useAgentStream({
                 nodeIdSet = new Set();
                 // Reducer clears sessionStats/currentTool/turnTokens/
                 // turnActive/stopping in one shot.
-                dispatchPane(blockId, { type: "TurnReset" });
+                dispatchPaneIfRegistered(blockId, { type: "TurnReset" });
                 return;
             }
 
@@ -440,12 +444,12 @@ export function useAgentStream({
                     if (inner?.type === "message_start") {
                         const inputTok = inner.message?.usage?.input_tokens as number | undefined;
                         if (inputTok != null) {
-                            dispatchPane(blockId, { type: "TokensIn", input: inputTok });
+                            dispatchPaneIfRegistered(blockId, { type: "TokensIn", input: inputTok });
                         }
                     } else if (inner?.type === "message_delta") {
                         const outputTok = inner.usage?.output_tokens as number | undefined;
                         if (outputTok != null) {
-                            dispatchPane(blockId, { type: "TokensOut", output: outputTok });
+                            dispatchPaneIfRegistered(blockId, { type: "TokensOut", output: outputTok });
                         }
                     }
                 }
@@ -472,12 +476,12 @@ export function useAgentStream({
                     // subscribe race that the per-tool model lost.
                     if (event.type === "tool_call") {
                         if (event.tool) {
-                            dispatchPane(blockId, { type: "ToolStart", name: event.tool });
+                            dispatchPaneIfRegistered(blockId, { type: "ToolStart", name: event.tool });
                         } else {
-                            dispatchPane(blockId, { type: "ToolEnd" });
+                            dispatchPaneIfRegistered(blockId, { type: "ToolEnd" });
                         }
                     } else if (event.type === "tool_result") {
-                        dispatchPane(blockId, { type: "ToolEnd" });
+                        dispatchPaneIfRegistered(blockId, { type: "ToolEnd" });
                     } else if (event.type === "tool_chunk") {
                         // Live-log streaming (SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md):
                         // route chunks through their own reducer command
@@ -486,7 +490,7 @@ export function useAgentStream({
                         // node → pendingNew path; the reducer mutates
                         // one ToolNode in place.
                         const { toolId, chunk } = parser.parseToolChunkEvent(event);
-                        dispatchDoc(blockId, { type: "ToolChunkAppend", toolId, chunk });
+                        dispatchDocIfRegistered(blockId, { type: "ToolChunkAppend", toolId, chunk });
                         continue;
                     }
                     const node = parser.parseLine(JSON.stringify(event));
@@ -522,8 +526,8 @@ export function useAgentStream({
             // StreamUnsubscribe also force-clears turnActive (so a crash
             // or exit without session_end doesn't leave "Working…" stuck).
             const at = Date.now();
-            dispatchPane(blockId, { type: "StreamUnsubscribe", at });
-            dispatchDoc(blockId, { type: "SessionEnd", at });
+            dispatchPaneIfRegistered(blockId, { type: "StreamUnsubscribe", at });
+            dispatchDocIfRegistered(blockId, { type: "SessionEnd", at });
         });
     });
 }

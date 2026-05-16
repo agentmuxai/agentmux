@@ -102,14 +102,35 @@ export function dispatch(
 
     // Project changes — only call setters for fields that actually
     // changed (referential equality). Avoids redundant signal writes.
-    if (slot.state.streaming !== prev.streaming) slot.proj.streaming(slot.state.streaming);
-    if (slot.state.sessionStats !== prev.sessionStats) slot.proj.sessionStats(slot.state.sessionStats);
-    if (slot.state.currentTool !== prev.currentTool) slot.proj.currentTool(slot.state.currentTool);
-    if (slot.state.turnTokens !== prev.turnTokens) slot.proj.turnTokens(slot.state.turnTokens);
-    if (slot.state.turnActive !== prev.turnActive) slot.proj.turnActive(slot.state.turnActive);
-    if (slot.state.stopping !== prev.stopping) slot.proj.stopping(slot.state.stopping);
-    if (slot.state.pending !== prev.pending) slot.proj.pending(slot.state.pending);
-    if (slot.state.initPhase !== prev.initPhase) slot.proj.initPhase?.(slot.state.initPhase);
+    // Per-setter cascade detection: docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md.
+    // A reactive subscriber on the atom backing one of these setters can
+    // synchronously unmount the pane (call `unregisterPane`) inside the
+    // setter call. Capture which setter triggers the dispose — the next
+    // dispatch in the caller's frame will throw and the log line below
+    // pinpoints the cause.
+    let cascadeSetter: string | null = null;
+    const proj = <T>(name: string, prev: T, next: T, set: ((v: T) => void) | undefined): void => {
+        if (prev === next) return;
+        set?.(next);
+        if (cascadeSetter == null && !slots.has(blockId)) cascadeSetter = name;
+    };
+    proj("streaming", prev.streaming, slot.state.streaming, slot.proj.streaming);
+    proj("sessionStats", prev.sessionStats, slot.state.sessionStats, slot.proj.sessionStats);
+    proj("currentTool", prev.currentTool, slot.state.currentTool, slot.proj.currentTool);
+    proj("turnTokens", prev.turnTokens, slot.state.turnTokens, slot.proj.turnTokens);
+    proj("turnActive", prev.turnActive, slot.state.turnActive, slot.proj.turnActive);
+    proj("stopping", prev.stopping, slot.state.stopping, slot.proj.stopping);
+    proj("pending", prev.pending, slot.state.pending, slot.proj.pending);
+    proj("initPhase", prev.initPhase, slot.state.initPhase, slot.proj.initPhase);
+
+    if (cascadeSetter != null) {
+        console.warn(
+            `[agent-pane-state] CASCADE_DETECTED: '${cascadeSetter}' setter disposed pane mid-dispatch ` +
+            `(cmd=${command.type}, blockId=${blockId.slice(0, 7)}, source=${source}). ` +
+            `A reactive subscriber on the '${cascadeSetter}' atom unmounted the pane during dispatch. ` +
+            `Subsequent dispatches in the same callback will throw.`,
+        );
+    }
 
     for (const ev of result.events) eventSink(blockId, ev);
     recordDispatch({
@@ -121,6 +142,27 @@ export function dispatch(
         at: Date.now(),
     });
     return result.events;
+}
+
+/**
+ * Soft-dispatch variant. Returns an empty event array if the slot is
+ * already gone, instead of throwing. Use ONLY from async contexts
+ * (RAF / setTimeout / setInterval / await continuations / subscription
+ * handlers) where a normal dispatch can race against the pane's
+ * onCleanup unregistering the slot — see
+ * docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md §6.1 option B.
+ *
+ * Synchronous component-body dispatches MUST continue to use `dispatch`
+ * — a missing slot there is a registration-order bug and the throw is
+ * the right signal.
+ */
+export function dispatchIfRegistered(
+    blockId: string,
+    command: AgentPaneCommand,
+    source: CommandSource = "system",
+): AgentPaneEvent[] {
+    if (!slots.has(blockId)) return [];
+    return dispatch(blockId, command, source);
 }
 
 /** Snapshot — diagnostics + tests only. */

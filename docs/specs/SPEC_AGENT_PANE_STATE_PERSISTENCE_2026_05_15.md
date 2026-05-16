@@ -206,6 +206,24 @@ Phases 0–3 ship together (one PR). Phase 4 deferred unless empirical demand.
 - **Q2** Should the snapshot be **incremental** (event-sourced log + periodic compaction) rather than a full replace? More resilient but more complex. Decision: full-replace for v1; revisit if write IO becomes a problem.
 - **Q3** Should `BlockfileWriteStateCommand` be exposed to the agent CLI itself (so agents can persist their own view metadata)? Probably not — that's a different feature surface. Out of scope.
 
+## 11. Known follow-ups surfaced by this PR
+
+### 11.1 Lifecycle / dispatch leak (cross-cutting)
+
+The first smoke build of v0.33.899 produced an uncaught `dispatch for unregistered pane c0ae6c7 (cmd=StreamFlushObserved)` in `useAgentStream.flushPendingNodes`. Root cause is **not** specific to this PR — it's a latent class of bug where a `dispatchDoc` write cascades through reactive subscribers and synchronously disposes the pane *during* the dispatch, causing the next dispatch in the same callback to throw.
+
+This PR is the likely **trigger** (the new `createEffect` on `documentAtom` is the only new subscriber to that atom in months), but the underlying lifecycle vulnerability has been present since the multi-store pattern landed in §4 of `frontend-reducer-conventions-2026-05-03.md`.
+
+Full breakdown: `docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md`. Cascade-detection instrumentation has been installed in `agent-pane-state-store.ts` and `agent-document-store.ts`; the next reproduction will identify the exact projection setter that triggers the cascade.
+
+**Followup PRs** (status):
+- **PR #878** ships the cascade-detection instrumentation AND the soft-dispatch migration in a single bundle. Adds `dispatchIfRegistered` to both pane stores, migrates 22 async dispatch sites across `useAgentStream.ts`, `useAgentCommands.ts`, `useHistoryPagination.ts`, `agent-view.tsx` (onLoginSuccess callback), and fixes the unguarded RAF in `browser-model.reload()`. Backed by 5 new regression tests in `agent-pane-state-store.test.ts`.
+- **PR-3** (architectural, pending): unify per-pane registration so both stores' slots are added/removed atomically. Pre-discussion in #707.
+
+### 11.2 Phase 4 still deferred
+
+The `highWaterMark` gap-replay (read NDJSON lines from `[snapshot.highWaterMark, currentTotal)` on reopen and dispatch through `StreamFlush`) remains v1-deferred per §4.2. Should ship after the lifecycle work above so its new dispatches can use the soft-variant from the start.
+
 ---
 
-🤖 Authored by AgentA. Implementation rides in the same PR — file is committed alongside the code change (per `feedback_no_doc_only_prs.md`).
+🤖 Authored by AgentA. Implementation rides in the same PR — file is committed alongside the code change (per `feedback_no_doc_only_prs.md`). §11 added 2026-05-15 after the v0.33.899 smoke-build crash surfaced the lifecycle issue documented in `docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md`.
