@@ -15,7 +15,7 @@
  * ANSI parsing lands in Phase γ (perf + worker offload) per the spec.
  */
 
-import { For, Match, Show, Switch, createEffect, createMemo, type JSX } from "solid-js";
+import { For, Match, Show, Switch, createEffect, type JSX } from "solid-js";
 // `Show` retained for fallback ToolOverlayResult sub-tree.
 import type { ToolNode } from "../types";
 import { BashOutputViewer } from "./BashOutputViewer";
@@ -38,15 +38,17 @@ const KIND_CLASS: Record<string, string> = {
 export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     let scrollRef: HTMLDivElement | undefined;
 
-    const chunks = createMemo(() => {
-        const c = props.node.log?.chunks ?? [];
-        // Live-log diag: report render-side view of chunks so we can
-        // diff against reducer-side append count. If reducer says 58
-        // appended but this memo evaluates to length=0, the render
-        // is reading a stale node reference (prop reactivity break).
-        console.log(`[live-log-diag] overlay chunks memo toolId=${(props.node.id ?? "?").slice(0, 14)} renderedLen=${c.length} logOpen=${props.node.log?.open}`);
-        return c;
-    });
+    // INLINE prop access pattern (matches MarkdownBlock lines 18-23) —
+    // wrapping `props.node.log?.chunks` in createMemo broke reactivity
+    // for in-place ToolNode updates (ToolChunkAppend only mutates log,
+    // not the array length, and the memo's tracked dependencies did
+    // not fire on those updates — verified via diag in PR #884/#885/#886
+    // where the reducer appended 58+ chunks but the memo evaluated
+    // exactly once per overlay mount with log=undefined). Solid's
+    // JSX-expression auto-wrapping IS reactive end-to-end through
+    // multi-layer prop chains; createMemo's manual tracking is not.
+    // Read every gate inline at JSX time so each repaint sees the
+    // latest log state.
     /**
      * Phase 3 fallback rules — refined after codex P1 on PR #803.
      *
@@ -71,9 +73,10 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
      * every tool that streamed any output — exit codes, diffs, and
      * highlighted Read content were silently dropped post-completion.
      */
-    const isStreaming = createMemo(() => props.node.log?.open === true);
-    const hasChunks = createMemo(() => chunks().length > 0);
-    const hasResult = createMemo(() => props.node.result != null);
+    const isStreaming = () => props.node.log?.open === true;
+    const hasChunks = () => (props.node.log?.chunks?.length ?? 0) > 0;
+    const hasResult = () => props.node.result != null;
+    const chunks = () => props.node.log?.chunks ?? [];
 
     // Auto-stick to bottom while the user hasn't scrolled away. The
     // threshold is forgiving — within 40px of the bottom counts as
