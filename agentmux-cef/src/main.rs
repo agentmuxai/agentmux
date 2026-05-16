@@ -320,15 +320,17 @@ fn main() {
     // srv events (workspace / tab / block lifecycle) to every
     // top-level renderer via the JS bridge. Renderer-side handler
     // (`window.__agentmux_srv_event`) lands in E.2c.5b. Non-fatal
-    // if absent: `task dev` mode doesn't run the launcher and so
-    // doesn't set `AGENTMUX_SRV_PIPE_PATH` — host runs without the
-    // bridge, frontend uses the legacy waveobj:update path.
+    // if absent: a standalone host (no parent launcher, no
+    // `AGENTMUX_SRV_PIPE_PATH`) runs without the bridge and the
+    // frontend uses the legacy waveobj:update path.
     //
     // Same env-isolation guard as launcher_ipc above — a dev build
     // inheriting `AGENTMUX_SRV_PIPE_PATH` from a parent AgentMux pane
     // would bridge its srv events into the parent's renderer fan-out.
     // Parent-process check (replaces the older path-only guard that
-    // over-fired in `task dev`) — see SPEC_DEV_MODE_LAUNCHER_IPC.
+    // over-fired in `task dev` after SPEC_LAUNCHER_DEV_INTEGRATION
+    // made `task dev` invoke the launcher) — see
+    // SPEC_DEV_MODE_LAUNCHER_IPC_2026_05_16.md.
     let _srv_ipc = if should_connect_launcher {
         runtime.block_on(srv_ipc::connect_to_srv(app_state.clone()))
     } else {

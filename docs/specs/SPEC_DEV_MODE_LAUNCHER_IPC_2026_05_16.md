@@ -1,6 +1,6 @@
 # SPEC: Restore Launcher IPC in `task dev` Mode
 
-**Status:** Draft / proposed
+**Status:** Implemented (PR #882)
 **Date:** 2026-05-16
 **Author:** AgentA
 **Related:** `SPEC_LAUNCHER_DEV_INTEGRATION_2026-05-13.md`, `SPEC_STATUS_BAR_WINDOW_COUNT_2026_05_16.md` (PR #880)
