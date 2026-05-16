@@ -265,11 +265,19 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                             >
                                 <option value="">— New agent —</option>
                                 <For each={namedAgents() ?? []}>
-                                    {(row) => (
-                                        <option value={row.instance_id}>
-                                            {`${row.instance_name} · ${row.identity_name} · ${row.memory_name}${row.started_at ? ` · ${formatRelative(row.started_at)}` : ""}`}
-                                        </option>
-                                    )}
+                                    {(row) => {
+                                        const parts = [
+                                            row.instance_name,
+                                            row.identity_name?.trim() || "(ambient creds)",
+                                            row.memory_name?.trim() || "(vanilla CLI)",
+                                        ];
+                                        if (row.started_at) parts.push(formatRelative(row.started_at));
+                                        return (
+                                            <option value={row.instance_id}>
+                                                {parts.join(" · ")}
+                                            </option>
+                                        );
+                                    }}
                                 </For>
                             </select>
                             <span class="agent-launch-modal-hint">
