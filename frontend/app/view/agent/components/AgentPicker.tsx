@@ -118,22 +118,33 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         pendingSelect.add(agent.id);
         try {
             setNodejsError(null);
+            // Phase α only handles npm-installable providers. For
+            // providers without `npmPackage` (e.g. kimi via pip, system-
+            // PATH CLIs), fall through to the launch flow — its
+            // ResolveCliCommand already does the system-PATH search.
+            const prov = getProvider(agent.provider);
+            const cliCommand = prov?.cliCommand ?? agent.provider;
+            const npmInstallable = !!prov?.npmPackage && prov.npmPackage.length > 0;
             // Query the backend's per-version install dir (the same
             // location `install.start` writes to). The CEF host's
             // getCliPath probes a different path and would falsely
             // report "not installed" for npm-cached providers, causing
             // a re-install on every launch.
             let installed = false;
-            const prov = getProvider(agent.provider);
-            const cliCommand = prov?.cliCommand ?? agent.provider;
-            try {
-                const r = await RpcApi.InstallCheckCommand(TabRpcClient, {
-                    providerId: agent.provider,
-                    cliCommand,
-                });
-                installed = r.installed;
-            } catch {
-                installed = false;
+            if (npmInstallable) {
+                try {
+                    const r = await RpcApi.InstallCheckCommand(TabRpcClient, {
+                        providerId: agent.provider,
+                        cliCommand,
+                    });
+                    installed = r.installed;
+                } catch {
+                    installed = false;
+                }
+            } else {
+                // Non-npm provider — launch flow will resolve via
+                // system PATH or report a missing-CLI error.
+                installed = true;
             }
             if (!installed) {
                 tabModal.open({
