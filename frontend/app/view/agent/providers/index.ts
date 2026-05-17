@@ -158,7 +158,12 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // "Login with Gemini", ...) and let the user pick which brain
         // before the OAuth subcommand runs.
         authType: "oauth",
-        authCheckCommand: ["doctor"],
+        // `doctor` is a health/repair command — exits 0 even when no
+        // openai-codex auth profile is registered, which would let
+        // AgentMux skip the OAuth login and launch `openclaw acp`
+        // unauthenticated. List the profiles for the specific provider
+        // instead; exits non-zero when none are configured.
+        authCheckCommand: ["models", "auth", "list", "--provider", "openai-codex"],
         // `cliCommand: "openclaw"` is prefixed by the spawn layer — keep
         // only the args here. Kimi's `["login"]` is the convention.
         authLoginCommand: ["models", "auth", "login", "--provider", "openai-codex"],
