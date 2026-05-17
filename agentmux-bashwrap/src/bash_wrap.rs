@@ -494,17 +494,15 @@ async fn run_via_pty(
             }
         }
         let existing_path = std::env::var_os("PATH").unwrap_or_default();
-        let mut new_path: std::ffi::OsString = std::ffi::OsString::new();
-        for (i, dir) in prefix_dirs.iter().enumerate() {
-            if i > 0 {
-                new_path.push(";");
-            }
-            new_path.push(dir);
-        }
+        let mut all_dirs: Vec<std::path::PathBuf> =
+            prefix_dirs.iter().map(std::path::PathBuf::from).collect();
         if !existing_path.is_empty() {
-            new_path.push(";");
-            new_path.push(&existing_path);
+            for p in std::env::split_paths(&existing_path) {
+                all_dirs.push(p);
+            }
         }
+        let new_path = std::env::join_paths(&all_dirs)
+            .context("joining PATH entries for child bash")?;
         cmd.env("PATH", &new_path);
         tracing::info!(
             target: "bashwrap",
@@ -545,19 +543,9 @@ async fn run_via_pty(
     .await
     .context("PTY wait task join")??;
 
-    // Do NOT wait for publisher. The publisher publishes each chunk
-    // synchronously as it arrives, so by the time child.wait()
-    // returns, the only chunks still in flight are the last few that
-    // overlapped with child teardown. On Windows ConPTY, the reader's
-    // blocking ReadFile may not unblock promptly when master drops —
-    // waiting on it (even with a deadline) is just a grace window in
-    // disguise (see feedback_no_timers_or_delays.md). Returning now
-    // means the wrapper process exits as soon as the child reaps;
-    // tokio cancels the publisher task. Any chunk in the mpsc queue
-    // that hadn't been HTTP-posted yet is lost from the LIVE overlay,
-    // but the model-visible aggregated blob (printed via stdout
-    // BELOW) is unaffected — Claude still sees the full output.
-    drop(publisher_handle);
+    // `buffered` (read by the caller for the model blob) is populated
+    // only by the publisher loop, so drain it before returning.
+    let _ = publisher_handle.await;
     Ok(exit_code)
 }
 
@@ -680,6 +668,12 @@ fn strip_and_answer_dsr(chunk: &mut Vec<u8>, writer: &mut dyn std::io::Write) {
             chunk.drain(i..i + DSR.len());
             if let Err(e) = writer.write_all(ANSWER) {
                 tracing::warn!(target: "bashwrap", error = %e, "DSR response write failed");
+                return;
+            }
+            // Flush — portable_pty's master writer may buffer at the
+            // Rust level and bash blocks on the DSR reply.
+            if let Err(e) = writer.flush() {
+                tracing::warn!(target: "bashwrap", error = %e, "DSR response flush failed");
                 return;
             }
             // Don't advance i — could be back-to-back DSRs.
