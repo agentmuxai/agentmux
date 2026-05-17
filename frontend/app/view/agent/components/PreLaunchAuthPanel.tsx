@@ -132,7 +132,7 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         // (= "create new bundle") rather than `"blank"` (= "attach
         // to bundle named blank", which doesn't exist in wstore).
         const bundleArg = id === "blank" ? "" : id;
-        untrack(() => controller.selected(prov.id, bundleArg, outcomeFor(id)));
+        untrack(() => controller.selected(prov.id, bundleArg, outcomeFor(id, prov.id)));
     });
 
     onCleanup(() => {
@@ -201,7 +201,13 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
  *  is deferred to PR B-4 / PR D — for MVP we treat:
  *   - blank singleton → `needs-bundle` (Connect creates new)
  *   - non-blank bundle → `ready` (trust prior auth — old behavior). */
-function outcomeFor(identityId: string): SelectionOutcome {
+function outcomeFor(identityId: string, providerId?: string): SelectionOutcome {
+    // Phase α for openclaw: bundle persistence isn't wired yet, so an
+    // already-selected identity can't be trusted as authenticated. Force
+    // a fresh OAuth on every launch so AgentLaunchModal's openclaw
+    // override actually gates Launch. Lift once Phase δ wires real
+    // bundle storage.
+    if (providerId === "openclaw") return "needs-bundle";
     if (!identityId || identityId === "blank") return "needs-bundle";
     return "ready";
 }
