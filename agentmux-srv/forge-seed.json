@@ -127,7 +127,7 @@
       "icon": "◎",
       "provider": "openclaw",
       "agent_type": "host",
-      "description": "ACP orchestration platform",
+      "description": "Open-source personal AI assistant (model-agnostic, local-first)",
       "working_directory": "",
       "shell": "pwsh",
       "agent_bus_id": "openclaw",

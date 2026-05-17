@@ -38,6 +38,7 @@ dependencies = [
  "futures-util",
  "json_comments",
  "parking_lot",
+ "portable-pty",
  "proptest",
  "reqwest",
  "serde",

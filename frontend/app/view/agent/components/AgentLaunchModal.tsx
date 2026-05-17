@@ -180,15 +180,25 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // the blank singleton selected.
     //
     // - `isContinue` bypasses: prior launch already produced creds.
-    // - API-key providers (openclaw/kimi/pi) bypass: until the backend
+    // - API-key providers (kimi/pi) bypass: until the backend
     //   `auth.submitapikey` persists bundles (PR C-2), the gate would
     //   deadlock — the user can't reach `ready` because save is a
     //   stub. Their existing `launch-flow.ts` Phase 2 prompts for the
     //   key in-line. Reagent + codex P1 on #847.
+    // - OpenClaw: even with a non-blank identity selected, no identity
+    //   has been openclaw-authed yet (Phase α addition, 2026-05-17).
+    //   Until identity bundles include openclaw auth profiles, gate
+    //   ALWAYS — the user needs to run the OpenAI OAuth flow before
+    //   `openclaw acp` will spawn. Lifts once identity-bundles-include-
+    //   openclaw lands (planned with Phase δ persistence work).
     const authRequired = () =>
         !isContinue()
         && provider()?.authType === "oauth"
-        && (identityId() === "blank" || identityId() === "");
+        && (
+            identityId() === "blank"
+            || identityId() === ""
+            || provider()?.id === "openclaw"
+        );
     const authReady = () => !authRequired() || authStateKind() === "ready";
     const canSubmit = () =>
         !submitting() && slugifyInstanceName(name()).length > 0 && authReady();

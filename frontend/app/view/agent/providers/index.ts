@@ -38,6 +38,12 @@ export interface ProviderDefinition {
     // Launch args for persistent mode (--input-format stream-json, no -p).
     // Only used when controllerType is "persistent".
     persistentLaunchArgs?: string[];
+    // Spawn the auth login subprocess under a PTY (instead of plain
+    // piped stdio). Required by providers whose auth subcommand checks
+    // `isatty()` and refuses to run otherwise — currently OpenClaw's
+    // `openclaw models auth login --provider <id>`. The host's
+    // `run_cli_login` reads this flag and chooses the PTY branch.
+    requiresLoginTty?: boolean;
 }
 
 export const PROVIDERS: Record<string, ProviderDefinition> = {
@@ -121,32 +127,54 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "session_id",
         controllerType: "subprocess",
     },
-    // OpenClaw via gateway daemon (detected if `openclaw` is installed and gateway is running).
-    // Uses acpx as the ACP bridge to the running OpenClaw gateway.
-    // Full OpenClaw features: skills, external messaging channels, memory, multi-agent.
+    // OpenClaw — model-agnostic personal AI assistant from openclaw.ai.
+    // We launch its `openclaw acp` bridge: speaks ACP over stdio (our
+    // side) and forwards turns to OpenClaw's local Gateway daemon over
+    // WebSocket (its side). The Gateway is OpenClaw's own daemon
+    // (`openclaw gateway --port 18789`) and MUST be running before
+    // the bridge can establish a session — onboarding via
+    // `openclaw onboard` covers that on first install.
+    //
+    // OpenClaw is model-agnostic — the backing LLM brain is selected
+    // by the user inside OpenClaw's own config (defaults to Pi; users
+    // can wire Claude, Codex/OpenAI, Gemini, or local models via
+    // `openclaw models auth login --provider <provider>`).
     openclaw: {
         id: "openclaw",
         displayName: "OpenClaw",
-        cliCommand: "acpx",
+        cliCommand: "openclaw",
         defaultArgs: [],
-        styledArgs: ["--agent", "openclaw"],
+        styledArgs: [],
         outputFormat: "acp",
         styledOutputFormat: "acp",
-        authType: "api-key",
-        authCheckCommand: ["openclaw", "doctor"],
-        authLoginCommand: ["openclaw", "onboard"],
-        npmPackage: "@openclaw/acpx",
+        // OAuth-via-subcommand. `openclaw models auth login --provider
+        // openai-codex` runs OpenAI's "Sign in with ChatGPT" flow and
+        // writes the resulting profile under ~/.openclaw/. OpenClaw then
+        // uses that profile to spawn Codex's app-server as the agent's
+        // backing brain (per docs.openclaw.ai/plugins/codex-harness +
+        // SPEC_OPENCLAW_AGENT_2026_05_17.md §4).
+        //
+        // Future Phase: add more provider options ("Login with Claude",
+        // "Login with Gemini", ...) and let the user pick which brain
+        // before the OAuth subcommand runs.
+        authType: "oauth",
+        authCheckCommand: ["doctor"],
+        // `cliCommand: "openclaw"` is prefixed by the spawn layer — keep
+        // only the args here. Kimi's `["login"]` is the convention.
+        authLoginCommand: ["models", "auth", "login", "--provider", "openai-codex"],
+        npmPackage: "openclaw",
         pinnedVersion: "latest",
         docsUrl: "https://docs.openclaw.ai",
-        windowsInstallCommand: "npm install -g @openclaw/acpx",
-        unixInstallCommand: "npm install -g @openclaw/acpx",
+        windowsInstallCommand: "npm install -g openclaw",
+        unixInstallCommand: "npm install -g openclaw",
         icon: "lobster",
         authConfigDirEnvVar: "OPENCLAW_HOME",
         authDirName: "openclaw",
-        launchArgs: ["--agent", "openclaw"],
+        launchArgs: ["acp"],
         resumeFlag: null,
         sessionIdField: "sessionId",
         controllerType: "acp",
+        requiresLoginTty: true,
     },
     // Kimi Code CLI — Moonshot AI's coding agent.
     // Python-based CLI (not npm). Supports stream-json output and OpenAI-style tool calls.

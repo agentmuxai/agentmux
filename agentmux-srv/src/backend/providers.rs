@@ -207,9 +207,20 @@ static KIMI: ProviderConfig = ProviderConfig {
 static OPENCLAW: ProviderConfig = ProviderConfig {
     id: "openclaw",
     display_name: "OpenClaw",
-    cli_command: "acpx",
+    // `openclaw acp` runs OpenClaw's ACP bridge — speaks ACP over stdio
+    // for IDE/tool clients (us) and forwards turns to the local
+    // OpenClaw Gateway over WebSocket. The Gateway is OpenClaw's own
+    // daemon (`openclaw gateway`) and MUST be running before this
+    // bridge can establish a session — surfaced to the user as an
+    // onboarding requirement in SPEC_OPENCLAW_AGENT_2026_05_17.md §6β.
+    //
+    // The previous scaffold pointed at `acpx` / `@openclaw/acpx`,
+    // which is not a real package. The canonical binary is `openclaw`
+    // (npm: `openclaw`) and the ACP subcommand is `openclaw acp`.
+    // Verified against docs.openclaw.ai/cli/acp + GitHub README.
+    cli_command: "openclaw",
     controller_type: ControllerType::Acp,
-    launch_args: &["--agent", "openclaw"],
+    launch_args: &["acp"],
     persistent_launch_args: None,
     // ACP handles sessions natively — no resume flag or session ID parsing needed
     resume_flag: None,
@@ -219,7 +230,7 @@ static OPENCLAW: ProviderConfig = ProviderConfig {
     auth_dir_name: "openclaw",
     auth_extra_env: &[],
     unset_env: &[],
-    npm_package: "@openclaw/acpx",
+    npm_package: "openclaw",
     pinned_version: "latest",
     icon: "lobster",
     docs_url: "https://docs.openclaw.ai",

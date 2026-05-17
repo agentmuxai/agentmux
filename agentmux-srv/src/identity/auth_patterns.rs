@@ -54,7 +54,12 @@ pub fn match_line(provider_id: &str, line: &str) -> Option<AuthPatternMatch> {
 }
 
 fn is_api_key_provider(provider_id: &str) -> bool {
-    matches!(provider_id, "openclaw" | "kimi" | "pi")
+    // OpenClaw moved out: as of SPEC_OPENCLAW_AGENT_2026_05_17.md Phase
+    // α + the "Login with OpenAI" addition, OpenClaw's launch flow runs
+    // `openclaw models auth login --provider openai-codex` which emits
+    // an OpenAI OAuth URL (auth.openai.com). The same `match_codex_url`
+    // we use for Codex matches it.
+    matches!(provider_id, "kimi" | "pi")
 }
 
 type LineMatcher = fn(&str) -> Option<AuthPatternMatch>;
@@ -63,12 +68,17 @@ fn patterns_for(provider_id: &str) -> &'static [LineMatcher] {
     match provider_id {
         "claude" => &[match_claude_url, match_logged_in_as],
         "codex" => &[match_codex_url, match_logged_in_as],
+        // OpenClaw onboards into OpenAI via the Codex harness; the OAuth
+        // URL OpenClaw emits is the same shape Codex CLI emits, so reuse
+        // the same matcher. When OpenClaw later supports Login-with-
+        // Claude / Gemini / etc., this list can grow.
+        "openclaw" => &[match_codex_url, match_logged_in_as],
         "gemini" => &[match_gemini_url, match_logged_in_as],
         "copilot" => &[match_copilot_device_code, match_logged_in_as],
         // API-key providers don't OAuth — these patterns never match.
         // Listed here so the dispatch is exhaustive and adding a new
         // provider always lands a code edit in this table.
-        "openclaw" | "kimi" | "pi" => &[],
+        "kimi" | "pi" => &[],
         _ => &[],
     }
 }
@@ -349,13 +359,23 @@ mod tests {
 
     #[test]
     fn api_key_providers_match_nothing() {
-        // openclaw / kimi / pi don't have OAuth flow. Even if their
-        // output includes an https URL during onboarding, we don't
-        // want to misinterpret it as OAuth.
-        for provider in ["openclaw", "kimi", "pi"] {
+        // kimi / pi don't have OAuth flow. Even if their output includes
+        // an https URL during onboarding, we don't want to misinterpret
+        // it as OAuth.
+        for provider in ["kimi", "pi"] {
             let m = match_line(provider, "Get your API key at https://example.com/keys");
             assert!(m.is_none(), "provider {provider} unexpectedly matched");
         }
+    }
+
+    #[test]
+    fn openclaw_matches_openai_oauth_url() {
+        // OpenClaw's `models auth login --provider openai-codex` emits
+        // the same OpenAI OAuth URL Codex CLI emits. We reuse codex's
+        // matcher for it.
+        let line = "Open this URL to sign in: https://auth.openai.com/oauth/authorize?...";
+        let m = match_line("openclaw", line);
+        assert!(matches!(m, Some(AuthPatternMatch::OAuthUrl(_))));
     }
 
     #[test]
@@ -391,8 +411,10 @@ mod tests {
         // used to run for API-key providers. Their onboarding output
         // ("get your key at https://.../auth") would mis-classify
         // as OAuth and drive the wrong UI branch. Now: no fallback
-        // for openclaw/kimi/pi at all.
-        for provider in ["openclaw", "kimi", "pi"] {
+        // for kimi/pi at all. (OpenClaw moved out — see
+        // openclaw_matches_openai_oauth_url; its `models auth login
+        // --provider openai-codex` emits a real OAuth URL.)
+        for provider in ["kimi", "pi"] {
             let line = "Get your API key at https://example.com/auth/keys";
             assert!(match_line(provider, line).is_none(), "{provider} matched");
         }

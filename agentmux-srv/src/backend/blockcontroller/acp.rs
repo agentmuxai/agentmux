@@ -8,7 +8,7 @@
 //! protocol for session management, prompting, and streaming events.
 //!
 //! Lifecycle:
-//!   1. Spawn the ACP agent process (e.g., `gemini --acp`, `acpx --agent openclaw`)
+//!   1. Spawn the ACP agent process (e.g., `gemini --acp`, `openclaw acp`)
 //!   2. Send `initialize` request, receive capabilities
 //!   3. Send `initialized` notification
 //!   4. Create a session via `session/create`
