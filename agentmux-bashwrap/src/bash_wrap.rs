@@ -462,7 +462,11 @@ async fn run_via_pty(
     // dirs to PATH manually (see below) so external commands like
     // `date`, `grep`, `awk` resolve without needing rc-script setup.
     cmd.arg("-c");
-    cmd.arg(command);
+    // Redirect stdin to /dev/null inside bash so stdin-reading
+    // children see EOF — ConPTY does not deliver EOF on master
+    // writer drop. The redirect runs after readline's startup DSR
+    // exchange, so the pre-written CSI response is still consumed.
+    cmd.arg(format!("exec </dev/null; {}", command));
 
     // PATH fix-up: bashwrap is a Windows exe, so when MSYS2/Git Bash
     // spawned us it converted PATH to Windows form, which has
@@ -520,12 +524,22 @@ async fn run_via_pty(
         .with_context(|| format!("PTY spawn of bash at {}", bash.display()))?;
 
     let reader = pair.master.try_clone_reader().context("PTY try_clone_reader")?;
-    let writer = pair.master.take_writer().context("PTY take_writer")?;
+
+    // Pre-load bash's stdin with a DSR response and drop the writer.
+    // Bash's readline blocks on `\x1b[6n` until it reads a matching
+    // CSI report; queuing the response upfront unblocks that read
+    // without keeping the master writer open across the child.
+    {
+        use std::io::Write as _;
+        let mut writer = pair.master.take_writer().context("PTY take_writer")?;
+        let _ = writer.write_all(b"\x1b[1;1R");
+        let _ = writer.flush();
+    }
 
     let (tx, rx) = mpsc::channel::<LineEvent>(1024);
     let tx_reader = tx.clone();
     tokio::task::spawn_blocking(move || {
-        pty_reader_loop(reader, writer, tx_reader);
+        pty_reader_loop(reader, tx_reader);
     });
     drop(tx);
 
@@ -584,23 +598,16 @@ async fn run_via_pipes(
     Ok(exit_status.code().unwrap_or(-1))
 }
 
-/// PTY reader loop: drains bytes, forwards line-split chunks to the
-/// publisher, AND scans for DSR queries to answer via the writer.
-///
-/// DSR matching: bash sends exactly `\x1b[6n` ("request cursor row
-/// and column"). We respond with `\x1b[1;1R` (cursor at row 1, col 1).
-/// We strip the DSR bytes from the chunk stream so they don't appear
-/// in the model-visible blob or the overlay log.
+/// PTY reader loop: drains bytes from the master, strips DSR / ANSI
+/// control sequences, and forwards line-split chunks to the publisher.
 fn pty_reader_loop(
     mut reader: Box<dyn std::io::Read + Send>,
-    writer: Box<dyn std::io::Write + Send>,
     tx: mpsc::Sender<LineEvent>,
 ) {
     use std::io::Read;
     let kind: &'static str = "stdout";
     let mut pending: Vec<u8> = Vec::with_capacity(8192);
     let mut buf = [0u8; 8192];
-    let mut writer: Option<Box<dyn std::io::Write + Send>> = Some(writer);
     loop {
         match reader.read(&mut buf) {
             Ok(0) => {
@@ -614,16 +621,7 @@ fn pty_reader_loop(
             }
             Ok(n) => {
                 let mut chunk = buf[..n].to_vec();
-                // Strip DSR queries + answer them. Only matches the
-                // specific `\x1b[6n` sequence — other CSI...n cases
-                // (e.g. `\x1b[<digits>n` other Report codes) are not
-                // handled because bash doesn't emit them for `-c`.
-                if let Some(w) = writer.as_mut() {
-                    strip_and_answer_dsr(&mut chunk, &mut **w);
-                    // Drop after the first chunk so stdin-reading
-                    // commands see EOF instead of hanging.
-                    writer = None;
-                }
+                strip_dsr(&mut chunk);
                 // Phase β: strip remaining ANSI control sequences so
                 // the plain-text chunk list doesn't render them as
                 // garbled literal characters. Bash emits terminal-
@@ -662,36 +660,18 @@ fn pty_reader_loop(
     }
 }
 
-/// Scan `chunk` for DSR `\x1b[6n` sequences. For each occurrence,
-/// strip the 4 bytes from the chunk and write back `\x1b[1;1R` on
-/// the writer. Mutates `chunk` in place. Returns `true` if at least
-/// one DSR was answered — the caller uses this to drop the writer
-/// after the startup exchange.
-fn strip_and_answer_dsr(chunk: &mut Vec<u8>, writer: &mut dyn std::io::Write) -> bool {
+/// Scan `chunk` for DSR `\x1b[6n` sequences and remove them in place
+/// so they don't leak into the model-visible blob or overlay log.
+fn strip_dsr(chunk: &mut Vec<u8>) {
     const DSR: &[u8] = b"\x1b[6n";
-    const ANSWER: &[u8] = b"\x1b[1;1R";
-    let mut answered = false;
     let mut i = 0;
     while i + DSR.len() <= chunk.len() {
         if &chunk[i..i + DSR.len()] == DSR {
             chunk.drain(i..i + DSR.len());
-            if let Err(e) = writer.write_all(ANSWER) {
-                tracing::warn!(target: "bashwrap", error = %e, "DSR response write failed");
-                return answered;
-            }
-            // Flush — portable_pty's master writer may buffer at the
-            // Rust level and bash blocks on the DSR reply.
-            if let Err(e) = writer.flush() {
-                tracing::warn!(target: "bashwrap", error = %e, "DSR response flush failed");
-                return answered;
-            }
-            answered = true;
-            // Don't advance i — could be back-to-back DSRs.
         } else {
             i += 1;
         }
     }
-    answered
 }
 
 /// Phase β (lite): strip ANSI control sequences from a PTY chunk so
