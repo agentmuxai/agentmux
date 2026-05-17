@@ -814,6 +814,18 @@ class RpcApiType {
         return client.rpcCall("install.cancel", data, opts);
     }
 
+    // command "install.check" — probe the per-version install dir to
+    // decide whether the provider's CLI is already installed. Reads the
+    // same path that `install.start` writes to, so the picker's
+    // "show install modal?" decision matches the install location.
+    InstallCheckCommand(
+        client: RpcClient,
+        data: { providerId: string; cliCommand: string },
+        opts?: RpcOpts,
+    ): Promise<{ installed: boolean }> {
+        return client.rpcCall("install.check", data, opts);
+    }
+
     // command "auth.submitapikey"
     AuthSubmitApiKeyCommand(
         client: RpcClient,

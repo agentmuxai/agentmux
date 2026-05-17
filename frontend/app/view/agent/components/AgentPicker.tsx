@@ -11,12 +11,12 @@
  */
 
 import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { getApi } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { useTabModal } from "@/app/tab/tab-modal";
 import type { AgentViewModel } from "../agent-model";
+import { getProvider } from "../providers";
 import { AgentCard } from "./AgentCard";
 import { AgentCardSettingsPanel } from "./AgentCardSettingsPanel";
 import { AgentActionBar } from "./AgentActionBar";
@@ -107,25 +107,47 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // the tab-scoped layer, depending on whether the agent's CLI is
     // already installed in the per-version cache. Phase α of
     // SPEC_AGENT_INSTALL_STAGE_2026_05_17.md.
+    //
+    // Concurrency guard: handleSelect awaits an IPC round-trip
+    // (getCliPath), so a rapid double-click could open two modals (and
+    // start two parallel installs) without it. The pendingSelect set
+    // tracks in-flight resolutions per agent id and rejects re-entry.
+    const pendingSelect = new Set<string>();
     const handleSelect = async (agent: ForgeAgent) => {
-        setNodejsError(null);
-        let installed = false;
+        if (pendingSelect.has(agent.id)) return;
+        pendingSelect.add(agent.id);
         try {
-            const cliPath = await getApi().getCliPath(agent.provider);
-            installed = !!cliPath && cliPath.length > 0;
-        } catch {
-            installed = false;
+            setNodejsError(null);
+            // Query the backend's per-version install dir (the same
+            // location `install.start` writes to). The CEF host's
+            // getCliPath probes a different path and would falsely
+            // report "not installed" for npm-cached providers, causing
+            // a re-install on every launch.
+            let installed = false;
+            const prov = getProvider(agent.provider);
+            const cliCommand = prov?.cliCommand ?? agent.provider;
+            try {
+                const r = await RpcApi.InstallCheckCommand(TabRpcClient, {
+                    providerId: agent.provider,
+                    cliCommand,
+                });
+                installed = r.installed;
+            } catch {
+                installed = false;
+            }
+            if (!installed) {
+                tabModal.open({
+                    kind: "install-agent",
+                    agent,
+                    originBlockId: props.model.blockId,
+                    onInstalled: () => openLaunchModal(agent),
+                });
+                return;
+            }
+            openLaunchModal(agent);
+        } finally {
+            pendingSelect.delete(agent.id);
         }
-        if (!installed) {
-            tabModal.open({
-                kind: "install-agent",
-                agent,
-                originBlockId: props.model.blockId,
-                onInstalled: () => openLaunchModal(agent),
-            });
-            return;
-        }
-        openLaunchModal(agent);
     };
 
     const openForgeFor = (agent: ForgeAgent) => {
