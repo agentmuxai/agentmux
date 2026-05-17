@@ -11,6 +11,7 @@
  */
 
 import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { getApi } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
@@ -77,12 +78,9 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // Session-local only — not persisted to block meta.
     const [expandedId, setExpandedId] = createSignal<string | null>(null);
 
-    // Clicking the card opens the launch modal in the tab-scoped layer.
-    // The picker no longer owns the modal's open/closed signal — that
-    // lives on TabModalLayer. We pass an `onSubmit` callback in the
-    // request; the layer closes the modal when it resolves.
-    const handleSelect = (agent: ForgeAgent) => {
-        setNodejsError(null);
+    // Open the launch modal. Extracted so the install-modal path can
+    // chain into it after a successful install.
+    const openLaunchModal = (agent: ForgeAgent) => {
         tabModal.open({
             kind: "launch-agent",
             agent,
@@ -103,6 +101,31 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 }
             },
         });
+    };
+
+    // Clicking the card opens either the install or launch modal in
+    // the tab-scoped layer, depending on whether the agent's CLI is
+    // already installed in the per-version cache. Phase α of
+    // SPEC_AGENT_INSTALL_STAGE_2026_05_17.md.
+    const handleSelect = async (agent: ForgeAgent) => {
+        setNodejsError(null);
+        let installed = false;
+        try {
+            const cliPath = await getApi().getCliPath(agent.provider);
+            installed = !!cliPath && cliPath.length > 0;
+        } catch {
+            installed = false;
+        }
+        if (!installed) {
+            tabModal.open({
+                kind: "install-agent",
+                agent,
+                originBlockId: props.model.blockId,
+                onInstalled: () => openLaunchModal(agent),
+            });
+            return;
+        }
+        openLaunchModal(agent);
     };
 
     const openForgeFor = (agent: ForgeAgent) => {

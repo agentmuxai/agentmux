@@ -786,6 +786,34 @@ class RpcApiType {
         return client.rpcCall("auth.cancel", data, opts);
     }
 
+    // ── Agent install (SPEC_AGENT_INSTALL_STAGE_2026_05_17.md) ────────────
+
+    // command "install.start" — begin install of a provider's CLI; the
+    // backend npm-installs into the per-version cache and streams output
+    // via `install_chunk` WPS events scoped to `install:<sessionId>`.
+    InstallStartCommand(
+        client: RpcClient,
+        data: {
+            providerId: string;
+            cliCommand: string;
+            npmPackage: string;
+            pinnedVersion: string;
+        },
+        opts?: RpcOpts,
+    ): Promise<{ sessionId: string }> {
+        return client.rpcCall("install.start", data, opts);
+    }
+
+    // command "install.cancel" — abort an in-flight install and remove
+    // the partial dir.
+    InstallCancelCommand(
+        client: RpcClient,
+        data: { sessionId: string },
+        opts?: RpcOpts,
+    ): Promise<{ success: boolean; error?: string }> {
+        return client.rpcCall("install.cancel", data, opts);
+    }
+
     // command "auth.submitapikey"
     AuthSubmitApiKeyCommand(
         client: RpcClient,
