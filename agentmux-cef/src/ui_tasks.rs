@@ -380,15 +380,26 @@ wrap_task! {
             };
             let cef_url = CefString::from(self.url.as_str());
 
-            // Get client from an existing browser.
-            // Phase H.2.b — reducer-aware "any browser" via first_browser().
+            // Get client from an existing TOP-LEVEL browser. Cannot use
+            // `first_browser()` here: that does `HashMap::iter().next()`
+            // over the full browsers map, which includes pane browsers.
+            // Pane browsers have `is_browser_pane=true` on their client.
+            // If we inherited that, the new window's `on_load_end` would
+            // take the pane early-return branch (client/mod.rs:954) and
+            // never call `window.show()` — backend reports success
+            // (status panel updates) but no OS window appears. Filter on
+            // label prefix: top-level labels are `window-…` (per
+            // client/mod.rs:218), panes are `browser-pane-…`.
             let client = self
                 .state
-                .first_browser()
+                .list_browsers()
+                .into_iter()
+                .find(|(label, _)| !label.starts_with("browser-pane-"))
                 .and_then(|(_, b)| b.host().map(|h| h.client()));
             tracing::info!(
                 label = %self.label,
                 elapsed_us = t0.elapsed().as_micros() as u64,
+                client_found = client.is_some(),
                 "[create-window] got client"
             );
 
