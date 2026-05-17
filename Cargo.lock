@@ -16,6 +16,7 @@ dependencies = [
  "base64",
  "clap",
  "dirs",
+ "portable-pty",
  "reqwest",
  "serde",
  "serde_json",
