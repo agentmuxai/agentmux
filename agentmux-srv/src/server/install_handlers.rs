@@ -321,6 +321,7 @@ fn spawn_install_task(
         if let Err(e) = std::fs::create_dir_all(&provider_dir) {
             emit_done(&broker, false, Some(format!("mkdir {}: {e}", provider_dir.display())));
             registry.drop_session(&session_id);
+            registry.release_provider(&provider_id);
             return;
         }
         let provider_dir_str = provider_dir.to_string_lossy().to_string();
