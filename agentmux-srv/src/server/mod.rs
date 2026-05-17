@@ -332,40 +332,6 @@ async fn handle_wps_publish(
     State(state): State<AppState>,
     Json(req): Json<WpsPublishRequest>,
 ) -> impl IntoResponse {
-    // Live-log diagnostic (temporary — track gap from
-    // SPEC_STREAMING_BASH_RUNNER §6 user-visible regression).
-    // Logs every publish so we can see whether tool_chunk events
-    // reach the endpoint and how the broker routes them.
-    if req.event == "tool_chunk" {
-        // Metadata only — do NOT log req.data. Bash tool output can
-        // contain credentials, request payloads, etc. Codex P2 #884
-        // round 1.
-        let op = req.data.get("op").and_then(|v| v.as_str()).unwrap_or("?");
-        let kind = req.data.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
-        let content_len = req
-            .data
-            .get("content")
-            .and_then(|v| v.as_str())
-            .map(|s| s.len())
-            .unwrap_or(0);
-        let tool_id = req
-            .data
-            .get("tool_id")
-            .and_then(|v| v.as_str())
-            .map(|s| s.chars().take(14).collect::<String>())
-            .unwrap_or_default();
-        tracing::info!(
-            target: "live-log-diag",
-            event = %req.event,
-            scopes = ?req.scopes,
-            persist = req.persist,
-            op = %op,
-            kind = %kind,
-            tool_id = %tool_id,
-            content_len,
-            "wps publish received",
-        );
-    }
     let event = crate::backend::wps::WaveEvent {
         event: req.event,
         scopes: req.scopes,
