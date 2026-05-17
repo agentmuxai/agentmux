@@ -6,23 +6,28 @@
 //! Invariants:
 //! - The user's command is decoded from `--b64-cmd` so quoting /
 //!   multi-line / shell-metachar content survives the rewrite.
-//! - The inner command runs under `bash -c` via piped stdio (NOT a PTY).
-//!   PTY was tried in β.A and broke on Win10's ConPTY (child exited
-//!   with `STATUS_DLL_INIT_FAILED` because `portable_pty`'s master
-//!   handle was dropped during child startup — see
-//!   `docs/retros/2026-05-11-live-log-streaming-wrapper-failures.md`
-//!   §4.2 and §6.3). Plain pipes give us line streaming, which is what
-//!   the live-log feature needs; PTY-only behaviors (spinner fidelity,
-//!   interactive prompts, CR-only progress bars) are deferred.
+//! - The inner command runs under `bash -c` inside a PTY by default
+//!   (`run_via_pty`), with a pipe-stdio fallback (`run_via_pipes`)
+//!   if PTY allocation fails. The PTY path keeps glibc's stdout
+//!   line-buffered so partial chunks reach the overlay in real time;
+//!   bash's startup DSR (`\x1b[6n`) is satisfied by pre-loading the
+//!   master writer with `\x1b[1;1R` and dropping it immediately, and
+//!   the user's command is prefixed `exec </dev/null;` so stdin-
+//!   reading children see EOF rather than blocking on the PTY's
+//!   stdin (ConPTY doesn't EOF on master-writer drop). The pipe
+//!   path remains as a safety net and is the only path that
+//!   preserves the stdout/stderr split — PTY collapses both onto
+//!   one stream. See `docs/specs/SPEC_LIVE_LOG_PTY_REWORK_2026_05_16.md`.
 //! - Bash is located via `$BASH` → `$AGENTMUX_BASH` → PATH search →
 //!   well-known Windows locations (Git Bash). Fails loud if missing.
-//! - stdout and stderr are streamed concurrently, each line published
-//!   as its own chunk with `kind` set to `"stdout"` or `"stderr"`.
-//!   Aggregated stdout (with stderr lines prefixed `[stderr] `) is
-//!   captured into a buffer; on exit, a formatted summary lands on
-//!   this process's stdout for Claude's native Bash tool to harvest as
-//!   the `tool_result` content. Truncated head/tail at 50KB each per
-//!   `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §4.5.
+//! - Each line is published as its own chunk with `kind` set to
+//!   `"stdout"` (PTY path always; pipe path for stdout reads) or
+//!   `"stderr"` (pipe path only — PTY merges both onto one stream).
+//!   Aggregated output (with stderr lines prefixed `[stderr] ` in the
+//!   pipe path) is captured into a buffer; on exit, a formatted summary
+//!   lands on this process's stdout for Claude's native Bash tool to
+//!   harvest as the `tool_result` content. Truncated head/tail at 50KB
+//!   each per `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §4.5.
 //! - If WPS publish fails (missing env, sidecar down, etc.), the
 //!   command still runs to completion — output just doesn't stream.
 //!   The model-visible blob is unaffected. A `kind: "system"` chunk
@@ -30,6 +35,7 @@
 
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
+use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -385,15 +391,30 @@ where
     }
 }
 
-/// Spawn the bash child via piped stdio and stream its lines.
+/// Spawn the bash child and stream its lines. PTY by default with a
+/// pipe fallback if PTY allocation fails (G6 in
+/// docs/specs/SPEC_LIVE_LOG_PTY_REWORK_2026_05_16.md).
 ///
-/// Why pipes instead of a PTY: on Windows, the previous `portable_pty`
-/// path dropped `pair.master` immediately after cloning the reader,
-/// which tears down the ConPTY mid-startup and yields
-/// `STATUS_DLL_INIT_FAILED` for every child. The fix is either to keep
-/// `master` alive across `child.wait()` OR drop PTY entirely. The
-/// live-log feature wants line streaming, not spinner fidelity, so
-/// plain pipes win — they sidestep the entire ConPTY lifetime class.
+/// Why PTY: when the child sees its stdout as a pipe, glibc switches
+/// libc stdio from line-buffered to block-buffered (~4 KB). External
+/// programs (grep, npm, cargo, python, ...) accumulate output in the
+/// stdio buffer until flush, defeating the live-log overlay's premise.
+/// PTY makes `isatty(STDOUT_FILENO) == 1` so glibc stays line-buffered.
+///
+/// CRITICAL ConPTY lifetime contract (Windows): `pair.master` MUST
+/// stay alive across `child.wait()`. Dropping master during child
+/// startup tears down the pseudoconsole anchor and produces
+/// `STATUS_DLL_INIT_FAILED` (the β.A wedge). See retro §4.2.
+///
+/// HEADLESS PTY contract (cross-platform): bash queries the PTY at
+/// startup with `\x1b[6n` (DSR — request cursor position) and blocks
+/// on stdin waiting for a `\x1b[r;cR` response. A headless PTY (no
+/// real terminal behind it) never answers — bash never proceeds —
+/// `child.wait()` therefore never returns. Our PTY reader detects DSR
+/// queries and writes a synthetic `\x1b[1;1R` response back via the
+/// master writer. This is what xterm.js does for VS Code's agent-
+/// mode terminal; here we do the minimum subset for non-interactive
+/// `bash -c`. Verified via agentmux-pty-repro V2 before this landed.
 async fn run_proc(
     args: &Args,
     command: &str,
@@ -401,9 +422,163 @@ async fn run_proc(
     buffered: Arc<Mutex<Vec<u8>>>,
 ) -> Result<i32> {
     let bash = locate_bash()?;
-    tracing::info!(target: "bashwrap", bash = %bash.display(), "spawning bash -c");
+    let pty_system = native_pty_system();
+    match pty_system.openpty(PtySize {
+        rows: 24,
+        cols: 80,
+        pixel_width: 0,
+        pixel_height: 0,
+    }) {
+        Ok(pair) => {
+            tracing::info!(
+                target: "bashwrap",
+                bash = %bash.display(),
+                "spawning bash -c via PTY (live-buffered, headless DSR responder active)",
+            );
+            run_via_pty(args, command, wps, buffered, &bash, pair).await
+        }
+        Err(e) => {
+            tracing::warn!(
+                target: "bashwrap",
+                bash = %bash.display(),
+                error = %e,
+                "PTY allocation failed — falling back to pipes (output may buffer at child level)",
+            );
+            run_via_pipes(args, command, wps, buffered, &bash).await
+        }
+    }
+}
 
-    let mut child = Command::new(&bash)
+/// PTY-backed run path. Holds master alive across child.wait() and
+/// answers DSR queries from bash at startup.
+async fn run_via_pty(
+    args: &Args,
+    command: &str,
+    wps: Option<&WpsClient>,
+    buffered: Arc<Mutex<Vec<u8>>>,
+    bash: &std::path::Path,
+    pair: portable_pty::PtyPair,
+) -> Result<i32> {
+    let mut cmd = CommandBuilder::new(bash.as_os_str());
+    // -c <cmd> for non-interactive run, WITHOUT -l. Login shell
+    // startup costs ~1 second (sources /etc/profile, /etc/bashrc,
+    // ~/.bash_profile, etc.) which the user sees as a "Running..."
+    // delay before any chunk arrives. We pre-prepend the MSYS2 bin
+    // dirs to PATH manually (see below) so external commands like
+    // `date`, `grep`, `awk` resolve without needing rc-script setup.
+    cmd.arg("-c");
+    // Redirect stdin to /dev/null inside bash so stdin-reading
+    // children see EOF — ConPTY does not deliver EOF on master
+    // writer drop. The redirect runs after readline's startup DSR
+    // exchange, so the pre-written CSI response is still consumed.
+    cmd.arg(format!("exec </dev/null; {}", command));
+
+    // PATH fix-up: bashwrap is a Windows exe, so when MSYS2/Git Bash
+    // spawned us it converted PATH to Windows form, which has
+    // /c/Windows/system32, /c/Program Files/nodejs, etc. but NOT
+    // /usr/bin, /usr/local/bin, /mingw64/bin where coreutils lives.
+    // Without -l (above), the child bash inherits the Windows PATH
+    // and every external command becomes "command not found".
+    //
+    // Derive MSYS2 bin dirs from bash's own location — typically
+    // bash sits at `C:\Program Files\Git\usr\bin\bash.exe`, so the
+    // three dirs we need are reachable as siblings/cousins of that.
+    // Pre-pend them to the inherited PATH; the existing Windows
+    // entries stay so platform-specific tools (cmd, powershell, gh,
+    // ...) still resolve.
+    if let Some(usr_bin) = bash.parent() {
+        let mut prefix_dirs: Vec<std::ffi::OsString> = vec![usr_bin.to_path_buf().into()];
+        if let Some(usr) = usr_bin.parent() {
+            // /usr/local/bin sibling of /usr/bin.
+            let local_bin = usr.join("local").join("bin");
+            if local_bin.exists() {
+                prefix_dirs.push(local_bin.into());
+            }
+            // /mingw64/bin sibling of /usr (Git for Windows layout).
+            if let Some(git_root) = usr.parent() {
+                let mingw64_bin = git_root.join("mingw64").join("bin");
+                if mingw64_bin.exists() {
+                    prefix_dirs.push(mingw64_bin.into());
+                }
+            }
+        }
+        let existing_path = std::env::var_os("PATH").unwrap_or_default();
+        let mut all_dirs: Vec<std::path::PathBuf> =
+            prefix_dirs.iter().map(std::path::PathBuf::from).collect();
+        if !existing_path.is_empty() {
+            for p in std::env::split_paths(&existing_path) {
+                all_dirs.push(p);
+            }
+        }
+        let new_path = std::env::join_paths(&all_dirs)
+            .context("joining PATH entries for child bash")?;
+        cmd.env("PATH", &new_path);
+        tracing::info!(
+            target: "bashwrap",
+            prepended_dirs = ?prefix_dirs,
+            "PATH fix-up for child bash (no login-shell startup needed)",
+        );
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        cmd.cwd(cwd);
+    }
+
+    let child = pair
+        .slave
+        .spawn_command(cmd)
+        .with_context(|| format!("PTY spawn of bash at {}", bash.display()))?;
+
+    let reader = pair.master.try_clone_reader().context("PTY try_clone_reader")?;
+
+    // Pre-load bash's stdin with a DSR response and drop the writer.
+    // Bash's readline blocks on `\x1b[6n` until it reads a matching
+    // CSI report; queuing the response upfront unblocks that read
+    // without keeping the master writer open across the child.
+    {
+        use std::io::Write as _;
+        let mut writer = pair.master.take_writer().context("PTY take_writer")?;
+        let _ = writer.write_all(b"\x1b[1;1R");
+        let _ = writer.flush();
+    }
+
+    let (tx, rx) = mpsc::channel::<LineEvent>(1024);
+    let tx_reader = tx.clone();
+    tokio::task::spawn_blocking(move || {
+        pty_reader_loop(reader, tx_reader);
+    });
+    drop(tx);
+
+    let publisher_handle = spawn_publisher_loop(args, wps.cloned(), buffered.clone(), rx);
+
+    // Move the whole pair (master + dropped-slave-handle slot) into
+    // the wait task so its destructor runs after child reaps.
+    let exit_code = tokio::task::spawn_blocking(move || -> Result<i32> {
+        let mut child = child;
+        let status = child.wait().context("PTY child wait")?;
+        // pair drops here, after wait returns — triggers reader EOF.
+        drop(pair);
+        Ok(status.exit_code() as i32)
+    })
+    .await
+    .context("PTY wait task join")??;
+
+    // `buffered` (read by the caller for the model blob) is populated
+    // only by the publisher loop, so drain it before returning.
+    let _ = publisher_handle.await;
+    Ok(exit_code)
+}
+
+/// Pipe-backed run path. Safety net for environments where PTY
+/// allocation fails (CI, sandboxes). Same byte semantics as the old
+/// pipe-only wrapper.
+async fn run_via_pipes(
+    args: &Args,
+    command: &str,
+    wps: Option<&WpsClient>,
+    buffered: Arc<Mutex<Vec<u8>>>,
+    bash: &std::path::Path,
+) -> Result<i32> {
+    let mut child = Command::new(bash)
         .arg("-c")
         .arg(command)
         .stdin(Stdio::null())
@@ -411,53 +586,232 @@ async fn run_proc(
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .with_context(|| format!("spawning bash at {}", bash.display()))?;
+        .with_context(|| format!("pipe spawn of bash at {}", bash.display()))?;
 
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| anyhow!("bash child has no stdout"))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| anyhow!("bash child has no stderr"))?;
+    let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
+    let stderr = child.stderr.take().ok_or_else(|| anyhow!("no stderr"))?;
 
-    let (tx, mut rx) = mpsc::channel::<LineEvent>(1024);
+    let (tx, rx) = mpsc::channel::<LineEvent>(1024);
     tokio::spawn(stream_reader(stdout, "stdout", tx.clone()));
     tokio::spawn(stream_reader(stderr, "stderr", tx.clone()));
-    drop(tx); // last surviving sender lives in the spawned tasks
+    drop(tx);
 
-    // Publisher: aggregate into buffer + publish to WPS.
+    let publisher_handle = spawn_publisher_loop(args, wps.cloned(), buffered.clone(), rx);
+
+    let exit_status = child.wait().await.context("waiting for bash child")?;
+    let _ = publisher_handle.await;
+    Ok(exit_status.code().unwrap_or(-1))
+}
+
+/// PTY reader loop: drains bytes from the master, strips DSR / ANSI
+/// control sequences, and forwards line-split chunks to the publisher.
+fn pty_reader_loop(
+    mut reader: Box<dyn std::io::Read + Send>,
+    tx: mpsc::Sender<LineEvent>,
+) {
+    use std::io::Read;
+    // PTY collapses stdout + stderr onto one stream — the slave's
+    // terminal device is a single FD shared by both. Chunks are
+    // labelled "stdout" because there is no way to recover the
+    // original FD distinction from the master read. The pipe path
+    // (`run_via_pipes`) preserves the split.
+    let kind: &'static str = "stdout";
+    let mut pending: Vec<u8> = Vec::with_capacity(8192);
+    let mut buf = [0u8; 8192];
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => {
+                if !pending.is_empty() {
+                    let _ = tx.blocking_send(LineEvent {
+                        kind,
+                        bytes: std::mem::take(&mut pending),
+                    });
+                }
+                return;
+            }
+            Ok(n) => {
+                let mut chunk = buf[..n].to_vec();
+                strip_dsr(&mut chunk);
+                // Phase β: strip remaining ANSI control sequences so
+                // the plain-text chunk list doesn't render them as
+                // garbled literal characters. Bash emits terminal-
+                // init bytes (`\x1b[m`, `\x1b]0;<title>\x07`,
+                // `\x1b[?25h`) on every `-c` invocation through a
+                // PTY; without this strip every chunk list starts
+                // with garbage.
+                strip_ansi(&mut chunk);
+                if chunk.is_empty() {
+                    continue;
+                }
+                pending.extend_from_slice(&chunk);
+                while let Some(nl_pos) = pending.iter().position(|&b| b == b'\n') {
+                    let line: Vec<u8> = pending.drain(..=nl_pos).collect();
+                    if tx.blocking_send(LineEvent { kind, bytes: line }).is_err() {
+                        return;
+                    }
+                }
+                // Flush any remaining partial line at the end of each
+                // read so progress prompts like `printf 'starting...'`
+                // surface live without waiting for a newline.
+                if !pending.is_empty() {
+                    if tx
+                        .blocking_send(LineEvent {
+                            kind,
+                            bytes: std::mem::take(&mut pending),
+                        })
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(target: "bashwrap", error = %e, "PTY read error");
+                return;
+            }
+        }
+    }
+}
+
+/// Scan `chunk` for DSR `\x1b[6n` sequences and remove them in place
+/// so they don't leak into the model-visible blob or overlay log.
+fn strip_dsr(chunk: &mut Vec<u8>) {
+    const DSR: &[u8] = b"\x1b[6n";
+    let mut i = 0;
+    while i + DSR.len() <= chunk.len() {
+        if &chunk[i..i + DSR.len()] == DSR {
+            chunk.drain(i..i + DSR.len());
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// Phase β (lite): strip ANSI control sequences from a PTY chunk so
+/// the overlay's plain-text ChunkList doesn't render them as garbled
+/// literal characters.
+///
+/// Three families to handle (everything bash emits during init and
+/// most programs emit during normal output):
+///
+/// 1. **CSI sequences** — `ESC [ <params> <final>` where params are
+///    `0x30..=0x3F` (digits, `;`, `?`, etc.) and final is
+///    `0x40..=0x7E` (letters + punctuation). Covers `\x1b[m` (reset),
+///    `\x1b[?25h/l` (cursor visibility), color codes, cursor moves.
+///
+/// 2. **OSC sequences** — `ESC ] <text> BEL` (or `ESC ] <text> ESC \`).
+///    Covers `\x1b]0;<title>\x07` (set window title — emitted by
+///    Git Bash on every command).
+///
+/// 3. **Lone control chars** — `\r` (carriage return without
+///    newline), `\x07` (bell), `\x08` (backspace). We strip `\r`
+///    when it immediately precedes `\n` (CRLF → LF for the chunk
+///    list); other `\r` we keep as-is for now since simple progress
+///    bars use it.
+///
+/// Things we DON'T handle yet (Phase γ territory):
+/// - Alt-screen apps (`\x1b[?1049h`) — left in the stream.
+/// - Cursor positioning escapes within the same line.
+/// - OSC 633 (shell integration markers).
+fn strip_ansi(chunk: &mut Vec<u8>) {
+    let mut out: Vec<u8> = Vec::with_capacity(chunk.len());
+    let mut i = 0;
+    while i < chunk.len() {
+        let b = chunk[i];
+        if b == 0x1b && i + 1 < chunk.len() {
+            match chunk[i + 1] {
+                b'[' => {
+                    // CSI: scan params (0x30..=0x3F) then final (0x40..=0x7E).
+                    let mut j = i + 2;
+                    while j < chunk.len() && (0x30..=0x3F).contains(&chunk[j]) {
+                        j += 1;
+                    }
+                    // Intermediate bytes (rare for our case).
+                    while j < chunk.len() && (0x20..=0x2F).contains(&chunk[j]) {
+                        j += 1;
+                    }
+                    if j < chunk.len() && (0x40..=0x7E).contains(&chunk[j]) {
+                        // Consume the whole CSI sequence.
+                        i = j + 1;
+                        continue;
+                    }
+                    // Malformed — keep ESC, skip past.
+                    out.push(b);
+                    i += 1;
+                    continue;
+                }
+                b']' => {
+                    // OSC: scan until BEL (0x07) or ST (`ESC \`).
+                    let mut j = i + 2;
+                    while j < chunk.len() {
+                        if chunk[j] == 0x07 {
+                            i = j + 1;
+                            break;
+                        }
+                        if chunk[j] == 0x1b && j + 1 < chunk.len() && chunk[j + 1] == b'\\' {
+                            i = j + 2;
+                            break;
+                        }
+                        j += 1;
+                    }
+                    if i <= j {
+                        // Reached end of chunk without terminator —
+                        // drop the rest as a partial OSC. (Next read
+                        // will resume with the trailing bytes; if it
+                        // doesn't start with the terminator we'll
+                        // mis-render once, but that's better than
+                        // emitting garbage.)
+                        i = chunk.len();
+                    }
+                    continue;
+                }
+                _ => {
+                    // ESC followed by some other byte (e.g. `ESC c` =
+                    // reset). Consume both.
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        if b == 0x07 {
+            // Bare BEL — drop.
+            i += 1;
+            continue;
+        }
+        if b == b'\r' && i + 1 < chunk.len() && chunk[i + 1] == b'\n' {
+            // CRLF → LF (matches what bash sends after every line on
+            // a PTY; the chunk list expects LF only).
+            i += 1;
+            continue;
+        }
+        out.push(b);
+        i += 1;
+    }
+    *chunk = out;
+}
+
+/// Shared publisher loop — drains the LineEvent channel, aggregates
+/// into the model-visible buffer, and publishes each line via WPS.
+fn spawn_publisher_loop(
+    args: &Args,
+    wps: Option<WpsClient>,
+    buffered: Arc<Mutex<Vec<u8>>>,
+    mut rx: mpsc::Receiver<LineEvent>,
+) -> tokio::task::JoinHandle<()> {
     let tool_id = args.tool_id.clone();
     let block_id = args.block_id.clone();
-    let wps_clone = wps.cloned();
-    let buffered_clone = buffered.clone();
-    let publisher_handle = tokio::spawn(async move {
+    tokio::spawn(async move {
         let mut chunks_published = 0u64;
         let mut chunks_failed = 0u64;
         while let Some(event) = rx.recv().await {
-            // Aggregate raw bytes into the model-visible buffer
-            // FIRST, before any UTF-8 conversion — preserves binary
-            // output fidelity. Stderr lines are prefixed so Claude
-            // can reason about them distinctly in the tool_result.
-            // `event.bytes` already includes the trailing `\n` from
-            // read_until (or omits it on the final EOF fragment).
             {
-                let mut buf = buffered_clone.lock().await;
+                let mut buf = buffered.lock().await;
                 if event.kind == "stderr" {
                     buf.extend_from_slice(b"[stderr] ");
                 }
                 buf.extend_from_slice(&event.bytes);
             }
-
-            // For the WPS chunk, the wire format is JSON so we must
-            // produce a String. `from_utf8_lossy` replaces invalid
-            // sequences with U+FFFD rather than aborting, preserving
-            // the model-visible blob's fidelity (kept above) while
-            // still publishing a readable line for the overlay.
-            // Strip the trailing `\n` from the chunk content so the
-            // frontend renderer doesn't add a stray blank line.
-            if let Some(client) = wps_clone.as_ref() {
+            if let Some(client) = wps.as_ref() {
                 let mut line_bytes: &[u8] = &event.bytes;
                 if line_bytes.last() == Some(&b'\n') {
                     line_bytes = &line_bytes[..line_bytes.len() - 1];
@@ -487,16 +841,7 @@ async fn run_proc(
             chunks_failed,
             "publisher done"
         );
-    });
-
-    // Wait for the child; tokio::process gives us the real exit code.
-    let exit_status = child.wait().await.context("waiting for bash child")?;
-    let _ = publisher_handle.await;
-
-    // tokio::process exposes Option<i32> for Unix-signal-terminated
-    // children; surface -1 in that case so Claude sees a clearly
-    // abnormal exit.
-    Ok(exit_status.code().unwrap_or(-1))
+    })
 }
 
 /// Snap `idx` down to the nearest UTF-8 character boundary (or 0).
