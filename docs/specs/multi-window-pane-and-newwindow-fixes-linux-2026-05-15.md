@@ -268,26 +268,18 @@ old pane's content over the new tab. Windows handled this incidentally
 because the equivalent code path uses `SetWindowPos` with width/height 0,
 and Win32 auto-hides 0-sized child windows.
 
-### Fix
+### Fix (initial — see Bug 3 follow-up below)
 
-`agentmux-cef/src/browser_pane/creation_views.rs::resize_browser_pane_view`:
+The first cut at this was `resize_browser_pane_view` toggling
+`set_visible` purely from the rect's dimensions:
 
 ```rust
-controller.set_size(Some(&Size { width: rect.width, height: rect.height }));
-controller.set_position(Some(&Point { x: rect.x, y: rect.y }));
 let should_be_visible = rect.width > 0 && rect.height > 0;
 controller.set_visible(if should_be_visible { 1 } else { 0 });
 ```
 
-The reverse direction (`visible=1` when rect goes back to non-zero) is
-also covered: when the user switches BACK to the original tab, the
-placeholder re-shows, `getBoundingClientRect` returns the real rect, and
-the next `syncPosition` (within 200 ms) re-fires the resize IPC with
-non-zero dimensions → `set_visible(1)`.
-
-No new IPC surface — the existing `browser_pane_resize` channel carries
-the visibility intent implicitly via dimensions. No frontend change
-required.
+That fixes the tab-switch case but introduces a converse race with the
+pane-airspace mechanism — see Bug 3 follow-up.
 
 ### Windows impact: none
 
@@ -295,6 +287,67 @@ Windows path uses `SetWindowPos` (`browser_panes.rs::resize`) which
 already hides 0-sized child windows automatically. The `set_visible` toggle
 only runs on the non-Windows path (`resize_browser_pane_view`). No
 Windows code touched.
+
+## Bug 3 follow-up: visibility must combine both hide reasons
+
+### Symptom (from Codex review on PR #881)
+
+With a DOM modal/popover open (e.g. the status-bar version panel,
+hamburger menu, tooltip):
+
+1. Frontend sends `browser_panes_set_overlay_clip([modal_rect])` →
+   pane-airspace task hides the intersecting pane via
+   `controller.set_visible(0)`.
+2. User drags a splitter (or any other layout change) → frontend's
+   `syncPosition` fires `browser_pane_resize` with positive dimensions
+   because the placeholder is still visible.
+3. The initial Bug 3 fix unconditionally calls `set_visible(1)` on
+   positive resize → re-exposes the pane on top of the modal.
+
+User-visible: a borderless browser pane re-appears above a modal/menu.
+
+### Mechanism
+
+`resize_browser_pane_view` was made the sole visibility authority on its
+code path. It only knew about its own hide reason (zero rect). It didn't
+consult the airspace's hide reason (overlay-clip intersection). The
+airspace, in turn, was passed `overlay_rects` by-value to its task and
+never published them anywhere durable.
+
+### Fix
+
+1. Add `AppState::pane_overlay_rects: Mutex<HashMap<String, Vec<(i32,i32,i32,i32)>>>`
+   keyed by `window_label`.
+2. `set_pane_overlay_clip` writes the latest overlay rects into this
+   state before posting the airspace task.
+3. Extract `browser_panes::compute_pane_visible(state, window_label,
+   pane_rect) -> bool` as the single source of truth:
+   ```rust
+   pub fn compute_pane_visible(
+       state: &Arc<AppState>,
+       window_label: &str,
+       pane_rect: (i32, i32, i32, i32),
+   ) -> bool {
+       if pane_rect.2 <= 0 || pane_rect.3 <= 0 {
+           return false;  // hidden because tab inactive (display:none → 0×0)
+       }
+       let overlays = state.pane_overlay_rects.lock()
+           .get(window_label).cloned().unwrap_or_default();
+       !overlays.iter().any(|or| rects_intersect(*or, pane_rect))
+   }
+   ```
+4. Both `SetPaneOverlayClipViewsTask` AND `resize_browser_pane_view` call
+   this helper instead of computing visibility locally. Both paths
+   converge on the same answer; neither clobbers the other.
+
+### Windows impact: none
+
+`compute_pane_visible`, `pane_overlay_rects`, and both call sites are all
+`#[cfg(not(target_os = "windows"))]`. Windows pane visibility still
+flows through `SetWindowPos` and `SetWindowRgn`.
+
+Credit: caught by Codex inline review on `creation_views.rs:301` of the
+initial Bug 3 fix.
 
 ## Test plan
 

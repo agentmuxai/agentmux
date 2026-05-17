@@ -289,23 +289,26 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
     // a window.layout() on the OWNING window to force the layout pass.
     controller.set_size(Some(&Size { width: rect.width, height: rect.height }));
     controller.set_position(Some(&Point { x: rect.x, y: rect.y }));
-    // Hide the overlay when the resize reports a zero-area rect. The frontend
-    // sends this when its placeholder element goes `display:none` (tab
-    // switched away) — getBoundingClientRect() of a hidden element returns
-    // all zeros. Without explicit set_visible(0), the OverlayController
-    // stays at set_visible(1) and Aura/Wayland renders a residual borderless
-    // quad over whatever pane (e.g. agent pane) is shown in the now-active
-    // tab. Reverse on next non-zero resize so panes return when the tab
-    // becomes active again.
-    let should_be_visible = rect.width > 0 && rect.height > 0;
-    controller.set_visible(if should_be_visible { 1 } else { 0 });
+    // Visibility = AND of the two independent hide reasons:
+    //  - Zero-area rect (frontend placed the placeholder in `display:none`
+    //    when the tab is inactive → getBoundingClientRect reports 0×0).
+    //  - This pane's bounds intersect a registered overlay-clip rect for
+    //    its window (DOM modal/menu/tooltip is on top of it).
+    // Both are tracked in AppState; `compute_pane_visible` is the single
+    // authoritative answer, shared with `SetPaneOverlayClipViewsTask`.
+    // Without consulting overlay-clip state here, a positive-rect resize
+    // (e.g. user drags a splitter while a modal is open) would clobber
+    // the airspace's set_visible(0) — Codex review on PR #881.
+    let pane_rect = (rect.x, rect.y, rect.width, rect.height);
+    let visible = crate::browser_panes::compute_pane_visible(state, &window_label, pane_rect);
+    controller.set_visible(if visible { 1 } else { 0 });
     if let Some(window) = state.windows.lock().get(&window_label).cloned() {
         window.layout();
     }
     tracing::debug!(
         label = %label, window_label = %window_label,
         x = rect.x, y = rect.y, w = rect.width, h = rect.height,
-        visible = should_be_visible,
+        visible,
         "[browser-pane] views: resize applied (set_size + set_position + visibility + layout)"
     );
 }
@@ -377,3 +380,4 @@ pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
         );
     }
 }
+
