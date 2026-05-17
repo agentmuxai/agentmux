@@ -1,51 +1,23 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// AgentInstallModal — opens when the user picks an agent whose CLI
-// isn't installed in the per-version cache. Streams npm install output
-// live. Phase α of SPEC_AGENT_INSTALL_STAGE_2026_05_17.md.
-//
-// Pattern after AgentLaunchModalBody but with a scrollable log area
-// instead of form fields.
+// AgentInstallModal — install-specific bits only. The outer modal
+// chrome (header/body/footer/title/description) lives in
+// `frontend/app/element/modal-v2.scss` and is shared across all
+// tab-modal panels.
 
-.agent-install-modal-panel {
+.agent-install-modal-body {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-3);
     min-width: 560px;
     max-width: 720px;
-    min-height: 360px;
-    max-height: 70vh;
-}
-
-.agent-install-modal-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding-bottom: var(--space-1);
-    border-bottom: 1px solid var(--border-color);
+    min-height: 320px;
+    max-height: 60vh;
 }
 
 .agent-install-modal-icon {
-    font-size: 20px;
-    flex-shrink: 0;
-}
-
-.agent-install-modal-title {
-    flex: 1 1 auto;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--main-text-color);
-}
-
-.agent-install-modal-status {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
-    font-size: 12px;
-    color: var(--secondary-text-color);
-    font-variant-numeric: tabular-nums;
+    margin-right: var(--space-2);
 }
 
 .agent-install-modal-spinner {
@@ -62,31 +34,20 @@
     font-weight: 700;
 }
 
-.agent-install-modal-log {
+// xterm.js container — Terminal mounts here and renders its own
+// canvas / DOM. We just provide a sized box matching xterm's theme.
+.agent-install-modal-term {
     flex: 1 1 auto;
-    min-height: 200px;
-    overflow-y: auto;
-    overflow-x: hidden;
+    min-height: 240px;
     padding: var(--space-1-5);
-    margin: 0;
-    background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+    background: #0d0e0f;
     border: 1px solid var(--border-color);
     border-radius: 4px;
-    font-family: var(--fixed-font, monospace);
-    font-size: 11px;
-    line-height: 1.4;
-    color: var(--main-text-color);
-    white-space: pre-wrap;
-    word-break: break-word;
-}
+    overflow: hidden;
 
-.agent-install-modal-line {
-    display: inline;
-}
-
-.agent-install-modal-line--stderr {
-    color: var(--error-color, #ff6b6b);
-    opacity: 0.9;
+    .xterm {
+        height: 100%;
+    }
 }
 
 .agent-install-modal-error {
@@ -95,19 +56,11 @@
     border: 1px solid color-mix(in srgb, var(--error-color, #ff6b6b) 40%, transparent);
     border-radius: 4px;
     color: var(--error-color, #ff6b6b);
-    font-size: 12px;
-}
-
-.agent-install-modal-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--space-1);
-    padding-top: var(--space-1);
+    font-size: var(--text-sm);
 }
 
 .agent-install-modal-launching {
-    align-self: center;
     color: var(--secondary-text-color);
-    font-size: 12px;
+    font-size: var(--text-sm);
     font-style: italic;
 }
