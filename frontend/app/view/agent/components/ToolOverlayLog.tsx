@@ -15,7 +15,7 @@
  * ANSI parsing lands in Phase γ (perf + worker offload) per the spec.
  */
 
-import { For, Match, Show, Switch, createEffect, createMemo, type JSX } from "solid-js";
+import { For, Match, Show, Switch, createEffect, type JSX } from "solid-js";
 // `Show` retained for fallback ToolOverlayResult sub-tree.
 import type { ToolNode } from "../types";
 import { BashOutputViewer } from "./BashOutputViewer";
@@ -38,7 +38,17 @@ const KIND_CLASS: Record<string, string> = {
 export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     let scrollRef: HTMLDivElement | undefined;
 
-    const chunks = createMemo(() => props.node.log?.chunks ?? []);
+    // INLINE prop access pattern (matches MarkdownBlock lines 18-23) —
+    // wrapping `props.node.log?.chunks` in createMemo broke reactivity
+    // for in-place ToolNode updates (ToolChunkAppend only mutates log,
+    // not the array length, and the memo's tracked dependencies did
+    // not fire on those updates — verified via diag in PR #884/#885/#886
+    // where the reducer appended 58+ chunks but the memo evaluated
+    // exactly once per overlay mount with log=undefined). Solid's
+    // JSX-expression auto-wrapping IS reactive end-to-end through
+    // multi-layer prop chains; createMemo's manual tracking is not.
+    // Read every gate inline at JSX time so each repaint sees the
+    // latest log state.
     /**
      * Phase 3 fallback rules — refined after codex P1 on PR #803.
      *
@@ -63,9 +73,10 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
      * every tool that streamed any output — exit codes, diffs, and
      * highlighted Read content were silently dropped post-completion.
      */
-    const isStreaming = createMemo(() => props.node.log?.open === true);
-    const hasChunks = createMemo(() => chunks().length > 0);
-    const hasResult = createMemo(() => props.node.result != null);
+    const isStreaming = () => props.node.log?.open === true;
+    const hasChunks = () => (props.node.log?.chunks?.length ?? 0) > 0;
+    const hasResult = () => props.node.result != null;
+    const chunks = () => props.node.log?.chunks ?? [];
 
     // Auto-stick to bottom while the user hasn't scrolled away. The
     // threshold is forgiving — within 40px of the bottom counts as
@@ -149,15 +160,30 @@ ToolOverlayLog.displayName = "ToolOverlayLog";
  * doesn't stream).
  */
 function ToolOverlayResult(props: { node: ToolNode }): JSX.Element {
-    const node = props.node;
-    if (node.status === "running") {
-        return (
-            <div class="agent-tool-loading">
-                <span class="agent-tool-spinner">⏳</span> Running...
-            </div>
-        );
-    }
+    // NEVER destructure `const node = props.node`. The streaming
+    // buffer keeps this component mounted across reducer updates;
+    // the reducer's ToolChunkAppend replaces the ToolNode reference
+    // for each chunk. A destructured `node` would capture the very
+    // first reference (status="running", no log) and freeze — every
+    // subsequent JSX evaluation would see the stale snapshot and
+    // keep rendering "⏳ Running..." even after chunks landed and
+    // status flipped. (Same pattern MarkdownBlock at lines 18-23
+    // warns against; bit us on PR #887.)
+    return (
+        <Show
+            when={props.node.status !== "running"}
+            fallback={
+                <div class="agent-tool-loading">
+                    <span class="agent-tool-spinner">⏳</span> Running...
+                </div>
+            }
+        >
+            {renderToolResultBody(props.node)}
+        </Show>
+    );
+}
 
+function renderToolResultBody(node: ToolNode): JSX.Element {
     switch (node.tool) {
         case "Edit":
             return <DiffViewer params={node.params as any} result={node.result as any} />;
