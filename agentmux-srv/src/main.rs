@@ -713,6 +713,7 @@ async fn main() {
         auth_session_manager: std::sync::Arc::new(
             crate::identity::auth_session::AuthSessionManager::new(),
         ),
+        install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
     };
 
     // Saga durability PR 2 — resume-on-startup. Walk any sagas the

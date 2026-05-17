@@ -16,6 +16,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { useTabModal } from "@/app/tab/tab-modal";
 import type { AgentViewModel } from "../agent-model";
+import { getProvider } from "../providers";
 import { AgentCard } from "./AgentCard";
 import { AgentCardSettingsPanel } from "./AgentCardSettingsPanel";
 import { AgentActionBar } from "./AgentActionBar";
@@ -77,12 +78,9 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // Session-local only — not persisted to block meta.
     const [expandedId, setExpandedId] = createSignal<string | null>(null);
 
-    // Clicking the card opens the launch modal in the tab-scoped layer.
-    // The picker no longer owns the modal's open/closed signal — that
-    // lives on TabModalLayer. We pass an `onSubmit` callback in the
-    // request; the layer closes the modal when it resolves.
-    const handleSelect = (agent: ForgeAgent) => {
-        setNodejsError(null);
+    // Open the launch modal. Extracted so the install-modal path can
+    // chain into it after a successful install.
+    const openLaunchModal = (agent: ForgeAgent) => {
         tabModal.open({
             kind: "launch-agent",
             agent,
@@ -103,6 +101,68 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 }
             },
         });
+    };
+
+    // Clicking the card opens either the install or launch modal in
+    // the tab-scoped layer, depending on whether the agent's CLI is
+    // already installed in the per-version cache. Phase α of
+    // SPEC_AGENT_INSTALL_STAGE_2026_05_17.md.
+    //
+    // Concurrency guard: handleSelect awaits an IPC round-trip
+    // (getCliPath), so a rapid double-click could open two modals (and
+    // start two parallel installs) without it. The pendingSelect set
+    // tracks in-flight resolutions per agent id and rejects re-entry.
+    const pendingSelect = new Set<string>();
+    const handleSelect = async (agent: ForgeAgent) => {
+        if (pendingSelect.has(agent.id)) return;
+        pendingSelect.add(agent.id);
+        try {
+            setNodejsError(null);
+            // Phase α only handles npm-installable providers. For
+            // providers without `npmPackage` (e.g. kimi via pip, system-
+            // PATH CLIs), fall through to the launch flow — its
+            // ResolveCliCommand already does the system-PATH search.
+            const prov = getProvider(agent.provider);
+            // Use the canonical provider id for the path probe — the
+            // saved agent definition may carry an alias like
+            // "claude-code" while install.start writes under "claude".
+            const canonicalProviderId = prov?.id ?? agent.provider;
+            const cliCommand = prov?.cliCommand ?? agent.provider;
+            const npmInstallable = !!prov?.npmPackage && prov.npmPackage.length > 0;
+            // Query the backend's per-version install dir (the same
+            // location `install.start` writes to). The CEF host's
+            // getCliPath probes a different path and would falsely
+            // report "not installed" for npm-cached providers, causing
+            // a re-install on every launch.
+            let installed = false;
+            if (npmInstallable) {
+                try {
+                    const r = await RpcApi.InstallCheckCommand(TabRpcClient, {
+                        providerId: canonicalProviderId,
+                        cliCommand,
+                    });
+                    installed = r.installed;
+                } catch {
+                    installed = false;
+                }
+            } else {
+                // Non-npm provider — launch flow will resolve via
+                // system PATH or report a missing-CLI error.
+                installed = true;
+            }
+            if (!installed) {
+                tabModal.open({
+                    kind: "install-agent",
+                    agent,
+                    originBlockId: props.model.blockId,
+                    onInstalled: () => openLaunchModal(agent),
+                });
+                return;
+            }
+            openLaunchModal(agent);
+        } finally {
+            pendingSelect.delete(agent.id);
+        }
     };
 
     const openForgeFor = (agent: ForgeAgent) => {
