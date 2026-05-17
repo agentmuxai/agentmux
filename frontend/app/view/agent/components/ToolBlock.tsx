@@ -72,14 +72,6 @@ const STATUS_ICON: Record<ToolNode["status"], string> = {
 // No dead space, no grace window. See feedback_no_timers_or_delays.md.
 
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
-    // Phase A of SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md replaced the
-    // portal-based overlay with an inline panel in normal document flow.
-    // All the absolute-position math (overlayRect, overlayUp, measure(),
-    // findScrollParent, getAncestorZoom, scroll-tracking effect) was
-    // necessary only to position the portal'd overlay against the
-    // collapsed row; the inline panel positions itself.
-    let blockRef: HTMLDivElement | undefined;
-
     // Hover-expand state. Instant on enter, instant on leave.
     const [hovering, setHovering] = createSignal(false);
     const handleMouseEnter = () => setHovering(true);
@@ -107,7 +99,6 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
 
     return (
         <div
-            ref={blockRef}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
             class={clsx("agent-tool-block", {
