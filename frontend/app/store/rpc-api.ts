@@ -753,6 +753,10 @@ class RpcApiType {
             authLoginArgs: string[];
             authCheckArgs: string[];
             authEnv?: Record<string, string>;
+            /** Spawn the login subprocess under a PTY (run_cli_login's
+             *  PTY branch). Required for providers whose auth subcommand
+             *  refuses to run without an interactive TTY (OpenClaw). */
+            requiresTty?: boolean;
         },
         opts?: RpcOpts,
     ): Promise<{ sessionId: string; authUrl?: string }> {

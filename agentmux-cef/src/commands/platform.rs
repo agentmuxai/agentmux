@@ -272,6 +272,48 @@ pub fn ensure_settings_file(state: &Arc<AppState>) -> Result<serde_json::Value, 
     Ok(serde_json::json!(settings_path.to_string_lossy()))
 }
 
+/// Stdin handle for an in-progress CLI login, regardless of whether
+/// it was spawned via plain pipes or via a PTY. `set_provider_auth`
+/// writes the OAuth code / pasted token here.
+pub enum CliLoginStdin {
+    /// Plain pipe — `tokio::process::Command` with `Stdio::piped()`.
+    /// AsyncWrite via tokio. Used by Claude, Codex, Gemini, Copilot,
+    /// Kimi — anything that doesn't strictly require a TTY for its
+    /// auth subcommand.
+    Pipe(tokio::process::ChildStdin),
+    /// PTY writer — `portable_pty` master writer. Sync `std::io::Write`.
+    /// Used by providers whose auth subcommand bails on `isatty()==0`
+    /// (currently OpenClaw's `openclaw models auth login`).
+    Pty(Box<dyn std::io::Write + Send>),
+}
+
+impl CliLoginStdin {
+    /// Write a line (terminated with `\n`) to the child's stdin. Used
+    /// by `set_provider_auth` to deliver an OAuth code.
+    pub async fn write_line(&mut self, line: &str) -> std::io::Result<()> {
+        let payload = format!("{}\n", line);
+        match self {
+            CliLoginStdin::Pipe(s) => {
+                use tokio::io::AsyncWriteExt;
+                s.write_all(payload.as_bytes()).await?;
+                s.flush().await?;
+                Ok(())
+            }
+            CliLoginStdin::Pty(w) => {
+                use std::io::Write;
+                // portable_pty's master writer is sync. Run it via
+                // `block_in_place` so the brief sync write doesn't
+                // starve the tokio reactor on the current worker
+                // thread if the PTY input buffer is full.
+                tokio::task::block_in_place(|| {
+                    w.write_all(payload.as_bytes())?;
+                    w.flush()
+                })
+            }
+        }
+    }
+}
+
 /// Spawn a CLI auth login flow.
 pub async fn run_cli_login(
     state: Arc<AppState>,
@@ -306,6 +348,21 @@ pub async fn run_cli_login(
         })
         .unwrap_or_default();
 
+    // `requires_tty` (passed by the frontend from the provider config)
+    // selects the PTY-spawn branch below. Providers like OpenClaw
+    // strictly require an interactive TTY for their auth subcommand —
+    // plain piped stdio causes the CLI to exit with
+    // "requires an interactive TTY" before printing the OAuth URL.
+    let requires_tty = args
+        .get("requires_tty")
+        .or_else(|| args.get("requiresTty"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if requires_tty {
+        return run_cli_login_pty(state, cli_path, login_args, auth_env).await;
+    }
+
     let mut cmd = make_cli_cmd(&cli_path);
     cmd.args(&login_args)
         .envs(&auth_env)
@@ -322,12 +379,12 @@ pub async fn run_cli_login(
         .spawn()
         .map_err(|e| format!("failed to spawn {cli_path}: {e}"))?;
 
-    tracing::info!(cli = %cli_path, "run_cli_login: spawned, browser should open");
+    tracing::info!(cli = %cli_path, "run_cli_login: spawned (pipes), browser should open");
 
     // Store the stdin handle so set_provider_auth can deliver the OAuth code.
     {
         let mut stored_stdin = state.cli_login_stdin.lock();
-        *stored_stdin = child.stdin.take();
+        *stored_stdin = child.stdin.take().map(CliLoginStdin::Pipe);
     }
 
     // Capture the OAuth URL from stdout/stderr. The CLI prints it within the
@@ -404,6 +461,162 @@ pub async fn run_cli_login(
     Ok(serde_json::json!({ "auth_url": auth_url }))
 }
 
+/// PTY-backed variant of run_cli_login. Used for providers whose auth
+/// subcommand requires an interactive TTY (currently OpenClaw —
+/// `openclaw models auth login --provider <id>` exits immediately with
+/// "requires an interactive TTY" when stdin is a pipe).
+///
+/// Same return shape as run_cli_login: `{ auth_url: <url or null> }`.
+/// Writes the master writer into `state.cli_login_stdin` so
+/// `set_provider_auth` can deliver an OAuth code if the CLI prompts
+/// for one.
+///
+/// CRITICAL ConPTY lifetime contract on Windows: the PtyPair (master +
+/// slave) MUST stay alive across child.wait(). Same hazard pattern
+/// agentmux-bashwrap navigates. The blocking wait task takes ownership
+/// of the pair so the destructor runs after the child reaps.
+async fn run_cli_login_pty(
+    state: Arc<AppState>,
+    cli_path: String,
+    login_args: Vec<String>,
+    auth_env: std::collections::HashMap<String, String>,
+) -> Result<serde_json::Value, String> {
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("openpty for {cli_path}: {e}"))?;
+
+    let mut cmd = CommandBuilder::new(&cli_path);
+    for a in &login_args {
+        cmd.arg(a);
+    }
+    for (k, v) in &auth_env {
+        cmd.env(k, v);
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        cmd.cwd(cwd);
+    }
+
+    let child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| format!("PTY spawn of {cli_path}: {e}"))?;
+
+    // Capture the child PID before moving the child into the wait
+    // task — cancel_cli_login needs it to kill the subprocess
+    // platform-side, since aborting the spawn_blocking wait does not
+    // propagate to the child.
+    let child_pid = child.process_id();
+    if let Some(pid) = child_pid {
+        *state.cli_login_pty_pid.lock() = Some(pid);
+    }
+
+    let reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| format!("PTY try_clone_reader: {e}"))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|e| format!("PTY take_writer: {e}"))?;
+
+    tracing::info!(cli = %cli_path, pid = ?child_pid, "run_cli_login: spawned (PTY), waiting for OAuth URL");
+
+    // Store the PTY writer so set_provider_auth can deliver an OAuth
+    // code via stdin (some flows prompt the user to paste a code).
+    {
+        let mut stored = state.cli_login_stdin.lock();
+        *stored = Some(CliLoginStdin::Pty(writer));
+    }
+
+    // Synchronously read from the master in a blocking task, scanning
+    // each line for an OAuth URL. portable_pty's reader is sync.
+    // The 15 s cap is enforced async-side via tokio::time::timeout —
+    // BufRead::read_line itself blocks indefinitely without per-read
+    // timeout support, so a child that pauses before its first line
+    // (or sits at a prompt with no newline) would wedge `url_rx.await`
+    // without it. When the timeout fires we return auth_url=None to
+    // the frontend and let the wait task below reap the child whenever
+    // it finishes naturally.
+    let (url_tx, url_rx) = tokio::sync::oneshot::channel::<Option<String>>();
+    tokio::task::spawn_blocking(move || {
+        use std::io::BufRead;
+        let mut reader = std::io::BufReader::new(reader);
+        let mut found: Option<String> = None;
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break, // EOF
+                Ok(_) => {
+                    if let Some(u) = extract_url(&line) {
+                        found = Some(u);
+                        break;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "run_cli_login_pty: read error");
+                    break;
+                }
+            }
+        }
+        let _ = url_tx.send(found);
+        // Reader is dropped here. Master keeps living in the wait task
+        // below.
+    });
+
+    let auth_url: Option<String> = match tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        url_rx,
+    )
+    .await
+    {
+        Ok(Ok(u)) => u,
+        Ok(Err(_)) | Err(_) => None,
+    };
+    if let Some(ref url) = auth_url {
+        tracing::info!(url = %url, "run_cli_login_pty: captured auth URL");
+    } else {
+        tracing::warn!("run_cli_login_pty: no auth URL captured within 15s");
+    }
+
+    // Reap the child in a blocking task. The PtyPair (master + slave)
+    // moves into the closure so its destructor runs AFTER child.wait()
+    // — necessary for ConPTY on Windows (see retro
+    // 2026-05-11-live-log-streaming-wrapper-failures.md §4.2).
+    //
+    // Cancel handling: `cancel_cli_login` reads `cli_login_pty_pid`
+    // and kills the subprocess by PID; once the child dies, this
+    // wait task observes the exit and clears the PID slot.
+    let state_for_cleanup = state.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut child = child;
+        match child.wait() {
+            Ok(status) => tracing::info!(
+                exit_code = ?status.exit_code(),
+                "run_cli_login_pty: child exited"
+            ),
+            Err(e) => tracing::warn!(
+                error = %e,
+                "run_cli_login_pty: child wait error"
+            ),
+        }
+        // pair drops here, after child.wait() returns
+        drop(pair);
+        *state_for_cleanup.cli_login_stdin.lock() = None;
+        *state_for_cleanup.cli_login_pty_pid.lock() = None;
+    });
+
+    Ok(serde_json::json!({ "auth_url": auth_url }))
+}
+
 /// Extract an OAuth URL from a line of CLI output.
 /// Strips ANSI escape sequences and looks for `https://...` substrings.
 fn extract_url(line: &str) -> Option<String> {
@@ -441,17 +654,62 @@ fn extract_url(line: &str) -> Option<String> {
     None
 }
 
-/// Kill the in-progress CLI login process.
+/// Kill the in-progress CLI login process. Covers both transports:
+/// the pipe path uses a oneshot to drop the Tokio Child (kill_on_drop
+/// terminates the subprocess); the PTY path uses platform-specific
+/// kill-by-PID because the `portable_pty::Child` lives inside a
+/// `spawn_blocking` task that doesn't react to outer-task abort.
 pub fn cancel_cli_login(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    // Pipe path.
     let sender = {
         let mut stored = state.cli_login_cancel.lock();
         stored.take()
     };
     if let Some(tx) = sender {
         let _ = tx.send(());
-        tracing::info!("cancel_cli_login: cancel signal sent");
+        tracing::info!("cancel_cli_login: pipe-path cancel signal sent");
+    }
+    // PTY path.
+    let pid = {
+        let mut stored = state.cli_login_pty_pid.lock();
+        stored.take()
+    };
+    if let Some(pid) = pid {
+        if let Err(e) = kill_pid(pid) {
+            tracing::warn!(pid, error = %e, "cancel_cli_login: kill_pid failed");
+        } else {
+            tracing::info!(pid, "cancel_cli_login: PTY child killed");
+        }
     }
     Ok(serde_json::Value::Null)
+}
+
+/// Platform-specific best-effort kill of a child process by PID.
+#[cfg(windows)]
+fn kill_pid(pid: u32) -> std::io::Result<()> {
+    // Use taskkill /F /T so the whole tree dies — `openclaw models
+    // auth login` typically spawns a child that opens the browser.
+    let status = std::process::Command::new("taskkill")
+        .args(["/F", "/T", "/PID", &pid.to_string()])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!("taskkill exit {:?}", status.code())))
+    }
+}
+
+#[cfg(unix)]
+fn kill_pid(pid: u32) -> std::io::Result<()> {
+    // SIGTERM first; an aborting subprocess gets a chance to clean up.
+    let ret = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    if ret != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 // --- CLI command helpers ---
