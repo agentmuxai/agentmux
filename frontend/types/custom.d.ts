@@ -170,7 +170,7 @@ declare global {
         getCliPath: (provider: string) => Promise<string | null>;
         checkNodejsAvailable: () => Promise<NodejsStatus>;
         ensureAuthDir: (providerId: string) => Promise<string>;
-        runCliLogin: (cliPath: string, loginArgs: string[], authEnv: Record<string, string>) => Promise<string | null>;
+        runCliLogin: (cliPath: string, loginArgs: string[], authEnv: Record<string, string>, requiresTty?: boolean) => Promise<string | null>;
         cancelCliLogin: () => Promise<void>;
         listen: (event: string, callback: (event: any) => void) => Promise<() => void>;
         startCrossDrag: (

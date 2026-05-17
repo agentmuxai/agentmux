@@ -38,7 +38,7 @@ export const loginCommand: SlashCommand = {
                     if (typeof v === "string") authEnv[k] = v;
                 }
             }
-            const url = await getApi().runCliLogin(cliPath, prov.authLoginCommand, authEnv);
+            const url = await getApi().runCliLogin(cliPath, prov.authLoginCommand, authEnv, prov.requiresLoginTty ?? false);
             if (url) {
                 ctx.setAuthUrl(url);
                 ctx.log("auth", "OAuth URL captured — browser should open automatically");

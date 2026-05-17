@@ -184,6 +184,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
                 cliResult.cli_path,
                 provider.authLoginCommand,
                 authEnv ?? {},
+                provider.requiresLoginTty ?? false,
             );
             if (loginUrl) {
                 setAuthUrl(loginUrl);

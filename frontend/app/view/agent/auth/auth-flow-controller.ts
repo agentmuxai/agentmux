@@ -41,6 +41,7 @@ export interface AuthRpc {
         authLoginArgs: string[];
         authCheckArgs: string[];
         authEnv?: Record<string, string>;
+        requiresTty?: boolean;
     }): Promise<{ sessionId: string; authUrl?: string }>;
     poll(sessionId: string): Promise<AuthSessionStatusWire>;
     submitCallback(sessionId: string, callbackUrl: string): Promise<void>;
@@ -108,6 +109,11 @@ export interface ProviderCliMeta {
     authLoginArgs: string[];
     authCheckArgs: string[];
     authEnv?: Record<string, string>;
+    /** Spawn the auth login subprocess under a PTY (instead of plain
+     *  piped stdio). Required by providers whose auth subcommand
+     *  refuses to run when `isatty()==0` — currently OpenClaw's
+     *  `models auth login`. Default false for backwards compat. */
+    requiresTty?: boolean;
 }
 
 export interface AuthFlowOptions {
@@ -222,6 +228,7 @@ export class AuthFlowController {
                 authLoginArgs: cli.authLoginArgs,
                 authCheckArgs: cli.authCheckArgs,
                 authEnv: cli.authEnv,
+                requiresTty: cli.requiresTty,
             });
             if (this.actionToken !== myToken) {
                 // The user did something else (selected/cancelled/

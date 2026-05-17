@@ -469,9 +469,13 @@ pub struct AppState {
     /// Cancellation channel for an in-progress CLI login process
     pub cli_login_cancel: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 
-    /// Stdin handle for the running CLI login child process.
-    /// Written to by `set_provider_auth` to deliver the OAuth device code.
-    pub cli_login_stdin: Mutex<Option<tokio::process::ChildStdin>>,
+    /// Stdin handle for the running CLI login child process. Two
+    /// variants because some providers (OpenClaw) require an
+    /// interactive TTY for their auth subcommand and we spawn them via
+    /// `portable_pty` instead of `tokio::process::Command`. Written to
+    /// by `set_provider_auth` to deliver an OAuth device code or
+    /// pasted token. See `commands::platform::CliLoginStdin`.
+    pub cli_login_stdin: Mutex<Option<crate::commands::platform::CliLoginStdin>>,
 
     /// IPC HTTP server port
     pub ipc_port: Mutex<u16>,
