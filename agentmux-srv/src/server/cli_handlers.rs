@@ -10,10 +10,12 @@ use super::AppState;
 
 /// Register CLI-related RPC handlers (resolvecli, checkcliauth, runclilogin).
 pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    // resolvecli → detect or install a CLI tool for an agent provider
+    // resolvecli → detect or install a CLI tool for an agent provider.
     // Each AgentMux version gets its own isolated CLI install at:
-    //   ~/.agentmux/<AGENTMUX_VERSION>/cli/<provider>/
-    // Never falls back to system PATH.
+    //   <agentmux_home>/instances/v<AGENTMUX_VERSION>/cli/<provider>/
+    // (shared with `install.start` / `install.check` and the frontend
+    // launch path; resolved via `DataPaths::from_env()`).
+    // Never falls back to system PATH for npm-backed providers.
     let broker_resolve = state.broker.clone();
     engine.register_handler(
         COMMAND_RESOLVE_CLI,
@@ -32,16 +34,22 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "ResolveCli"
                 );
 
-                // Resolve home directory
-                let home = std::env::var("HOME")
-                    .or_else(|_| std::env::var("USERPROFILE"))
-                    .map_err(|_| "cannot determine home directory".to_string())?;
-
-                // Versioned install directory: ~/.agentmux/<version>/cli/<provider>/
-                let provider_dir = format!(
-                    "{}/.agentmux/{}/cli/{}",
-                    home, AGENTMUX_VERSION, cmd.provider_id
-                );
+                // Canonical install directory — shared with
+                // `install.start` / `install.check` and the frontend's
+                // `agent-model.ts::resolveCliDir`. Resolves to
+                // `<agentmux_home>/instances/v<version>/cli/<provider>/`
+                // via `DataPaths::from_env()` so portable, installed,
+                // and `AGENTMUX_HOME_OVERRIDE` modes all agree.
+                let paths = agentmux_common::DataPaths::from_env()
+                    .ok_or_else(|| "DataPaths::from_env() failed".to_string())?;
+                let provider_dir = paths
+                    .home_dir
+                    .join("instances")
+                    .join(format!("v{AGENTMUX_VERSION}"))
+                    .join("cli")
+                    .join(&cmd.provider_id)
+                    .to_string_lossy()
+                    .to_string();
                 // npm binary path — the only valid location for installed CLIs.
                 let npm_bin = if cfg!(windows) {
                     format!("{}/node_modules/.bin/{}.cmd", provider_dir, cmd.cli_command)
