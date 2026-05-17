@@ -605,6 +605,11 @@ fn pty_reader_loop(
     tx: mpsc::Sender<LineEvent>,
 ) {
     use std::io::Read;
+    // PTY collapses stdout + stderr onto one stream — the slave's
+    // terminal device is a single FD shared by both. Chunks are
+    // labelled "stdout" because there is no way to recover the
+    // original FD distinction from the master read. The pipe path
+    // (`run_via_pipes`) preserves the split.
     let kind: &'static str = "stdout";
     let mut pending: Vec<u8> = Vec::with_capacity(8192);
     let mut buf = [0u8; 8192];
@@ -640,7 +645,10 @@ fn pty_reader_loop(
                         return;
                     }
                 }
-                if pending.len() >= FLUSH_BYTES {
+                // Flush any remaining partial line at the end of each
+                // read so progress prompts like `printf 'starting...'`
+                // surface live without waiting for a newline.
+                if !pending.is_empty() {
                     if tx
                         .blocking_send(LineEvent {
                             kind,
