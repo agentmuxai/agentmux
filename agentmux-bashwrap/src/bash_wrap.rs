@@ -593,13 +593,14 @@ async fn run_via_pipes(
 /// in the model-visible blob or the overlay log.
 fn pty_reader_loop(
     mut reader: Box<dyn std::io::Read + Send>,
-    mut writer: Box<dyn std::io::Write + Send>,
+    writer: Box<dyn std::io::Write + Send>,
     tx: mpsc::Sender<LineEvent>,
 ) {
     use std::io::Read;
     let kind: &'static str = "stdout";
     let mut pending: Vec<u8> = Vec::with_capacity(8192);
     let mut buf = [0u8; 8192];
+    let mut writer: Option<Box<dyn std::io::Write + Send>> = Some(writer);
     loop {
         match reader.read(&mut buf) {
             Ok(0) => {
@@ -617,7 +618,12 @@ fn pty_reader_loop(
                 // specific `\x1b[6n` sequence — other CSI...n cases
                 // (e.g. `\x1b[<digits>n` other Report codes) are not
                 // handled because bash doesn't emit them for `-c`.
-                strip_and_answer_dsr(&mut chunk, &mut *writer);
+                if let Some(w) = writer.as_mut() {
+                    strip_and_answer_dsr(&mut chunk, &mut **w);
+                    // Drop after the first chunk so stdin-reading
+                    // commands see EOF instead of hanging.
+                    writer = None;
+                }
                 // Phase β: strip remaining ANSI control sequences so
                 // the plain-text chunk list doesn't render them as
                 // garbled literal characters. Bash emits terminal-
@@ -658,29 +664,34 @@ fn pty_reader_loop(
 
 /// Scan `chunk` for DSR `\x1b[6n` sequences. For each occurrence,
 /// strip the 4 bytes from the chunk and write back `\x1b[1;1R` on
-/// the writer. Mutates `chunk` in place.
-fn strip_and_answer_dsr(chunk: &mut Vec<u8>, writer: &mut dyn std::io::Write) {
+/// the writer. Mutates `chunk` in place. Returns `true` if at least
+/// one DSR was answered — the caller uses this to drop the writer
+/// after the startup exchange.
+fn strip_and_answer_dsr(chunk: &mut Vec<u8>, writer: &mut dyn std::io::Write) -> bool {
     const DSR: &[u8] = b"\x1b[6n";
     const ANSWER: &[u8] = b"\x1b[1;1R";
+    let mut answered = false;
     let mut i = 0;
     while i + DSR.len() <= chunk.len() {
         if &chunk[i..i + DSR.len()] == DSR {
             chunk.drain(i..i + DSR.len());
             if let Err(e) = writer.write_all(ANSWER) {
                 tracing::warn!(target: "bashwrap", error = %e, "DSR response write failed");
-                return;
+                return answered;
             }
             // Flush — portable_pty's master writer may buffer at the
             // Rust level and bash blocks on the DSR reply.
             if let Err(e) = writer.flush() {
                 tracing::warn!(target: "bashwrap", error = %e, "DSR response flush failed");
-                return;
+                return answered;
             }
+            answered = true;
             // Don't advance i — could be back-to-back DSRs.
         } else {
             i += 1;
         }
     }
+    answered
 }
 
 /// Phase β (lite): strip ANSI control sequences from a PTY chunk so
