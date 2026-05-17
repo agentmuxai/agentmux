@@ -109,18 +109,20 @@ fn is_safe_cli_command(s: &str) -> bool {
 }
 
 /// Canonical install directory for a provider —
-/// `~/.agentmux/<version>/cli/<provider>/`. `install.start` writes
-/// here and `install.check` reads the same path so the frontend's
-/// "is installed?" probe matches what `install.start` produces.
+/// `<agentmux_home>/instances/v<version>/cli/<provider>/`. This is the
+/// same path the frontend uses to launch the agent
+/// (`agent-model.ts::resolveCliDir`), so the bin we drop in
+/// `node_modules/.bin/` is what the launch path will execute.
+/// Honors portable / installed mode + the `AGENTMUX_HOME_OVERRIDE`
+/// test override via `DataPaths::from_env()`.
 fn provider_install_dir(provider_id: &str) -> Option<std::path::PathBuf> {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .ok()?;
+    let paths = agentmux_common::DataPaths::from_env()?;
     let version = env!("CARGO_PKG_VERSION");
     Some(
-        std::path::PathBuf::from(home)
-            .join(".agentmux")
-            .join(version)
+        paths
+            .home_dir
+            .join("instances")
+            .join(format!("v{version}"))
             .join("cli")
             .join(provider_id),
     )
