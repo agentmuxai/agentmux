@@ -123,6 +123,10 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             // PATH CLIs), fall through to the launch flow — its
             // ResolveCliCommand already does the system-PATH search.
             const prov = getProvider(agent.provider);
+            // Use the canonical provider id for the path probe — the
+            // saved agent definition may carry an alias like
+            // "claude-code" while install.start writes under "claude".
+            const canonicalProviderId = prov?.id ?? agent.provider;
             const cliCommand = prov?.cliCommand ?? agent.provider;
             const npmInstallable = !!prov?.npmPackage && prov.npmPackage.length > 0;
             // Query the backend's per-version install dir (the same
@@ -134,7 +138,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             if (npmInstallable) {
                 try {
                     const r = await RpcApi.InstallCheckCommand(TabRpcClient, {
-                        providerId: agent.provider,
+                        providerId: canonicalProviderId,
                         cliCommand,
                     });
                     installed = r.installed;
