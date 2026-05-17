@@ -98,6 +98,16 @@ fn is_safe_provider_id(s: &str) -> bool {
         && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
+/// CLI command names are joined into the bin-resolution path; same
+/// allowlist as provider ids, plus `.` (some real CLIs include dots,
+/// e.g. `eslint.cmd`).
+fn is_safe_cli_command(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+        && !s.contains("..")
+}
+
 /// Canonical install directory for a provider —
 /// `~/.agentmux/<version>/cli/<provider>/`. `install.start` writes
 /// here and `install.check` reads the same path so the frontend's
@@ -196,6 +206,12 @@ pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     return Err(format!(
                         "install.check: invalid provider id {:?}",
                         req.provider_id
+                    ));
+                }
+                if !is_safe_cli_command(&req.cli_command) {
+                    return Err(format!(
+                        "install.check: invalid cli command {:?}",
+                        req.cli_command
                     ));
                 }
                 let installed = resolve_installed_bin(&req.provider_id, &req.cli_command).is_some();
@@ -383,6 +399,17 @@ fn spawn_install_task(
                 let _ = child.kill().await;
                 let _ = stdout_task.await;
                 let _ = stderr_task.await;
+                // Wipe the partial install so a retry doesn't inherit
+                // a half-written package-lock.json. Best-effort —
+                // logging only on failure.
+                if let Err(e) = std::fs::remove_dir_all(&provider_dir) {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        provider_dir = %provider_dir.display(),
+                        error = %e,
+                        "install.cancel: remove partial dir failed"
+                    );
+                }
                 emit_done(&broker, false, Some("cancelled".into()));
             }
         }
@@ -393,7 +420,7 @@ fn spawn_install_task(
 
 #[cfg(test)]
 mod tests {
-    use super::is_safe_provider_id;
+    use super::{is_safe_cli_command, is_safe_provider_id};
 
     #[test]
     fn safe_provider_ids_accepted() {
@@ -418,6 +445,32 @@ mod tests {
             &"x".repeat(65),
         ] {
             assert!(!is_safe_provider_id(id), "{id:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn safe_cli_commands_accepted() {
+        for cmd in ["claude", "claude-code", "kimi.cmd", "agentmux-srv", "open_claw"] {
+            assert!(is_safe_cli_command(cmd), "{cmd} should be accepted");
+        }
+    }
+
+    #[test]
+    fn unsafe_cli_commands_rejected() {
+        for cmd in [
+            "",
+            "../etc/passwd",
+            "../../etc/passwd",
+            "a/b",
+            "a\\b",
+            "a b",
+            "..",
+            "a..b",
+            "a/../b",
+            "\0null",
+            &"x".repeat(65),
+        ] {
+            assert!(!is_safe_cli_command(cmd), "{cmd:?} should be rejected");
         }
     }
 }

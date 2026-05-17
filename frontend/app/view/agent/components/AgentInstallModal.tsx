@@ -55,6 +55,9 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     let preRef: HTMLPreElement | undefined;
     let startedAt = 0;
     let tickHandle: ReturnType<typeof setInterval> | null = null;
+    // Flipped in onCleanup so a startInstall awaiting the RPC response
+    // can cancel the resolved session id even if it landed after unmount.
+    let disposed = false;
 
     const appendChunk = (chunk: InstallChunk) => {
         setChunks((prev) => {
@@ -102,6 +105,15 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                 npmPackage: prov.npmPackage,
                 pinnedVersion: prov.pinnedVersion,
             });
+            // If the modal unmounted while the RPC was in flight, the
+            // backend now owns a live session our cleanup couldn't
+            // cancel (sessionId was null). Cancel it explicitly here.
+            if (disposed) {
+                void RpcApi.InstallCancelCommand(TabRpcClient, { sessionId: r.sessionId }).catch(() => {
+                    /* best-effort */
+                });
+                return;
+            }
             setSessionId(r.sessionId);
             unsub = waveEventSubscribe({
                 eventType: "install_chunk",
@@ -151,6 +163,7 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     });
 
     onCleanup(() => {
+        disposed = true;
         if (unsub) {
             unsub();
             unsub = null;
@@ -159,11 +172,11 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             clearInterval(tickHandle);
             tickHandle = null;
         }
-        // If the user closes the modal mid-install (Esc, backdrop
-        // click, tab switch), cancel the backend session so the next
-        // open doesn't see a phantom second install running. The
-        // explicit Cancel button takes a different path that also
-        // calls `onCancel`; this catches the implicit closes.
+        // Catch implicit closes (Esc, backdrop click, tab switch)
+        // while installing. The Cancel button itself goes through
+        // `cancel()`. If the modal unmounts *before* InstallStartCommand
+        // resolves, the `disposed` flag above lets the in-flight start
+        // path issue the cancel once the session id arrives.
         const sid = sessionId();
         if (sid && phase() === "installing") {
             void RpcApi.InstallCancelCommand(TabRpcClient, { sessionId: sid }).catch(() => {
