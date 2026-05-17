@@ -178,6 +178,12 @@ pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         req.provider_id
                     ));
                 }
+                if !is_safe_cli_command(&req.cli_command) {
+                    return Err(format!(
+                        "install.start: invalid cli command {:?}",
+                        req.cli_command
+                    ));
+                }
                 if req.npm_package.is_empty() {
                     return Err(format!(
                         "install.start: provider {} has no npm_package — only npm-installable providers are supported in Phase α",
