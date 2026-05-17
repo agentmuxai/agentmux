@@ -496,94 +496,86 @@ fn spawn_auth_cli_pty(
     let auth_check_args_for_check = auth_check_args.clone();
     let auth_env_for_check = auth_env.clone();
 
+    tracing::info!(
+        session_id = %session_id,
+        provider_id = %provider_id,
+        cli_path = %cli_path,
+        auth_login_args = ?auth_login_args,
+        "auth.spawn (PTY): launching provider CLI"
+    );
+
+    // Allocate the PTY, build the command, spawn the child, and
+    // register the PID — all synchronously, BEFORE the async drain/
+    // wait task and BEFORE `attach_process`. That way no
+    // `cancel_session` racing with the spawn can find a registered
+    // handle but a missing PID; either the PID is registered first
+    // (cancel can kill), or the early-return path fired and there
+    // is no child to kill.
+    let pty_system = native_pty_system();
+    let pair = match pty_system.openpty(PtySize {
+        rows: 24,
+        cols: 80,
+        pixel_width: 0,
+        pixel_height: 0,
+    }) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!(session_id = %session_id, error = %e, "auth.spawn (PTY): openpty failed");
+            mgr.finish_failure(&session_id, format!("openpty failed: {e}"));
+            mgr.detach_process(&session_id);
+            return;
+        }
+    };
+
+    let mut cmd = CommandBuilder::new(&cli_path);
+    for a in &auth_login_args {
+        cmd.arg(a);
+    }
+    for (k, v) in &auth_env {
+        cmd.env(k, v);
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        cmd.cwd(cwd);
+    }
+
+    let child = match pair.slave.spawn_command(cmd) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!(
+                session_id = %session_id,
+                error = %e,
+                "auth.spawn (PTY): spawn_command failed"
+            );
+            mgr.finish_failure(&session_id, format!("PTY spawn `{cli_path}` failed: {e}"));
+            mgr.detach_process(&session_id);
+            return;
+        }
+    };
+
+    if let Some(pid) = child.process_id() {
+        mgr.attach_pty_pid(&session_id, pid);
+    }
+
+    let reader = match pair.master.try_clone_reader() {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(session_id = %session_id, error = %e, "auth.spawn (PTY): try_clone_reader failed");
+            mgr.finish_failure(&session_id, format!("PTY reader: {e}"));
+            mgr.detach_process(&session_id);
+            return;
+        }
+    };
+    let writer = match pair.master.take_writer() {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::error!(session_id = %session_id, error = %e, "auth.spawn (PTY): take_writer failed");
+            mgr.finish_failure(&session_id, format!("PTY writer: {e}"));
+            mgr.detach_process(&session_id);
+            return;
+        }
+    };
+
     let handle = tokio::spawn(async move {
-        tracing::info!(
-            session_id = %session_id_for_task,
-            provider_id = %provider_id,
-            cli_path = %cli_path,
-            auth_login_args = ?auth_login_args,
-            "auth.spawn (PTY): launching provider CLI"
-        );
-
-        let pty_system = native_pty_system();
-        let pair = match pty_system.openpty(PtySize {
-            rows: 24,
-            cols: 80,
-            pixel_width: 0,
-            pixel_height: 0,
-        }) {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::error!(session_id = %session_id_for_task, error = %e, "auth.spawn (PTY): openpty failed");
-                mgr_for_task.finish_failure(
-                    &session_id_for_task,
-                    format!("openpty failed: {e}"),
-                );
-                mgr_for_task.detach_process(&session_id_for_task);
-                return;
-            }
-        };
-
-        let mut cmd = CommandBuilder::new(&cli_path);
-        for a in &auth_login_args {
-            cmd.arg(a);
-        }
-        for (k, v) in &auth_env {
-            cmd.env(k, v);
-        }
-        if let Ok(cwd) = std::env::current_dir() {
-            cmd.cwd(cwd);
-        }
-
-        let child = match pair.slave.spawn_command(cmd) {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!(
-                    session_id = %session_id_for_task,
-                    error = %e,
-                    "auth.spawn (PTY): spawn_command failed"
-                );
-                mgr_for_task.finish_failure(
-                    &session_id_for_task,
-                    format!("PTY spawn `{cli_path}` failed: {e}"),
-                );
-                mgr_for_task.detach_process(&session_id_for_task);
-                return;
-            }
-        };
-
-        // Register the child PID with the session manager so
-        // `cancel_session` can kill it — aborting drain_handle below
-        // can't reach into the spawn_blocking wait task that owns
-        // the portable_pty::Child.
-        if let Some(pid) = child.process_id() {
-            mgr_for_task.attach_pty_pid(&session_id_for_task, pid);
-        }
-
-        let reader = match pair.master.try_clone_reader() {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::error!(session_id = %session_id_for_task, error = %e, "auth.spawn (PTY): try_clone_reader failed");
-                mgr_for_task.finish_failure(
-                    &session_id_for_task,
-                    format!("PTY reader: {e}"),
-                );
-                mgr_for_task.detach_process(&session_id_for_task);
-                return;
-            }
-        };
-        let writer = match pair.master.take_writer() {
-            Ok(w) => w,
-            Err(e) => {
-                tracing::error!(session_id = %session_id_for_task, error = %e, "auth.spawn (PTY): take_writer failed");
-                mgr_for_task.finish_failure(
-                    &session_id_for_task,
-                    format!("PTY writer: {e}"),
-                );
-                mgr_for_task.detach_process(&session_id_for_task);
-                return;
-            }
-        };
 
         // Stdin writer: forward callback URLs from the manager into
         // the child's PTY input. portable_pty's master writer is sync;
