@@ -24,6 +24,7 @@ import { createSignal, onCleanup, onMount, Show, type Accessor, type Component, 
 
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { AgentLaunchModalPanel } from "@/app/view/agent/components/AgentLaunchModal";
+import { AgentInstallModalPanel } from "@/app/view/agent/components/AgentInstallModal";
 
 import { TabModalContext, type TabModalApi, type TabModalRequest } from "./tab-modal";
 import "./tab-modal.scss";
@@ -151,6 +152,23 @@ function renderRequest(
                                 setSubmitting(false);
                                 throw e;
                             }
+                        }}
+                    />
+                ),
+            };
+        case "install-agent":
+            return {
+                label: `Install ${req.agent.name}`,
+                panel: (
+                    <AgentInstallModalPanel
+                        agent={req.agent}
+                        onCancel={api.close}
+                        onInstalled={() => {
+                            // Close the install modal and immediately
+                            // call back so the picker can chain into
+                            // launch. The picker handles the chain.
+                            api.close();
+                            req.onInstalled();
                         }}
                     />
                 ),

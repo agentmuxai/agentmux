@@ -1187,6 +1187,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
     // cancel / submitapikey — see docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md)
     super::identity_handlers::register_identity_handlers(engine, &state);
 
+    // Install handlers (install.start / install.cancel — see
+    // docs/specs/SPEC_AGENT_INSTALL_STAGE_2026_05_17.md)
+    super::install_handlers::register_install_handlers(engine, &state);
+
     // App API handlers (agent.open, agent.send, agent.stop, agent.status, agent.list, agent.output)
     super::app_api::register_app_api_handlers(engine, &state);
 }

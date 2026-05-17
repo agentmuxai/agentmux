@@ -3,6 +3,7 @@ mod files;
 mod app_api;
 mod forge_handlers;
 mod identity_handlers;
+pub mod install_handlers;
 mod messagebus;
 mod reactive;
 pub(crate) mod service;
@@ -98,6 +99,13 @@ pub struct AppState {
     /// "Connect with OAuth" attempt from the launch modal. See
     /// `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md`.
     pub auth_session_manager: std::sync::Arc<crate::identity::auth_session::AuthSessionManager>,
+
+    /// In-flight `install.start` sessions. Frontend subscribes to
+    /// `install_chunk` WPS events scoped by session id; the registry
+    /// holds per-session cancel handles so `install.cancel` can abort
+    /// an install mid-flight.
+    /// See `SPEC_AGENT_INSTALL_STAGE_2026_05_17.md` §9.
+    pub install_sessions: std::sync::Arc<crate::server::install_handlers::InstallSessionRegistry>,
 }
 
 /// Build the Axum router with all routes, auth middleware, and CORS.
