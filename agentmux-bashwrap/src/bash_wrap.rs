@@ -6,23 +6,28 @@
 //! Invariants:
 //! - The user's command is decoded from `--b64-cmd` so quoting /
 //!   multi-line / shell-metachar content survives the rewrite.
-//! - The inner command runs under `bash -c` via piped stdio (NOT a PTY).
-//!   PTY was tried in β.A and broke on Win10's ConPTY (child exited
-//!   with `STATUS_DLL_INIT_FAILED` because `portable_pty`'s master
-//!   handle was dropped during child startup — see
-//!   `docs/retros/2026-05-11-live-log-streaming-wrapper-failures.md`
-//!   §4.2 and §6.3). Plain pipes give us line streaming, which is what
-//!   the live-log feature needs; PTY-only behaviors (spinner fidelity,
-//!   interactive prompts, CR-only progress bars) are deferred.
+//! - The inner command runs under `bash -c` inside a PTY by default
+//!   (`run_via_pty`), with a pipe-stdio fallback (`run_via_pipes`)
+//!   if PTY allocation fails. The PTY path keeps glibc's stdout
+//!   line-buffered so partial chunks reach the overlay in real time;
+//!   bash's startup DSR (`\x1b[6n`) is satisfied by pre-loading the
+//!   master writer with `\x1b[1;1R` and dropping it immediately, and
+//!   the user's command is prefixed `exec </dev/null;` so stdin-
+//!   reading children see EOF rather than blocking on the PTY's
+//!   stdin (ConPTY doesn't EOF on master-writer drop). The pipe
+//!   path remains as a safety net and is the only path that
+//!   preserves the stdout/stderr split — PTY collapses both onto
+//!   one stream. See `docs/specs/SPEC_LIVE_LOG_PTY_REWORK_2026_05_16.md`.
 //! - Bash is located via `$BASH` → `$AGENTMUX_BASH` → PATH search →
 //!   well-known Windows locations (Git Bash). Fails loud if missing.
-//! - stdout and stderr are streamed concurrently, each line published
-//!   as its own chunk with `kind` set to `"stdout"` or `"stderr"`.
-//!   Aggregated stdout (with stderr lines prefixed `[stderr] `) is
-//!   captured into a buffer; on exit, a formatted summary lands on
-//!   this process's stdout for Claude's native Bash tool to harvest as
-//!   the `tool_result` content. Truncated head/tail at 50KB each per
-//!   `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §4.5.
+//! - Each line is published as its own chunk with `kind` set to
+//!   `"stdout"` (PTY path always; pipe path for stdout reads) or
+//!   `"stderr"` (pipe path only — PTY merges both onto one stream).
+//!   Aggregated output (with stderr lines prefixed `[stderr] ` in the
+//!   pipe path) is captured into a buffer; on exit, a formatted summary
+//!   lands on this process's stdout for Claude's native Bash tool to
+//!   harvest as the `tool_result` content. Truncated head/tail at 50KB
+//!   each per `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §4.5.
 //! - If WPS publish fails (missing env, sidecar down, etc.), the
 //!   command still runs to completion — output just doesn't stream.
 //!   The model-visible blob is unaffected. A `kind: "system"` chunk
