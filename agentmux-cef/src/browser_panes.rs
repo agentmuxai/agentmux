@@ -580,6 +580,17 @@ impl BrowserPaneManager {
         window_label: &str,
         overlay_rects: &[(i32, i32, i32, i32)],
     ) {
+        // Publish to AppState so resize_browser_pane_view can consult the
+        // same authoritative rect list when computing pane visibility on
+        // its own code path. Without this, a positive-dimension resize
+        // (e.g. user drags a splitter while a DOM modal is open) would
+        // call set_visible(1) and re-expose the pane on top of the modal.
+        // See state::pane_overlay_rects doc comment.
+        state
+            .pane_overlay_rects
+            .lock()
+            .insert(window_label.to_string(), overlay_rects.to_vec());
+
         let mut task = SetPaneOverlayClipViewsTask::new(
             state.clone(),
             window_label.to_string(),
@@ -636,6 +647,37 @@ fn rects_intersect(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> bool {
     let b_right = bx + bw;
     let b_bottom = by + bh;
     !(a_right <= bx || b_right <= ax || a_bottom <= by || b_bottom <= ay)
+}
+
+/// Compute whether a pane with the given bounds should be visible, given
+/// the pane's parent window. Both pane-airspace (`SetPaneOverlayClipViewsTask`)
+/// and per-pane resize (`resize_browser_pane_view`) call this to converge on
+/// the same answer — without it, the two paths fight each other (Codex
+/// review on PR #881 caught the dragging-splitter-while-modal-open case
+/// where a positive resize re-exposed a pane that airspace had hidden).
+///
+/// A pane is visible iff BOTH conditions hold:
+/// - Its rect has non-zero width and height (frontend places it in a
+///   `display:none` placeholder when the tab is inactive → reports 0×0).
+/// - It does not intersect any registered overlay-clip rect for its window
+///   (e.g. a hamburger menu, tooltip, modal popover).
+#[cfg(not(target_os = "windows"))]
+pub fn compute_pane_visible(
+    state: &Arc<AppState>,
+    window_label: &str,
+    pane_rect: (i32, i32, i32, i32),
+) -> bool {
+    let (_, _, w, h) = pane_rect;
+    if w <= 0 || h <= 0 {
+        return false;
+    }
+    let rects = state.pane_overlay_rects.lock();
+    let overlays = match rects.get(window_label) {
+        Some(v) => v.clone(),
+        None => return true,
+    };
+    drop(rects);
+    !overlays.iter().any(|or| rects_intersect(*or, pane_rect))
 }
 
 // ── Linux/macOS UI-thread marshalling tasks ────────────────────────────────
@@ -716,15 +758,16 @@ wrap_task! {
                 use cef::ImplOverlayController;
                 let pb = controller.bounds();
                 let pane_rect = (pb.x, pb.y, pb.width, pb.height);
-                let intersects_any = self
-                    .overlay_rects
-                    .iter()
-                    .any(|or| rects_intersect(*or, pane_rect));
-                controller.set_visible(if intersects_any { 0 } else { 1 });
+                // Shared visibility helper consults BOTH the pane's own rect
+                // (zero → hidden because tab inactive) and the latest
+                // overlay-clip rects published in AppState. Resize path uses
+                // the same helper so both decisions converge.
+                let visible = compute_pane_visible(&self.state, &self.window_label, pane_rect);
+                controller.set_visible(if visible { 1 } else { 0 });
                 tracing::debug!(
                     label = %label,
                     window_label = %self.window_label,
-                    hidden = intersects_any,
+                    visible,
                     pane_x = pb.x, pane_y = pb.y, pane_w = pb.width, pane_h = pb.height,
                     overlay_count = self.overlay_rects.len(),
                     "[pane-airspace] views: applied visibility"

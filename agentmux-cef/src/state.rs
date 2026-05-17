@@ -568,6 +568,25 @@ pub struct AppState {
     pub browser_pane_overlays:
         Mutex<std::collections::HashMap<String, (String, cef::OverlayController)>>,
 
+    /// Linux/macOS only — latest overlay-clip rects per window_label.
+    ///
+    /// `browser_panes_set_overlay_clip` IPC publishes here so that BOTH the
+    /// pane-airspace task (`SetPaneOverlayClipViewsTask`) and the per-pane
+    /// resize task (`resize_browser_pane_view`) can compute pane visibility
+    /// from the same authoritative state. Without this, resize would be the
+    /// sole visibility authority on its path and `set_visible(1)` on a
+    /// non-zero resize (e.g. user dragging a splitter while a DOM modal is
+    /// open) would clobber the airspace's `set_visible(0)` — the
+    /// "borderless DOM appears above modal" repro Codex caught on PR #881.
+    ///
+    /// Empty `Vec` for a key means "no overlays open in this window" →
+    /// panes are visible (subject to their own rect being non-zero).
+    /// Stale entries for closed windows are harmless: they only affect
+    /// panes still attached to that window.
+    #[cfg(not(target_os = "windows"))]
+    pub pane_overlay_rects:
+        Mutex<std::collections::HashMap<String, Vec<(i32, i32, i32, i32)>>>,
+
     /// Linux/macOS only — OverlayControllers awaiting deferred destroy.
     ///
     /// Calling `OverlayController::destroy()` synchronously on the same UI
@@ -696,6 +715,8 @@ impl Default for AppState {
             windows: Mutex::new(HashMap::new()),
             #[cfg(not(target_os = "windows"))]
             browser_pane_overlays: Mutex::new(HashMap::new()),
+            #[cfg(not(target_os = "windows"))]
+            pane_overlay_rects: Mutex::new(HashMap::new()),
             #[cfg(not(target_os = "windows"))]
             pending_overlay_destroy: Mutex::new(HashMap::new()),
             // window_pool / unpromoted_pool_labels / window_pool_respawn_in_flight
