@@ -181,13 +181,15 @@
         // Bounded height with internal scroll so a very long output
         // doesn't push the rest of the conversation out of view.
         .agent-tool-panel {
+            display: flex;
+            flex-direction: column;
             margin: 4px 0 8px 24px;
             border-left: 2px solid var(--accent-color, #2bd4a8);
             background: var(--surface-elevated, rgba(255, 255, 255, 0.02));
             border-radius: 0 4px 4px 0;
             padding: 6px 8px;
             max-height: 50vh;
-            overflow-y: auto;
+            min-height: 0;
             font-family: var(--fixed-font, monospace);
             font-size: 12px;
         }
