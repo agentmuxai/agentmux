@@ -268,7 +268,7 @@ fn spawn_install_task(
     registry: Arc<InstallSessionRegistry>,
     session_id: String,
     provider_id: String,
-    _cli_command: String,
+    cli_command: String,
     npm_package: String,
     pinned_version: String,
     mut cancel_rx: tokio::sync::oneshot::Receiver<()>,
@@ -414,7 +414,26 @@ fn spawn_install_task(
                 let _ = stdout_task.await;
                 let _ = stderr_task.await;
                 match wait {
-                    Ok(s) if s.success() => emit_done(&broker, true, None),
+                    Ok(s) if s.success() => {
+                        // npm exit 0 ≠ "binary is on disk". Verify the
+                        // expected bin shim exists so a package/bin
+                        // rename or provider-config mismatch surfaces
+                        // as an install failure rather than a phantom
+                        // launch with a non-existent cmd path.
+                        if resolve_installed_bin(&provider_id, &cli_command).is_some() {
+                            emit_done(&broker, true, None);
+                        } else {
+                            emit_done(
+                                &broker,
+                                false,
+                                Some(format!(
+                                    "npm install reported success but {} not found in {}/node_modules/.bin/",
+                                    cli_command,
+                                    provider_dir.display()
+                                )),
+                            );
+                        }
+                    }
                     Ok(s) => emit_done(&broker, false, Some(format!("npm exited {:?}", s.code()))),
                     Err(e) => emit_done(&broker, false, Some(format!("wait: {e}"))),
                 }
