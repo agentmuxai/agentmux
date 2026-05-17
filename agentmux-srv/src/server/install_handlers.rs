@@ -60,11 +60,15 @@ struct InstallCheckReq {
 }
 
 /// Per-session abort handle so `install.cancel` can kill an in-flight
-/// install. `parking_lot::Mutex` since the engine is sync at the
-/// handler boundary.
+/// install. Also tracks `active_providers` so concurrent sessions for
+/// the *same* provider directory are rejected — without that, cancel
+/// of one would `rm_rf` the shared dir mid-install for the other.
+/// `parking_lot::Mutex` since the engine is sync at the handler
+/// boundary.
 #[derive(Default)]
 pub struct InstallSessionRegistry {
     sessions: Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<()>>>,
+    active_providers: Mutex<std::collections::HashSet<String>>,
 }
 
 impl InstallSessionRegistry {
@@ -74,6 +78,16 @@ impl InstallSessionRegistry {
 
     fn insert(&self, session_id: String, tx: tokio::sync::oneshot::Sender<()>) {
         self.sessions.lock().insert(session_id, tx);
+    }
+
+    /// Try to claim a provider; returns false if another session is
+    /// already installing this provider.
+    fn try_claim_provider(&self, provider_id: &str) -> bool {
+        self.active_providers.lock().insert(provider_id.to_string())
+    }
+
+    fn release_provider(&self, provider_id: &str) {
+        self.active_providers.lock().remove(provider_id);
     }
 
     fn cancel(&self, session_id: &str) -> bool {
@@ -167,6 +181,12 @@ pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if req.npm_package.is_empty() {
                     return Err(format!(
                         "install.start: provider {} has no npm_package — only npm-installable providers are supported in Phase α",
+                        req.provider_id
+                    ));
+                }
+                if !registry.try_claim_provider(&req.provider_id) {
+                    return Err(format!(
+                        "install.start: provider {} is already being installed in another session",
                         req.provider_id
                     ));
                 }
@@ -294,6 +314,7 @@ fn spawn_install_task(
             None => {
                 emit_done(&broker, false, Some("cannot determine home directory".into()));
                 registry.drop_session(&session_id);
+                registry.release_provider(&provider_id);
                 return;
             }
         };
@@ -337,6 +358,7 @@ fn spawn_install_task(
             Err(e) => {
                 emit_done(&broker, false, Some(format!("spawn npm: {e}")));
                 registry.drop_session(&session_id);
+                registry.release_provider(&provider_id);
                 return;
             }
         };
@@ -417,6 +439,7 @@ fn spawn_install_task(
         }
 
         registry.drop_session(&session_id);
+        registry.release_provider(&provider_id);
     });
 }
 
