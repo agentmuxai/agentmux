@@ -160,15 +160,30 @@ ToolOverlayLog.displayName = "ToolOverlayLog";
  * doesn't stream).
  */
 function ToolOverlayResult(props: { node: ToolNode }): JSX.Element {
-    const node = props.node;
-    if (node.status === "running") {
-        return (
-            <div class="agent-tool-loading">
-                <span class="agent-tool-spinner">⏳</span> Running...
-            </div>
-        );
-    }
+    // NEVER destructure `const node = props.node`. The streaming
+    // buffer keeps this component mounted across reducer updates;
+    // the reducer's ToolChunkAppend replaces the ToolNode reference
+    // for each chunk. A destructured `node` would capture the very
+    // first reference (status="running", no log) and freeze — every
+    // subsequent JSX evaluation would see the stale snapshot and
+    // keep rendering "⏳ Running..." even after chunks landed and
+    // status flipped. (Same pattern MarkdownBlock at lines 18-23
+    // warns against; bit us on PR #887.)
+    return (
+        <Show
+            when={props.node.status !== "running"}
+            fallback={
+                <div class="agent-tool-loading">
+                    <span class="agent-tool-spinner">⏳</span> Running...
+                </div>
+            }
+        >
+            {renderToolResultBody(props.node)}
+        </Show>
+    );
+}
 
+function renderToolResultBody(node: ToolNode): JSX.Element {
     switch (node.tool) {
         case "Edit":
             return <DiffViewer params={node.params as any} result={node.result as any} />;

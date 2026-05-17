@@ -34,8 +34,7 @@
  */
 
 import clsx from "clsx";
-import { Show, createEffect, createSignal, onCleanup, type JSX } from "solid-js";
-import { Portal } from "solid-js/web";
+import { Show, createSignal, type JSX } from "solid-js";
 import { createBlock } from "@/store/global";
 import type { ToolNode } from "../types";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
@@ -63,196 +62,48 @@ const STATUS_ICON: Record<ToolNode["status"], string> = {
     denied: "⊘",
 };
 
-// Walk upward from `el` to find the first ancestor with a non-1 CSS zoom.
-// The portal renders to document.body (outside the zoom context), so we must
-// apply the same zoom to the portal container and shrink the width constraints
-// by the zoom factor so the visual size matches the underlying block.
-function getAncestorZoom(el: HTMLElement): number {
-    let cur: HTMLElement | null = el;
-    while (cur) {
-        const z = parseFloat(getComputedStyle(cur).zoom ?? "1");
-        if (!isNaN(z) && z !== 1) return z;
-        cur = cur.parentElement;
-    }
-    return 1;
-}
-
-// Walk upward from `el` until we find a scrollable ancestor. Used to decide
-// whether the overlay has room to pop down or must flip up.
-function findScrollParent(el: HTMLElement): HTMLElement | null {
-    let parent: HTMLElement | null = el.parentElement;
-    while (parent && parent !== document.body) {
-        const style = getComputedStyle(parent);
-        if (style.overflowY === "auto" || style.overflowY === "scroll") {
-            return parent;
-        }
-        parent = parent.parentElement;
-    }
-    return null;
-}
-
-// CSS max-height cap for the overlay. When there's less than this much space
-// below a tool block in its scroll container, we flip the overlay to open
-// upward instead of downward.
-const OVERLAY_MAX_HEIGHT_PX = 400;
-
-// Hover-expand delays — match docs/specs/tool-collapse.md §"Expanded State (on Hover)".
-// 150ms enter avoids flicker on scroll-through; 300ms leave lets the user move the
-// cursor down into the expanded overlay without it collapsing first.
-const HOVER_ENTER_DELAY_MS = 150;
-const HOVER_LEAVE_DELAY_MS = 300;
+// Hover is instant under the inline-panel layout. The portal overlay
+// needed 150ms enter / 300ms leave because it floated outside the
+// row's hover boundary — the user had to "travel" through dead space
+// to reach the overlay content. With the inline panel
+// (SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md), both the summary row
+// and the panel sit inside the same .agent-tool-block element, so
+// mouseleave only fires when the cursor truly exits the whole block.
+// No dead space, no grace window. See feedback_no_timers_or_delays.md.
 
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
-    // Position of the collapsed row in viewport coordinates, recomputed when
-    // pinned flips true. The overlay is rendered via a <Portal> to document.body
-    // to escape the paint containment imposed by .agent-document-node-wrapper's
-    // `content-visibility: auto` — otherwise the overlay gets clipped.
-    const [overlayRect, setOverlayRect] = createSignal<{
-        left: number;
-        right: number;
-        top: number;    // used when overlayUp = false (drop down below the row)
-        bottom: number; // used when overlayUp = true  (pop up above the row)
-        width: number;
-    } | null>(null);
-    const [overlayUp, setOverlayUp] = createSignal(false);
-
+    // Phase A of SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md replaced the
+    // portal-based overlay with an inline panel in normal document flow.
+    // All the absolute-position math (overlayRect, overlayUp, measure(),
+    // findScrollParent, getAncestorZoom, scroll-tracking effect) was
+    // necessary only to position the portal'd overlay against the
+    // collapsed row; the inline panel positions itself.
     let blockRef: HTMLDivElement | undefined;
 
-    // Hover-expand state. Click pins (props.pinned); mouse hover
-    // expands transiently. The overlay portal uses overlayMode for
-    // styling — same for both hover and pin.
+    // Hover-expand state. Instant on enter, instant on leave.
     const [hovering, setHovering] = createSignal(false);
-    let enterTimer: ReturnType<typeof setTimeout> | undefined;
-    let leaveTimer: ReturnType<typeof setTimeout> | undefined;
+    const handleMouseEnter = () => setHovering(true);
+    const handleMouseLeave = () => setHovering(false);
 
-    const clearTimers = () => {
-        if (enterTimer !== undefined) { clearTimeout(enterTimer); enterTimer = undefined; }
-        if (leaveTimer !== undefined) { clearTimeout(leaveTimer); leaveTimer = undefined; }
+    // Auto-expand while the tool is actively running (or awaiting approval,
+    // or in a terminal-failure state where the user almost certainly wants
+    // to see the output). Pin still wins as an explicit override (so the
+    // user can keep a completed tool expanded). Hover keeps working as a
+    // peek affordance for collapsed (completed-success) tools.
+    //
+    // Per SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md §4.2 — Phase B. This
+    // hybrid is the minimal change that delivers the visibility win
+    // without introducing `userExpandState` (the three-state map). A
+    // follow-up phase can add click-to-collapse-mid-run if needed; for
+    // now, click on a running tool is a no-op visually because it's
+    // already expanded.
+    const autoExpanded = (): boolean => {
+        const s = props.node.status;
+        return s === "running" || s === "pending_approval" || s === "failed";
     };
-
-    const handleMouseEnter = () => {
-        if (props.pinned) return;
-        if (leaveTimer !== undefined) { clearTimeout(leaveTimer); leaveTimer = undefined; }
-        if (hovering()) return;
-        enterTimer = setTimeout(() => {
-            setHovering(true);
-            enterTimer = undefined;
-        }, HOVER_ENTER_DELAY_MS);
-    };
-
-    const handleMouseLeave = () => {
-        if (enterTimer !== undefined) { clearTimeout(enterTimer); enterTimer = undefined; }
-        if (!hovering()) return;
-        leaveTimer = setTimeout(() => {
-            setHovering(false);
-            leaveTimer = undefined;
-        }, HOVER_LEAVE_DELAY_MS);
-    };
-
-    onCleanup(clearTimers);
-
-    const expanded = () => props.pinned || hovering();
-    const overlayMode = () => expanded();
+    const expanded = () => props.pinned || autoExpanded() || hovering();
 
     const statusIcon = (): string => STATUS_ICON[props.node.status] || "•";
-
-    const measure = () => {
-        if (!blockRef) return;
-        const blockRect = blockRef.getBoundingClientRect();
-        const scrollParent = findScrollParent(blockRef);
-        const parentBottom = scrollParent
-            ? scrollParent.getBoundingClientRect().bottom
-            : window.innerHeight;
-        const spaceBelow = parentBottom - blockRect.bottom;
-        setOverlayUp(spaceBelow < OVERLAY_MAX_HEIGHT_PX);
-        setOverlayRect({
-            left: blockRect.left,
-            right: window.innerWidth - blockRect.right,
-            top: blockRect.bottom,
-            bottom: window.innerHeight - blockRect.top,
-            width: blockRect.width,
-        });
-    };
-
-    // Measure position when overlay flips visible so the portal has
-    // coordinates on first render. Fires for both pin (click) and
-    // hover paths via the unified `overlayMode()` getter.
-    createEffect(() => {
-        if (overlayMode() && blockRef) {
-            measure();
-        }
-    });
-
-    // Reposition the portal overlay on scroll so a PINNED overlay stays
-    // anchored to its block. Only attached while pinned — hover-only overlays
-    // don't need scroll tracking because mouseleave fires before any
-    // significant drift, and removing the listener eliminates the one-frame
-    // reposition lag that causes the hover overlay to visually twitch.
-    let scrollParentRef: HTMLElement | null = null;
-    const handleScroll = () => measure();
-
-    createEffect(() => {
-        const active = props.pinned; // scroll tracking only while pinned
-        if (active && blockRef) {
-            scrollParentRef = findScrollParent(blockRef);
-            scrollParentRef?.addEventListener("scroll", handleScroll, { passive: true });
-            window.addEventListener("resize", handleScroll, { passive: true });
-        } else if (scrollParentRef) {
-            scrollParentRef.removeEventListener("scroll", handleScroll);
-            window.removeEventListener("resize", handleScroll);
-            scrollParentRef = null;
-        }
-    });
-
-    onCleanup(() => {
-        if (scrollParentRef) {
-            scrollParentRef.removeEventListener("scroll", handleScroll);
-            window.removeEventListener("resize", handleScroll);
-            scrollParentRef = null;
-        }
-    });
-
-    // Per-tool rich result rendering moved into `ToolOverlayLog`'s
-    // fallback path (Phase 3 of SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md).
-    // The overlay is now a header / log / action-bar three-slot
-    // component — see ToolBlockOverlay.tsx.
-
-    // Overlay style — only meaningful when overlayMode() is true. Computed
-    // from overlayRect() which is set during measure() / handleScroll.
-    //
-    // Zoom correction: the portal renders to document.body, outside the
-    // .agent-view zoom context. getBoundingClientRect() returns viewport
-    // coordinates (already zoomed), so top/left stay as-is. But the portal
-    // container's width/height are in un-zoomed CSS px, so min/max-width must
-    // be divided by zoom to produce the correct visual size. We also apply
-    // `zoom` to the portal container itself so font-sizes and spacing scale
-    // to match the surrounding document.
-    const overlayStyle = (): Record<string, string> => {
-        const r = overlayRect();
-        if (!r) return { display: "none" };
-        const zoom = blockRef ? getAncestorZoom(blockRef) : 1;
-        // Clamp right edge to viewport so the overlay never bleeds off-screen.
-        const maxRight = (window.innerWidth - r.left - 16) / zoom;
-        const minWidth = r.width / zoom;
-        if (overlayUp()) {
-            return {
-                position: "fixed",
-                left: `${r.left}px`,
-                minWidth: `${minWidth}px`,
-                maxWidth: `${maxRight}px`,
-                bottom: `${r.bottom}px`,
-                zoom: String(zoom),
-            };
-        }
-        return {
-            position: "fixed",
-            left: `${r.left}px`,
-            minWidth: `${minWidth}px`,
-            maxWidth: `${maxRight}px`,
-            top: `${r.top}px`,
-            zoom: String(zoom),
-        };
-    };
 
     return (
         <div
@@ -263,8 +114,6 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 collapsed: !expanded(),
                 expanded: expanded(),
                 pinned: props.pinned,
-                "overlay-mode": overlayMode(),
-                "overlay-up": overlayMode() && overlayUp(),
                 running: props.node.status === "running",
                 success: props.node.status === "success",
                 failed: props.node.status === "failed",
@@ -275,6 +124,25 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 <span class="agent-tool-name" title={props.node.summary}>{props.node.summary}</span>
                 <Show when={props.node.duration}>
                     <span class="agent-tool-duration">({props.node.duration.toFixed(1)}s)</span>
+                </Show>
+                {/* Live-tail: while the tool is streaming, show the most
+                    recent stdout/stderr line right in the collapsed row
+                    so the user can watch progress without expanding
+                    the overlay. With auto-expand-while-running, the
+                    panel below already shows the full stream — this
+                    tail still helps for the user-collapsed-mid-run
+                    case (and for tools the user manually pinned-closed
+                    while running). */}
+                <Show when={
+                    props.node.log?.open === true
+                    && (props.node.log?.chunks?.length ?? 0) > 0
+                }>
+                    <span
+                        class="agent-tool-live-tail"
+                        title={`latest stream output (${props.node.log?.chunks?.length ?? 0} chunks)`}
+                    >
+                        ↳ {props.node.log!.chunks[props.node.log!.chunks.length - 1].content}
+                    </span>
                 </Show>
                 <Show when={props.node.tool === "Agent"}>
                     <button
@@ -295,29 +163,28 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                     </button>
                 </Show>
             </div>
-            {/* All expansion now routes through the portal overlay — running,
-                failed, success all collapse by default (SPEC_AGENT_PANE_FOLLOWUPS
-                items #4 and #5). The portal escapes the paint containment on
-                `.agent-document-node-wrapper` (content-visibility: auto). */}
+            {/* Phase A: inline panel — replaces the Portal-to-document.body
+                positioning hack. The panel renders in normal document
+                flow underneath the summary row, so its lifecycle is
+                tied to the tool's `expanded()` state (and, in Phase B,
+                to the tool's running status). Mouse enter/leave on the
+                panel keeps the hover state alive so the user can
+                interact with the content. See
+                docs/specs/SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md §4. */}
             <Show when={expanded()}>
-                <Portal>
-                    <div
-                        class={clsx("agent-tool-content", "agent-tool-content--portal", {
-                            "overlay-up": overlayUp(),
-                        })}
-                        style={overlayStyle()}
-                        onClick={(e) => e.stopPropagation()}
-                        onMouseEnter={handleMouseEnter}
-                        onMouseLeave={handleMouseLeave}
-                    >
-                        <ToolBlockOverlay
-                            node={props.node}
-                            isBookmarked={props.isBookmarked}
-                            onBookmark={props.onBookmark}
-                            onOpenInPane={props.onOpenInPane}
-                        />
-                    </div>
-                </Portal>
+                <div
+                    class="agent-tool-panel"
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseEnter={handleMouseEnter}
+                    onMouseLeave={handleMouseLeave}
+                >
+                    <ToolBlockOverlay
+                        node={props.node}
+                        isBookmarked={props.isBookmarked}
+                        onBookmark={props.onBookmark}
+                        onOpenInPane={props.onOpenInPane}
+                    />
+                </div>
             </Show>
         </div>
     );

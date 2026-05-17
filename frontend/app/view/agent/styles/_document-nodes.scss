@@ -128,6 +128,28 @@
                 font-size: 11px;
             }
 
+            // Live-tail: shows the most recent stream chunk inline
+            // while the tool is running. Truncates with ellipsis so
+            // the row doesn't reflow as long lines arrive. Tinted
+            // toward the accent color so the user immediately
+            // recognises it as "live output" vs the static command
+            // summary. Monospace because tool output is
+            // overwhelmingly code / path-ish.
+            .agent-tool-live-tail {
+                flex: 1 1 0;
+                min-width: 0;
+                margin-left: 8px;
+                padding: 0 6px;
+                color: var(--accent-color, #2bd4a8);
+                background: rgba(43, 212, 168, 0.08);
+                border-radius: 3px;
+                font-family: var(--fixed-font, monospace);
+                font-size: 11px;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
         }
 
         // When pinned open, the click-to-pin state gets a subtle accent
@@ -147,18 +169,28 @@
             cursor: text;
         }
 
-        // Overlay mode is implemented via a <Portal> to document.body so
-        // the overlay escapes the `content-visibility: auto` paint
-        // containment on `.agent-document-node-wrapper`. Without the
-        // portal, the absolute-positioned overlay would be paint-clipped
-        // at the wrapper's edge and invisible on hover.
+        // Phase A of SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md replaced
+        // the portal-based overlay with this inline panel. The panel sits
+        // in normal document flow underneath the summary row. Variable-
+        // height — the existing virtualizer + measureElement handles
+        // re-measurement when the panel opens/closes (§4.8 of the spec
+        // recommended option B; verified working).
         //
-        // See .agent-tool-content--portal below for the portaled element's
-        // visual styling (background, border, shadow, z-index).
-        //
-        // The inline `.agent-tool-content` rule above still applies when
-        // the block is force-expanded (running/failed) — those render
-        // inline in the document flow, not in the portal.
+        // Visual: indented under the summary row, with a faint accent
+        // border-left to tie it visually to the running/streaming state.
+        // Bounded height with internal scroll so a very long output
+        // doesn't push the rest of the conversation out of view.
+        .agent-tool-panel {
+            margin: 4px 0 8px 24px;
+            border-left: 2px solid var(--accent-color, #2bd4a8);
+            background: var(--surface-elevated, rgba(255, 255, 255, 0.02));
+            border-radius: 0 4px 4px 0;
+            padding: 6px 8px;
+            max-height: 50vh;
+            overflow-y: auto;
+            font-family: var(--fixed-font, monospace);
+            font-size: 12px;
+        }
 
         .agent-tool-loading {
             color: var(--secondary-text-color);
