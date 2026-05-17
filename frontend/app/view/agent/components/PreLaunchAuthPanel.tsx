@@ -80,7 +80,7 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         const url = s.authUrl;
         if (url && url !== lastOpenedUrl) {
             lastOpenedUrl = url;
-            console.log(`[auth-diag] opening auth URL in browser: ${url}`);
+            console.log(`[auth-diag] opening auth URL in browser (host=${(() => { try { return new URL(url).host; } catch { return "?"; } })()})`);
             try {
                 getApi().openExternal(url);
             } catch (e) {

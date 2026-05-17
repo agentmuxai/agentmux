@@ -578,19 +578,23 @@ fn spawn_auth_cli_pty(
         };
 
         // Stdin writer: forward callback URLs from the manager into
-        // the child's PTY input. PTY writer is sync; wrap calls in a
-        // blocking task.
+        // the child's PTY input. portable_pty's master writer is sync;
+        // wrap each write in `block_in_place` so the blocking IO
+        // doesn't starve the tokio reactor when the PTY input buffer
+        // is full.
         let stdin_writer_handle = tokio::spawn(async move {
             let mut writer = writer;
             while let Some(line) = stdin_rx.recv().await {
-                use std::io::Write;
-                if writer.write_all(line.as_bytes()).is_err() {
+                let res = tokio::task::block_in_place(|| {
+                    use std::io::Write;
+                    writer
+                        .write_all(line.as_bytes())
+                        .and_then(|_| writer.write_all(b"\n"))
+                        .and_then(|_| writer.flush())
+                });
+                if res.is_err() {
                     break;
                 }
-                if writer.write_all(b"\n").is_err() {
-                    break;
-                }
-                let _ = writer.flush();
             }
         });
 
