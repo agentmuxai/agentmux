@@ -552,6 +552,14 @@ fn spawn_auth_cli_pty(
             }
         };
 
+        // Register the child PID with the session manager so
+        // `cancel_session` can kill it — aborting drain_handle below
+        // can't reach into the spawn_blocking wait task that owns
+        // the portable_pty::Child.
+        if let Some(pid) = child.process_id() {
+            mgr_for_task.attach_pty_pid(&session_id_for_task, pid);
+        }
+
         let reader = match pair.master.try_clone_reader() {
             Ok(r) => r,
             Err(e) => {

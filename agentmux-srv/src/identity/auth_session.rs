@@ -135,6 +135,10 @@ pub struct PollSessionResult {
 struct ProcessRefs {
     drain_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
     stdin_senders: HashMap<String, tokio::sync::mpsc::Sender<String>>,
+    /// PID of a PTY-backed auth subprocess. Aborting `drain_tasks`
+    /// can't reach into a `spawn_blocking` wait task, so cancel_session
+    /// kills the child by PID for PTY transports.
+    pty_pids: HashMap<String, u32>,
 }
 
 #[derive(Default)]
@@ -284,7 +288,25 @@ impl AuthSessionManager {
             handle.abort();
         }
         refs.stdin_senders.remove(session_id);
+        // PTY transport: abort() doesn't reach the spawn_blocking
+        // wait task, so kill the child by PID. Pipes path doesn't
+        // need this — its tokio Child uses kill_on_drop.
+        if let Some(pid) = refs.pty_pids.remove(session_id) {
+            if let Err(e) = kill_pid(pid) {
+                tracing::warn!(pid, session_id, error = %e, "cancel_session: kill_pid failed");
+            } else {
+                tracing::info!(pid, session_id, "cancel_session: PTY child killed");
+            }
+        }
         transitioned
+    }
+
+    /// Register the PID of a PTY-backed auth subprocess so
+    /// `cancel_session` can terminate it. Called by `auth.start`
+    /// after spawning a PTY login (in addition to `attach_process`).
+    pub fn attach_pty_pid(&self, session_id: &str, pid: u32) {
+        let mut refs = self.process_refs.lock().unwrap();
+        refs.pty_pids.insert(session_id.to_string(), pid);
     }
 
     /// Register the drain task + stdin sender for a session. Called
@@ -322,6 +344,7 @@ impl AuthSessionManager {
         let mut refs = self.process_refs.lock().unwrap();
         refs.drain_tasks.remove(session_id);
         refs.stdin_senders.remove(session_id);
+        refs.pty_pids.remove(session_id);
     }
 
     /// Remove a session from the map. Caller should only invoke this
@@ -354,6 +377,32 @@ impl AuthSessionManager {
             s.started_at = Instant::now() - Duration::from_secs(SESSION_TIMEOUT_SECS + 1);
         }
     }
+}
+
+/// Platform-specific best-effort kill of a child process by PID.
+/// Mirror of the cef-side helper in `agentmux-cef::commands::platform`.
+#[cfg(windows)]
+fn kill_pid(pid: u32) -> std::io::Result<()> {
+    let status = std::process::Command::new("taskkill")
+        .args(["/F", "/T", "/PID", &pid.to_string()])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!("taskkill exit {:?}", status.code())))
+    }
+}
+
+#[cfg(unix)]
+fn kill_pid(pid: u32) -> std::io::Result<()> {
+    let ret = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    if ret != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
