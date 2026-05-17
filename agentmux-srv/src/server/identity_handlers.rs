@@ -57,6 +57,14 @@ struct StartProviderAuthReq {
     /// GEMINI_CLI_HOME, etc.).
     #[serde(default)]
     auth_env: std::collections::HashMap<String, String>,
+    /// Spawn the auth login subprocess under a PTY (instead of plain
+    /// piped stdio). Required by providers whose auth subcommand
+    /// checks `isatty()` and refuses to run otherwise (currently
+    /// OpenClaw's `models auth login --provider <id>`). The flag is
+    /// forwarded down to the CEF host's `run_cli_login` which picks
+    /// the PTY branch when set.
+    #[serde(default)]
+    requires_tty: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -127,6 +135,7 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                     req.auth_login_args,
                     req.auth_check_args,
                     req.auth_env,
+                    req.requires_tty,
                 );
                 Ok(Some(serde_json::to_value(&r).unwrap_or_default()))
             })
@@ -239,6 +248,7 @@ fn spawn_auth_cli(
     auth_login_args: Vec<String>,
     auth_check_args: Vec<String>,
     auth_env: std::collections::HashMap<String, String>,
+    requires_tty: bool,
 ) {
     use std::process::Stdio;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -248,6 +258,27 @@ fn spawn_auth_cli(
     // Channel for SubmitAuthCallback → CLI stdin forwarding.
     // Buffer of 4 is enough — only one URL per session in normal use.
     let (stdin_tx, mut stdin_rx) = mpsc::channel::<String>(4);
+
+    // PTY branch: providers like OpenClaw whose auth subcommand
+    // refuses to run when `isatty()==0`. Spawn via portable_pty so the
+    // child sees an interactive terminal, feed PTY output through the
+    // same record_line matcher the pipes path uses. Stdout/stderr are
+    // merged into the single PTY stream — record_line handles both as
+    // identical input.
+    if requires_tty {
+        spawn_auth_cli_pty(
+            mgr,
+            session_id,
+            provider_id,
+            cli_path,
+            auth_login_args,
+            auth_check_args,
+            auth_env,
+            stdin_tx,
+            stdin_rx,
+        );
+        return;
+    }
 
     let mgr_for_task = mgr.clone();
     let session_id_for_task = session_id.clone();
@@ -431,6 +462,244 @@ fn spawn_auth_cli(
                 mgr_for_task.finish_failure(
                     &session_id_for_task,
                     format!("wait error: {e}"),
+                );
+            }
+        }
+
+        mgr_for_task.detach_process(&session_id_for_task);
+    });
+
+    mgr.attach_process(&session_id, handle, stdin_tx);
+}
+
+/// PTY-backed variant of spawn_auth_cli. Used for providers whose auth
+/// subcommand bails on `isatty()==0` (currently OpenClaw). Mirrors the
+/// pipes path's lifecycle: spawn → drain → confirm → finish_success or
+/// finish_failure → detach. Stdout+stderr are merged on the PTY side;
+/// `record_line` doesn't care which stream a line came from.
+fn spawn_auth_cli_pty(
+    mgr: Arc<crate::identity::auth_session::AuthSessionManager>,
+    session_id: String,
+    provider_id: String,
+    cli_path: String,
+    auth_login_args: Vec<String>,
+    auth_check_args: Vec<String>,
+    auth_env: std::collections::HashMap<String, String>,
+    stdin_tx: tokio::sync::mpsc::Sender<String>,
+    mut stdin_rx: tokio::sync::mpsc::Receiver<String>,
+) {
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+
+    let mgr_for_task = mgr.clone();
+    let session_id_for_task = session_id.clone();
+    let cli_path_for_check = cli_path.clone();
+    let auth_check_args_for_check = auth_check_args.clone();
+    let auth_env_for_check = auth_env.clone();
+
+    tracing::info!(
+        session_id = %session_id,
+        provider_id = %provider_id,
+        cli_path = %cli_path,
+        auth_login_args = ?auth_login_args,
+        "auth.spawn (PTY): launching provider CLI"
+    );
+
+    // Allocate the PTY, build the command, spawn the child, and
+    // register the PID — all synchronously, BEFORE the async drain/
+    // wait task and BEFORE `attach_process`. That way no
+    // `cancel_session` racing with the spawn can find a registered
+    // handle but a missing PID; either the PID is registered first
+    // (cancel can kill), or the early-return path fired and there
+    // is no child to kill.
+    let pty_system = native_pty_system();
+    let pair = match pty_system.openpty(PtySize {
+        rows: 24,
+        cols: 80,
+        pixel_width: 0,
+        pixel_height: 0,
+    }) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!(session_id = %session_id, error = %e, "auth.spawn (PTY): openpty failed");
+            mgr.finish_failure(&session_id, format!("openpty failed: {e}"));
+            mgr.detach_process(&session_id);
+            return;
+        }
+    };
+
+    let mut cmd = CommandBuilder::new(&cli_path);
+    for a in &auth_login_args {
+        cmd.arg(a);
+    }
+    for (k, v) in &auth_env {
+        cmd.env(k, v);
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        cmd.cwd(cwd);
+    }
+
+    let child = match pair.slave.spawn_command(cmd) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!(
+                session_id = %session_id,
+                error = %e,
+                "auth.spawn (PTY): spawn_command failed"
+            );
+            mgr.finish_failure(&session_id, format!("PTY spawn `{cli_path}` failed: {e}"));
+            mgr.detach_process(&session_id);
+            return;
+        }
+    };
+
+    if let Some(pid) = child.process_id() {
+        mgr.attach_pty_pid(&session_id, pid);
+    }
+
+    let reader = match pair.master.try_clone_reader() {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(session_id = %session_id, error = %e, "auth.spawn (PTY): try_clone_reader failed");
+            mgr.finish_failure(&session_id, format!("PTY reader: {e}"));
+            mgr.detach_process(&session_id);
+            return;
+        }
+    };
+    let writer = match pair.master.take_writer() {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::error!(session_id = %session_id, error = %e, "auth.spawn (PTY): take_writer failed");
+            mgr.finish_failure(&session_id, format!("PTY writer: {e}"));
+            mgr.detach_process(&session_id);
+            return;
+        }
+    };
+
+    let handle = tokio::spawn(async move {
+
+        // Stdin writer: forward callback URLs from the manager into
+        // the child's PTY input. portable_pty's master writer is sync;
+        // wrap each write in `block_in_place` so the blocking IO
+        // doesn't starve the tokio reactor when the PTY input buffer
+        // is full.
+        let stdin_writer_handle = tokio::spawn(async move {
+            let mut writer = writer;
+            while let Some(line) = stdin_rx.recv().await {
+                let res = tokio::task::block_in_place(|| {
+                    use std::io::Write;
+                    writer
+                        .write_all(line.as_bytes())
+                        .and_then(|_| writer.write_all(b"\n"))
+                        .and_then(|_| writer.flush())
+                });
+                if res.is_err() {
+                    break;
+                }
+            }
+        });
+
+        // Drain: synchronous line reader from PTY master, feeds into
+        // the same record_line matcher the pipes path uses. Runs in a
+        // blocking thread; sends parsed events through a oneshot when
+        // we hit a login-success pattern (so the async task can run
+        // confirm_authenticated without crossing the blocking thread).
+        let mgr_drain = mgr_for_task.clone();
+        let sid_drain = session_id_for_task.clone();
+        let cli_path_drain = cli_path_for_check.clone();
+        let check_args_drain = auth_check_args_for_check.clone();
+        let check_env_drain = auth_env_for_check.clone();
+        let drain_handle = tokio::task::spawn_blocking(move || {
+            use std::io::BufRead;
+            let mut reader = std::io::BufReader::new(reader);
+            let mut success_transitioned = false;
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) => break, // EOF
+                    Ok(_) => {
+                        // Same redaction policy as the pipes path —
+                        // OAuth URLs / codes can be in here.
+                        tracing::debug!(session_id = %sid_drain, bytes = line.len(), "auth.spawn (PTY): line");
+                        let m = mgr_drain.record_line(&sid_drain, &line);
+                        if !success_transitioned
+                            && matches!(
+                                m,
+                                Some(crate::identity::auth_patterns::AuthPatternMatch::LoginSuccess { .. })
+                            )
+                        {
+                            // Hand off to async to call confirm_authenticated.
+                            let cli = cli_path_drain.clone();
+                            let args = check_args_drain.clone();
+                            let env = check_env_drain.clone();
+                            let mgr2 = mgr_drain.clone();
+                            let sid2 = sid_drain.clone();
+                            tokio::runtime::Handle::current().spawn(async move {
+                                if confirm_authenticated(&cli, &args, &env).await {
+                                    let bundle_id = format!("pending-bundle-for-{}", sid2);
+                                    mgr2.finish_success(&sid2, bundle_id);
+                                }
+                            });
+                            success_transitioned = true;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        // Wait for the child in a blocking task. pair (master + slave)
+        // moves into the closure so its destructor runs AFTER
+        // child.wait() — ConPTY contract on Windows.
+        let wait_handle = tokio::task::spawn_blocking(move || {
+            let mut child = child;
+            let exit = child.wait();
+            drop(pair);
+            exit
+        });
+
+        let exit = wait_handle.await;
+        tracing::info!(session_id = %session_id_for_task, exit = ?exit, "auth.spawn (PTY): child exited");
+
+        let _ = drain_handle.await;
+        stdin_writer_handle.abort();
+
+        // Final transition fallback — some CLIs exit cleanly without
+        // emitting a login-success line that record_line recognizes.
+        match exit {
+            Ok(Ok(s)) if s.success() => {
+                if confirm_authenticated(
+                    &cli_path_for_check,
+                    &auth_check_args_for_check,
+                    &auth_env_for_check,
+                )
+                .await
+                {
+                    let bundle_id = format!("pending-bundle-for-{}", session_id_for_task);
+                    mgr_for_task.finish_success(&session_id_for_task, bundle_id);
+                } else {
+                    mgr_for_task.finish_failure(
+                        &session_id_for_task,
+                        "CLI exited cleanly but auth-check still failed".to_string(),
+                    );
+                }
+            }
+            Ok(Ok(s)) => {
+                mgr_for_task.finish_failure(
+                    &session_id_for_task,
+                    format!("CLI exited with code {:?}", s.exit_code()),
+                );
+            }
+            Ok(Err(e)) => {
+                mgr_for_task.finish_failure(
+                    &session_id_for_task,
+                    format!("PTY wait error: {e}"),
+                );
+            }
+            Err(e) => {
+                mgr_for_task.finish_failure(
+                    &session_id_for_task,
+                    format!("PTY wait task join error: {e}"),
                 );
             }
         }

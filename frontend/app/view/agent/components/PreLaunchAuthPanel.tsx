@@ -67,6 +67,28 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         props.onStateChange(controller.state());
     });
 
+    // Auto-open the OAuth URL in the user's default browser as soon as
+    // the auth controller surfaces it. Same effect as the legacy
+    // launch-flow.ts inline path. The URL also stays visible in the
+    // WaitingPanel below with a Copy button — that's the manual
+    // fallback when the OS doesn't route the open (browser closed,
+    // protocol handler missing, etc.). Fires once per URL (the guard
+    // tracks the last URL we opened so re-renders don't re-fire).
+    let lastOpenedUrl: string | null = null;
+    createEffect(() => {
+        const s = controller.state();
+        const url = s.authUrl;
+        if (url && url !== lastOpenedUrl) {
+            lastOpenedUrl = url;
+            console.log(`[auth-diag] opening auth URL in browser (host=${(() => { try { return new URL(url).host; } catch { return "?"; } })()})`);
+            try {
+                getApi().openExternal(url);
+            } catch (e) {
+                console.warn(`[auth-diag] openExternal failed: ${(e as Error)?.message ?? String(e)}`);
+            }
+        }
+    });
+
     // Forward `succeeded` / `api-key-accepted` to bundle-creation
     // callback so the modal can refresh the bundle list.
     //
@@ -110,7 +132,7 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         // (= "create new bundle") rather than `"blank"` (= "attach
         // to bundle named blank", which doesn't exist in wstore).
         const bundleArg = id === "blank" ? "" : id;
-        untrack(() => controller.selected(prov.id, bundleArg, outcomeFor(id)));
+        untrack(() => controller.selected(prov.id, bundleArg, outcomeFor(id, prov.id)));
     });
 
     onCleanup(() => {
@@ -179,7 +201,13 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
  *  is deferred to PR B-4 / PR D — for MVP we treat:
  *   - blank singleton → `needs-bundle` (Connect creates new)
  *   - non-blank bundle → `ready` (trust prior auth — old behavior). */
-function outcomeFor(identityId: string): SelectionOutcome {
+function outcomeFor(identityId: string, providerId?: string): SelectionOutcome {
+    // Phase α for openclaw: bundle persistence isn't wired yet, so an
+    // already-selected identity can't be trusted as authenticated. Force
+    // a fresh OAuth on every launch so AgentLaunchModal's openclaw
+    // override actually gates Launch. Lift once Phase δ wires real
+    // bundle storage.
+    if (providerId === "openclaw") return "needs-bundle";
     if (!identityId || identityId === "blank") return "needs-bundle";
     return "ready";
 }
@@ -188,7 +216,11 @@ async function startConnect(
     controller: AuthFlowController,
     provider: ProviderDefinition | undefined,
 ): Promise<void> {
-    if (!provider) return;
+    console.log(`[auth-diag] startConnect entry: provider=${provider?.id ?? "(undefined)"} requiresLoginTty=${provider?.requiresLoginTty}`);
+    if (!provider) {
+        console.warn("[auth-diag] startConnect: provider undefined, bailing");
+        return;
+    }
     // Resolve the CLI path via the same RPC `launch-flow.ts` uses.
     // The backend handles "not installed → npm install" so the
     // call returns a valid path or an error.
@@ -207,7 +239,9 @@ async function startConnect(
             { timeout: 120000 },
         );
         cliPath = r.cli_path;
+        console.log(`[auth-diag] ResolveCli ok: cliPath=${cliPath}`);
     } catch (e) {
+        console.error(`[auth-diag] ResolveCli FAILED: ${(e as Error)?.message ?? String(e)}`);
         // Surface the real ResolveCli error in the FailedBanner —
         // reagent P1 on #847: previously this discarded `e` and
         // called connect with an empty cliPath, producing a
@@ -226,7 +260,9 @@ async function startConnect(
         try {
             const authDir = await getApi().ensureAuthDir(provider.id);
             authEnv[provider.authConfigDirEnvVar] = authDir;
+            console.log(`[auth-diag] ensureAuthDir ok: ${provider.authConfigDirEnvVar}=${authDir}`);
         } catch (e) {
+            console.error(`[auth-diag] ensureAuthDir FAILED: ${(e as Error)?.message ?? String(e)}`);
             controller.failConnect(e);
             return;
         }
@@ -237,13 +273,19 @@ async function startConnect(
     // Codex P2 on #854 round 4: bail before connect() if the modal
     // closed mid-prep. The controller itself also gates on `closed`,
     // but skipping the call avoids the extra RPC bookkeeping.
-    if (controller.state().closed) return;
+    if (controller.state().closed) {
+        console.warn("[auth-diag] startConnect: controller closed mid-prep, bailing");
+        return;
+    }
+    console.log(`[auth-diag] calling controller.connect(); kind=${controller.state().kind}`);
     await controller.connect({
         cliPath,
         authLoginArgs: provider.authLoginCommand,
         authCheckArgs: provider.authCheckCommand,
         authEnv,
+        requiresTty: provider.requiresLoginTty ?? false,
     });
+    console.log(`[auth-diag] controller.connect returned; kind=${controller.state().kind}`);
 }
 
 // ── Sub-panels ─────────────────────────────────────────────────────

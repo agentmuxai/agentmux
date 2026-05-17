@@ -38,6 +38,12 @@ axum = "0.8"
 tower-http = { version = "0.6", features = ["cors", "fs"] }
 tokio = { version = "1", features = ["full"] }
 whoami = "1"
+# PTY-backed CLI login flow — needed for providers that strictly require
+# an interactive TTY for their OAuth subcommand (currently OpenClaw's
+# `openclaw models auth login --provider <id>`). Other providers (Claude,
+# Codex, Gemini, etc.) still go through the plain-pipes path inside
+# run_cli_login. See SPEC_OPENCLAW_AGENT_2026_05_17.md §6.
+portable-pty = "0.9"
 json_comments = "0.2"
 # Browser DOM API (SPEC_BROWSER_DOM_API.md): CDP WebSocket client + /json probe
 tokio-tungstenite = "0.24"
@@ -75,6 +81,12 @@ windows-sys = { version = "0.59", features = [
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1"
+
+[target.'cfg(unix)'.dependencies]
+# Used by `cancel_cli_login` to send SIGTERM to a PTY child by PID
+# when `auth.cancel` fires (the portable_pty child sits inside a
+# `spawn_blocking` task that doesn't unwind on outer-task abort).
+libc = "0.2"
 
 [dev-dependencies]
 # Property tests for the shadow projection (master spec §8.14
