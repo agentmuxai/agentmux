@@ -19,7 +19,7 @@ import { createContext, useContext, type Accessor } from "solid-js";
 // Discriminated union so the layer can dispatch on `kind`. New tab-modal
 // surfaces add a variant here and a render branch in TabModalLayer.
 
-export type TabModalRequest = LaunchAgentRequest;
+export type TabModalRequest = LaunchAgentRequest | InstallAgentRequest;
 
 export interface LaunchAgentRequest {
     kind: "launch-agent";
@@ -41,6 +41,23 @@ export interface LaunchAgentSubmit {
     agentType: "host" | "container";
     environment: "local" | "docker";
     containerImage?: string;
+}
+
+/**
+ * Install-agent modal — opens when the user picks an agent whose CLI
+ * isn't installed in the per-version cache. Streams the npm-install
+ * output live inside the modal. On success the layer auto-transitions
+ * to the launch-agent modal (via `onInstalled`). Per
+ * SPEC_AGENT_INSTALL_STAGE_2026_05_17.md §6.
+ */
+export interface InstallAgentRequest {
+    kind: "install-agent";
+    agent: ForgeAgent;
+    originBlockId: string;
+    /** Called by the modal once the install completes successfully.
+     *  Convention: the layer closes the install modal then opens the
+     *  launch-agent modal as the natural next step. */
+    onInstalled: () => void;
 }
 
 // ── Context API ──────────────────────────────────────────────────────────────
