@@ -301,8 +301,14 @@ impl CliLoginStdin {
             }
             CliLoginStdin::Pty(w) => {
                 use std::io::Write;
-                w.write_all(payload.as_bytes())?;
-                w.flush()
+                // portable_pty's master writer is sync. Run it via
+                // `block_in_place` so the brief sync write doesn't
+                // starve the tokio reactor on the current worker
+                // thread if the PTY input buffer is full.
+                tokio::task::block_in_place(|| {
+                    w.write_all(payload.as_bytes())?;
+                    w.flush()
+                })
             }
         }
     }
@@ -523,22 +529,23 @@ async fn run_cli_login_pty(
 
     // Synchronously read from the master in a blocking task, scanning
     // each line for an OAuth URL. portable_pty's reader is sync.
-    // 15 s timeout — login subprocesses can take a couple seconds to
-    // initialise (network probe, plugin load, browser handshake) and
-    // 2 s was empirically too tight for OpenClaw's `models auth login`.
+    // The 15 s cap is enforced async-side via tokio::time::timeout —
+    // BufRead::read_line itself blocks indefinitely without per-read
+    // timeout support, so a child that pauses before its first line
+    // (or sits at a prompt with no newline) would wedge `url_rx.await`
+    // without it. When the timeout fires we return auth_url=None to
+    // the frontend and let the wait task below reap the child whenever
+    // it finishes naturally.
     let (url_tx, url_rx) = tokio::sync::oneshot::channel::<Option<String>>();
     tokio::task::spawn_blocking(move || {
         use std::io::BufRead;
         let mut reader = std::io::BufReader::new(reader);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
         let mut found: Option<String> = None;
         let mut line = String::new();
-        while std::time::Instant::now() < deadline {
+        loop {
             line.clear();
-            // BufRead::read_line blocks; the deadline above is a
-            // best-effort cap that's checked only between reads.
             match reader.read_line(&mut line) {
-                Ok(0) => break,                          // EOF
+                Ok(0) => break, // EOF
                 Ok(_) => {
                     if let Some(u) = extract_url(&line) {
                         found = Some(u);
@@ -556,7 +563,15 @@ async fn run_cli_login_pty(
         // below.
     });
 
-    let auth_url: Option<String> = url_rx.await.unwrap_or(None);
+    let auth_url: Option<String> = match tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        url_rx,
+    )
+    .await
+    {
+        Ok(Ok(u)) => u,
+        Ok(Err(_)) | Err(_) => None,
+    };
     if let Some(ref url) = auth_url {
         tracing::info!(url = %url, "run_cli_login_pty: captured auth URL");
     } else {
