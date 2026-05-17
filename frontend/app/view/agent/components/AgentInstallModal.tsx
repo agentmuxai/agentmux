@@ -78,6 +78,18 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             setPhase("failed");
             return;
         }
+        // Tear down any prior run (Retry path) before reassigning —
+        // otherwise the previous setInterval keeps ticking + the
+        // previous WPS subscription stays active for the rest of the
+        // component's life.
+        if (unsub) {
+            unsub();
+            unsub = null;
+        }
+        if (tickHandle != null) {
+            clearInterval(tickHandle);
+            tickHandle = null;
+        }
         setPhase("installing");
         setChunks([]);
         setError(null);
@@ -146,6 +158,17 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         if (tickHandle != null) {
             clearInterval(tickHandle);
             tickHandle = null;
+        }
+        // If the user closes the modal mid-install (Esc, backdrop
+        // click, tab switch), cancel the backend session so the next
+        // open doesn't see a phantom second install running. The
+        // explicit Cancel button takes a different path that also
+        // calls `onCancel`; this catches the implicit closes.
+        const sid = sessionId();
+        if (sid && phase() === "installing") {
+            void RpcApi.InstallCancelCommand(TabRpcClient, { sessionId: sid }).catch(() => {
+                /* best-effort */
+            });
         }
     });
 

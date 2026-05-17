@@ -34,6 +34,7 @@ use crate::server::AppState;
 
 pub const COMMAND_INSTALL_START: &str = "install.start";
 pub const COMMAND_INSTALL_CANCEL: &str = "install.cancel";
+pub const COMMAND_INSTALL_CHECK: &str = "install.check";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,6 +50,13 @@ struct InstallStartReq {
 #[serde(rename_all = "camelCase")]
 struct InstallCancelReq {
     session_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallCheckReq {
+    provider_id: String,
+    cli_command: String,
 }
 
 /// Per-session abort handle so `install.cancel` can kill an in-flight
@@ -82,6 +90,51 @@ impl InstallSessionRegistry {
     }
 }
 
+/// Provider ids feed into the install dir path; reject anything that
+/// could escape `~/.agentmux/<version>/cli/<provider>/`.
+fn is_safe_provider_id(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// Canonical install directory for a provider —
+/// `~/.agentmux/<version>/cli/<provider>/`. `install.start` writes
+/// here and `install.check` reads the same path so the frontend's
+/// "is installed?" probe matches what `install.start` produces.
+fn provider_install_dir(provider_id: &str) -> Option<std::path::PathBuf> {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()?;
+    let version = env!("CARGO_PKG_VERSION");
+    Some(
+        std::path::PathBuf::from(home)
+            .join(".agentmux")
+            .join(version)
+            .join("cli")
+            .join(provider_id),
+    )
+}
+
+/// Returns the path to the installed CLI binary if present in the
+/// per-version cache, else None. Used by `install.check`.
+fn resolve_installed_bin(provider_id: &str, cli_command: &str) -> Option<std::path::PathBuf> {
+    let dir = provider_install_dir(provider_id)?;
+    let bin_dir = dir.join("node_modules").join(".bin");
+    let candidates: &[&str] = if cfg!(windows) {
+        &[".cmd", ".exe", ""]
+    } else {
+        &["", ".cmd"]
+    };
+    for suffix in candidates {
+        let p = bin_dir.join(format!("{cli_command}{suffix}"));
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
+}
+
 pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let registry = state.install_sessions.clone();
     let broker = state.broker.clone();
@@ -93,6 +146,12 @@ pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             Box::pin(async move {
                 let req: InstallStartReq = serde_json::from_value(data)
                     .map_err(|e| format!("install.start: {e}"))?;
+                if !is_safe_provider_id(&req.provider_id) {
+                    return Err(format!(
+                        "install.start: invalid provider id {:?} — must match [a-zA-Z0-9_-]+",
+                        req.provider_id
+                    ));
+                }
                 if req.npm_package.is_empty() {
                     return Err(format!(
                         "install.start: provider {} has no npm_package — only npm-installable providers are supported in Phase α",
@@ -123,6 +182,24 @@ pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 );
 
                 Ok(Some(json!({ "sessionId": session_id })))
+            })
+        }),
+    );
+
+    engine.register_handler(
+        COMMAND_INSTALL_CHECK,
+        Box::new(move |data, _ctx| {
+            Box::pin(async move {
+                let req: InstallCheckReq = serde_json::from_value(data)
+                    .map_err(|e| format!("install.check: {e}"))?;
+                if !is_safe_provider_id(&req.provider_id) {
+                    return Err(format!(
+                        "install.check: invalid provider id {:?}",
+                        req.provider_id
+                    ));
+                }
+                let installed = resolve_installed_bin(&req.provider_id, &req.cli_command).is_some();
+                Ok(Some(json!({ "installed": installed })))
             })
         }),
     );
@@ -194,23 +271,20 @@ fn spawn_install_task(
             broker.publish(event);
         };
 
-        // Resolve install dir. Mirrors `cli_handlers.rs::resolve_cli`:
-        // `~/.agentmux/<version>/cli/<provider>/`.
-        let home = match std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
-            Ok(h) => h,
-            Err(_) => {
+        let provider_dir = match provider_install_dir(&provider_id) {
+            Some(p) => p,
+            None => {
                 emit_done(&broker, false, Some("cannot determine home directory".into()));
                 registry.drop_session(&session_id);
                 return;
             }
         };
-        let version = env!("CARGO_PKG_VERSION");
-        let provider_dir = format!("{}/.agentmux/{}/cli/{}", home, version, provider_id);
         if let Err(e) = std::fs::create_dir_all(&provider_dir) {
-            emit_done(&broker, false, Some(format!("mkdir {provider_dir}: {e}")));
+            emit_done(&broker, false, Some(format!("mkdir {}: {e}", provider_dir.display())));
             registry.drop_session(&session_id);
             return;
         }
+        let provider_dir_str = provider_dir.to_string_lossy().to_string();
 
         let pkg_arg = if pinned_version.is_empty() {
             npm_package.clone()
@@ -218,14 +292,14 @@ fn spawn_install_task(
             format!("{}@{}", npm_package, pinned_version)
         };
 
-        emit_line(&broker, format!("$ npm install {} --prefix {}", pkg_arg, provider_dir), "stdout");
+        emit_line(&broker, format!("$ npm install {} --prefix {}", pkg_arg, provider_dir_str), "stdout");
 
         let mut cmd = Command::new(if cfg!(windows) { "npm.cmd" } else { "npm" });
         cmd.args([
             "install",
             &pkg_arg,
             "--prefix",
-            &provider_dir,
+            &provider_dir_str,
             "--no-audit",
             "--no-fund",
             "--progress=false",
@@ -315,4 +389,35 @@ fn spawn_install_task(
 
         registry.drop_session(&session_id);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_safe_provider_id;
+
+    #[test]
+    fn safe_provider_ids_accepted() {
+        for id in ["claude", "claude-code", "open_claw", "Codex42"] {
+            assert!(is_safe_provider_id(id), "{id} should be accepted");
+        }
+    }
+
+    #[test]
+    fn unsafe_provider_ids_rejected() {
+        for id in [
+            "",
+            "../escape",
+            "a/b",
+            "a\\b",
+            "a b",
+            ".",
+            "..",
+            "a..b",
+            "a/../b",
+            "\0null",
+            &"x".repeat(65),
+        ] {
+            assert!(!is_safe_provider_id(id), "{id:?} should be rejected");
+        }
+    }
 }
