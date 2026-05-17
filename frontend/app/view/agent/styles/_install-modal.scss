@@ -1,0 +1,113 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// AgentInstallModal — opens when the user picks an agent whose CLI
+// isn't installed in the per-version cache. Streams npm install output
+// live. Phase α of SPEC_AGENT_INSTALL_STAGE_2026_05_17.md.
+//
+// Pattern after AgentLaunchModalBody but with a scrollable log area
+// instead of form fields.
+
+.agent-install-modal-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 560px;
+    max-width: 720px;
+    min-height: 360px;
+    max-height: 70vh;
+}
+
+.agent-install-modal-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding-bottom: var(--space-1);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.agent-install-modal-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+}
+
+.agent-install-modal-title {
+    flex: 1 1 auto;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--main-text-color);
+}
+
+.agent-install-modal-status {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: 12px;
+    color: var(--secondary-text-color);
+    font-variant-numeric: tabular-nums;
+}
+
+.agent-install-modal-spinner {
+    color: var(--warning-color, #e9b800);
+}
+
+.agent-install-modal-ok {
+    color: var(--success-color, #2bd4a8);
+    font-weight: 700;
+}
+
+.agent-install-modal-fail {
+    color: var(--error-color, #ff6b6b);
+    font-weight: 700;
+}
+
+.agent-install-modal-log {
+    flex: 1 1 auto;
+    min-height: 200px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: var(--space-1-5);
+    margin: 0;
+    background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-family: var(--fixed-font, monospace);
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--main-text-color);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.agent-install-modal-line {
+    display: inline;
+}
+
+.agent-install-modal-line--stderr {
+    color: var(--error-color, #ff6b6b);
+    opacity: 0.9;
+}
+
+.agent-install-modal-error {
+    padding: var(--space-1) var(--space-1-5);
+    background: color-mix(in srgb, var(--error-color, #ff6b6b) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--error-color, #ff6b6b) 40%, transparent);
+    border-radius: 4px;
+    color: var(--error-color, #ff6b6b);
+    font-size: 12px;
+}
+
+.agent-install-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-1);
+    padding-top: var(--space-1);
+}
+
+.agent-install-modal-launching {
+    align-self: center;
+    color: var(--secondary-text-color);
+    font-size: 12px;
+    font-style: italic;
+}
