@@ -469,6 +469,15 @@ pub struct AppState {
     /// Cancellation channel for an in-progress CLI login process
     pub cli_login_cancel: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 
+    /// PID of an in-progress PTY-backed CLI login child. The pipe
+    /// path uses `cli_login_cancel` + `tokio::select!` + Tokio's
+    /// `kill_on_drop` Child to terminate, but the PTY path moves
+    /// the `portable_pty` child into a `spawn_blocking` task that
+    /// outlives the outer abort — so cancel needs a PID + platform
+    /// kill to actually stop the subprocess. Populated by
+    /// `run_cli_login_pty`, cleared when the child exits naturally.
+    pub cli_login_pty_pid: Mutex<Option<u32>>,
+
     /// Stdin handle for the running CLI login child process. Two
     /// variants because some providers (OpenClaw) require an
     /// interactive TTY for their auth subcommand and we spawn them via
@@ -708,6 +717,7 @@ impl Default for AppState {
                 m
             }),
             cli_login_cancel: Mutex::new(None),
+            cli_login_pty_pid: Mutex::new(None),
             cli_login_stdin: Mutex::new(None),
             ipc_port: Mutex::new(0),
             ipc_token: uuid::Uuid::new_v4().to_string(),

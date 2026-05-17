@@ -82,6 +82,12 @@ windows-sys = { version = "0.59", features = [
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1"
 
+[target.'cfg(unix)'.dependencies]
+# Used by `cancel_cli_login` to send SIGTERM to a PTY child by PID
+# when `auth.cancel` fires (the portable_pty child sits inside a
+# `spawn_blocking` task that doesn't unwind on outer-task abort).
+libc = "0.2"
+
 [dev-dependencies]
 # Property tests for the shadow projection (master spec §8.14
 # subscriber idempotency contract). Mirrors agentmux-launcher's

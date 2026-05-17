@@ -37,6 +37,7 @@ dependencies = [
  "dirs",
  "futures-util",
  "json_comments",
+ "libc",
  "parking_lot",
  "portable-pty",
  "proptest",

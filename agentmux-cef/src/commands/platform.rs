@@ -509,6 +509,15 @@ async fn run_cli_login_pty(
         .spawn_command(cmd)
         .map_err(|e| format!("PTY spawn of {cli_path}: {e}"))?;
 
+    // Capture the child PID before moving the child into the wait
+    // task — cancel_cli_login needs it to kill the subprocess
+    // platform-side, since aborting the spawn_blocking wait does not
+    // propagate to the child.
+    let child_pid = child.process_id();
+    if let Some(pid) = child_pid {
+        *state.cli_login_pty_pid.lock() = Some(pid);
+    }
+
     let reader = pair
         .master
         .try_clone_reader()
@@ -518,7 +527,7 @@ async fn run_cli_login_pty(
         .take_writer()
         .map_err(|e| format!("PTY take_writer: {e}"))?;
 
-    tracing::info!(cli = %cli_path, "run_cli_login: spawned (PTY), waiting for OAuth URL");
+    tracing::info!(cli = %cli_path, pid = ?child_pid, "run_cli_login: spawned (PTY), waiting for OAuth URL");
 
     // Store the PTY writer so set_provider_auth can deliver an OAuth
     // code via stdin (some flows prompt the user to paste a code).
@@ -583,10 +592,9 @@ async fn run_cli_login_pty(
     // — necessary for ConPTY on Windows (see retro
     // 2026-05-11-live-log-streaming-wrapper-failures.md §4.2).
     //
-    // Cancel handling: the pipes path stores a cancel sender for the
-    // user-clicks-cancel flow; the PTY path skips that for now because
-    // portable_pty::Child::kill() needs &mut access and is awkward to
-    // share across the wait task. v2 can wire it via PID + taskkill.
+    // Cancel handling: `cancel_cli_login` reads `cli_login_pty_pid`
+    // and kills the subprocess by PID; once the child dies, this
+    // wait task observes the exit and clears the PID slot.
     let state_for_cleanup = state.clone();
     tokio::task::spawn_blocking(move || {
         let mut child = child;
@@ -603,6 +611,7 @@ async fn run_cli_login_pty(
         // pair drops here, after child.wait() returns
         drop(pair);
         *state_for_cleanup.cli_login_stdin.lock() = None;
+        *state_for_cleanup.cli_login_pty_pid.lock() = None;
     });
 
     Ok(serde_json::json!({ "auth_url": auth_url }))
@@ -645,17 +654,62 @@ fn extract_url(line: &str) -> Option<String> {
     None
 }
 
-/// Kill the in-progress CLI login process.
+/// Kill the in-progress CLI login process. Covers both transports:
+/// the pipe path uses a oneshot to drop the Tokio Child (kill_on_drop
+/// terminates the subprocess); the PTY path uses platform-specific
+/// kill-by-PID because the `portable_pty::Child` lives inside a
+/// `spawn_blocking` task that doesn't react to outer-task abort.
 pub fn cancel_cli_login(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    // Pipe path.
     let sender = {
         let mut stored = state.cli_login_cancel.lock();
         stored.take()
     };
     if let Some(tx) = sender {
         let _ = tx.send(());
-        tracing::info!("cancel_cli_login: cancel signal sent");
+        tracing::info!("cancel_cli_login: pipe-path cancel signal sent");
+    }
+    // PTY path.
+    let pid = {
+        let mut stored = state.cli_login_pty_pid.lock();
+        stored.take()
+    };
+    if let Some(pid) = pid {
+        if let Err(e) = kill_pid(pid) {
+            tracing::warn!(pid, error = %e, "cancel_cli_login: kill_pid failed");
+        } else {
+            tracing::info!(pid, "cancel_cli_login: PTY child killed");
+        }
     }
     Ok(serde_json::Value::Null)
+}
+
+/// Platform-specific best-effort kill of a child process by PID.
+#[cfg(windows)]
+fn kill_pid(pid: u32) -> std::io::Result<()> {
+    // Use taskkill /F /T so the whole tree dies — `openclaw models
+    // auth login` typically spawns a child that opens the browser.
+    let status = std::process::Command::new("taskkill")
+        .args(["/F", "/T", "/PID", &pid.to_string()])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!("taskkill exit {:?}", status.code())))
+    }
+}
+
+#[cfg(unix)]
+fn kill_pid(pid: u32) -> std::io::Result<()> {
+    // SIGTERM first; an aborting subprocess gets a chance to clean up.
+    let ret = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    if ret != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 // --- CLI command helpers ---
