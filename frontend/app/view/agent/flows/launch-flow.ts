@@ -30,6 +30,7 @@
  *   - "fatal"       — CLI missing, docker missing, provider unknown (retry won't help)
  */
 
+import { translateError } from "@/app/errors/translate";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
@@ -117,9 +118,17 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         }, { timeout: 300000 });
     } catch (err: any) {
         unsubInstall();
-        const msg = err?.message ?? String(err);
-        log("cli", msg, "error");
-        log("error", `${provider.cliCommand} not available — install manually or check your internet connection`, "error");
+        // Route through translateError so typed wire-format errors
+        // from ResolveCli render as readable text in the activity
+        // log instead of raw JSON like `{"code":"AMX-CLI-001",...}`.
+        // Legacy free-text errors pass through unchanged.
+        const t = translateError(err);
+        // Log the retry hint FIRST so the error line is the most
+        // recent entry — `ActivityLogPanel` derives the panel's
+        // failed-state styling from the most recent log entry's
+        // level (`agent-activity-log--has-error`).
+        if (t.retry) log("cli", t.retry, "warn");
+        log("cli", `${t.title}: ${t.message}`, "error");
         return "fatal";
     }
     unsubInstall();
