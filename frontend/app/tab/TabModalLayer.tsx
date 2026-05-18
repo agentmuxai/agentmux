@@ -69,12 +69,12 @@ export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
     const api: TabModalApi = {
         open: (req) => { setSubmitting(false); setCurrent(req); },
         replace: (next) => {
-            // No current modal → degenerate to `open` (which plays the
-            // full entrance animation). Otherwise keep backdrop + outer
-            // panel mounted and let the inner keyed <Show> remount the
-            // content, triggering the content-fade keyframe. See
-            // SPEC_MODAL_TRANSITIONS_2026_05_18.md §3.3.
-            if (current() == null) { setSubmitting(false); setCurrent(next); return; }
+            // Identical to `open` at the signal level — the visual
+            // difference (cold open plays the backdrop fade-in + panel
+            // pop-in; warm replace fires only the content keyframe) is
+            // emergent from <Show>'s mount state. Reagent caught this:
+            // splitting the assignment into two branches was dead code.
+            // See SPEC_MODAL_TRANSITIONS_2026_05_18.md §3.3.
             setSubmitting(false);
             setCurrent(next);
         },
