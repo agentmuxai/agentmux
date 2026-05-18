@@ -53,6 +53,7 @@ import {
     ReducerResult,
     TITLE_FALLBACK,
     deriveFaviconUrl,
+    deriveTitlePlaceholder,
     sameOriginUrl,
 } from "./types";
 
@@ -74,6 +75,13 @@ export function update(
 
     switch (command.type) {
         case "Navigate": {
+            // Optimistic header (SPEC_BROWSER_PANE_OPTIMISTIC_HEADER_2026_05_18):
+            // also seed the title with a hostname-based placeholder so
+            // the header doesn't show the previous page's title for
+            // the 500ms–3s before CEF emits `TitleChanged`. The real
+            // title overrides this when it arrives.
+            const placeholder = deriveTitlePlaceholder(command.url);
+            const title = placeholder !== "" ? placeholder : TITLE_FALLBACK;
             return {
                 state: {
                     ...state,
@@ -82,6 +90,7 @@ export function update(
                     url: command.url,
                     faviconUrl: deriveFaviconUrl(command.url),
                     faviconOverridden: false,
+                    title,
                 },
                 events: [{ type: "navigate", url: command.url }],
             };
@@ -166,12 +175,22 @@ export function update(
                 ? state.faviconUrl
                 : deriveFaviconUrl(command.url);
             const faviconOverridden = keepOverride ? state.faviconOverridden : false;
+            // Same logic for the title placeholder: cross-origin nav
+            // (in-page link click to a new domain) resets the title
+            // to the hostname so the user sees instant feedback. CEF
+            // will eventually emit the real title via TitleChanged.
+            // Same-origin redirects keep the existing real title to
+            // avoid a flash to hostname.
+            const title = originChanged
+                ? (deriveTitlePlaceholder(command.url) || TITLE_FALLBACK)
+                : state.title;
             return {
                 state: {
                     ...state,
                     url: command.url,
                     faviconUrl,
                     faviconOverridden,
+                    title,
                 },
                 events: [{ type: "url-confirmed", url: command.url }],
             };

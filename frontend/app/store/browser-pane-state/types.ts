@@ -114,6 +114,29 @@ export function deriveFaviconUrl(url: string): string {
 }
 
 /**
+ * Hostname-based placeholder for the page title while CEF is loading.
+ * Returns the URL's hostname with a leading `www.` stripped (so
+ * `https://www.x.com/foo` → `"x.com"`). Empty for unparseable URLs or
+ * `null`-origin schemes (about:blank, file://) so the existing
+ * `TITLE_FALLBACK` ("Browser") rule takes over.
+ *
+ * Used by the reducer's `Navigate` + `UrlConfirmed` cases to give the
+ * header an instant title at navigation time, replaced by the real
+ * `<title>` once CEF emits `TitleChanged`. See
+ * SPEC_BROWSER_PANE_OPTIMISTIC_HEADER_2026_05_18.md.
+ */
+export function deriveTitlePlaceholder(url: string): string {
+    if (url === "") return "";
+    try {
+        const u = new URL(url);
+        if (u.origin === "null" || u.origin === "") return "";
+        return u.hostname.replace(/^www\./, "");
+    } catch {
+        return "";
+    }
+}
+
+/**
  * True iff `a` and `b` resolve to the same `URL.origin`. Empty strings,
  * unparseable URLs, and `null`-origin schemes (about:blank, file://)
  * compare as same-origin only with themselves. Used by the reducer to
