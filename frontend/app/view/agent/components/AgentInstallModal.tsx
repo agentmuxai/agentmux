@@ -62,9 +62,11 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     const [error, setError] = createSignal<unknown>(null);
     const [sessionId, setSessionId] = createSignal<string | null>(null);
     const [elapsedMs, setElapsedMs] = createSignal(0);
-    // When true, install runs with `npm --loglevel=verbose` + progress
-    // bar enabled. Off by default — keeps the install log scannable.
-    const [verbose, setVerbose] = createSignal(false);
+    // When true, install runs with `npm --loglevel=verbose`. On by
+    // default — surface per-package fetch/extract lines so the user
+    // can see what's happening during long installs. Toggle off for
+    // a terse log.
+    const [verbose, setVerbose] = createSignal(true);
 
     let unsub: (() => void) | null = null;
     let termRef: HTMLDivElement | undefined;
