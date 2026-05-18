@@ -73,6 +73,12 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     // Flipped in onCleanup so a startInstall awaiting the RPC response
     // can cancel the resolved session id even if it landed after unmount.
     let disposed = false;
+    // Set when either footer button fires onInstalled, so the unmount
+    // path in onCleanup doesn't double-fire. Also lets us detect "user
+    // dismissed the success screen via ESC / backdrop" (notifiedDone
+    // stays false in those paths) and flip state once on the way out.
+    // Codex P2 on PR #895.
+    let notifiedDone = false;
 
     const writeTerm = (line: string, stream: "stdout" | "stderr") => {
         if (!terminal) return;
@@ -236,6 +242,13 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                 /* best-effort */
             });
         }
+        // ESC, backdrop click, or any other unmount path that bypassed
+        // the footer buttons. If the install succeeded, we still owe
+        // the picker the state flip so the card's ribbon clears.
+        // Codex P2 on PR #895.
+        if (phase() === "done" && !notifiedDone) {
+            props.onInstalled(false);
+        }
     });
 
     const elapsedLabel = () => {
@@ -290,8 +303,8 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                     </Button>
                 </Show>
                 <Show when={phase() === "done"}>
-                    <Button onClick={() => props.onInstalled(false)}>Close</Button>
-                    <Button onClick={() => props.onInstalled(true)} className="green solid">
+                    <Button onClick={() => { notifiedDone = true; props.onInstalled(false); }}>Close</Button>
+                    <Button onClick={() => { notifiedDone = true; props.onInstalled(true); }} className="green solid">
                         Continue to Launch
                     </Button>
                 </Show>
