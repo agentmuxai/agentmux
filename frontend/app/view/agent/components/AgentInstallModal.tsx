@@ -40,7 +40,14 @@ import "../../term/xterm.css";
 interface AgentInstallModalPanelProps {
     agent: ForgeAgent;
     onCancel: () => void;
-    onInstalled: () => void;
+    /**
+     * Fires when the install completed successfully. The boolean tells
+     * the caller whether the user clicked "Continue to Launch" (true)
+     * or "Close" (false). The picker uses the false case to still flip
+     * its cached install state so the ribbon goes away even when the
+     * user dismisses the success screen — codex caught this on PR #895.
+     */
+    onInstalled: (continueToLaunch: boolean) => void;
 }
 
 export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.Element => {
@@ -283,8 +290,8 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                     </Button>
                 </Show>
                 <Show when={phase() === "done"}>
-                    <Button onClick={() => props.onCancel()}>Close</Button>
-                    <Button onClick={() => props.onInstalled()} className="green solid">
+                    <Button onClick={() => props.onInstalled(false)}>Close</Button>
+                    <Button onClick={() => props.onInstalled(true)} className="green solid">
                         Continue to Launch
                     </Button>
                 </Show>

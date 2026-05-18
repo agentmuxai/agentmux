@@ -54,10 +54,18 @@ export interface InstallAgentRequest {
     kind: "install-agent";
     agent: ForgeAgent;
     originBlockId: string;
-    /** Called by the modal once the install completes successfully.
-     *  Convention: the layer closes the install modal then opens the
-     *  launch-agent modal as the natural next step. */
-    onInstalled: () => void;
+    /**
+     * Called by the modal once the install completes successfully. The
+     * boolean reflects which terminal button the user clicked:
+     *  - `true`  — "Continue to Launch": flip install state AND open
+     *    the launch modal as the natural next step.
+     *  - `false` — "Close": flip install state but do not chain.
+     *
+     * Callers MUST flip cached install state in both branches; codex
+     * caught a regression on PR #895 where the Close path skipped the
+     * flip and stranded users on a stale ribbon.
+     */
+    onInstalled: (continueToLaunch: boolean) => void;
 }
 
 // ── Context API ──────────────────────────────────────────────────────────────

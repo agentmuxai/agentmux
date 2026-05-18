@@ -82,7 +82,18 @@ function computeTheme(
  */
 function computeTermThemeFromSettings(fullConfig: FullConfigType): [TermThemeType, string] {
     const themeName = fullConfig?.settings?.["term:theme"] ?? DefaultTermTheme;
-    return computeTheme(fullConfig, themeName, 0);
+    const [theme, bgcolor] = computeTheme(fullConfig, themeName, 0);
+    // Modal callers paint xterm directly onto the panel surface — restore
+    // the resolved background so xterm renders the theme's bg rather than
+    // letting the container CSS's hardcoded color bleed through. Block-pane
+    // callers want the original behavior (transparent bg → blockBg shows
+    // through), so `computeTheme` stays unchanged. Codex caught this on PR
+    // #895: a non-dark theme would put light foreground on a hardcoded
+    // dark container bg.
+    if (bgcolor) {
+        theme.background = bgcolor;
+    }
+    return [theme, bgcolor];
 }
 
 export { computeTheme, computeTermThemeFromSettings };

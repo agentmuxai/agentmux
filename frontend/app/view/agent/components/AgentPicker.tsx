@@ -163,12 +163,15 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     kind: "install-agent",
                     agent,
                     originBlockId: props.model.blockId,
-                    onInstalled: () => {
+                    onInstalled: (continueToLaunch: boolean) => {
                         // install.start runs at provider scope, so every
                         // ForgeAgent definition that resolves to the same
                         // canonical provider is now installed — not just
                         // the one the user clicked. Mark all of them so
-                        // sibling cards drop their ribbon too.
+                        // sibling cards drop their ribbon too. This flip
+                        // runs whether the user chose Continue or Close
+                        // — codex caught the bug on PR #895 where Close
+                        // left the state stale.
                         const canonical = getProvider(agent.provider)?.id ?? agent.provider;
                         setInstallState((s) => {
                             const next = { ...s };
@@ -179,10 +182,17 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             }
                             return next;
                         });
-                        // Crossfade install → launch (same shell;
-                        // no backdrop flicker). See
-                        // SPEC_MODAL_TRANSITIONS_2026_05_18.md.
-                        tabModal.replace(buildLaunchRequest(agent));
+                        if (continueToLaunch) {
+                            // Crossfade install → launch (same shell;
+                            // no backdrop flicker). See
+                            // SPEC_MODAL_TRANSITIONS_2026_05_18.md.
+                            tabModal.replace(buildLaunchRequest(agent));
+                        } else {
+                            // User clicked Close (or ESC/backdrop) on
+                            // the success screen — state has been
+                            // flipped above; just tear down the modal.
+                            tabModal.close();
+                        }
                     },
                 });
                 return;

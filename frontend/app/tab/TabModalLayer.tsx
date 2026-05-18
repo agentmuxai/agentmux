@@ -181,15 +181,15 @@ function renderRequest(
                     <AgentInstallModalPanel
                         agent={req.agent}
                         onCancel={api.close}
-                        onInstalled={() => {
-                            // Hand off to the picker, which calls
-                            // `tabModal.replace(launchReq)` — the
-                            // backdrop + outer panel persist across
-                            // the swap and only the inner content
-                            // crossfades. Do NOT call `api.close()`
-                            // here — that would tear down the shell
-                            // and reintroduce the visible jolt.
-                            req.onInstalled();
+                        onInstalled={(continueToLaunch: boolean) => {
+                            // Hand off to the picker — it owns whether
+                            // to call `tabModal.replace(launchReq)`
+                            // (continueToLaunch=true) or `tabModal.close()`
+                            // (continueToLaunch=false). Don't tear down
+                            // the shell here — that would break the
+                            // install→launch crossfade for the chain
+                            // path. SPEC_MODAL_TRANSITIONS_2026_05_18.md.
+                            req.onInstalled(continueToLaunch);
                         }}
                     />
                 ),
