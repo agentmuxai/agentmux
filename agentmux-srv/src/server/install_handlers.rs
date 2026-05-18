@@ -374,6 +374,12 @@ fn spawn_install_task(
 
         // Build the arg list once so the echoed command line matches
         // what we actually exec — easier to copy/paste for debugging.
+        // `--progress=false` is unconditional: npm only renders the
+        // progress bar when both stdout and stderr are TTYs, and this
+        // task pipes both, so leaving progress at the default would
+        // produce no visible spinner anyway (codex P3 on PR #897).
+        // The verbose toggle still earns its keep via per-package
+        // fetch/extract lines from `--loglevel=verbose`.
         let mut npm_args: Vec<String> = vec![
             "install".to_string(),
             pkg_arg.clone(),
@@ -381,17 +387,10 @@ fn spawn_install_task(
             provider_dir_str.clone(),
             "--no-audit".to_string(),
             "--no-fund".to_string(),
+            "--progress=false".to_string(),
         ];
         if verbose {
-            // Verbose tier — per-package fetch/extract lines. Keep
-            // the progress bar enabled so the user sees live activity
-            // while npm chews through node_modules. xterm.js handles
-            // the CR-overwrite spinner correctly.
             npm_args.push("--loglevel=verbose".to_string());
-        } else {
-            // Default terse output; suppress the progress bar so the
-            // log stays scannable.
-            npm_args.push("--progress=false".to_string());
         }
 
         emit_line(
