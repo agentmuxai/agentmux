@@ -76,6 +76,40 @@
     to   { opacity: 1; transform: translateY(0); }
 }
 
+// Paint gate — see SPEC_MODAL_PAINT_GATE_2026_05_18.md.
+//
+// Before `data-ready` lands on the overlay (set by TabModalLayer after
+// rAF×2), the backdrop + panel are kept layout-flowed but invisible
+// via `opacity: 0` + `pointer-events: none`. Layout still flows
+// (children depending on a real rect — xterm + FitAddon, dropdown
+// sizing — settle correctly), no pixels are painted, the entrance
+// keyframes are suppressed, and `autofocus` still works (which
+// `visibility: hidden` would have broken — codex P2 on PR #900).
+// pointer-events:none blocks clicks during the gate so the user
+// can't activate buttons that haven't visually appeared yet.
+//
+// Once `data-ready` flips on, opacity returns to 1 and the keyframes
+// run against an already-laid-out subtree. Net effect: the user
+// never sees a half-painted modal animating in.
+//
+// Same gate applies to `.tab-modal-content` via `data-content-ready`
+// so `tabModal.replace()` swaps also wait for paint on the new
+// content.
+.tab-modal-overlay:not([data-ready]) {
+    .tab-modal-backdrop,
+    .tab-modal-panel {
+        opacity: 0;
+        pointer-events: none;
+        animation: none;
+    }
+}
+
+.tab-modal-overlay:not([data-content-ready]) .tab-modal-content {
+    opacity: 0;
+    pointer-events: none;
+    animation: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .tab-modal-backdrop,
     .tab-modal-panel,

@@ -20,7 +20,7 @@
  * See docs/specs/launch-modal-rearchitecture-2026-05-01.md.
  */
 
-import { createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type Component, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type Component, type JSX } from "solid-js";
 
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { AgentLaunchModalPanel } from "@/app/view/agent/components/AgentLaunchModal";
@@ -59,6 +59,72 @@ const PaneOverlayClip: Component<{ getEl: Accessor<HTMLElement | null | undefine
 export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
     const [current, setCurrent] = createSignal<TabModalRequest | null>(null);
     const [submitting, setSubmitting] = createSignal(false);
+    // Paint gate — see SPEC_MODAL_PAINT_GATE_2026_05_18.md.
+    //
+    // Outer gate (`ready`): arms ONLY on a null→non-null transition,
+    // i.e. cold open of a modal session. `tabModal.replace()` keeps
+    // the backdrop + outer panel mounted, so we must NOT toggle ready
+    // back to false on replace — that would briefly hide the
+    // persistent shell mid-crossfade (reagent P1 + codex P2 on PR
+    // #900). Stays true through replaces; resets only on close.
+    //
+    // Inner gate (`contentReady`): re-arms on every request identity
+    // change so each replace swaps content through a hidden frame
+    // before the crossfade keyframe runs.
+    //
+    // Both gates schedule rAF×2 (waits for one full paint cycle to
+    // commit) with a 200ms failsafe in case the renderer is suspended
+    // (background tab). Both rAF handles AND the failsafe are
+    // cancelled in onCleanup so stale callbacks from a prior arm
+    // don't flip the new arm early (reagent P2 on #900).
+    const [ready, setReady] = createSignal(false);
+    const [contentReady, setContentReady] = createSignal(false);
+
+    const armGate = (setGate: (v: boolean) => void): (() => void) => {
+        setGate(false);
+        let innerRaf: number | null = null;
+        const failsafe = setTimeout(() => setGate(true), 200);
+        const outerRaf = requestAnimationFrame(() => {
+            innerRaf = requestAnimationFrame(() => {
+                clearTimeout(failsafe);
+                setGate(true);
+            });
+        });
+        return () => {
+            clearTimeout(failsafe);
+            cancelAnimationFrame(outerRaf);
+            if (innerRaf != null) cancelAnimationFrame(innerRaf);
+        };
+    };
+
+    // Outer gate: arm only on cold open (null→non-null). On replace()
+    // (non-null → non-null) the gate stays as-is so a mid-crossfade
+    // doesn't briefly hide the persistent shell.
+    //
+    // Edge case (codex P2 / reagent P2 on PR #900): if replace() fires
+    // BEFORE the cold-open rAF×2 / 200ms failsafe has flipped ready to
+    // true, Solid runs this effect's previous onCleanup — which cancels
+    // both rAFs and the failsafe — then re-runs the body. If we
+    // unconditionally bail on `prevWasOpen`, no callback survives to
+    // flip ready, and the overlay stays opacity:0 forever. Fix: only
+    // bail when the gate has actually fired. If the gate is still
+    // in-flight at the moment of replace(), re-arm it.
+    let prevWasOpen = false;
+    createEffect(() => {
+        const isOpen = current() != null;
+        if (!isOpen) { prevWasOpen = false; setReady(false); return; }
+        if (prevWasOpen && ready()) return;   // gate already fired — leave it alone
+        prevWasOpen = true;
+        const cleanup = armGate(setReady);
+        onCleanup(cleanup);
+    });
+
+    // Inner gate: re-arm on every request identity change.
+    createEffect(() => {
+        if (current() == null) { setContentReady(false); return; }
+        const cleanup = armGate(setContentReady);
+        onCleanup(cleanup);
+    });
 
     // Guard close: ESC and backdrop click are blocked while a submit RPC is
     // in-flight so the user can't lose error feedback or trigger a duplicate launch.
@@ -111,6 +177,8 @@ export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
                     return (
                         <div
                             class="tab-modal-overlay"
+                            data-ready={ready() ? "" : undefined}
+                            data-content-ready={contentReady() ? "" : undefined}
                             ref={(el) => { overlayRef = el; }}
                             role="presentation"
                             tabIndex={-1}
