@@ -85,9 +85,22 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             source: "system_path".to_string(),
                         }).unwrap()));
                     }
-                    return Err(agentmux_common::AgentMuxError::CliNotInstalled {
+                    // This branch fires for PATH-only providers
+                    // (`npm_package` empty) whose CLI isn't on the
+                    // system PATH. AgentMux can't auto-install these
+                    // — emit AMX-CLI-004 with a manual install hint
+                    // instead of AMX-CLI-001 ("Click Install now"),
+                    // which would point the user at an install
+                    // affordance that doesn't apply.
+                    let install_hint = if cfg!(target_os = "windows") {
+                        cmd.windows_install_command.clone()
+                    } else {
+                        cmd.unix_install_command.clone()
+                    };
+                    return Err(agentmux_common::AgentMuxError::CliMissingOnPath {
                         provider: cmd.provider_id.clone(),
                         cli: cmd.cli_command.clone(),
+                        install_hint,
                     }
                     .to_wire()
                     .to_string());

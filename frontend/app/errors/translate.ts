@@ -96,11 +96,12 @@ function renderEntry(wire: WireError): TranslatedError {
     // back to the generic stub. Inject `wire.message` into the
     // details object the renderer sees so the real text wins.
     const renderDetails = rawMessage ? { message: rawMessage, ...details } : details;
+    const retry = typeof entry.retry === "function" ? entry.retry(renderDetails) : entry.retry;
     return {
         code: wire.code,
         title: entry.title,
         message: entry.message(renderDetails),
-        retry: entry.retry,
+        retry,
         rawMessage,
     };
 }
