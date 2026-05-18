@@ -17,15 +17,17 @@
  * xterm renders npm's output (ANSI colors preserved).
  */
 
-import { Show, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 
 import { Button } from "@/element/button";
 import { ErrorBanner } from "@/app/errors/ErrorBanner";
+import { atoms } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
+import { computeTermThemeFromSettings } from "@/app/view/term/termutil";
 
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { getProvider } from "../providers";
@@ -38,7 +40,14 @@ import "../../term/xterm.css";
 interface AgentInstallModalPanelProps {
     agent: ForgeAgent;
     onCancel: () => void;
-    onInstalled: () => void;
+    /**
+     * Fires when the install completed successfully. The boolean tells
+     * the caller whether the user clicked "Continue to Launch" (true)
+     * or "Close" (false). The picker uses the false case to still flip
+     * its cached install state so the ribbon goes away even when the
+     * user dismisses the success screen — codex caught this on PR #895.
+     */
+    onInstalled: (continueToLaunch: boolean) => void;
 }
 
 export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.Element => {
@@ -64,6 +73,12 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     // Flipped in onCleanup so a startInstall awaiting the RPC response
     // can cancel the resolved session id even if it landed after unmount.
     let disposed = false;
+    // Set when either footer button fires onInstalled, so the unmount
+    // path in onCleanup doesn't double-fire. Also lets us detect "user
+    // dismissed the success screen via ESC / backdrop" (notifiedDone
+    // stays false in those paths) and flip state once on the way out.
+    // Codex P2 on PR #895.
+    let notifiedDone = false;
 
     const writeTerm = (line: string, stream: "stdout" | "stderr") => {
         if (!terminal) return;
@@ -123,8 +138,12 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                         writeTerm(data.line, data.stream === "stderr" ? "stderr" : "stdout");
                     } else if (data.op === "done") {
                         if (data.ok) {
+                            // Don't auto-chain — the user clicks
+                            // "Continue to Launch" in the footer so
+                            // they have a moment to read the install
+                            // log and confirm the operation
+                            // succeeded.
                             setPhase("done");
-                            queueMicrotask(() => props.onInstalled());
                         } else {
                             setError(data.error ?? "install failed");
                             setPhase("failed");
@@ -154,17 +173,31 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         // Lazy-create the terminal so it doesn't render before the
         // container has a layout size (FitAddon needs a real rect).
         if (!termRef) return;
+        // Resolve the project's monospace font at runtime — xterm.js
+        // doesn't parse CSS variables, so passing the literal
+        // `var(--termfontfamily, ...)` string would silently fall
+        // back to xterm's default (Courier), which renders wider
+        // than the rest of the app's terminals.
+        const cs = getComputedStyle(termRef);
+        const termFont = cs.getPropertyValue("--termfontfamily").trim()
+            || `"JetBrains Mono", "Fira Code", "Consolas", monospace`;
+        // Bind to the same theme source the regular term pane uses
+        // (single source of truth — see SPEC_INSTALL_MODAL_TERM_THEME_BINDING_2026_05_18.md).
+        const [initialTheme] = computeTermThemeFromSettings(atoms.fullConfigAtom());
         terminal = new Terminal({
             cursorBlink: false,
             scrollback: 5000,
             fontSize: 12,
-            fontFamily: "var(--fixed-font, monospace)",
-            theme: {
-                background: "#0d0e0f",
-                foreground: "#cccccc",
-            },
+            fontFamily: termFont,
+            theme: initialTheme,
             convertEol: false,
             scrollOnUserInput: false,
+        });
+        // Live theme swap — mirrors TermThemeUpdater so settings changes
+        // while the modal is open take effect without remount.
+        createEffect(() => {
+            const [t] = computeTermThemeFromSettings(atoms.fullConfigAtom());
+            if (terminal) terminal.options.theme = t;
         });
         fitAddon = new FitAddon();
         terminal.loadAddon(fitAddon);
@@ -208,6 +241,13 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             void RpcApi.InstallCancelCommand(TabRpcClient, { sessionId: sid }).catch(() => {
                 /* best-effort */
             });
+        }
+        // ESC, backdrop click, or any other unmount path that bypassed
+        // the footer buttons. If the install succeeded, we still owe
+        // the picker the state flip so the card's ribbon clears.
+        // Codex P2 on PR #895.
+        if (phase() === "done" && !notifiedDone) {
+            props.onInstalled(false);
         }
     });
 
@@ -263,7 +303,10 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                     </Button>
                 </Show>
                 <Show when={phase() === "done"}>
-                    <span class="agent-install-modal-launching">Opening launch modal…</span>
+                    <Button onClick={() => { notifiedDone = true; props.onInstalled(false); }}>Close</Button>
+                    <Button onClick={() => { notifiedDone = true; props.onInstalled(true); }} className="green solid">
+                        Continue to Launch
+                    </Button>
                 </Show>
             </footer>
         </>

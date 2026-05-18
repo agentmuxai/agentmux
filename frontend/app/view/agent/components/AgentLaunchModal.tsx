@@ -392,20 +392,20 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                         </label>
 
                         {/*
-                         * Memory dropdown is parked here pending the
-                         * spawn-time content-injection layer (provider
-                         * override, instructions, context files, MCP
-                         * servers, skills). Until that lands, picking
-                         * a non-blank Memory would be cosmetic — codex
-                         * P2 on PR #751 caught this. The state hooks
-                         * below stay in place; memoryId is forced to
-                         * "blank" on the wire so the backend writes a
-                         * blank reference. The Memory pane is still
-                         * usable for managing bundles; the launch
-                         * picker comes back in PR-F.4.
+                         * Memory dropdown — companion to Identity.
+                         * The wire selection rides through to the
+                         * backend via `memoryId` on LaunchOverrides;
+                         * the spawn-time content-injection layer
+                         * (provider override, instructions, context
+                         * files, MCP servers, skills) ships in PR-F.4
+                         * and will start consuming the selection.
+                         * Until then, picking a non-blank Memory is
+                         * visible UX scaffolding that records the
+                         * user's intent without changing runtime
+                         * behavior.
                          */}
 
-                        <label class="agent-launch-modal-bundle-row" style={{ display: "none" }}>
+                        <label class="agent-launch-modal-bundle-row">
                             <span class="agent-launch-modal-bundle-row-label">Memory</span>
                             <select
                                 class="agent-launch-modal-input"
