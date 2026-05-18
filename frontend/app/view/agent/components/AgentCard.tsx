@@ -4,20 +4,24 @@
 /**
  * AgentCard — a definition tile in the agent picker.
  *
- * After SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23 the card is driven
- * by the CLI catalog, not by the ForgeAgent row's user-facing fields.
- * Title reads as a capability blurb ("Anthropic's coding agent") and
- * the CLI brand name sits as a caption below. Clicking the body opens
- * the Launch modal (or Install modal if the CLI isn't installed yet).
+ * Per SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23 the card is driven
+ * by the CLI catalog when one exists for the provider — title reads
+ * as a capability blurb ("Anthropic's coding agent") and the CLI
+ * brand name ("Claude Code") sits as a caption below. Providers
+ * without a catalog entry fall back to the ForgeAgent row's own
+ * description/name fields.
  *
- * When `installed === false`, a bottom-right "Click to install" ribbon
- * is overlaid on the card — like a "For Sale" sign. The ribbon
- * disappears once installation succeeds (parent re-runs install.check
- * after the install modal closes).
+ * Clicking the body opens the Launch modal (or Install modal if
+ * the CLI isn't installed yet). When `installed === false`, a
+ * bottom-right "Click to install" ribbon is overlaid on the card —
+ * like a "For Sale" sign. The ribbon disappears once installation
+ * succeeds (parent re-runs install.check after the install modal
+ * closes).
  */
 
-import { Show, type JSX } from "solid-js";
+import { createMemo, Show, type JSX } from "solid-js";
 import { ProviderLogo } from "@/element/ProviderLogo";
+import { getCliCatalogEntry } from "../defaults/cli-catalog";
 
 interface AgentCardProps {
     agent: ForgeAgent;
@@ -32,8 +36,9 @@ interface AgentCardProps {
 }
 
 export const AgentCard = (props: AgentCardProps): JSX.Element => {
-    const title = () => props.agent.description || props.agent.name;
-    const caption = () => props.agent.name;
+    const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
+    const title = () => catalog()?.blurb || props.agent.description || props.agent.name;
+    const caption = () => catalog()?.displayName || props.agent.name;
 
     const handleCardClick = () => {
         if (!props.disabled) props.onLaunch(props.agent);
