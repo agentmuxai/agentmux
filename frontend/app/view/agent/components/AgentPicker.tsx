@@ -125,11 +125,6 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // the tab-scoped layer, depending on whether the agent's CLI is
     // already installed in the per-version cache. Phase α of
     // SPEC_AGENT_INSTALL_STAGE_2026_05_17.md.
-    //
-    // Concurrency guard: handleSelect awaits an IPC round-trip
-    // (getCliPath), so a rapid double-click could open two modals (and
-    // start two parallel installs) without it. The pendingSelect set
-    // tracks in-flight resolutions per agent id and rejects re-entry.
     const handleSelect = async (agent: ForgeAgent) => {
         setNodejsError(null);
         let installed = installState()[agent.id];
