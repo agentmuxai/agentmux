@@ -44,11 +44,6 @@ struct InstallStartReq {
     npm_package: String,
     #[serde(default)]
     pinned_version: String,
-    /// When true, run npm with `--loglevel=verbose` and re-enable the
-    /// install progress bar. Default false → terse "notice" loglevel
-    /// matching the pre-toggle behavior.
-    #[serde(default)]
-    verbose: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -221,7 +216,6 @@ pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     req.cli_command,
                     req.npm_package,
                     req.pinned_version,
-                    req.verbose,
                     cancel_rx,
                 );
 
@@ -283,7 +277,6 @@ fn spawn_install_task(
     cli_command: String,
     npm_package: String,
     pinned_version: String,
-    verbose: bool,
     mut cancel_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
     tokio::spawn(async move {
@@ -372,15 +365,14 @@ fn spawn_install_task(
             format!("{}@{}", npm_package, pinned_version)
         };
 
-        // Build the arg list once so the echoed command line matches
-        // what we actually exec — easier to copy/paste for debugging.
         // `--progress=false` is unconditional: npm only renders the
         // progress bar when both stdout and stderr are TTYs, and this
         // task pipes both, so leaving progress at the default would
-        // produce no visible spinner anyway (codex P3 on PR #897).
-        // The verbose toggle still earns its keep via per-package
-        // fetch/extract lines from `--loglevel=verbose`.
-        let mut npm_args: Vec<String> = vec![
+        // produce no visible spinner anyway. `--loglevel=verbose` is
+        // also unconditional: the user's only signal of progress
+        // during long installs is the per-package fetch/extract
+        // chatter, so we always pay for the noise to gain the signal.
+        let npm_args: Vec<String> = vec![
             "install".to_string(),
             pkg_arg.clone(),
             "--prefix".to_string(),
@@ -388,10 +380,8 @@ fn spawn_install_task(
             "--no-audit".to_string(),
             "--no-fund".to_string(),
             "--progress=false".to_string(),
+            "--loglevel=verbose".to_string(),
         ];
-        if verbose {
-            npm_args.push("--loglevel=verbose".to_string());
-        }
 
         emit_line(
             &broker,

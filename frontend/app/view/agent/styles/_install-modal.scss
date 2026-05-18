@@ -82,22 +82,3 @@
     font-size: var(--text-sm);
     font-style: italic;
 }
-
-// Verbose toggle — sits at the left of the idle-phase footer next to
-// Cancel/Install. `margin-right: auto` pushes the buttons to the right
-// edge so the toggle reads as an opt-in detail rather than a primary
-// action.
-.agent-install-modal-verbose {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    margin-right: auto;
-    color: var(--secondary-text-color);
-    font-size: var(--text-sm);
-    cursor: pointer;
-    user-select: none;
-
-    input {
-        cursor: pointer;
-    }
-}
