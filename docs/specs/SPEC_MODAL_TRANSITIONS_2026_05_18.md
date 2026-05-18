@@ -185,9 +185,11 @@ const replace = (next: TabModalRequest) => {
 
 Phase 2. Not required for the initial fix.
 
-### 3.5 Panel size changes
+### 3.5 Panel size changes (not animated in v1)
 
-If install modal and launch modal have different heights, the panel will resize during the swap. Add `transition: min-height 140ms cubic-bezier(0.2, 1, 0.3, 1)` to `.tab-modal-panel` so the resize is animated rather than snapped. Match the duration of the content crossfade.
+If install modal and launch modal have different heights, the panel resizes during the swap. CSS `transition: min-height` on `.tab-modal-panel` was tried but doesn't work — the panel sizes itself from intrinsic content (children supply `min-height`, panel itself is `auto`), and `auto` is not animatable. Reagent caught this on PR #896.
+
+The content-fade crossfade already removes the user-reported jolt, so v1 ships with an un-animated size snap. A FLIP-measured height animation can be added later if the snap becomes user-visible — the work would live inside the keyed `<Show>` callback, measuring the old content's `getBoundingClientRect().height` before unmount and animating the new content's height from old → new.
 
 ### 3.6 Exit animations (deferred)
 
