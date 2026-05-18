@@ -96,29 +96,32 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         }
     };
 
-    // Open the launch modal. Extracted so the install-modal path can
-    // chain into it after a successful install.
-    const openLaunchModal = (agent: ForgeAgent) => {
-        tabModal.open({
-            kind: "launch-agent",
-            agent,
-            originBlockId: props.model.blockId,
-            onSubmit: async (overrides: LaunchOverrides) => {
-                setLaunching(agent.id);
-                try {
-                    await props.model.launchForgeAgent(agent, overrides);
-                    if (props.model.nodejsError) {
-                        // Surface the missing-Node banner inside the
-                        // picker after the layer closes the modal —
-                        // matches the pre-refactor behaviour.
-                        setNodejsError(props.model.nodejsError);
-                        props.model.nodejsError = null;
-                    }
-                } finally {
-                    setLaunching(null);
+    // Build the launch-agent request descriptor. Separated from the
+    // open call so the install→launch chain can hand the same shape
+    // to `tabModal.replace()` for a crossfade (no shell teardown).
+    const buildLaunchRequest = (agent: ForgeAgent) => ({
+        kind: "launch-agent" as const,
+        agent,
+        originBlockId: props.model.blockId,
+        onSubmit: async (overrides: LaunchOverrides) => {
+            setLaunching(agent.id);
+            try {
+                await props.model.launchForgeAgent(agent, overrides);
+                if (props.model.nodejsError) {
+                    // Surface the missing-Node banner inside the
+                    // picker after the layer closes the modal —
+                    // matches the pre-refactor behaviour.
+                    setNodejsError(props.model.nodejsError);
+                    props.model.nodejsError = null;
                 }
-            },
-        });
+            } finally {
+                setLaunching(null);
+            }
+        },
+    });
+
+    const openLaunchModal = (agent: ForgeAgent) => {
+        tabModal.open(buildLaunchRequest(agent));
     };
 
     // Clicking the card opens either the install or launch modal in
@@ -176,7 +179,10 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             }
                             return next;
                         });
-                        openLaunchModal(agent);
+                        // Crossfade install → launch (same shell;
+                        // no backdrop flicker). See
+                        // SPEC_MODAL_TRANSITIONS_2026_05_18.md.
+                        tabModal.replace(buildLaunchRequest(agent));
                     },
                 });
                 return;

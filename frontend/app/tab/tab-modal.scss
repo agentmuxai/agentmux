@@ -39,11 +39,24 @@
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-modal);
     animation: tab-modal-pop-in 140ms cubic-bezier(0.2, 1, 0.3, 1);
+    // Smooth panel size changes when content swaps (install modal is
+    // taller than launch modal because of the xterm). Without this
+    // the panel snaps to the new size mid-crossfade.
+    transition: min-height 160ms cubic-bezier(0.2, 1, 0.3, 1),
+                min-width 160ms cubic-bezier(0.2, 1, 0.3, 1);
 
     &:focus-visible {
         box-shadow: var(--shadow-modal), var(--shadow-focus-ring);
         outline: none;
     }
+}
+
+// Content subtree wrapper — re-mounted by a keyed <Show> on each
+// `tabModal.replace(...)` call so the entrance keyframe fires fresh
+// for the new content while the backdrop + outer panel stay put.
+// See SPEC_MODAL_TRANSITIONS_2026_05_18.md §3.3.
+.tab-modal-content {
+    animation: tab-modal-content-in 140ms cubic-bezier(0.2, 1, 0.3, 1);
 }
 
 @keyframes tab-modal-fade-in {
@@ -56,9 +69,18 @@
     to   { opacity: 1; transform: scale(1) translateY(0); }
 }
 
+@keyframes tab-modal-content-in {
+    from { opacity: 0; transform: translateY(2px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .tab-modal-backdrop,
-    .tab-modal-panel {
+    .tab-modal-panel,
+    .tab-modal-content {
         animation: none;
+    }
+    .tab-modal-panel {
+        transition: none;
     }
 }

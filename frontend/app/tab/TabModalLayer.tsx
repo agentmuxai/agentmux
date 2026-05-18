@@ -20,7 +20,7 @@
  * See docs/specs/launch-modal-rearchitecture-2026-05-01.md.
  */
 
-import { createSignal, onCleanup, onMount, Show, type Accessor, type Component, type JSX } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type Component, type JSX } from "solid-js";
 
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { AgentLaunchModalPanel } from "@/app/view/agent/components/AgentLaunchModal";
@@ -68,6 +68,16 @@ export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
 
     const api: TabModalApi = {
         open: (req) => { setSubmitting(false); setCurrent(req); },
+        replace: (next) => {
+            // No current modal → degenerate to `open` (which plays the
+            // full entrance animation). Otherwise keep backdrop + outer
+            // panel mounted and let the inner keyed <Show> remount the
+            // content, triggering the content-fade keyframe. See
+            // SPEC_MODAL_TRANSITIONS_2026_05_18.md §3.3.
+            if (current() == null) { setSubmitting(false); setCurrent(next); return; }
+            setSubmitting(false);
+            setCurrent(next);
+        },
         close: safeClose,
         current,
     };
@@ -89,8 +99,15 @@ export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
                 {props.children}
             </div>
             <Show when={current()}>
-                {(req) => {
+                {(reqAcc) => {
+                    // Backdrop + outer panel persist for the lifetime of
+                    // a "modal session" (one or more chained requests via
+                    // `replace`). The inner keyed <Show> remounts the
+                    // content subtree on each request swap, triggering
+                    // the content-fade animation while the shell stays
+                    // put — no backdrop flicker, no entrance-pop replay.
                     let overlayRef: HTMLDivElement | undefined;
+                    const meta = createMemo(() => renderRequest(reqAcc(), api, setSubmitting));
                     return (
                         <div
                             class="tab-modal-overlay"
@@ -105,20 +122,21 @@ export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
                                 overlay area, so e.target === e.currentTarget on the
                                 overlay would never fire. */}
                             <div class="tab-modal-backdrop" onClick={safeClose} />
-                            {(() => {
-                                const { label, panel } = renderRequest(req(), api, setSubmitting);
-                                return (
-                                    <div
-                                        class="tab-modal-panel"
-                                        role="dialog"
-                                        aria-modal="true"
-                                        aria-label={label}
-                                        onClick={(e) => e.stopPropagation()}
-                                    >
-                                        {panel}
-                                    </div>
-                                );
-                            })()}
+                            <div
+                                class="tab-modal-panel"
+                                role="dialog"
+                                aria-modal="true"
+                                aria-label={meta().label}
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                <Show keyed when={reqAcc()}>
+                                    {(_req) => (
+                                        <div class="tab-modal-content">
+                                            {meta().panel}
+                                        </div>
+                                    )}
+                                </Show>
+                            </div>
                         </div>
                     );
                 }}
@@ -164,10 +182,13 @@ function renderRequest(
                         agent={req.agent}
                         onCancel={api.close}
                         onInstalled={() => {
-                            // Close the install modal and immediately
-                            // call back so the picker can chain into
-                            // launch. The picker handles the chain.
-                            api.close();
+                            // Hand off to the picker, which calls
+                            // `tabModal.replace(launchReq)` — the
+                            // backdrop + outer panel persist across
+                            // the swap and only the inner content
+                            // crossfades. Do NOT call `api.close()`
+                            // here — that would tear down the shell
+                            // and reintroduce the visible jolt.
                             req.onInstalled();
                         }}
                     />

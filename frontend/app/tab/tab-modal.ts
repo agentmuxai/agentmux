@@ -65,6 +65,15 @@ export interface InstallAgentRequest {
 export interface TabModalApi {
     /** Open or replace the current tab modal request. */
     open: (req: TabModalRequest) => void;
+    /**
+     * Replace the current modal with `next` as a continuation of the
+     * same flow. The backdrop + outer panel stay mounted across the
+     * swap; only the panel content remounts with a content-fade
+     * animation. Falls back to `open(next)` when no modal is open.
+     *
+     * See docs/specs/SPEC_MODAL_TRANSITIONS_2026_05_18.md.
+     */
+    replace: (next: TabModalRequest) => void;
     /** Close the current modal, if any. No-op when nothing is open. */
     close: () => void;
     /** The currently open request, or null. */
