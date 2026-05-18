@@ -10,7 +10,7 @@
  * See docs/specs/SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23.md.
  */
 
-import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
@@ -163,12 +163,15 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     kind: "install-agent",
                     agent,
                     originBlockId: props.model.blockId,
-                    onInstalled: () => {
+                    onInstalled: (continueToLaunch: boolean) => {
                         // install.start runs at provider scope, so every
                         // ForgeAgent definition that resolves to the same
                         // canonical provider is now installed — not just
                         // the one the user clicked. Mark all of them so
-                        // sibling cards drop their ribbon too.
+                        // sibling cards drop their ribbon too. This flip
+                        // runs whether the user chose Continue or Close
+                        // — codex caught the bug on PR #895 where Close
+                        // left the state stale.
                         const canonical = getProvider(agent.provider)?.id ?? agent.provider;
                         setInstallState((s) => {
                             const next = { ...s };
@@ -179,10 +182,17 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             }
                             return next;
                         });
-                        // Crossfade install → launch (same shell;
-                        // no backdrop flicker). See
-                        // SPEC_MODAL_TRANSITIONS_2026_05_18.md.
-                        tabModal.replace(buildLaunchRequest(agent));
+                        if (continueToLaunch) {
+                            // Crossfade install → launch (same shell;
+                            // no backdrop flicker). See
+                            // SPEC_MODAL_TRANSITIONS_2026_05_18.md.
+                            tabModal.replace(buildLaunchRequest(agent));
+                        } else {
+                            // User clicked Close (or ESC/backdrop) on
+                            // the success screen — state has been
+                            // flipped above; just tear down the modal.
+                            tabModal.close();
+                        }
                     },
                 });
                 return;
@@ -204,12 +214,24 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         }
     });
 
+    // Per-pane zoom — read `term:zoom` from block meta and apply CSS
+    // `zoom` on the root, matching AgentPresentationView (chat mode).
+    // The universal framework (Ctrl+/-/0 in keymodel, Ctrl+Wheel in
+    // app.tsx) writes `term:zoom` for any block whose `viewType ===
+    // "agent"`; the picker just needs to read + apply.
+    const block = props.model.blockAtom;
+    const zoomFactor = createMemo(() => {
+        const z = block()?.meta?.["term:zoom"];
+        if (z == null || typeof z !== "number" || isNaN(z)) return 1.0;
+        return Math.max(0.5, Math.min(2.0, z));
+    });
+
     return (
         <>
             <Show
                 when={agents().length > 0}
                 fallback={
-                    <div class="agent-view">
+                    <div class="agent-view" style={{ zoom: zoomFactor() }}>
                         <div class="agent-picker-empty">
                             <div class="agent-picker-empty-icon">{"\u2726"}</div>
                             <div class="agent-picker-empty-title">No definitions configured</div>
@@ -221,7 +243,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     </div>
                 }
             >
-                <div class="agent-view">
+                <div class="agent-view" style={{ zoom: zoomFactor() }}>
                     <div class="agent-picker">
                         <div class="agent-picker-list">
                             <For each={agents()}>

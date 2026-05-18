@@ -532,70 +532,24 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         return Math.max(0.5, Math.min(2.0, z));
     });
 
-    // Persist a zoom change to block meta. Null when back at 1.0 so
-    // the key round-trips clean instead of persisting a default.
-    const setZoom = (next: number): void => {
-        const clamped = Math.max(0.5, Math.min(2.0, Math.round(next * 100) / 100));
-        void RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: WOS.makeORef("block", model.blockId),
-            meta: { "term:zoom": clamped === 1.0 ? null : clamped },
-        });
-    };
+    // Persistence is owned by the universal zoom framework — see the
+    // note below where the inline handlers were removed.
 
     let rootRef: HTMLDivElement | undefined;
 
-    // Ctrl+Wheel to zoom — capture phase on the root so we intercept
-    // before child scroll handlers (AgentDocumentView's scrollable
-    // region) and before CEF's native page zoom. Same pattern as
-    // `term.tsx`.
-    onMount(() => {
-        if (!rootRef) return;
-        const el = rootRef;
-        const handleCtrlWheel = (ev: WheelEvent) => {
-            if (!ev.ctrlKey) return;
-            ev.preventDefault();
-            ev.stopPropagation();
-            const STEP = 0.1;
-            const delta = ev.deltaY > 0 ? -STEP : STEP;
-            setZoom(zoomFactor() + delta);
-        };
-        el.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
-        onCleanup(() => el.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
-    });
-
-    // Ctrl+Plus / Ctrl+Minus / Ctrl+0 for keyboard zoom. Attached to
-    // `document` in capture phase with a containment check against
-    // `rootRef`, so:
-    //   - it fires regardless of which descendant (textarea, doc view,
-    //     etc.) currently has focus;
-    //   - it only fires for this pane (multiple agent panes each
-    //     zoom independently);
-    //   - it wins over a child that might call stopPropagation on
-    //     Ctrl+±.
-    onMount(() => {
-        if (!rootRef) return;
-        const el = rootRef;
-        const handleKey = (ev: KeyboardEvent) => {
-            if (!ev.ctrlKey || ev.altKey || ev.metaKey) return;
-            if (!(ev.target instanceof Node) || !el.contains(ev.target)) return;
-            const STEP = 0.1;
-            if (ev.key === "+" || ev.key === "=") {
-                ev.preventDefault();
-                ev.stopPropagation();
-                setZoom(zoomFactor() + STEP);
-            } else if (ev.key === "-" || ev.key === "_") {
-                ev.preventDefault();
-                ev.stopPropagation();
-                setZoom(zoomFactor() - STEP);
-            } else if (ev.key === "0") {
-                ev.preventDefault();
-                ev.stopPropagation();
-                setZoom(1.0);
-            }
-        };
-        document.addEventListener("keydown", handleKey, { capture: true });
-        onCleanup(() => document.removeEventListener("keydown", handleKey, { capture: true }));
-    });
+    // Zoom input is handled by the universal framework — `keymodel.ts`
+    // intercepts Ctrl+/-/0 and dispatches to `zoomIn/Out/Reset`, and
+    // `app.tsx` routes Ctrl+Wheel to `zoomBlockIn/Out`. Both call
+    // paths probe the focused block's `viewType`, and `viewType ===
+    // "agent"` is explicitly supported (see `zoom.win32.ts::getBlockZoom`).
+    // The universal flow writes `term:zoom` on block meta, which we
+    // read back via `zoomFactor()` and apply on the root div below.
+    //
+    // Earlier this file had its own Ctrl+Wheel + Ctrl+±/0 handlers
+    // attached in capture phase. They fought the universal handlers
+    // (different step size, both writing the same key, agent's
+    // stopPropagation pre-empting the zoom indicator), which broke
+    // zoom in the agent pane. Deleted.
 
     // Handle subagent link click — open a subagent pane
     const handleSubagentClick = (node: SubagentLinkNode) => {

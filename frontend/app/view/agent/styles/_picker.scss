@@ -86,9 +86,9 @@
         // (modal) flow rather than launching the agent directly.
         .agent-card-install-ribbon {
             position: absolute;
-            right: -4px;
-            bottom: -4px;
-            padding: 3px 8px;
+            right: 0;            // anchored fully inside the card so
+            bottom: 0;           // the label can't clip on the right
+            padding: 3px 10px;   // a touch more horizontal breathing room
             font-size: 10px;
             font-weight: 600;
             letter-spacing: 0.04em;
@@ -100,16 +100,13 @@
             pointer-events: none;
             z-index: 1;
             user-select: none;
-
-            // Animate a gentle pulse so it draws the eye without
-            // being noisy. Halts on hover so the card hover state
-            // stays the focal point.
-            animation: agent-card-ribbon-pulse 2.4s ease-in-out infinite;
+            transform-origin: bottom right;
+            transition: transform 0.15s ease-out, background 0.15s;
         }
 
         &:hover .agent-card-install-ribbon {
-            animation: none;
             background: color-mix(in srgb, var(--warning-color, #e9b800) 80%, white);
+            transform: scale(1.06);
         }
 
         &.agent-card--needs-install {
@@ -373,22 +370,5 @@
             font-style: italic;
             margin-top: var(--space-1-5);
         }
-    }
-}
-
-@keyframes agent-card-ribbon-pulse {
-    0%, 100% {
-        transform: scale(1);
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-    }
-    50% {
-        transform: scale(1.05);
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .agent-card-install-ribbon {
-        animation: none !important;
     }
 }
