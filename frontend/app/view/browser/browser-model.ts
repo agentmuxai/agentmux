@@ -258,15 +258,20 @@ export class BrowserViewModel implements ViewModel {
         this.viewFaviconUrl = createMemo(() => this.faviconUrlAtom());
 
         // Subscribe to live title changes fired by CEF's on_title_change.
+        // Diag note: log EVERY arrival (pre block-id filter) so a
+        // mismatched block_id is observable in muxlog — silent drops
+        // were the main blind spot when chasing the favicon/title
+        // regression on 2026-05-18.
         void listenEvent<{ block_id: string; title: string }>(
             "browser-pane-title-change",
             (payload) => {
+                const matched = payload.block_id === this.blockId;
+                this.diag(`title-change arrive payload-block=${(payload.block_id ?? "").slice(0, 7)} match=${matched} title=${JSON.stringify(payload.title)}`);
                 if (this.closed) {
                     this.diag(`post-close-event-dropped name=browser-pane-title-change`);
                     return;
                 }
-                if (payload.block_id !== this.blockId) return;
-                this.diag(`title-change recv title=${JSON.stringify(payload.title)}`);
+                if (!matched) return;
                 this._dispatch({ type: "TitleChanged", title: payload.title }, "title-change");
             },
         ).then((unsub) => {
@@ -279,12 +284,13 @@ export class BrowserViewModel implements ViewModel {
         void listenEvent<{ block_id: string; urls: string[] }>(
             "browser-pane-favicon-urls",
             (payload) => {
+                const matched = payload.block_id === this.blockId;
+                this.diag(`favicon-urls arrive payload-block=${(payload.block_id ?? "").slice(0, 7)} match=${matched} count=${payload.urls?.length ?? 0} first=${JSON.stringify(payload.urls?.[0])}`);
                 if (this.closed) {
                     this.diag(`post-close-event-dropped name=browser-pane-favicon-urls`);
                     return;
                 }
-                if (payload.block_id !== this.blockId) return;
-                this.diag(`favicon-urls recv count=${payload.urls.length}`);
+                if (!matched) return;
                 this._dispatch({ type: "FaviconUrlsReceived", urls: payload.urls }, "favicon-urls");
             },
         ).then((unsub) => {
