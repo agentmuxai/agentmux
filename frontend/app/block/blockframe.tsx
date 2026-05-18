@@ -291,6 +291,14 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
     const viewFaviconUrl = createMemo(() => util.useAtomValueSafe(props.viewModel?.viewFaviconUrl));
     const viewIconElem = createMemo(() => {
         const favUrl = viewFaviconUrl();
+        // Diag for the favicon path — log every recomputation of this
+        // memo for browser-view blocks so muxlog shows whether the
+        // atom is being read with a non-empty value. Throttle is the
+        // memo itself: it only re-fires when the dependent atom
+        // changes, so this won't spam.
+        if (blockData()?.meta?.view === "browser") {
+            console.log(`[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)}] header-render favUrl=${JSON.stringify(favUrl ?? "")}`);
+        }
         if (favUrl) {
             return (
                 <div class="block-frame-view-icon">
@@ -308,9 +316,11 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
                             // all subsequent valid favicons. Reset on every
                             // successful load.
                             (e.currentTarget as HTMLImageElement).style.display = "";
+                            console.log(`[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)}] favicon-load ok src=${JSON.stringify(favUrl)}`);
                         }}
                         onError={(e) => {
                             (e.currentTarget as HTMLImageElement).style.display = "none";
+                            console.log(`[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)}] favicon-load fail src=${JSON.stringify(favUrl)}`);
                         }}
                     />
                 </div>
