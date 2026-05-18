@@ -520,8 +520,22 @@ fn spawn_auth_cli_pty(
     }) {
         Ok(p) => p,
         Err(e) => {
-            tracing::error!(session_id = %session_id, error = %e, "auth.spawn (PTY): openpty failed");
-            mgr.finish_failure(&session_id, format!("openpty failed: {e}"));
+            // PTY allocation failure means the provider's auth
+            // subprocess can't get the interactive TTY it requires
+            // (openclaw `models auth login`). Surface as the typed
+            // `AMX-AUTH-001` so the FailedBanner shows the friendly
+            // recovery hint instead of "openpty failed: <e>".
+            let mux = agentmux_common::AgentMuxError::AuthRequiresTty {
+                provider: provider_id.clone(),
+            };
+            tracing::error!(
+                target: "amx::error",
+                session_id = %session_id,
+                amx_code = %mux.code(),
+                error = %e,
+                "auth.spawn (PTY): openpty failed"
+            );
+            mgr.finish_failure(&session_id, mux.to_wire().to_string());
             mgr.detach_process(&session_id);
             return;
         }
