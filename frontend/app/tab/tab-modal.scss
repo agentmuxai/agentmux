@@ -91,16 +91,26 @@
 //
 // Same gate applies to `.tab-modal-content` via `data-content-ready` so
 // `tabModal.replace()` swaps also wait for paint on the new content.
+// `opacity: 0` (not `visibility: hidden`): the user-perceived hidden
+// frame is identical, but browsers skip the `autofocus` attribute on
+// elements inside a `visibility: hidden` subtree. The launch modal's
+// name input relies on autofocus; opacity-based hiding keeps focus
+// acquisition working while still suppressing the in-progress mount
+// from view (codex P2 on PR #900). `pointer-events: none` blocks
+// clicks during the gate so the user can't activate buttons that
+// haven't visually appeared yet.
 .tab-modal-overlay:not([data-ready]) {
     .tab-modal-backdrop,
     .tab-modal-panel {
-        visibility: hidden;
+        opacity: 0;
+        pointer-events: none;
         animation: none;
     }
 }
 
 .tab-modal-overlay:not([data-content-ready]) .tab-modal-content {
-    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
     animation: none;
 }
 

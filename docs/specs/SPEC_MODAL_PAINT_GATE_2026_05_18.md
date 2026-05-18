@@ -13,7 +13,9 @@
 
 When a modal mounts, its entrance animation (fade-in + pop-in) fires *in parallel* with the component's `onMount` work — xterm.js constructor, `terminal.open(ref)`, `fitAddon.fit()`, ResizeObserver settling. For the install modal in particular, the user sees a half-mounted terminal mid-animation: a 0×0 box that resolves to its real size after the animation completes, sometimes with a visible reflow.
 
-Fix: introduce a **paint gate** in `TabModalLayer`. The modal renders with `visibility: hidden` first, lets `onMount` run, waits two animation frames (one for layout, one for paint), then adds a `data-ready` attribute that switches `visibility: visible` and triggers the entrance keyframes. No additional library; no SolidJS `<Suspense>` needed. Reduced-motion still respected.
+Fix: introduce a **paint gate** in `TabModalLayer`. The modal renders with `opacity: 0` + `pointer-events: none` first, lets `onMount` run, waits two animation frames (one for layout, one for paint), then adds a `data-ready` attribute that flips opacity back on and triggers the entrance keyframes. No additional library; no SolidJS `<Suspense>` needed. Reduced-motion still respected.
+
+> **Why `opacity: 0` and not `visibility: hidden`?** The initial draft called for `visibility: hidden`, but browsers skip the `autofocus` HTML attribute on elements inside a `visibility: hidden` subtree, regressing the launch modal's name-input focus (codex P2 on PR #900). `opacity: 0` keeps layout flowing AND allows focus acquisition.
 
 ---
 
