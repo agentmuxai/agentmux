@@ -59,43 +59,61 @@ const PaneOverlayClip: Component<{ getEl: Accessor<HTMLElement | null | undefine
 export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
     const [current, setCurrent] = createSignal<TabModalRequest | null>(null);
     const [submitting, setSubmitting] = createSignal(false);
-    // Paint gate — see SPEC_MODAL_PAINT_GATE_2026_05_18.md. We mount
-    // the modal subtree with `visibility: hidden` and animations
-    // suppressed, let the browser run one full paint cycle (rAF×2 so
-    // FitAddon, autofocus, dropdown population finish their post-mount
-    // layout), then flip `ready` true → `data-ready` attribute appears,
-    // CSS reveals the modal and starts the entrance keyframes. Failsafe
-    // at 200ms in case rAF stays parked (background tab, suspended
-    // renderer).
+    // Paint gate — see SPEC_MODAL_PAINT_GATE_2026_05_18.md.
+    //
+    // Outer gate (`ready`): arms ONLY on a null→non-null transition,
+    // i.e. cold open of a modal session. `tabModal.replace()` keeps
+    // the backdrop + outer panel mounted, so we must NOT toggle ready
+    // back to false on replace — that would briefly hide the
+    // persistent shell mid-crossfade (reagent P1 + codex P2 on PR
+    // #900). Stays true through replaces; resets only on close.
+    //
+    // Inner gate (`contentReady`): re-arms on every request identity
+    // change so each replace swaps content through a hidden frame
+    // before the crossfade keyframe runs.
+    //
+    // Both gates schedule rAF×2 (waits for one full paint cycle to
+    // commit) with a 200ms failsafe in case the renderer is suspended
+    // (background tab). Both rAF handles AND the failsafe are
+    // cancelled in onCleanup so stale callbacks from a prior arm
+    // don't flip the new arm early (reagent P2 on #900).
     const [ready, setReady] = createSignal(false);
     const [contentReady, setContentReady] = createSignal(false);
 
-    createEffect(() => {
-        if (current() == null) { setReady(false); return; }
-        setReady(false);
-        const failsafe = setTimeout(() => setReady(true), 200);
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
+    const armGate = (setGate: (v: boolean) => void): (() => void) => {
+        setGate(false);
+        let innerRaf: number | null = null;
+        const failsafe = setTimeout(() => setGate(true), 200);
+        const outerRaf = requestAnimationFrame(() => {
+            innerRaf = requestAnimationFrame(() => {
                 clearTimeout(failsafe);
-                setReady(true);
+                setGate(true);
             });
         });
-        onCleanup(() => clearTimeout(failsafe));
+        return () => {
+            clearTimeout(failsafe);
+            cancelAnimationFrame(outerRaf);
+            if (innerRaf != null) cancelAnimationFrame(innerRaf);
+        };
+    };
+
+    // Outer gate: arm only on null→non-null. Track previous open
+    // state so replace() (non-null → non-null) leaves `ready` alone.
+    let prevWasOpen = false;
+    createEffect(() => {
+        const isOpen = current() != null;
+        if (!isOpen) { prevWasOpen = false; setReady(false); return; }
+        if (prevWasOpen) return;   // replace path — leave ready alone
+        prevWasOpen = true;
+        const cleanup = armGate(setReady);
+        onCleanup(cleanup);
     });
 
+    // Inner gate: re-arm on every request identity change.
     createEffect(() => {
-        // Re-arm for every request swap (cold open + every replace).
-        // Reading current() makes this effect track request identity.
         if (current() == null) { setContentReady(false); return; }
-        setContentReady(false);
-        const failsafe = setTimeout(() => setContentReady(true), 200);
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                clearTimeout(failsafe);
-                setContentReady(true);
-            });
-        });
-        onCleanup(() => clearTimeout(failsafe));
+        const cleanup = armGate(setContentReady);
+        onCleanup(cleanup);
     });
 
     // Guard close: ESC and backdrop click are blocked while a submit RPC is
