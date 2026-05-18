@@ -89,10 +89,17 @@ function renderEntry(wire: WireError): TranslatedError {
             rawMessage,
         };
     }
+    // For `AMX-LEGACY` (and any other catalog entry that needs the
+    // raw backend text as its primary message), Rust's `to_wire()`
+    // puts the text in `wire.message` and leaves `details` empty —
+    // so the catalog's `d.message` reader gets nothing and falls
+    // back to the generic stub. Inject `wire.message` into the
+    // details object the renderer sees so the real text wins.
+    const renderDetails = rawMessage ? { message: rawMessage, ...details } : details;
     return {
         code: wire.code,
         title: entry.title,
-        message: entry.message(details),
+        message: entry.message(renderDetails),
         retry: entry.retry,
         rawMessage,
     };

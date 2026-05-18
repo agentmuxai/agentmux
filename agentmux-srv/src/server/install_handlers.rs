@@ -299,10 +299,10 @@ fn spawn_install_task(
             };
             broker.publish(event);
         };
-        // The `error` field on done events accepts either a plain
-        // string (legacy callers) or the wire-format `AgentMuxError`
-        // object the frontend's `translateError()` understands. New
-        // call sites should emit the wire form via `emit_done_typed`.
+        // Legacy emit path — the `error` field is a free-text string.
+        // New code paths should use `emit_done_typed` below to emit
+        // the wire-format `AgentMuxError` object so the frontend can
+        // render a friendly `<ErrorBanner />`.
         let emit_done = |broker: &Broker, ok: bool, error: Option<String>| {
             let event = WaveEvent {
                 event: "install_chunk".to_string(),

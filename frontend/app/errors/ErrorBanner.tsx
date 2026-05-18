@@ -26,7 +26,7 @@
  * The translator handles all three uniformly.
  */
 
-import { createSignal, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, Show, type JSX } from "solid-js";
 import { translateError } from "./translate";
 import "./ErrorBanner.scss";
 
@@ -38,7 +38,9 @@ interface ErrorBannerProps {
 }
 
 export const ErrorBanner = (props: ErrorBannerProps): JSX.Element => {
-    const t = () => translateError(props.error);
+    // Memo so the 5+ `t()` reads per render don't re-translate; the
+    // memo only re-runs when `props.error` actually changes.
+    const t = createMemo(() => translateError(props.error));
     const [detailsOpen, setDetailsOpen] = createSignal(false);
 
     return (
