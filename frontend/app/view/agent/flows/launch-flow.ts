@@ -245,8 +245,17 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             }
 
             if (!authenticated) {
-                log("auth", "login timed out after 5 minutes", "error");
-                log("auth", `retry: click the button below, or run '${provider.cliCommand} ${provider.authLoginCommand.join(" ")}' manually`, "warn");
+                // Synthesize an AMX-AUTH-002 wire payload so the log
+                // entry renders with the catalog's friendly title +
+                // retry hint, matching the typed-error pattern used
+                // elsewhere. Same retry-first / error-last ordering
+                // so ActivityLogPanel keeps failed-state styling.
+                const t = translateError({
+                    code: "AMX-AUTH-002",
+                    details: { provider: provider.id, seconds: 300 },
+                });
+                log("auth", `retry: ${t.retry ?? `run '${provider.cliCommand} ${provider.authLoginCommand.join(" ")}' manually`}`, "warn");
+                log("auth", `${t.title}: ${t.message}`, "error");
                 return "auth_failed";
             }
         } catch (err: any) {
