@@ -71,6 +71,13 @@ export interface BrowserPaneState {
      *  `TitleChanged` is folded to `TITLE_FALLBACK` so the view
      *  never has to know about the empty case. */
     title: string;
+    /** True once a `TitleChanged` command has applied a non-fallback
+     *  title — used by `UrlConfirmed` to avoid overwriting the real
+     *  title with a hostname placeholder during the race where CEF's
+     *  title-change beats its nav-state event. Cleared by `Navigate`
+     *  so each new page starts fresh. Parallel to `faviconOverridden`.
+     *  See SPEC_BROWSER_PANE_OPTIMISTIC_HEADER_2026_05_18.md §3. */
+    titleOverridden: boolean;
     /** Committed/loading URL. Distinct from the address-bar `<input>`
      *  typing buffer (which stays in `browser-view.tsx` per the
      *  catalog — DOM is the source of truth for live-typing UX).
@@ -172,6 +179,7 @@ export const initialState = (): BrowserPaneState => ({
     canGoBack: false,
     canGoForward: false,
     title: TITLE_FALLBACK,
+    titleOverridden: false,
     url: "",
     faviconUrl: "",
     faviconOverridden: false,

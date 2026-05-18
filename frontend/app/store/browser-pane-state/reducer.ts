@@ -91,6 +91,7 @@ export function update(
                     faviconUrl: deriveFaviconUrl(command.url),
                     faviconOverridden: false,
                     title,
+                    titleOverridden: false,
                 },
                 events: [{ type: "navigate", url: command.url }],
             };
@@ -191,11 +192,20 @@ export function update(
             // (in-page link click to a new domain) resets the title
             // to the hostname so the user sees instant feedback. CEF
             // will eventually emit the real title via TitleChanged.
-            // Same-origin redirects keep the existing real title to
-            // avoid a flash to hostname.
-            const title = originChanged
-                ? (deriveTitlePlaceholder(command.url) || TITLE_FALLBACK)
-                : state.title;
+            //
+            // Race guard mirroring the favicon side (reagent P2 on
+            // #905 v2): if `TitleChanged` already applied the real
+            // destination title before `UrlConfirmed` arrived, we
+            // should NOT overwrite it with a hostname placeholder.
+            // `titleOverridden` is set true by TitleChanged and
+            // false by Navigate; cleared by an explicit reset here.
+            const keepTitle = state.titleOverridden && originChanged
+                ? true   // race case — real title already arrived
+                : !originChanged;  // same-origin → keep real title too
+            const title = keepTitle
+                ? state.title
+                : (deriveTitlePlaceholder(command.url) || TITLE_FALLBACK);
+            const titleOverridden = keepTitle ? state.titleOverridden : false;
             return {
                 state: {
                     ...state,
@@ -203,6 +213,7 @@ export function update(
                     faviconUrl,
                     faviconOverridden,
                     title,
+                    titleOverridden,
                 },
                 events: [{ type: "url-confirmed", url: command.url }],
             };
@@ -226,10 +237,18 @@ export function update(
         }
 
         case "TitleChanged": {
-            const next = command.title.trim() === "" ? TITLE_FALLBACK : command.title;
-            if (next === state.title) return { state, events: [] };
+            // CEF emitted a real <title>. Empty / whitespace folds to
+            // TITLE_FALLBACK and is treated as NOT-overridden (no real
+            // title yet) so a subsequent UrlConfirmed cross-origin
+            // can still replace it with a hostname placeholder.
+            const trimmed = command.title.trim();
+            const next = trimmed === "" ? TITLE_FALLBACK : command.title;
+            const overridden = trimmed !== "";
+            if (next === state.title && overridden === state.titleOverridden) {
+                return { state, events: [] };
+            }
             return {
-                state: { ...state, title: next },
+                state: { ...state, title: next, titleOverridden: overridden },
                 events: [{ type: "title-changed", title: next }],
             };
         }
