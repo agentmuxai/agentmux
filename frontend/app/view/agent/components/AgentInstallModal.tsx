@@ -64,11 +64,6 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     const [error, setError] = createSignal<unknown>(null);
     const [sessionId, setSessionId] = createSignal<string | null>(null);
     const [elapsedMs, setElapsedMs] = createSignal(0);
-    // When true, install runs with `npm --loglevel=verbose`. On by
-    // default — surface per-package fetch/extract lines so the user
-    // can see what's happening during long installs. Toggle off for
-    // a terse log.
-    const [verbose, setVerbose] = createSignal(true);
 
     let unsub: (() => void) | null = null;
     let termRef: HTMLDivElement | undefined;
@@ -128,7 +123,6 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                 cliCommand: prov.cliCommand,
                 npmPackage: prov.npmPackage,
                 pinnedVersion: prov.pinnedVersion,
-                verbose: verbose(),
             });
             // If the modal unmounted while the RPC was in flight, cancel
             // the resolved session id rather than subscribing.
@@ -396,14 +390,6 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             </div>
             <footer class="modal-panel-footer">
                 <Show when={phase() === "idle"}>
-                    <label class="agent-install-modal-verbose">
-                        <input
-                            type="checkbox"
-                            checked={verbose()}
-                            onChange={(e) => setVerbose(e.currentTarget.checked)}
-                        />
-                        <span>Verbose output</span>
-                    </label>
                     <Button onClick={() => props.onCancel()}>Cancel</Button>
                     <Button onClick={() => void startInstall()} className="green solid">
                         Install now
