@@ -21,7 +21,25 @@
 }
 
 .agent-install-modal-spinner {
+    display: inline-block;
     color: var(--warning-color, #e9b800);
+    animation: agent-install-spinner-spin 1.6s linear infinite;
+    transform-origin: 50% 55%; // slight bias matches the hourglass's visual center
+}
+
+@keyframes agent-install-spinner-spin {
+    // Discrete flip so the hourglass reads as "rotating to drain"
+    // rather than continuously spinning (matches the OS-native
+    // hourglass cursor convention).
+    0%, 45%   { transform: rotate(0deg); }
+    50%, 95%  { transform: rotate(180deg); }
+    100%      { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .agent-install-modal-spinner {
+        animation: none;
+    }
 }
 
 .agent-install-modal-ok {

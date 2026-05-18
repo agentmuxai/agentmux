@@ -17,15 +17,17 @@
  * xterm renders npm's output (ANSI colors preserved).
  */
 
-import { Show, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 
 import { Button } from "@/element/button";
 import { ErrorBanner } from "@/app/errors/ErrorBanner";
+import { atoms } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
+import { computeTermThemeFromSettings } from "@/app/view/term/termutil";
 
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { getProvider } from "../providers";
@@ -123,8 +125,12 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                         writeTerm(data.line, data.stream === "stderr" ? "stderr" : "stdout");
                     } else if (data.op === "done") {
                         if (data.ok) {
+                            // Don't auto-chain — the user clicks
+                            // "Continue to Launch" in the footer so
+                            // they have a moment to read the install
+                            // log and confirm the operation
+                            // succeeded.
                             setPhase("done");
-                            queueMicrotask(() => props.onInstalled());
                         } else {
                             setError(data.error ?? "install failed");
                             setPhase("failed");
@@ -154,17 +160,31 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         // Lazy-create the terminal so it doesn't render before the
         // container has a layout size (FitAddon needs a real rect).
         if (!termRef) return;
+        // Resolve the project's monospace font at runtime — xterm.js
+        // doesn't parse CSS variables, so passing the literal
+        // `var(--termfontfamily, ...)` string would silently fall
+        // back to xterm's default (Courier), which renders wider
+        // than the rest of the app's terminals.
+        const cs = getComputedStyle(termRef);
+        const termFont = cs.getPropertyValue("--termfontfamily").trim()
+            || `"JetBrains Mono", "Fira Code", "Consolas", monospace`;
+        // Bind to the same theme source the regular term pane uses
+        // (single source of truth — see SPEC_INSTALL_MODAL_TERM_THEME_BINDING_2026_05_18.md).
+        const [initialTheme] = computeTermThemeFromSettings(atoms.fullConfigAtom());
         terminal = new Terminal({
             cursorBlink: false,
             scrollback: 5000,
             fontSize: 12,
-            fontFamily: "var(--fixed-font, monospace)",
-            theme: {
-                background: "#0d0e0f",
-                foreground: "#cccccc",
-            },
+            fontFamily: termFont,
+            theme: initialTheme,
             convertEol: false,
             scrollOnUserInput: false,
+        });
+        // Live theme swap — mirrors TermThemeUpdater so settings changes
+        // while the modal is open take effect without remount.
+        createEffect(() => {
+            const [t] = computeTermThemeFromSettings(atoms.fullConfigAtom());
+            if (terminal) terminal.options.theme = t;
         });
         fitAddon = new FitAddon();
         terminal.loadAddon(fitAddon);
@@ -263,7 +283,10 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                     </Button>
                 </Show>
                 <Show when={phase() === "done"}>
-                    <span class="agent-install-modal-launching">Opening launch modal…</span>
+                    <Button onClick={() => props.onCancel()}>Close</Button>
+                    <Button onClick={() => props.onInstalled()} className="green solid">
+                        Continue to Launch
+                    </Button>
                 </Show>
             </footer>
         </>
