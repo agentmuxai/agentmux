@@ -155,7 +155,21 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 agent,
                 originBlockId: props.model.blockId,
                 onInstalled: () => {
-                    setInstallState((s) => ({ ...s, [agent.id]: true }));
+                    // install.start runs at provider scope, so every
+                    // ForgeAgent definition that resolves to the same
+                    // canonical provider is now installed — not just
+                    // the one the user clicked. Mark all of them so
+                    // sibling cards drop their ribbon too.
+                    const canonical = getProvider(agent.provider)?.id ?? agent.provider;
+                    setInstallState((s) => {
+                        const next = { ...s };
+                        for (const a of agents()) {
+                            if ((getProvider(a.provider)?.id ?? a.provider) === canonical) {
+                                next[a.id] = true;
+                            }
+                        }
+                        return next;
+                    });
                     openLaunchModal(agent);
                 },
             });
