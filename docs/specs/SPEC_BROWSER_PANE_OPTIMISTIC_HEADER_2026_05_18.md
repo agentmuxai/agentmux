@@ -82,3 +82,13 @@ Wire it into two reducer cases:
 2. Cross-origin nav from CEF nav-state (in-page clicks) also resets the title placeholder.
 3. Same-origin redirects/hash-changes preserve the real title (no flash).
 4. `TitleChanged` still wins once CEF emits.
+
+## 6. Known trade-off — title race
+
+Unlike the favicon (whose URL encodes its origin and lets the reducer disambiguate "real favicon for new page beat UrlConfirmed" from "stale favicon from old page"), titles carry no origin signal. So `UrlConfirmed` cross-origin always resets to the hostname placeholder — even if `TitleChanged` already applied the real title in a race.
+
+Worst case: TitleChanged for the new page fires BEFORE UrlConfirmed, leaving `state.title = newReal, state.url = oldPage, titleOverridden = true`. UrlConfirmed arrives, origin changed → resets title to hostname placeholder. CEF doesn't re-emit TitleChanged for the same page → user is stuck on the placeholder until the next navigation.
+
+This is rare in practice (IPC subscription ordering in `BrowserViewModel` consistently sees nav-state ahead of title-change in the smoke logs) and produces a less-bad outcome than the alternative — which would be the real title of the PREVIOUS page sticking forever (the original bug §2 was filed to fix).
+
+A future PR could introduce a per-nav token (dispatch on `on_loading_state_change(is_loading=true)`) to disambiguate. Out of scope for this fix.

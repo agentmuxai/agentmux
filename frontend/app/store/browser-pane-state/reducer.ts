@@ -188,24 +188,31 @@ export function update(
                 ? state.faviconUrl
                 : deriveFaviconUrl(command.url);
             const faviconOverridden = keepOverride ? state.faviconOverridden : false;
-            // Same logic for the title placeholder: cross-origin nav
-            // (in-page link click to a new domain) resets the title
-            // to the hostname so the user sees instant feedback. CEF
-            // will eventually emit the real title via TitleChanged.
+            // Title placeholder for cross-origin transitions. Simpler
+            // than favicon because title carries no origin information
+            // to disambiguate "real-title-from-new-page beat
+            // UrlConfirmed" vs "stale-real-title-from-old-page".
             //
-            // Race guard mirroring the favicon side (reagent P2 on
-            // #905 v2): if `TitleChanged` already applied the real
-            // destination title before `UrlConfirmed` arrived, we
-            // should NOT overwrite it with a hostname placeholder.
-            // `titleOverridden` is set true by TitleChanged and
-            // false by Navigate; cleared by an explicit reset here.
-            const keepTitle = state.titleOverridden && originChanged
-                ? true   // race case — real title already arrived
-                : !originChanged;  // same-origin → keep real title too
-            const title = keepTitle
-                ? state.title
-                : (deriveTitlePlaceholder(command.url) || TITLE_FALLBACK);
-            const titleOverridden = keepTitle ? state.titleOverridden : false;
+            //   - Same-origin: keep state.title (real title for this
+            //     page; no flash to placeholder).
+            //   - Cross-origin: reset to hostname placeholder so the
+            //     header shows instant feedback for in-page link
+            //     clicks to new domains (the primary win).
+            //
+            // Trade-off (reagent + codex P2 on #905 v2): if CEF's
+            // TitleChanged for the new page beat UrlConfirmed in a
+            // race, state.title already holds the real title with
+            // titleOverridden=true — we overwrite it with the
+            // placeholder here and never recover (CEF doesn't
+            // re-emit TitleChanged for the same page). Accepted
+            // because the common path (in-page link → new domain
+            // with no race) dominates, and the rare race produces a
+            // less-bad outcome than the original bug (real-title-of-
+            // PREVIOUS-page sticking forever).
+            const title = originChanged
+                ? (deriveTitlePlaceholder(command.url) || TITLE_FALLBACK)
+                : state.title;
+            const titleOverridden = originChanged ? false : state.titleOverridden;
             return {
                 state: {
                     ...state,
