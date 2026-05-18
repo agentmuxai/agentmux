@@ -181,10 +181,12 @@ impl AgentMuxError {
 
     fn classify_io(err: &std::io::Error) -> AmxCode {
         // `ErrorKind::StorageFull` was stabilized in 1.83 but we
-        // can't rely on it across all toolchains the CI uses. The
-        // raw OS code check is portable: ENOSPC=28 on Unix,
-        // ERROR_DISK_FULL=112 on Windows.
-        if matches!(err.raw_os_error(), Some(28) | Some(112)) {
+        // can't rely on it across all toolchains the CI uses. Match
+        // raw OS codes instead: ENOSPC=28 on Unix; on Windows the
+        // disk-full condition surfaces as ERROR_HANDLE_DISK_FULL=39
+        // (`WriteFile` / file-handle-bound APIs) OR ERROR_DISK_FULL=112
+        // (volume-level APIs), depending on which Win32 call failed.
+        if matches!(err.raw_os_error(), Some(28) | Some(39) | Some(112)) {
             return AmxCode::OutOfSpace;
         }
         match err.kind() {
@@ -350,6 +352,15 @@ mod tests {
     #[test]
     fn io_error_routes_windows_disk_full_to_out_of_space() {
         let err = std::io::Error::from_raw_os_error(112);
+        let mux: AgentMuxError = err.into();
+        assert_eq!(mux.code(), AmxCode::OutOfSpace);
+    }
+
+    #[test]
+    fn io_error_routes_windows_handle_disk_full_to_out_of_space() {
+        // ERROR_HANDLE_DISK_FULL — what `WriteFile` returns when the
+        // disk fills up via a file-handle-bound write.
+        let err = std::io::Error::from_raw_os_error(39);
         let mux: AgentMuxError = err.into();
         assert_eq!(mux.code(), AmxCode::OutOfSpace);
     }
