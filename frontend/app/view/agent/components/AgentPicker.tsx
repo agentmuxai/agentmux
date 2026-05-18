@@ -125,7 +125,18 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // the tab-scoped layer, depending on whether the agent's CLI is
     // already installed in the per-version cache. Phase α of
     // SPEC_AGENT_INSTALL_STAGE_2026_05_17.md.
+    //
+    // Re-entry guard: handleSelect awaits an IPC round-trip when
+    // install state is still undefined. Without the in-flight set,
+    // a double-click during the await would spawn two install
+    // modals — the second mount replaces the first, and its
+    // onCleanup fires `install.cancel` on the session the first one
+    // had just kicked off.
+    const pendingSelect = new Set<string>();
     const handleSelect = async (agent: ForgeAgent) => {
+        if (pendingSelect.has(agent.id)) return;
+        pendingSelect.add(agent.id);
+        try {
         setNodejsError(null);
         let installed = installState()[agent.id];
 
@@ -171,6 +182,9 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             return;
         }
         openLaunchModal(agent);
+        } finally {
+            pendingSelect.delete(agent.id);
+        }
     };
 
     const busy = () => launching() !== null;
