@@ -113,6 +113,26 @@ export function deriveFaviconUrl(url: string): string {
     }
 }
 
+/**
+ * True iff `a` and `b` resolve to the same `URL.origin`. Empty strings,
+ * unparseable URLs, and `null`-origin schemes (about:blank, file://)
+ * compare as same-origin only with themselves. Used by the reducer to
+ * decide whether a URL change is an in-page redirect (preserve the
+ * real favicon) vs. a cross-origin navigation (reset the override and
+ * fall back to the derived favicon for the new origin).
+ */
+export function sameOriginUrl(a: string, b: string): boolean {
+    if (a === b) return true;
+    let originA: string | null = null;
+    let originB: string | null = null;
+    try { originA = new URL(a).origin; } catch { originA = null; }
+    try { originB = new URL(b).origin; } catch { originB = null; }
+    // Both unparseable → fall back to literal-equality (handled above)
+    // → treat as different. Otherwise compare origins.
+    if (originA == null || originB == null) return false;
+    return originA === originB;
+}
+
 /** The string the reducer projects when `TitleChanged` arrives with
  *  empty or whitespace-only content. The view binds to `state.title`
  *  directly, so the fallback is enforced at write time, not at read

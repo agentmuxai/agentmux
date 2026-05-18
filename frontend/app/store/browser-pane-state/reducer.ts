@@ -53,6 +53,7 @@ import {
     ReducerResult,
     TITLE_FALLBACK,
     deriveFaviconUrl,
+    sameOriginUrl,
 } from "./types";
 
 export function update(
@@ -143,18 +144,34 @@ export function update(
 
         case "UrlConfirmed": {
             if (state.url === command.url) return { state, events: [] };
-            // Reagent P2 on #876: preserve a CEF-reported favicon across
-            // redirects + hash-changes. Only re-derive the heuristic favicon
-            // if no real favicon has overridden it. Otherwise the user sees
-            // the real favicon flash to the heuristic on every nav event.
-            const faviconUrl = state.faviconOverridden
+            // Origin-aware favicon preservation:
+            //
+            // - Same-origin URL change (in-page redirect, hash change,
+            //   querystring update) keeps the CEF-reported favicon to
+            //   avoid the real favicon flashing back to the heuristic
+            //   on every nav event (reagent P2 on #876).
+            // - Cross-origin navigation resets the override so a stale
+            //   favicon from the previous site doesn't carry over —
+            //   bug found 2026-05-18, the old code preserved
+            //   faviconOverridden across all URL changes, so
+            //   navigating from agentmux.ai → bing.com → x.com would
+            //   keep bing's favicon when CEF was silent about x.com.
+            //   The new derived favicon may still flash briefly, but a
+            //   subsequent FaviconUrlsReceived from CEF will replace
+            //   it. That's a better default than retaining a foreign
+            //   favicon indefinitely.
+            const originChanged = sameOriginUrl(state.url, command.url) === false;
+            const keepOverride = state.faviconOverridden && !originChanged;
+            const faviconUrl = keepOverride
                 ? state.faviconUrl
                 : deriveFaviconUrl(command.url);
+            const faviconOverridden = keepOverride ? state.faviconOverridden : false;
             return {
                 state: {
                     ...state,
                     url: command.url,
                     faviconUrl,
+                    faviconOverridden,
                 },
                 events: [{ type: "url-confirmed", url: command.url }],
             };
