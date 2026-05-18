@@ -1,0 +1,113 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Canonical AgentMux error banner — used everywhere a translated
+// AgentMuxError needs to surface to the user. See
+// docs/specs/SPEC_ERROR_CATALOG_2026_05_17.md.
+
+.amx-error-banner {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    grid-template-areas: "icon body code dismiss";
+    align-items: start;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-2-5);
+    background: color-mix(in srgb, var(--error-color, #ff6b6b) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--error-color, #ff6b6b) 40%, transparent);
+    border-radius: 6px;
+    color: var(--main-text-color);
+    font-size: var(--text-sm, 13px);
+    line-height: 1.4;
+}
+
+.amx-error-banner-icon {
+    grid-area: icon;
+    font-size: 16px;
+    line-height: 1;
+    color: var(--error-color, #ff6b6b);
+    margin-top: 1px;
+}
+
+.amx-error-banner-body {
+    grid-area: body;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+}
+
+.amx-error-banner-title {
+    font-weight: 600;
+    color: var(--error-color, #ff6b6b);
+}
+
+.amx-error-banner-message {
+    color: var(--main-text-color);
+}
+
+.amx-error-banner-retry {
+    font-style: italic;
+    color: var(--secondary-text-color);
+    margin-top: var(--space-0-5);
+}
+
+.amx-error-banner-details-toggle {
+    align-self: flex-start;
+    background: none;
+    border: none;
+    padding: 0;
+    margin-top: var(--space-1);
+    color: var(--secondary-text-color);
+    font-size: 11px;
+    text-decoration: underline dotted;
+    cursor: pointer;
+
+    &:hover {
+        color: var(--main-text-color);
+    }
+}
+
+.amx-error-banner-raw {
+    margin: var(--space-1) 0 0;
+    padding: var(--space-1) var(--space-1-5);
+    background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    font-family: var(--fixed-font, monospace);
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--secondary-text-color);
+    max-height: 160px;
+    overflow-y: auto;
+}
+
+.amx-error-banner-code {
+    grid-area: code;
+    align-self: flex-start;
+    padding: 1px 6px;
+    font-family: var(--fixed-font, monospace);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+    color: var(--secondary-text-color);
+    border-radius: 3px;
+    user-select: text;
+    white-space: nowrap;
+}
+
+.amx-error-banner-dismiss {
+    grid-area: dismiss;
+    align-self: flex-start;
+    background: none;
+    border: none;
+    padding: 0 var(--space-0-5);
+    font-size: 16px;
+    line-height: 1;
+    color: var(--secondary-text-color);
+    cursor: pointer;
+
+    &:hover {
+        color: var(--main-text-color);
+    }
+}
