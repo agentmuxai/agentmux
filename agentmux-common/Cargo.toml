@@ -7,6 +7,7 @@ description = "Shared utilities for AgentMux crates"
 [dependencies]
 tokio = { version = "1", features = ["process"] }
 tracing = "0.1"
+thiserror = "1"
 # Phase B.2: shared IPC protocol types (Command/Event) between
 # launcher (server) and host (client). One source of truth so the
 # wire format can't drift between the two binaries on a version-
