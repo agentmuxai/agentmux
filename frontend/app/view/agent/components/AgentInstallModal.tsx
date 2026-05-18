@@ -77,6 +77,9 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     let resizeObserver: ResizeObserver | null = null;
     let startedAt = 0;
     let tickHandle: ReturnType<typeof setInterval> | null = null;
+    // Hoisted so onCleanup can cancel the pending copy-on-select
+    // timer when the modal unmounts (reagent P2 on PR #899 v2).
+    let selectionDebounce: ReturnType<typeof setTimeout> | null = null;
     // Flipped in onCleanup so a startInstall awaiting the RPC response
     // can cancel the resolved session id even if it landed after unmount.
     let disposed = false;
@@ -213,8 +216,8 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         // out of the install log.
         const copyOnSelect = getSettingsKeyAtom("term:copyonselect");
         // Debounce matches termwrap.ts:205 — fires once per drag burst
-        // instead of once per tick.
-        let selectionDebounce: ReturnType<typeof setTimeout> | null = null;
+        // instead of once per tick. `selectionDebounce` is hoisted to
+        // component scope so onCleanup can cancel it.
         terminal.onSelectionChange(() => {
             if (!copyOnSelect()) return;
             if (selectionDebounce != null) clearTimeout(selectionDebounce);
@@ -270,6 +273,10 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         if (tickHandle != null) {
             clearInterval(tickHandle);
             tickHandle = null;
+        }
+        if (selectionDebounce != null) {
+            clearTimeout(selectionDebounce);
+            selectionDebounce = null;
         }
         if (resizeObserver) {
             resizeObserver.disconnect();
@@ -336,11 +343,19 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                         // (reagent P1 + codex P2 on PR #899).
                         e.preventDefault();
                         const sel = terminal?.getSelection() ?? "";
-                        const all = terminal?.buffer?.active
-                            ? Array.from({ length: terminal.buffer.active.length }, (_, i) =>
-                                terminal.buffer.active.getLine(i)?.translateToString(true) ?? ""
-                              ).join("\n")
-                            : "";
+                        // Lazy-walk the scrollback inside the click
+                        // handler so we don't pay for it on every
+                        // right-click + dismiss (reagent P2). For
+                        // long install logs this is non-trivial work.
+                        const collectAll = (): string => {
+                            const buf = terminal?.buffer?.active;
+                            if (!buf) return "";
+                            const lines: string[] = [];
+                            for (let i = 0; i < buf.length; i++) {
+                                lines.push(buf.getLine(i)?.translateToString(true) ?? "");
+                            }
+                            return lines.join("\n");
+                        };
                         ContextMenuModel.showContextMenu(
                             [
                                 {
@@ -351,9 +366,13 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                                 },
                                 {
                                     label: "Copy All",
-                                    enabled: all.length > 0,
-                                    click: () => void clipboardWriteText(all).catch((err) =>
-                                        console.log("clipboard write failed", err)),
+                                    enabled: !!terminal?.buffer?.active?.length,
+                                    click: () => {
+                                        const all = collectAll();
+                                        if (all.length === 0) return;
+                                        void clipboardWriteText(all).catch((err) =>
+                                            console.log("clipboard write failed", err));
+                                    },
                                 },
                             ],
                             e,

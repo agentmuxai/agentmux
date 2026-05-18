@@ -368,7 +368,9 @@ const WaitingPanel = (p: {
                             // navigator.clipboard.* is fragile under CEF's
                             // permission policy. See
                             // SPEC_UNIFIED_CLIPBOARD_2026_05_18.md §3.3.
-                            void clipboardWriteText(p.state.authUrl).catch(() => {});
+                            void clipboardWriteText(p.state.authUrl).catch((err) =>
+                                console.log("clipboard write failed", err),
+                            );
                         }}
                     >
                         Copy
