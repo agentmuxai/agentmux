@@ -123,8 +123,12 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         // log instead of raw JSON like `{"code":"AMX-CLI-001",...}`.
         // Legacy free-text errors pass through unchanged.
         const t = translateError(err);
-        log("cli", `${t.title}: ${t.message}`, "error");
+        // Log the retry hint FIRST so the error line is the most
+        // recent entry — `ActivityLogPanel` derives the panel's
+        // failed-state styling from the most recent log entry's
+        // level (`agent-activity-log--has-error`).
         if (t.retry) log("cli", t.retry, "warn");
+        log("cli", `${t.title}: ${t.message}`, "error");
         return "fatal";
     }
     unsubInstall();
