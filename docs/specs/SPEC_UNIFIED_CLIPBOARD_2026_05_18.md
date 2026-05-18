@@ -9,10 +9,11 @@
 
 ## 0. TL;DR
 
-The user reports they can't copy text from the install modal's xterm.js terminal. They want **copy/paste to work from anywhere in the app**, plus two adjacent actions:
+The user reports they can't copy text from the install modal's xterm.js terminal. They want **copy/paste to work from anywhere in the app**, plus one adjacent action for long-output regions:
 
-- **Save selection / pane content to a file** (e.g. `~/.agentmux/clips/install-2026-05-18.log`).
-- **Open in editor** (VS Code, or the user's configured external editor).
+- **Save selection / pane content to a file** (e.g. `~/.agentmux/clips/install-2026-05-18.log`) — useful when the output is too long to paste comfortably.
+
+> **Open-in-editor was originally scoped here but cut after design review (2026-05-18).** It belongs in a separate spec — selecting text for copy/paste doesn't imply moving the whole buffer into an editor. If that capability is needed later, it can live on top of Save Selection As… by chaining `OpenExternal(path)` after the write.
 
 Today: clipboard works only in *some* surfaces (regular terminal pane, code blocks, context menu actions), and even then via four different paths. The install modal terminal has **zero** clipboard wiring — the audit found no `onSelectionChange`, no `term:copyonselect` read, no paste handler, no keyboard binding. xterm.js's `getSelection()` is never queried, and the container has `user-select: none` from the shared `xterm.css`, so browser-native selection-copy is blocked too.
 
@@ -116,7 +117,7 @@ export function getActiveSelectionProvider(): SelectionProvider | null;
 
 Activation follows DOM focus. The pane's container wires `onFocusIn` / `onFocusOut` to `register` / `unregister`. Multiple panes can be mounted; only the focused one is active.
 
-### 3.2 The four global commands
+### 3.2 The three global commands
 
 Wired once at app root (`frontend/app/app.tsx`), keyed off the active provider:
 
@@ -125,9 +126,8 @@ Wired once at app root (`frontend/app/app.tsx`), keyed off the active provider:
 | Copy | `Ctrl+C` (or `Ctrl+Shift+C` in terminal context) | `clipboardWriteText(provider.getSelection() || provider.getAll())` |
 | Copy All | `Ctrl+Shift+A` | `clipboardWriteText(provider.getAll())` |
 | Save Selection As… | `Ctrl+S` (when focus is in a non-editor pane) | `RpcApi.WriteFile({ path: dialogPick, content: provider.getSelection() || provider.getAll() })` |
-| Open in Editor | `Ctrl+Shift+E` | Write to a temp file in `~/.agentmux/clips/`, then `RpcApi.OpenExternal(tempPath)` which routes to the user's configured editor (default: VS Code's `code <path>` if on PATH; fallback: OS default for `.txt`). |
 
-All four also appear in the right-click context menu (`buildPaneContextMenu` extension) and as buttons in a hover-revealed action bar (Phase β).
+All three also appear in the right-click context menu (`buildPaneContextMenu` extension) and as buttons in a hover-revealed action bar (Phase β).
 
 ### 3.3 Clipboard write path
 
@@ -181,15 +181,9 @@ Path resolution: relative paths are resolved against `~/.agentmux/clips/`. Absol
 
 For the OS file picker, use `getApi().showSaveDialog({ defaultPath, filters })` — CEF exposes the native Chromium save dialog. If we don't have that bridge yet, the v1 implementation can drop content into `~/.agentmux/clips/<timestamp>-<label>.txt` and surface a toast with the path (good enough for "open in editor" follow-up).
 
-### 3.7 Open in Editor
+### 3.7 Open in Editor — cut from this spec
 
-Two-step:
-
-1. Write content to `~/.agentmux/clips/<timestamp>-<label>.txt` via the same path as 3.6.
-2. Resolve the user's editor: setting `editor:external` (default: `"code"` on Windows/Linux, `"open -a 'Visual Studio Code'"` on macOS, fallback to OS default `open` / `xdg-open` / `start`).
-3. Spawn editor via `RpcApi.OpenExternalCommand(path)` — already exists at `agentmux-cef/src/commands/platform.rs::open_external`.
-
-The cleanup story: clips older than 7 days get pruned on startup. Capped at 1 MB / file to keep disk usage bounded.
+Cut after design review (2026-05-18). Selecting text for copy/paste doesn't imply moving the whole buffer into an editor — those are separate user goals. If "open this output in VS Code" becomes a frequent ask, it can live on top of 3.6: after the file is written, optionally chain `RpcApi.OpenExternalCommand(path)` (which already exists at `agentmux-cef/src/commands/platform.rs::open_external`). That's a small extension, not a foundational piece of the unified clipboard.
 
 ---
 
@@ -209,18 +203,17 @@ That's ~30 lines. Spec + Phase α implementation ship as one PR. Internals doc p
 ### Phase β — Selection-provider registry + global commands
 
 1. New file `frontend/util/selection-registry.ts` per §3.1.
-2. App-root keyboard listener registers Ctrl+C / Ctrl+Shift+A / Ctrl+S / Ctrl+Shift+E → dispatches to active provider.
+2. App-root keyboard listener registers Ctrl+C / Ctrl+Shift+A / Ctrl+S → dispatches to active provider.
 3. Both xterm consumers + agent doc view + markdown blocks register providers.
-4. Extend `buildPaneContextMenu` with Copy / Copy All / Save As… / Open in Editor entries.
+4. Extend `buildPaneContextMenu` with Copy / Copy All / Save As… entries.
 
 Separate PR after Phase α stabilizes.
 
-### Phase γ — Write to file + Open in editor
+### Phase γ — Write to file
 
 1. New `RpcApi.WriteFile` backend handler.
 2. `~/.agentmux/clips/` directory + 7-day pruning.
-3. `editor:external` setting wired through to `open_external`.
-4. Toast on save with click-to-open.
+3. Toast on save with path.
 
 Separate PR.
 
@@ -242,10 +235,9 @@ Hover-revealed "[ Copy | Save | Open ]" bar on the install-modal terminal and ot
 
 ### Phase γ
 1. `Ctrl+S` in any focused pane opens a save dialog (or writes to `~/.agentmux/clips/` with a toast).
-2. `Ctrl+Shift+E` opens the saved file in the user's configured editor.
 
 ### Phase δ
-1. Hovering an exportable output region shows the [Copy | Save | Open] bar.
+1. Hovering an exportable output region shows the `[ Copy | Save ]` bar.
 
 ---
 

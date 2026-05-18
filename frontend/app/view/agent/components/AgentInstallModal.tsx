@@ -212,12 +212,20 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         // Ctrl+Shift+C, context menu Copy) so users can pull npm output
         // out of the install log.
         const copyOnSelect = getSettingsKeyAtom("term:copyonselect");
+        // Debounce matches termwrap.ts:205 — fires once per drag burst
+        // instead of once per tick.
+        let selectionDebounce: ReturnType<typeof setTimeout> | null = null;
         terminal.onSelectionChange(() => {
             if (!copyOnSelect()) return;
-            const sel = terminal?.getSelection() ?? "";
-            if (sel.length > 0) {
-                clipboardWriteText(sel).catch(() => { /* best-effort */ });
-            }
+            if (selectionDebounce != null) clearTimeout(selectionDebounce);
+            selectionDebounce = setTimeout(() => {
+                const sel = terminal?.getSelection() ?? "";
+                if (sel.length > 0) {
+                    clipboardWriteText(sel).catch((e) =>
+                        console.log("clipboard write failed", e),
+                    );
+                }
+            }, 50);
         });
         terminal.attachCustomKeyEventHandler((ev) => {
             // Ctrl+Shift+C → manual copy. Return false stops xterm from
@@ -225,7 +233,9 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             if (ev.type === "keydown" && ev.ctrlKey && ev.shiftKey && ev.key === "C") {
                 const sel = terminal?.getSelection() ?? "";
                 if (sel.length > 0) {
-                    clipboardWriteText(sel).catch(() => { /* best-effort */ });
+                    clipboardWriteText(sel).catch((e) =>
+                        console.log("clipboard write failed", e),
+                    );
                 }
                 return false;
             }
@@ -321,6 +331,10 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                         // Right-click → Copy (selection) / Copy All. Mirrors
                         // the regular term pane's menu. Phase α of
                         // SPEC_UNIFIED_CLIPBOARD_2026_05_18.md.
+                        // preventDefault stops Chromium's native right-click
+                        // menu from firing alongside our custom one
+                        // (reagent P1 + codex P2 on PR #899).
+                        e.preventDefault();
                         const sel = terminal?.getSelection() ?? "";
                         const all = terminal?.buffer?.active
                             ? Array.from({ length: terminal.buffer.active.length }, (_, i) =>
@@ -332,12 +346,14 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                                 {
                                     label: "Copy",
                                     enabled: sel.length > 0,
-                                    click: () => void clipboardWriteText(sel).catch(() => {}),
+                                    click: () => void clipboardWriteText(sel).catch((err) =>
+                                        console.log("clipboard write failed", err)),
                                 },
                                 {
                                     label: "Copy All",
                                     enabled: all.length > 0,
-                                    click: () => void clipboardWriteText(all).catch(() => {}),
+                                    click: () => void clipboardWriteText(all).catch((err) =>
+                                        console.log("clipboard write failed", err)),
                                 },
                             ],
                             e,
