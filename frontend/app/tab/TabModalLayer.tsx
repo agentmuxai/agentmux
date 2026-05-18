@@ -20,7 +20,7 @@
  * See docs/specs/launch-modal-rearchitecture-2026-05-01.md.
  */
 
-import { createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type Component, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type Component, type JSX } from "solid-js";
 
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { AgentLaunchModalPanel } from "@/app/view/agent/components/AgentLaunchModal";
@@ -59,6 +59,44 @@ const PaneOverlayClip: Component<{ getEl: Accessor<HTMLElement | null | undefine
 export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
     const [current, setCurrent] = createSignal<TabModalRequest | null>(null);
     const [submitting, setSubmitting] = createSignal(false);
+    // Paint gate — see SPEC_MODAL_PAINT_GATE_2026_05_18.md. We mount
+    // the modal subtree with `visibility: hidden` and animations
+    // suppressed, let the browser run one full paint cycle (rAF×2 so
+    // FitAddon, autofocus, dropdown population finish their post-mount
+    // layout), then flip `ready` true → `data-ready` attribute appears,
+    // CSS reveals the modal and starts the entrance keyframes. Failsafe
+    // at 200ms in case rAF stays parked (background tab, suspended
+    // renderer).
+    const [ready, setReady] = createSignal(false);
+    const [contentReady, setContentReady] = createSignal(false);
+
+    createEffect(() => {
+        if (current() == null) { setReady(false); return; }
+        setReady(false);
+        const failsafe = setTimeout(() => setReady(true), 200);
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                clearTimeout(failsafe);
+                setReady(true);
+            });
+        });
+        onCleanup(() => clearTimeout(failsafe));
+    });
+
+    createEffect(() => {
+        // Re-arm for every request swap (cold open + every replace).
+        // Reading current() makes this effect track request identity.
+        if (current() == null) { setContentReady(false); return; }
+        setContentReady(false);
+        const failsafe = setTimeout(() => setContentReady(true), 200);
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                clearTimeout(failsafe);
+                setContentReady(true);
+            });
+        });
+        onCleanup(() => clearTimeout(failsafe));
+    });
 
     // Guard close: ESC and backdrop click are blocked while a submit RPC is
     // in-flight so the user can't lose error feedback or trigger a duplicate launch.
@@ -111,6 +149,8 @@ export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
                     return (
                         <div
                             class="tab-modal-overlay"
+                            data-ready={ready() ? "" : undefined}
+                            data-content-ready={contentReady() ? "" : undefined}
                             ref={(el) => { overlayRef = el; }}
                             role="presentation"
                             tabIndex={-1}
