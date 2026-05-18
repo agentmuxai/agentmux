@@ -16,8 +16,10 @@ export interface ErrorEntry {
     title: string;
     /** Sentence-case description; receives the wire `details` object. */
     message: (details: Record<string, unknown>) => string;
-    /** Optional italicized recovery hint under the message. */
-    retry?: string;
+    /** Italicized recovery hint under the message. Static string or a
+     *  function of `details` for entries that need to surface
+     *  payload-specific text (e.g. a system install command). */
+    retry?: string | ((details: Record<string, unknown>) => string | undefined);
 }
 
 const noPath = (v: unknown): string => (typeof v === "string" && v ? v : "the affected location");
@@ -73,6 +75,18 @@ export const ERROR_CATALOG: Record<string, ErrorEntry> = {
         message: (d) =>
             `${str(d.provider, "The CLI")} was installed but the expected binary is missing at ${str(d.expected_path, "the install path")}.`,
         retry: "Reinstall the agent — the package may be misconfigured.",
+    },
+    "AMX-CLI-004": {
+        title: "CLI not on PATH",
+        message: (d) =>
+            `${str(d.cli, "The CLI")} isn't on your PATH and ${str(d.provider, "this agent")} can't be auto-installed.`,
+        // Surface the platform-specific install command the provider
+        // ships in its catalog entry (e.g. `pip install kimi-cli`)
+        // so the user has a copy-pasteable next step.
+        retry: (d) => {
+            const hint = str(d.install_hint);
+            return hint ? `Install it manually: ${hint}` : "Install the CLI manually and add it to your PATH.";
+        },
     },
 
     // ── Auth ────────────────────────────────────────────────────────

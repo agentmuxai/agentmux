@@ -33,6 +33,10 @@ pub enum AmxCode {
     CliNotInstalled,
     NpmInstallFailed,
     CliShimMissing,
+    /// Non-npm provider whose CLI couldn't be found on the system
+    /// PATH. The user must install it manually — there's no
+    /// in-app install path for these (Kimi via pip, etc.).
+    CliMissingOnPath,
     // Auth
     AuthRequiresTty,
     AuthTimeout,
@@ -58,6 +62,7 @@ impl AmxCode {
             AmxCode::CliNotInstalled => "AMX-CLI-001",
             AmxCode::NpmInstallFailed => "AMX-CLI-002",
             AmxCode::CliShimMissing => "AMX-CLI-003",
+            AmxCode::CliMissingOnPath => "AMX-CLI-004",
             AmxCode::AuthRequiresTty => "AMX-AUTH-001",
             AmxCode::AuthTimeout => "AMX-AUTH-002",
             AmxCode::HttpError => "AMX-NET-001",
@@ -114,6 +119,13 @@ pub enum AgentMuxError {
     #[error("installed CLI shim missing: {expected_path}")]
     CliShimMissing { provider: String, expected_path: String },
 
+    #[error("{cli} not found on PATH for {provider}")]
+    CliMissingOnPath {
+        provider: String,
+        cli: String,
+        install_hint: String,
+    },
+
     // ── Auth ────────────────────────────────────────────────
     #[error("OAuth subprocess requires an interactive TTY: {provider}")]
     AuthRequiresTty { provider: String },
@@ -155,6 +167,7 @@ impl AgentMuxError {
             AgentMuxError::CliNotInstalled { .. } => AmxCode::CliNotInstalled,
             AgentMuxError::NpmInstallFailed { .. } => AmxCode::NpmInstallFailed,
             AgentMuxError::CliShimMissing { .. } => AmxCode::CliShimMissing,
+            AgentMuxError::CliMissingOnPath { .. } => AmxCode::CliMissingOnPath,
             AgentMuxError::AuthRequiresTty { .. } => AmxCode::AuthRequiresTty,
             AgentMuxError::AuthTimeout { .. } => AmxCode::AuthTimeout,
             AgentMuxError::HttpError { .. } => AmxCode::HttpError,
@@ -241,6 +254,11 @@ impl AgentMuxError {
             AgentMuxError::CliShimMissing { provider, expected_path } => {
                 details.insert("provider".into(), provider.clone().into());
                 details.insert("expected_path".into(), expected_path.clone().into());
+            }
+            AgentMuxError::CliMissingOnPath { provider, cli, install_hint } => {
+                details.insert("provider".into(), provider.clone().into());
+                details.insert("cli".into(), cli.clone().into());
+                details.insert("install_hint".into(), install_hint.clone().into());
             }
             AgentMuxError::AuthRequiresTty { provider } => {
                 details.insert("provider".into(), provider.clone().into());
@@ -340,6 +358,7 @@ mod tests {
             AmxCode::CliNotInstalled,
             AmxCode::NpmInstallFailed,
             AmxCode::CliShimMissing,
+            AmxCode::CliMissingOnPath,
             AmxCode::AuthRequiresTty,
             AmxCode::AuthTimeout,
             AmxCode::HttpError,

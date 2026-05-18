@@ -19,6 +19,7 @@
  */
 
 import { Button } from "@/element/button";
+import { translateError } from "@/app/errors/translate";
 import { getApi } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -246,7 +247,12 @@ async function startConnect(
         // reagent P1 on #847: previously this discarded `e` and
         // called connect with an empty cliPath, producing a
         // misleading backend "CLI not found at ''" message.
-        controller.failConnect(e);
+        //
+        // Route through translateError so typed wire-format errors
+        // render as readable text in the FailedBanner instead of
+        // raw JSON. Legacy free-text errors pass through unchanged.
+        const t = translateError(e);
+        controller.failConnect(new Error(`${t.title}: ${t.message}${t.retry ? ` — ${t.retry}` : ""}`));
         return;
     }
     // Codex P1 on #847: pass the full provider-isolated auth env. Setting

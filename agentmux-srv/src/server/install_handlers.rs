@@ -480,10 +480,19 @@ fn spawn_install_task(
                 // a half-written package-lock.json. Best-effort —
                 // logging only on failure.
                 if let Err(e) = std::fs::remove_dir_all(&provider_dir) {
+                    // Best-effort cleanup; tag the log with the typed
+                    // code so grouped support requests can grep by
+                    // `amx_code` rather than free-text matching.
+                    let mux = agentmux_common::AgentMuxError::from_io_with_path(
+                        provider_dir.display().to_string(),
+                        e,
+                    );
                     tracing::warn!(
+                        target: "amx::error",
                         session_id = %session_id,
+                        amx_code = %mux.code(),
                         provider_dir = %provider_dir.display(),
-                        error = %e,
+                        error = %mux,
                         "install.cancel: remove partial dir failed"
                     );
                 }
