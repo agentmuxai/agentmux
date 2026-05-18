@@ -137,51 +137,51 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         if (pendingSelect.has(agent.id)) return;
         pendingSelect.add(agent.id);
         try {
-        setNodejsError(null);
-        let installed = installState()[agent.id];
+            setNodejsError(null);
+            let installed = installState()[agent.id];
 
-        // If the bg check hasn't populated state yet (initial render
-        // race, slow IPC, freshly added definition), block on a sync
-        // probe for npm-backed providers before deciding the path.
-        // Without this, an unchecked npm agent would fall through to
-        // openLaunchModal and the launch would write a per-version
-        // `.bin` path that doesn't exist on disk.
-        if (installed === undefined) {
-            const prov = getProvider(agent.provider);
-            const isNpmInstallable = !!prov?.npmPackage && prov.npmPackage.length > 0;
-            if (isNpmInstallable) {
-                await checkInstalled(agent);
-                installed = installState()[agent.id];
+            // If the bg check hasn't populated state yet (initial render
+            // race, slow IPC, freshly added definition), block on a sync
+            // probe for npm-backed providers before deciding the path.
+            // Without this, an unchecked npm agent would fall through to
+            // openLaunchModal and the launch would write a per-version
+            // `.bin` path that doesn't exist on disk.
+            if (installed === undefined) {
+                const prov = getProvider(agent.provider);
+                const isNpmInstallable = !!prov?.npmPackage && prov.npmPackage.length > 0;
+                if (isNpmInstallable) {
+                    await checkInstalled(agent);
+                    installed = installState()[agent.id];
+                }
             }
-        }
 
-        if (installed === false) {
-            tabModal.open({
-                kind: "install-agent",
-                agent,
-                originBlockId: props.model.blockId,
-                onInstalled: () => {
-                    // install.start runs at provider scope, so every
-                    // ForgeAgent definition that resolves to the same
-                    // canonical provider is now installed — not just
-                    // the one the user clicked. Mark all of them so
-                    // sibling cards drop their ribbon too.
-                    const canonical = getProvider(agent.provider)?.id ?? agent.provider;
-                    setInstallState((s) => {
-                        const next = { ...s };
-                        for (const a of agents()) {
-                            if ((getProvider(a.provider)?.id ?? a.provider) === canonical) {
-                                next[a.id] = true;
+            if (installed === false) {
+                tabModal.open({
+                    kind: "install-agent",
+                    agent,
+                    originBlockId: props.model.blockId,
+                    onInstalled: () => {
+                        // install.start runs at provider scope, so every
+                        // ForgeAgent definition that resolves to the same
+                        // canonical provider is now installed — not just
+                        // the one the user clicked. Mark all of them so
+                        // sibling cards drop their ribbon too.
+                        const canonical = getProvider(agent.provider)?.id ?? agent.provider;
+                        setInstallState((s) => {
+                            const next = { ...s };
+                            for (const a of agents()) {
+                                if ((getProvider(a.provider)?.id ?? a.provider) === canonical) {
+                                    next[a.id] = true;
+                                }
                             }
-                        }
-                        return next;
-                    });
-                    openLaunchModal(agent);
-                },
-            });
-            return;
-        }
-        openLaunchModal(agent);
+                            return next;
+                        });
+                        openLaunchModal(agent);
+                    },
+                });
+                return;
+            }
+            openLaunchModal(agent);
         } finally {
             pendingSelect.delete(agent.id);
         }
