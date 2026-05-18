@@ -1,0 +1,66 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// AgentInstallModal — install-specific bits only. The outer modal
+// chrome (header/body/footer/title/description) lives in
+// `frontend/app/element/modal-v2.scss` and is shared across all
+// tab-modal panels.
+
+.agent-install-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    min-width: 560px;
+    max-width: 720px;
+    min-height: 320px;
+    max-height: 60vh;
+}
+
+.agent-install-modal-icon {
+    margin-right: var(--space-2);
+}
+
+.agent-install-modal-spinner {
+    color: var(--warning-color, #e9b800);
+}
+
+.agent-install-modal-ok {
+    color: var(--success-color, #2bd4a8);
+    font-weight: 700;
+}
+
+.agent-install-modal-fail {
+    color: var(--error-color, #ff6b6b);
+    font-weight: 700;
+}
+
+// xterm.js container — Terminal mounts here and renders its own
+// canvas / DOM. We just provide a sized box matching xterm's theme.
+.agent-install-modal-term {
+    flex: 1 1 auto;
+    min-height: 240px;
+    padding: var(--space-1-5);
+    background: #0d0e0f;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    overflow: hidden;
+
+    .xterm {
+        height: 100%;
+    }
+}
+
+.agent-install-modal-error {
+    padding: var(--space-1) var(--space-1-5);
+    background: color-mix(in srgb, var(--error-color, #ff6b6b) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--error-color, #ff6b6b) 40%, transparent);
+    border-radius: 4px;
+    color: var(--error-color, #ff6b6b);
+    font-size: var(--text-sm);
+}
+
+.agent-install-modal-launching {
+    color: var(--secondary-text-color);
+    font-size: var(--text-sm);
+    font-style: italic;
+}

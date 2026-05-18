@@ -3,23 +3,23 @@
 
 /**
  * AgentInstallModalPanel — modal that runs an agent's install recipe
- * and shows live output. Opens when the user picks an agent whose CLI
- * isn't already in the per-version cache. Sibling to
- * `AgentLaunchModalPanel`.
+ * and shows live output in an xterm.js terminal. Opens when the user
+ * picks an agent whose CLI isn't already in the per-version cache.
+ * Sibling to `AgentLaunchModalPanel`.
  *
  * Phase α (SPEC_AGENT_INSTALL_STAGE_2026_05_17.md §11): single-step
  * recipe (just `npm install <package>`) streamed line-by-line via the
- * `install.start` RPC. The visual surface is a scrollable `<pre>` for
- * v1 — xterm.js upgrade lands in Phase β. Cancel kills the install +
- * removes the partial dir.
+ * `install.start` RPC. Cancel kills the install + removes the partial
+ * dir.
  *
- * Re-click idempotency: the modal owns the install lifecycle. While a
- * session is in flight, opening this modal again (re-click on the
- * picker card) re-focuses the existing modal instead of starting a
- * second install.
+ * UX: modal opens in `idle` state with a "Click to install" CTA at the
+ * bottom-right. Clicking starts the install; the CTA goes away and the
+ * xterm renders npm's output (ANSI colors preserved).
  */
 
 import { Show, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
 
 import { Button } from "@/element/button";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -28,16 +28,16 @@ import { waveEventSubscribe } from "@/app/store/wps";
 
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { getProvider } from "../providers";
+// Use the project's customized xterm.css copy (same one term.tsx
+// imports) rather than the raw package stylesheet. The package CSS
+// loads later in the bundle and would override our project-wide
+// terminal theme tweaks.
+import "../../term/xterm.css";
 
 interface AgentInstallModalPanelProps {
     agent: ForgeAgent;
     onCancel: () => void;
     onInstalled: () => void;
-}
-
-interface InstallChunk {
-    line: string;
-    stream: "stdout" | "stderr";
 }
 
 export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.Element => {
@@ -46,32 +46,28 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     const displayName = () => catalog()?.displayName ?? props.agent.name;
 
     const [phase, setPhase] = createSignal<"idle" | "installing" | "done" | "failed">("idle");
-    const [chunks, setChunks] = createSignal<InstallChunk[]>([]);
     const [error, setError] = createSignal<string | null>(null);
     const [sessionId, setSessionId] = createSignal<string | null>(null);
     const [elapsedMs, setElapsedMs] = createSignal(0);
 
     let unsub: (() => void) | null = null;
-    let preRef: HTMLPreElement | undefined;
+    let termRef: HTMLDivElement | undefined;
+    let terminal: Terminal | null = null;
+    let fitAddon: FitAddon | null = null;
+    let resizeObserver: ResizeObserver | null = null;
     let startedAt = 0;
     let tickHandle: ReturnType<typeof setInterval> | null = null;
     // Flipped in onCleanup so a startInstall awaiting the RPC response
     // can cancel the resolved session id even if it landed after unmount.
     let disposed = false;
 
-    const appendChunk = (chunk: InstallChunk) => {
-        setChunks((prev) => {
-            const next = prev.concat(chunk);
-            // Cap scrollback so very chatty installs don't drag the
-            // renderer. 2000 lines is enough for typical npm output;
-            // last-N is what the user needs anyway.
-            if (next.length > 2000) return next.slice(next.length - 2000);
-            return next;
-        });
-        // Auto-scroll to bottom.
-        queueMicrotask(() => {
-            if (preRef) preRef.scrollTop = preRef.scrollHeight;
-        });
+    const writeTerm = (line: string, stream: "stdout" | "stderr") => {
+        if (!terminal) return;
+        if (stream === "stderr") {
+            terminal.write(`\x1b[31m${line}\x1b[0m\r\n`);
+        } else {
+            terminal.write(`${line}\r\n`);
+        }
     };
 
     const startInstall = async () => {
@@ -81,10 +77,7 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             setPhase("failed");
             return;
         }
-        // Tear down any prior run (Retry path) before reassigning —
-        // otherwise the previous setInterval keeps ticking + the
-        // previous WPS subscription stays active for the rest of the
-        // component's life.
+        // Tear down any prior run (Retry path).
         if (unsub) {
             unsub();
             unsub = null;
@@ -93,8 +86,10 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             clearInterval(tickHandle);
             tickHandle = null;
         }
+        if (terminal) {
+            terminal.clear();
+        }
         setPhase("installing");
-        setChunks([]);
         setError(null);
         startedAt = Date.now();
         tickHandle = setInterval(() => setElapsedMs(Date.now() - startedAt), 250);
@@ -105,9 +100,8 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                 npmPackage: prov.npmPackage,
                 pinnedVersion: prov.pinnedVersion,
             });
-            // If the modal unmounted while the RPC was in flight, the
-            // backend now owns a live session our cleanup couldn't
-            // cancel (sessionId was null). Cancel it explicitly here.
+            // If the modal unmounted while the RPC was in flight, cancel
+            // the resolved session id rather than subscribing.
             if (disposed) {
                 void RpcApi.InstallCancelCommand(TabRpcClient, { sessionId: r.sessionId }).catch(() => {
                     /* best-effort */
@@ -122,16 +116,10 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                     const data = event?.data;
                     if (!data || typeof data !== "object") return;
                     if (typeof data.line === "string") {
-                        appendChunk({
-                            line: data.line,
-                            stream: data.stream === "stderr" ? "stderr" : "stdout",
-                        });
+                        writeTerm(data.line, data.stream === "stderr" ? "stderr" : "stdout");
                     } else if (data.op === "done") {
                         if (data.ok) {
                             setPhase("done");
-                            // Auto-close + chain to launch modal one
-                            // frame later so the user sees the "done"
-                            // state briefly.
                             queueMicrotask(() => props.onInstalled());
                         } else {
                             setError(data.error ?? "install failed");
@@ -159,7 +147,38 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     };
 
     onMount(() => {
-        void startInstall();
+        // Lazy-create the terminal so it doesn't render before the
+        // container has a layout size (FitAddon needs a real rect).
+        if (!termRef) return;
+        terminal = new Terminal({
+            cursorBlink: false,
+            scrollback: 5000,
+            fontSize: 12,
+            fontFamily: "var(--fixed-font, monospace)",
+            theme: {
+                background: "#0d0e0f",
+                foreground: "#cccccc",
+            },
+            convertEol: false,
+            scrollOnUserInput: false,
+        });
+        fitAddon = new FitAddon();
+        terminal.loadAddon(fitAddon);
+        terminal.open(termRef);
+        const tryFit = () => {
+            try {
+                fitAddon?.fit();
+            } catch {
+                /* container still 0×0 — wait for next resize */
+            }
+        };
+        tryFit();
+        // Refit on container resize. The modal may animate in from
+        // 0×0; without an observer the terminal stays at the default
+        // 80×24 indefinitely.
+        resizeObserver = new ResizeObserver(() => tryFit());
+        resizeObserver.observe(termRef);
+        terminal.writeln("\x1b[90m# Click \"Install now\" to begin.\x1b[0m");
     });
 
     onCleanup(() => {
@@ -172,11 +191,14 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             clearInterval(tickHandle);
             tickHandle = null;
         }
-        // Catch implicit closes (Esc, backdrop click, tab switch)
-        // while installing. The Cancel button itself goes through
-        // `cancel()`. If the modal unmounts *before* InstallStartCommand
-        // resolves, the `disposed` flag above lets the in-flight start
-        // path issue the cancel once the session id arrives.
+        if (resizeObserver) {
+            resizeObserver.disconnect();
+            resizeObserver = null;
+        }
+        if (terminal) {
+            terminal.dispose();
+            terminal = null;
+        }
         const sid = sessionId();
         if (sid && phase() === "installing") {
             void RpcApi.InstallCancelCommand(TabRpcClient, { sessionId: sid }).catch(() => {
@@ -187,64 +209,60 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
 
     const elapsedLabel = () => {
         const s = Math.floor(elapsedMs() / 1000);
-        const mm = Math.floor(s / 60).toString().padStart(1, "0");
+        const mm = Math.floor(s / 60).toString();
         const ss = (s % 60).toString().padStart(2, "0");
         return `${mm}:${ss}`;
     };
 
     return (
-        <div class="agent-install-modal-panel">
-            <div class="agent-install-modal-header">
-                <span class="agent-install-modal-icon" aria-hidden="true">
-                    {catalog()?.icon ?? "📦"}
-                </span>
-                <span class="agent-install-modal-title">Install {displayName()}</span>
-                <span class="agent-install-modal-status">
+        <>
+            <header class="modal-panel-header">
+                <h2 class="modal-panel-title">
+                    <span class="agent-install-modal-icon" aria-hidden="true">
+                        {catalog()?.icon ?? "📦"}
+                    </span>
+                    Install {displayName()}
+                </h2>
+                <p class="modal-panel-description">
+                    <Show when={phase() === "idle"}>not installed — click below to install</Show>
                     <Show when={phase() === "installing"}>
-                        <span class="agent-install-modal-spinner">⏳</span>
-                        Installing… {elapsedLabel()}
+                        <span class="agent-install-modal-spinner">⏳</span> Installing… {elapsedLabel()}
                     </Show>
                     <Show when={phase() === "done"}>
-                        <span class="agent-install-modal-ok">✓</span>
-                        Installed
+                        <span class="agent-install-modal-ok">✓</span> Installed
                     </Show>
                     <Show when={phase() === "failed"}>
-                        <span class="agent-install-modal-fail">✗</span>
-                        Failed
+                        <span class="agent-install-modal-fail">✗</span> Failed
                     </Show>
-                </span>
+                </p>
+            </header>
+            <div class="modal-panel-body agent-install-modal-body">
+                <div class="agent-install-modal-term" ref={termRef} />
+                <Show when={error()}>
+                    <div class="agent-install-modal-error">⚠ {error()}</div>
+                </Show>
             </div>
-            <pre class="agent-install-modal-log" ref={preRef}>
-                {chunks().map((c) => (
-                    <span
-                        classList={{
-                            "agent-install-modal-line": true,
-                            "agent-install-modal-line--stderr": c.stream === "stderr",
-                        }}
-                    >
-                        {c.line}
-                        {"\n"}
-                    </span>
-                ))}
-            </pre>
-            <Show when={error()}>
-                <div class="agent-install-modal-error">⚠ {error()}</div>
-            </Show>
-            <div class="agent-install-modal-actions">
+            <footer class="modal-panel-footer">
+                <Show when={phase() === "idle"}>
+                    <Button onClick={() => props.onCancel()}>Cancel</Button>
+                    <Button onClick={() => void startInstall()} className="green solid">
+                        Install now
+                    </Button>
+                </Show>
                 <Show when={phase() === "installing"}>
                     <Button onClick={() => void cancel()}>Cancel</Button>
                 </Show>
                 <Show when={phase() === "failed"}>
+                    <Button onClick={() => props.onCancel()}>Close</Button>
                     <Button onClick={() => void startInstall()} className="green solid">
                         Retry
                     </Button>
-                    <Button onClick={() => props.onCancel()}>Close</Button>
                 </Show>
                 <Show when={phase() === "done"}>
                     <span class="agent-install-modal-launching">Opening launch modal…</span>
                 </Show>
-            </div>
-        </div>
+            </footer>
+        </>
     );
 };
 
