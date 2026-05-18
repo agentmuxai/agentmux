@@ -297,7 +297,8 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
         // memo itself: it only re-fires when the dependent atom
         // changes, so this won't spam.
         if (blockData()?.meta?.view === "browser") {
-            console.log(`[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)}] header-render favUrl=${JSON.stringify(favUrl ?? "")}`);
+            const vmId = (props.viewModel as any)?.__diagVmId ?? "?";
+            console.log(`[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)} vm=${vmId}] header-render favUrl=${JSON.stringify(favUrl ?? "")}`);
         }
         if (favUrl) {
             return (
