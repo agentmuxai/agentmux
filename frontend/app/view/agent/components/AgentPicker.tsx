@@ -130,18 +130,31 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // (getCliPath), so a rapid double-click could open two modals (and
     // start two parallel installs) without it. The pendingSelect set
     // tracks in-flight resolutions per agent id and rejects re-entry.
-    const handleSelect = (agent: ForgeAgent) => {
+    const handleSelect = async (agent: ForgeAgent) => {
         setNodejsError(null);
-        // Use the cached install state. `undefined` = non-npm provider
-        // or not-yet-checked; either way fall through to launch flow.
-        const installed = installState()[agent.id];
+        let installed = installState()[agent.id];
+
+        // If the bg check hasn't populated state yet (initial render
+        // race, slow IPC, freshly added definition), block on a sync
+        // probe for npm-backed providers before deciding the path.
+        // Without this, an unchecked npm agent would fall through to
+        // openLaunchModal and the launch would write a per-version
+        // `.bin` path that doesn't exist on disk.
+        if (installed === undefined) {
+            const prov = getProvider(agent.provider);
+            const isNpmInstallable = !!prov?.npmPackage && prov.npmPackage.length > 0;
+            if (isNpmInstallable) {
+                await checkInstalled(agent);
+                installed = installState()[agent.id];
+            }
+        }
+
         if (installed === false) {
             tabModal.open({
                 kind: "install-agent",
                 agent,
                 originBlockId: props.model.blockId,
                 onInstalled: () => {
-                    // Mark installed + refresh state for the ribbon.
                     setInstallState((s) => ({ ...s, [agent.id]: true }));
                     openLaunchModal(agent);
                 },
