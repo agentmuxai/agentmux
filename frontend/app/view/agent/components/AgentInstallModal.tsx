@@ -23,11 +23,13 @@ import { FitAddon } from "@xterm/addon-fit";
 
 import { Button } from "@/element/button";
 import { ErrorBanner } from "@/app/errors/ErrorBanner";
-import { atoms } from "@/app/store/global";
+import { atoms, getSettingsKeyAtom } from "@/app/store/global";
+import { ContextMenuModel } from "@/app/store/contextmenu";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { computeTermThemeFromSettings } from "@/app/view/term/termutil";
+import { writeText as clipboardWriteText } from "@/util/clipboard";
 
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { getProvider } from "../providers";
@@ -75,6 +77,9 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     let resizeObserver: ResizeObserver | null = null;
     let startedAt = 0;
     let tickHandle: ReturnType<typeof setInterval> | null = null;
+    // Hoisted so onCleanup can cancel the pending copy-on-select
+    // timer when the modal unmounts (reagent P2 on PR #899 v2).
+    let selectionDebounce: ReturnType<typeof setTimeout> | null = null;
     // Flipped in onCleanup so a startInstall awaiting the RPC response
     // can cancel the resolved session id even if it landed after unmount.
     let disposed = false;
@@ -205,6 +210,41 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             const [t] = computeTermThemeFromSettings(atoms.fullConfigAtom());
             if (terminal) terminal.options.theme = t;
         });
+        // Clipboard wiring — phase α of SPEC_UNIFIED_CLIPBOARD_2026_05_18.md.
+        // Mirrors the regular term pane's three paths (copy-on-select,
+        // Ctrl+Shift+C, context menu Copy) so users can pull npm output
+        // out of the install log.
+        const copyOnSelect = getSettingsKeyAtom("term:copyonselect");
+        // Debounce matches termwrap.ts:205 — fires once per drag burst
+        // instead of once per tick. `selectionDebounce` is hoisted to
+        // component scope so onCleanup can cancel it.
+        terminal.onSelectionChange(() => {
+            if (!copyOnSelect()) return;
+            if (selectionDebounce != null) clearTimeout(selectionDebounce);
+            selectionDebounce = setTimeout(() => {
+                const sel = terminal?.getSelection() ?? "";
+                if (sel.length > 0) {
+                    clipboardWriteText(sel).catch((e) =>
+                        console.log("clipboard write failed", e),
+                    );
+                }
+            }, 50);
+        });
+        terminal.attachCustomKeyEventHandler((ev) => {
+            // Ctrl+Shift+C → manual copy. Return false stops xterm from
+            // also routing the keystroke as input.
+            if (ev.type === "keydown" && ev.ctrlKey && ev.shiftKey && ev.key === "C") {
+                const sel = terminal?.getSelection() ?? "";
+                if (sel.length > 0) {
+                    clipboardWriteText(sel).catch((e) =>
+                        console.log("clipboard write failed", e),
+                    );
+                }
+                return false;
+            }
+            return true;
+        });
+
         fitAddon = new FitAddon();
         terminal.loadAddon(fitAddon);
         terminal.open(termRef);
@@ -233,6 +273,10 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         if (tickHandle != null) {
             clearInterval(tickHandle);
             tickHandle = null;
+        }
+        if (selectionDebounce != null) {
+            clearTimeout(selectionDebounce);
+            selectionDebounce = null;
         }
         if (resizeObserver) {
             resizeObserver.disconnect();
@@ -287,7 +331,65 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                 </p>
             </header>
             <div class="modal-panel-body agent-install-modal-body">
-                <div class="agent-install-modal-term" ref={termRef} />
+                <div
+                    class="agent-install-modal-term"
+                    ref={termRef}
+                    onContextMenu={(e) => {
+                        // Right-click → Copy (selection) / Copy All. Mirrors
+                        // the regular term pane's menu. Phase α of
+                        // SPEC_UNIFIED_CLIPBOARD_2026_05_18.md.
+                        // preventDefault stops Chromium's native right-click
+                        // menu from firing alongside our custom one
+                        // (reagent P1 + codex P2 on PR #899).
+                        e.preventDefault();
+                        const sel = terminal?.getSelection() ?? "";
+                        // Lazy-walk the scrollback inside the click
+                        // handler so we don't pay for it on every
+                        // right-click + dismiss (reagent P2). For
+                        // long install logs this is non-trivial work.
+                        const collectAll = (): string => {
+                            // Reassemble logical lines from xterm's visual
+                            // rows. `isWrapped` on row N+1 means row N's
+                            // logical line continues onto N+1, so emit a
+                            // newline only when the next row starts a fresh
+                            // logical line. Codex P2 on PR #899 v3 — naive
+                            // join inserted artificial breaks into long
+                            // URLs / stack traces / npm command echoes.
+                            const buf = terminal?.buffer?.active;
+                            if (!buf) return "";
+                            let out = "";
+                            for (let i = 0; i < buf.length; i++) {
+                                const line = buf.getLine(i);
+                                if (!line) continue;
+                                out += line.translateToString(true);
+                                const next = buf.getLine(i + 1);
+                                if (!next?.isWrapped) out += "\n";
+                            }
+                            return out;
+                        };
+                        ContextMenuModel.showContextMenu(
+                            [
+                                {
+                                    label: "Copy",
+                                    enabled: sel.length > 0,
+                                    click: () => void clipboardWriteText(sel).catch((err) =>
+                                        console.log("clipboard write failed", err)),
+                                },
+                                {
+                                    label: "Copy All",
+                                    enabled: !!terminal?.buffer?.active?.length,
+                                    click: () => {
+                                        const all = collectAll();
+                                        if (all.length === 0) return;
+                                        void clipboardWriteText(all).catch((err) =>
+                                            console.log("clipboard write failed", err));
+                                    },
+                                },
+                            ],
+                            e,
+                        );
+                    }}
+                />
                 <Show when={error()}>
                     <ErrorBanner error={error()} />
                 </Show>

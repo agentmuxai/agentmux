@@ -23,6 +23,7 @@ import { translateError } from "@/app/errors/translate";
 import { getApi } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { writeText as clipboardWriteText } from "@/util/clipboard";
 import {
     createEffect,
     createSignal,
@@ -363,7 +364,13 @@ const WaitingPanel = (p: {
                     <Button
                         className="grey solid"
                         onClick={() => {
-                            void navigator.clipboard.writeText(p.state.authUrl);
+                            // Route through the CEF clipboard wrapper —
+                            // navigator.clipboard.* is fragile under CEF's
+                            // permission policy. See
+                            // SPEC_UNIFIED_CLIPBOARD_2026_05_18.md §3.3.
+                            void clipboardWriteText(p.state.authUrl).catch((err) =>
+                                console.log("clipboard write failed", err),
+                            );
                         }}
                     >
                         Copy
