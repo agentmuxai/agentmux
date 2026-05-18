@@ -348,13 +348,24 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                         // right-click + dismiss (reagent P2). For
                         // long install logs this is non-trivial work.
                         const collectAll = (): string => {
+                            // Reassemble logical lines from xterm's visual
+                            // rows. `isWrapped` on row N+1 means row N's
+                            // logical line continues onto N+1, so emit a
+                            // newline only when the next row starts a fresh
+                            // logical line. Codex P2 on PR #899 v3 — naive
+                            // join inserted artificial breaks into long
+                            // URLs / stack traces / npm command echoes.
                             const buf = terminal?.buffer?.active;
                             if (!buf) return "";
-                            const lines: string[] = [];
+                            let out = "";
                             for (let i = 0; i < buf.length; i++) {
-                                lines.push(buf.getLine(i)?.translateToString(true) ?? "");
+                                const line = buf.getLine(i);
+                                if (!line) continue;
+                                out += line.translateToString(true);
+                                const next = buf.getLine(i + 1);
+                                if (!next?.isWrapped) out += "\n";
                             }
-                            return lines.join("\n");
+                            return out;
                         };
                         ContextMenuModel.showContextMenu(
                             [
