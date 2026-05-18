@@ -71,6 +71,13 @@ export interface BrowserPaneState {
      *  `TitleChanged` is folded to `TITLE_FALLBACK` so the view
      *  never has to know about the empty case. */
     title: string;
+    /** True once a `TitleChanged` command has applied a non-fallback
+     *  title — used by `UrlConfirmed` to avoid overwriting the real
+     *  title with a hostname placeholder during the race where CEF's
+     *  title-change beats its nav-state event. Cleared by `Navigate`
+     *  so each new page starts fresh. Parallel to `faviconOverridden`.
+     *  See SPEC_BROWSER_PANE_OPTIMISTIC_HEADER_2026_05_18.md §3. */
+    titleOverridden: boolean;
     /** Committed/loading URL. Distinct from the address-bar `<input>`
      *  typing buffer (which stays in `browser-view.tsx` per the
      *  catalog — DOM is the source of truth for live-typing UX).
@@ -113,6 +120,51 @@ export function deriveFaviconUrl(url: string): string {
     }
 }
 
+/**
+ * Hostname-based placeholder for the page title while CEF is loading.
+ * Returns the URL's hostname with a leading `www.` stripped (so
+ * `https://www.x.com/foo` → `"x.com"`). Empty for unparseable URLs or
+ * `null`-origin schemes (about:blank, file://) so the existing
+ * `TITLE_FALLBACK` ("Browser") rule takes over.
+ *
+ * Used by the reducer's `Navigate` + `UrlConfirmed` cases to give the
+ * header an instant title at navigation time, replaced by the real
+ * `<title>` once CEF emits `TitleChanged`. See
+ * SPEC_BROWSER_PANE_OPTIMISTIC_HEADER_2026_05_18.md.
+ */
+export function deriveTitlePlaceholder(url: string): string {
+    if (url === "") return "";
+    try {
+        const u = new URL(url);
+        if (u.origin === "null" || u.origin === "") return "";
+        return u.hostname.replace(/^www\./, "");
+    } catch {
+        return "";
+    }
+}
+
+/**
+ * True iff `a` and `b` resolve to the same `URL.origin`. Empty strings,
+ * unparseable URLs, and `null`-origin schemes (about:blank, file://)
+ * compare as same-origin only with themselves. Used by the reducer to
+ * decide whether a URL change is an in-page redirect (preserve the
+ * real favicon) vs. a cross-origin navigation (reset the override and
+ * fall back to the derived favicon for the new origin).
+ */
+export function sameOriginUrl(a: string, b: string): boolean {
+    if (a === b) return true;
+    let originA: string | null = null;
+    let originB: string | null = null;
+    try { originA = new URL(a).origin; } catch { originA = null; }
+    try { originB = new URL(b).origin; } catch { originB = null; }
+    // Unparseable or null-origin schemes (about:blank, file:, data:)
+    // are only same-origin with their own literal URL, never with
+    // each other or with regular http(s) origins — codex P3 on #905.
+    if (originA == null || originB == null) return false;
+    if (originA === "null" || originB === "null") return false;
+    return originA === originB;
+}
+
 /** The string the reducer projects when `TitleChanged` arrives with
  *  empty or whitespace-only content. The view binds to `state.title`
  *  directly, so the fallback is enforced at write time, not at read
@@ -127,6 +179,7 @@ export const initialState = (): BrowserPaneState => ({
     canGoBack: false,
     canGoForward: false,
     title: TITLE_FALLBACK,
+    titleOverridden: false,
     url: "",
     faviconUrl: "",
     faviconOverridden: false,
