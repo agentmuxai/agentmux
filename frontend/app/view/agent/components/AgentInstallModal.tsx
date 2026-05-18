@@ -54,6 +54,7 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     let termRef: HTMLDivElement | undefined;
     let terminal: Terminal | null = null;
     let fitAddon: FitAddon | null = null;
+    let resizeObserver: ResizeObserver | null = null;
     let startedAt = 0;
     let tickHandle: ReturnType<typeof setInterval> | null = null;
     // Flipped in onCleanup so a startInstall awaiting the RPC response
@@ -164,11 +165,19 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         fitAddon = new FitAddon();
         terminal.loadAddon(fitAddon);
         terminal.open(termRef);
-        try {
-            fitAddon.fit();
-        } catch {
-            /* container may still be 0×0 — fit again on first resize */
-        }
+        const tryFit = () => {
+            try {
+                fitAddon?.fit();
+            } catch {
+                /* container still 0×0 — wait for next resize */
+            }
+        };
+        tryFit();
+        // Refit on container resize. The modal may animate in from
+        // 0×0; without an observer the terminal stays at the default
+        // 80×24 indefinitely.
+        resizeObserver = new ResizeObserver(() => tryFit());
+        resizeObserver.observe(termRef);
         terminal.writeln("\x1b[90m# Click \"Install now\" to begin.\x1b[0m");
     });
 
@@ -181,6 +190,10 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         if (tickHandle != null) {
             clearInterval(tickHandle);
             tickHandle = null;
+        }
+        if (resizeObserver) {
+            resizeObserver.disconnect();
+            resizeObserver = null;
         }
         if (terminal) {
             terminal.dispose();
