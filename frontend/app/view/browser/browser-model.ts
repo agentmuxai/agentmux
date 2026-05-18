@@ -197,12 +197,19 @@ export class BrowserViewModel implements ViewModel {
     /** Tag every diag log with the block prefix so multi-pane sessions
      *  are greppable per pane. See docs/specs/browser-pane-reducer-roadmap.md
      *  Phase 1. */
-    private get _diagTag(): string { return `[browser-pane:diag][${this.blockId.slice(0, 7)}]`; }
+    // Per-instance ID so we can tell when a stale viewModel reference
+    // is hanging around. Used in diag logs alongside blockId. If the
+    // setFavicon-side and the memo-read-side print different `vm`
+    // values for the same blockId, the bug is "two viewModels for the
+    // same blockId, blockframe holds the wrong one."
+    public readonly __diagVmId: string = Math.random().toString(36).slice(2, 8);
+    private get _diagTag(): string { return `[browser-pane:diag][${this.blockId.slice(0, 7)} vm=${this.__diagVmId}]`; }
     private diag(msg: string): void { console.log(`${this._diagTag} ${msg}`); }
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
+        this.diag(`viewmodel-constructed`);
 
         this.blockAtom = getWaveObjectAtom<Block>(makeORef("block", blockId));
 
@@ -255,7 +262,11 @@ export class BrowserViewModel implements ViewModel {
         installEventSinkOnce();
 
         this.viewName = createMemo(() => this.titleAtom());
-        this.viewFaviconUrl = createMemo(() => this.faviconUrlAtom());
+        this.viewFaviconUrl = createMemo(() => {
+            const v = this.faviconUrlAtom();
+            this.diag(`vm-favicon-memo-eval value=${JSON.stringify(v)}`);
+            return v;
+        });
 
         // Subscribe to live title changes fired by CEF's on_title_change.
         // Diag note: log EVERY arrival (pre block-id filter) so a
