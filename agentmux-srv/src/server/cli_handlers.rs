@@ -85,10 +85,12 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             source: "system_path".to_string(),
                         }).unwrap()));
                     }
-                    return Err(format!(
-                        "{} not found and no npm package configured for this provider",
-                        cmd.cli_command
-                    ));
+                    return Err(agentmux_common::AgentMuxError::CliNotInstalled {
+                        provider: cmd.provider_id.clone(),
+                        cli: cmd.cli_command.clone(),
+                    }
+                    .to_wire()
+                    .to_string());
                 }
 
                 tracing::info!(
@@ -218,10 +220,15 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     tracing::info!(exit_code = exit_status.code().unwrap_or(-1), "npm install completed");
 
                     if !exit_status.success() {
-                        return Err(format!(
-                            "npm install failed (exit {}). Check the output above for details.",
-                            exit_status.code().unwrap_or(-1)
-                        ));
+                        return Err(agentmux_common::AgentMuxError::NpmInstallFailed {
+                            package: format!("{}@{}", cmd.npm_package, cmd.pinned_version),
+                            message: format!(
+                                "exit {}; check the output above",
+                                exit_status.code().unwrap_or(-1)
+                            ),
+                        }
+                        .to_wire()
+                        .to_string());
                     }
 
                     // Verify npm binary exists
@@ -235,10 +242,12 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         }).unwrap()));
                     }
 
-                    Err(format!(
-                        "npm install completed but binary not found at {}",
-                        npm_bin
-                    ))
+                    Err(agentmux_common::AgentMuxError::CliShimMissing {
+                        provider: cmd.provider_id.clone(),
+                        expected_path: npm_bin.clone(),
+                    }
+                    .to_wire()
+                    .to_string())
                 }
             })
         }),
