@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { update } from "./reducer";
-import { deriveFaviconUrl, initialState, TITLE_FALLBACK } from "./types";
+import { deriveFaviconUrl, initialState, TITLE_FALLBACK, type BrowserPaneState } from "./types";
 
 // Pure-function tests for the URL→favicon helper. Kept separate from
 // the reducer suite because the helper is reused by future consumers
@@ -638,6 +638,134 @@ describe("browser-pane-state reducer (slice #9, Phases 3a + 3b + 3c + 3d + 3e co
                     expect(r.state.loading && r.state.error !== null).toBe(false);
                 }
             }
+        });
+    });
+
+    // SPEC_BROWSER_PANE_OPTIMISTIC_HEADER_2026_05_18.md +
+    // SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15.md cross-origin
+    // reset logic introduced on PR #905.
+    describe("UrlConfirmed cross-origin handling", () => {
+        const setupRealFavicon = (origin: string): BrowserPaneState => {
+            // After Navigate + FaviconUrlsReceived for a given origin,
+            // state should hold the real CEF favicon with override=true.
+            const s1 = update(initialState(), {
+                type: "Navigate",
+                url: `${origin}/`,
+            }).state;
+            return update(s1, {
+                type: "FaviconUrlsReceived",
+                urls: [`${origin}/real.ico`],
+            }).state;
+        };
+
+        it("cross-origin URL change resets favicon override + derives fresh favicon", () => {
+            const s0 = setupRealFavicon("https://wikipedia.org");
+            expect(s0.faviconUrl).toBe("https://wikipedia.org/real.ico");
+            expect(s0.faviconOverridden).toBe(true);
+
+            const r = update(s0, {
+                type: "UrlConfirmed",
+                url: "https://google.com/",
+            });
+            expect(r.state.faviconUrl).toBe("https://google.com/favicon.ico");
+            expect(r.state.faviconOverridden).toBe(false);
+        });
+
+        it("same-origin URL change preserves favicon override (PR #876 P2)", () => {
+            const s0 = setupRealFavicon("https://wikipedia.org");
+            const r = update(s0, {
+                type: "UrlConfirmed",
+                url: "https://wikipedia.org/wiki/Foo",
+            });
+            expect(r.state.faviconUrl).toBe("https://wikipedia.org/real.ico");
+            expect(r.state.faviconOverridden).toBe(true);
+        });
+
+        it("preserves real favicon when FaviconUrlsReceived beat UrlConfirmed (race)", () => {
+            // Race: FaviconUrlsReceived for the new page arrived
+            // before UrlConfirmed updated state.url. So state.url is
+            // still old (wikipedia) but state.faviconUrl is from the
+            // new origin (google). Cross-origin UrlConfirmed should
+            // detect that and keep the real favicon.
+            const s0: BrowserPaneState = {
+                ...initialState(),
+                url: "https://wikipedia.org/",
+                faviconUrl: "https://google.com/real.ico",
+                faviconOverridden: true,
+            };
+            const r = update(s0, {
+                type: "UrlConfirmed",
+                url: "https://google.com/",
+            });
+            expect(r.state.faviconUrl).toBe("https://google.com/real.ico");
+            expect(r.state.faviconOverridden).toBe(true);
+        });
+
+        it("cross-origin resets title to hostname placeholder", () => {
+            const s0 = update(initialState(), {
+                type: "TitleChanged",
+                title: "Wikipedia, the free encyclopedia",
+            });
+            const s1: BrowserPaneState = {
+                ...s0.state,
+                url: "https://wikipedia.org/",
+            };
+            const r = update(s1, {
+                type: "UrlConfirmed",
+                url: "https://google.com/",
+            });
+            expect(r.state.title).toBe("google.com");
+            expect(r.state.titleOverridden).toBe(false);
+        });
+
+        it("same-origin preserves real title (no flash)", () => {
+            const s0 = update(initialState(), {
+                type: "TitleChanged",
+                title: "Wikipedia, the free encyclopedia",
+            });
+            const s1: BrowserPaneState = {
+                ...s0.state,
+                url: "https://wikipedia.org/wiki/Cat",
+            };
+            const r = update(s1, {
+                type: "UrlConfirmed",
+                url: "https://wikipedia.org/wiki/Dog",
+            });
+            expect(r.state.title).toBe("Wikipedia, the free encyclopedia");
+            expect(r.state.titleOverridden).toBe(true);
+        });
+    });
+
+    describe("TitleChanged sets titleOverridden flag", () => {
+        it("non-empty title sets titleOverridden=true", () => {
+            const r = update(initialState(), {
+                type: "TitleChanged",
+                title: "Hello",
+            });
+            expect(r.state.titleOverridden).toBe(true);
+        });
+
+        it("empty/whitespace folds to TITLE_FALLBACK with titleOverridden=false", () => {
+            const s1 = update(initialState(), {
+                type: "TitleChanged",
+                title: "Hello",
+            }).state;
+            const r = update(s1, { type: "TitleChanged", title: "  " });
+            expect(r.state.title).toBe(TITLE_FALLBACK);
+            expect(r.state.titleOverridden).toBe(false);
+        });
+
+        it("Navigate clears titleOverridden", () => {
+            const s1 = update(initialState(), {
+                type: "TitleChanged",
+                title: "Hello",
+            }).state;
+            const r = update(s1, {
+                type: "Navigate",
+                url: "https://example.com/",
+            });
+            expect(r.state.titleOverridden).toBe(false);
+            expect(r.state.title).toBe("example.com");
         });
     });
 });

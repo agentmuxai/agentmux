@@ -53,6 +53,8 @@ import {
     ReducerResult,
     TITLE_FALLBACK,
     deriveFaviconUrl,
+    deriveTitlePlaceholder,
+    sameOriginUrl,
 } from "./types";
 
 export function update(
@@ -73,6 +75,13 @@ export function update(
 
     switch (command.type) {
         case "Navigate": {
+            // Optimistic header (SPEC_BROWSER_PANE_OPTIMISTIC_HEADER_2026_05_18):
+            // also seed the title with a hostname-based placeholder so
+            // the header doesn't show the previous page's title for
+            // the 500ms–3s before CEF emits `TitleChanged`. The real
+            // title overrides this when it arrives.
+            const placeholder = deriveTitlePlaceholder(command.url);
+            const title = placeholder !== "" ? placeholder : TITLE_FALLBACK;
             return {
                 state: {
                     ...state,
@@ -81,6 +90,8 @@ export function update(
                     url: command.url,
                     faviconUrl: deriveFaviconUrl(command.url),
                     faviconOverridden: false,
+                    title,
+                    titleOverridden: false,
                 },
                 events: [{ type: "navigate", url: command.url }],
             };
@@ -143,18 +154,73 @@ export function update(
 
         case "UrlConfirmed": {
             if (state.url === command.url) return { state, events: [] };
-            // Reagent P2 on #876: preserve a CEF-reported favicon across
-            // redirects + hash-changes. Only re-derive the heuristic favicon
-            // if no real favicon has overridden it. Otherwise the user sees
-            // the real favicon flash to the heuristic on every nav event.
-            const faviconUrl = state.faviconOverridden
+            // Origin-aware favicon preservation:
+            //
+            // - Same-origin URL change (in-page redirect, hash change,
+            //   querystring update) keeps the CEF-reported favicon to
+            //   avoid the real favicon flashing back to the heuristic
+            //   on every nav event (reagent P2 on #876).
+            // - Cross-origin navigation resets the override so a stale
+            //   favicon from the previous site doesn't carry over —
+            //   bug found 2026-05-18, the old code preserved
+            //   faviconOverridden across all URL changes, so
+            //   navigating from agentmux.ai → bing.com → x.com would
+            //   keep bing's favicon when CEF was silent about x.com.
+            //   The new derived favicon may still flash briefly, but a
+            //   subsequent FaviconUrlsReceived from CEF will replace
+            //   it. That's a better default than retaining a foreign
+            //   favicon indefinitely.
+            const originChanged = sameOriginUrl(state.url, command.url) === false;
+            // Race guard (reagent + codex P2 on #905 v1): if
+            // `FaviconUrlsReceived` for the destination page beat
+            // `UrlConfirmed` here, `state.faviconUrl` is already from
+            // the new origin even though `state.url` still points at
+            // the previous page. Resetting based purely on
+            // `originChanged` would overwrite that real favicon with
+            // the derived one. So: also keep the override when the
+            // current favicon's origin already matches the incoming
+            // URL's origin.
+            const faviconAlreadyForNewOrigin = state.faviconOverridden
+                && sameOriginUrl(state.faviconUrl, command.url);
+            const keepOverride = state.faviconOverridden
+                && (!originChanged || faviconAlreadyForNewOrigin);
+            const faviconUrl = keepOverride
                 ? state.faviconUrl
                 : deriveFaviconUrl(command.url);
+            const faviconOverridden = keepOverride ? state.faviconOverridden : false;
+            // Title placeholder for cross-origin transitions. Simpler
+            // than favicon because title carries no origin information
+            // to disambiguate "real-title-from-new-page beat
+            // UrlConfirmed" vs "stale-real-title-from-old-page".
+            //
+            //   - Same-origin: keep state.title (real title for this
+            //     page; no flash to placeholder).
+            //   - Cross-origin: reset to hostname placeholder so the
+            //     header shows instant feedback for in-page link
+            //     clicks to new domains (the primary win).
+            //
+            // Trade-off (reagent + codex P2 on #905 v2): if CEF's
+            // TitleChanged for the new page beat UrlConfirmed in a
+            // race, state.title already holds the real title with
+            // titleOverridden=true — we overwrite it with the
+            // placeholder here and never recover (CEF doesn't
+            // re-emit TitleChanged for the same page). Accepted
+            // because the common path (in-page link → new domain
+            // with no race) dominates, and the rare race produces a
+            // less-bad outcome than the original bug (real-title-of-
+            // PREVIOUS-page sticking forever).
+            const title = originChanged
+                ? (deriveTitlePlaceholder(command.url) || TITLE_FALLBACK)
+                : state.title;
+            const titleOverridden = originChanged ? false : state.titleOverridden;
             return {
                 state: {
                     ...state,
                     url: command.url,
                     faviconUrl,
+                    faviconOverridden,
+                    title,
+                    titleOverridden,
                 },
                 events: [{ type: "url-confirmed", url: command.url }],
             };
@@ -178,10 +244,18 @@ export function update(
         }
 
         case "TitleChanged": {
-            const next = command.title.trim() === "" ? TITLE_FALLBACK : command.title;
-            if (next === state.title) return { state, events: [] };
+            // CEF emitted a real <title>. Empty / whitespace folds to
+            // TITLE_FALLBACK and is treated as NOT-overridden (no real
+            // title yet) so a subsequent UrlConfirmed cross-origin
+            // can still replace it with a hostname placeholder.
+            const trimmed = command.title.trim();
+            const next = trimmed === "" ? TITLE_FALLBACK : command.title;
+            const overridden = trimmed !== "";
+            if (next === state.title && overridden === state.titleOverridden) {
+                return { state, events: [] };
+            }
             return {
-                state: { ...state, title: next },
+                state: { ...state, title: next, titleOverridden: overridden },
                 events: [{ type: "title-changed", title: next }],
             };
         }
