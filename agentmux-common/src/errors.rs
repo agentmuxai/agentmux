@@ -182,11 +182,19 @@ impl AgentMuxError {
     fn classify_io(err: &std::io::Error) -> AmxCode {
         // `ErrorKind::StorageFull` was stabilized in 1.83 but we
         // can't rely on it across all toolchains the CI uses. Match
-        // raw OS codes instead: ENOSPC=28 on Unix; on Windows the
-        // disk-full condition surfaces as ERROR_HANDLE_DISK_FULL=39
-        // (`WriteFile` / file-handle-bound APIs) OR ERROR_DISK_FULL=112
-        // (volume-level APIs), depending on which Win32 call failed.
-        if matches!(err.raw_os_error(), Some(28) | Some(39) | Some(112)) {
+        // raw OS codes instead. ENOSPC=28 is portable across Unix +
+        // also unused on Windows. The Windows-specific codes 39 and
+        // 112 collide with Unix errnos (ENOTEMPTY / EHOSTDOWN) so
+        // they must be gated to `cfg(windows)` — otherwise a
+        // disconnected CIFS mount on Linux would mis-classify as
+        // "Device out of space."
+        if err.raw_os_error() == Some(28) {
+            return AmxCode::OutOfSpace;
+        }
+        #[cfg(windows)]
+        if matches!(err.raw_os_error(), Some(39) | Some(112)) {
+            // 39  = ERROR_HANDLE_DISK_FULL (file-handle-bound APIs)
+            // 112 = ERROR_DISK_FULL        (volume-level APIs)
             return AmxCode::OutOfSpace;
         }
         match err.kind() {
@@ -274,25 +282,32 @@ impl Serialize for AgentMuxError {
 impl From<std::io::Error> for AgentMuxError {
     /// Implicit conversion routes by `ErrorKind` + raw OS code, but
     /// loses the path context. Prefer `from_io_with_path` at sites
-    /// that know which file/dir was being operated on.
+    /// that know which file/dir was being operated on — the empty
+    /// path here renders as the literal `(unknown path)` sentinel
+    /// in `Display`, which leaks into wire `message` and the
+    /// Details disclosure.
     fn from(err: std::io::Error) -> Self {
         let source_msg = err.to_string();
+        let unknown = || UNKNOWN_PATH.to_string();
         match Self::classify_io(&err) {
             AmxCode::OutOfSpace => AgentMuxError::OutOfSpace {
-                path: String::new(),
+                path: unknown(),
                 source_msg,
             },
             AmxCode::PermissionDenied => AgentMuxError::PermissionDenied {
-                path: String::new(),
+                path: unknown(),
                 source_msg,
             },
-            AmxCode::PathNotFound => AgentMuxError::PathNotFound {
-                path: String::new(),
-            },
+            AmxCode::PathNotFound => AgentMuxError::PathNotFound { path: unknown() },
             _ => AgentMuxError::Legacy(source_msg),
         }
     }
 }
+
+/// Sentinel rendered when an `std::io::Error` is converted without
+/// path context (via the `From` impl above). `from_io_with_path`
+/// supplies the real path so the user sees the offending location.
+const UNKNOWN_PATH: &str = "(unknown path)";
 
 /// Wrap a free-text string in `AgentMuxError::Legacy`. Used by the
 /// RPC engine to bridge un-migrated handlers that still return
@@ -349,6 +364,7 @@ mod tests {
         assert_eq!(mux.code(), AmxCode::OutOfSpace);
     }
 
+    #[cfg(windows)]
     #[test]
     fn io_error_routes_windows_disk_full_to_out_of_space() {
         let err = std::io::Error::from_raw_os_error(112);
@@ -356,6 +372,7 @@ mod tests {
         assert_eq!(mux.code(), AmxCode::OutOfSpace);
     }
 
+    #[cfg(windows)]
     #[test]
     fn io_error_routes_windows_handle_disk_full_to_out_of_space() {
         // ERROR_HANDLE_DISK_FULL — what `WriteFile` returns when the
@@ -363,6 +380,17 @@ mod tests {
         let err = std::io::Error::from_raw_os_error(39);
         let mux: AgentMuxError = err.into();
         assert_eq!(mux.code(), AmxCode::OutOfSpace);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn io_error_unix_ehostdown_does_not_route_to_out_of_space() {
+        // On Linux raw OS error 112 = EHOSTDOWN, not disk-full.
+        // Must NOT be classified as OutOfSpace — the Windows code
+        // 112 (ERROR_DISK_FULL) must be cfg-gated.
+        let err = std::io::Error::from_raw_os_error(112);
+        let mux: AgentMuxError = err.into();
+        assert_ne!(mux.code(), AmxCode::OutOfSpace);
     }
 
     #[test]
