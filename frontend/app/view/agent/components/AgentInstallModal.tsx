@@ -23,11 +23,13 @@ import { FitAddon } from "@xterm/addon-fit";
 
 import { Button } from "@/element/button";
 import { ErrorBanner } from "@/app/errors/ErrorBanner";
-import { atoms } from "@/app/store/global";
+import { atoms, getSettingsKeyAtom } from "@/app/store/global";
+import { ContextMenuModel } from "@/app/store/contextmenu";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { computeTermThemeFromSettings } from "@/app/view/term/termutil";
+import { writeText as clipboardWriteText } from "@/util/clipboard";
 
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { getProvider } from "../providers";
@@ -205,6 +207,31 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             const [t] = computeTermThemeFromSettings(atoms.fullConfigAtom());
             if (terminal) terminal.options.theme = t;
         });
+        // Clipboard wiring — phase α of SPEC_UNIFIED_CLIPBOARD_2026_05_18.md.
+        // Mirrors the regular term pane's three paths (copy-on-select,
+        // Ctrl+Shift+C, context menu Copy) so users can pull npm output
+        // out of the install log.
+        const copyOnSelect = getSettingsKeyAtom("term:copyonselect");
+        terminal.onSelectionChange(() => {
+            if (!copyOnSelect()) return;
+            const sel = terminal?.getSelection() ?? "";
+            if (sel.length > 0) {
+                clipboardWriteText(sel).catch(() => { /* best-effort */ });
+            }
+        });
+        terminal.attachCustomKeyEventHandler((ev) => {
+            // Ctrl+Shift+C → manual copy. Return false stops xterm from
+            // also routing the keystroke as input.
+            if (ev.type === "keydown" && ev.ctrlKey && ev.shiftKey && ev.key === "C") {
+                const sel = terminal?.getSelection() ?? "";
+                if (sel.length > 0) {
+                    clipboardWriteText(sel).catch(() => { /* best-effort */ });
+                }
+                return false;
+            }
+            return true;
+        });
+
         fitAddon = new FitAddon();
         terminal.loadAddon(fitAddon);
         terminal.open(termRef);
@@ -287,7 +314,36 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                 </p>
             </header>
             <div class="modal-panel-body agent-install-modal-body">
-                <div class="agent-install-modal-term" ref={termRef} />
+                <div
+                    class="agent-install-modal-term"
+                    ref={termRef}
+                    onContextMenu={(e) => {
+                        // Right-click → Copy (selection) / Copy All. Mirrors
+                        // the regular term pane's menu. Phase α of
+                        // SPEC_UNIFIED_CLIPBOARD_2026_05_18.md.
+                        const sel = terminal?.getSelection() ?? "";
+                        const all = terminal?.buffer?.active
+                            ? Array.from({ length: terminal.buffer.active.length }, (_, i) =>
+                                terminal.buffer.active.getLine(i)?.translateToString(true) ?? ""
+                              ).join("\n")
+                            : "";
+                        ContextMenuModel.showContextMenu(
+                            [
+                                {
+                                    label: "Copy",
+                                    enabled: sel.length > 0,
+                                    click: () => void clipboardWriteText(sel).catch(() => {}),
+                                },
+                                {
+                                    label: "Copy All",
+                                    enabled: all.length > 0,
+                                    click: () => void clipboardWriteText(all).catch(() => {}),
+                                },
+                            ],
+                            e,
+                        );
+                    }}
+                />
                 <Show when={error()}>
                     <ErrorBanner error={error()} />
                 </Show>
