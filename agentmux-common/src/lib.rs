@@ -2,12 +2,14 @@
 
 mod cli;
 pub mod data_paths;
+pub mod errors;
 pub mod ipc;
 pub mod layout_types;
 pub mod runtime_mode;
 
 pub use cli::make_cli_cmd;
 pub use data_paths::DataPaths;
+pub use errors::{AgentMuxError, AmxCode};
 pub use layout_types::{FlexDirection, LayoutNode, LayoutNodeData, ResizeOp, SplitPosition};
 pub use runtime_mode::{is_dev_build_exe, RuntimeMode};
 

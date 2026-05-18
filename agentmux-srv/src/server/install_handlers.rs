@@ -299,6 +299,10 @@ fn spawn_install_task(
             };
             broker.publish(event);
         };
+        // The `error` field on done events accepts either a plain
+        // string (legacy callers) or the wire-format `AgentMuxError`
+        // object the frontend's `translateError()` understands. New
+        // call sites should emit the wire form via `emit_done_typed`.
         let emit_done = |broker: &Broker, ok: bool, error: Option<String>| {
             let event = WaveEvent {
                 event: "install_chunk".to_string(),
@@ -314,6 +318,21 @@ fn spawn_install_task(
             };
             broker.publish(event);
         };
+        let emit_done_typed = |broker: &Broker, err: agentmux_common::AgentMuxError| {
+            let event = WaveEvent {
+                event: "install_chunk".to_string(),
+                scopes: vec![scope.clone()],
+                sender: String::new(),
+                persist: 1024,
+                data: Some(json!({
+                    "sessionId": session_id,
+                    "op": "done",
+                    "ok": false,
+                    "error": err.to_wire(),
+                })),
+            };
+            broker.publish(event);
+        };
 
         let provider_dir = match provider_install_dir(&provider_id) {
             Some(p) => p,
@@ -325,7 +344,15 @@ fn spawn_install_task(
             }
         };
         if let Err(e) = std::fs::create_dir_all(&provider_dir) {
-            emit_done(&broker, false, Some(format!("mkdir {}: {e}", provider_dir.display())));
+            // The disk-full / permission-denied / path-not-found cases
+            // route to the typed catalog so the frontend renders a
+            // friendly "Device out of space" message instead of the
+            // raw OS error. Other IO kinds fall through to Legacy.
+            let err = agentmux_common::AgentMuxError::from_io_with_path(
+                provider_dir.display().to_string(),
+                e,
+            );
+            emit_done_typed(&broker, err);
             registry.drop_session(&session_id);
             registry.release_provider(&provider_id);
             return;
