@@ -24,7 +24,7 @@ import { refocusNode } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
-import { createMemo, createSignal, type Accessor } from "solid-js";
+import { createMemo, createRoot, createSignal, type Accessor } from "solid-js";
 
 /**
  * One-time install of the slice #9 event sink. Hands `pane-clicked`
@@ -88,6 +88,9 @@ export class BrowserViewModel implements ViewModel {
     viewIcon: Accessor<string> = () => "globe";
     viewName: Accessor<string>;
     viewFaviconUrl: Accessor<string>;
+    /** Disposes the createRoot that owns `viewName` and `viewFaviconUrl`.
+     *  Called from `dispose()` to release the memos cleanly. */
+    private _memoRootDispose: (() => void) | null = null;
     viewText: Accessor<string | HeaderElem[]> = () => [];
     noPadding: Accessor<boolean> = () => true;
 
@@ -261,11 +264,28 @@ export class BrowserViewModel implements ViewModel {
         bpRegisterPane(blockId, projections);
         installEventSinkOnce();
 
-        this.viewName = createMemo(() => this.titleAtom());
-        this.viewFaviconUrl = createMemo(() => {
-            const v = this.faviconUrlAtom();
-            this.diag(`vm-favicon-memo-eval value=${JSON.stringify(v)}`);
-            return v;
+        // Wrap memos in a persistent createRoot owner so they survive
+        // re-runs of the surrounding createEffect in block.tsx.
+        //
+        // block.tsx constructs the viewModel inside a createEffect that
+        // re-runs when the meta `view` field changes. The previous
+        // run's owner is disposed when the effect re-runs — and that
+        // would dispose any createMemo created during the constructor
+        // too, even though the viewModel instance is cached and reused.
+        // A disposed memo stops subscribing to its signal sources and
+        // returns its last cached value forever, which is exactly the
+        // favicon-stuck-at-initial-URL regression we chased on
+        // 2026-05-18. By hosting the memos in a dedicated root we
+        // detach their lifecycle from the surrounding effect and tie
+        // them to `dispose()` instead.
+        this._memoRootDispose = createRoot((dispose) => {
+            this.viewName = createMemo(() => this.titleAtom());
+            this.viewFaviconUrl = createMemo(() => {
+                const v = this.faviconUrlAtom();
+                this.diag(`vm-favicon-memo-eval value=${JSON.stringify(v)}`);
+                return v;
+            });
+            return dispose;
         });
 
         // Subscribe to live title changes fired by CEF's on_title_change.
@@ -514,6 +534,10 @@ export class BrowserViewModel implements ViewModel {
         if (this._faviconUnsub) {
             this._faviconUnsub();
             this._faviconUnsub = null;
+        }
+        if (this._memoRootDispose) {
+            this._memoRootDispose();
+            this._memoRootDispose = null;
         }
         // Drop the slot AFTER the Disposed dispatch — the projection
         // for `closed:true` runs first, so any consumer reading
