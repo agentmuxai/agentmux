@@ -22,6 +22,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 
 import { Button } from "@/element/button";
+import { ErrorBanner } from "@/app/errors/ErrorBanner";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
@@ -46,7 +47,10 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     const displayName = () => catalog()?.displayName ?? props.agent.name;
 
     const [phase, setPhase] = createSignal<"idle" | "installing" | "done" | "failed">("idle");
-    const [error, setError] = createSignal<string | null>(null);
+    // `unknown` — accepts plain strings (legacy) AND the wire-format
+    // `AgentMuxError` object the backend now emits for typed errors.
+    // `<ErrorBanner>` + `translateError()` handle both shapes.
+    const [error, setError] = createSignal<unknown>(null);
     const [sessionId, setSessionId] = createSignal<string | null>(null);
     const [elapsedMs, setElapsedMs] = createSignal(0);
 
@@ -239,7 +243,7 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             <div class="modal-panel-body agent-install-modal-body">
                 <div class="agent-install-modal-term" ref={termRef} />
                 <Show when={error()}>
-                    <div class="agent-install-modal-error">⚠ {error()}</div>
+                    <ErrorBanner error={error()} />
                 </Show>
             </div>
             <footer class="modal-panel-footer">
