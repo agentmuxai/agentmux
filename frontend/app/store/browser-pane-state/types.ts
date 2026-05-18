@@ -150,9 +150,11 @@ export function sameOriginUrl(a: string, b: string): boolean {
     let originB: string | null = null;
     try { originA = new URL(a).origin; } catch { originA = null; }
     try { originB = new URL(b).origin; } catch { originB = null; }
-    // Both unparseable → fall back to literal-equality (handled above)
-    // → treat as different. Otherwise compare origins.
+    // Unparseable or null-origin schemes (about:blank, file:, data:)
+    // are only same-origin with their own literal URL, never with
+    // each other or with regular http(s) origins — codex P3 on #905.
     if (originA == null || originB == null) return false;
+    if (originA === "null" || originB === "null") return false;
     return originA === originB;
 }
 

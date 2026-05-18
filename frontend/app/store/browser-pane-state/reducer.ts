@@ -170,7 +170,19 @@ export function update(
             //   it. That's a better default than retaining a foreign
             //   favicon indefinitely.
             const originChanged = sameOriginUrl(state.url, command.url) === false;
-            const keepOverride = state.faviconOverridden && !originChanged;
+            // Race guard (reagent + codex P2 on #905 v1): if
+            // `FaviconUrlsReceived` for the destination page beat
+            // `UrlConfirmed` here, `state.faviconUrl` is already from
+            // the new origin even though `state.url` still points at
+            // the previous page. Resetting based purely on
+            // `originChanged` would overwrite that real favicon with
+            // the derived one. So: also keep the override when the
+            // current favicon's origin already matches the incoming
+            // URL's origin.
+            const faviconAlreadyForNewOrigin = state.faviconOverridden
+                && sameOriginUrl(state.faviconUrl, command.url);
+            const keepOverride = state.faviconOverridden
+                && (!originChanged || faviconAlreadyForNewOrigin);
             const faviconUrl = keepOverride
                 ? state.faviconUrl
                 : deriveFaviconUrl(command.url);
