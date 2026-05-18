@@ -79,54 +79,43 @@
             cursor: not-allowed;
         }
 
-        // Actions float in the top-left corner of the card so the
-        // icon + title + caption take the full horizontal width.
-        // Absolute positioning keeps them out of the flex row that
-        // lays out icon + info — no reserved gutter, no ellipsis
-        // truncation halfway through long titles. Hidden by default
-        // so the card reads clean; hover/focus reveals them.
-        .agent-card-actions {
+        // Install-state ribbon — anchored to the bottom-right corner
+        // of the card when the agent's CLI isn't in the per-version
+        // cache yet. Styled as a small "For Sale" sign tag so the user
+        // immediately understands clicking will start the install
+        // (modal) flow rather than launching the agent directly.
+        .agent-card-install-ribbon {
             position: absolute;
-            top: 6px;
-            left: 6px;
-            display: flex;
-            gap: var(--space-1);
-            opacity: 0;
-            transition: opacity 0.15s;
+            right: -4px;
+            bottom: -4px;
+            padding: 3px 8px;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #fff; /* stylelint-disable-line color-no-hex */
+            background: var(--warning-color, #e9b800);
+            border-radius: 4px 0 4px 0;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+            pointer-events: none;
             z-index: 1;
+            user-select: none;
+
+            // Animate a gentle pulse so it draws the eye without
+            // being noisy. Halts on hover so the card hover state
+            // stays the focal point.
+            animation: agent-card-ribbon-pulse 2.4s ease-in-out infinite;
         }
 
-        &:hover .agent-card-actions,
-        &:focus-within .agent-card-actions {
-            opacity: 1;
+        &:hover .agent-card-install-ribbon {
+            animation: none;
+            background: color-mix(in srgb, var(--warning-color, #e9b800) 80%, white);
         }
 
-        .agent-card-action-btn {
-            width: 26px;
-            height: 26px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            padding: 0;
-            border: 1px solid var(--border-color);
-            // Fully opaque background so the icon/text behind the
-            // absolutely-positioned actions doesn't bleed through.
-            background: var(--main-bg-color);
-            border-radius: 4px;
-            color: var(--main-text-color);
-            font-size: 13px;
-            cursor: pointer;
-            transition: all 0.1s;
-
-            &:hover:not(:disabled) {
-                border-color: var(--accent-color);
-                background: color-mix(in srgb, var(--accent-color) 15%, var(--main-bg-color));
-            }
-
-            &:disabled {
-                opacity: 0.4;
-                cursor: not-allowed;
-            }
+        &.agent-card--needs-install {
+            // Subtle accent on the card border to reinforce the
+            // ribbon's "needs action" signal.
+            border-color: color-mix(in srgb, var(--warning-color, #e9b800) 40%, var(--border-color));
         }
 
         .agent-card-icon {
@@ -384,5 +373,22 @@
             font-style: italic;
             margin-top: var(--space-1-5);
         }
+    }
+}
+
+@keyframes agent-card-ribbon-pulse {
+    0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    }
+    50% {
+        transform: scale(1.05);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .agent-card-install-ribbon {
+        animation: none !important;
     }
 }

@@ -10,7 +10,7 @@
  * See docs/specs/SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23.md.
  */
 
-import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
@@ -18,10 +18,8 @@ import { useTabModal } from "@/app/tab/tab-modal";
 import type { AgentViewModel } from "../agent-model";
 import { getProvider } from "../providers";
 import { AgentCard } from "./AgentCard";
-import { AgentCardSettingsPanel } from "./AgentCardSettingsPanel";
 import { AgentActionBar } from "./AgentActionBar";
 import type { LaunchOverrides } from "./AgentLaunchModal";
-import { ConfirmModal } from "@/element/modal-v2";
 
 // ── useForgeAgents hook ───────────────────────────────────────────────────────
 
@@ -69,14 +67,34 @@ interface AgentPickerProps {
 export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     const [launching, setLaunching] = createSignal<string | null>(null);
     const [nodejsError, setNodejsError] = createSignal<string | null>(null);
-    const [deleteCandidate, setDeleteCandidate] = createSignal<ForgeAgent | null>(null);
-    const [deleteError, setDeleteError] = createSignal<string | null>(null);
     const agents = useForgeAgents();
     const tabModal = useTabModal();
 
-    // Inline Forge-settings panel: which definition is expanded.
-    // Session-local only — not persisted to block meta.
-    const [expandedId, setExpandedId] = createSignal<string | null>(null);
+    // Per-agent install state, keyed by agent.id.
+    //   undefined = not yet checked / non-npm provider (no install needed)
+    //   true      = present in the per-version cache
+    //   false     = needs install — card shows the bottom-right ribbon
+    const [installState, setInstallState] = createSignal<Record<string, boolean | undefined>>({});
+
+    const checkInstalled = async (agent: ForgeAgent) => {
+        const prov = getProvider(agent.provider);
+        // Non-npm providers (kimi via pip, system-PATH CLIs) don't go
+        // through the install modal — never show the ribbon.
+        if (!prov?.npmPackage || prov.npmPackage.length === 0) {
+            setInstallState((s) => ({ ...s, [agent.id]: undefined }));
+            return;
+        }
+        try {
+            const r = await RpcApi.InstallCheckCommand(TabRpcClient, {
+                providerId: prov.id,
+                cliCommand: prov.cliCommand,
+            });
+            setInstallState((s) => ({ ...s, [agent.id]: r.installed }));
+        } catch {
+            // Treat as needs-install — better to over-prompt than miss.
+            setInstallState((s) => ({ ...s, [agent.id]: false }));
+        }
+    };
 
     // Open the launch modal. Extracted so the install-modal path can
     // chain into it after a successful install.
@@ -112,93 +130,37 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // (getCliPath), so a rapid double-click could open two modals (and
     // start two parallel installs) without it. The pendingSelect set
     // tracks in-flight resolutions per agent id and rejects re-entry.
-    const pendingSelect = new Set<string>();
-    const handleSelect = async (agent: ForgeAgent) => {
-        if (pendingSelect.has(agent.id)) return;
-        pendingSelect.add(agent.id);
-        try {
-            setNodejsError(null);
-            // Phase α only handles npm-installable providers. For
-            // providers without `npmPackage` (e.g. kimi via pip, system-
-            // PATH CLIs), fall through to the launch flow — its
-            // ResolveCliCommand already does the system-PATH search.
-            const prov = getProvider(agent.provider);
-            // Use the canonical provider id for the path probe — the
-            // saved agent definition may carry an alias like
-            // "claude-code" while install.start writes under "claude".
-            const canonicalProviderId = prov?.id ?? agent.provider;
-            const cliCommand = prov?.cliCommand ?? agent.provider;
-            const npmInstallable = !!prov?.npmPackage && prov.npmPackage.length > 0;
-            // Query the backend's per-version install dir (the same
-            // location `install.start` writes to). The CEF host's
-            // getCliPath probes a different path and would falsely
-            // report "not installed" for npm-cached providers, causing
-            // a re-install on every launch.
-            let installed = false;
-            if (npmInstallable) {
-                try {
-                    const r = await RpcApi.InstallCheckCommand(TabRpcClient, {
-                        providerId: canonicalProviderId,
-                        cliCommand,
-                    });
-                    installed = r.installed;
-                } catch {
-                    installed = false;
-                }
-            } else {
-                // Non-npm provider — launch flow will resolve via
-                // system PATH or report a missing-CLI error.
-                installed = true;
-            }
-            if (!installed) {
-                tabModal.open({
-                    kind: "install-agent",
-                    agent,
-                    originBlockId: props.model.blockId,
-                    onInstalled: () => openLaunchModal(agent),
-                });
-                return;
-            }
-            openLaunchModal(agent);
-        } finally {
-            pendingSelect.delete(agent.id);
+    const handleSelect = (agent: ForgeAgent) => {
+        setNodejsError(null);
+        // Use the cached install state. `undefined` = non-npm provider
+        // or not-yet-checked; either way fall through to launch flow.
+        const installed = installState()[agent.id];
+        if (installed === false) {
+            tabModal.open({
+                kind: "install-agent",
+                agent,
+                originBlockId: props.model.blockId,
+                onInstalled: () => {
+                    // Mark installed + refresh state for the ribbon.
+                    setInstallState((s) => ({ ...s, [agent.id]: true }));
+                    openLaunchModal(agent);
+                },
+            });
+            return;
         }
-    };
-
-    const openForgeFor = (agent: ForgeAgent) => {
-        // Toggle the inline settings panel for this definition.
-        setExpandedId((prev) => (prev === agent.id ? null : agent.id));
-    };
-
-    const closePanel = () => {
-        setExpandedId(null);
-    };
-
-    /**
-     * Stage a Forge definition for deletion — the actual delete runs
-     * via `handleDeleteConfirm` when the user confirms in the modal.
-     * The backend `DeleteForgeAgent` RPC removes the row and emits a
-     * `forgeagents:changed` event, which `useForgeAgents` re-fetches
-     * on — so the list updates without manual refresh.
-     */
-    const handleDelete = (agent: ForgeAgent) => {
-        setDeleteError(null);
-        setDeleteCandidate(agent);
-    };
-
-    const handleDeleteConfirm = async () => {
-        const agent = deleteCandidate();
-        if (!agent) return;
-        try {
-            await RpcApi.DeleteForgeAgentCommand(TabRpcClient, { id: agent.id });
-            setDeleteCandidate(null);
-        } catch (e: any) {
-            setDeleteError(e?.message ?? String(e));
-            // Leave the modal open so the user sees the error.
-        }
+        openLaunchModal(agent);
     };
 
     const busy = () => launching() !== null;
+
+    // Refresh install state whenever the agent list changes.
+    createEffect(() => {
+        for (const agent of agents()) {
+            if (!(agent.id in installState())) {
+                void checkInstalled(agent);
+            }
+        }
+    });
 
     return (
         <>
@@ -222,25 +184,13 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         <div class="agent-picker-list">
                             <For each={agents()}>
                                 {(agent) => (
-                                    <>
-                                        <AgentCard
-                                            agent={agent}
-                                            launching={launching() === agent.id}
-                                            disabled={busy()}
-                                            onLaunch={handleSelect}
-                                            onOpenForge={openForgeFor}
-                                            onDelete={handleDelete}
-                                        />
-                                        <Show when={expandedId() === agent.id}>
-                                            <AgentCardSettingsPanel
-                                                blockId={props.model.blockId}
-                                                nodeModel={props.model.nodeModel}
-                                                agent={agent}
-                                                initialTab="forge"
-                                                onClose={closePanel}
-                                            />
-                                        </Show>
-                                    </>
+                                    <AgentCard
+                                        agent={agent}
+                                        launching={launching() === agent.id}
+                                        disabled={busy()}
+                                        installed={installState()[agent.id]}
+                                        onLaunch={handleSelect}
+                                    />
                                 )}
                             </For>
                         </div>
@@ -261,28 +211,6 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     </div>
                     <AgentActionBar />
                 </div>
-            </Show>
-            <Show when={deleteCandidate()}>
-                {(agent) => (
-                    <ConfirmModal
-                        open={true}
-                        title={`Delete definition "${agent().name}"?`}
-                        description="This removes it permanently. Any open panes running instances of it will stay connected until you close them."
-                        confirmLabel="Delete"
-                        destructive
-                        onConfirm={handleDeleteConfirm}
-                        onCancel={() => {
-                            setDeleteCandidate(null);
-                            setDeleteError(null);
-                        }}
-                    >
-                        <Show when={deleteError()}>
-                            <div class="agent-picker-delete-error">
-                                Delete failed: {deleteError()}
-                            </div>
-                        </Show>
-                    </ConfirmModal>
-                )}
             </Show>
         </>
     );

@@ -8,74 +8,32 @@
  * by the CLI catalog, not by the ForgeAgent row's user-facing fields.
  * Title reads as a capability blurb ("Anthropic's coding agent") and
  * the CLI brand name sits as a caption below. Clicking the body opens
- * the Launch modal instead of launching directly.
+ * the Launch modal (or Install modal if the CLI isn't installed yet).
  *
- * The ⓘ button uses the Popover primitive (PR F of the definitions
- * spec) so users get the catalog's full CLI deep-dive text — startup
- * flow, MCP support, memory behaviour — on click, rather than a
- * native tooltip truncated by the OS.
- *
- * The card is rendered as a <div role="button"> rather than <button>
- * so nested action buttons are valid HTML (buttons can't contain
- * buttons).
+ * When `installed === false`, a bottom-right "Click to install" ribbon
+ * is overlaid on the card — like a "For Sale" sign. The ribbon
+ * disappears once installation succeeds (parent re-runs install.check
+ * after the install modal closes).
  */
 
-import { createMemo, Show, useContext, type Component, type JSX } from "solid-js";
-import { Popover, PopoverContext, PopoverContent } from "@/element/popover";
+import { Show, type JSX } from "solid-js";
 import { ProviderLogo } from "@/element/ProviderLogo";
-import { getCliCatalogEntry } from "../defaults/cli-catalog";
 
 interface AgentCardProps {
     agent: ForgeAgent;
     launching: boolean;
     disabled: boolean;
-    /** Opens the AgentLaunchModal for this definition. */
+    /** undefined = not yet checked / non-npm provider (no install needed).
+     *  true = CLI present in the per-version cache.
+     *  false = needs install — render the bottom-right ribbon. */
+    installed: boolean | undefined;
+    /** Opens the AgentLaunchModal (or Install modal) for this definition. */
     onLaunch: (agent: ForgeAgent) => void;
-    /** Opens the inline settings panel (Forge tab). */
-    onOpenForge: (agent: ForgeAgent) => void;
-    /** Called when the user clicks the 🗑 delete button. Caller is
-     *  responsible for confirmation + the `DeleteForgeAgent` RPC. */
-    onDelete: (agent: ForgeAgent) => void;
 }
 
-/**
- * The ⓘ trigger. Custom trigger (not `PopoverButton`) so we keep
- * the existing `agent-card-action-btn` chrome instead of inheriting
- * the default `Button` styling. Uses `PopoverContext` directly.
- */
-const InfoPopoverTrigger: Component<{ ariaLabel: string }> = (props) => {
-    const ctx = useContext(PopoverContext);
-    return (
-        <button
-            ref={(el) => ctx?.registerReference(el)}
-            class="agent-card-action-btn agent-card-action-btn--info"
-            classList={{ "agent-card-action-btn--open": ctx?.isOpen() }}
-            onClick={(e) => {
-                e.stopPropagation();
-                ctx?.togglePopover();
-            }}
-            type="button"
-            aria-label={props.ariaLabel}
-            aria-expanded={ctx?.isOpen()}
-        >
-            {"\u24D8"}
-        </button>
-    );
-};
-
 export const AgentCard = (props: AgentCardProps): JSX.Element => {
-    const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
-
-    const title = () => catalog()?.blurb || props.agent.description || props.agent.name;
-    const caption = () => catalog()?.displayName || props.agent.name;
-    const popoverText = () => catalog()?.popoverMarkdown ?? props.agent.description ?? "";
-    const primaryContextFile = () => catalog()?.primaryContextFile ?? "";
-    const mcpSupport = () => catalog()?.mcpSupport ?? "";
-
-    const stopAndRun = (fn: () => void) => (e: MouseEvent) => {
-        e.stopPropagation();
-        fn();
-    };
+    const title = () => props.agent.description || props.agent.name;
+    const caption = () => props.agent.name;
 
     const handleCardClick = () => {
         if (!props.disabled) props.onLaunch(props.agent);
@@ -92,7 +50,10 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
     return (
         <div
             class={`agent-card${props.launching ? " agent-card--launching" : ""}`}
-            classList={{ "agent-card--disabled": props.disabled }}
+            classList={{
+                "agent-card--disabled": props.disabled,
+                "agent-card--needs-install": props.installed === false,
+            }}
             onClick={handleCardClick}
             onKeyDown={handleKeyDown}
             role="button"
@@ -105,47 +66,11 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
                 <span class="agent-card-title">{title()}</span>
                 <span class="agent-card-caption">{caption()}</span>
             </span>
-            <div class="agent-card-actions" onClick={(e) => e.stopPropagation()}>
-                <Show when={popoverText()}>
-                    <Popover placement="right-start" offset={8}>
-                        <InfoPopoverTrigger ariaLabel={`About ${caption()}`} />
-                        <PopoverContent className="agent-card-info-popover">
-                            <div class="agent-card-info-popover-title">{caption()}</div>
-                            <Show when={primaryContextFile()}>
-                                <div class="agent-card-info-popover-meta">
-                                    <span class="agent-card-info-popover-label">Context file</span>
-                                    <code>{primaryContextFile()}</code>
-                                </div>
-                            </Show>
-                            <Show when={mcpSupport() && mcpSupport() !== "none"}>
-                                <div class="agent-card-info-popover-meta">
-                                    <span class="agent-card-info-popover-label">MCP</span>
-                                    <code>{mcpSupport()}</code>
-                                </div>
-                            </Show>
-                            <div class="agent-card-info-popover-body">{popoverText()}</div>
-                        </PopoverContent>
-                    </Popover>
-                </Show>
-                <button
-                    class="agent-card-action-btn"
-                    onClick={stopAndRun(() => props.onOpenForge(props.agent))}
-                    title="Configure this definition in the Forge"
-                    disabled={props.disabled}
-                    type="button"
-                >
-                    {"\u2699"}
-                </button>
-                <button
-                    class="agent-card-action-btn agent-card-action-btn--delete"
-                    onClick={stopAndRun(() => props.onDelete(props.agent))}
-                    title="Delete this definition"
-                    disabled={props.disabled}
-                    type="button"
-                >
-                    {"\uD83D\uDDD1"}
-                </button>
-            </div>
+            <Show when={props.installed === false}>
+                <span class="agent-card-install-ribbon" aria-hidden="true">
+                    Click to install
+                </span>
+            </Show>
             <Show when={props.launching}>
                 <span class="agent-card-spinner" />
             </Show>

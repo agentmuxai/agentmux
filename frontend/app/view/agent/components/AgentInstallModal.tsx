@@ -28,7 +28,11 @@ import { waveEventSubscribe } from "@/app/store/wps";
 
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { getProvider } from "../providers";
-import "@xterm/xterm/css/xterm.css";
+// Use the project's customized xterm.css copy (same one term.tsx
+// imports) rather than the raw package stylesheet. The package CSS
+// loads later in the bundle and would override our project-wide
+// terminal theme tweaks.
+import "../../term/xterm.css";
 
 interface AgentInstallModalPanelProps {
     agent: ForgeAgent;
