@@ -97,13 +97,23 @@ export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
         };
     };
 
-    // Outer gate: arm only on null→non-null. Track previous open
-    // state so replace() (non-null → non-null) leaves `ready` alone.
+    // Outer gate: arm only on cold open (null→non-null). On replace()
+    // (non-null → non-null) the gate stays as-is so a mid-crossfade
+    // doesn't briefly hide the persistent shell.
+    //
+    // Edge case (codex P2 / reagent P2 on PR #900): if replace() fires
+    // BEFORE the cold-open rAF×2 / 200ms failsafe has flipped ready to
+    // true, Solid runs this effect's previous onCleanup — which cancels
+    // both rAFs and the failsafe — then re-runs the body. If we
+    // unconditionally bail on `prevWasOpen`, no callback survives to
+    // flip ready, and the overlay stays opacity:0 forever. Fix: only
+    // bail when the gate has actually fired. If the gate is still
+    // in-flight at the moment of replace(), re-arm it.
     let prevWasOpen = false;
     createEffect(() => {
         const isOpen = current() != null;
         if (!isOpen) { prevWasOpen = false; setReady(false); return; }
-        if (prevWasOpen) return;   // replace path — leave ready alone
+        if (prevWasOpen && ready()) return;   // gate already fired — leave it alone
         prevWasOpen = true;
         const cleanup = armGate(setReady);
         onCleanup(cleanup);
