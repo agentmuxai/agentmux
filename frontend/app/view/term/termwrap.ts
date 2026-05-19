@@ -347,7 +347,7 @@ export class TermWrap {
         // guard eliminates the extra RAF cycle (≤16ms) that was stalling echo rendering
         // while a large PTY write was in progress, causing the sporadic keypress delays.
         if (data.length <= TermWrap.RAF_BYPASS_THRESHOLD && this.rafBuffer.length === 0) {
-            markStart('term-echo-render');
+            if (data.length <= 32) markStart('term-echo-render');
             this.doTerminalWrite(data, null);
             return;
         }
