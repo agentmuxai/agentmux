@@ -132,7 +132,18 @@ pub fn inject_identity_env(
 
     // Step 2: identity_id check.
     if instance.identity_id.is_empty() || instance.identity_id == "blank" {
-        // Blank singleton or unset → ambient creds.
+        // Empty or legacy "blank" sentinel → ambient creds (no
+        // injection). The UI no longer produces these for new
+        // launches (identity is now required at submit-time —
+        // SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md), so seeing
+        // one here means either a legacy continuation row or a UI
+        // regression. Warn so the regression is visible in logs.
+        tracing::warn!(
+            target: "identity",
+            "instance {} has empty/blank identity_id — falling back to ambient creds. \
+             Legacy row or UI regression?",
+            block_id
+        );
         return;
     }
 

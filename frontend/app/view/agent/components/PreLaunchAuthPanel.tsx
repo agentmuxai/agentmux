@@ -3,8 +3,10 @@
 
 /**
  * PreLaunchAuthPanel — the Connect-with-OAuth UI block that sits
- * inline in `AgentLaunchModal` before the Launch button. Owns an
- * `AuthFlowController` instance for the lifetime of the modal.
+ * inline in `AgentLaunchModal` before the Launch button. The
+ * `AuthFlowController` is owned by the parent (`AgentLaunchModal`)
+ * and passed in as a prop so the controller's lifetime spans the
+ * whole modal, not just this panel's conditional `<Show>` mount.
  *
  * Spec: `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` §3 + §8.
  *
@@ -14,8 +16,8 @@
  *   - `ready` — green check banner ("Connected as <email>")
  *   - `failed` — red error banner + retry CTA
  *
- * Exposes the controller's `state` accessor to the parent so the
- * Launch button can gate on `state().kind === "ready"`.
+ * The parent reads `props.controller.state()` directly to gate the
+ * Launch button on `state().kind === "ready"`.
  */
 
 import { Button } from "@/element/button";
@@ -28,7 +30,6 @@ import {
     createEffect,
     createSignal,
     Match,
-    onCleanup,
     Show,
     Switch,
     untrack,
@@ -48,18 +49,22 @@ import "./PreLaunchAuthPanel.scss";
 export interface PreLaunchAuthPanelProps {
     /** The provider to authenticate. */
     provider: ProviderDefinition | undefined;
-    /** Currently-selected identity bundle id. "blank" = singleton. */
+    /** Currently-selected identity bundle id, or "" if the user hasn't
+     *  picked one yet. The empty case triggers the Connect CTA so OAuth
+     *  can mint a fresh bundle. */
     identityId: Accessor<string>;
     /** True when the selected non-blank bundle has a binding for the
-     *  agent's provider. Required because `outcomeFor` used to treat
-     *  any non-blank as "ready" — which let the "+ New identity" flow
-     *  bypass OAuth entirely (reagent + codex P1 on PR #910 round 3).
-     *  When false (or while bindings are still loading), the panel
-     *  routes to `needs-bundle` so the user goes through the OAuth
-     *  flow before Launch enables. */
+     *  agent's provider. When false (or while bindings are still
+     *  loading), the panel routes to `needs-bundle` so the user goes
+     *  through the OAuth flow before Launch enables. */
     hasMatchingBinding: Accessor<boolean>;
-    /** Notify parent when auth state changes — used to gate Launch. */
-    onStateChange: (state: AuthState) => void;
+    /** Auth flow controller — owned by the Launch modal so its
+     *  lifetime spans the whole modal, not just the panel's
+     *  conditional mount. Lifting fixed the "memory change forgot
+     *  login" bug where a brief re-render unmounted this panel and
+     *  destroyed an internally-constructed controller along with it.
+     *  See docs/specs/SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md. */
+    controller: AuthFlowController;
     /** Called when a new bundle is created via OAuth or API-key
      *  submission — parent should refresh the identity list and
      *  switch the dropdown to this new bundle. */
@@ -70,12 +75,11 @@ export interface PreLaunchAuthPanelProps {
 }
 
 export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element => {
-    const controller = new AuthFlowController();
-
-    // Mirror controller.state() through createEffect → parent prop.
-    createEffect(() => {
-        props.onStateChange(controller.state());
-    });
+    // Controller is owned by the parent (AgentLaunchModal); panel
+    // mount/unmount doesn't construct or dispose it. The parent
+    // reads `controller.state()` directly for `authStateKind()`
+    // — no more `onStateChange` callback wiring.
+    const controller = props.controller;
 
     // Auto-open the OAuth URL in the user's default browser as soon as
     // the auth controller surfaces it. Same effect as the legacy
@@ -100,21 +104,16 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     });
 
     // Forward `succeeded` / `api-key-accepted` to bundle-creation
-    // callback so the modal can refresh the bundle list.
-    //
-    // Codex P2 on #847 (round 7): skip placeholder bundle ids the
-    // OAuth backend synthesizes pre-PR-C (`pending-bundle-for-<sid>`).
-    // Selecting one as identityId would launch against a row that
-    // doesn't exist in wstore. Until PR C-2 wires real persistence,
-    // OAuth-success leaves the dropdown on blank — the user's session
-    // is still authenticated, the launch path treats blank as
-    // "create-on-launch" via the existing flow.
+    // callback so the modal swaps its Identity selection to the
+    // newly-persisted bundle id. Skip placeholder ids
+    // (`pending-bundle-for-<sid>`) — those are pre-persistence
+    // synthetic ids; the real id arrives via the next state
+    // transition.
     createEffect(() => {
         const s = controller.state();
         if (
             s.kind === "ready" &&
             s.bundleId &&
-            s.bundleId !== "blank" &&
             !s.bundleId.startsWith("pending-bundle-for-")
         ) {
             props.onBundleCreated(s.bundleId);
@@ -141,19 +140,16 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         // connects an account.
         const hasBinding = props.hasMatchingBinding();
         if (!prov) return;
-        // Codex P2 on #847 round 8: "blank" is a UI sentinel meaning
-        // "no bundle selected", not a real bundleId. Normalize it to
-        // "" before handing to the controller so `auth.start` /
-        // `auth.submitapikey` receive `intoBundleId: undefined`
-        // (= "create new bundle") rather than `"blank"` (= "attach
-        // to bundle named blank", which doesn't exist in wstore).
-        const bundleArg = id === "blank" ? "" : id;
-        untrack(() => controller.selected(prov.id, bundleArg, outcomeFor(id, prov.id, hasBinding)));
+        // "" id (no bundle selected) tells the controller / backend
+        // to create a fresh bundle as part of the OAuth flow.
+        untrack(() => controller.selected(prov.id, id, outcomeFor(id, prov.id, hasBinding)));
     });
 
-    onCleanup(() => {
-        controller.dispose();
-    });
+    // No onCleanup here — controller lifetime is owned by the parent
+    // (AgentLaunchModal). Disposing on panel unmount would destroy
+    // in-flight auth state any time the parent's `<Show when={authRequired()}>`
+    // briefly flips false (the root cause of the "memory change forgot
+    // login" bug fixed in this PR).
 
     return (
         <div class="pre-launch-auth-panel">
@@ -228,7 +224,7 @@ function outcomeFor(
     // override actually gates Launch. Lift once Phase δ wires real
     // bundle storage.
     if (providerId === "openclaw") return "needs-bundle";
-    if (!identityId || identityId === "blank") return "needs-bundle";
+    if (!identityId) return "needs-bundle";
     // Reagent + codex P1 on PR #910 round 3 — a non-blank bundle
     // without a binding for the agent's provider can't supply creds
     // (e.g. "+ New identity" created an empty "Work" bundle that the
