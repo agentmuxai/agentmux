@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { invokeCommand } from "@/app/platform/ipc";
+import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import { useTabModal } from "@/app/tab/tab-modal";
 import type { BrowserViewModel } from "./browser-model";
 import "./browser-view.scss";
 
@@ -19,6 +20,7 @@ function tagElement(el: Element | null): string {
 
 export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>): JSX.Element {
     const model = props.model;
+    const tabModal = useTabModal();
     const _diagTag = `[browser-pane:diag][${model.blockId.slice(0, 7)}]`;
     const diag = (msg: string): void => { console.log(`${_diagTag} ${msg}`); };
     // Captured once at mount — same window_label that createPane uses
@@ -149,12 +151,70 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
         }
     };
 
+    let authUnsub: (() => void) | null = null;
+    let authDisposed = false;
+    // Per-pane set of in-flight auth requests. ESC/backdrop dismiss
+    // tears down the modal via `safeClose()` without firing the
+    // browser-auth onCancel, so any remaining ids in this set need
+    // explicit cancel on pane unmount AND on resolution. Tracks ids
+    // so we cancel exactly the ones that didn't resolve through
+    // submit/cancel buttons (codex P2 on #906).
+    const pendingAuthIds = new Set<string>();
     onMount(() => {
         if (placeholderRef) {
             resizeObserver = new ResizeObserver(syncPosition);
             resizeObserver.observe(placeholderRef);
             positionInterval = setInterval(syncPosition, 200);
         }
+        // Subscribe to CEF's HTTP Basic/Digest auth challenges. Lives
+        // in the view (not the model) because it needs `useTabModal()`
+        // context, which is a SolidJS hook. Phase α of
+        // SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18.md.
+        void listenEvent<{
+            block_id: string;
+            request_id: string;
+            origin: string;
+            host: string;
+            port: number;
+            realm: string;
+            is_proxy: boolean;
+        }>("browser-pane-auth-required", (payload) => {
+            if (payload.block_id !== model.blockId) return;
+            // Don't log username-length on submit — reagent P2 on #906.
+            diag(`auth-required request_id=${payload.request_id} origin=${JSON.stringify(payload.origin)} realm=${JSON.stringify(payload.realm)}`);
+            pendingAuthIds.add(payload.request_id);
+            tabModal.open({
+                kind: "browser-auth",
+                blockId: model.blockId,
+                requestId: payload.request_id,
+                origin: payload.origin || `${payload.host}:${payload.port}`,
+                realm: payload.realm,
+                isProxy: payload.is_proxy,
+                onSubmit: (username, password) => {
+                    pendingAuthIds.delete(payload.request_id);
+                    diag(`auth-submit request_id=${payload.request_id}`);
+                    void invokeCommand("browser_pane_auth_submit", {
+                        request_id: payload.request_id,
+                        username,
+                        password,
+                    }).catch((e) => diag(`auth-submit-failed err=${String(e)}`));
+                },
+                onCancel: () => {
+                    pendingAuthIds.delete(payload.request_id);
+                    diag(`auth-cancel request_id=${payload.request_id}`);
+                    void invokeCommand("browser_pane_auth_cancel", {
+                        request_id: payload.request_id,
+                    }).catch(() => {});
+                },
+            });
+        }).then((unsub) => {
+            // Race guard (reagent P1 on #906): listenEvent's promise
+            // can resolve AFTER onCleanup runs. Without this check,
+            // authUnsub gets set post-cleanup and never invoked,
+            // leaking the listener until renderer teardown.
+            if (authDisposed) unsub();
+            else authUnsub = unsub;
+        });
         const url = model.urlAtom();
         if (url) createPane(url);
     });
@@ -173,6 +233,20 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
             clearInterval(positionInterval);
             positionInterval = null;
         }
+        authDisposed = true;
+        if (authUnsub) {
+            authUnsub();
+            authUnsub = null;
+        }
+        // Cancel any auth prompts still parked on the host. Pane
+        // close also fires `cancel_for_block` on the backend as a
+        // safety net (codex P2 on #906), but firing them here ensures
+        // each cancel logs against the correct request_id.
+        for (const requestId of pendingAuthIds) {
+            invokeCommand("browser_pane_auth_cancel", { request_id: requestId })
+                .catch(() => {});
+        }
+        pendingAuthIds.clear();
     });
 
     return (

@@ -1418,8 +1418,89 @@ impl AgentMuxHandler {
             }
         }
     }
+
+    /// CEF asks the embedder for HTTP Basic / Digest credentials on a
+    /// 401/407. Browser-pane requests get surfaced to the renderer via
+    /// `browser-pane-auth-required` so the user can type credentials;
+    /// non-browser-pane requests (the main host window's frontend
+    /// load) are declined — those shouldn't hit auth-challenged
+    /// resources, and silently failing matches the prior behavior.
+    ///
+    /// Returns 1 (async — we'll resolve the callback via
+    /// `browser_pane_auth_submit` / `browser_pane_auth_cancel`) or 0
+    /// (sync no — CEF aborts the request).
+    ///
+    /// Phase α of SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18.md.
+    fn on_auth_credentials(
+        &mut self,
+        browser: Option<&mut Browser>,
+        origin_url: Option<&CefString>,
+        is_proxy: ::std::os::raw::c_int,
+        host: Option<&CefString>,
+        port: ::std::os::raw::c_int,
+        realm: Option<&CefString>,
+        _scheme: Option<&CefString>,
+        callback: Option<&mut AuthCallback>,
+    ) -> ::std::os::raw::c_int {
+        // Resolve the pane block_id from the browser ref. If this isn't
+        // a browser-pane browser (i.e. it's the host frontend's browser),
+        // we have no UI to prompt — decline and let CEF fail the
+        // request. The host frontend should never hit auth challenges.
+        let Some(b) = browser.as_deref() else {
+            tracing::warn!("[browser-pane-auth] no browser ref — declining");
+            return 0;
+        };
+        let Some(block_id) =
+            crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b)
+        else {
+            tracing::info!(
+                "[browser-pane-auth] not a browser pane (host frontend?) — declining"
+            );
+            return 0;
+        };
+        let Some(cb) = callback else {
+            return 0;
+        };
+
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let origin = origin_url.map(CefString::to_string).unwrap_or_default();
+        let host_str = host.map(CefString::to_string).unwrap_or_default();
+        let realm_str = realm.map(CefString::to_string).unwrap_or_default();
+        let is_proxy_bool = is_proxy != 0;
+
+        let block_id_short: String = block_id.chars().take(7).collect();
+        tracing::info!(
+            "[browser-pane-auth][{}] auth-required origin={:?} host={:?}:{} realm={:?} is_proxy={} request_id={}",
+            block_id_short, origin, host_str, port, realm_str, is_proxy_bool, request_id,
+        );
+
+        // Park the callback so the renderer's submit/cancel IPC can
+        // resolve it. The callback IS reference-counted internally
+        // (RefGuard) — `cb.clone()` bumps the refcount so the registry
+        // can hold it after CEF's invocation returns. Pass block_id so
+        // `cancel_for_block` can clean up when the pane closes.
+        crate::browser_pane::auth::register(
+            request_id.clone(),
+            block_id.clone(),
+            cb.clone(),
+        );
+
+        crate::events::emit_event_from_state(
+            &self.state,
+            "browser-pane-auth-required",
+            &serde_json::json!({
+                "block_id": block_id,
+                "request_id": request_id,
+                "origin": origin,
+                "host": host_str,
+                "port": port,
+                "realm": realm_str,
+                "is_proxy": is_proxy_bool,
+            }),
+        );
+
+        1
+    }
 }
-
-
 
 

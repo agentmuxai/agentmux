@@ -7,6 +7,7 @@
 //! lifecycle now lives only in the host reducer (`HostState.browser_panes`).
 //! `RegisterResult` moved to `crate::reducer`.
 
+pub mod auth;
 pub mod callbacks;
 pub mod creation;
 #[cfg(target_os = "windows")]
