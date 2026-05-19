@@ -853,6 +853,17 @@ pub fn run_forge_v10_migrations(conn: &Connection) -> Result<(), StoreError> {
         );
     }
     if runs_exist > 0 {
+        // Both the INSERT and the sentinel insert require the parent
+        // drone to exist. PRAGMA foreign_keys=ON in wstore.rs means an
+        // orphan-run insert would fail the FK and roll back the whole
+        // migration transaction, blocking startup. Orphans arise if a
+        // user deletes a migrated drone, downgrades, runs the still-
+        // present legacy workflow, and re-upgrades — the parent's
+        // sentinel keeps the drone from coming back, so the runs need
+        // to filter on parent presence too. (codex P2 round 3 on #912.)
+        // Unmarked orphans are re-checked next launch for free; if the
+        // parent never appears again the runs stay invisible, which
+        // matches the user's intent (they deleted the drone).
         sql.push_str(
             "INSERT OR IGNORE INTO db_drone_runs
                 (id, drone_id, status, started_at, ended_at, block_states, output, error)
@@ -861,6 +872,9 @@ pub fn run_forge_v10_migrations(conn: &Connection) -> Result<(), StoreError> {
              WHERE NOT EXISTS (
                  SELECT 1 FROM db_v10_migrated_legacy_runs s
                   WHERE s.legacy_id = wr.id
+             ) AND EXISTS (
+                 SELECT 1 FROM db_drone_definitions d
+                  WHERE d.id = wr.workflow_id
              );
 
              INSERT OR IGNORE INTO db_v10_migrated_legacy_runs
@@ -870,6 +884,9 @@ pub fn run_forge_v10_migrations(conn: &Connection) -> Result<(), StoreError> {
              WHERE NOT EXISTS (
                  SELECT 1 FROM db_v10_migrated_legacy_runs s
                   WHERE s.legacy_id = wr.id
+             ) AND EXISTS (
+                 SELECT 1 FROM db_drone_definitions d
+                  WHERE d.id = wr.workflow_id
              );\n",
         );
     }
@@ -1580,5 +1597,76 @@ mod tests {
             )
             .unwrap();
         assert_eq!(drone1, 0, "previously-deleted drone must stay deleted across roundtrip");
+    }
+
+    #[test]
+    fn test_forge_v10_skips_orphan_runs_under_foreign_keys_on() {
+        // codex P2 round 3 on PR #912: PRAGMA foreign_keys=ON is set
+        // by wstore.rs before migrations run. A user who deletes a
+        // migrated drone, downgrades, runs the still-present legacy
+        // workflow, and re-upgrades would produce a new legacy run
+        // whose workflow_id points at a drone the sentinel prevents
+        // from re-appearing. Without the parent-exists filter on the
+        // run copy, the INSERT INTO db_drone_runs fails FK and rolls
+        // back the entire migration transaction — blocking startup.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+
+        // First boot at v10: copy a drone + its run.
+        run_forge_migrations(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO db_workflow_definitions
+                (id, name, description, graph, viewport, created_at, updated_at)
+             VALUES ('d1', 'demo', '', '{}', '{}', 100, 100);
+
+             INSERT INTO db_workflow_runs
+                (id, workflow_id, status, started_at, ended_at,
+                 block_states, output, error)
+             VALUES ('r1', 'd1', 'done', 100, 200, '{}', '', '');",
+        )
+        .unwrap();
+        run_forge_v10_migrations(&conn).unwrap();
+
+        // User deletes the drone via the UI — the run cascade-deletes
+        // (FK ON DELETE CASCADE on db_drone_runs).
+        conn.execute("DELETE FROM db_drone_definitions WHERE id='d1'", [])
+            .unwrap();
+
+        // User downgrades, runs legacy workflow d1 — appears as new
+        // run row in the legacy table.
+        conn.execute_batch(
+            "INSERT INTO db_workflow_runs
+                (id, workflow_id, status, started_at, ended_at,
+                 block_states, output, error)
+             VALUES ('r2', 'd1', 'done', 300, 400, '{}', '', '');",
+        )
+        .unwrap();
+
+        // Re-upgrade: v10 must NOT fail. Parent d1 is intentionally
+        // gone from drone tables, so r2 is filtered out.
+        run_forge_v10_migrations(&conn)
+            .expect("v10 must not error when legacy runs have no drone parent");
+
+        // Drone tables: empty (d1 deleted, r1 cascade-deleted, r2 skipped).
+        let drone_defs: i64 = conn
+            .query_row("SELECT count(*) FROM db_drone_definitions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(drone_defs, 0, "deleted drone must stay deleted");
+        let drone_runs: i64 = conn
+            .query_row("SELECT count(*) FROM db_drone_runs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(drone_runs, 0, "orphan run must NOT be copied (no parent)");
+
+        // r2 is NOT marked in the sentinel — unmarked so a future
+        // launch can re-evaluate cheaply if the parent ever reappears.
+        let r2_sentinel: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_v10_migrated_legacy_runs WHERE legacy_id='r2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(r2_sentinel, 0, "orphan run sentinel must NOT be set");
     }
 }
