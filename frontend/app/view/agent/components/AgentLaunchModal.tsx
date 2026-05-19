@@ -235,7 +235,16 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         },
     );
 
-    const bundleHasMatchingBinding = () => {
+    // Wrapped in createMemo (not a bare accessor) so downstream
+    // effects only re-fire on actual boolean transitions. Codex P2
+    // on PR #910 round 5: without the memo, when bindings finish
+    // loading the value stays false (no binding yet) but the
+    // underlying resource read changes, which re-ran
+    // PreLaunchAuthPanel's createEffect — which calls
+    // controller.selected, which cancels any in-flight `waiting`
+    // OAuth session. Memo's === dedupe makes the loading→loaded
+    // false→false transition a no-op.
+    const bundleHasMatchingBinding = createMemo(() => {
         const id = identityId();
         if (!id || id === "blank") return false;
         // Treat the loading state as "no binding" so a fast-launch
@@ -246,7 +255,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         return (selectedBundleBindings() ?? []).some(
             (b) => b.provider === providerId,
         );
-    };
+    });
 
     // Auth gate applies to fresh launches of OAuth providers when the
     // selected identity can't supply credentials for the agent's
