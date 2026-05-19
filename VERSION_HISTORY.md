@@ -1,8 +1,86 @@
 # AgentMux Version History
 
+## 0.34.0 — 2026-05-18
+
+- devx(phase 2): adopt changesets workflow (RFC #857)
+- fix(taskfile): guard dev:serve against orphan vite on :5173 (rebase of #839)
+- fix(window-drag): scale CSS-pixel deltas by devicePixelRatio (Win11 125% fix) — rebase of #827
+- feat: hamburger menu keyboard shortcuts + Command Palette + per-window opacity slider (rebase of #863, #858)
+- feat(linux): enable CEF Wayland window transparency + iterative fixes (rebase of #797)
+- fix(taskfile): quote desc strings containing colons (broke task --list + task package after RFC #857 Phase 2)
+- fix(launcher): add UpdateWindowMeta + WindowMetaUpdated match arms (pre-existing main breakage)
+- fix(linux): multi-window pane crash + new-window invisibility + tab-switch overlay bleed
+- Three related Linux-only correctness fixes in the Views pane/window
+- machinery:
+- - **Pane crash in 2nd/3rd window** (`browser_pane/creation_views.rs`):
+-   opening a browser pane in any non-first window FATAL-crashed the CEF host
+-   with `observer_list.h:318 NOTREACHED — Observers can only be added once!`.
+-   Root cause: every isolated `RequestContext` yields a different `Profile*`
+-   pointer but they share one `ThemeService` instance (chrome's
+-   `ThemeServiceFactory` redirects to the original profile). The pane passed
+-   `None` for `request_context` → different `Profile*` than the parent
+-   window's main browser → `CefWidgetImpl::AddAssociatedProfile` map miss →
+-   re-`AddObserver` on the shared `ThemeService`. Fix: pane reuses the
+-   parent window's `RequestContext` via
+-   `state.get_browser(window_label).host().request_context()`.
+- - **"New Window" creates a CEF browser but no OS window appears**
+-   (`ui_tasks.rs`): with at least one pane open,
+-   `state.first_browser()`'s HashMap iteration order could pick a pane
+-   browser. The new window inherited its `is_browser_pane=true` client.
+-   `on_load_end`'s pane early-return then skipped the `window.show()`
+-   call. Fix: filter `list_browsers()` to a top-level (non-pane) browser
+-   when picking the client to reuse.
+- - **Inactive-tab browser pane bleeds into active tab**
+-   (`browser_pane/creation_views.rs::resize_browser_pane_view`): switching
+-   tabs left the previous tab's `OverlayController` drawing a borderless
+-   residual quad on top of the new tab's DOM. Root cause: frontend sends
+-   `browser_pane_resize(0,0,0,0)` when the placeholder goes `display:none`
+-   (getBoundingClientRect returns all zeros), but the backend only called
+-   `set_size(0,0) + set_position(0,0)` without `set_visible(0)`. On
+-   Wayland a 0-sized OverlayController at `set_visible(1)` still
+-   composites residual pixels. Fix: toggle `set_visible` based on rect
+-   dimensions (`width>0 && height>0`).
+- Spec: `docs/specs/multi-window-pane-and-newwindow-fixes-linux-2026-05-15.md`
+- feat(browser-pane): live page title and favicon in pane header
+- fix(#876): preserve window title on None + free CEF string-list buffer + favicon fallback (reagent P1+P1+P2 commandeer)
+- feat(agent-pane): persist reducer state to disk so reopen restores full conversation (no more truncated tables / orphaned tool calls)
+- fix(agent-pane): cascade detection + dispatchIfRegistered migration
+- - Detect reactive cascades that dispose a pane mid-dispatch (`agent-pane-state-store.ts`, `agent-document-store.ts`); log a `CASCADE_DETECTED` warning identifying the projection setter that triggered the dispose.
+- - Add `dispatchIfRegistered` soft-variant on both pane stores; migrate 22 async-context call sites (RAF, setTimeout, setInterval, subscription handlers, RPC `.catch()` continuations) across `useAgentStream.ts`, `useAgentCommands.ts`, `useHistoryPagination.ts`, and `agent-view.tsx` so they silently no-op instead of throwing when the pane disposed mid-dispatch.
+- - Guard the `browser-model.reload()` RAF callback with `if (this.closed) return;` to match every other IPC handler in that file.
+- Throwing `dispatch()` stays as the contract for synchronous-body register-order checks. Backed by new `agent-pane-state-store.test.ts` covering both contracts (5 tests, 306 total still pass).
+- fix(launch-modal): defensive fallback for blank identity/memory labels
+- fix(statusbar): show total window count instead of per-window ordinal
+- feat(taskfile): add task dev:local mirror of package:local
+- fix(dev): restore launcher IPC connection in task dev via parent-process check
+- fix(live-log): plumb 'persist' field through WPS publish endpoint
+- diag(live-log): temporary tracing for tool_chunk delivery path
+- diag(live-log): log reducer tool-chunk drop+append
+- diag(live-log): log overlay render-side chunks view
+- fix(live-log): tool overlay must access props.node inline (not via createMemo) for live chunk rendering
+- feat(live-log): PTY-backed tool streaming + auto-expand inline panel
+- feat(agent): install stage Phase α — agent-pane install modal with live npm progress
+- feat(openclaw): OAuth login via Codex harness + PTY-backed auth subprocess
+- fix(install-modal): add missing SCSS, modal was collapsing to intrinsic size
+- feat(errors): error-catalog scaffold (codes + frontend banner) — PR 1 of 3
+- feat(errors): migrate CLI resolve + install paths to typed catalog — PR 2 of 3
+- feat(errors): migrate auth paths to typed catalog — PR 3 of 3
+- fix(install-modal): bind xterm to configured terminal theme
+- fix(modal): crossfade chained-modal handoffs via tabModal.replace()
+- feat(install-modal): verbose output toggle for npm install
+- feat(install-modal): default verbose output to true
+- fix(install-modal): copy/paste wiring + unified clipboard spec
+- fix(modal): paint-gate entrance animations until content settles
+- fix(install-modal): always verbose, drop checkbox
+- diag(browser-pane): instrument title/favicon flow end-to-end
+- diag(browser-pane): per-instance vmId to detect stale viewmodel refs
+- fix(browser-pane): persist viewmodel memos in createRoot (favicon/title stuck on first load)
+- fix(browser-pane): reset favicon override on cross-origin navigation
+
+
 This document tracks the version history of AgentMux (forked from waveterm).
 
-## Latest Version: 0.33.794
+## Latest Version: 0.34.0
 
 **Base:** Upstream waveterm v0.12.0 + extensive custom features
 
