@@ -46,8 +46,8 @@ impl WaveStore {
     }
 
     /// Crate-internal accessor for sibling modules that maintain their
-    /// own per-table CRUD via the `WorkflowStore` extension trait
-    /// pattern (see `agentmux-srv/src/workflows/storage.rs`). Outside
+    /// own per-table CRUD via the `DroneStore` extension trait
+    /// pattern (see `agentmux-srv/src/drone/storage.rs`). Outside
     /// callers must use the typed methods on this impl.
     pub(crate) fn conn(&self) -> &Mutex<Connection> {
         &self.conn

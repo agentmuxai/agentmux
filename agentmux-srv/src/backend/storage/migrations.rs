@@ -127,6 +127,7 @@ pub fn run_forge_migrations(conn: &Connection) -> Result<(), StoreError> {
     run_forge_v7_migrations(conn)?;
     run_forge_v8_migrations(conn)?;
     run_forge_v9_migrations(conn)?;
+    run_forge_v10_migrations(conn)?;
     Ok(())
 }
 
@@ -725,6 +726,176 @@ pub fn run_forge_v9_migrations(conn: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// v10 — rename "Workflows" feature to "Drone".
+///
+/// Creates the drone tables (`db_drone_definitions`, `db_drone_runs`)
+/// and copies existing data from the v9 workflow tables. Schema is
+/// identical to v9 except that `db_drone_runs` renames the
+/// `workflow_id` column to `drone_id` (and the FK now points at
+/// `db_drone_definitions`).
+///
+/// Following the v7 pattern, the legacy v9 tables (`db_workflow_*`)
+/// are NOT dropped — they remain on disk so a downgrade path stays
+/// open. Readers in the renamed code path ignore them.
+///
+/// Idempotent: re-running this migration is a no-op. Schema creation
+/// uses `CREATE TABLE IF NOT EXISTS`; the v9 → v10 data copy is gated
+/// **per-row** by sentinel tables so legacy rows are migrated exactly
+/// once each (see "Per-row copy gate" below).
+///
+/// **Per-row copy gate.** A naive `INSERT OR IGNORE` over the v9
+/// `db_workflow_*` tables on every srv startup has two failure modes
+/// that arise from the fact that we intentionally retain the v9
+/// tables on disk for downgrade safety:
+///
+///   1. **Resurrection** (codex P2 round 1 on PR #912): a user deletes
+///      a migrated drone; on the next launch the copy re-runs and
+///      re-creates the row from the still-populated legacy table.
+///   2. **Roundtrip loss** (codex P2 round 2): a user upgrades,
+///      downgrades to the v9 build, creates a workflow under the old
+///      schema, and upgrades again — a singleton "v10 copy done"
+///      marker would short-circuit before noticing the new legacy row.
+///
+/// Sentinel tables `db_v10_migrated_legacy_defs` / `_runs` record each
+/// legacy id that has been copied. Per-row gating gets both right:
+///
+///   * Deleted drones stay deleted (their legacy id is in the sentinel,
+///     so re-copy is skipped).
+///   * Newly-appearing legacy rows (downgrade-then-recreate) are copied
+///     on the next v10 run because their ids aren't yet in the sentinel.
+pub fn run_forge_v10_migrations(conn: &Connection) -> Result<(), StoreError> {
+    // 1. Schema — always idempotent.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS db_drone_definitions (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            graph TEXT NOT NULL DEFAULT '{\"nodes\":[],\"edges\":[]}',
+            viewport TEXT NOT NULL DEFAULT '{\"x\":0,\"y\":0,\"zoom\":1}',
+            created_at INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_drone_definitions_updated
+            ON db_drone_definitions(updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS db_drone_runs (
+            id TEXT PRIMARY KEY,
+            drone_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'running',
+            started_at INTEGER NOT NULL DEFAULT 0,
+            ended_at INTEGER NOT NULL DEFAULT 0,
+            block_states TEXT NOT NULL DEFAULT '{}',
+            output TEXT NOT NULL DEFAULT '',
+            error TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY (drone_id) REFERENCES db_drone_definitions(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_drone_runs_drone_started
+            ON db_drone_runs(drone_id, started_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_drone_runs_status
+            ON db_drone_runs(status);
+
+        CREATE TABLE IF NOT EXISTS db_v10_migrated_legacy_defs (
+            legacy_id TEXT PRIMARY KEY,
+            copied_at INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS db_v10_migrated_legacy_runs (
+            legacy_id TEXT PRIMARY KEY,
+            copied_at INTEGER NOT NULL DEFAULT 0
+        );",
+    )?;
+
+    // 2. Per-row copy from v9 → v10. Skip rows we've already migrated
+    //    (sentinel hit) and rows whose legacy table doesn't exist
+    //    (fresh DB built straight at v10). Copy + sentinel insert run
+    //    in a single transaction so partial failure rolls back and
+    //    the next launch retries the same row set.
+    let defs_exist: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM sqlite_master
+             WHERE type='table' AND name='db_workflow_definitions'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    let runs_exist: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM sqlite_master
+             WHERE type='table' AND name='db_workflow_runs'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if defs_exist == 0 && runs_exist == 0 {
+        return Ok(());
+    }
+
+    let mut sql = String::from("BEGIN IMMEDIATE;\n");
+    if defs_exist > 0 {
+        sql.push_str(
+            "INSERT OR IGNORE INTO db_drone_definitions
+                (id, name, description, graph, viewport, created_at, updated_at)
+             SELECT id, name, description, graph, viewport, created_at, updated_at
+             FROM db_workflow_definitions wf
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM db_v10_migrated_legacy_defs s
+                  WHERE s.legacy_id = wf.id
+             );
+
+             INSERT OR IGNORE INTO db_v10_migrated_legacy_defs
+                (legacy_id, copied_at)
+             SELECT id, CAST(strftime('%s', 'now') AS INTEGER) * 1000
+             FROM db_workflow_definitions wf
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM db_v10_migrated_legacy_defs s
+                  WHERE s.legacy_id = wf.id
+             );\n",
+        );
+    }
+    if runs_exist > 0 {
+        // Both the INSERT and the sentinel insert require the parent
+        // drone to exist. PRAGMA foreign_keys=ON in wstore.rs means an
+        // orphan-run insert would fail the FK and roll back the whole
+        // migration transaction, blocking startup. Orphans arise if a
+        // user deletes a migrated drone, downgrades, runs the still-
+        // present legacy workflow, and re-upgrades — the parent's
+        // sentinel keeps the drone from coming back, so the runs need
+        // to filter on parent presence too. (codex P2 round 3 on #912.)
+        // Unmarked orphans are re-checked next launch for free; if the
+        // parent never appears again the runs stay invisible, which
+        // matches the user's intent (they deleted the drone).
+        sql.push_str(
+            "INSERT OR IGNORE INTO db_drone_runs
+                (id, drone_id, status, started_at, ended_at, block_states, output, error)
+             SELECT id, workflow_id, status, started_at, ended_at, block_states, output, error
+             FROM db_workflow_runs wr
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM db_v10_migrated_legacy_runs s
+                  WHERE s.legacy_id = wr.id
+             ) AND EXISTS (
+                 SELECT 1 FROM db_drone_definitions d
+                  WHERE d.id = wr.workflow_id
+             );
+
+             INSERT OR IGNORE INTO db_v10_migrated_legacy_runs
+                (legacy_id, copied_at)
+             SELECT id, CAST(strftime('%s', 'now') AS INTEGER) * 1000
+             FROM db_workflow_runs wr
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM db_v10_migrated_legacy_runs s
+                  WHERE s.legacy_id = wr.id
+             ) AND EXISTS (
+                 SELECT 1 FROM db_drone_definitions d
+                  WHERE d.id = wr.workflow_id
+             );\n",
+        );
+    }
+    sql.push_str("COMMIT;");
+    conn.execute_batch(&sql)?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1194,5 +1365,308 @@ mod tests {
             )
             .unwrap();
         assert_eq!(backfilled, "forge-1");
+    }
+
+    #[test]
+    fn test_forge_v10_copies_workflow_data_to_drone_tables() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+
+        // Run forge migrations up to v9 so the workflow tables exist
+        // (v10 is included by run_forge_migrations; we'll seed BEFORE
+        // running it explicitly by first wiping the drone tables and
+        // re-running just v10 to verify the copy path).
+        run_forge_v9_migrations(&conn).unwrap();
+
+        // Seed a workflow definition and a workflow run in the v9
+        // tables.
+        conn.execute_batch(
+            "INSERT INTO db_workflow_definitions
+                (id, name, description, graph, viewport, created_at, updated_at)
+             VALUES (
+                'wf-1', 'My Drone', 'desc',
+                '{\"nodes\":[],\"edges\":[]}',
+                '{\"x\":0,\"y\":0,\"zoom\":1}',
+                1000, 2000
+             );
+
+             INSERT INTO db_workflow_runs
+                (id, workflow_id, status, started_at, ended_at,
+                 block_states, output, error)
+             VALUES (
+                'run-1', 'wf-1', 'done', 1100, 1500,
+                '{}', 'hello', ''
+             );",
+        )
+        .unwrap();
+
+        // Run v10 — should create drone tables and copy data.
+        run_forge_v10_migrations(&conn).unwrap();
+
+        let def_row: (String, String, i64) = conn
+            .query_row(
+                "SELECT id, name, updated_at FROM db_drone_definitions
+                 WHERE id = 'wf-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(def_row.0, "wf-1");
+        assert_eq!(def_row.1, "My Drone");
+        assert_eq!(def_row.2, 2000);
+
+        let run_row: (String, String, String, String) = conn
+            .query_row(
+                "SELECT id, drone_id, status, output FROM db_drone_runs
+                 WHERE id = 'run-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(run_row.0, "run-1");
+        assert_eq!(run_row.1, "wf-1");
+        assert_eq!(run_row.2, "done");
+        assert_eq!(run_row.3, "hello");
+
+        // v9 tables remain on disk (downgrade safety).
+        let wf_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_workflow_definitions",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(wf_count, 1);
+
+        // Re-running v10 is idempotent.
+        run_forge_v10_migrations(&conn).unwrap();
+        let drone_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_drone_definitions",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(drone_count, 1);
+    }
+
+    #[test]
+    fn test_forge_v10_does_not_resurrect_deleted_drones() {
+        // codex P2 round 1 on PR #912: the v10 copy used to run on
+        // every srv startup. Because the v9 `db_workflow_*` tables are
+        // intentionally retained on disk for downgrade safety, a user
+        // who deleted a migrated drone saw it reappear on the next
+        // launch (the next INSERT OR IGNORE re-created the row from
+        // the legacy table). Per-row sentinel tables gate the copy.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+
+        run_forge_migrations(&conn).unwrap();
+
+        // Seed a v9 workflow row and force a v10 re-run. (run_forge_v10
+        // is part of the chain above; we wipe the sentinel + drone row
+        // so the copy path actually executes here.)
+        conn.execute_batch(
+            "INSERT INTO db_workflow_definitions
+                (id, name, description, graph, viewport, created_at, updated_at)
+             VALUES ('drone-1', 'demo', '', '{}', '{}', 100, 100);
+
+             DELETE FROM db_v10_migrated_legacy_defs WHERE legacy_id='drone-1';
+             DELETE FROM db_drone_definitions WHERE id='drone-1';",
+        )
+        .unwrap();
+
+        run_forge_v10_migrations(&conn).unwrap();
+
+        let after_copy: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_drone_definitions WHERE id='drone-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(after_copy, 1, "v10 should copy the v9 workflow row");
+
+        // Sentinel row recorded.
+        let sentinel: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_v10_migrated_legacy_defs
+                 WHERE legacy_id='drone-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(sentinel, 1, "sentinel must record the copied legacy id");
+
+        // User deletes the drone — simulates real-world delete via the
+        // Drone pane UI.
+        conn.execute("DELETE FROM db_drone_definitions WHERE id='drone-1'", [])
+            .unwrap();
+
+        // Next srv launch — re-run all migrations. The sentinel should
+        // gate the v10 copy so the deleted drone STAYS deleted.
+        run_forge_migrations(&conn).unwrap();
+
+        let after_relaunch: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_drone_definitions WHERE id='drone-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            after_relaunch, 0,
+            "deleted drone must NOT come back when migrations re-run"
+        );
+
+        // Legacy v9 row is preserved (downgrade safety).
+        let legacy: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_workflow_definitions WHERE id='drone-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy, 1, "v9 legacy row preserved on disk for downgrade");
+    }
+
+    #[test]
+    fn test_forge_v10_copies_new_legacy_rows_after_downgrade_roundtrip() {
+        // codex P2 round 2 on PR #912: with a singleton "v10 copy done"
+        // marker, a user who upgrades, downgrades to the v9 build,
+        // creates a workflow under the old schema, then re-upgrades
+        // would never see that new legacy row migrated. Per-row
+        // sentinels copy any legacy id that isn't yet recorded — new
+        // post-downgrade rows are picked up, previously-migrated-then-
+        // deleted rows are not.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+
+        // First boot at v10: legacy "drone-1" gets copied.
+        run_forge_migrations(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO db_workflow_definitions
+                (id, name, description, graph, viewport, created_at, updated_at)
+             VALUES ('drone-1', 'demo-1', '', '{}', '{}', 100, 100);",
+        )
+        .unwrap();
+        run_forge_v10_migrations(&conn).unwrap();
+        let copied: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_drone_definitions",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(copied, 1);
+
+        // User deletes "drone-1" via the UI.
+        conn.execute("DELETE FROM db_drone_definitions WHERE id='drone-1'", [])
+            .unwrap();
+
+        // User downgrades. The old v9 build reads `db_workflow_*` and
+        // the user creates a new workflow "drone-2" there.
+        conn.execute_batch(
+            "INSERT INTO db_workflow_definitions
+                (id, name, description, graph, viewport, created_at, updated_at)
+             VALUES ('drone-2', 'demo-2', '', '{}', '{}', 200, 200);",
+        )
+        .unwrap();
+
+        // User re-upgrades — v10 fires again.
+        run_forge_v10_migrations(&conn).unwrap();
+
+        // "drone-2" got migrated (new legacy id, no sentinel yet).
+        let drone2: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_drone_definitions WHERE id='drone-2'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(drone2, 1, "new legacy row created during downgrade must migrate on re-upgrade");
+
+        // "drone-1" did NOT come back (sentinel from first copy still present).
+        let drone1: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_drone_definitions WHERE id='drone-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(drone1, 0, "previously-deleted drone must stay deleted across roundtrip");
+    }
+
+    #[test]
+    fn test_forge_v10_skips_orphan_runs_under_foreign_keys_on() {
+        // codex P2 round 3 on PR #912: PRAGMA foreign_keys=ON is set
+        // by wstore.rs before migrations run. A user who deletes a
+        // migrated drone, downgrades, runs the still-present legacy
+        // workflow, and re-upgrades would produce a new legacy run
+        // whose workflow_id points at a drone the sentinel prevents
+        // from re-appearing. Without the parent-exists filter on the
+        // run copy, the INSERT INTO db_drone_runs fails FK and rolls
+        // back the entire migration transaction — blocking startup.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+
+        // First boot at v10: copy a drone + its run.
+        run_forge_migrations(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO db_workflow_definitions
+                (id, name, description, graph, viewport, created_at, updated_at)
+             VALUES ('d1', 'demo', '', '{}', '{}', 100, 100);
+
+             INSERT INTO db_workflow_runs
+                (id, workflow_id, status, started_at, ended_at,
+                 block_states, output, error)
+             VALUES ('r1', 'd1', 'done', 100, 200, '{}', '', '');",
+        )
+        .unwrap();
+        run_forge_v10_migrations(&conn).unwrap();
+
+        // User deletes the drone via the UI — the run cascade-deletes
+        // (FK ON DELETE CASCADE on db_drone_runs).
+        conn.execute("DELETE FROM db_drone_definitions WHERE id='d1'", [])
+            .unwrap();
+
+        // User downgrades, runs legacy workflow d1 — appears as new
+        // run row in the legacy table.
+        conn.execute_batch(
+            "INSERT INTO db_workflow_runs
+                (id, workflow_id, status, started_at, ended_at,
+                 block_states, output, error)
+             VALUES ('r2', 'd1', 'done', 300, 400, '{}', '', '');",
+        )
+        .unwrap();
+
+        // Re-upgrade: v10 must NOT fail. Parent d1 is intentionally
+        // gone from drone tables, so r2 is filtered out.
+        run_forge_v10_migrations(&conn)
+            .expect("v10 must not error when legacy runs have no drone parent");
+
+        // Drone tables: empty (d1 deleted, r1 cascade-deleted, r2 skipped).
+        let drone_defs: i64 = conn
+            .query_row("SELECT count(*) FROM db_drone_definitions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(drone_defs, 0, "deleted drone must stay deleted");
+        let drone_runs: i64 = conn
+            .query_row("SELECT count(*) FROM db_drone_runs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(drone_runs, 0, "orphan run must NOT be copied (no parent)");
+
+        // r2 is NOT marked in the sentinel — unmarked so a future
+        // launch can re-evaluate cheaply if the parent ever reappears.
+        let r2_sentinel: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_v10_migrated_legacy_runs WHERE legacy_id='r2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(r2_sentinel, 0, "orphan run sentinel must NOT be set");
     }
 }

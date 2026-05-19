@@ -5,7 +5,7 @@
 // and the InspectorPanel field schema. One source of truth shared by
 // all node components and the validators.
 
-import type { BlockKind } from "./workflows-types";
+import type { BlockKind } from "./drone-types";
 
 export interface BlockHandleSpec {
     /** xyflow handle id; "in" / "out" by convention. */
@@ -33,7 +33,7 @@ export const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
     variables: {
         kind: "variables",
         label: "Variables",
-        description: "Declare workflow-scope variables. Read via {{var.name}}.",
+        description: "Declare drone-scope variables. Read via {{var.name}}.",
         color: "#a855f7",
         icon: "font-awesome-flag",
         defaultData: {
@@ -95,7 +95,7 @@ export const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
     response: {
         kind: "response",
         label: "Response",
-        description: "Terminal output. Exactly one per workflow.",
+        description: "Terminal output. Exactly one per drone.",
         color: "#ef4444",
         icon: "flag-checkered",
         defaultData: {

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Unified agent types shared between the agent pane (interactive)
-//! and the workflow Agent block (headless). See
+//! and the drone Agent block (headless). See
 //! `docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md` §3 for the
 //! full design rationale.
 //!
@@ -41,7 +41,7 @@ pub struct AgentRef {
 
 /// What the agent should do, plus the variables for `{{ }}` resolution
 /// inside `prompt`. The agent pane uses `prompt=<user-typed-text>`
-/// with an empty `context`. The workflow Agent block uses
+/// with an empty `context`. The drone Agent block uses
 /// `prompt=<block.data.task>` resolved against `scope.outputs +
 /// scope.vars`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,7 +59,7 @@ pub struct AgentTask {
 }
 
 /// Discriminated streaming event. Same union for both the agent
-/// pane (renders into the UI) and the workflow Agent block
+/// pane (renders into the UI) and the drone Agent block
 /// (accumulates until `Done`, returns `AgentRunResult`).
 ///
 /// Provider-specific extension goes through a `Custom` variant
@@ -69,7 +69,7 @@ pub struct AgentTask {
 #[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
 pub enum AgentEvent {
     /// Streaming text chunk from the assistant. Agent pane appends
-    /// to the visible transcript; workflow Agent block buffers
+    /// to the visible transcript; drone Agent block buffers
     /// until `Done`.
     AssistantText {
         delta: String,
@@ -95,7 +95,7 @@ pub enum AgentEvent {
         tokens: TokenCounts,
     },
     /// Run completed successfully. `response` is the final assistant
-    /// message text (the workflow Agent block's primary output).
+    /// message text (the drone Agent block's primary output).
     /// `transcript` is the full ordered turn list for audit / replay.
     Done {
         response: String,
@@ -130,7 +130,7 @@ pub struct AgentTurn {
 }
 
 /// Final structured result of a complete agent run — the value the
-/// workflow Agent block returns to downstream blocks. The agent
+/// drone Agent block returns to downstream blocks. The agent
 /// pane discards this (it has already rendered the stream) but
 /// constructs the same struct for the audit log.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -323,26 +323,26 @@ declare global {
         updated_at: number;
     };
 
-    /** Workflows pane (issue #753 Phase 1). Mirrors the Rust types in
-     *  agentmux-srv/src/workflows/types.rs. */
-    type WorkflowDefinition = {
+    /** Drone pane (issue #753 Phase 1). Mirrors the Rust types in
+     *  agentmux-srv/src/drone/types.rs. */
+    type DroneDefinition = {
         id: string;
         name: string;
         description: string;
-        graph: { nodes: WorkflowFlowNode[]; edges: WorkflowFlowEdge[] };
+        graph: { nodes: DroneFlowNode[]; edges: DroneFlowEdge[] };
         viewport: { x: number; y: number; zoom: number };
         created_at: number;
         updated_at: number;
     };
 
-    type WorkflowFlowNode = {
+    type DroneFlowNode = {
         id: string;
         position: { x: number; y: number };
         data: Record<string, unknown> & { kind: string };
         type?: string;
     };
 
-    type WorkflowFlowEdge = {
+    type DroneFlowEdge = {
         id: string;
         source: string;
         target: string;
@@ -350,18 +350,18 @@ declare global {
         targetHandle?: string;
     };
 
-    type WorkflowRun = {
+    type DroneRun = {
         id: string;
-        workflow_id: string;
+        drone_id: string;
         status: string;
         started_at: number;
         ended_at: number;
-        block_states: Record<string, WorkflowBlockState>;
+        block_states: Record<string, DroneBlockState>;
         output: string;
         error: string;
     };
 
-    type WorkflowBlockState = {
+    type DroneBlockState = {
         status: "pending" | "running" | "done" | "error" | "skipped";
         output?: unknown;
         error?: string;
@@ -404,14 +404,14 @@ declare global {
     };
 
     // ────────────────────────────────────────────────────────────────
-    // Unified agent types (Workflows Phase 1.5, see
+    // Unified agent types (Drone Phase 1.5, see
     // docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md). Shared
-    // between the agent pane and the workflow Agent block. Mirror
+    // between the agent pane and the drone Agent block. Mirror
     // of agentmux-srv/src/agents/types.rs — camelCase via serde
     // rename_all so the field shapes match without translation.
     // ────────────────────────────────────────────────────────────────
 
-    /** Identifies "which agent" — same shape for launch modal + workflow Agent block. */
+    /** Identifies "which agent" — same shape for launch modal + drone Agent block. */
     type AgentRef = {
         identityId?: string;
         memoryId?: string;

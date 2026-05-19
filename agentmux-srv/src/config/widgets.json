@@ -78,15 +78,15 @@
             }
         }
     },
-    "defwidget@workflows": {
+    "defwidget@drone": {
         "display:order": 9,
         "icon": "diagram-project",
         "color": "#06b6d4",
-        "label": "workflows",
-        "description": "Visual DAG-of-blocks workflow engine (Sim-modeled, issue #753)",
+        "label": "drone",
+        "description": "Visual DAG-of-blocks drone engine (Sim-modeled, issue #753)",
         "blockdef": {
             "meta": {
-                "view": "workflows"
+                "view": "drone"
             }
         }
     },

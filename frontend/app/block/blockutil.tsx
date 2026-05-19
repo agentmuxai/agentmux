@@ -24,7 +24,7 @@ export function blockViewToIcon(view: string): string {
     if (view == "swarm") {
         return "diagram-project";
     }
-    if (view == "workflows") {
+    if (view == "drone") {
         return "diagram-project";
     }
     return "square";
@@ -46,8 +46,8 @@ export function blockViewToName(view: string): string {
     if (view == "swarm") {
         return "Swarm";
     }
-    if (view == "workflows") {
-        return "Workflows";
+    if (view == "drone") {
+        return "Drone";
     }
     return view;
 }

@@ -13,14 +13,14 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 
 use super::blocks;
-use crate::workflows::data_flow::ExecutionScope;
-use crate::workflows::types::{BlockKind, BlockState, FlowEdge, FlowNode, WorkflowGraph};
+use crate::drone::data_flow::ExecutionScope;
+use crate::drone::types::{BlockKind, BlockState, FlowEdge, FlowNode, DroneGraph};
 
 /// Streaming events emitted to the frontend during a run.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RunEvent {
-    RunStarted { run_id: String, workflow_id: String },
+    RunStarted { run_id: String, drone_id: String },
     BlockStarted { run_id: String, block_id: String },
     BlockDone {
         run_id: String,
@@ -45,12 +45,12 @@ pub struct RunHandle {
     pub final_states: Arc<tokio::sync::Mutex<HashMap<String, BlockState>>>,
 }
 
-/// Run the workflow end-to-end. Returns a handle whose `events` channel
+/// Run the drone end-to-end. Returns a handle whose `events` channel
 /// surfaces per-block lifecycle, and a `final_states` mutex callers can
 /// snapshot for the run-history record.
-pub async fn run_workflow(
-    workflow_id: String,
-    graph: WorkflowGraph,
+pub async fn run_drone(
+    drone_id: String,
+    graph: DroneGraph,
 ) -> Result<RunHandle, String> {
     let run_id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = mpsc::unbounded_channel();
@@ -58,13 +58,13 @@ pub async fn run_workflow(
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
     let states_for_task = final_states.clone();
-    let workflow_id_for_evt = workflow_id.clone();
+    let drone_id_for_evt = drone_id.clone();
     let run_id_for_task = run_id.clone();
     let tx_for_task = tx.clone();
     tokio::spawn(async move {
         let _ = tx_for_task.send(RunEvent::RunStarted {
             run_id: run_id_for_task.clone(),
-            workflow_id: workflow_id_for_evt,
+            drone_id: drone_id_for_evt,
         });
         match execute(&run_id_for_task, &graph, &tx_for_task, &states_for_task).await {
             Ok(output) => {
@@ -91,12 +91,12 @@ pub async fn run_workflow(
 
 async fn execute(
     run_id: &str,
-    graph: &WorkflowGraph,
+    graph: &DroneGraph,
     tx: &mpsc::UnboundedSender<RunEvent>,
     final_states: &Arc<tokio::sync::Mutex<HashMap<String, BlockState>>>,
 ) -> Result<Value, String> {
     if graph.nodes.is_empty() {
-        return Err("workflow has no blocks".to_string());
+        return Err("drone has no blocks".to_string());
     }
 
     let layers = topological_layers(graph)?;
@@ -244,7 +244,7 @@ fn now_ms() -> i64 {
 /// Returns the layered topological order of the graph. Each layer is
 /// the set of blocks whose dependencies are already satisfied —
 /// independent branches run together.
-pub fn topological_layers(graph: &WorkflowGraph) -> Result<Vec<Vec<String>>, String> {
+pub fn topological_layers(graph: &DroneGraph) -> Result<Vec<Vec<String>>, String> {
     let mut indegree: HashMap<String, usize> = HashMap::new();
     let mut outedges: HashMap<String, Vec<String>> = HashMap::new();
     let known: HashSet<String> = graph.nodes.iter().map(|n| n.id.clone()).collect();
@@ -299,7 +299,7 @@ pub fn topological_layers(graph: &WorkflowGraph) -> Result<Vec<Vec<String>>, Str
 
     let scheduled: usize = layers.iter().map(|l| l.len()).sum();
     if scheduled != graph.nodes.len() {
-        return Err("workflow contains a cycle".to_string());
+        return Err("drone contains a cycle".to_string());
     }
     Ok(layers)
 }
@@ -326,7 +326,7 @@ fn block_kind_of(node: &FlowNode) -> Result<BlockKind, String> {
 /// processed (run or skipped) by the time we evaluate a target here.
 fn should_skip(
     node_id: &str,
-    graph: &WorkflowGraph,
+    graph: &DroneGraph,
     nodes_by_id: &HashMap<String, &FlowNode>,
     scope: &ExecutionScope,
     skipped: &HashSet<String>,
@@ -387,7 +387,7 @@ fn edge_is_active(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workflows::types::{FlowEdge, FlowNode, NodePosition};
+    use crate::drone::types::{FlowEdge, FlowNode, NodePosition};
     use serde_json::json;
 
     fn n(id: &str, kind: &str) -> FlowNode {
@@ -412,7 +412,7 @@ mod tests {
     #[test]
     fn topo_orders_diamond() {
         // a → b, a → c, b → d, c → d
-        let g = WorkflowGraph {
+        let g = DroneGraph {
             nodes: vec![n("a", "variables"), n("b", "api"), n("c", "api"), n("d", "response")],
             edges: vec![
                 e("e1", "a", "b"),
@@ -430,7 +430,7 @@ mod tests {
 
     #[test]
     fn topo_rejects_cycle() {
-        let g = WorkflowGraph {
+        let g = DroneGraph {
             nodes: vec![n("a", "variables"), n("b", "api")],
             edges: vec![e("e1", "a", "b"), e("e2", "b", "a")],
         };
@@ -439,7 +439,7 @@ mod tests {
 
     #[test]
     fn topo_rejects_unknown_node_in_edge() {
-        let g = WorkflowGraph {
+        let g = DroneGraph {
             nodes: vec![n("a", "variables")],
             edges: vec![e("e1", "a", "ghost")],
         };
@@ -448,7 +448,7 @@ mod tests {
 
     #[test]
     fn topo_single_node_one_layer() {
-        let g = WorkflowGraph {
+        let g = DroneGraph {
             nodes: vec![n("a", "response")],
             edges: vec![],
         };
@@ -470,7 +470,7 @@ mod tests {
         }
     }
 
-    fn nodes_map<'a>(g: &'a WorkflowGraph) -> HashMap<String, &'a FlowNode> {
+    fn nodes_map<'a>(g: &'a DroneGraph) -> HashMap<String, &'a FlowNode> {
         g.nodes.iter().map(|n| (n.id.clone(), n)).collect()
     }
 
@@ -485,7 +485,7 @@ mod tests {
     #[test]
     fn skip_root_node_runs() {
         // No incoming edges — always runs regardless of state.
-        let g = WorkflowGraph {
+        let g = DroneGraph {
             nodes: vec![n("a", "variables")],
             edges: vec![],
         };
@@ -502,7 +502,7 @@ mod tests {
     #[test]
     fn skip_unconditional_chain_runs() {
         // a → b (a is plain Variables, not a condition).
-        let g = WorkflowGraph {
+        let g = DroneGraph {
             nodes: vec![n("a", "variables"), n("b", "api")],
             edges: vec![e("e1", "a", "b")],
         };
@@ -520,7 +520,7 @@ mod tests {
     fn skip_condition_false_branch_when_result_true() {
         // c (condition, true) → t via "true" handle (active)
         //                    → f via "false" handle (inactive)
-        let g = WorkflowGraph {
+        let g = DroneGraph {
             nodes: vec![n("c", "condition"), n("t", "api"), n("f", "api")],
             edges: vec![
                 eh("e1", "c", "t", Some("true")),
@@ -536,7 +536,7 @@ mod tests {
 
     #[test]
     fn skip_condition_true_branch_when_result_false() {
-        let g = WorkflowGraph {
+        let g = DroneGraph {
             nodes: vec![n("c", "condition"), n("t", "api"), n("f", "api")],
             edges: vec![
                 eh("e1", "c", "t", Some("true")),
@@ -555,7 +555,7 @@ mod tests {
         // c (condition, true) → f via "false" (skipped) → x
         // x's only incoming is from skipped `f`, so x must also skip
         // — guards against false-branch side effects past depth 1.
-        let g = WorkflowGraph {
+        let g = DroneGraph {
             nodes: vec![n("c", "condition"), n("f", "api"), n("x", "agent")],
             edges: vec![
                 eh("e1", "c", "f", Some("false")),
@@ -573,7 +573,7 @@ mod tests {
     fn join_runs_if_any_incoming_active() {
         // a (active) → d, b (skipped) → d
         // d has one active source — Phase 1 any-active semantics.
-        let g = WorkflowGraph {
+        let g = DroneGraph {
             nodes: vec![n("a", "variables"), n("b", "api"), n("d", "response")],
             edges: vec![e("e1", "a", "d"), e("e2", "b", "d")],
         };
@@ -594,7 +594,7 @@ mod tests {
         // Pre-spec edges off a Condition block lack a source_handle.
         // Don't accidentally prune them — Phase 2 will require the
         // handle once the canvas always sets it.
-        let g = WorkflowGraph {
+        let g = DroneGraph {
             nodes: vec![n("c", "condition"), n("x", "api")],
             edges: vec![eh("e1", "c", "x", None)],
         };
@@ -621,12 +621,12 @@ mod tests {
         });
         let mut resp_node = n("r1", "response");
         resp_node.data = json!({ "kind": "response", "template": "done" });
-        let g = WorkflowGraph {
+        let g = DroneGraph {
             nodes: vec![vars_node, resp_node],
             edges: vec![e("e1", "v1", "r1")],
         };
 
-        let handle = run_workflow("wf1".to_string(), g).await.unwrap();
+        let handle = run_drone("wf1".to_string(), g).await.unwrap();
         let mut rx = handle.events;
         while let Some(ev) = rx.recv().await {
             if matches!(ev, RunEvent::RunDone { .. } | RunEvent::RunFailed { .. }) {
@@ -652,7 +652,7 @@ mod tests {
     #[test]
     fn flow_edge_serializes_with_camelcase_handle_fields() {
         // Wire format must match xyflow + the frontend TS
-        // `WorkflowFlowEdge` shape (sourceHandle / targetHandle).
+        // `DroneFlowEdge` shape (sourceHandle / targetHandle).
         // Snake-case would silently drop the field on the frontend
         // roundtrip, leaving the executor's branch-pruning permissive.
         let edge = FlowEdge {
@@ -704,7 +704,7 @@ mod tests {
             "kind": "response",
             "template": "hit_false"
         });
-        let g = WorkflowGraph {
+        let g = DroneGraph {
             nodes: vec![vars_node, cond_node, t_resp, f_resp],
             edges: vec![
                 e("e1", "v1", "c1"),
@@ -713,7 +713,7 @@ mod tests {
             ],
         };
 
-        let handle = run_workflow("wf1".to_string(), g).await.unwrap();
+        let handle = run_drone("wf1".to_string(), g).await.unwrap();
         // Drain events to completion.
         let mut rx = handle.events;
         let mut got_done_ids: Vec<String> = Vec::new();
