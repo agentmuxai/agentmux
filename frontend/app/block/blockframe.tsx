@@ -22,6 +22,7 @@ import { IconButton, ToggleIconButton } from "@/element/iconbutton";
 import { BlockStatsBadge } from "@/element/blockstats";
 import { MagnifyIcon } from "@/element/magnify";
 import { MenuButton } from "@/element/menubutton";
+import { MicButton } from "@/app/element/MicButton";
 import { NodeModel } from "@/layout/index";
 import * as util from "@/util/util";
 import { computeBgStyleFromMeta } from "@/util/waveutil";
@@ -196,6 +197,12 @@ function EndIcons(props: {
                 <For each={endIconButtons()}>
                     {(button) => <IconButton decl={button} />}
                 </For>
+            </Show>
+            <Show when={props.viewModel?.voiceHandle}>
+                <MicButton
+                    blockId={props.nodeModel.blockId}
+                    handle={props.viewModel.voiceHandle!()}
+                />
             </Show>
             <Show when={ephemeral()} fallback={
                 <OptMagnifyButton
