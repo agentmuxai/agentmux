@@ -11,6 +11,8 @@
  * `docs/specs/SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md`.
  */
 
+import { update as authUpdate } from "@/app/view/agent/auth/auth-state";
+
 import type {
     LaunchFlowCommand,
     LaunchFlowEvent,
@@ -233,6 +235,26 @@ export function update(
             return {
                 state: { ...state, submit: { inFlight: false, error: command.error } },
                 events: [],
+            };
+        }
+
+        case "Auth": {
+            // Delegate to the auth-state reducer. State change → new
+            // outer state with the inner result merged in. Events get
+            // wrapped so the view's outer event sink can pattern-
+            // match on `{ type: "Auth", event }` to dispatch the
+            // side-effect (RPC fire, openExternal, etc.).
+            const inner = authUpdate(state.auth, command.cmd);
+            const wrappedEvents: LaunchFlowEvent[] = inner.events.map((event) => ({
+                type: "Auth" as const,
+                event,
+            }));
+            if (inner.state === state.auth) {
+                return { state, events: wrappedEvents };
+            }
+            return {
+                state: { ...state, auth: inner.state },
+                events: wrappedEvents,
             };
         }
 

@@ -2,20 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Type definitions for the launch-flow-state reducer (Stage 2a of
- * docs/specs/SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md).
+ * Type definitions for the launch-flow-state reducer.
+ * Spec: docs/specs/SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md.
  *
- * Owns the editable Launch-modal surface as a single state object:
+ * Owns the entire editable Launch-modal surface as a single state
+ * object:
  *   - `form` — name, runtime, image, identity/memory/continue selections
  *   - `identities` / `memories` — loaded bundle lists + load status
- *   - `bindings` — per-identity binding cache (push-updatable in
- *     stage 2c via a backend event subscription)
+ *   - `bindings` — per-identity binding cache (push-updated via
+ *     backend `identitybundlebindings:changed:<id>` events)
  *   - `submit` — submit-in-flight + last error
- *
- * Auth state is intentionally OUT of scope for stage 2a — it stays
- * in the existing `AuthFlowController` (lifted to AgentLaunchModal
- * in Stage 1). A later stage can fold auth into this store if the
- * cross-product simplifies further.
+ *   - `auth` — folded-in OAuth state machine (Stage 2d) so the
+ *     (auth × form-field-changed) cross-product is testable
+ *     against a single pure reducer. The `Auth` command wraps
+ *     `AuthCommand`s from auth-state.ts and delegates to that
+ *     module's `update()`.
  *
  * Pure reducer — `update(state, command) → { state, events }`. The
  * view mounts the store, dispatches commands, and runs emitted
@@ -24,6 +25,9 @@
  * Reference: `frontend/app/store/browser-pane-state/types.ts` is the
  * established slice shape this file mirrors.
  */
+
+import type { AuthCommand, AuthEvent, AuthState } from "@/app/view/agent/auth/auth-state";
+import { initialState as initialAuthState } from "@/app/view/agent/auth/auth-state";
 
 /** Editable Launch-modal form fields. Empty strings mean "no
  *  selection"; the view's submit predicate blocks Launch until the
@@ -92,6 +96,11 @@ export interface LaunchFlowState {
      *  fast Connect click doesn't slip through the race. */
     bindingsLoading: Record<string, boolean>;
     submit: SubmitStatus;
+    /** Folded-in OAuth state machine. The `Auth` command wraps an
+     *  `AuthCommand` from auth-state.ts; the reducer delegates to
+     *  that module's `update()` so this slice stays the single
+     *  source of truth (Stage 2d). */
+    auth: AuthState;
     /** Terminal flag — set by `Closed`. Post-close commands are no-ops. */
     closed: boolean;
 }
@@ -103,6 +112,7 @@ export const initialState = (): LaunchFlowState => ({
     bindings: {},
     bindingsLoading: {},
     submit: initialSubmit(),
+    auth: initialAuthState(),
     closed: false,
 });
 
@@ -146,6 +156,11 @@ export type LaunchFlowCommand =
     | { type: "SubmitClicked" }
     | { type: "SubmitSucceeded" }
     | { type: "SubmitFailed"; error: string }
+    /** Wrapped auth-state command. Reducer delegates to the auth
+     *  module's pure `update()`; any auth events the inner reducer
+     *  emits get wrapped as `AuthEvent` and surfaced on the outer
+     *  ReducerResult. */
+    | { type: "Auth"; cmd: AuthCommand }
     /** Terminal. */
     | { type: "Closed" };
 
@@ -155,7 +170,11 @@ export type LaunchFlowCommand =
 export type LaunchFlowEvent =
     /** Fetch bindings for an identity that just became selected and
      *  has no cached entry. */
-    | { type: "FetchBindings"; identityId: string };
+    | { type: "FetchBindings"; identityId: string }
+    /** Pass-through of an auth-state event so the view can run the
+     *  side-effect (RPC, openExternal, etc.). Wraps `AuthEvent` from
+     *  auth-state.ts. */
+    | { type: "Auth"; event: AuthEvent };
 
 export interface ReducerResult {
     state: LaunchFlowState;
