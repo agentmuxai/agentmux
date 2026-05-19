@@ -1,0 +1,24 @@
+.mic-button-wrap {
+    display: flex;
+    align-items: center;
+
+    &.mic-active .wave-iconbutton {
+        color: var(--color-primary, var(--accent-color));
+        position: relative;
+
+        &::after {
+            content: "";
+            position: absolute;
+            inset: -3px;
+            border-radius: 50%;
+            border: 1.5px solid var(--color-primary, var(--accent-color));
+            opacity: 0.6;
+            animation: mic-pulse 1.4s ease-in-out infinite;
+        }
+    }
+}
+
+@keyframes mic-pulse {
+    0%, 100% { transform: scale(1);   opacity: 0.6; }
+    50%       { transform: scale(1.3); opacity: 0;   }
+}
