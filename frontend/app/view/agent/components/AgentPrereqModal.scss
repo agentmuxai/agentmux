@@ -1,0 +1,90 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Modal-panel chrome lives in modal-v2.scss; this file only styles
+// the prereq list body. SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md.
+
+.agent-prereq-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    min-width: 440px;
+    max-width: 540px;
+}
+
+.agent-prereq-modal-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.agent-prereq-modal-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-2-5);
+    background: color-mix(in srgb, var(--warning-color, #e9b800) 6%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning-color, #e9b800) 30%, transparent);
+    border-radius: 6px;
+}
+
+.agent-prereq-modal-icon {
+    flex-shrink: 0;
+    color: var(--warning-color, #e9b800);
+    font-size: 18px;
+    line-height: 1;
+    padding-top: 2px;
+}
+
+.agent-prereq-modal-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+}
+
+.agent-prereq-modal-tool {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--main-text-color);
+}
+
+.agent-prereq-modal-tool-status {
+    font-weight: 400;
+    color: var(--secondary-text-color);
+}
+
+.agent-prereq-modal-link {
+    font-size: var(--text-sm);
+    color: var(--accent-color);
+    text-decoration: none;
+    cursor: pointer;
+    width: fit-content;
+
+    &:hover {
+        text-decoration: underline;
+    }
+}
+
+.agent-prereq-modal-link-arrow {
+    color: color-mix(in srgb, var(--accent-color) 70%, transparent);
+    font-size: 0.9em;
+}
+
+.agent-prereq-modal-hint {
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+    line-height: 1.4;
+    margin: 0;
+
+    code {
+        padding: 1px 4px;
+        background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+        border-radius: 3px;
+        font-size: 0.9em;
+    }
+}

@@ -25,6 +25,8 @@ import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type 
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { AgentLaunchModalPanel } from "@/app/view/agent/components/AgentLaunchModal";
 import { AgentInstallModalPanel } from "@/app/view/agent/components/AgentInstallModal";
+import { AgentPrereqModalPanel } from "@/app/view/agent/components/AgentPrereqModal";
+import "@/app/view/agent/components/AgentPrereqModal.scss";
 
 import { TabModalContext, type TabModalApi, type TabModalRequest } from "./tab-modal";
 import "./tab-modal.scss";
@@ -238,6 +240,22 @@ function renderRequest(
                                 setSubmitting(false);
                                 throw e;
                             }
+                        }}
+                    />
+                ),
+            };
+        case "agent-prereqs":
+            return {
+                label: `Install required tools for ${req.agent.name}`,
+                panel: (
+                    <AgentPrereqModalPanel
+                        agent={req.agent}
+                        missing={req.missing}
+                        onRefresh={() => req.onRefresh()}
+                        onProceed={() => req.onProceed()}
+                        onCancel={() => {
+                            req.onCancel();
+                            api.close();
                         }}
                     />
                 ),

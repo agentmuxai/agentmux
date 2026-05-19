@@ -19,7 +19,10 @@ import { createContext, useContext, type Accessor } from "solid-js";
 // Discriminated union so the layer can dispatch on `kind`. New tab-modal
 // surfaces add a variant here and a render branch in TabModalLayer.
 
-export type TabModalRequest = LaunchAgentRequest | InstallAgentRequest;
+export type TabModalRequest =
+    | LaunchAgentRequest
+    | InstallAgentRequest
+    | AgentPrereqRequest;
 
 export interface LaunchAgentRequest {
     kind: "launch-agent";
@@ -66,6 +69,34 @@ export interface InstallAgentRequest {
      * flip and stranded users on a stale ribbon.
      */
     onInstalled: (continueToLaunch: boolean) => void;
+}
+
+/**
+ * Pre-launch system prerequisite check. Opened when one or more of
+ * the provider's `systemPrereqs` are missing from PATH (e.g. Claude
+ * Code requires `git` to start a session — anthropics/claude-code#29898).
+ * See docs/specs/SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md.
+ */
+export interface AgentPrereqRequest {
+    kind: "agent-prereqs";
+    agent: ForgeAgent;
+    originBlockId: string;
+    /** Missing prereqs to display. Each row is rendered with its
+     *  platform-appropriate install link. */
+    missing: Array<{
+        tool: string;
+        label: string;
+        installUrl: string;
+        installLinkText: string;
+    }>;
+    /** User clicked "Refresh" — caller re-probes and either closes
+     *  this modal (no missing) or replaces it with an updated list. */
+    onRefresh: () => void;
+    /** "Launch anyway" — proceed to install/launch despite the missing
+     *  tool. Useful when the tool is at a non-standard PATH. */
+    onProceed: () => void;
+    /** "Cancel" — close the modal, do not launch. */
+    onCancel: () => void;
 }
 
 // ── Context API ──────────────────────────────────────────────────────────────

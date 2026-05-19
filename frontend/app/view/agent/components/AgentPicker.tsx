@@ -15,6 +15,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { useTabModal } from "@/app/tab/tab-modal";
+import { getPlatform } from "@/util/platformutil";
 import type { AgentViewModel } from "../agent-model";
 import { getProvider } from "../providers";
 import { AgentCard } from "./AgentCard";
@@ -124,6 +125,32 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         tabModal.open(buildLaunchRequest(agent));
     };
 
+    // Extracted from the install branch of handleSelect so the
+    // prereq modal's "Launch anyway" path can route to install when
+    // needed. Same shape as the existing inline install request.
+    const buildInstallRequest = (agent: ForgeAgent) => ({
+        kind: "install-agent" as const,
+        agent,
+        originBlockId: props.model.blockId,
+        onInstalled: (continueToLaunch: boolean) => {
+            const canonical = getProvider(agent.provider)?.id ?? agent.provider;
+            setInstallState((s) => {
+                const next = { ...s };
+                for (const a of agents()) {
+                    if ((getProvider(a.provider)?.id ?? a.provider) === canonical) {
+                        next[a.id] = true;
+                    }
+                }
+                return next;
+            });
+            if (continueToLaunch) {
+                tabModal.replace(buildLaunchRequest(agent));
+            } else {
+                tabModal.close();
+            }
+        },
+    });
+
     // Clicking the card opens either the install or launch modal in
     // the tab-scoped layer, depending on whether the agent's CLI is
     // already installed in the per-version cache. Phase α of
@@ -135,6 +162,52 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // modals — the second mount replaces the first, and its
     // onCleanup fires `install.cancel` on the session the first one
     // had just kicked off.
+    // System-tool prereq probe + modal. Phase α of
+    // SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md. Caches per-tool
+    // probe results for the session (PATH doesn't change mid-session
+    // unless the user installs a new tool — `Refresh` clears).
+    const prereqCache = new Map<string, boolean>();
+    const platformKey = (): "windows" | "macos" | "linux" => {
+        // Read from the CEF host's authoritative `getPlatform()` IPC
+        // rather than the deprecated `window.navigator.platform` —
+        // reagent P2 on PR #908.
+        switch (getPlatform()) {
+            case "win32": return "windows";
+            case "darwin": return "macos";
+            default: return "linux";
+        }
+    };
+    const probeMissingPrereqs = async (agent: ForgeAgent) => {
+        const prov = getProvider(agent.provider);
+        const reqs = prov?.systemPrereqs ?? [];
+        if (reqs.length === 0) return [];
+        const uncached = reqs.filter((r) => !prereqCache.has(r.tool));
+        if (uncached.length > 0) {
+            try {
+                const r = await RpcApi.ResolvePrereqsCommand(TabRpcClient, {
+                    tools: uncached.map((u) => u.tool),
+                });
+                for (const result of r.results) {
+                    prereqCache.set(result.tool, result.found);
+                }
+            } catch {
+                // If the probe fails (e.g. backend not ready), treat
+                // all as found — don't block launch on probe failure.
+                for (const u of uncached) prereqCache.set(u.tool, true);
+            }
+        }
+        const platform = platformKey();
+        return reqs
+            .filter((r) => prereqCache.get(r.tool) === false)
+            .map((r) => ({
+                tool: r.tool,
+                label: r.label ?? r.tool,
+                installUrl: r.installUrls[platform],
+                installLinkText:
+                    r.installLinkText?.[platform] ?? `Install ${r.label ?? r.tool}`,
+            }));
+    };
+
     const pendingSelect = new Set<string>();
     const handleSelect = async (agent: ForgeAgent) => {
         if (pendingSelect.has(agent.id)) return;
@@ -156,6 +229,52 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     await checkInstalled(agent);
                     installed = installState()[agent.id];
                 }
+            }
+
+            // System-tool prereq check (e.g. Claude Code requires git
+            // — anthropics/claude-code#29898). If any are missing, open
+            // the prereq modal first; user can install + refresh or
+            // override via Launch anyway.
+            const missing = await probeMissingPrereqs(agent);
+            if (missing.length > 0) {
+                const proceedWithFlow = () => {
+                    if (installed === false) {
+                        tabModal.replace(buildInstallRequest(agent));
+                    } else {
+                        tabModal.replace(buildLaunchRequest(agent));
+                    }
+                };
+                // Recursive opener so the Refresh handler on every
+                // rendered modal (including the replacement after a
+                // failed re-probe) gets a working re-probe wired up.
+                // Reagent + codex P1/P2 on PR #908.
+                const openPrereqModal = (
+                    currentMissing: typeof missing,
+                    op: "open" | "replace",
+                ): void => {
+                    const refresh = async () => {
+                        for (const m of currentMissing) prereqCache.delete(m.tool);
+                        const fresh = await probeMissingPrereqs(agent);
+                        if (fresh.length === 0) {
+                            proceedWithFlow();
+                        } else {
+                            openPrereqModal(fresh, "replace");
+                        }
+                    };
+                    const req = {
+                        kind: "agent-prereqs" as const,
+                        agent,
+                        originBlockId: props.model.blockId,
+                        missing: currentMissing,
+                        onRefresh: () => void refresh(),
+                        onProceed: proceedWithFlow,
+                        onCancel: () => { /* layer closes */ },
+                    };
+                    if (op === "open") tabModal.open(req);
+                    else tabModal.replace(req);
+                };
+                openPrereqModal(missing, "open");
+                return;
             }
 
             if (installed === false) {

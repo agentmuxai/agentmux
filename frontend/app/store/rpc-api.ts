@@ -830,6 +830,18 @@ class RpcApiType {
         return client.rpcCall("install.check", data, opts);
     }
 
+    // command "resolve.prereqs" — probe the system PATH for each
+    // requested tool via where/which. Returns one PrereqResult per
+    // input tool preserving order. Path-only — never executes the
+    // tools. See SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md.
+    ResolvePrereqsCommand(
+        client: RpcClient,
+        data: { tools: string[] },
+        opts?: RpcOpts,
+    ): Promise<{ results: Array<{ tool: string; found: boolean; path: string | null }> }> {
+        return client.rpcCall("resolve.prereqs", data, opts);
+    }
+
     // command "auth.submitapikey"
     AuthSubmitApiKeyCommand(
         client: RpcClient,
