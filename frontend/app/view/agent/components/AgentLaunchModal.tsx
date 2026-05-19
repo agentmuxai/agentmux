@@ -101,16 +101,15 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         (memories() ?? []).some((m) => !m.is_blank),
     );
 
-    // Phase β/γ stubs — wired to real modals in follow-up PRs. For
-    // now, log + alert so the buttons are testable without backend
-    // changes. SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md.
+    // Phase β/γ stubs — only console.log so the click paths are
+    // observable in dev. The real handlers (which fire
+    // tabModal.replace) land in Phase β (identity) and Phase γ
+    // (memory). SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md.
     const handleNewIdentity = () => {
         console.log("[launch-modal] New identity clicked — modal Phase β");
-        // TODO Phase β: tabModal.replace({ kind: "new-identity", ... })
     };
     const handleNewMemory = () => {
         console.log("[launch-modal] New memory clicked — modal Phase γ");
-        // TODO Phase γ: tabModal.replace({ kind: "new-memory", ... })
     };
 
     // v8 — "Continue agent" dropdown. Filters to instances of the
