@@ -304,7 +304,6 @@ export class TermWrap {
         } else if (msg.fileop == "append") {
             const decodedData = base64ToArray(msg.data64);
             if (this.loaded) {
-                if (decodedData.length <= 32) markStart('term-echo-render');
                 this.scheduleRafWrite(decodedData);
             } else {
                 this.heldData.push(decodedData);
@@ -348,6 +347,7 @@ export class TermWrap {
         // guard eliminates the extra RAF cycle (≤16ms) that was stalling echo rendering
         // while a large PTY write was in progress, causing the sporadic keypress delays.
         if (data.length <= TermWrap.RAF_BYPASS_THRESHOLD && this.rafBuffer.length === 0) {
+            markStart('term-echo-render');
             this.doTerminalWrite(data, null);
             return;
         }
@@ -389,7 +389,7 @@ export class TermWrap {
     }
 
     doTerminalWrite(data: string | Uint8Array, setPtyOffset?: number): Promise<void> {
-        const isSmall = typeof data === 'string' ? data.length <= 32 : data.length <= 32;
+        const isSmall = data.length <= 32;
         let resolve: () => void = null;
         let prtn = new Promise<void>((presolve, _) => {
             resolve = presolve;
