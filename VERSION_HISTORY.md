@@ -1,5 +1,16 @@
 # AgentMux Version History
 
+## 0.35.0 — 2026-05-19
+
+- feat(browser-pane): HTTP Basic/Digest auth prompt (Phase α)
+- feat(agent-picker): pre-launch system prereq check (git for Claude Code/OpenClaw)
+- feat(launch-modal): Profile section + New buttons (Phase α)
+- feat(launch-modal): New Identity bundle modal (Phase β)
+- feat(launch-modal): New Memory bundle modal (Phase γ)
+- refactor(drone): rename Workflows feature to Drone (SPEC_RENAME_WORKFLOWS_TO_DRONE_2026_05_18)
+- docs(drone): annotate pre-rename specs with rename-pointer headers
+
+
 ## 0.34.0 — 2026-05-18
 
 - devx(phase 2): adopt changesets workflow (RFC #857)

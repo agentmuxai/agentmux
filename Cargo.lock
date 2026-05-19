@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux-bashwrap"
-version = "0.34.0"
+version = "0.35.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -28,7 +28,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-cef"
-version = "0.34.0"
+version = "0.35.0"
 dependencies = [
  "agentmux-common",
  "axum 0.8.9",
@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-common"
-version = "0.34.0"
+version = "0.35.0"
 dependencies = [
  "dirs",
  "serde",
@@ -71,7 +71,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.34.0"
+version = "0.35.0"
 dependencies = [
  "agentmux-common",
  "chrono",
@@ -92,7 +92,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-srv"
-version = "0.34.0"
+version = "0.35.0"
 dependencies = [
  "agentmux-common",
  "async-stream",
@@ -1572,9 +1572,9 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "libbz2-rs-sys"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8fc329e1457d97a9d58a4e2ca49e3be572431a7e096008efc2e3a3c19d428f4"
+checksum = "34b357333733e8260735ba5894eb928c02ecc69c78715f01a8019e7fa7f2db4c"
 
 [[package]]
 name = "libc"
@@ -1899,9 +1899,9 @@ dependencies = [
 
 [[package]]
 name = "num-conv"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6673768db2d862beb9b39a78fdcb1a69439615d5794a1be50caa9bc92c81967"
+checksum = "521739c6d2bac4aa25192232afe6841231376b2b26d4d9fae5ecf8ca5772e441"
 
 [[package]]
 name = "num-derive"
@@ -2884,9 +2884,9 @@ dependencies = [
 
 [[package]]
 name = "tar"
-version = "0.4.45"
+version = "0.4.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22692a6476a21fa75fdfc11d452fda482af402c008cdbaf3476414e122040973"
+checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
 dependencies = [
  "filetime",
  "libc",
@@ -3101,9 +3101,9 @@ dependencies = [
 
 [[package]]
 name = "tower-http"
-version = "0.6.10"
+version = "0.6.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68d6fdd9f81c2819c9a8b0e0cd91660e7746a8e6ea2ba7c6b2b057985f6bcb51"
+checksum = "4cfcf7e2740e6fc6d4d688b4ef00650406bb94adf4731e43c096c3a19fe40840"
 dependencies = [
  "bitflags 2.11.1",
  "bytes",
