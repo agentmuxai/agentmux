@@ -6,6 +6,7 @@
 import type { Placement } from "@floating-ui/dom";
 import type { Accessor, JSX } from "solid-js";
 import type { SignalAtom } from "@/util/util";
+import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import type * as rxjs from "rxjs";
 
 declare global {
@@ -455,6 +456,10 @@ declare global {
         giveFocus?: () => boolean;
         keyDownHandler?: (e: WaveKeyboardEvent) => boolean;
         dispose?: () => void;
+        /** Views that support voice input expose a handle accessor. Called
+         *  by BlockFrame_Header (to render the mic button) and by the
+         *  Ctrl+Shift+V global hotkey to retarget the voice session. */
+        voiceHandle?: () => PaneVoiceHandle;
     }
 
     type UpdaterStatus = "up-to-date" | "checking" | "available" | "downloading" | "ready" | "error" | "installing";

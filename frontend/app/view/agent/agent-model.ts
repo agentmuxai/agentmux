@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
+import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, getApi, WOS } from "@/app/store/global";
@@ -36,6 +37,17 @@ export class AgentViewModel implements ViewModel {
     _setOverlayTab: ((tab: OverlayTab | null) => void) | null = null;
     // Last-used overlay tab — gear re-opens to whichever tab was active last.
     _lastOverlayTab: OverlayTab = "forge";
+
+    // Voice-input target ref. AgentFooter populates this on mount with a
+    // textarea-backed handle (and clears it on unmount). The exposed
+    // `voiceHandle` accessor below delegates to whatever's current —
+    // before AgentFooter mounts (or after it unmounts) it's a no-op.
+    voiceTargetRef: { current: PaneVoiceHandle | null } = { current: null };
+
+    voiceHandle = (): PaneVoiceHandle => ({
+        appendFinal: (text: string) => this.voiceTargetRef.current?.appendFinal(text),
+        setInterim: (text: string) => this.voiceTargetRef.current?.setInterim(text),
+    });
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;

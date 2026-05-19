@@ -5,7 +5,9 @@
  * AgentFooter - Minimal Claude Code-style input
  */
 
-import { Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
+import type { AgentViewModel } from "../agent-model";
 import type { SlashCommand } from "../commands/types";
 import type { SessionStats, TurnTokens } from "../types";
 import { SlashAutocomplete } from "./SlashAutocomplete";
@@ -208,6 +210,13 @@ interface AgentFooterProps {
      * If absent, autocomplete is disabled.
      */
     getCompletions?: (prefix: string) => SlashCommand[];
+    /**
+     * AgentViewModel — used to register a textarea-backed
+     * PaneVoiceHandle so the frame-header mic button can write
+     * transcripts into the composer. Optional so tests / older
+     * callers that haven't been updated still type-check.
+     */
+    viewModel?: AgentViewModel;
 }
 
 export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
@@ -287,6 +296,61 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             cb();
         });
     };
+
+    // ── Voice input handle ───────────────────────────────────────────
+    // Registers a textarea-backed PaneVoiceHandle on the AgentViewModel
+    // so the frame-header mic button can write voice transcripts into
+    // the composer. `baseValue` is the prefix the user typed (or the
+    // last appended-final state) — interim updates render *after* it
+    // without committing, final updates fold in and become the new
+    // base. Cleared on unmount.
+    onMount(() => {
+        const vm = props.viewModel;
+        if (!vm) return;
+        // Two pieces of state interleave with the user's manual typing:
+        //   * baseValue — the textarea content as of the last user-or-
+        //     final-voice event. Interim updates render AFTER it but
+        //     don't promote into it.
+        //   * lastVoiceWrite — the exact string we last wrote to the
+        //     textarea. If ta.value diverges from this between events,
+        //     the user typed something manually and we re-snapshot
+        //     baseValue from ta.value so the next voice event preserves
+        //     what they added.
+        //
+        // Earlier guard (`!startsWith(baseValue)`) never fired for the
+        // common case where the user APPENDED to existing content —
+        // their additions were silently clobbered by the next voice
+        // append. (reagent P1 on PR #930.)
+        let baseValue = textareaRef?.value ?? "";
+        let lastVoiceWrite = baseValue;
+        const handle: PaneVoiceHandle = {
+            appendFinal: (text) => {
+                const ta = textareaRef;
+                if (!ta) return;
+                if (ta.value !== lastVoiceWrite) baseValue = ta.value;
+                const next = baseValue + text + " ";
+                ta.value = next;
+                ta.dispatchEvent(new Event("input", { bubbles: true }));
+                baseValue = next;
+                lastVoiceWrite = next;
+            },
+            setInterim: (text) => {
+                const ta = textareaRef;
+                if (!ta) return;
+                if (ta.value !== lastVoiceWrite) baseValue = ta.value;
+                const next = baseValue + text;
+                ta.value = next;
+                ta.dispatchEvent(new Event("input", { bubbles: true }));
+                lastVoiceWrite = next;
+            },
+        };
+        vm.voiceTargetRef.current = handle;
+        onCleanup(() => {
+            if (vm.voiceTargetRef.current === handle) {
+                vm.voiceTargetRef.current = null;
+            }
+        });
+    });
 
     const handleSend = () => {
         if (!textareaRef) return;
