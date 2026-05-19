@@ -85,6 +85,34 @@ describe("launch-flow-state reducer", () => {
             s = dispatch(s, { type: "Opened" }).state;
             expect(s.closed).toBe(false);
         });
+
+        it("emits FetchBindings for an uncached preselected identityId", () => {
+            const r = update(initialState(), {
+                type: "Opened",
+                initial: { identityId: "preselect-a" },
+            });
+            expect(r.events).toEqual([
+                { type: "FetchBindings", identityId: "preselect-a" },
+            ]);
+        });
+
+        it("does NOT emit FetchBindings when preselected identity already cached", () => {
+            let s = dispatch(initialState(), {
+                type: "BindingsLoaded",
+                identityId: "preselect-a",
+                bindings: [],
+            }).state;
+            const r = update(s, {
+                type: "Opened",
+                initial: { identityId: "preselect-a" },
+            });
+            expect(r.events).toEqual([]);
+        });
+
+        it("does NOT emit FetchBindings when initial identityId is empty", () => {
+            const r = update(initialState(), { type: "Opened", initial: { identityId: "" } });
+            expect(r.events).toEqual([]);
+        });
     });
 
     describe("form fields", () => {

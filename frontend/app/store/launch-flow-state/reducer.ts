@@ -38,7 +38,17 @@ export function update(
                 form: { ...initialForm(), ...command.initial },
                 closed: false,
             };
-            return { state: next, events: [] };
+            // If Opened carries a preselected identityId we haven't
+            // seen bindings for, emit a fetch — otherwise the cache
+            // stays empty and hasMatchingBinding keeps reading false
+            // for an already-bound bundle, holding Launch behind the
+            // Connect gate (codex P2 on PR #917).
+            const events: LaunchFlowEvent[] = [];
+            const id = next.form.identityId;
+            if (id !== "" && state.bindings[id] === undefined && !state.bindingsLoading[id]) {
+                events.push({ type: "FetchBindings", identityId: id });
+            }
+            return { state: next, events };
         }
 
         case "NameChanged": {
