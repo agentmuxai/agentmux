@@ -596,15 +596,20 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                     {/*
                      * Pre-launch OAuth panel (spec:
                      * SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md).
-                     * Shows the Connect CTA when the user has the
-                     * blank singleton picked. Non-blank bundles are
-                     * trusted (PR B-4 / D will tighten this with a
-                     * per-bundle binding lookup).
+                     * Shows the Connect CTA whenever the selected
+                     * identity can't supply creds for this provider —
+                     * blank singleton, openclaw, or a non-blank bundle
+                     * without a matching binding (e.g. "+ New" just
+                     * created an empty bundle). The panel uses
+                     * `hasMatchingBinding` to compute its own outcome
+                     * so non-blank-but-empty bundles don't shortcut
+                     * to `ready`.
                      */}
                     <Show when={authRequired()}>
                         <PreLaunchAuthPanel
                             provider={provider()}
                             identityId={identityId}
+                            hasMatchingBinding={bundleHasMatchingBinding}
                             onStateChange={onAuthStateChange}
                             onBundleCreated={onBundleCreated}
                             disabled={submitting()}
