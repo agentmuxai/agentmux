@@ -53,6 +53,13 @@ export const AgentNewIdentityModalPanel = (
                 updated_at: now,
             });
             props.onCreated(bundle.id, bundle.name);
+            // Reset on success too. In practice the caller unmounts
+            // this panel via tabModal.replace, so the next render
+            // never observes the reset value — but leaving the flag
+            // stuck at true is a fragile invariant (reagent P2 on
+            // PR #910): a future caller that fails to replace the
+            // modal would strand the inputs disabled.
+            setSubmitting(false);
         } catch (e) {
             setError((e as Error)?.message ?? String(e));
             setSubmitting(false);

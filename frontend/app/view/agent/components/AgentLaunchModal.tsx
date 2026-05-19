@@ -119,7 +119,10 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // "+ New ..." buttons delegate to picker-injected callbacks that
     // chain `tabModal.replace(newBundleRequest)`. The picker owns the
     // chain because it can rebuild the Launch request with
-    // preselectedIdentityId/preselectedMemoryId after creation.
+    // preselectedIdentityId/preselectedMemoryId after creation. A
+    // missing callback (Phase β ships Identity wiring only; Memory
+    // wiring lands in Phase γ) keeps the button visible but disabled
+    // with a "coming soon" hint — see reagent P2 on PR #910.
     const handleNewIdentity = () => props.onRequestNewIdentity?.();
     const handleNewMemory = () => props.onRequestNewMemory?.();
 
@@ -412,7 +415,16 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                         type="button"
                                         class="agent-launch-modal-bundle-empty-btn"
                                         onClick={handleNewIdentity}
-                                        disabled={submitting() || isContinue()}
+                                        disabled={
+                                            submitting() ||
+                                            isContinue() ||
+                                            !props.onRequestNewIdentity
+                                        }
+                                        title={
+                                            props.onRequestNewIdentity
+                                                ? undefined
+                                                : "Coming soon"
+                                        }
                                     >
                                         + New identity bundle...
                                     </button>
@@ -439,8 +451,16 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                     type="button"
                                     class="agent-launch-modal-bundle-new-btn"
                                     onClick={handleNewIdentity}
-                                    disabled={submitting() || isContinue()}
-                                    title="New identity bundle..."
+                                    disabled={
+                                        submitting() ||
+                                        isContinue() ||
+                                        !props.onRequestNewIdentity
+                                    }
+                                    title={
+                                        props.onRequestNewIdentity
+                                            ? "New identity bundle..."
+                                            : "Coming soon"
+                                    }
                                     aria-label="New identity bundle"
                                 >
                                     +
@@ -471,7 +491,16 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                         type="button"
                                         class="agent-launch-modal-bundle-empty-btn"
                                         onClick={handleNewMemory}
-                                        disabled={submitting() || isContinue()}
+                                        disabled={
+                                            submitting() ||
+                                            isContinue() ||
+                                            !props.onRequestNewMemory
+                                        }
+                                        title={
+                                            props.onRequestNewMemory
+                                                ? undefined
+                                                : "Coming soon"
+                                        }
                                     >
                                         + New memory bundle...
                                     </button>
@@ -498,8 +527,16 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                     type="button"
                                     class="agent-launch-modal-bundle-new-btn"
                                     onClick={handleNewMemory}
-                                    disabled={submitting() || isContinue()}
-                                    title="New memory bundle..."
+                                    disabled={
+                                        submitting() ||
+                                        isContinue() ||
+                                        !props.onRequestNewMemory
+                                    }
+                                    title={
+                                        props.onRequestNewMemory
+                                            ? "New memory bundle..."
+                                            : "Coming soon"
+                                    }
                                     aria-label="New memory bundle"
                                 >
                                     +
