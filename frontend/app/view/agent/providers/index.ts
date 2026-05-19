@@ -1,6 +1,37 @@
 // Copyright 2025, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * A system tool the provider's CLI needs at runtime — beyond Node
+ * itself, which is checked separately by `check_nodejs_available`.
+ * Examples: Claude Code calls `git` from inside session-start; the
+ * GitHub Copilot CLI wraps `gh`.
+ *
+ * Probed pre-launch via the `resolve_prereqs` RPC. Missing prereqs
+ * open the `AgentPrereqModal` with platform-aware install links.
+ * See docs/specs/SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md.
+ */
+export interface SystemPrereq {
+    /** Binary name to look up via `where` (Windows) / `which` (Unix). */
+    tool: string;
+    /** Display label in the banner. Defaults to `tool` if omitted. */
+    label?: string;
+    /** Per-platform official install URLs. Curated landing pages so
+     *  the link reads as intentional, not a generic Google search. */
+    installUrls: {
+        windows: string;
+        macos: string;
+        linux: string;
+    };
+    /** Anchor text shown for the install link, per platform. Falls
+     *  back to "Install {label}" when omitted. */
+    installLinkText?: {
+        windows?: string;
+        macos?: string;
+        linux?: string;
+    };
+}
+
 export interface ProviderDefinition {
     id: string;
     displayName: string;
@@ -44,7 +75,29 @@ export interface ProviderDefinition {
     // `openclaw models auth login --provider <id>`. The host's
     // `run_cli_login` reads this flag and chooses the PTY branch.
     requiresLoginTty?: boolean;
+    /** System tools the provider's CLI needs at runtime. Probed before
+     *  the user launches the agent so we can show install links
+     *  instead of letting the CLI fail with cryptic stderr. */
+    systemPrereqs?: SystemPrereq[];
 }
+
+/** Shared git prereq — claude-code calls `git` from session-start
+ *  (issue anthropics/claude-code#29898), and openclaw uses git for
+ *  project context. Curated install URLs per platform. */
+const GIT_PREREQ: SystemPrereq = {
+    tool: "git",
+    label: "Git",
+    installUrls: {
+        windows: "https://git-scm.com/download/win",
+        macos: "https://git-scm.com/download/mac",
+        linux: "https://git-scm.com/download/linux",
+    },
+    installLinkText: {
+        windows: "Install Git for Windows",
+        macos: "Install Git for macOS",
+        linux: "Install Git",
+    },
+};
 
 export const PROVIDERS: Record<string, ProviderDefinition> = {
     claude: {
@@ -72,6 +125,10 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "session_id",
         controllerType: "subprocess",
         persistentLaunchArgs: ["--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"],
+        // Claude Code calls `git` at session-start (issue
+        // anthropics/claude-code#29898). Without git the CLI fails
+        // with `Error: Git is required but was not found.`.
+        systemPrereqs: [GIT_PREREQ],
     },
     codex: {
         id: "codex",
@@ -180,6 +237,9 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "sessionId",
         controllerType: "acp",
         requiresLoginTty: true,
+        // Same git dependency as Claude Code — OpenClaw uses git for
+        // project-context features when invoking the Codex harness.
+        systemPrereqs: [GIT_PREREQ],
     },
     // Kimi Code CLI — Moonshot AI's coding agent.
     // Python-based CLI (not npm). Supports stream-json output and OpenAI-style tool calls.

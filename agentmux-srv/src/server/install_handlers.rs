@@ -35,6 +35,7 @@ use crate::server::AppState;
 pub const COMMAND_INSTALL_START: &str = "install.start";
 pub const COMMAND_INSTALL_CANCEL: &str = "install.cancel";
 pub const COMMAND_INSTALL_CHECK: &str = "install.check";
+pub const COMMAND_RESOLVE_PREREQS: &str = "resolve.prereqs";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -144,6 +145,30 @@ fn provider_install_dir(provider_id: &str) -> Option<std::path::PathBuf> {
 
 /// Returns the path to the installed CLI binary if present in the
 /// per-version cache, else None. Used by `install.check`.
+/// Locate a system tool (e.g. `git`, `gh`) on PATH. Uses the platform
+/// equivalent of `which` and returns the resolved absolute path. None
+/// when the tool isn't on PATH or the lookup itself failed.
+///
+/// Used by `resolve.prereqs` to pre-launch-check whether a provider's
+/// system dependencies are installed. The probe is path-only — never
+/// executes the tool — so it's safe to call without side effects.
+/// See SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md.
+async fn resolve_tool_path(tool: &str) -> Option<String> {
+    let cmd = if cfg!(windows) { "where" } else { "which" };
+    let output = tokio::process::Command::new(cmd)
+        .arg(tool)
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    // `where` on Windows can return multiple lines; first is canonical.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout.lines().next().map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 fn resolve_installed_bin(provider_id: &str, cli_command: &str) -> Option<std::path::PathBuf> {
     let dir = provider_install_dir(provider_id)?;
     let bin_dir = dir.join("node_modules").join(".bin");
@@ -244,6 +269,35 @@ pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 let installed = resolve_installed_bin(&req.provider_id, &req.cli_command).is_some();
                 Ok(Some(json!({ "installed": installed })))
+            })
+        }),
+    );
+
+    engine.register_handler(
+        COMMAND_RESOLVE_PREREQS,
+        Box::new(move |data, _ctx| {
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Req { tools: Vec<String> }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("resolve.prereqs: {e}"))?;
+                let mut results = Vec::with_capacity(req.tools.len());
+                for tool in &req.tools {
+                    if !is_safe_cli_command(tool) {
+                        return Err(format!(
+                            "resolve.prereqs: invalid tool name {:?}",
+                            tool
+                        ));
+                    }
+                    let path = resolve_tool_path(tool).await;
+                    results.push(json!({
+                        "tool": tool,
+                        "found": path.is_some(),
+                        "path": path,
+                    }));
+                }
+                Ok(Some(json!({ "results": results })))
             })
         }),
     );
