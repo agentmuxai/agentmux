@@ -13,7 +13,7 @@
  * panel only. See docs/specs/launch-modal-rearchitecture-2026-05-01.md.
  */
 
-import { createMemo, createResource, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createResource, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -144,6 +144,25 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         (memories() ?? []).some((m) => !m.is_blank),
     );
 
+    // Auto-pick the first available bundle when nothing is selected
+    // yet — saves a click for users with existing bundles. Per spec
+    // §3.1.2: "user has 1+ identity, none chosen → first non-blank
+    // bundle is the default". Only auto-picks if the user hasn't
+    // explicitly picked "" (which they can't from the dropdown — the
+    // placeholder option is `disabled`); identifies the initial-mount
+    // case by current identityId being empty AND a bundle being
+    // available.
+    createEffect(() => {
+        if (identityId()) return;
+        const firstReal = (identities() ?? []).find((b) => !b.is_blank);
+        if (firstReal) setIdentityId(firstReal.id);
+    });
+    createEffect(() => {
+        if (memoryId()) return;
+        const firstReal = (memories() ?? []).find((m) => !m.is_blank);
+        if (firstReal) setMemoryId(firstReal.id);
+    });
+
     // "+ New ..." buttons delegate to picker-injected callbacks that
     // chain `tabModal.replace(newBundleRequest)`. The picker owns the
     // chain because it can rebuild the Launch request with
@@ -186,6 +205,19 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         (namedAgents() ?? []).find((r) => r.instance_id === continueOfId()) ?? null,
     );
     const isContinue = () => continuedRow() != null;
+    // Per-bundle continuation locks. Only lock the selector when the
+    // continued row carries a real (non-empty / non-legacy-"blank")
+    // value for that bundle. Legacy rows with blank carryover leave
+    // the selector editable so the user can pick a replacement —
+    // without this, legacy continuations deadlock (codex P1 on #916).
+    const continueLocksIdentity = createMemo(() => {
+        const r = continuedRow();
+        return !!r && !!r.identity_id && r.identity_id !== "blank";
+    });
+    const continueLocksMemory = createMemo(() => {
+        const r = continuedRow();
+        return !!r && !!r.memory_id && r.memory_id !== "blank";
+    });
 
     const handleContinueSelect = (id: string) => {
         setContinueOfId(id);
@@ -506,8 +538,8 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                         <span class="agent-launch-modal-hint">
                             A Profile groups the agent's <strong>Identity</strong> (credentials
                             for Claude, Codex, GitHub, AWS, …) with its <strong>Memory</strong>
-                            (notes, instructions, project context). Blank uses whatever's
-                            already in your environment.
+                            (notes, instructions, project context). Both are required —
+                            pick existing bundles or create new ones below.
                         </span>
 
                         <div class="agent-launch-modal-bundle-row">
@@ -521,7 +553,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                         onClick={handleNewIdentity}
                                         disabled={
                                             submitting() ||
-                                            isContinue() ||
+                                            continueLocksIdentity() ||
                                             !props.onRequestNewIdentity
                                         }
                                         title={
@@ -538,7 +570,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                     class="agent-launch-modal-input"
                                     value={identityId()}
                                     onChange={(e) => setIdentityId(e.currentTarget.value)}
-                                    disabled={submitting() || isContinue()}
+                                    disabled={submitting() || continueLocksIdentity()}
                                     aria-label="Identity bundle"
                                 >
                                     <Show when={!identityId()}>
@@ -556,7 +588,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                     onClick={handleNewIdentity}
                                     disabled={
                                         submitting() ||
-                                        isContinue() ||
+                                        continueLocksIdentity() ||
                                         !props.onRequestNewIdentity
                                     }
                                     title={
@@ -596,7 +628,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                         onClick={handleNewMemory}
                                         disabled={
                                             submitting() ||
-                                            isContinue() ||
+                                            continueLocksMemory() ||
                                             !props.onRequestNewMemory
                                         }
                                         title={
@@ -613,7 +645,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                     class="agent-launch-modal-input"
                                     value={memoryId()}
                                     onChange={(e) => setMemoryId(e.currentTarget.value)}
-                                    disabled={submitting() || isContinue()}
+                                    disabled={submitting() || continueLocksMemory()}
                                     aria-label="Memory bundle"
                                 >
                                     <Show when={!memoryId()}>
@@ -631,7 +663,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                     onClick={handleNewMemory}
                                     disabled={
                                         submitting() ||
-                                        isContinue() ||
+                                        continueLocksMemory() ||
                                         !props.onRequestNewMemory
                                     }
                                     title={

@@ -103,15 +103,11 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     });
 
     // Forward `succeeded` / `api-key-accepted` to bundle-creation
-    // callback so the modal can refresh the bundle list.
-    //
-    // Codex P2 on #847 (round 7): skip placeholder bundle ids the
-    // OAuth backend synthesizes pre-PR-C (`pending-bundle-for-<sid>`).
-    // Selecting one as identityId would launch against a row that
-    // doesn't exist in wstore. Until PR C-2 wires real persistence,
-    // OAuth-success leaves the dropdown on blank — the user's session
-    // is still authenticated, the launch path treats blank as
-    // "create-on-launch" via the existing flow.
+    // callback so the modal swaps its Identity selection to the
+    // newly-persisted bundle id. Skip placeholder ids
+    // (`pending-bundle-for-<sid>`) — those are pre-persistence
+    // synthetic ids; the real id arrives via the next state
+    // transition.
     createEffect(() => {
         const s = controller.state();
         if (
