@@ -1,4 +1,4 @@
-# SPEC: Voice input — per-pane, top-left button, Terminal + Agent
+# SPEC: Voice input — per-pane, header button near pane controls, Terminal + Agent
 
 **Date:** 2026-05-19
 **Author:** AgentX
@@ -13,7 +13,7 @@
 
 ## TL;DR
 
-Voice-to-text input via the Web Speech API, scoped per pane via a mic button in the **top-left corner of the pane frame header**. Initially supported by the **Terminal** and **Agent** pane types. Click the button on the pane you want to speak into; the singleton recognition session redirects its output to that pane. Closing the button or clicking it on a different pane retargets.
+Voice-to-text input via the Web Speech API, scoped per pane via a mic button in the **top-right of the pane frame header, adjacent to the pane controls (maximize, close)**. Initially supported by the **Terminal** and **Agent** pane types. Click the button on the pane you want to speak into; the singleton recognition session redirects its output to that pane. Closing the button or clicking it on a different pane retargets.
 
 ---
 
@@ -21,7 +21,7 @@ Voice-to-text input via the Web Speech API, scoped per pane via a mic button in 
 
 | Dimension | Original PR #741 (2026-05-08) | This spec (2026-05-19) |
 |---|---|---|
-| **Activation location** | Mic button in `AgentFooter` (bottom of agent pane) | Mic button in `BlockFrame_Header` (top-left of any supporting pane) |
+| **Activation location** | Mic button in `AgentFooter` (bottom of agent pane) | Mic button in `BlockFrame_Header` (top-right of any supporting pane, next to max/close) |
 | **Supported panes** | Agent pane only | Terminal + Agent (extensible to others later) |
 | **Pane targeting** | Last-focused agent pane | Pane whose mic button is *clicked* (explicit) |
 | **Output injection** | Append to agent textarea + interim preview | **Agent:** same. **Terminal:** stream characters to the PTY via `controllerinput`. |
@@ -68,7 +68,7 @@ The singleton + `registerPane(handle)` pattern in `useVoiceInput.ts` already sup
 
 | Location | Change |
 |---|---|
-| `frontend/app/block/blockframe.tsx` | `BlockFrame_Header` renders `<MicButton />` as the leftmost element when `blockData.meta.view ∈ {"term", "agent"}`. Calls `voice.registerPane(handle)` when the button toggles on for this pane. |
+| `frontend/app/block/blockframe.tsx` | `BlockFrame_Header` renders `<MicButton />` in the right-side controls group (next to maximize/close) when `blockData.meta.view ∈ {"term", "agent"}`. Calls `voice.registerPane(handle)` when the button toggles on for this pane. |
 | `frontend/app/view/term/termViewModel.ts` | Expose a `voiceHandle: PaneVoiceHandle` that calls `RpcApi.ControllerInputCommand` with the text as `inputdata64` — voice characters stream into the PTY. |
 | `frontend/app/view/agent/agent-view.tsx` (or `useAgentStream.ts`) | Expose a `voiceHandle` that appends to the textarea (existing PR #741 logic, re-located from `AgentFooter`). |
 | `frontend/app/store/keymodel.ts` | `Ctrl:Shift:v` resolves to "toggle voice on the focused pane" by looking up the focused block's view and calling its `voiceHandle`. |
@@ -133,11 +133,12 @@ const voiceHandle: PaneVoiceHandle = {
 
 ## 5. UX: where the button lives
 
-The mic button is the **leftmost** element in the frame header for supporting panes, before the view icon. This is intentional:
+The mic button lives in the **top-right of the frame header**, grouped with the existing pane controls (maximize, close), positioned just before them so the destructive close action remains at the corner. Rationale:
 
-- Mirrors macOS app conventions (recording controls top-left)
-- Visually disjoint from the right-side controls (close, magnify) so accidental clicks are unlikely
-- Top-left is the visual focal point when the pane is first noticed — natural place for "tell me how to interact with this"
+- Co-locates with the other pane-scoped controls so users learn one "pane chrome" region instead of two
+- Active state (pulse-ring) is visible peripherally without competing with the pane content on the left side
+- Click target is well-separated from the view icon / pane title hit area, so accidental activation while reading the header is unlikely
+- Symmetric across all panes — terminal and agent panes use the same chrome, so the button slot is in the same place regardless of view
 
 When listening:
 
@@ -196,7 +197,7 @@ This avoids the original PR's "last-focused" ambiguity: the user always sees whi
 PR #741 stays open until this spec's Phase 1 lands. Then:
 
 - Comment on #741 linking to this spec
-- Close PR #741 with note: "Cherry-picked the building blocks (useVoiceInput, speech.d.ts, MicButton, *moved to `frontend/app/element/`*) into [new PR]. The integration is being redesigned for multi-pane support (Terminal + Agent), top-left frame-header button placement instead of footer. See SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md for the new design."
+- Close PR #741 with note: "Cherry-picked the building blocks (useVoiceInput, speech.d.ts, MicButton, *moved to `frontend/app/element/`*) into [new PR]. The integration is being redesigned for multi-pane support (Terminal + Agent), top-right frame-header button placement (next to max/close) instead of agent footer. See SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md for the new design."
 - Author of #741 can be re-invited to drive Phase 2 if they want, or it's open work
 
 ---
