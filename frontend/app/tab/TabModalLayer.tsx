@@ -29,6 +29,7 @@ import { AgentLaunchModalPanel } from "@/app/view/agent/components/AgentLaunchMo
 import { AgentInstallModalPanel } from "@/app/view/agent/components/AgentInstallModal";
 import { AgentPrereqModalPanel } from "@/app/view/agent/components/AgentPrereqModal";
 import { AgentNewIdentityModalPanel } from "@/app/view/agent/components/AgentNewIdentityModal";
+import { AgentNewMemoryModalPanel } from "@/app/view/agent/components/AgentNewMemoryModal";
 import "@/app/view/agent/components/AgentPrereqModal.scss";
 import "@/app/view/agent/components/AgentNewBundleModal.scss";
 
@@ -298,6 +299,51 @@ function renderRequest(
                         // api.close() afterward would nullify that replace
                         // (both run synchronously, last write wins) and
                         // exit the launch flow — reagent P1 on PR #910.
+                        onCancel={req.onCancel}
+                    />
+                ),
+            };
+        case "new-memory":
+            return {
+                label: "New Memory",
+                panel: (
+                    <AgentNewMemoryModalPanel
+                        initialName={req.initialName}
+                        // Same lift-up pattern as new-identity above —
+                        // layer owns the UpsertMemory RPC so its
+                        // submitting() flag (gates safeClose) tracks
+                        // the in-flight call.
+                        onSubmit={async ({ name, description, contextFiles }) => {
+                            setSubmitting(true);
+                            try {
+                                const memory = await RpcApi.UpsertMemoryCommand(
+                                    TabRpcClient,
+                                    {
+                                        // Wire convention from
+                                        // memory-model.ts:draftToWire —
+                                        // empty id triggers server-side
+                                        // uuid; 0 timestamps trigger
+                                        // server-side now-stamping.
+                                        id: "",
+                                        name,
+                                        description,
+                                        provider: "",
+                                        model: "",
+                                        instructions: "",
+                                        context_files: contextFiles,
+                                        mcp_servers: "[]",
+                                        skills: "[]",
+                                        created_at: 0,
+                                        updated_at: 0,
+                                    },
+                                );
+                                setSubmitting(false);
+                                req.onCreated(memory.id, memory.name);
+                            } catch (e) {
+                                setSubmitting(false);
+                                throw e;
+                            }
+                        }}
                         onCancel={req.onCancel}
                     />
                 ),
