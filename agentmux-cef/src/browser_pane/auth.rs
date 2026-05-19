@@ -60,7 +60,7 @@ pub fn set_runtime_handle(h: Handle) {
 /// (background tab + suspended JS, hung modal). 5 minutes is well
 /// above any realistic credential-entry time and well below "user
 /// noticed and wondered what happened."
-pub const PARKED_TTL: Duration = Duration::from_secs(5 * 60);
+const PARKED_TTL: Duration = Duration::from_secs(5 * 60);
 
 /// Park a CEF auth callback under `request_id`. The renderer will
 /// resolve it shortly via `submit` / `cancel`. A 5-minute timeout

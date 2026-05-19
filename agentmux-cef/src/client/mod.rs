@@ -1485,14 +1485,17 @@ impl AgentMuxHandler {
             cb.clone(),
         );
 
-        // Broadcast to ALL windows — `emit_event_from_state` only
-        // dispatches to the "main" browser, so panes hosted in a
+        // Broadcast to every TOP-LEVEL window — `emit_event_from_state`
+        // only dispatches to the "main" browser, so panes hosted in a
         // tear-off / secondary window would never see the event and
-        // the CEF callback would wait until TTL/cancel. The renderer
-        // filters on `payload.block_id` (browser-view.tsx) so
-        // broadcasting is safe: only the window that owns this
-        // block_id reacts.
-        crate::events::emit_event_all_windows(
+        // the CEF callback would wait until TTL/cancel. Filtering to
+        // top-level is critical: the payload carries origin/host/realm
+        // plus block_id correlation, which must not be visible to
+        // remote content loaded inside a sibling pane (whose main
+        // frame is an arbitrary URL). The host renderer filters on
+        // `payload.block_id` so only the window owning this pane
+        // surfaces the prompt.
+        crate::events::emit_event_to_top_level_windows(
             &self.state,
             "browser-pane-auth-required",
             &serde_json::json!({
