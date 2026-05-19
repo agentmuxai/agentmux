@@ -30,8 +30,10 @@ import { AgentInstallModalPanel } from "@/app/view/agent/components/AgentInstall
 import { AgentPrereqModalPanel } from "@/app/view/agent/components/AgentPrereqModal";
 import { AgentNewIdentityModalPanel } from "@/app/view/agent/components/AgentNewIdentityModal";
 import { AgentNewMemoryModalPanel } from "@/app/view/agent/components/AgentNewMemoryModal";
+import { BrowserAuthModalPanel } from "@/app/view/browser/components/BrowserAuthModal";
 import "@/app/view/agent/components/AgentPrereqModal.scss";
 import "@/app/view/agent/components/AgentNewBundleModal.scss";
+import "@/app/view/browser/components/BrowserAuthModal.scss";
 
 import { TabModalContext, type TabModalApi, type TabModalRequest } from "./tab-modal";
 import "./tab-modal.scss";
@@ -380,6 +382,25 @@ function renderRequest(
                             // install→launch crossfade for the chain
                             // path. SPEC_MODAL_TRANSITIONS_2026_05_18.md.
                             req.onInstalled(continueToLaunch);
+                        }}
+                    />
+                ),
+            };
+        case "browser-auth":
+            return {
+                label: req.isProxy ? "Proxy authentication required" : "Authentication required",
+                panel: (
+                    <BrowserAuthModalPanel
+                        origin={req.origin}
+                        realm={req.realm}
+                        isProxy={req.isProxy}
+                        onCancel={() => {
+                            req.onCancel();
+                            api.close();
+                        }}
+                        onSubmit={(username, password) => {
+                            req.onSubmit(username, password);
+                            api.close();
                         }}
                     />
                 ),

@@ -364,6 +364,11 @@ async fn route_command(
         }
         "browser_pane_close" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            // Cancel any pending HTTP-auth callbacks parked for this
+            // pane before tearing it down. Without this, closing a
+            // pane mid-auth-prompt leaks the CEF AuthCallback refcount
+            // until the 5-minute TTL fires.
+            crate::browser_pane::auth::cancel_for_block(block_id);
             state.browser_panes.close(block_id, state);
             Ok(serde_json::json!(true))
         }
@@ -387,6 +392,46 @@ async fn route_command(
             tracing::info!("[ipc] browser_pane_focus block_id={}", block_id);
             state.browser_panes.focus(block_id, state);
             Ok(serde_json::json!(true))
+        }
+        "browser_pane_auth_submit" => {
+            // Renderer collected credentials from the modal. Resolve the
+            // CEF AuthCallback parked under request_id and continue.
+            // Phase α of SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18.md.
+            let request_id = args.get("request_id").and_then(|v| v.as_str()).unwrap_or("");
+            let username = args.get("username").and_then(|v| v.as_str()).unwrap_or("");
+            let password = args.get("password").and_then(|v| v.as_str()).unwrap_or("");
+            // Don't log username/password length — host logs are
+            // retained 7 days per CLAUDE.md and the length is sensitive
+            // metadata that could narrow a brute-force window.
+            // request_id alone is enough to trace flow.
+            tracing::info!(
+                "[browser-pane-auth] submit request_id={}",
+                request_id,
+            );
+            if let Some(cb) = crate::browser_pane::auth::take(request_id) {
+                use cef::ImplAuthCallback;
+                let u = cef::CefString::from(username);
+                let p = cef::CefString::from(password);
+                cb.cont(Some(&u), Some(&p));
+                Ok(serde_json::json!(true))
+            } else {
+                tracing::warn!(
+                    "[browser-pane-auth] submit for unknown request_id {} — already resolved?",
+                    request_id
+                );
+                Ok(serde_json::json!(false))
+            }
+        }
+        "browser_pane_auth_cancel" => {
+            let request_id = args.get("request_id").and_then(|v| v.as_str()).unwrap_or("");
+            tracing::info!("[browser-pane-auth] cancel request_id={}", request_id);
+            if let Some(cb) = crate::browser_pane::auth::take(request_id) {
+                use cef::ImplAuthCallback;
+                cb.cancel();
+                Ok(serde_json::json!(true))
+            } else {
+                Ok(serde_json::json!(false))
+            }
         }
         "browser_panes_set_overlay_clip" => {
             // Apply a clip region to every pane HWND that excludes the given

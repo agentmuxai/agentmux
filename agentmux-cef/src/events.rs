@@ -57,6 +57,27 @@ pub fn emit_event_all_windows(state: &crate::state::AppState, event: &str, paylo
     }
 }
 
+/// Emit an event to every TOP-LEVEL window — i.e. the host frontend
+/// renderers, excluding pane child browsers. Use this instead of
+/// `emit_event_all_windows` when the payload carries metadata that
+/// shouldn't be visible to untrusted remote content loaded inside a
+/// browser pane. The host frontend's `listenEvent` lives in the
+/// top-level renderer; pane main frames load arbitrary URLs.
+pub fn emit_event_to_top_level_windows(
+    state: &crate::state::AppState,
+    event: &str,
+    payload: &serde_json::Value,
+) {
+    let all = state.list_top_level_browsers();
+    if all.is_empty() {
+        tracing::warn!("Cannot broadcast event '{}': no top-level browsers", event);
+        return;
+    }
+    for (_label, browser) in all {
+        emit_event(&browser, event, payload);
+    }
+}
+
 /// Emit an event to a specific browser window by label.
 /// Used by the tear-off Phase 4 hook to push merge-candidate
 /// changes to the destination renderer.

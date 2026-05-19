@@ -844,6 +844,21 @@ impl AppState {
             .collect()
     }
 
+    /// Snapshot of TOP-LEVEL browsers only — excludes `BrowserKind::Pane`
+    /// child browsers whose main frame is loading untrusted remote
+    /// content. Callers emitting JS-injected host events must use this
+    /// (or `emit_event_to_window`) so a hostile page in one pane can't
+    /// observe events meant for the host frontend.
+    pub fn list_top_level_browsers(&self) -> Vec<(String, Browser)> {
+        self.host_state
+            .lock()
+            .browsers
+            .iter()
+            .filter(|(_, h)| matches!(h.kind, BrowserKind::TopLevel { .. }))
+            .map(|(k, h)| (k.clone(), h.browser.clone()))
+            .collect()
+    }
+
     /// First registered browser (for "any browser" callers like command
     /// palette routing). Returns the label + Browser pair, or None if
     /// the registry is empty.

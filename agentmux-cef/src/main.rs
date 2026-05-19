@@ -274,6 +274,13 @@ fn main() {
     // Start tokio runtime for async operations (IPC server, sidecar management).
     let runtime = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
+    // Install the runtime Handle into browser_pane::auth so the
+    // CEF `get_auth_credentials` callback (which runs on CEF's IO
+    // thread) can spawn the parked-auth TTL timer. A bare
+    // `tokio::spawn` there would panic with "there is no reactor
+    // running" because that thread has no `Handle::current()`.
+    browser_pane::auth::set_runtime_handle(runtime.handle().clone());
+
     // Start the IPC HTTP server and get the assigned port.
     let ipc_port = runtime.block_on(ipc::start_ipc_server(app_state.clone()));
     *app_state.ipc_port.lock() = ipc_port;
