@@ -155,10 +155,10 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 },
             });
         },
-        // Phase γ stub — replaced in #911 when new-memory lands.
-        onRequestNewMemory: () => {
-            console.log("[launch-modal] New memory clicked — Phase γ pending");
-        },
+        // onRequestNewMemory deliberately omitted — Phase γ (#911)
+        // wires it. Leaving the prop undefined makes the Memory `+`
+        // buttons render disabled with a "Coming soon" tooltip, which
+        // is the behaviour reagent asked for on P2 of this PR.
     });
 
     const openLaunchModal = (agent: ForgeAgent) => {
