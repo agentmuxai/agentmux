@@ -22,7 +22,8 @@ import { createContext, useContext, type Accessor } from "solid-js";
 export type TabModalRequest =
     | LaunchAgentRequest
     | InstallAgentRequest
-    | AgentPrereqRequest;
+    | AgentPrereqRequest
+    | NewIdentityBundleRequest;
 
 export interface LaunchAgentRequest {
     kind: "launch-agent";
@@ -37,6 +38,20 @@ export interface LaunchAgentRequest {
      * rejects, the modal stays open and surfaces the error.
      */
     onSubmit: (overrides: LaunchAgentSubmit) => Promise<void> | void;
+    /** If set, the launch modal initialises its Identity dropdown to
+     *  this bundle id instead of the default "blank". Used by the
+     *  "+ New" → create → replace-back flow so the new bundle is
+     *  auto-selected. Phase β of
+     *  SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md. */
+    preselectedIdentityId?: string;
+    /** Same idea for the Memory dropdown. Phase γ. */
+    preselectedMemoryId?: string;
+    /** Optional callback fired when the user clicks the "+ New
+     *  identity" button. Caller is expected to call
+     *  tabModal.replace(newIdentityRequest) — the picker does this. */
+    onRequestNewIdentity?: () => void;
+    /** Same for "+ New memory". */
+    onRequestNewMemory?: () => void;
 }
 
 export interface LaunchAgentSubmit {
@@ -96,6 +111,23 @@ export interface AgentPrereqRequest {
      *  tool. Useful when the tool is at a non-standard PATH. */
     onProceed: () => void;
     /** "Cancel" — close the modal, do not launch. */
+    onCancel: () => void;
+}
+
+/**
+ * "+ New" affordance on the Launch modal's Identity row creates an
+ * empty Identity bundle. Connector setup (Claude/Codex/GitHub/AWS)
+ * happens in the Identity pane afterward.
+ * Phase β of SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md.
+ */
+export interface NewIdentityBundleRequest {
+    kind: "new-identity";
+    originBlockId: string;
+    /** Initial value for the name field. Usually empty. */
+    initialName?: string;
+    /** Called after the bundle is persisted on disk. The Launch
+     *  modal uses the id to auto-select on its next render. */
+    onCreated: (bundleId: string, bundleName: string) => void;
     onCancel: () => void;
 }
 

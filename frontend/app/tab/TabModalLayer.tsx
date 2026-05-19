@@ -26,7 +26,9 @@ import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { AgentLaunchModalPanel } from "@/app/view/agent/components/AgentLaunchModal";
 import { AgentInstallModalPanel } from "@/app/view/agent/components/AgentInstallModal";
 import { AgentPrereqModalPanel } from "@/app/view/agent/components/AgentPrereqModal";
+import { AgentNewIdentityModalPanel } from "@/app/view/agent/components/AgentNewIdentityModal";
 import "@/app/view/agent/components/AgentPrereqModal.scss";
+import "@/app/view/agent/components/AgentNewBundleModal.scss";
 
 import { TabModalContext, type TabModalApi, type TabModalRequest } from "./tab-modal";
 import "./tab-modal.scss";
@@ -240,6 +242,30 @@ function renderRequest(
                                 setSubmitting(false);
                                 throw e;
                             }
+                        }}
+                        preselectedIdentityId={req.preselectedIdentityId}
+                        preselectedMemoryId={req.preselectedMemoryId}
+                        onRequestNewIdentity={req.onRequestNewIdentity}
+                        onRequestNewMemory={req.onRequestNewMemory}
+                    />
+                ),
+            };
+        case "new-identity":
+            return {
+                label: "New Identity",
+                panel: (
+                    <AgentNewIdentityModalPanel
+                        initialName={req.initialName}
+                        onCreated={(id, name) => {
+                            req.onCreated(id, name);
+                            // Caller is responsible for chaining back
+                            // to the Launch modal via tabModal.replace —
+                            // we DON'T close here, since closing then
+                            // re-opening the Launch modal would flicker.
+                        }}
+                        onCancel={() => {
+                            req.onCancel();
+                            api.close();
                         }}
                     />
                 ),

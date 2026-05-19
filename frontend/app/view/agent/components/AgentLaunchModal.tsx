@@ -55,6 +55,17 @@ interface AgentLaunchModalPanelProps {
     agent: ForgeAgent;
     onCancel: () => void;
     onSubmit: (overrides: LaunchOverrides) => Promise<void> | void;
+    /** Auto-select this Identity bundle on mount. Used by the
+     *  "+ New" → create → replace-back flow so the freshly-created
+     *  bundle shows up as the picker's choice. */
+    preselectedIdentityId?: string;
+    /** Same for Memory. Phase γ. */
+    preselectedMemoryId?: string;
+    /** Called when the "+" / empty-state New buttons fire. The picker
+     *  is expected to chain `tabModal.replace(newIdentityRequest)` —
+     *  this component doesn't know how to build that request. */
+    onRequestNewIdentity?: () => void;
+    onRequestNewMemory?: () => void;
 }
 
 export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.Element => {
@@ -72,8 +83,12 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // which the resolver short-circuits as "no override". Lists fetched
     // once at mount; the blank singleton is always present. See
     // docs/specs/identity-forge-integration-and-vault-2026-05-08.md.
-    const [identityId, setIdentityId] = createSignal<string>("blank");
-    const [memoryId, setMemoryId] = createSignal<string>("blank");
+    const [identityId, setIdentityId] = createSignal<string>(
+        props.preselectedIdentityId ?? "blank",
+    );
+    const [memoryId, setMemoryId] = createSignal<string>(
+        props.preselectedMemoryId ?? "blank",
+    );
 
     const [identities] = createResource<IdentityBundle[]>(async () => {
         try {
@@ -101,17 +116,12 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         (memories() ?? []).some((m) => !m.is_blank),
     );
 
-    // Phase β/γ stubs — wired to real modals in follow-up PRs. For
-    // now, log + alert so the buttons are testable without backend
-    // changes. SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md.
-    const handleNewIdentity = () => {
-        console.log("[launch-modal] New identity clicked — modal Phase β");
-        // TODO Phase β: tabModal.replace({ kind: "new-identity", ... })
-    };
-    const handleNewMemory = () => {
-        console.log("[launch-modal] New memory clicked — modal Phase γ");
-        // TODO Phase γ: tabModal.replace({ kind: "new-memory", ... })
-    };
+    // "+ New ..." buttons delegate to picker-injected callbacks that
+    // chain `tabModal.replace(newBundleRequest)`. The picker owns the
+    // chain because it can rebuild the Launch request with
+    // preselectedIdentityId/preselectedMemoryId after creation.
+    const handleNewIdentity = () => props.onRequestNewIdentity?.();
+    const handleNewMemory = () => props.onRequestNewMemory?.();
 
     // v8 — "Continue agent" dropdown. Filters to instances of the
     // CURRENT definition (server-side; a global cap would let older
