@@ -23,6 +23,8 @@ import {
     createLaunchFlowStore,
     continueLocksIdentity as flowContinueLocksIdentity,
     continueLocksMemory as flowContinueLocksMemory,
+    realIdentities,
+    realMemories,
 } from "@/app/store/launch-flow-state";
 
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
@@ -134,48 +136,55 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
 
     onCleanup(() => flow.dispatch({ type: "Closed" }));
 
-    const [identities] = createResource<IdentityBundle[]>(async () => {
+    // Identities + Memories now live in the reducer slice
+    // (Stage 2c.2 of SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md).
+    // `loadIdentities` / `loadMemories` are async wrappers around the
+    // RPCs that dispatch the loading lifecycle commands; the view
+    // reads via `flow.state.identities.list` etc. Existing accessor
+    // names (`identities()`, `memories()`) are kept as thin façades.
+    const loadIdentities = async () => {
+        flow.dispatch({ type: "IdentitiesLoading" });
         try {
-            return await RpcApi.ListIdentityBundlesCommand(TabRpcClient, {});
-        } catch {
-            return [];
+            const list = await RpcApi.ListIdentityBundlesCommand(TabRpcClient, {});
+            flow.dispatch({ type: "IdentitiesLoaded", list: list ?? [] });
+        } catch (e: any) {
+            flow.dispatch({ type: "IdentitiesFailed", error: String(e?.message ?? e) });
         }
-    });
-    const [memories] = createResource<Memory[]>(async () => {
+    };
+    const loadMemories = async () => {
+        flow.dispatch({ type: "MemoriesLoading" });
         try {
-            return await RpcApi.ListMemoriesCommand(TabRpcClient, {});
-        } catch {
-            return [];
+            const list = await RpcApi.ListMemoriesCommand(TabRpcClient, {});
+            flow.dispatch({ type: "MemoriesLoaded", list: list ?? [] });
+        } catch (e: any) {
+            flow.dispatch({ type: "MemoriesFailed", error: String(e?.message ?? e) });
         }
-    });
+    };
+    void loadIdentities();
+    void loadMemories();
+    const identities = () => flow.state.identities.list;
+    const memories = () => flow.state.memories.list;
 
-    // Empty-state predicate. The backend may still return an
-    // implicit `is_blank` singleton (for back-compat with older
-    // clients); filter it out so the dropdown only shows real,
-    // user-created bundles.
-    const hasUserIdentities = createMemo(() =>
-        (identities() ?? []).some((b) => !b.is_blank),
-    );
-    const hasUserMemories = createMemo(() =>
-        (memories() ?? []).some((m) => !m.is_blank),
-    );
+    // Empty-state predicate via the slice's `realIdentities` /
+    // `realMemories` selectors, which filter out any back-compat
+    // `is_blank` singleton.
+    const hasUserIdentities = createMemo(() => realIdentities(flow.state).length > 0);
+    const hasUserMemories = createMemo(() => realMemories(flow.state).length > 0);
 
     // Auto-pick the first available bundle when nothing is selected
-    // yet — saves a click for users with existing bundles (spec
-    // §3.1.2). Gated on `!isContinue()` so legacy-continuation rows
-    // (where handleContinueSelect deliberately clears the carry-over
-    // to "") don't silently get filled with an unrelated bundle's
-    // credentials. In continuation mode the user must explicitly pick.
+    // yet — saves a click for users with existing bundles. Gated on
+    // `!isContinue()` so legacy-continuation rows don't get filled
+    // with an unrelated bundle's credentials.
     createEffect(() => {
         if (isContinue()) return;
         if (identityId()) return;
-        const firstReal = (identities() ?? []).find((b) => !b.is_blank);
+        const firstReal = realIdentities(flow.state)[0];
         if (firstReal) setIdentityId(firstReal.id);
     });
     createEffect(() => {
         if (isContinue()) return;
         if (memoryId()) return;
-        const firstReal = (memories() ?? []).find((m) => !m.is_blank);
+        const firstReal = realMemories(flow.state)[0];
         if (firstReal) setMemoryId(firstReal.id);
     });
 
@@ -283,24 +292,20 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     onCleanup(() => authController.dispose());
     const authStateKind = () => authController.state().kind;
     const onBundleCreated = (bundleId: string) => {
-        // The new bundle was just persisted backend-side. Force the
-        // resource to refetch and switch the dropdown to it.
-        // `createResource.refetch()` isn't exposed by destructure — we
-        // re-trigger by re-mounting the resource via a key signal.
-        // Lightweight alternative: optimistically set the dropdown
-        // and let the next refetch (on dropdown change or modal
-        // reopen) load the row. The bundle id alone is what the
-        // launch payload needs.
+        // The new bundle was just persisted backend-side. Switch the
+        // dropdown to it AND refetch the identities list so the new
+        // row appears in the dropdown options (otherwise hover/options
+        // would show stale data until reopen).
         //
-        // Codex P2 on #847 round 9: defense-in-depth — `PreLaunchAuthPanel`
-        // already filters `pending-bundle-for-...` placeholders before
-        // invoking this callback, but guard here too so any future
-        // call site that bypasses the panel filter can't poison the
+        // Defense-in-depth — `PreLaunchAuthPanel` filters
+        // `pending-bundle-for-...` placeholders before calling, but
+        // guard here too so any future call site can't poison the
         // dropdown with a non-existent bundle row.
         if (!bundleId || bundleId.startsWith("pending-bundle-for-")) {
             return;
         }
         setIdentityId(bundleId);
+        void loadIdentities();
     };
     const provider = createMemo(() => getProvider(props.agent.provider));
 
