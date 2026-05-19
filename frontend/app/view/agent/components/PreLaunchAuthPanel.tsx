@@ -3,8 +3,10 @@
 
 /**
  * PreLaunchAuthPanel — the Connect-with-OAuth UI block that sits
- * inline in `AgentLaunchModal` before the Launch button. Owns an
- * `AuthFlowController` instance for the lifetime of the modal.
+ * inline in `AgentLaunchModal` before the Launch button. The
+ * `AuthFlowController` is owned by the parent (`AgentLaunchModal`)
+ * and passed in as a prop so the controller's lifetime spans the
+ * whole modal, not just this panel's conditional `<Show>` mount.
  *
  * Spec: `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` §3 + §8.
  *
@@ -14,8 +16,8 @@
  *   - `ready` — green check banner ("Connected as <email>")
  *   - `failed` — red error banner + retry CTA
  *
- * Exposes the controller's `state` accessor to the parent so the
- * Launch button can gate on `state().kind === "ready"`.
+ * The parent reads `props.controller.state()` directly to gate the
+ * Launch button on `state().kind === "ready"`.
  */
 
 import { Button } from "@/element/button";
@@ -28,7 +30,6 @@ import {
     createEffect,
     createSignal,
     Match,
-    onCleanup,
     Show,
     Switch,
     untrack,

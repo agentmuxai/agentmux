@@ -145,19 +145,19 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     );
 
     // Auto-pick the first available bundle when nothing is selected
-    // yet — saves a click for users with existing bundles. Per spec
-    // §3.1.2: "user has 1+ identity, none chosen → first non-blank
-    // bundle is the default". Only auto-picks if the user hasn't
-    // explicitly picked "" (which they can't from the dropdown — the
-    // placeholder option is `disabled`); identifies the initial-mount
-    // case by current identityId being empty AND a bundle being
-    // available.
+    // yet — saves a click for users with existing bundles (spec
+    // §3.1.2). Gated on `!isContinue()` so legacy-continuation rows
+    // (where handleContinueSelect deliberately clears the carry-over
+    // to "") don't silently get filled with an unrelated bundle's
+    // credentials. In continuation mode the user must explicitly pick.
     createEffect(() => {
+        if (isContinue()) return;
         if (identityId()) return;
         const firstReal = (identities() ?? []).find((b) => !b.is_blank);
         if (firstReal) setIdentityId(firstReal.id);
     });
     createEffect(() => {
+        if (isContinue()) return;
         if (memoryId()) return;
         const firstReal = (memories() ?? []).find((m) => !m.is_blank);
         if (firstReal) setMemoryId(firstReal.id);
