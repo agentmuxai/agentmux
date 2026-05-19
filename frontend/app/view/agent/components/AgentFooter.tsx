@@ -307,29 +307,41 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     onMount(() => {
         const vm = props.viewModel;
         if (!vm) return;
+        // Two pieces of state interleave with the user's manual typing:
+        //   * baseValue — the textarea content as of the last user-or-
+        //     final-voice event. Interim updates render AFTER it but
+        //     don't promote into it.
+        //   * lastVoiceWrite — the exact string we last wrote to the
+        //     textarea. If ta.value diverges from this between events,
+        //     the user typed something manually and we re-snapshot
+        //     baseValue from ta.value so the next voice event preserves
+        //     what they added.
+        //
+        // Earlier guard (`!startsWith(baseValue)`) never fired for the
+        // common case where the user APPENDED to existing content —
+        // their additions were silently clobbered by the next voice
+        // append. (reagent P1 on PR #930.)
         let baseValue = textareaRef?.value ?? "";
+        let lastVoiceWrite = baseValue;
         const handle: PaneVoiceHandle = {
             appendFinal: (text) => {
                 const ta = textareaRef;
                 if (!ta) return;
-                // Re-snapshot in case the user typed between voice
-                // events — voice should append to current text, not
-                // overwrite what they manually added.
-                if (ta.value !== baseValue && !ta.value.startsWith(baseValue)) {
-                    baseValue = ta.value;
-                }
-                ta.value = baseValue + text + " ";
+                if (ta.value !== lastVoiceWrite) baseValue = ta.value;
+                const next = baseValue + text + " ";
+                ta.value = next;
                 ta.dispatchEvent(new Event("input", { bubbles: true }));
-                baseValue = ta.value;
+                baseValue = next;
+                lastVoiceWrite = next;
             },
             setInterim: (text) => {
                 const ta = textareaRef;
                 if (!ta) return;
-                if (ta.value !== baseValue && !ta.value.startsWith(baseValue)) {
-                    baseValue = ta.value;
-                }
-                ta.value = baseValue + text;
+                if (ta.value !== lastVoiceWrite) baseValue = ta.value;
+                const next = baseValue + text;
+                ta.value = next;
                 ta.dispatchEvent(new Event("input", { bubbles: true }));
+                lastVoiceWrite = next;
             },
         };
         vm.voiceTargetRef.current = handle;
