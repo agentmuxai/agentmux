@@ -63,9 +63,20 @@ interface AgentLaunchModalPanelProps {
     preselectedMemoryId?: string;
     /** Called when the "+" / empty-state New buttons fire. The picker
      *  is expected to chain `tabModal.replace(newIdentityRequest)` —
-     *  this component doesn't know how to build that request. */
-    onRequestNewIdentity?: () => void;
-    onRequestNewMemory?: () => void;
+     *  this component doesn't know how to build that request.
+     *
+     *  The current Identity + Memory selections are passed through so
+     *  the picker can preserve them across the new-bundle round-trip
+     *  (codex P2 on PR #910 round 6 — without this, picking a Memory
+     *  before clicking "+ New Identity" silently reset to blank on
+     *  return). */
+    onRequestNewIdentity?: (current: CurrentSelection) => void;
+    onRequestNewMemory?: (current: CurrentSelection) => void;
+}
+
+export interface CurrentSelection {
+    identityId: string;
+    memoryId: string;
 }
 
 export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.Element => {
@@ -123,8 +134,10 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // missing callback (Phase β ships Identity wiring only; Memory
     // wiring lands in Phase γ) keeps the button visible but disabled
     // with a "coming soon" hint — see reagent P2 on PR #910.
-    const handleNewIdentity = () => props.onRequestNewIdentity?.();
-    const handleNewMemory = () => props.onRequestNewMemory?.();
+    const handleNewIdentity = () =>
+        props.onRequestNewIdentity?.({ identityId: identityId(), memoryId: memoryId() });
+    const handleNewMemory = () =>
+        props.onRequestNewMemory?.({ identityId: identityId(), memoryId: memoryId() });
 
     // v8 — "Continue agent" dropdown. Filters to instances of the
     // CURRENT definition (server-side; a global cap would let older

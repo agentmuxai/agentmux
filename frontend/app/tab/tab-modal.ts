@@ -48,10 +48,15 @@ export interface LaunchAgentRequest {
     preselectedMemoryId?: string;
     /** Optional callback fired when the user clicks the "+ New
      *  identity" button. Caller is expected to call
-     *  tabModal.replace(newIdentityRequest) — the picker does this. */
-    onRequestNewIdentity?: () => void;
+     *  tabModal.replace(newIdentityRequest) — the picker does this.
+     *  The `current` arg carries the modal's live Identity + Memory
+     *  selections so the picker can preserve them across the
+     *  new-bundle round-trip (codex P2 on PR #910 round 6 — without
+     *  this, picking a Memory before clicking "+ New Identity"
+     *  silently reset to blank on return). */
+    onRequestNewIdentity?: (current: { identityId: string; memoryId: string }) => void;
     /** Same for "+ New memory". */
-    onRequestNewMemory?: () => void;
+    onRequestNewMemory?: (current: { identityId: string; memoryId: string }) => void;
 }
 
 export interface LaunchAgentSubmit {

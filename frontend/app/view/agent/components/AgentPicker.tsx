@@ -134,24 +134,29 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         },
         preselectedIdentityId: preselect.preselectedIdentityId,
         preselectedMemoryId: preselect.preselectedMemoryId,
-        onRequestNewIdentity: () => {
+        onRequestNewIdentity: (current) => {
+            // Use the modal's LIVE selections (passed via `current`)
+            // rather than the request's frozen `preselect` — the user
+            // may have changed Memory before clicking "+ New Identity".
+            // Codex P2 on PR #910 round 6.
             tabModal.replace({
                 kind: "new-identity" as const,
                 originBlockId: props.model.blockId,
                 onCreated: (id: string) => {
-                    // Chain back to the launch modal with the new
-                    // bundle preselected.
                     tabModal.replace(
                         buildLaunchRequest(agent, {
                             preselectedIdentityId: id,
-                            preselectedMemoryId: preselect.preselectedMemoryId,
+                            preselectedMemoryId: current.memoryId,
                         }),
                     );
                 },
                 onCancel: () => {
-                    // User backed out — go back to the launch modal
-                    // with whatever preselection was in flight.
-                    tabModal.replace(buildLaunchRequest(agent, preselect));
+                    tabModal.replace(
+                        buildLaunchRequest(agent, {
+                            preselectedIdentityId: current.identityId,
+                            preselectedMemoryId: current.memoryId,
+                        }),
+                    );
                 },
             });
         },
