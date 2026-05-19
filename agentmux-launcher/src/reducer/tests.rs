@@ -220,6 +220,7 @@ fn extract_version(e: &Event) -> u64 {
         | Event::LayoutSplitVerticalApplied { version, .. }
         | Event::LayoutCleared { version, .. }
         | Event::LayoutTreeReplaced { version, .. }
+        | Event::WindowMetaUpdated { version, .. }
         | Event::Error { version, .. } => *version,
     }
 }

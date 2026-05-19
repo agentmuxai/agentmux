@@ -297,7 +297,7 @@ impl SagaCoordinator {
     }
 
     /// LSD-2 — install the durable saga log so saga lifecycle
-    /// transitions are persisted to `~/.agentmux/launcher-sagas.db`.
+    /// transitions are persisted to `<data-dir>/db/launcher-sagas.db`.
     /// Builder-style setter rather than a constructor parameter so
     /// existing tests + the `next_id_is_monotonic` smoke don't have
     /// to construct an in-memory log. Production wiring (in

@@ -5,8 +5,12 @@
 //
 // Spec: `docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md`
 //   - §3.1 storage (separate SQLite file at
-//     `~/.agentmux/launcher-sagas.db`, WAL + 5s busy timeout +
-//     foreign_keys=ON; same configuration as srv saga log)
+//     `<data-dir>/db/launcher-sagas.db`, WAL + 5s busy timeout +
+//     foreign_keys=ON; same configuration as srv saga log. Pre-
+//     AUDIT_SQLITE_SYSTEMS_2026_05_19.md the file lived directly
+//     in `<data-dir>/`; a back-compat migration in
+//     `data_dir::launcher_saga_log_path` moves the legacy file
+//     into `db/` on first launch.)
 //   - §3.2 schema (see `schema.rs`)
 //   - §3.3 API surface (this module)
 //   - §4 PR1 scope: log exists in isolation, NO coordinator wiring
