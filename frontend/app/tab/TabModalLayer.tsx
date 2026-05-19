@@ -23,6 +23,8 @@
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type Component, type JSX } from "solid-js";
 
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { AgentLaunchModalPanel } from "@/app/view/agent/components/AgentLaunchModal";
 import { AgentInstallModalPanel } from "@/app/view/agent/components/AgentInstallModal";
 import { AgentPrereqModalPanel } from "@/app/view/agent/components/AgentPrereqModal";
@@ -256,17 +258,44 @@ function renderRequest(
                 panel: (
                     <AgentNewIdentityModalPanel
                         initialName={req.initialName}
-                        onCreated={(id, name) => {
-                            req.onCreated(id, name);
-                            // Caller is responsible for chaining back
-                            // to the Launch modal via tabModal.replace —
-                            // we DON'T close here, since closing then
-                            // re-opening the Launch modal would flicker.
+                        // The layer owns the RPC + chaining so its
+                        // `submitting()` flag (which gates safeClose)
+                        // tracks the in-flight call. Mirrors the
+                        // launch-agent dispatch above — reagent P1 on
+                        // PR #911.
+                        onSubmit={async ({ name, description }) => {
+                            setSubmitting(true);
+                            try {
+                                const id = crypto.randomUUID();
+                                const now = Date.now();
+                                const bundle = await RpcApi.UpsertIdentityBundleCommand(
+                                    TabRpcClient,
+                                    {
+                                        id,
+                                        name,
+                                        description,
+                                        is_blank: false,
+                                        created_at: now,
+                                        updated_at: now,
+                                    },
+                                );
+                                setSubmitting(false);
+                                // Caller's onCreated does tabModal.replace
+                                // back to Launch with the new id
+                                // preselected — that's what unmounts this
+                                // panel. We don't `api.close()` here.
+                                req.onCreated(bundle.id, bundle.name);
+                            } catch (e) {
+                                setSubmitting(false);
+                                throw e;
+                            }
                         }}
-                        onCancel={() => {
-                            req.onCancel();
-                            api.close();
-                        }}
+                        // Caller's onCancel does tabModal.replace back to
+                        // Launch with the prior selection intact. Running
+                        // api.close() afterward would nullify that replace
+                        // (both run synchronously, last write wins) and
+                        // exit the launch flow — reagent P1 on PR #910.
+                        onCancel={req.onCancel}
                     />
                 ),
             };
