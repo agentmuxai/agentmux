@@ -302,9 +302,17 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // controller's lifetime spans the whole modal mount, so a brief
     // re-render that unmounts the conditionally-rendered Connect
     // panel no longer destroys in-flight auth state.
-    const authController = new AuthFlowController();
+    // Auth state is owned by the slice (Stage 2d.2). The controller
+    // continues to orchestrate side-effects (OAuth start, polling,
+    // openExternal) but reads + writes state through the slice via
+    // the externalGetState / externalDispatch hooks. So
+    // `flow.state.auth` is the single source of truth.
+    const authController = new AuthFlowController({
+        externalGetState: () => flow.state.auth,
+        externalDispatch: (cmd) => flow.dispatch({ type: "Auth", cmd }),
+    });
     onCleanup(() => authController.dispose());
-    const authStateKind = () => authController.state().kind;
+    const authStateKind = () => flow.state.auth.kind;
     const onBundleCreated = (bundleId: string) => {
         // The new bundle was just persisted backend-side. Switch the
         // dropdown to it AND refetch the identities list so the new
