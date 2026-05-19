@@ -158,7 +158,7 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
     // browser-auth onCancel, so any remaining ids in this set need
     // explicit cancel on pane unmount AND on resolution. Tracks ids
     // so we cancel exactly the ones that didn't resolve through
-    // submit/cancel buttons (codex P2 on #906).
+    // the submit/cancel buttons.
     const pendingAuthIds = new Set<string>();
     onMount(() => {
         if (placeholderRef) {
@@ -180,7 +180,8 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
             is_proxy: boolean;
         }>("browser-pane-auth-required", (payload) => {
             if (payload.block_id !== model.blockId) return;
-            // Don't log username-length on submit — reagent P2 on #906.
+            // Diagnostic stays high-signal: request_id + origin + realm
+            // are enough to trace the prompt without logging credentials.
             diag(`auth-required request_id=${payload.request_id} origin=${JSON.stringify(payload.origin)} realm=${JSON.stringify(payload.realm)}`);
             pendingAuthIds.add(payload.request_id);
             tabModal.open({
@@ -208,10 +209,11 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                 },
             });
         }).then((unsub) => {
-            // Race guard (reagent P1 on #906): listenEvent's promise
-            // can resolve AFTER onCleanup runs. Without this check,
-            // authUnsub gets set post-cleanup and never invoked,
-            // leaking the listener until renderer teardown.
+            // listenEvent's promise can resolve AFTER onCleanup has
+            // already run (pane closed before subscription completed).
+            // Without this check, the unsub closure is captured post-
+            // cleanup and never invoked, leaking the listener until
+            // renderer teardown.
             if (authDisposed) unsub();
             else authUnsub = unsub;
         });
@@ -238,10 +240,10 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
             authUnsub();
             authUnsub = null;
         }
-        // Cancel any auth prompts still parked on the host. Pane
-        // close also fires `cancel_for_block` on the backend as a
-        // safety net (codex P2 on #906), but firing them here ensures
-        // each cancel logs against the correct request_id.
+        // Cancel any auth prompts still parked on the host. The
+        // backend also fires `cancel_for_block` from `browser_pane_close`
+        // as a safety net, but firing them here ensures each cancel
+        // logs against the correct request_id.
         for (const requestId of pendingAuthIds) {
             invokeCommand("browser_pane_auth_cancel", { request_id: requestId })
                 .catch(() => {});

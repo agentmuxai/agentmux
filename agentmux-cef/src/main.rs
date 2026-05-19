@@ -279,7 +279,6 @@ fn main() {
     // thread) can spawn the parked-auth TTL timer. A bare
     // `tokio::spawn` there would panic with "there is no reactor
     // running" because that thread has no `Handle::current()`.
-    // Reagent + codex P1 on PR #906.
     browser_pane::auth::set_runtime_handle(runtime.handle().clone());
 
     // Start the IPC HTTP server and get the assigned port.

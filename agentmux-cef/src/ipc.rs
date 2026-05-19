@@ -365,9 +365,9 @@ async fn route_command(
         "browser_pane_close" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             // Cancel any pending HTTP-auth callbacks parked for this
-            // pane before tearing it down — reagent + codex P1 on #906.
-            // Without this, closing a pane mid-auth-prompt leaks the
-            // CEF AuthCallback refcount until the 5-minute TTL fires.
+            // pane before tearing it down. Without this, closing a
+            // pane mid-auth-prompt leaks the CEF AuthCallback refcount
+            // until the 5-minute TTL fires.
             crate::browser_pane::auth::cancel_for_block(block_id);
             state.browser_panes.close(block_id, state);
             Ok(serde_json::json!(true))
@@ -400,10 +400,10 @@ async fn route_command(
             let request_id = args.get("request_id").and_then(|v| v.as_str()).unwrap_or("");
             let username = args.get("username").and_then(|v| v.as_str()).unwrap_or("");
             let password = args.get("password").and_then(|v| v.as_str()).unwrap_or("");
-            // Reagent P2 on #906: don't log username/password length —
-            // host logs are retained 7 days per CLAUDE.md and the
-            // length is sensitive metadata that could narrow a brute
-            // force window. request_id alone is enough to trace flow.
+            // Don't log username/password length — host logs are
+            // retained 7 days per CLAUDE.md and the length is sensitive
+            // metadata that could narrow a brute-force window.
+            // request_id alone is enough to trace flow.
             tracing::info!(
                 "[browser-pane-auth] submit request_id={}",
                 request_id,

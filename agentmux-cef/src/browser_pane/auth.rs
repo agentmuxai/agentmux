@@ -33,9 +33,7 @@ struct Entry {
     epoch: u64,
 }
 
-/// std OnceLock + lazy init (HashMap::new is not const-fn, and our
-/// Cargo.toml has no once_cell dep). Reagent P1 on PR #906 round 2 —
-/// the original `once_cell::sync::Lazy` import didn't resolve.
+/// HashMap::new is not const-fn so the static needs lazy init.
 fn pending() -> &'static Mutex<HashMap<String, Entry>> {
     static CELL: OnceLock<Mutex<HashMap<String, Entry>>> = OnceLock::new();
     CELL.get_or_init(|| Mutex::new(HashMap::new()))
@@ -48,8 +46,7 @@ static NEXT_EPOCH: std::sync::atomic::AtomicU64 =
 /// schedule the TTL timer from any thread — CEF invokes
 /// `get_auth_credentials` on its IO thread, which has no
 /// `Handle::current()`, so a bare `tokio::spawn(...)` would panic
-/// with "there is no reactor running". Reagent + codex P1 on PR
-/// #906 round 2.
+/// with "there is no reactor running".
 static TOKIO_HANDLE: OnceLock<Handle> = OnceLock::new();
 
 /// Install the Tokio runtime Handle. Called once from `main.rs` after

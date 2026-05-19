@@ -28,8 +28,8 @@ export const BrowserAuthModalPanel = (props: BrowserAuthModalPanelProps): JSX.El
     // True once either footer button fired its handler. onCleanup
     // uses this to detect "modal was unmounted via ESC / backdrop
     // click / pane close / replace" and fire onCancel exactly once
-    // so the parked CEF AuthCallback gets resolved (codex P2 on #906
-    // — TabModalLayer's safeClose() bypasses footer handlers).
+    // so the parked CEF AuthCallback gets resolved — the layer's
+    // safeClose() unmounts without routing through onCancel.
     let resolved = false;
 
     const submit = () => {
