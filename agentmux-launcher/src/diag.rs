@@ -725,7 +725,10 @@ async fn run_sagas_diag_impl(launcher_exe_dir: &std::path::Path) -> Result<(), S
 
     let paths = crate::data_dir::resolve_paths(launcher_exe_dir, version)
         .map_err(|e| format!("path resolution failed: {}", e))?;
-    let saga_log_path = crate::data_dir::launcher_saga_log_path(&paths.data_dir);
+    // `--diag sagas` is a passive on-disk inspector (see the doc
+    // comment for this function); use the read-only resolver so we
+    // don't trigger the legacy-file rename here. Reagent P2 on PR #932.
+    let saga_log_path = crate::data_dir::launcher_saga_log_path_read_only(&paths.data_dir);
 
     println!("AgentMux launcher saga diagnostic");
     println!("Data dir: {}", paths.data_dir.display());

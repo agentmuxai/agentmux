@@ -228,7 +228,7 @@ No `sqlx`, no `diesel`, no async DB layer. All SQLite access is synchronous behi
 
 2. ~~`saga` tables in two files.~~ **Retracted** — the initial audit miscounted; `run_saga_log_migrations` is only invoked from `SagaLog::configure_and_migrate`, so `objects.db` has no saga tables. See §2.2.b.
 
-3. **`launcher-sagas.db` lives in the wrong directory.** ~~Srv puts its DBs in `<data-dir>/db/`; launcher puts `launcher-sagas.db` directly in `<data-dir>/`.~~ **Fixed** in PR #930-ish — `agentmux-launcher::data_dir::launcher_saga_log_path` performs a one-shot rename of any pre-existing file from `<data-dir>/launcher-sagas.db` into `<data-dir>/db/launcher-sagas.db`. Idempotent + safe to call repeatedly. Both `main.rs` and `diag.rs` route through it.
+3. **`launcher-sagas.db` lives in the wrong directory.** ~~Srv puts its DBs in `<data-dir>/db/`; launcher puts `launcher-sagas.db` directly in `<data-dir>/`.~~ **Fixed** in PR #932 — `agentmux-launcher::data_dir::launcher_saga_log_path` performs a one-shot rename of any pre-existing file from `<data-dir>/launcher-sagas.db` into `<data-dir>/db/launcher-sagas.db`. Idempotent + safe to call repeatedly. `main.rs` uses this writing variant; `diag.rs` uses the read-only sibling `launcher_saga_log_path_read_only` so `--diag sagas` stays passive.
 
 4. **`db_workflow_*` vs `db_drone_*` after the rename.** Both exist on v10. Eventually drop the v9 workflow tables (and the migration step) once we're confident no rows reference them.
 

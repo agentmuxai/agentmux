@@ -85,6 +85,26 @@ pub fn resolve_paths(launcher_exe_dir: &Path, version: &str) -> Result<DataPaths
     })
 }
 
+/// Read-only resolver for the launcher saga log path. Returns
+/// whichever location actually holds the data: the canonical
+/// `<data-dir>/db/launcher-sagas.db` if present, otherwise the
+/// legacy `<data-dir>/launcher-sagas.db` if THAT exists, otherwise
+/// the canonical path (for the fresh-install case).
+///
+/// Does NOT touch the filesystem — safe for read-only callers like
+/// `--diag sagas` which document themselves as passive.
+pub fn launcher_saga_log_path_read_only(data_dir: &Path) -> PathBuf {
+    let new_path = data_dir.join("db").join("launcher-sagas.db");
+    if new_path.exists() {
+        return new_path;
+    }
+    let legacy_path = data_dir.join("launcher-sagas.db");
+    if legacy_path.exists() {
+        return legacy_path;
+    }
+    new_path
+}
+
 /// Canonical path for the launcher saga log
 /// (`<data-dir>/db/launcher-sagas.db`). Performs a one-shot back-
 /// compat migration: launcher releases prior to this change wrote
@@ -92,6 +112,12 @@ pub fn resolve_paths(launcher_exe_dir: &Path, version: &str) -> Result<DataPaths
 /// srv DBs alongside in `<data-dir>/db/`, an inconsistency flagged
 /// by AUDIT_SQLITE_SYSTEMS §8.3). If only the legacy path exists,
 /// move it into `db/`.
+///
+/// This variant has WRITE side effects (rename + mkdir). Callers
+/// that must stay read-only (e.g. `--diag sagas` is documented as
+/// a passive on-disk inspector) should use
+/// `launcher_saga_log_path_read_only` instead. The launcher's own
+/// startup path uses this one — the rename is welcome there.
 ///
 /// Idempotent + safe to call repeatedly. Returns the canonical
 /// (post-migration) path the caller should open.
@@ -176,6 +202,40 @@ mod tests {
         assert_eq!(std::fs::read(&p).unwrap(), b"newer");
         // Legacy stays (user can clean up manually); we don't trash it.
         assert!(legacy.exists());
+    }
+
+    #[test]
+    fn read_only_resolver_returns_canonical_when_neither_file_exists() {
+        let tmp = tempdir().unwrap();
+        let p = launcher_saga_log_path_read_only(tmp.path());
+        assert_eq!(p, tmp.path().join("db").join("launcher-sagas.db"));
+        // Crucially, no side effects — no `db/` dir created.
+        assert!(!tmp.path().join("db").exists());
+    }
+
+    #[test]
+    fn read_only_resolver_returns_legacy_path_when_only_legacy_exists() {
+        let tmp = tempdir().unwrap();
+        let legacy = tmp.path().join("launcher-sagas.db");
+        std::fs::write(&legacy, b"legacy").unwrap();
+
+        let p = launcher_saga_log_path_read_only(tmp.path());
+
+        assert_eq!(p, legacy);
+        assert!(legacy.exists(), "read-only resolver must not migrate");
+        assert!(!tmp.path().join("db").exists());
+    }
+
+    #[test]
+    fn read_only_resolver_returns_canonical_when_canonical_exists() {
+        let tmp = tempdir().unwrap();
+        let db_dir = tmp.path().join("db");
+        std::fs::create_dir_all(&db_dir).unwrap();
+        let new_path = db_dir.join("launcher-sagas.db");
+        std::fs::write(&new_path, b"current").unwrap();
+
+        let p = launcher_saga_log_path_read_only(tmp.path());
+        assert_eq!(p, new_path);
     }
 
     #[test]
