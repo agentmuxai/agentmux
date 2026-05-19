@@ -1,9 +1,14 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetDispatchLog, getRecentDispatches } from "../command-source";
 import { createLaunchFlowStore } from "./launch-flow-store";
 import type { LaunchFlowEvent } from "./types";
+
+beforeEach(() => {
+    __resetDispatchLog();
+});
 
 describe("createLaunchFlowStore", () => {
     it("starts in initial state", () => {
@@ -45,5 +50,46 @@ describe("createLaunchFlowStore", () => {
         dispatch({ type: "NameChanged", name: "x" });
         dispatch({ type: "NameChanged", name: "x" }); // same → no-op
         expect(sink).not.toHaveBeenCalled();
+    });
+
+    describe("recordDispatch audit ring (§6.8)", () => {
+        it("appends every dispatch to the global ring", () => {
+            const { dispatch } = createLaunchFlowStore();
+            dispatch({ type: "NameChanged", name: "alpha" });
+            dispatch({ type: "RuntimeChanged", runtime: "container" });
+            const records = getRecentDispatches();
+            expect(records).toHaveLength(2);
+            expect(records[0].slice).toBe("launch-flow-state");
+            expect(records[0].key).toBeNull();
+            expect((records[0].command as { type: string }).type).toBe("NameChanged");
+            expect((records[1].command as { type: string }).type).toBe("RuntimeChanged");
+        });
+
+        it("captures emitted events alongside the command", () => {
+            const { dispatch } = createLaunchFlowStore();
+            dispatch({ type: "IdentityChanged", identityId: "ident-a" });
+            const records = getRecentDispatches();
+            expect(records[0].events).toEqual([
+                { type: "FetchBindings", identityId: "ident-a" },
+            ]);
+        });
+
+        it("tags source — defaults to 'user', honors explicit override", () => {
+            const { dispatch } = createLaunchFlowStore();
+            dispatch({ type: "NameChanged", name: "alpha" });
+            dispatch({ type: "IdentitiesLoading" }, "system");
+            const records = getRecentDispatches();
+            expect(records[0].source).toBe("user");
+            expect(records[1].source).toBe("system");
+        });
+
+        it("records no-op dispatches too (audit-completeness)", () => {
+            const { dispatch } = createLaunchFlowStore();
+            dispatch({ type: "NameChanged", name: "x" });
+            dispatch({ type: "NameChanged", name: "x" }); // same → no-op
+            // Audit ring records all dispatches, including no-ops, so
+            // diag-panel users can see attempted-but-rejected transitions.
+            expect(getRecentDispatches()).toHaveLength(2);
+        });
     });
 });
