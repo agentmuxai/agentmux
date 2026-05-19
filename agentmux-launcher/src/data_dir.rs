@@ -85,8 +85,108 @@ pub fn resolve_paths(launcher_exe_dir: &Path, version: &str) -> Result<DataPaths
     })
 }
 
+/// Canonical path for the launcher saga log
+/// (`<data-dir>/db/launcher-sagas.db`). Performs a one-shot back-
+/// compat migration: launcher releases prior to this change wrote
+/// the saga log directly under `<data-dir>/launcher-sagas.db` (with
+/// srv DBs alongside in `<data-dir>/db/`, an inconsistency flagged
+/// by AUDIT_SQLITE_SYSTEMS §8.3). If only the legacy path exists,
+/// move it into `db/`.
+///
+/// Idempotent + safe to call repeatedly. Returns the canonical
+/// (post-migration) path the caller should open.
+pub fn launcher_saga_log_path(data_dir: &Path) -> PathBuf {
+    let db_dir = data_dir.join("db");
+    let new_path = db_dir.join("launcher-sagas.db");
+    let legacy_path = data_dir.join("launcher-sagas.db");
+
+    // Migrate iff only the legacy file is present. Don't overwrite a
+    // non-empty new file even if both exist — that would be a
+    // surprising data loss and likely indicates a multi-process race
+    // we'd want to investigate.
+    if legacy_path.exists() && !new_path.exists() {
+        // Best-effort `mkdir -p`. If this fails the rename will fail
+        // and we'll log + fall back to the legacy path below.
+        let _ = std::fs::create_dir_all(&db_dir);
+        if let Err(e) = std::fs::rename(&legacy_path, &new_path) {
+            // Migration failed — keep using the legacy path so we
+            // don't drop saga state. The next launch retries.
+            eprintln!(
+                "[launcher-saga-log] migration of {} → {} failed: {} \
+                 (continuing with legacy path)",
+                legacy_path.display(),
+                new_path.display(),
+                e
+            );
+            return legacy_path;
+        }
+    }
+    new_path
+}
+
 /// Create every directory the launcher + srv expect to exist.
 /// Idempotent. Delegates to the common implementation.
 pub fn ensure_dirs(paths: &DataPaths) -> Result<(), String> {
     paths.common.ensure_dirs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn launcher_saga_log_path_returns_db_subdir_on_fresh_install() {
+        let tmp = tempdir().unwrap();
+        let p = launcher_saga_log_path(tmp.path());
+        assert_eq!(p, tmp.path().join("db").join("launcher-sagas.db"));
+        // No legacy file → no rename attempt; new path simply returned.
+        assert!(!tmp.path().join("launcher-sagas.db").exists());
+    }
+
+    #[test]
+    fn launcher_saga_log_path_migrates_legacy_file() {
+        let tmp = tempdir().unwrap();
+        let legacy = tmp.path().join("launcher-sagas.db");
+        std::fs::write(&legacy, b"legacy bytes").unwrap();
+
+        let p = launcher_saga_log_path(tmp.path());
+
+        assert_eq!(p, tmp.path().join("db").join("launcher-sagas.db"));
+        assert!(p.exists());
+        assert_eq!(std::fs::read(&p).unwrap(), b"legacy bytes");
+        assert!(!legacy.exists(), "legacy path should be removed by rename");
+    }
+
+    #[test]
+    fn launcher_saga_log_path_does_not_overwrite_existing_new_file() {
+        // Both files exist (theoretical race / aborted migration).
+        // Keep the new file untouched and leave the legacy alone.
+        let tmp = tempdir().unwrap();
+        let legacy = tmp.path().join("launcher-sagas.db");
+        let new_dir = tmp.path().join("db");
+        std::fs::create_dir_all(&new_dir).unwrap();
+        let new_path = new_dir.join("launcher-sagas.db");
+        std::fs::write(&legacy, b"legacy").unwrap();
+        std::fs::write(&new_path, b"newer").unwrap();
+
+        let p = launcher_saga_log_path(tmp.path());
+
+        assert_eq!(p, new_path);
+        assert_eq!(std::fs::read(&p).unwrap(), b"newer");
+        // Legacy stays (user can clean up manually); we don't trash it.
+        assert!(legacy.exists());
+    }
+
+    #[test]
+    fn launcher_saga_log_path_is_idempotent() {
+        let tmp = tempdir().unwrap();
+        let legacy = tmp.path().join("launcher-sagas.db");
+        std::fs::write(&legacy, b"data").unwrap();
+
+        let first = launcher_saga_log_path(tmp.path());
+        let second = launcher_saga_log_path(tmp.path());
+        assert_eq!(first, second);
+        assert!(first.exists());
+    }
 }
