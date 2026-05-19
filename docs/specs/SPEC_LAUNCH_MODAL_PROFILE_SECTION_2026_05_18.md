@@ -269,9 +269,9 @@ This phase ships immediately — visual surface only, no backend.
 
 ### Phase γ — Memory creation modal
 
-8. `AgentNewMemoryModal.tsx` with name + description + seed mode + conditional region.
-9. `memory.create_bundle` RPC supporting all three seed modes.
-10. File picker integration.
+8. `AgentNewMemoryModal.tsx` with name + description + seed mode radios.
+9. Reuses existing `upsertmemory` RPC — paste-text mode JSON-encodes `[{path: "notes.md", content}]` into `context_files`; empty mode ships `[]`.
+10. **File picker mode is deferred** to its own PR (radio disabled with "(coming soon)"). The drag-and-drop / OS file dialog integration is its own design concern; not blocking the rest of Phase γ.
 
 ### Phase δ (deferred) — Manage connections inline
 
@@ -293,7 +293,10 @@ A future "Connect AI provider" / "Connect GitHub" / "Connect AWS" flow could liv
 7. Cancel returns to Launch modal with the previously selected bundle still chosen.
 
 ### Phase γ
-8. Same for Memory, plus file picker integration + paste-text mode + empty mode.
+8. Click `+` next to Memory (in either state) → New Memory modal opens via `tabModal.replace` (no flicker; same modal chrome).
+9. Empty seed mode creates a bundle with `context_files = "[]"`; paste mode writes a single `notes.md` entry containing the pasted text.
+10. Submit returns Launch modal with the new memory id pre-selected; Cancel returns with the previous selection intact.
+11. Pick-files radio is disabled and labelled "(coming soon)" — file-picker integration is out of scope for this PR.
 
 ---
 
