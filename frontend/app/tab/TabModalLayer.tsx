@@ -23,10 +23,14 @@
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type Component, type JSX } from "solid-js";
 
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { AgentLaunchModalPanel } from "@/app/view/agent/components/AgentLaunchModal";
 import { AgentInstallModalPanel } from "@/app/view/agent/components/AgentInstallModal";
 import { AgentPrereqModalPanel } from "@/app/view/agent/components/AgentPrereqModal";
+import { AgentNewIdentityModalPanel } from "@/app/view/agent/components/AgentNewIdentityModal";
 import "@/app/view/agent/components/AgentPrereqModal.scss";
+import "@/app/view/agent/components/AgentNewBundleModal.scss";
 
 import { TabModalContext, type TabModalApi, type TabModalRequest } from "./tab-modal";
 import "./tab-modal.scss";
@@ -241,6 +245,60 @@ function renderRequest(
                                 throw e;
                             }
                         }}
+                        initialFormState={req.initialFormState}
+                        onRequestNewIdentity={req.onRequestNewIdentity}
+                        onRequestNewMemory={req.onRequestNewMemory}
+                    />
+                ),
+            };
+        case "new-identity":
+            return {
+                label: "New Identity",
+                panel: (
+                    <AgentNewIdentityModalPanel
+                        initialName={req.initialName}
+                        // The layer owns the RPC + chaining so its
+                        // `submitting()` flag (which gates safeClose)
+                        // tracks the in-flight call. Mirrors the
+                        // launch-agent dispatch above — reagent P1 on
+                        // PR #911.
+                        onSubmit={async ({ name, description }) => {
+                            setSubmitting(true);
+                            try {
+                                // Wire convention from identity-pane-
+                                // model.ts:bundleDraftToWire — empty id
+                                // triggers server-side uuid; 0 timestamps
+                                // trigger server-side now-stamping. Keeps
+                                // id/timestamp handling in one place
+                                // (codex P2 on PR #910 round 3).
+                                const bundle = await RpcApi.UpsertIdentityBundleCommand(
+                                    TabRpcClient,
+                                    {
+                                        id: "",
+                                        name,
+                                        description,
+                                        is_blank: false,
+                                        created_at: 0,
+                                        updated_at: 0,
+                                    },
+                                );
+                                setSubmitting(false);
+                                // Caller's onCreated does tabModal.replace
+                                // back to Launch with the new id
+                                // preselected — that's what unmounts this
+                                // panel. We don't `api.close()` here.
+                                req.onCreated(bundle.id, bundle.name);
+                            } catch (e) {
+                                setSubmitting(false);
+                                throw e;
+                            }
+                        }}
+                        // Caller's onCancel does tabModal.replace back to
+                        // Launch with the prior selection intact. Running
+                        // api.close() afterward would nullify that replace
+                        // (both run synchronously, last write wins) and
+                        // exit the launch flow — reagent P1 on PR #910.
+                        onCancel={req.onCancel}
                     />
                 ),
             };

@@ -14,7 +14,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
-import { useTabModal } from "@/app/tab/tab-modal";
+import { useTabModal, type LaunchFormStateWire } from "@/app/tab/tab-modal";
 import { getPlatform } from "@/util/platformutil";
 import type { AgentViewModel } from "../agent-model";
 import { getProvider } from "../providers";
@@ -100,7 +100,17 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // Build the launch-agent request descriptor. Separated from the
     // open call so the install→launch chain can hand the same shape
     // to `tabModal.replace()` for a crossfade (no shell teardown).
-    const buildLaunchRequest = (agent: ForgeAgent) => ({
+    //
+    // `initialFormState` carries the user's in-progress launch-form
+    // edits through the "+ New identity/memory" round-trip — name,
+    // runtime, image, identity, memory. Spec: Phase β of
+    // SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md; codex P2 on
+    // round 7 expanded preservation from identity+memory only to the
+    // full form.
+    const buildLaunchRequest = (
+        agent: ForgeAgent,
+        initialFormState?: Partial<LaunchFormStateWire>,
+    ) => ({
         kind: "launch-agent" as const,
         agent,
         originBlockId: props.model.blockId,
@@ -119,6 +129,31 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 setLaunching(null);
             }
         },
+        initialFormState,
+        onRequestNewIdentity: (current: LaunchFormStateWire) => {
+            // Thread the user's whole live form snapshot through the
+            // new-identity round-trip so name/runtime/image/memory
+            // survive alongside the freshly-created identity id.
+            tabModal.replace({
+                kind: "new-identity" as const,
+                originBlockId: props.model.blockId,
+                onCreated: (id: string) => {
+                    tabModal.replace(
+                        buildLaunchRequest(agent, {
+                            ...current,
+                            identityId: id,
+                        }),
+                    );
+                },
+                onCancel: () => {
+                    tabModal.replace(buildLaunchRequest(agent, current));
+                },
+            });
+        },
+        // onRequestNewMemory deliberately omitted — Phase γ (#911)
+        // wires it. Leaving the prop undefined makes the Memory `+`
+        // buttons render disabled with a "Coming soon" tooltip, which
+        // is the behaviour reagent asked for on P2 of this PR.
     });
 
     const openLaunchModal = (agent: ForgeAgent) => {

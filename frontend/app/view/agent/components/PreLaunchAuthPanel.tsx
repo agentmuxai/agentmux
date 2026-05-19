@@ -50,6 +50,14 @@ export interface PreLaunchAuthPanelProps {
     provider: ProviderDefinition | undefined;
     /** Currently-selected identity bundle id. "blank" = singleton. */
     identityId: Accessor<string>;
+    /** True when the selected non-blank bundle has a binding for the
+     *  agent's provider. Required because `outcomeFor` used to treat
+     *  any non-blank as "ready" — which let the "+ New identity" flow
+     *  bypass OAuth entirely (reagent + codex P1 on PR #910 round 3).
+     *  When false (or while bindings are still loading), the panel
+     *  routes to `needs-bundle` so the user goes through the OAuth
+     *  flow before Launch enables. */
+    hasMatchingBinding: Accessor<boolean>;
     /** Notify parent when auth state changes — used to gate Launch. */
     onStateChange: (state: AuthState) => void;
     /** Called when a new bundle is created via OAuth or API-key
@@ -126,6 +134,12 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     createEffect(() => {
         const id = props.identityId();
         const prov = props.provider;
+        // Track hasMatchingBinding so the effect re-fires when
+        // bindings finish loading — without this, a freshly created
+        // "+ New" bundle that initially reports `hasMatchingBinding=
+        // false` would never re-dispatch to `ready` once the user
+        // connects an account.
+        const hasBinding = props.hasMatchingBinding();
         if (!prov) return;
         // Codex P2 on #847 round 8: "blank" is a UI sentinel meaning
         // "no bundle selected", not a real bundleId. Normalize it to
@@ -134,7 +148,7 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         // (= "create new bundle") rather than `"blank"` (= "attach
         // to bundle named blank", which doesn't exist in wstore).
         const bundleArg = id === "blank" ? "" : id;
-        untrack(() => controller.selected(prov.id, bundleArg, outcomeFor(id, prov.id)));
+        untrack(() => controller.selected(prov.id, bundleArg, outcomeFor(id, prov.id, hasBinding)));
     });
 
     onCleanup(() => {
@@ -198,12 +212,16 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     );
 };
 
-/** Compute the SelectionOutcome from the bundle id. The richer
- *  expired / needs-account computation (per-bundle binding lookup)
- *  is deferred to PR B-4 / PR D — for MVP we treat:
- *   - blank singleton → `needs-bundle` (Connect creates new)
- *   - non-blank bundle → `ready` (trust prior auth — old behavior). */
-function outcomeFor(identityId: string, providerId?: string): SelectionOutcome {
+/** Compute the SelectionOutcome from the bundle id and its binding
+ *  state. Treat:
+ *   - blank singleton or "+ New"-just-created (no matching binding)
+ *     → `needs-bundle` (Connect creates new or attaches a binding).
+ *   - non-blank bundle WITH a binding for this provider → `ready`. */
+function outcomeFor(
+    identityId: string,
+    providerId: string | undefined,
+    hasMatchingBinding: boolean,
+): SelectionOutcome {
     // Phase α for openclaw: bundle persistence isn't wired yet, so an
     // already-selected identity can't be trusted as authenticated. Force
     // a fresh OAuth on every launch so AgentLaunchModal's openclaw
@@ -211,6 +229,14 @@ function outcomeFor(identityId: string, providerId?: string): SelectionOutcome {
     // bundle storage.
     if (providerId === "openclaw") return "needs-bundle";
     if (!identityId || identityId === "blank") return "needs-bundle";
+    // Reagent + codex P1 on PR #910 round 3 — a non-blank bundle
+    // without a binding for the agent's provider can't supply creds
+    // (e.g. "+ New identity" created an empty "Work" bundle that the
+    // user hasn't connected yet). Use `needs-account` (NOT
+    // `needs-bundle`) so the reducer preserves `intoBundleId` and
+    // OAuth lands on THIS bundle instead of creating a fresh one
+    // (codex P1 round 4 — `needs-bundle` clears the bundle id).
+    if (!hasMatchingBinding) return "needs-account";
     return "ready";
 }
 

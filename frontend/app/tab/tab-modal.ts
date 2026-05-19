@@ -22,7 +22,8 @@ import { createContext, useContext, type Accessor } from "solid-js";
 export type TabModalRequest =
     | LaunchAgentRequest
     | InstallAgentRequest
-    | AgentPrereqRequest;
+    | AgentPrereqRequest
+    | NewIdentityBundleRequest;
 
 export interface LaunchAgentRequest {
     kind: "launch-agent";
@@ -37,6 +38,31 @@ export interface LaunchAgentRequest {
      * rejects, the modal stays open and surfaces the error.
      */
     onSubmit: (overrides: LaunchAgentSubmit) => Promise<void> | void;
+    /** Initial form state for the launch modal — used by the
+     *  "+ New" → create → replace-back flow to restore the user's
+     *  in-progress edits (name, runtime, image, identity, memory)
+     *  across the new-bundle round-trip. Codex P2 on PR #910
+     *  rounds 6 + 7. */
+    initialFormState?: Partial<LaunchFormStateWire>;
+    /** Optional callback fired when the user clicks the "+ New
+     *  identity" button. Caller is expected to call
+     *  tabModal.replace(newIdentityRequest) — the picker does this.
+     *  The `current` snapshot carries the modal's live form state so
+     *  the picker can preserve it across the new-bundle round-trip. */
+    onRequestNewIdentity?: (current: LaunchFormStateWire) => void;
+    /** Same for "+ New memory". */
+    onRequestNewMemory?: (current: LaunchFormStateWire) => void;
+}
+
+/** Snapshot of the editable Launch form. Kept here (not imported from
+ *  AgentLaunchModal) so tab-modal.ts stays a leaf type module with no
+ *  imports into the view layer. */
+export interface LaunchFormStateWire {
+    name: string;
+    runtime: "host" | "container";
+    image: string;
+    identityId: string;
+    memoryId: string;
 }
 
 export interface LaunchAgentSubmit {
@@ -96,6 +122,35 @@ export interface AgentPrereqRequest {
      *  tool. Useful when the tool is at a non-standard PATH. */
     onProceed: () => void;
     /** "Cancel" — close the modal, do not launch. */
+    onCancel: () => void;
+}
+
+/**
+ * "+ New" affordance on the Launch modal's Identity row creates an
+ * empty Identity bundle. Connector setup (Claude/Codex/GitHub/AWS)
+ * happens in the Identity pane afterward.
+ *
+ * The actual UpsertIdentityBundle RPC is owned by the layer so its
+ * `submitting()` flag (which gates safeClose) tracks the in-flight
+ * call — see reagent P1 on PR #911. Callers only supply the chain
+ * callbacks for after-success / on-cancel.
+ *
+ * Phase β of SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md.
+ */
+export interface NewIdentityBundleRequest {
+    kind: "new-identity";
+    originBlockId: string;
+    /** Initial value for the name field. Usually empty. */
+    initialName?: string;
+    /** Called after the bundle is persisted on disk. Caller should
+     *  `tabModal.replace(launchRequest)` with the new id preselected;
+     *  the layer does NOT close after this fires. */
+    onCreated: (bundleId: string, bundleName: string) => void;
+    /** Called when the user clicks Cancel. Caller should
+     *  `tabModal.replace(launchRequest)` with the prior selection
+     *  intact, OR `tabModal.close()` to exit. The layer does NOT
+     *  close after this fires — running both replace + close
+     *  synchronously nullified the replace, reagent P1 on PR #910. */
     onCancel: () => void;
 }
 
