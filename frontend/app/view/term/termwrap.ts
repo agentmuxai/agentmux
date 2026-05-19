@@ -24,6 +24,7 @@ import { FilePathLinkProvider, makeFilePathHandler } from "./filelinkprovider";
 import { FitAddon } from "@xterm/addon-fit";
 import { registeredAgentsByBlock, unregisterAgent } from "./termagent";
 import { handleOsc7Command, handleOsc16162Command, handleOscTitleCommand, handleOscWaveCommand } from "./termosc";
+import { markStart, markEnd } from "@/perf";
 
 const dlog = debug("wave:termwrap");
 
@@ -268,6 +269,7 @@ export class TermWrap {
         if (!this.loaded) {
             return;
         }
+        markStart('term-keypress');
         if (this.pasteActive) {
             this.pasteActive = false;
             if (this.multiInputCallback) {
@@ -275,6 +277,7 @@ export class TermWrap {
             }
         }
         this.sendDataHandler?.(data);
+        markEnd('term-keypress', 'sent');
     }
 
     onKeyHandler(data: { key: string; domEvent: KeyboardEvent }) {
@@ -301,6 +304,7 @@ export class TermWrap {
         } else if (msg.fileop == "append") {
             const decodedData = base64ToArray(msg.data64);
             if (this.loaded) {
+                if (decodedData.length <= 32) markStart('term-echo-render');
                 this.scheduleRafWrite(decodedData);
             } else {
                 this.heldData.push(decodedData);
@@ -337,10 +341,13 @@ export class TermWrap {
     private static readonly RAF_BYPASS_THRESHOLD = 512; // bytes
 
     private scheduleRafWrite(data: Uint8Array) {
-        if (data.length <= TermWrap.RAF_BYPASS_THRESHOLD && this.rafBuffer.length === 0 && !this.writeInFlight) {
-            // Small data with nothing queued: write directly to eliminate echo delay.
-            // Only safe when rafBuffer is empty and no write is in flight, otherwise
-            // the small chunk would be written out of order ahead of pending data.
+        // Fast path: small data, nothing buffered — bypass RAF to eliminate echo delay.
+        // writeInFlight is intentionally NOT checked here: xterm.js serialises all
+        // terminal.write() calls internally, so a concurrent small write always lands
+        // after the in-flight batch without ordering issues. Removing the writeInFlight
+        // guard eliminates the extra RAF cycle (≤16ms) that was stalling echo rendering
+        // while a large PTY write was in progress, causing the sporadic keypress delays.
+        if (data.length <= TermWrap.RAF_BYPASS_THRESHOLD && this.rafBuffer.length === 0) {
             this.doTerminalWrite(data, null);
             return;
         }
@@ -365,12 +372,14 @@ export class TermWrap {
             const chunkCount = this.rafBuffer.length;
             this.rafBuffer = [];
             this.writeInFlight = true;
+            markStart('term-raf-write');
             const t0 = performance.now();
             this.doTerminalWrite(merged, null).then(() => {
                 this.writeInFlight = false;
                 const elapsed = performance.now() - t0;
+                markEnd('term-raf-write', 'done');
                 const bufLines = this.terminal.buffer.active.length;
-                if (elapsed > 8) {
+                if (elapsed > 4) {
                     console.warn(`[raf-write] SLOW chunks=${chunkCount} bytes=${totalLen} elapsed=${elapsed.toFixed(1)}ms bufLines=${bufLines}`);
                 }
                 // Drain any data that arrived while the write was in progress.
@@ -380,6 +389,7 @@ export class TermWrap {
     }
 
     doTerminalWrite(data: string | Uint8Array, setPtyOffset?: number): Promise<void> {
+        const isSmall = typeof data === 'string' ? data.length <= 32 : data.length <= 32;
         let resolve: () => void = null;
         let prtn = new Promise<void>((presolve, _) => {
             resolve = presolve;
@@ -392,6 +402,7 @@ export class TermWrap {
                 this.dataBytesProcessed += data.length;
             }
             this.lastUpdated = Date.now();
+            if (isSmall) markEnd('term-echo-render', 'rendered');
             resolve();
         });
         return prtn;
