@@ -76,7 +76,7 @@ private dispatchIfAlive(command, source) {
 }
 ```
 
-Every async path (`await RpcApi.RunWorkflowCommand()`, `.then(async () => …)` continuations, the WPS subscription handler) routes through this one method. There is no way for a caller to forget the guard. New dispatches default-safe.
+Every async path (`await RpcApi.RunDroneCommand()`, `.then(async () => …)` continuations, the WPS subscription handler) routes through this one method. There is no way for a caller to forget the guard. New dispatches default-safe.
 
 Compared to the mounted-flag pattern (which requires the caller to remember to `if (!mounted) return` before each dispatch), the helper-method pattern is strictly stronger — it is impossible to forget unless someone bypasses the helper entirely.
 
