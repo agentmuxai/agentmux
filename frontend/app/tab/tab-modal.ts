@@ -23,7 +23,8 @@ export type TabModalRequest =
     | LaunchAgentRequest
     | InstallAgentRequest
     | AgentPrereqRequest
-    | NewIdentityBundleRequest;
+    | NewIdentityBundleRequest
+    | NewMemoryBundleRequest;
 
 export interface LaunchAgentRequest {
     kind: "launch-agent";
@@ -140,6 +141,20 @@ export interface NewIdentityBundleRequest {
      *  intact, OR `tabModal.close()` to exit. The layer does NOT
      *  close after this fires — running both replace + close
      *  synchronously nullified the replace, reagent P1 on PR #910. */
+    onCancel: () => void;
+}
+
+/**
+ * "+ New" affordance on the Launch modal's Memory row creates a new
+ * Memory bundle with an optional pasted-text seed (saved as a single
+ * `notes.md` context file).
+ * Phase γ of SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md.
+ */
+export interface NewMemoryBundleRequest {
+    kind: "new-memory";
+    originBlockId: string;
+    initialName?: string;
+    onCreated: (bundleId: string, bundleName: string) => void;
     onCancel: () => void;
 }
 

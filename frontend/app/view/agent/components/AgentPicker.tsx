@@ -155,10 +155,23 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 },
             });
         },
-        // onRequestNewMemory deliberately omitted — Phase γ (#911)
-        // wires it. Leaving the prop undefined makes the Memory `+`
-        // buttons render disabled with a "Coming soon" tooltip, which
-        // is the behaviour reagent asked for on P2 of this PR.
+        onRequestNewMemory: () => {
+            tabModal.replace({
+                kind: "new-memory" as const,
+                originBlockId: props.model.blockId,
+                onCreated: (id: string) => {
+                    tabModal.replace(
+                        buildLaunchRequest(agent, {
+                            preselectedIdentityId: preselect.preselectedIdentityId,
+                            preselectedMemoryId: id,
+                        }),
+                    );
+                },
+                onCancel: () => {
+                    tabModal.replace(buildLaunchRequest(agent, preselect));
+                },
+            });
+        },
     });
 
     const openLaunchModal = (agent: ForgeAgent) => {

@@ -29,6 +29,7 @@ import { AgentLaunchModalPanel } from "@/app/view/agent/components/AgentLaunchMo
 import { AgentInstallModalPanel } from "@/app/view/agent/components/AgentInstallModal";
 import { AgentPrereqModalPanel } from "@/app/view/agent/components/AgentPrereqModal";
 import { AgentNewIdentityModalPanel } from "@/app/view/agent/components/AgentNewIdentityModal";
+import { AgentNewMemoryModalPanel } from "@/app/view/agent/components/AgentNewMemoryModal";
 import "@/app/view/agent/components/AgentPrereqModal.scss";
 import "@/app/view/agent/components/AgentNewBundleModal.scss";
 
@@ -296,6 +297,22 @@ function renderRequest(
                         // (both run synchronously, last write wins) and
                         // exit the launch flow — reagent P1 on PR #910.
                         onCancel={req.onCancel}
+                    />
+                ),
+            };
+        case "new-memory":
+            return {
+                label: "New Memory",
+                panel: (
+                    <AgentNewMemoryModalPanel
+                        initialName={req.initialName}
+                        onCreated={(id, name) => {
+                            req.onCreated(id, name);
+                        }}
+                        onCancel={() => {
+                            req.onCancel();
+                            api.close();
+                        }}
                     />
                 ),
             };
