@@ -15,16 +15,23 @@
 import { createSignal, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
+
+export interface NewIdentityFormData {
+    name: string;
+    description: string;
+}
 
 interface AgentNewIdentityModalPanelProps {
     /** Suggested initial name (often empty). */
     initialName?: string;
     onCancel: () => void;
-    /** Fires after the bundle is persisted. Caller passes the new id
-     *  to the Launch modal so it auto-selects on next render. */
-    onCreated: (bundleId: string, bundleName: string) => void;
+    /** Runs the RPC + downstream chaining. Owned by the layer so its
+     *  `submitting()` signal correctly gates ESC / backdrop while the
+     *  RPC is in flight (mirrors the Launch modal pattern). Reagent
+     *  P1 on PR #911 — panel-local submitting wasn't visible to the
+     *  layer's safeClose, so users could ESC mid-RPC and the resolved
+     *  promise would re-open Launch unexpectedly. */
+    onSubmit: (formData: NewIdentityFormData) => Promise<void>;
 }
 
 export const AgentNewIdentityModalPanel = (
@@ -42,23 +49,13 @@ export const AgentNewIdentityModalPanel = (
         setSubmitting(true);
         setError(null);
         try {
-            const id = crypto.randomUUID();
-            const now = Date.now();
-            const bundle = await RpcApi.UpsertIdentityBundleCommand(TabRpcClient, {
-                id,
+            await props.onSubmit({
                 name: name().trim(),
                 description: description().trim(),
-                is_blank: false,
-                created_at: now,
-                updated_at: now,
             });
-            props.onCreated(bundle.id, bundle.name);
-            // Reset on success too. In practice the caller unmounts
-            // this panel via tabModal.replace, so the next render
-            // never observes the reset value — but leaving the flag
-            // stuck at true is a fragile invariant (reagent P2 on
-            // PR #910): a future caller that fails to replace the
-            // modal would strand the inputs disabled.
+            // On success the layer unmounts this panel via the
+            // request's chained tabModal.replace. The reset is for
+            // the fragile case where the caller's chain doesn't fire.
             setSubmitting(false);
         } catch (e) {
             setError((e as Error)?.message ?? String(e));
@@ -70,10 +67,9 @@ export const AgentNewIdentityModalPanel = (
         if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
             void submit();
-        } else if (e.key === "Escape") {
-            e.preventDefault();
-            props.onCancel();
         }
+        // Escape handled by the layer's overlay handler so the
+        // submitting() gate (layer-level) takes effect uniformly.
     };
 
     return (
