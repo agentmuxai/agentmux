@@ -90,6 +90,29 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         }
     });
 
+    // Empty-state predicate — the backend always returns the implicit
+    // "blank" singleton, so an empty-of-user-bundles list still has
+    // length 1. Treat any list where every entry is `is_blank` as
+    // empty for the "show only New button" branch.
+    const hasUserIdentities = createMemo(() =>
+        (identities() ?? []).some((b) => !b.is_blank),
+    );
+    const hasUserMemories = createMemo(() =>
+        (memories() ?? []).some((m) => !m.is_blank),
+    );
+
+    // Phase β/γ stubs — wired to real modals in follow-up PRs. For
+    // now, log + alert so the buttons are testable without backend
+    // changes. SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md.
+    const handleNewIdentity = () => {
+        console.log("[launch-modal] New identity clicked — modal Phase β");
+        // TODO Phase β: tabModal.replace({ kind: "new-identity", ... })
+    };
+    const handleNewMemory = () => {
+        console.log("[launch-modal] New memory clicked — modal Phase γ");
+        // TODO Phase γ: tabModal.replace({ kind: "new-memory", ... })
+    };
+
     // v8 — "Continue agent" dropdown. Filters to instances of the
     // CURRENT definition (server-side; a global cap would let older
     // rows of this definition fall off when users have many agents
@@ -362,34 +385,58 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                     </fieldset>
 
                     <fieldset class="agent-launch-modal-field agent-launch-modal-bundles">
-                        <legend class="agent-launch-modal-label">Identity</legend>
+                        <legend class="agent-launch-modal-label">Profile</legend>
                         <span class="agent-launch-modal-hint">
-                            Identity bundles credentials per provider. Pick a bundle to
-                            inject its accounts as env vars at launch (e.g. GITHUB_TOKEN,
-                            ANTHROPIC_API_KEY); pick blank to use whatever's already in
-                            your environment.
+                            A Profile groups the agent's <strong>Identity</strong> (credentials
+                            for Claude, Codex, GitHub, AWS, …) with its <strong>Memory</strong>
+                            (notes, instructions, project context). Blank uses whatever's
+                            already in your environment.
                         </span>
 
-                        <label class="agent-launch-modal-bundle-row">
+                        <div class="agent-launch-modal-bundle-row">
                             <span class="agent-launch-modal-bundle-row-label">Identity</span>
-                            <select
-                                class="agent-launch-modal-input"
-                                value={identityId()}
-                                onChange={(e) => setIdentityId(e.currentTarget.value)}
-                                disabled={submitting() || isContinue()}
-                                aria-label="Identity bundle"
+                            <Show
+                                when={hasUserIdentities()}
+                                fallback={
+                                    <button
+                                        type="button"
+                                        class="agent-launch-modal-bundle-empty-btn"
+                                        onClick={handleNewIdentity}
+                                        disabled={submitting() || isContinue()}
+                                    >
+                                        + New identity bundle...
+                                    </button>
+                                }
                             >
-                                <For each={identities() ?? []}>
-                                    {(bundle) => (
-                                        <option value={bundle.id}>
-                                            {bundle.is_blank
-                                                ? "— Blank (no creds) —"
-                                                : bundle.name}
-                                        </option>
-                                    )}
-                                </For>
-                            </select>
-                        </label>
+                                <select
+                                    class="agent-launch-modal-input"
+                                    value={identityId()}
+                                    onChange={(e) => setIdentityId(e.currentTarget.value)}
+                                    disabled={submitting() || isContinue()}
+                                    aria-label="Identity bundle"
+                                >
+                                    <For each={identities() ?? []}>
+                                        {(bundle) => (
+                                            <option value={bundle.id}>
+                                                {bundle.is_blank
+                                                    ? "— Blank (no creds) —"
+                                                    : bundle.name}
+                                            </option>
+                                        )}
+                                    </For>
+                                </select>
+                                <button
+                                    type="button"
+                                    class="agent-launch-modal-bundle-new-btn"
+                                    onClick={handleNewIdentity}
+                                    disabled={submitting() || isContinue()}
+                                    title="New identity bundle..."
+                                    aria-label="New identity bundle"
+                                >
+                                    +
+                                </button>
+                            </Show>
+                        </div>
 
                         {/*
                          * Memory dropdown — companion to Identity.
@@ -405,26 +452,50 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                          * behavior.
                          */}
 
-                        <label class="agent-launch-modal-bundle-row">
+                        <div class="agent-launch-modal-bundle-row">
                             <span class="agent-launch-modal-bundle-row-label">Memory</span>
-                            <select
-                                class="agent-launch-modal-input"
-                                value={memoryId()}
-                                onChange={(e) => setMemoryId(e.currentTarget.value)}
-                                disabled={submitting() || isContinue()}
-                                aria-label="Memory bundle"
+                            <Show
+                                when={hasUserMemories()}
+                                fallback={
+                                    <button
+                                        type="button"
+                                        class="agent-launch-modal-bundle-empty-btn"
+                                        onClick={handleNewMemory}
+                                        disabled={submitting() || isContinue()}
+                                    >
+                                        + New memory bundle...
+                                    </button>
+                                }
                             >
-                                <For each={memories() ?? []}>
-                                    {(memory) => (
-                                        <option value={memory.id}>
-                                            {memory.is_blank
-                                                ? "— Blank (vanilla CLI) —"
-                                                : memory.name}
-                                        </option>
-                                    )}
-                                </For>
-                            </select>
-                        </label>
+                                <select
+                                    class="agent-launch-modal-input"
+                                    value={memoryId()}
+                                    onChange={(e) => setMemoryId(e.currentTarget.value)}
+                                    disabled={submitting() || isContinue()}
+                                    aria-label="Memory bundle"
+                                >
+                                    <For each={memories() ?? []}>
+                                        {(memory) => (
+                                            <option value={memory.id}>
+                                                {memory.is_blank
+                                                    ? "— Blank (vanilla CLI) —"
+                                                    : memory.name}
+                                            </option>
+                                        )}
+                                    </For>
+                                </select>
+                                <button
+                                    type="button"
+                                    class="agent-launch-modal-bundle-new-btn"
+                                    onClick={handleNewMemory}
+                                    disabled={submitting() || isContinue()}
+                                    title="New memory bundle..."
+                                    aria-label="New memory bundle"
+                                >
+                                    +
+                                </button>
+                            </Show>
+                        </div>
                     </fieldset>
 
                     {/*
