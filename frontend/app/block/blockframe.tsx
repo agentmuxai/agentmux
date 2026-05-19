@@ -176,6 +176,9 @@ function EndIcons(props: {
     viewModel: ViewModel;
     nodeModel: NodeModel;
     onContextMenu: (e: MouseEvent) => void;
+    /** View key from `blockData.meta.view`, used to render a context-aware
+     *  tooltip on the per-pane mic button (e.g. "Speak into this terminal"). */
+    blockView?: string;
 }): JSX.Element {
     // createMemo so blockAtom reads inside endIconButtons() are tracked and
     // the button array re-evaluates when the agent loads/unloads.
@@ -202,6 +205,13 @@ function EndIcons(props: {
                 <MicButton
                     blockId={props.nodeModel.blockId}
                     handle={props.viewModel.voiceHandle!()}
+                    paneTitle={
+                        props.blockView === "term"
+                            ? "Speak into this terminal (Ctrl+Shift+V)"
+                            : props.blockView === "agent"
+                                ? "Speak into this agent (Ctrl+Shift+V)"
+                                : undefined
+                    }
                 />
             </Show>
             <Show when={ephemeral()} fallback={
@@ -408,7 +418,7 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
             </Show>
             <div class="block-frame-textelems-wrapper">{headerTextElems}</div>
             <div class="block-frame-end-icons" onDblClick={(e) => e.stopPropagation()}>
-                <EndIcons viewModel={props.viewModel} nodeModel={props.nodeModel} onContextMenu={onContextMenu} />
+                <EndIcons viewModel={props.viewModel} nodeModel={props.nodeModel} onContextMenu={onContextMenu} blockView={blockData()?.meta?.view} />
             </div>
         </div>
     );

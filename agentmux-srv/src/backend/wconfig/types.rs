@@ -206,6 +206,18 @@ pub struct SettingsType {
     #[serde(rename = "network:lan_discovery", default, skip_serializing_if = "is_false")]
     pub network_lan_discovery: bool,
 
+    // -- Voice settings --
+    //
+    // `voice:enabled` globally controls whether the per-pane microphone
+    // button is rendered. The default at the UX layer is "enabled" — the
+    // frontend treats `undefined`/absent as enabled, so we only need to
+    // model the explicit-disable case here. Users set this to `false` in
+    // `settings.json` to fully hide the buttons across all panes.
+    //
+    // Spec: docs/specs/SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md §7 Phase 3.
+    #[serde(rename = "voice:enabled", default, skip_serializing_if = "Option::is_none")]
+    pub voice_enabled: Option<bool>,
+
     /// Catch-all for unknown/dynamic keys (e.g. `widget:hidden@defwidget@sysinfo`).
     /// These pass through serde unchanged so the frontend can access them as flat settings keys.
     #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]

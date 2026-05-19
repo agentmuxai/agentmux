@@ -327,6 +327,14 @@ export async function initApp() {
     // Register context menu click handler now that window.api exists.
     ContextMenuModel.init();
 
+    // Phase 3 voice input — surface permission errors via the existing
+    // notification system. `useVoiceInput.ts` dispatches `voice-input-error`
+    // on the only fatal SpeechRecognition error codes ("not-allowed" /
+    // "service-not-allowed"); transient errors like "no-speech" and
+    // "aborted" are silently auto-restarted by `recognition.onend` and
+    // never reach this listener.
+    installVoiceInputErrorListener();
+
     const bareStart = performance.now();
     window.__startupPerfStart = bareStart;
     getApi().sendLog("Init Bare");
@@ -590,6 +598,35 @@ function installWindowTitleEffect(windowId: string): void {
         return disposeFn;
     });
     window.addEventListener("beforeunload", () => dispose(), { once: true });
+}
+
+/**
+ * One-time listener for the `voice-input-error` CustomEvent dispatched by
+ * `useVoiceInput.ts` when SpeechRecognition emits a fatal permission error.
+ * Surfaces a notification toast via the app's existing notification system
+ * (`pushNotification`, same path used by term.tsx for drop/copy failures).
+ *
+ * Spec: docs/specs/SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md §7 Phase 3.
+ */
+function installVoiceInputErrorListener(): void {
+    window.addEventListener("voice-input-error", (e: Event) => {
+        const detail = (e as CustomEvent<string>).detail;
+        let message: string | null = null;
+        if (detail === "not-allowed") {
+            message = "Microphone permission denied. Enable it in browser settings to use voice input.";
+        } else if (detail === "service-not-allowed") {
+            message = "Voice service unavailable. Check browser settings.";
+        }
+        if (message == null) return;
+        pushNotification({
+            icon: "fa-microphone-slash",
+            title: "Voice input unavailable",
+            message,
+            timestamp: new Date().toISOString(),
+            type: "error",
+            expiration: Date.now() + 10000,
+        });
+    });
 }
 
 function reloadAllWorkspaceTabs(ws: Workspace) {
