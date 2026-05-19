@@ -100,7 +100,20 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // Build the launch-agent request descriptor. Separated from the
     // open call so the install→launch chain can hand the same shape
     // to `tabModal.replace()` for a crossfade (no shell teardown).
-    const buildLaunchRequest = (agent: ForgeAgent) => ({
+    //
+    // Optional preselect args drive the "+ New" → create → replace-
+    // back-with-new-id flow: the new-identity / new-memory modal's
+    // onCreated calls this with `preselectedIdentityId: newId` (or
+    // memory equivalent) so the rebuilt Launch modal auto-selects
+    // the freshly-created bundle.
+    // Phase β of SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md.
+    const buildLaunchRequest = (
+        agent: ForgeAgent,
+        preselect: {
+            preselectedIdentityId?: string;
+            preselectedMemoryId?: string;
+        } = {},
+    ) => ({
         kind: "launch-agent" as const,
         agent,
         originBlockId: props.model.blockId,
@@ -118,6 +131,33 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             } finally {
                 setLaunching(null);
             }
+        },
+        preselectedIdentityId: preselect.preselectedIdentityId,
+        preselectedMemoryId: preselect.preselectedMemoryId,
+        onRequestNewIdentity: () => {
+            tabModal.replace({
+                kind: "new-identity" as const,
+                originBlockId: props.model.blockId,
+                onCreated: (id: string) => {
+                    // Chain back to the launch modal with the new
+                    // bundle preselected.
+                    tabModal.replace(
+                        buildLaunchRequest(agent, {
+                            preselectedIdentityId: id,
+                            preselectedMemoryId: preselect.preselectedMemoryId,
+                        }),
+                    );
+                },
+                onCancel: () => {
+                    // User backed out — go back to the launch modal
+                    // with whatever preselection was in flight.
+                    tabModal.replace(buildLaunchRequest(agent, preselect));
+                },
+            });
+        },
+        // Phase γ stub — replaced in #911 when new-memory lands.
+        onRequestNewMemory: () => {
+            console.log("[launch-modal] New memory clicked — Phase γ pending");
         },
     });
 
