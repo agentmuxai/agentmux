@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Variables block — declares workflow-scope vars. The block's
+//! Variables block — declares drone-scope vars. The block's
 //! `data.entries` is a list of `{name, value}` pairs; each value is
 //! `{{}}`-resolved against the current scope and written as the var.
 //!
@@ -10,8 +10,8 @@
 
 use serde_json::{json, Value};
 
-use crate::workflows::data_flow::ExecutionScope;
-use crate::workflows::types::FlowNode;
+use crate::drone::data_flow::ExecutionScope;
+use crate::drone::types::FlowNode;
 
 pub async fn run(node: &FlowNode, scope: &mut ExecutionScope) -> Result<Value, String> {
     let entries = node
@@ -40,7 +40,7 @@ pub async fn run(node: &FlowNode, scope: &mut ExecutionScope) -> Result<Value, S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workflows::types::NodePosition;
+    use crate::drone::types::NodePosition;
 
     #[tokio::test]
     async fn writes_string_var_with_resolution() {

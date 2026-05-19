@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Unified agent runner — one-shot Claude Code spawn for the
-//! workflow Agent block.
+//! drone Agent block.
 //!
 //! Spawns `claude --print --output-format=stream-json` as a non-
 //! interactive subprocess, drains its stdout through
@@ -10,7 +10,7 @@
 //! `tx`, and resolves the handle's `final_result` with the
 //! structured `AgentRunResult` once the stream emits `Done`.
 //!
-//! Headless and one-shot by design — the workflow Agent block's
+//! Headless and one-shot by design — the drone Agent block's
 //! contract is "send task, wait for done, return result." The
 //! interactive agent pane has its own PTY-based controller in
 //! `blockcontroller/shell.rs`; that path is NOT routed through
@@ -38,7 +38,7 @@ const DEFAULT_CLAUDE_BIN: &str = "claude";
 /// Handle returned by `run_agent`. The caller already holds the
 /// `mpsc::UnboundedReceiver<AgentEvent>` they paired with the `tx`
 /// passed into `run_agent`; this handle adds the structured terminal
-/// value via `final_result` (workflow Agent block's downstream
+/// value via `final_result` (drone Agent block's downstream
 /// output) and the `instance_id` of the backing `db_agent_instances`
 /// row.
 ///
@@ -70,10 +70,10 @@ pub enum AgentError {
 ///   - else the current process working directory
 ///
 /// Identity / memory bundle resolution and named-agent continuation
-/// are NOT plumbed in Phase 1.5 PR 2 — the workflow Agent block
-/// always spawns fresh (per spec §8 "workflow runs always allocate
+/// are NOT plumbed in Phase 1.5 PR 2 — the drone Agent block
+/// always spawns fresh (per spec §8 "drone runs always allocate
 /// fresh instance_name"). The bundles can be added in a follow-up
-/// once the workflow inspector (PR 3) needs to surface them.
+/// once the drone inspector (PR 3) needs to surface them.
 pub async fn run_agent(
     agent_ref: AgentRef,
     task: AgentTask,
@@ -141,7 +141,7 @@ pub(crate) async fn run_agent_with_bin(
         .take()
         .ok_or_else(|| AgentError::Spawn("claude stderr pipe missing".to_string()))?;
 
-    let instance_id = format!("workflow-agent-{}", uuid::Uuid::new_v4());
+    let instance_id = format!("drone-agent-{}", uuid::Uuid::new_v4());
     let (result_tx, result_rx) = oneshot::channel();
 
     // Drain stderr to EOF in the background so the child's pipe
@@ -149,7 +149,7 @@ pub(crate) async fn run_agent_with_bin(
     // on stderr writes, which can stall the whole run). Capped at
     // STDERR_CAP bytes — beyond that, additional bytes are read
     // and dropped on the floor so the child can keep writing.
-    // Phase 2 surfaces stderr as a `workflowrun:<id>` diagnostic
+    // Phase 2 surfaces stderr as a `dronerun:<id>` diagnostic
     // event; for now it's captured locally and discarded.
     // Reagent P2 on PR #834.
     tokio::spawn(async move {

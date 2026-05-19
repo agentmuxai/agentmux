@@ -1180,8 +1180,8 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
     // Forge handlers (agents, content, skills, history, import, reseed)
     super::forge_handlers::register_forge_handlers(engine, &state);
 
-    // Workflow handlers (issue #753 — Workflows pane DAG executor)
-    super::workflow_handlers::register_workflow_handlers(engine, &state);
+    // Drone handlers (issue #753 — Drone pane DAG executor)
+    super::drone_handlers::register_drone_handlers(engine, &state);
 
     // Pre-launch OAuth handlers (auth.start / poll / submitcallback /
     // cancel / submitapikey — see docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md)

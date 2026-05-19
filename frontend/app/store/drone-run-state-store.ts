@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Workflow run state store — slice #10 of the frontend reducer roadmap
+ * Drone run state store — slice #10 of the frontend reducer roadmap
  * and PR 4 of Phase 1.5 (`docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md`
- * §6 row 4). Closes the "workflows-model.ts is not a reducer" drift
- * item by externalizing per-run state from `WorkflowsViewModel` and
+ * §6 row 4). Closes the "drone-model.ts is not a reducer" drift
+ * item by externalizing per-run state from `DroneViewModel` and
  * routing every dispatch through the `recordDispatch` audit ring.
  *
  * Pattern matches slice #9 (`browser-pane-state-store.ts`) — same slot
@@ -26,41 +26,41 @@
  */
 
 import { type CommandSource, recordDispatch } from "./command-source";
-import { update } from "./workflow-run-state/reducer";
+import { update } from "./drone-run-state/reducer";
 import {
     AgentBlockResult,
     initialState,
-    WorkflowRunCommand,
-    WorkflowRunEvent,
-    WorkflowRunState,
-    WorkflowRunStatus,
-} from "./workflow-run-state/types";
+    DroneRunCommand,
+    DroneRunEvent,
+    DroneRunState,
+    DroneRunStatus,
+} from "./drone-run-state/types";
 
 /**
  * Setters the slot writes into when reducer state changes. The view
- * (`WorkflowsViewModel`) owns the underlying SolidJS signals and
+ * (`DroneViewModel`) owns the underlying SolidJS signals and
  * passes just the setters in via `registerPane`. Readers continue
  * using the model's existing accessors — only writes flow through
  * the slot.
  */
-export interface WorkflowRunProjections {
+export interface DroneRunProjections {
     closed: (next: boolean) => void;
     runId: (next: string) => void;
-    workflowId: (next: string) => void;
-    status: (next: WorkflowRunStatus) => void;
+    droneId: (next: string) => void;
+    status: (next: DroneRunStatus) => void;
     blockResults: (next: Record<string, AgentBlockResult>) => void;
     output: (next: string) => void;
     error: (next: string) => void;
 }
 
 interface Slot {
-    state: WorkflowRunState;
-    proj: WorkflowRunProjections;
+    state: DroneRunState;
+    proj: DroneRunProjections;
 }
 
 const slots = new Map<string, Slot>();
 
-type EventSink = (blockId: string, event: WorkflowRunEvent) => void;
+type EventSink = (blockId: string, event: DroneRunEvent) => void;
 let eventSink: EventSink = (_blockId, _event) => {
     // Default no-op sink. Tests can override via `setEventSink`.
 };
@@ -77,7 +77,7 @@ export function setEventSink(sink: EventSink): void {
  */
 export function registerPane(
     blockId: string,
-    proj: WorkflowRunProjections,
+    proj: DroneRunProjections,
 ): void {
     slots.set(blockId, { state: initialState(), proj });
 }
@@ -96,13 +96,13 @@ export function unregisterPane(blockId: string): void {
  */
 export function dispatch(
     blockId: string,
-    command: WorkflowRunCommand,
+    command: DroneRunCommand,
     source: CommandSource = "system",
-): WorkflowRunEvent[] {
+): DroneRunEvent[] {
     const slot = slots.get(blockId);
     if (!slot) {
         throw new Error(
-            `[workflow-run-state] dispatch for unregistered pane ${blockId.slice(0, 7)} (cmd=${command.type}). registerPane must be called synchronously in the WorkflowsViewModel constructor.`,
+            `[drone-run-state] dispatch for unregistered pane ${blockId.slice(0, 7)} (cmd=${command.type}). registerPane must be called synchronously in the DroneViewModel constructor.`,
         );
     }
     const prev = slot.state;
@@ -111,8 +111,8 @@ export function dispatch(
 
     if (slot.state.closed !== prev.closed) slot.proj.closed(slot.state.closed);
     if (slot.state.runId !== prev.runId) slot.proj.runId(slot.state.runId);
-    if (slot.state.workflowId !== prev.workflowId)
-        slot.proj.workflowId(slot.state.workflowId);
+    if (slot.state.droneId !== prev.droneId)
+        slot.proj.droneId(slot.state.droneId);
     if (slot.state.status !== prev.status) slot.proj.status(slot.state.status);
     if (slot.state.blockResults !== prev.blockResults)
         slot.proj.blockResults(slot.state.blockResults);
@@ -122,7 +122,7 @@ export function dispatch(
     for (const ev of result.events) eventSink(blockId, ev);
 
     recordDispatch({
-        slice: "workflow-run-state",
+        slice: "drone-run-state",
         key: blockId,
         command,
         events: result.events,
@@ -134,7 +134,7 @@ export function dispatch(
 }
 
 /** Snapshot — diagnostics + tests only. */
-export function snapshot(blockId: string): WorkflowRunState | null {
+export function snapshot(blockId: string): DroneRunState | null {
     return slots.get(blockId)?.state ?? null;
 }
 
@@ -145,8 +145,8 @@ export function __resetAllSlots(): void {
 
 export type {
     AgentBlockResult,
-    WorkflowRunCommand,
-    WorkflowRunEvent,
-    WorkflowRunState,
-    WorkflowRunStatus,
+    DroneRunCommand,
+    DroneRunEvent,
+    DroneRunState,
+    DroneRunStatus,
 };

@@ -18,7 +18,7 @@ import { EditorViewModel } from "@/app/view/editor/editor";
 import { BrowserViewModel } from "@/app/view/browser/browser";
 import { MemoryViewModel } from "@/app/view/memory/memory";
 import { IdentityPaneViewModel } from "@/app/view/identity/identity-pane";
-import { WorkflowsViewModel } from "@/app/view/workflows/workflows";
+import { DroneViewModel } from "@/app/view/drone/drone";
 import { invokeCommand } from "@/app/platform/ipc";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
@@ -54,17 +54,24 @@ BlockRegistry.set("editor", EditorViewModel as any);
 BlockRegistry.set("browser", BrowserViewModel as any);
 BlockRegistry.set("memory", MemoryViewModel as any);
 BlockRegistry.set("identity", IdentityPaneViewModel as any);
-BlockRegistry.set("workflows", WorkflowsViewModel as any);
+BlockRegistry.set("drone", DroneViewModel as any);
 
 function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel): ViewModel {
-    // Migration shim (v0.33.197): forge was folded into the agent pane;
-    // redirect old "forge" blocks to "agent" so they keep rendering.
+    // Migration shims:
+    //   * v0.33.197: forge was folded into the agent pane; redirect old
+    //     "forge" blocks to "agent" so they keep rendering.
+    //   * Drone rename (SPEC_RENAME_WORKFLOWS_TO_DRONE_2026_05_18): the
+    //     Workflows feature was renamed to Drone. Existing user panes
+    //     persist `meta.view: "workflows"` in the block store; the v10
+    //     SQLite migration moves the DAG tables but does NOT rewrite
+    //     block metadata, so redirect at the view-dispatch layer instead.
     //
     // "identity" was previously redirected here too, but as of PR-F.2
     // (#748) Identity is once again a first-class pane — `view: "identity"`
-    // resolves to IdentityPaneViewModel via the BlockRegistry above. The
-    // shim only handles "forge" now.
-    const effectiveView = blockView === "forge" ? "agent" : blockView;
+    // resolves to IdentityPaneViewModel via the BlockRegistry above.
+    let effectiveView = blockView;
+    if (effectiveView === "forge") effectiveView = "agent";
+    if (effectiveView === "workflows") effectiveView = "drone";
     const ctor = BlockRegistry.get(effectiveView);
     if (ctor != null) {
         return new ctor(blockId, nodeModel as any);

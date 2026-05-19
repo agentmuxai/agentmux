@@ -1,10 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// WorkflowsViewModel — owns the per-pane state for the Workflows widget.
+// DroneViewModel — owns the per-pane state for the Drone widget.
 //
 // Phase 1.5 PR 4 (`docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md`
-// §6 row 4) routes per-run state through the `workflow-run-state` slice
+// §6 row 4) routes per-run state through the `drone-run-state` slice
 // (#10) — same lifecycle pattern as slice #9 (browser-pane-state).
 //
 // What's reducer-backed (slot store, `recordDispatch` audit ring):
@@ -17,12 +17,12 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import {
-    dispatch as dispatchWorkflowRun,
+    dispatch as dispatchDroneRun,
     registerPane,
     unregisterPane,
     type AgentBlockResult,
-    type WorkflowRunStatus,
-} from "@/app/store/workflow-run-state-store";
+    type DroneRunStatus,
+} from "@/app/store/drone-run-state-store";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, createSignal, type Accessor } from "solid-js";
@@ -34,14 +34,14 @@ import {
     type BlockKind,
     type FlowEdge,
     type FlowNode,
-    type WorkflowDefinition,
-    type WorkflowGraph,
-    type WorkflowRun,
-} from "./workflows-types";
+    type DroneDefinition,
+    type DroneGraph,
+    type DroneRun,
+} from "./drone-types";
 
-const BLANK_WORKFLOW = (): WorkflowDefinition => ({
+const BLANK_DRONE = (): DroneDefinition => ({
     id: "",
-    name: "Untitled Workflow",
+    name: "Untitled Drone",
     description: "",
     graph: emptyGraph(),
     viewport: defaultViewport(),
@@ -49,8 +49,8 @@ const BLANK_WORKFLOW = (): WorkflowDefinition => ({
     updated_at: 0,
 });
 
-export class WorkflowsViewModel implements ViewModel {
-    viewType = "workflows";
+export class DroneViewModel implements ViewModel {
+    viewType = "drone";
     blockId: string;
     nodeModel: BlockNodeModel;
 
@@ -65,14 +65,14 @@ export class WorkflowsViewModel implements ViewModel {
 
     blockAtom: Accessor<Block | undefined>;
 
-    // --- list of saved workflows
-    private _list = createSignal<WorkflowDefinition[]>([]);
-    listAtom: Accessor<WorkflowDefinition[]> = this._list[0];
+    // --- list of saved drones
+    private _list = createSignal<DroneDefinition[]>([]);
+    listAtom: Accessor<DroneDefinition[]> = this._list[0];
     setList = this._list[1];
 
-    // --- the workflow currently open in the canvas (a draft until saved)
-    private _draft = createSignal<WorkflowDefinition>(BLANK_WORKFLOW());
-    draftAtom: Accessor<WorkflowDefinition> = this._draft[0];
+    // --- the drone currently open in the canvas (a draft until saved)
+    private _draft = createSignal<DroneDefinition>(BLANK_DRONE());
+    draftAtom: Accessor<DroneDefinition> = this._draft[0];
     setDraft = this._draft[1];
 
     // --- which node is selected in the canvas (for the InspectorPanel)
@@ -82,10 +82,10 @@ export class WorkflowsViewModel implements ViewModel {
 
     // --- run state
     //
-    // `_running` is the in-flight `await RunWorkflowCommand` flag — bound
+    // `_running` is the in-flight `await RunDroneCommand` flag — bound
     // to the Toolbar's button disable. It's a UI thing, separate from the
     // slot's `status` (which is "idle"|"running"|"done"|"failed", folded
-    // from `workflowrun:<id>` events). Keeping it in the view.
+    // from `dronerun:<id>` events). Keeping it in the view.
     private _running = createSignal<boolean>(false);
     runningAtom: Accessor<boolean> = this._running[0];
     setRunning = this._running[1];
@@ -100,8 +100,8 @@ export class WorkflowsViewModel implements ViewModel {
     private _activeRunId = createSignal<string | null>(null);
     activeRunIdAtom: Accessor<string | null> = this._activeRunId[0];
 
-    private _status = createSignal<WorkflowRunStatus>("idle");
-    statusAtom: Accessor<WorkflowRunStatus> = this._status[0];
+    private _status = createSignal<DroneRunStatus>("idle");
+    statusAtom: Accessor<DroneRunStatus> = this._status[0];
 
     private _blockResults = createSignal<Record<string, AgentBlockResult>>({});
     blockResultsAtom: Accessor<Record<string, AgentBlockResult>> = this._blockResults[0];
@@ -111,21 +111,21 @@ export class WorkflowsViewModel implements ViewModel {
     }
 
     // ── Non-reducer-backed view-only cells ─────────────────────────
-    private _runs = createSignal<WorkflowRun[]>([]);
-    runsAtom: Accessor<WorkflowRun[]> = this._runs[0];
+    private _runs = createSignal<DroneRun[]>([]);
+    runsAtom: Accessor<DroneRun[]> = this._runs[0];
     setRuns = this._runs[1];
 
     private _error = createSignal<string | null>(null);
     errorAtom: Accessor<string | null> = this._error[0];
     setError = this._error[1];
 
-    // Active `workflowrun:<id>` subscription. Stored so we can
+    // Active `dronerun:<id>` subscription. Stored so we can
     // unsubscribe on dispose / when the run changes.
     private activeRunUnsub: (() => void) | null = null;
 
     // Idempotency flag — block-cleanup paths can call dispose() more
     // than once on the same view model. A second call would re-fire
-    // `dispatchWorkflowRun(..., Disposed)` against a slot the first
+    // `dispatchDroneRun(..., Disposed)` against a slot the first
     // call already removed, throwing "unregistered pane" out of
     // teardown. Codex P2 on PR #844.
     private disposed = false;
@@ -154,9 +154,9 @@ export class WorkflowsViewModel implements ViewModel {
                 // unregisterPane — no view-model signal to mirror.
             },
             runId: (next) => this._activeRunId[1](next === "" ? null : next),
-            workflowId: () => {
+            droneId: () => {
                 // Not mirrored — the view reads draft.id, not the slot's
-                // workflowId. Keeping the projection a no-op so the slot
+                // droneId. Keeping the projection a no-op so the slot
                 // surface stays uniform with slice #9.
             },
             status: (next) => this._status[1](next),
@@ -165,7 +165,7 @@ export class WorkflowsViewModel implements ViewModel {
                 // The terminal `output` projection is unused today — the
                 // Run panel reads the runs-list row instead, and the
                 // inspector reads blockResults. Reserved for Phase 2
-                // when a workflow-level result panel lands.
+                // when a drone-level result panel lands.
             },
             error: () => {
                 // Same rationale as `output` — terminal error surfaces
@@ -178,18 +178,18 @@ export class WorkflowsViewModel implements ViewModel {
 
     async refreshList(): Promise<void> {
         try {
-            const list = await RpcApi.ListWorkflowsCommand(TabRpcClient, {});
+            const list = await RpcApi.ListDronesCommand(TabRpcClient, {});
             this.setList(list);
             this.setError(null);
         } catch (e) {
-            this.setError(`Failed to load workflows: ${(e as Error).message ?? e}`);
+            this.setError(`Failed to load drones: ${(e as Error).message ?? e}`);
         }
     }
 
-    /** Load a workflow into the canvas as the draft. */
-    async openWorkflow(id: string): Promise<void> {
+    /** Load a drone into the canvas as the draft. */
+    async openDrone(id: string): Promise<void> {
         try {
-            const wf = await RpcApi.GetWorkflowCommand(TabRpcClient, { id });
+            const wf = await RpcApi.GetDroneCommand(TabRpcClient, { id });
             if (wf) {
                 this.setDraft(wf);
                 this.setSelected(null);
@@ -197,13 +197,13 @@ export class WorkflowsViewModel implements ViewModel {
                 await this.refreshRuns(id);
             }
         } catch (e) {
-            this.setError(`Failed to open workflow: ${(e as Error).message ?? e}`);
+            this.setError(`Failed to open drone: ${(e as Error).message ?? e}`);
         }
     }
 
-    /** Start a fresh blank workflow in the canvas. */
-    newWorkflow(): void {
-        this.setDraft(BLANK_WORKFLOW());
+    /** Start a fresh blank drone in the canvas. */
+    newDrone(): void {
+        this.setDraft(BLANK_DRONE());
         this.setSelected(null);
         this.setRuns([]);
         this.dispatchIfAlive({ type: "Reset" }, "user");
@@ -217,7 +217,7 @@ export class WorkflowsViewModel implements ViewModel {
     async save(): Promise<string | null> {
         const wf = this.draftAtom();
         try {
-            const saved = await RpcApi.UpsertWorkflowCommand(TabRpcClient, wf);
+            const saved = await RpcApi.UpsertDroneCommand(TabRpcClient, wf);
             this.setDraft(saved);
             await this.refreshList();
             return saved.id;
@@ -246,7 +246,7 @@ export class WorkflowsViewModel implements ViewModel {
         // doesn't show stale results alongside the new error banner.
         this.dispatchIfAlive({ type: "Reset" }, "user");
         try {
-            const r = await RpcApi.RunWorkflowCommand(TabRpcClient, { workflow_id: id });
+            const r = await RpcApi.RunDroneCommand(TabRpcClient, { drone_id: id });
             // The dispose-during-await race: if `dispose()` ran while
             // we were awaiting the RPC, `this.disposed === true` now
             // and `dispatchIfAlive` no-ops below. `subscribeRun`
@@ -254,7 +254,7 @@ export class WorkflowsViewModel implements ViewModel {
             // the subscription past dispose (reagent P1 on #848).
             if (this.disposed) return;
             this.dispatchIfAlive(
-                { type: "RunStarted", runId: r.run_id, workflowId: id },
+                { type: "RunStarted", runId: r.run_id, droneId: id },
                 "user",
             );
             this.subscribeRun(r.run_id, id);
@@ -264,7 +264,7 @@ export class WorkflowsViewModel implements ViewModel {
             // (Phase 1.5 PR 3, #830).
             await this.refreshRuns(id);
             if (this.disposed) return;
-            // Race recovery: ultra-fast workflows can finish + persist
+            // Race recovery: ultra-fast drones can finish + persist
             // their final row before we subscribe (codex P2 on #843).
             // Dispatched as `BackfilledFromRow`, the reducer treats
             // backfill as the authoritative final state.
@@ -276,17 +276,17 @@ export class WorkflowsViewModel implements ViewModel {
         }
     }
 
-    /** Subscribe to `workflowrun:<runId>` WPS events for the active run.
+    /** Subscribe to `dronerun:<runId>` WPS events for the active run.
      *  Replaces any prior subscription. The backend publishes one event
      *  per `RunEvent` variant — we route every event into the slot
      *  reducer and refresh the run row on terminal events. */
-    private subscribeRun(runId: string, workflowId: string): void {
+    private subscribeRun(runId: string, droneId: string): void {
         if (this.activeRunUnsub) {
             this.activeRunUnsub();
             this.activeRunUnsub = null;
         }
         this.activeRunUnsub = waveEventSubscribe({
-            eventType: `workflowrun:${runId}`,
+            eventType: `dronerun:${runId}`,
             scope: "",
             handler: (event) => {
                 const data = (event as { data?: RunEventWire }).data;
@@ -296,7 +296,7 @@ export class WorkflowsViewModel implements ViewModel {
                     // Backend writes the row update BEFORE publishing
                     // the terminal event (codex P2 on #843), so a
                     // refresh here lands the final state.
-                    void this.refreshRuns(workflowId);
+                    void this.refreshRuns(droneId);
                     if (this.activeRunUnsub) {
                         this.activeRunUnsub();
                         this.activeRunUnsub = null;
@@ -357,8 +357,8 @@ export class WorkflowsViewModel implements ViewModel {
     /** Look up the active run in the just-refreshed runs list and, if
      *  it's already terminal, dispatch `BackfilledFromRow` so the slot
      *  populates `blockResults` from persistence. Covers the codex P2
-     *  race for fast workflows whose events fire before we subscribe. */
-    private maybeBackfillFromTerminalRun(runId: string, workflowId: string): void {
+     *  race for fast drones whose events fire before we subscribe. */
+    private maybeBackfillFromTerminalRun(runId: string, droneId: string): void {
         // If streaming events already populated, the reducer treats
         // backfill as authoritative — but the BlockDone events from the
         // stream are equally authoritative. Skip to avoid clobbering
@@ -378,7 +378,7 @@ export class WorkflowsViewModel implements ViewModel {
             {
                 type: "BackfilledFromRow",
                 runId,
-                workflowId,
+                droneId,
                 status: row.status === "done" ? "done" : "failed",
                 output: row.output,
                 error: row.error,
@@ -392,10 +392,10 @@ export class WorkflowsViewModel implements ViewModel {
         }
     }
 
-    async refreshRuns(workflowId: string): Promise<void> {
+    async refreshRuns(droneId: string): Promise<void> {
         try {
-            const list = await RpcApi.ListWorkflowRunsCommand(TabRpcClient, {
-                workflow_id: workflowId,
+            const list = await RpcApi.ListDroneRunsCommand(TabRpcClient, {
+                drone_id: droneId,
                 limit: 25,
             });
             this.setRuns(list);
@@ -480,11 +480,11 @@ export class WorkflowsViewModel implements ViewModel {
         const errors: string[] = [];
         const graph = this.draftAtom().graph;
         if (graph.nodes.length === 0) {
-            errors.push("Workflow is empty.");
+            errors.push("Drone is empty.");
         }
         const responses = graph.nodes.filter((n) => n.data.kind === "response").length;
-        if (responses === 0) errors.push("Workflow needs exactly one Response block.");
-        if (responses > 1) errors.push("Only one Response block per workflow.");
+        if (responses === 0) errors.push("Drone needs exactly one Response block.");
+        if (responses > 1) errors.push("Only one Response block per drone.");
         return { ok: errors.length === 0, errors };
     }
 
@@ -495,7 +495,7 @@ export class WorkflowsViewModel implements ViewModel {
             this.activeRunUnsub();
             this.activeRunUnsub = null;
         }
-        dispatchWorkflowRun(this.blockId, { type: "Disposed" });
+        dispatchDroneRun(this.blockId, { type: "Disposed" });
         unregisterPane(this.blockId);
     }
 
@@ -507,16 +507,16 @@ export class WorkflowsViewModel implements ViewModel {
      *  same race exists for ANY post-dispose dispatch, not just a
      *  second `Disposed`. */
     private dispatchIfAlive(
-        command: Parameters<typeof dispatchWorkflowRun>[1],
-        source?: Parameters<typeof dispatchWorkflowRun>[2],
+        command: Parameters<typeof dispatchDroneRun>[1],
+        source?: Parameters<typeof dispatchDroneRun>[2],
     ): void {
         if (this.disposed) return;
-        dispatchWorkflowRun(this.blockId, command, source);
+        dispatchDroneRun(this.blockId, command, source);
     }
 }
 
-/** Shape of one `workflowrun:<id>` event payload as emitted by
- *  `agentmux-srv/src/workflows/executor/engine.rs::RunEvent`
+/** Shape of one `dronerun:<id>` event payload as emitted by
+ *  `agentmux-srv/src/drone/executor/engine.rs::RunEvent`
  *  (`#[serde(tag = "kind", rename_all = "snake_case")]`). */
 interface RunEventWire {
     kind:
@@ -527,7 +527,7 @@ interface RunEventWire {
         | "run_done"
         | "run_failed";
     run_id?: string;
-    workflow_id?: string;
+    drone_id?: string;
     block_id?: string;
     output?: unknown;
     error?: string;
@@ -539,4 +539,4 @@ function makeId(prefix: string): string {
 
 // Re-export the slot's per-block result type for view consumers that
 // still import from the view-model module.
-export type { AgentBlockResult } from "@/app/store/workflow-run-state-store";
+export type { AgentBlockResult } from "@/app/store/drone-run-state-store";

@@ -10,7 +10,7 @@
 //! `claude --print --output-format=stream-json`, drains its stdout
 //! through `ClaudeTranslator`, and produces a structured
 //! `AgentRunResult` that this function flattens into the
-//! snake_case workflow-block output shape.
+//! snake_case drone-block output shape.
 //!
 //! Block config (`node.data`):
 //!   * `task`         — required. Mustache-style template resolved
@@ -22,7 +22,7 @@
 //!                      optional; missing = blank agent.
 //!   * `max_turns`    — optional. Hard cap on claude turns.
 //!
-//! Output (snake_case to match other workflow blocks — see spec
+//! Output (snake_case to match other drone blocks — see spec
 //! §4.5):
 //!
 //!   ```json
@@ -41,8 +41,8 @@ use serde_json::{json, Value};
 
 use crate::agents::runner::{run_agent, AgentError};
 use crate::agents::types::{AgentRef, AgentTask};
-use crate::workflows::data_flow::ExecutionScope;
-use crate::workflows::types::FlowNode;
+use crate::drone::data_flow::ExecutionScope;
+use crate::drone::types::FlowNode;
 
 pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, String> {
     let task_raw = node
@@ -90,7 +90,7 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
     };
 
     // Forward AgentEvents into a local channel and discard for now.
-    // Phase 1.5 PR 3 will re-emit them on the `workflowrun:<id>`
+    // Phase 1.5 PR 3 will re-emit them on the `dronerun:<id>`
     // broker so the inspector pane can render the live stream.
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let handle = run_agent(agent_ref, task, tx).await.map_err(|e| match e {
@@ -111,9 +111,9 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
         .map_err(|e| format!("agent block: runner cancelled: {e}"))?
         .map_err(|e| format!("agent block: agent run failed: {e}"))?;
 
-    // Manually flatten to snake_case to match other workflow block
+    // Manually flatten to snake_case to match other drone block
     // outputs (the AgentRunResult's serde camelCase is for the IPC
-    // seam with the frontend, NOT for workflow templates — see spec
+    // seam with the frontend, NOT for drone templates — see spec
     // §4.5 NOTE).
     Ok(json!({
         "response": result.response,
@@ -131,7 +131,7 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workflows::types::NodePosition;
+    use crate::drone::types::NodePosition;
 
     fn mk_node(data: Value) -> FlowNode {
         FlowNode {

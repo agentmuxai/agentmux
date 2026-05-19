@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pure reducer for the workflow-run-state slice (#10).
+ * Pure reducer for the drone-run-state slice (#10).
  *
  * Mirrors slice #9 (browser-pane-state) — same `update(state, command) →
  * { state, events }` shape, same idempotency rules, same no-throw policy,
@@ -33,13 +33,13 @@ import {
     initialState,
     parseBlockOutput,
     ReducerResult,
-    WorkflowRunCommand,
-    WorkflowRunState,
+    DroneRunCommand,
+    DroneRunState,
 } from "./types";
 
 export function update(
-    state: WorkflowRunState,
-    command: WorkflowRunCommand,
+    state: DroneRunState,
+    command: DroneRunCommand,
 ): ReducerResult {
     if (state.closed && command.type !== "Disposed") {
         return {
@@ -59,7 +59,7 @@ export function update(
                 state: {
                     ...state,
                     runId: command.runId,
-                    workflowId: command.workflowId,
+                    droneId: command.droneId,
                     status: "running",
                     blockResults: {},
                     output: "",
@@ -69,7 +69,7 @@ export function update(
                     {
                         type: "run-started",
                         runId: command.runId,
-                        workflowId: command.workflowId,
+                        droneId: command.droneId,
                     },
                 ],
             };
@@ -158,7 +158,7 @@ export function update(
                 state: {
                     ...state,
                     runId: command.runId,
-                    workflowId: command.workflowId,
+                    droneId: command.droneId,
                     status: command.status,
                     blockResults,
                     output: command.output,

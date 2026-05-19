@@ -856,54 +856,54 @@ class RpcApiType {
         return client.rpcCall("auth.submitapikey", data, opts);
     }
 
-    // ── Workflows pane (issue #753) ─────────────────────────────────
+    // ── Drone pane (issue #753) ─────────────────────────────────────
 
-    ListWorkflowsCommand(
+    ListDronesCommand(
         client: RpcClient,
         data: Record<string, never> = {},
         opts?: RpcOpts,
-    ): Promise<WorkflowDefinition[]> {
-        return client.rpcCall("listworkflows", data, opts);
+    ): Promise<DroneDefinition[]> {
+        return client.rpcCall("listdrones", data, opts);
     }
 
-    GetWorkflowCommand(
+    GetDroneCommand(
         client: RpcClient,
         data: { id: string },
         opts?: RpcOpts,
-    ): Promise<WorkflowDefinition | null> {
-        return client.rpcCall("getworkflow", data, opts);
+    ): Promise<DroneDefinition | null> {
+        return client.rpcCall("getdrone", data, opts);
     }
 
-    UpsertWorkflowCommand(
+    UpsertDroneCommand(
         client: RpcClient,
-        data: WorkflowDefinition,
+        data: DroneDefinition,
         opts?: RpcOpts,
-    ): Promise<WorkflowDefinition> {
-        return client.rpcCall("upsertworkflow", data, opts);
+    ): Promise<DroneDefinition> {
+        return client.rpcCall("upsertdrone", data, opts);
     }
 
-    DeleteWorkflowCommand(
+    DeleteDroneCommand(
         client: RpcClient,
         data: { id: string },
         opts?: RpcOpts,
     ): Promise<{ deleted: boolean }> {
-        return client.rpcCall("deleteworkflow", data, opts);
+        return client.rpcCall("deletedrone", data, opts);
     }
 
-    RunWorkflowCommand(
+    RunDroneCommand(
         client: RpcClient,
-        data: { workflow_id: string },
+        data: { drone_id: string },
         opts?: RpcOpts,
     ): Promise<{ run_id: string }> {
-        return client.rpcCall("runworkflow", data, opts);
+        return client.rpcCall("rundrone", data, opts);
     }
 
-    ListWorkflowRunsCommand(
+    ListDroneRunsCommand(
         client: RpcClient,
-        data: { workflow_id: string; limit?: number },
+        data: { drone_id: string; limit?: number },
         opts?: RpcOpts,
-    ): Promise<WorkflowRun[]> {
-        return client.rpcCall("listworkflowruns", data, opts);
+    ): Promise<DroneRun[]> {
+        return client.rpcCall("listdroneruns", data, opts);
     }
 
     // command "listagentinstances" [call]

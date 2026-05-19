@@ -13,14 +13,14 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-/// Only env vars starting with this prefix are exposed to workflow
+/// Only env vars starting with this prefix are exposed to drone
 /// templates via `{{env.NAME}}`. See `ExecutionScope::lookup` for
 /// the security rationale.
-const WORKFLOW_ENV_PREFIX: &str = "AGENTMUX_WF_";
+const DRONE_ENV_PREFIX: &str = "AGENTMUX_DR_";
 
 /// Holds the per-run scope. Maps:
 ///   * `outputs[block_id]` — the JSON output of a completed block
-///   * `vars[name]` — workflow-scope variables (set by Variables block)
+///   * `vars[name]` — drone-scope variables (set by Variables block)
 #[derive(Debug, Default)]
 pub struct ExecutionScope {
     pub outputs: HashMap<String, Value>,
@@ -89,15 +89,15 @@ impl ExecutionScope {
             let v = self.vars.get(*name)?;
             return Some(walk(v.clone(), &rest[1..]));
         } else if head == "env" {
-            // Restrict `{{env.NAME}}` to vars under the workflow
+            // Restrict `{{env.NAME}}` to vars under the drone
             // namespace prefix. Without this guard a Response template
             // could read AWS_*, GITHUB_TOKEN, CLAUDE_API_KEY, etc. and
             // surface them via the persisted run output, exfiltrating
-            // server-side secrets to any caller with workflow access.
-            // (reagent P1 on PR #755.) Phase 2 introduces a per-workflow
+            // server-side secrets to any caller with drone access.
+            // (reagent P1 on PR #755.) Phase 2 introduces a per-drone
             // configured allowlist; the prefix is the Phase 1 stopgap.
             let name = rest.first()?;
-            if !name.starts_with(WORKFLOW_ENV_PREFIX) {
+            if !name.starts_with(DRONE_ENV_PREFIX) {
                 return None;
             }
             return std::env::var(name).ok().map(Value::String);
@@ -156,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    fn resolves_workflow_var() {
+    fn resolves_drone_var() {
         let mut scope = ExecutionScope::new();
         scope.vars.insert("name".to_string(), json!("world"));
         assert_eq!(scope.resolve("hi {{var.name}}"), "hi world");
@@ -231,8 +231,8 @@ mod tests {
     // ────────────────────────────────────────────────────────────────
 
     #[test]
-    fn env_var_allowed_under_workflow_prefix() {
-        let key = "AGENTMUX_WF_TEST_PASS_KEY";
+    fn env_var_allowed_under_drone_prefix() {
+        let key = "AGENTMUX_DR_TEST_PASS_KEY";
         std::env::set_var(key, "hello");
         let scope = ExecutionScope::new();
         assert_eq!(
@@ -244,13 +244,13 @@ mod tests {
 
     #[test]
     fn env_var_outside_prefix_is_blocked() {
-        // Setting common secret-shaped names would let workflows
+        // Setting common secret-shaped names would let drones
         // exfiltrate them via Response output if the lookup wasn't
         // namespaced.
         let secret_key = "AWS_TEST_SECRET_DO_NOT_LEAK";
         std::env::set_var(secret_key, "TOPSECRET");
         let scope = ExecutionScope::new();
-        // Without the AGENTMUX_WF_ prefix, lookup returns None —
+        // Without the AGENTMUX_DR_ prefix, lookup returns None —
         // the template emits the unresolved token (passthrough).
         let out = scope.resolve(&format!("leak: {{{{env.{secret_key}}}}}"));
         assert!(!out.contains("TOPSECRET"), "secret value leaked: {out}");

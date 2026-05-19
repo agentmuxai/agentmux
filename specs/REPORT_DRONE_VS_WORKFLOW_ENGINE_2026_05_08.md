@@ -1,5 +1,7 @@
 # Report: PR #256 (Drone) vs. Workflow Engine Spec — best way forward
 
+> **⚠ Naming decision reversed 2026-05-18.** This report chose "Workflows" over "Drone"; that name was used through Phase 1.5 (PRs #755, #831-848). The feature has since been renamed back to **Drone**. The *technical* recommendations below (solid-flow canvas, Rust DAG engine, block taxonomy) remain in force. See [`docs/specs/SPEC_RENAME_WORKFLOWS_TO_DRONE_2026_05_18.md`](../docs/specs/SPEC_RENAME_WORKFLOWS_TO_DRONE_2026_05_18.md) §9 for rationale.
+
 **Date:** 2026-05-08
 **Author:** review of PR #256 + agenty-workspace workflow specs
 **Sources:**

@@ -11,15 +11,15 @@ import {
     setEventSink,
     snapshot,
     unregisterPane,
-    type WorkflowRunStatus,
-} from "./workflow-run-state-store";
-import type { WorkflowRunEvent } from "./workflow-run-state/types";
+    type DroneRunStatus,
+} from "./drone-run-state-store";
+import type { DroneRunEvent } from "./drone-run-state/types";
 
 interface Projections {
     closed: boolean[];
     runId: string[];
-    workflowId: string[];
-    status: WorkflowRunStatus[];
+    droneId: string[];
+    status: DroneRunStatus[];
     blockResults: Record<string, AgentBlockResult>[];
     output: string[];
     error: string[];
@@ -32,7 +32,7 @@ function mkProj(): {
     const calls: Projections = {
         closed: [],
         runId: [],
-        workflowId: [],
+        droneId: [],
         status: [],
         blockResults: [],
         output: [],
@@ -43,7 +43,7 @@ function mkProj(): {
         proj: {
             closed: (v) => calls.closed.push(v),
             runId: (v) => calls.runId.push(v),
-            workflowId: (v) => calls.workflowId.push(v),
+            droneId: (v) => calls.droneId.push(v),
             status: (v) => calls.status.push(v),
             blockResults: (v) => calls.blockResults.push(v),
             output: (v) => calls.output.push(v),
@@ -52,7 +52,7 @@ function mkProj(): {
     };
 }
 
-describe("workflow-run-state-store (slice #10)", () => {
+describe("drone-run-state-store (slice #10)", () => {
     afterEach(() => {
         __resetAllSlots();
         setEventSink(() => {});
@@ -60,16 +60,16 @@ describe("workflow-run-state-store (slice #10)", () => {
 
     it("dispatch on unregistered blockId throws (no silent drops)", () => {
         expect(() =>
-            dispatch("nope", { type: "RunStarted", runId: "r1", workflowId: "w1" }),
+            dispatch("nope", { type: "RunStarted", runId: "r1", droneId: "w1" }),
         ).toThrowError(/unregistered pane/);
     });
 
     it("registers a pane and projects only changed cells", () => {
         const { proj, calls } = mkProj();
         registerPane("blk-1", proj);
-        dispatch("blk-1", { type: "RunStarted", runId: "r1", workflowId: "w1" });
+        dispatch("blk-1", { type: "RunStarted", runId: "r1", droneId: "w1" });
         expect(calls.runId).toEqual(["r1"]);
-        expect(calls.workflowId).toEqual(["w1"]);
+        expect(calls.droneId).toEqual(["w1"]);
         expect(calls.status).toEqual(["running"]);
         expect(calls.closed).toEqual([]);
         // RunStarted always allocates a fresh empty blockResults map
@@ -81,7 +81,7 @@ describe("workflow-run-state-store (slice #10)", () => {
     it("BlockDone projects the freshly-allocated blockResults map", () => {
         const { proj, calls } = mkProj();
         registerPane("blk-1", proj);
-        dispatch("blk-1", { type: "RunStarted", runId: "r1", workflowId: "w1" });
+        dispatch("blk-1", { type: "RunStarted", runId: "r1", droneId: "w1" });
         dispatch("blk-1", {
             type: "BlockDone",
             blockId: "agent-1",
@@ -98,7 +98,7 @@ describe("workflow-run-state-store (slice #10)", () => {
     it("RunDone projects status without clobbering blockResults", () => {
         const { proj, calls } = mkProj();
         registerPane("blk-1", proj);
-        dispatch("blk-1", { type: "RunStarted", runId: "r1", workflowId: "w1" });
+        dispatch("blk-1", { type: "RunStarted", runId: "r1", droneId: "w1" });
         dispatch("blk-1", {
             type: "BlockDone",
             blockId: "agent-1",
@@ -116,7 +116,7 @@ describe("workflow-run-state-store (slice #10)", () => {
         dispatch("blk-1", {
             type: "BackfilledFromRow",
             runId: "r1",
-            workflowId: "w1",
+            droneId: "w1",
             status: "done",
             output: "x",
             error: "",
@@ -132,11 +132,11 @@ describe("workflow-run-state-store (slice #10)", () => {
     });
 
     it("emits events through the configured sink", () => {
-        const events: { blockId: string; ev: WorkflowRunEvent }[] = [];
+        const events: { blockId: string; ev: DroneRunEvent }[] = [];
         setEventSink((blockId, ev) => events.push({ blockId, ev }));
         const { proj } = mkProj();
         registerPane("blk-1", proj);
-        dispatch("blk-1", { type: "RunStarted", runId: "r1", workflowId: "w1" });
+        dispatch("blk-1", { type: "RunStarted", runId: "r1", droneId: "w1" });
         expect(events).toHaveLength(1);
         expect(events[0].ev.type).toBe("run-started");
     });
@@ -147,7 +147,7 @@ describe("workflow-run-state-store (slice #10)", () => {
         dispatch("blk-1", { type: "Disposed" });
         const closedCallsBefore = calls.closed.length;
         const statusCallsBefore = calls.status.length;
-        dispatch("blk-1", { type: "RunStarted", runId: "r1", workflowId: "w1" });
+        dispatch("blk-1", { type: "RunStarted", runId: "r1", droneId: "w1" });
         expect(calls.closed.length).toBe(closedCallsBefore);
         expect(calls.status.length).toBe(statusCallsBefore);
         expect(snapshot("blk-1")?.runId).toBe("");
@@ -159,7 +159,7 @@ describe("workflow-run-state-store (slice #10)", () => {
         unregisterPane("blk-1");
         expect(snapshot("blk-1")).toBeNull();
         expect(() =>
-            dispatch("blk-1", { type: "RunStarted", runId: "r1", workflowId: "w1" }),
+            dispatch("blk-1", { type: "RunStarted", runId: "r1", droneId: "w1" }),
         ).toThrowError(/unregistered pane/);
     });
 });

@@ -22,12 +22,12 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::workflows::data_flow::ExecutionScope;
-use crate::workflows::types::FlowNode;
+use crate::drone::data_flow::ExecutionScope;
+use crate::drone::types::FlowNode;
 
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 
-/// Shared `reqwest::Client` so workflows with multiple API blocks
+/// Shared `reqwest::Client` so drones with multiple API blocks
 /// reuse one connection pool instead of building a new pool per
 /// request. Per-request timeouts move to the RequestBuilder.
 /// (reagent P2 on PR #755.)
