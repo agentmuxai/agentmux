@@ -27,6 +27,28 @@ $auth = Get-AgentMuxAuthFile
 $client = Invoke-AgentMuxService -Auth $auth -Service client -Method GetClientData
 ```
 
+## `bench-term-echo.mjs`
+
+Node.js benchmark for **terminal input echo latency** — the interval from
+sending a command into a PTY via the App API until its echo appears in
+the PTY output stream. Uses the sentinel-echo pattern to avoid false
+matches from concurrent output.
+
+```bash
+# Basic run (quiet terminal, 60 samples)
+node tools/tests/bench-term-echo.mjs
+
+# With busy-terminal scenario and results file
+node tools/tests/bench-term-echo.mjs --busy --output-file results.json
+
+# Manual target (production instance)
+node tools/tests/bench-term-echo.mjs --ws-url ws://127.0.0.1:PORT/ws --auth-key KEY
+```
+
+Reports p50/p95/p99/max in ms. Save `--output-file` before and after a
+fix to compare distributions. Full spec at
+[`docs/specs/SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md`](../../docs/specs/SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md).
+
 ## `pane-focus-smoke.ps1`
 
 Minimum-viable harness sanity check: reads the auth file and calls
