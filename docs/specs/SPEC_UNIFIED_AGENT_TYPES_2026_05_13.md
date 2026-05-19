@@ -1,5 +1,7 @@
 # SPEC: Unified agent type system (Workflows Phase 1.5)
 
+> **ℹ Naming note (2026-05-19):** This spec predates the Workflows → Drone rename in [#912](https://github.com/agentmuxai/agentmux/pull/912). References to the "Workflows" pane, `workflows-model.ts`, `view/workflows/`, `src/workflows/`, `workflowrun:<id>`, and "workflow Agent block" correspond to today's Drone equivalents (`drone-model.ts`, `view/drone/`, `src/drone/`, `dronerun:<id>`, "drone Agent block"). The technical design below shipped as-described; only the user-facing name changed. See [`SPEC_RENAME_WORKFLOWS_TO_DRONE_2026_05_18.md`](SPEC_RENAME_WORKFLOWS_TO_DRONE_2026_05_18.md) for the rename rationale.
+
 **Date:** 2026-05-13
 **Status:** Draft — lands after PR #755 (Workflows Phase 1) merges
 **Author:** AgentA

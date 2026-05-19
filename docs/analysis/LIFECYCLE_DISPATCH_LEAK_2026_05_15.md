@@ -65,18 +65,18 @@ Four distinct guard patterns exist in the codebase. They are *not* equally effec
 | **Mounted-flag** (`let mounted = true; onCleanup(() => mounted = false; if (!mounted) return)`) | `useHistoryPagination.ts:126-129` and 6 dispatch guards | Async (await) continuations after the owner disposed. **Does not** defend against mid-callback cascade unless checked between *every* dispatch. |
 | **Subscription lifecycle** (subscribe in `onMount`, unsubscribe in `onCleanup`) | `useAgentStream.ts:519-521` `fileSubject.subscribe`, `blockChunkUnsub`, `acceptedUnsub` | Future emissions after `onCleanup` — but emissions *already in flight on the JS stack* still fire. |
 | **`if (this.closed) return`** model flag, checked at every dispatch | `browser-model.ts:261, 282, 311, 361` (uniform pattern across IPC handlers) | Both async continuations *and* mid-handler cascades, **provided the check is at every dispatch site, not just the function entry.** |
-| **`dispatchIfAlive(...)` model helper** | `workflows-model.ts:509-515`, used at all 10 dispatch sites | The strongest variant — encapsulates the closed-check so callers can't forget. |
+| **`dispatchIfAlive(...)` model helper** | `drone-model.ts:509-515` (formerly `workflows-model.ts`, renamed in #912), used at all 10 dispatch sites | The strongest variant — encapsulates the closed-check so callers can't forget. |
 
-### 3.1 The `workflows-model.ts` pattern is the right answer
+### 3.1 The `drone-model.ts` pattern is the right answer
 
 ```ts
 private dispatchIfAlive(command, source) {
     if (this.disposed) return;
-    dispatchWorkflowRun(this.blockId, command, source);
+    dispatchDroneRun(this.blockId, command, source);
 }
 ```
 
-Every async path (`await RpcApi.RunWorkflowCommand()`, `.then(async () => …)` continuations, the WPS subscription handler) routes through this one method. There is no way for a caller to forget the guard. New dispatches default-safe.
+Every async path (`await RpcApi.RunDroneCommand()`, `.then(async () => …)` continuations, the WPS subscription handler) routes through this one method. There is no way for a caller to forget the guard. New dispatches default-safe.
 
 Compared to the mounted-flag pattern (which requires the caller to remember to `if (!mounted) return` before each dispatch), the helper-method pattern is strictly stronger — it is impossible to forget unless someone bypasses the helper entirely.
 
@@ -164,7 +164,7 @@ Today the latency of the failing RPC effectively covers the race. *But*: a synch
 
 `frontend/app/view/agent/hooks/useHistoryPagination.ts` — six dispatch sites, all preceded by `if (!mounted) return;` after every `await`. **Safe today** *for the dispatch-after-await scenario*. **Not safe** against the mid-callback cascade — if a `dispatchDoc(HistoryRestored)` cascade-disposes the pane, the immediately-following `dispatchPane(InitReady)` would still throw. (No evidence this happens in practice, but the pattern is fragile.)
 
-### 4.6 SAFE — `workflows-model.ts`
+### 4.6 SAFE — `drone-model.ts`
 
 All 10 dispatch sites route through `dispatchIfAlive()`. Even if the helper runs inside a cascade-disposed state, the `this.disposed` check fires first and the dispatch is silently dropped.
 
