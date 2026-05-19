@@ -148,13 +148,22 @@ export interface NewIdentityBundleRequest {
  * "+ New" affordance on the Launch modal's Memory row creates a new
  * Memory bundle with an optional pasted-text seed (saved as a single
  * `notes.md` context file).
+ *
+ * Same layer-owned-RPC contract as NewIdentityBundleRequest: the
+ * UpsertMemory call lives in TabModalLayer's dispatch so the layer's
+ * submitting() flag tracks the in-flight RPC; caller routes after
+ * success/cancel via tabModal.replace or tabModal.close.
+ *
  * Phase γ of SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md.
  */
 export interface NewMemoryBundleRequest {
     kind: "new-memory";
     originBlockId: string;
     initialName?: string;
+    /** Caller should tabModal.replace(launchRequest) with the new id
+     *  preselected. Layer does NOT close. */
     onCreated: (bundleId: string, bundleName: string) => void;
+    /** Caller routes (replace vs close). Layer does NOT close. */
     onCancel: () => void;
 }
 

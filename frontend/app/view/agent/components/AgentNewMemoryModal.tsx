@@ -12,21 +12,33 @@
  *   - Paste text: pastes go into a single `notes.md` context file.
  *   - Pick files: deferred (file picker integration is its own work).
  *
+ * The actual UpsertMemory RPC lives in TabModalLayer's new-memory
+ * dispatch (mirrors the Launch modal's onSubmit pattern) so the
+ * layer's `submitting()` flag — which gates safeClose — tracks the
+ * in-flight call. Reagent P1 on PR #911.
+ *
  * Phase γ of SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md.
  */
 
 import { Show, createSignal, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
 
 type SeedMode = "empty" | "paste" | "files";
+
+export interface NewMemoryFormData {
+    name: string;
+    description: string;
+    /** JSON-encoded array of `{ path, content }` — server stores this
+     *  verbatim in the Memory row's context_files column. Empty array
+     *  ("[]") for the empty / pick-files seed modes. */
+    contextFiles: string;
+}
 
 interface AgentNewMemoryModalPanelProps {
     initialName?: string;
     onCancel: () => void;
-    onCreated: (memoryId: string, memoryName: string) => void;
+    onSubmit: (formData: NewMemoryFormData) => Promise<void>;
 }
 
 export const AgentNewMemoryModalPanel = (
@@ -46,31 +58,18 @@ export const AgentNewMemoryModalPanel = (
         setSubmitting(true);
         setError(null);
         try {
-            // Wire convention from memory-model.ts:draftToWire — empty
-            // id triggers server-side uuid generation; 0 timestamps
-            // trigger server-side now-stamping (codex P1 on PR #749).
-            // context_files is a JSON-encoded array of {path, content};
-            // paste mode writes a single notes.md, empty mode ships [].
             const contextFiles =
                 seedMode() === "paste" && pasteText().trim().length > 0
                     ? JSON.stringify([
                           { path: "notes.md", content: pasteText() },
                       ])
                     : "[]";
-            const memory = await RpcApi.UpsertMemoryCommand(TabRpcClient, {
-                id: "",
+            await props.onSubmit({
                 name: name().trim(),
                 description: description().trim(),
-                provider: "",
-                model: "",
-                instructions: "",
-                context_files: contextFiles,
-                mcp_servers: "[]",
-                skills: "[]",
-                created_at: 0,
-                updated_at: 0,
+                contextFiles,
             });
-            props.onCreated(memory.id, memory.name);
+            setSubmitting(false);
         } catch (e) {
             setError((e as Error)?.message ?? String(e));
             setSubmitting(false);
@@ -81,10 +80,10 @@ export const AgentNewMemoryModalPanel = (
         if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
             void submit();
-        } else if (e.key === "Escape") {
-            e.preventDefault();
-            props.onCancel();
         }
+        // Escape handled by the layer's overlay handler so the
+        // layer-level submitting() gate takes effect uniformly
+        // across all focusable elements — reagent P2 on PR #911.
     };
 
     return (

@@ -306,13 +306,44 @@ function renderRequest(
                 panel: (
                     <AgentNewMemoryModalPanel
                         initialName={req.initialName}
-                        onCreated={(id, name) => {
-                            req.onCreated(id, name);
+                        // Same lift-up pattern as new-identity above —
+                        // layer owns the UpsertMemory RPC so its
+                        // submitting() flag (gates safeClose) tracks
+                        // the in-flight call (reagent P1 on PR #911).
+                        onSubmit={async ({ name, description, contextFiles }) => {
+                            setSubmitting(true);
+                            try {
+                                const memory = await RpcApi.UpsertMemoryCommand(
+                                    TabRpcClient,
+                                    {
+                                        // Wire convention from
+                                        // memory-model.ts:draftToWire —
+                                        // empty id triggers server-side
+                                        // uuid; 0 timestamps trigger
+                                        // server-side now-stamping.
+                                        id: "",
+                                        name,
+                                        description,
+                                        provider: "",
+                                        model: "",
+                                        instructions: "",
+                                        context_files: contextFiles,
+                                        mcp_servers: "[]",
+                                        skills: "[]",
+                                        created_at: 0,
+                                        updated_at: 0,
+                                    },
+                                );
+                                setSubmitting(false);
+                                req.onCreated(memory.id, memory.name);
+                            } catch (e) {
+                                setSubmitting(false);
+                                throw e;
+                            }
                         }}
-                        onCancel={() => {
-                            req.onCancel();
-                            api.close();
-                        }}
+                        // Caller routes (replace vs close); see the
+                        // new-identity case + reagent P1 on PR #910.
+                        onCancel={req.onCancel}
                     />
                 ),
             };
