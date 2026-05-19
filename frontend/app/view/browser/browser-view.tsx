@@ -160,6 +160,66 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
     // so we cancel exactly the ones that didn't resolve through
     // the submit/cancel buttons.
     const pendingAuthIds = new Set<string>();
+    // FIFO queue for concurrent auth challenges. Two protected
+    // subresources on the same page (or two panes in the same tab)
+    // can challenge before the user resolves the first prompt;
+    // unconditional tabModal.open would replace the visible modal,
+    // and the unmounted panel's onCleanup would cancel the earlier
+    // challenge — so authenticating the survivor still fails the
+    // earlier requests. Queue new arrivals; open the next after the
+    // active one resolves.
+    type AuthChallenge = {
+        request_id: string;
+        origin: string;
+        host: string;
+        port: number;
+        realm: string;
+        is_proxy: boolean;
+    };
+    const authQueue: AuthChallenge[] = [];
+    let authActive = false;
+
+    const openAuthPrompt = (c: AuthChallenge) => {
+        authActive = true;
+        tabModal.open({
+            kind: "browser-auth",
+            blockId: model.blockId,
+            requestId: c.request_id,
+            origin: c.origin || `${c.host}:${c.port}`,
+            realm: c.realm,
+            isProxy: c.is_proxy,
+            onSubmit: (username, password) => {
+                pendingAuthIds.delete(c.request_id);
+                diag(`auth-submit request_id=${c.request_id}`);
+                void invokeCommand("browser_pane_auth_submit", {
+                    request_id: c.request_id,
+                    username,
+                    password,
+                }).catch((e) => diag(`auth-submit-failed err=${String(e)}`));
+                authActive = false;
+                drainAuthQueue();
+            },
+            onCancel: () => {
+                pendingAuthIds.delete(c.request_id);
+                diag(`auth-cancel request_id=${c.request_id}`);
+                void invokeCommand("browser_pane_auth_cancel", {
+                    request_id: c.request_id,
+                }).catch(() => {});
+                authActive = false;
+                drainAuthQueue();
+            },
+        });
+    };
+    const drainAuthQueue = () => {
+        if (authActive || authQueue.length === 0) return;
+        const next = authQueue.shift()!;
+        // Defer to a microtask so the prior modal's onCleanup has
+        // run before we mount the next one — replacing synchronously
+        // would re-trigger the cleanup-cancel path the queue exists
+        // to prevent.
+        queueMicrotask(() => openAuthPrompt(next));
+    };
+
     onMount(() => {
         if (placeholderRef) {
             resizeObserver = new ResizeObserver(syncPosition);
@@ -184,30 +244,20 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
             // are enough to trace the prompt without logging credentials.
             diag(`auth-required request_id=${payload.request_id} origin=${JSON.stringify(payload.origin)} realm=${JSON.stringify(payload.realm)}`);
             pendingAuthIds.add(payload.request_id);
-            tabModal.open({
-                kind: "browser-auth",
-                blockId: model.blockId,
-                requestId: payload.request_id,
-                origin: payload.origin || `${payload.host}:${payload.port}`,
+            const challenge: AuthChallenge = {
+                request_id: payload.request_id,
+                origin: payload.origin,
+                host: payload.host,
+                port: payload.port,
                 realm: payload.realm,
-                isProxy: payload.is_proxy,
-                onSubmit: (username, password) => {
-                    pendingAuthIds.delete(payload.request_id);
-                    diag(`auth-submit request_id=${payload.request_id}`);
-                    void invokeCommand("browser_pane_auth_submit", {
-                        request_id: payload.request_id,
-                        username,
-                        password,
-                    }).catch((e) => diag(`auth-submit-failed err=${String(e)}`));
-                },
-                onCancel: () => {
-                    pendingAuthIds.delete(payload.request_id);
-                    diag(`auth-cancel request_id=${payload.request_id}`);
-                    void invokeCommand("browser_pane_auth_cancel", {
-                        request_id: payload.request_id,
-                    }).catch(() => {});
-                },
-            });
+                is_proxy: payload.is_proxy,
+            };
+            if (authActive) {
+                diag(`auth-queue request_id=${payload.request_id} depth=${authQueue.length + 1}`);
+                authQueue.push(challenge);
+            } else {
+                openAuthPrompt(challenge);
+            }
         }).then((unsub) => {
             // listenEvent's promise can resolve AFTER onCleanup has
             // already run (pane closed before subscription completed).
@@ -240,15 +290,17 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
             authUnsub();
             authUnsub = null;
         }
-        // Cancel any auth prompts still parked on the host. The
-        // backend also fires `cancel_for_block` from `browser_pane_close`
-        // as a safety net, but firing them here ensures each cancel
-        // logs against the correct request_id.
+        // Cancel any auth prompts still parked on the host (active
+        // + queued). The backend also fires `cancel_for_block` from
+        // `browser_pane_close` as a safety net, but firing them here
+        // ensures each cancel logs against the correct request_id.
         for (const requestId of pendingAuthIds) {
             invokeCommand("browser_pane_auth_cancel", { request_id: requestId })
                 .catch(() => {});
         }
         pendingAuthIds.clear();
+        authQueue.length = 0;
+        authActive = false;
     });
 
     return (
