@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 /// Block (node) kinds for Phase 1. Phase 2 adds Function, Loop, Parallel,
-/// Router, Drone. Stored as `kind` field on `FlowNode.data`.
+/// Router, Subdrone. Stored as `kind` field on `FlowNode.data`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BlockKind {
