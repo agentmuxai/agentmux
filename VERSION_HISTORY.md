@@ -1,5 +1,89 @@
 # AgentMux Version History
 
+## 0.36.0 — 2026-05-19
+
+- feat(launch-modal): lift auth controller out of conditional panel + remove blank Identity/Memory (Stage 1)
+- Fixes the "memory change → forgot login" repro by lifting the
+- AuthFlowController instance from PreLaunchAuthPanel up to
+- AgentLaunchModal so its lifetime spans the whole modal mount.
+- Conditionally re-rendering the Connect panel no longer destroys
+- in-flight auth state.
+- Also removes the "blank" Identity/Memory sentinel: both selections
+- are now required at submit. Spec:
+- docs/specs/SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md
+- feat(launch-flow-state): additive reducer slice + tests (Stage 2a)
+- Adds `frontend/app/store/launch-flow-state/` — types + pure reducer
+- + selectors + 37 unit tests covering the form/identity/memory/
+- bindings/submit cross-product. Modeled on browser-pane-state.
+- Purely additive — no view migration yet. AgentLaunchModal still uses
+- its existing local signals; Stage 2b migrates it. Spec:
+- docs/specs/SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md
+- feat(launch-modal): migrate form state to launch-flow-state slice (Stage 2b)
+- AgentLaunchModal's form fields (name, runtime, image, identity,
+- memory, continueOf) now route through the launch-flow-state
+- reducer. Adds the Solid-store wrapper + tests; the existing
+- accessor names (`name()`, `setName(v)`, …) remain as thin facades
+- so call sites are unchanged.
+- Stage 2c will migrate the resources (identities/memories/bindings)
+- + wire backend push events for cross-tab reactivity.
+- feat(launch-modal): migrate submit + error state to launch-flow-state slice (Stage 2c.1)
+- AgentLaunchModal's `submitting` / `error` signals now live in the
+- reducer. handleSubmit dispatches `SubmitClicked` / `SubmitFailed`
+- directly instead of the legacy paired setters. The failure case now
+- sets in-flight=false and error=msg in one atomic dispatch.
+- Stage 2c.2 (resources) + 2c.3 (bindings + push events) land in
+- follow-up PRs.
+- feat(launch-modal): migrate identities + memories resources to slice (Stage 2c.2)
+- AgentLaunchModal's `identities` and `memories` createResource calls
+- are replaced with async wrappers that dispatch
+- IdentitiesLoading/Loaded/Failed (and the Memory equivalents) into
+- the reducer. `realIdentities` / `realMemories` selectors replace
+- the inline `is_blank` filter memos.
+- Stage 2c.3 (bindings migration + identitybundlebindings:changed
+- subscription) lands next.
+- feat(launch-modal): migrate bindings + subscribe to backend push events (Stage 2c.3)
+- Final piece of the launch-modal state-machine hardening.
+- - `selectedBundleBindings` createResource removed; the reducer
+-   emits `FetchBindings` on identity selection and the view's
+-   event sink runs the RPC + dispatches BindingsLoading/Loaded.
+- - Subscribes to backend's `identitybundlebindings:changed:<id>`
+-   event (already emitted on bundle_bind / unbind RPCs) so cross-
+-   tab modifications via the Identity pane update this modal
+-   without a manual refetch.
+- - `bundleHasMatchingBinding` memo delegates to the slice's
+-   `hasMatchingBinding(state, providerId)` selector.
+- Closes the Stage 2 spec — all of form / submit / resources /
+- bindings flow through the reducer slice now.
+- feat(launch-flow-state): fold AuthState into the slice (Stage 2d.1)
+- `LaunchFlowState.auth: AuthState` is now part of the slice. The
+- reducer delegates `{ type: "Auth", cmd }` commands to auth-state's
+- pure `update()` and wraps emitted events as
+- `{ type: "Auth", event }` on the outer ReducerResult.
+- Adds the §6.9 cross-product test suite — 8 tests asserting that
+- form-field commands (Name/Memory/Runtime/Image/Identities/
+- Bindings/Submit) never touch `state.auth`, and that auth commands
+- never touch `state.form`. Pins the original memory-change-resets-
+- auth bug as a pure-reducer regression.
+- View migration to read `flow.state.auth.kind` is Stage 2d.2.
+- feat(launch-modal): route auth state through the slice (Stage 2d.2)
+- AuthFlowController accepts optional `externalGetState` +
+- `externalDispatch` hooks. AgentLaunchModal wires them so the
+- controller reads + writes auth state via the launch-flow-state
+- slice. `flow.state.auth` is now the single source of truth;
+- internal signal stays as a fallback for tests + standalone use.
+- §6.7 satisfied: all Launch modal state is owned by the slice.
+- feat(launch-modal): integration test pinning the memory-change regression (Stage 2g, closes spec)
+- Adds Vitest + @solidjs/testing-library + jsdom integration test that
+- mounts AgentLaunchModalPanel with mocked RPCs, drives the user flow
+- programmatically, and asserts the auth panel doesn't reappear after a
+- Memory dropdown change. Pins the §6.10 acceptance criterion with a
+- fast (~360ms) jsdom-based test instead of standing up real
+- Playwright/WebDriver against CEF.
+- Approach + library choice rationale:
+- docs/specs/SPEC_LAUNCH_MODAL_INTEGRATION_TESTS_2026_05_19.md.
+- Closes Stage 2 of the launch-modal state-machine hardening spec.
+
+
 ## 0.35.0 — 2026-05-19
 
 - feat(browser-pane): HTTP Basic/Digest auth prompt (Phase α)
