@@ -260,11 +260,18 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     };
 
     // Enter submits; ESC and backdrop click are handled by the layer.
+    // Skip when focus is on a button or select so Enter triggers the
+    // browser's native button activation / dropdown open, not the form
+    // submit. Reagent P1 on PR #909 — without this guard, pressing
+    // Enter on the "+ New identity/memory" button submits the launch
+    // instead of opening the bundle-creation modal.
     const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === "Enter" && canSubmit()) {
-            e.preventDefault();
-            void handleSubmit();
-        }
+        if (e.key !== "Enter" || !canSubmit()) return;
+        const target = e.target as HTMLElement | null;
+        const tag = target?.tagName;
+        if (tag === "BUTTON" || tag === "SELECT") return;
+        e.preventDefault();
+        void handleSubmit();
     };
 
     return (
