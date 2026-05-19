@@ -161,7 +161,13 @@ function openWs(wsEndpoint, authKey) {
         ws.send(JSON.stringify({ wscommand: "blockinput", blockid: blockId, inputdata64 }));
     }
 
-    function onEvent(handler) { eventHandlers.push(handler); }
+    function onEvent(handler) {
+        eventHandlers.push(handler);
+        return () => {
+            const i = eventHandlers.indexOf(handler);
+            if (i !== -1) eventHandlers.splice(i, 1);
+        };
+    }
 
     function close() { ws.close(); }
 
@@ -200,19 +206,23 @@ function stats(samples) {
 
 async function waitForPattern(client, pattern, timeoutMs = 5000) {
     return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error(`Timeout waiting for: ${pattern}`)), timeoutMs);
         let buf = "";
+        let unsub;
+        const timer = setTimeout(() => {
+            unsub?.();
+            reject(new Error(`Timeout waiting for: ${pattern}`));
+        }, timeoutMs);
         const handler = (msg) => {
             if (msg.data?.data64) {
                 buf += Buffer.from(msg.data.data64, "base64").toString("utf8");
                 if (buf.includes(pattern)) {
                     clearTimeout(timer);
-                    client.onEvent((_) => {}); // no-op to remove isn't possible, handled by buf check
+                    unsub?.();
                     resolve(buf);
                 }
             }
         };
-        client.onEvent(handler);
+        unsub = client.onEvent(handler);
     });
 }
 
