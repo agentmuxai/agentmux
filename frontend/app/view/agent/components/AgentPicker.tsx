@@ -15,6 +15,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { useTabModal } from "@/app/tab/tab-modal";
+import { getPlatform } from "@/util/platformutil";
 import type { AgentViewModel } from "../agent-model";
 import { getProvider } from "../providers";
 import { AgentCard } from "./AgentCard";
@@ -167,10 +168,14 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // unless the user installs a new tool — `Refresh` clears).
     const prereqCache = new Map<string, boolean>();
     const platformKey = (): "windows" | "macos" | "linux" => {
-        const p = (window.navigator?.platform ?? "").toLowerCase();
-        if (p.includes("win")) return "windows";
-        if (p.includes("mac")) return "macos";
-        return "linux";
+        // Read from the CEF host's authoritative `getPlatform()` IPC
+        // rather than the deprecated `window.navigator.platform` —
+        // reagent P2 on PR #908.
+        switch (getPlatform()) {
+            case "win32": return "windows";
+            case "darwin": return "macos";
+            default: return "linux";
+        }
     };
     const probeMissingPrereqs = async (agent: ForgeAgent) => {
         const prov = getProvider(agent.provider);
@@ -239,33 +244,36 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         tabModal.replace(buildLaunchRequest(agent));
                     }
                 };
-                tabModal.open({
-                    kind: "agent-prereqs",
-                    agent,
-                    originBlockId: props.model.blockId,
-                    missing,
-                    onRefresh: async () => {
-                        // Clear cache, re-probe, replace modal with
-                        // fresh result.
-                        for (const m of missing) prereqCache.delete(m.tool);
+                // Recursive opener so the Refresh handler on every
+                // rendered modal (including the replacement after a
+                // failed re-probe) gets a working re-probe wired up.
+                // Reagent + codex P1/P2 on PR #908.
+                const openPrereqModal = (
+                    currentMissing: typeof missing,
+                    op: "open" | "replace",
+                ): void => {
+                    const refresh = async () => {
+                        for (const m of currentMissing) prereqCache.delete(m.tool);
                         const fresh = await probeMissingPrereqs(agent);
                         if (fresh.length === 0) {
                             proceedWithFlow();
                         } else {
-                            tabModal.replace({
-                                kind: "agent-prereqs",
-                                agent,
-                                originBlockId: props.model.blockId,
-                                missing: fresh,
-                                onRefresh: () => { /* will be re-bound by next replace */ },
-                                onProceed: proceedWithFlow,
-                                onCancel: () => { /* layer closes */ },
-                            });
+                            openPrereqModal(fresh, "replace");
                         }
-                    },
-                    onProceed: proceedWithFlow,
-                    onCancel: () => { /* layer closes */ },
-                });
+                    };
+                    const req = {
+                        kind: "agent-prereqs" as const,
+                        agent,
+                        originBlockId: props.model.blockId,
+                        missing: currentMissing,
+                        onRefresh: () => void refresh(),
+                        onProceed: proceedWithFlow,
+                        onCancel: () => { /* layer closes */ },
+                    };
+                    if (op === "open") tabModal.open(req);
+                    else tabModal.replace(req);
+                };
+                openPrereqModal(missing, "open");
                 return;
             }
 
