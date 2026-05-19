@@ -11,7 +11,7 @@
 
 The first version of this spec only addressed *drift* (keys in code missing from the template). After a re-audit that distinguishes **declared** keys (in `wconfig/types.rs` / `schema/settings.json`) from **read** keys (i.e. something actually accesses them at runtime), the picture is much worse:
 
-- **The `ai:*` namespace is waveterm leftover.** Zero call sites read any `ai:*` setting. AgentMux's agent pane stores its config in `db_agentdefs` / `db_memories`, not these keys.
+- **The `ai:*` namespace is waveterm leftover.** Zero call sites read any `ai:*` setting. AgentMux's agent pane stores its config in `db_forge_agents` / `db_memory_bundles`, not these keys.
 - **`autoupdate:*` is not implemented.** No code path reads any `autoupdate:*` field; there is no updater wired up.
 - **`editor:*` is waveterm leftover** (Monaco code-editor pane, removed). Zero call sites.
 - **`telemetry:enabled` is dead.** `telemetry:interval` and `telemetry:numpoints` *are* used — but only for the sysinfo widget's polling rate, not actual telemetry transmission. The name is misleading and warrants a rename.
@@ -94,7 +94,7 @@ Plus one out-of-template key referenced by code that is **not** in the SettingsT
 
 #### C1. Whole namespace: `ai:*` (waveterm leftover)
 
-The user asked: *"is `ai:` meaning the agent pane, or is that old waveterm?"* — **It is old waveterm.** Zero reads anywhere in the codebase. AgentMux's agent pane uses agent definitions stored in `db_agentdefs` / `db_memories` (see CLAUDE.md), with config flowing through the agent-launch dialog and ACP, not through `SettingsType`.
+The user asked: *"is `ai:` meaning the agent pane, or is that old waveterm?"* — **It is old waveterm.** Zero reads anywhere in the codebase. AgentMux's agent pane uses agent definitions stored in `db_forge_agents` / `db_memory_bundles` (see CLAUDE.md), with config flowing through the agent-launch dialog and ACP, not through `SettingsType`.
 
 Remove these 13 keys from template, schema, and `SettingsType`:
 

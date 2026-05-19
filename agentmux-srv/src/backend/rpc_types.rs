@@ -1663,12 +1663,12 @@ pub struct CommandCreateAgentInstanceData {
     pub block_id: String,
     #[serde(default)]
     pub parent_instance_id: String,
-    /// FK to db_identities. Empty = blank singleton (no env-var
+    /// FK to db_identity_bundles. Empty = blank singleton (no env-var
     /// injection; agent inherits ambient creds). Set by the launch
     /// modal's Identity dropdown.
     #[serde(default)]
     pub identity_id: String,
-    /// FK to db_memories. Empty = blank singleton. Set by the launch
+    /// FK to db_memory_bundles. Empty = blank singleton. Set by the launch
     /// modal's Memory dropdown.
     #[serde(default)]
     pub memory_id: String,
@@ -1704,8 +1704,8 @@ pub struct CommandListNamedAgentsData {
 
 /// One row of the launch modal's "Continue agent" dropdown. Joins
 /// `db_agent_instances` with `db_forge_agents` (for the definition's
-/// display name + provider) and `db_identities` / `db_memories` (for
-/// bundle names) so the frontend renders without further lookups.
+/// display name + provider) and `db_identity_bundles` / `db_memory_bundles`
+/// (for bundle names) so the frontend renders without further lookups.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NamedAgentRow {
     pub instance_id: String,
