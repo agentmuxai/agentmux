@@ -13,7 +13,7 @@
  * panel only. See docs/specs/launch-modal-rearchitecture-2026-05-01.md.
  */
 
-import { createMemo, createResource, createSignal, For, Show, type JSX } from "solid-js";
+import { createMemo, createResource, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -23,7 +23,7 @@ import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { buildInstanceSlug, slugifyInstanceName } from "../defaults/instance-slug";
 import { getProvider } from "../providers";
 import { PreLaunchAuthPanel } from "./PreLaunchAuthPanel";
-import type { AuthState } from "../auth";
+import { AuthFlowController } from "../auth";
 
 export interface LaunchOverrides {
     /** Instance name — written into AGENTMUX_AGENT_ID and used to
@@ -36,10 +36,11 @@ export interface LaunchOverrides {
     environment: "local" | "docker";
     /** Only set when agentType === "container". */
     containerImage?: string;
-    /** v7 — selected Identity bundle. "blank" = use ambient creds. */
-    identityId?: string;
-    /** v7 — selected Memory bundle. "blank" = vanilla CLI. */
-    memoryId?: string;
+    /** Selected Identity bundle id. Required (non-empty) at submit;
+     *  the form blocks Launch until the user picks or creates one. */
+    identityId: string;
+    /** Selected Memory bundle id. Required (non-empty) at submit. */
+    memoryId: string;
     /** v8 — when set, this launch is a continuation of a prior named
      *  agent. The id is recorded as `parent_instance_id` on the new
      *  row so the lineage is queryable. */
@@ -105,15 +106,16 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         (initial.runtime ?? "host") !== "host" || (initial.image ?? "") !== "",
     );
 
-    // v7 — Identity + Memory bundle pickers. Both default to "blank"
-    // which the resolver short-circuits as "no override". Lists fetched
-    // once at mount; the blank singleton is always present. See
-    // docs/specs/identity-forge-integration-and-vault-2026-05-08.md.
+    // Identity + Memory selections. Empty string = no selection
+    // (Launch disabled until the user picks or creates a bundle). The
+    // "blank" sentinel was removed in
+    // docs/specs/SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md —
+    // every launch now ships a real bundle id.
     const [identityId, setIdentityId] = createSignal<string>(
-        initial.identityId ?? "blank",
+        initial.identityId ?? "",
     );
     const [memoryId, setMemoryId] = createSignal<string>(
-        initial.memoryId ?? "blank",
+        initial.memoryId ?? "",
     );
 
     const [identities] = createResource<IdentityBundle[]>(async () => {
@@ -131,10 +133,10 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         }
     });
 
-    // Empty-state predicate — the backend always returns the implicit
-    // "blank" singleton, so an empty-of-user-bundles list still has
-    // length 1. Treat any list where every entry is `is_blank` as
-    // empty for the "show only New button" branch.
+    // Empty-state predicate. The backend may still return an
+    // implicit `is_blank` singleton (for back-compat with older
+    // clients); filter it out so the dropdown only shows real,
+    // user-created bundles.
     const hasUserIdentities = createMemo(() =>
         (identities() ?? []).some((b) => !b.is_blank),
     );
@@ -190,17 +192,24 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         const row = (namedAgents() ?? []).find((r) => r.instance_id === id);
         if (row) {
             setName(row.instance_name);
-            setIdentityId(row.identity_id || "blank");
-            setMemoryId(row.memory_id || "blank");
+            // Legacy rows may carry "" or "blank" identity_id from
+            // before the blank-removal. Treat both as "no carry-over"
+            // — the user must pick or create a real bundle for the
+            // continuation.
+            const carryIdentity =
+                row.identity_id && row.identity_id !== "blank" ? row.identity_id : "";
+            const carryMemory =
+                row.memory_id && row.memory_id !== "blank" ? row.memory_id : "";
+            setIdentityId(carryIdentity);
+            setMemoryId(carryMemory);
         } else {
             // Selecting "— New agent —" releases the lock. Clear the
             // fields back to defaults so the user doesn't accidentally
             // submit a brand-new launch carrying the previously
-            // continued agent's name + bundles (which would collide
-            // on allocate_agent_workdir and inject the wrong creds).
+            // continued agent's name + bundles.
             setName("");
-            setIdentityId("blank");
-            setMemoryId("blank");
+            setIdentityId("");
+            setMemoryId("");
         }
     };
 
@@ -217,13 +226,15 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     const containerSupported = () => catalog()?.containerSupported ?? true;
 
     // Pre-launch OAuth (spec: SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md).
-    // The PreLaunchAuthPanel owns the AuthFlowController; we mirror
-    // its state.kind here to gate the Launch button. Existing
-    // non-blank bundles bypass the gate — they came from a prior
-    // OAuth, so trust them (PR B-4 / PR D will tighten this with a
-    // per-bundle binding check).
-    const [authStateKind, setAuthStateKind] = createSignal<AuthState["kind"]>("idle");
-    const onAuthStateChange = (s: AuthState) => setAuthStateKind(s.kind);
+    // The Launch modal OWNS the AuthFlowController (lifted from
+    // PreLaunchAuthPanel — see
+    // docs/specs/SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md). The
+    // controller's lifetime spans the whole modal mount, so a brief
+    // re-render that unmounts the conditionally-rendered Connect
+    // panel no longer destroys in-flight auth state.
+    const authController = new AuthFlowController();
+    onCleanup(() => authController.dispose());
+    const authStateKind = () => authController.state().kind;
     const onBundleCreated = (bundleId: string) => {
         // The new bundle was just persisted backend-side. Force the
         // resource to refetch and switch the dropdown to it.
@@ -239,7 +250,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         // invoking this callback, but guard here too so any future
         // call site that bypasses the panel filter can't poison the
         // dropdown with a non-existent bundle row.
-        if (!bundleId || bundleId === "blank" || bundleId.startsWith("pending-bundle-for-")) {
+        if (!bundleId || bundleId.startsWith("pending-bundle-for-")) {
             return;
         }
         setIdentityId(bundleId);
@@ -255,7 +266,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     const [selectedBundleBindings] = createResource(
         () => identityId(),
         async (id) => {
-            if (!id || id === "blank" || id.startsWith("pending-bundle-for-")) {
+            if (!id || id.startsWith("pending-bundle-for-")) {
                 return [] as IdentityBinding[];
             }
             try {
@@ -279,7 +290,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // false→false transition a no-op.
     const bundleHasMatchingBinding = createMemo(() => {
         const id = identityId();
-        if (!id || id === "blank") return false;
+        if (!id) return false;
         // Treat the loading state as "no binding" so a fast-launch
         // race can't slip through the gate while bindings refetch.
         if (selectedBundleBindings.loading) return false;
@@ -313,14 +324,17 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         !isContinue()
         && provider()?.authType === "oauth"
         && (
-            identityId() === "blank"
-            || identityId() === ""
+            identityId() === ""
             || provider()?.id === "openclaw"
             || !bundleHasMatchingBinding()
         );
     const authReady = () => !authRequired() || authStateKind() === "ready";
     const canSubmit = () =>
-        !submitting() && slugifyInstanceName(name()).length > 0 && authReady();
+        !submitting()
+        && slugifyInstanceName(name()).length > 0
+        && identityId() !== ""
+        && memoryId() !== ""
+        && authReady();
 
     const resolvedImage = () => {
         const v = image().trim();
@@ -527,13 +541,12 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                     disabled={submitting() || isContinue()}
                                     aria-label="Identity bundle"
                                 >
-                                    <For each={identities() ?? []}>
+                                    <Show when={!identityId()}>
+                                        <option value="" disabled>— Pick an identity —</option>
+                                    </Show>
+                                    <For each={(identities() ?? []).filter((b) => !b.is_blank)}>
                                         {(bundle) => (
-                                            <option value={bundle.id}>
-                                                {bundle.is_blank
-                                                    ? "— Blank (no creds) —"
-                                                    : bundle.name}
-                                            </option>
+                                            <option value={bundle.id}>{bundle.name}</option>
                                         )}
                                     </For>
                                 </select>
@@ -603,13 +616,12 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                     disabled={submitting() || isContinue()}
                                     aria-label="Memory bundle"
                                 >
-                                    <For each={memories() ?? []}>
+                                    <Show when={!memoryId()}>
+                                        <option value="" disabled>— Pick a memory —</option>
+                                    </Show>
+                                    <For each={(memories() ?? []).filter((m) => !m.is_blank)}>
                                         {(memory) => (
-                                            <option value={memory.id}>
-                                                {memory.is_blank
-                                                    ? "— Blank (vanilla CLI) —"
-                                                    : memory.name}
-                                            </option>
+                                            <option value={memory.id}>{memory.name}</option>
                                         )}
                                     </For>
                                 </select>
@@ -652,7 +664,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                             provider={provider()}
                             identityId={identityId}
                             hasMatchingBinding={bundleHasMatchingBinding}
-                            onStateChange={onAuthStateChange}
+                            controller={authController}
                             onBundleCreated={onBundleCreated}
                             disabled={submitting()}
                         />
