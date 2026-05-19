@@ -55,25 +55,66 @@ interface AgentLaunchModalPanelProps {
     agent: ForgeAgent;
     onCancel: () => void;
     onSubmit: (overrides: LaunchOverrides) => Promise<void> | void;
+    /** Initial form state — used by the "+ New" → create → replace-
+     *  back flow so the user's in-progress edits (name, runtime,
+     *  image, identity, memory) survive the round-trip. All fields
+     *  default to the modal's normal initial values when omitted.
+     *  Codex P2 on PR #910 rounds 6 + 7: rounds 1-6 only restored
+     *  identity/memory selection; round 7 added the rest of the form. */
+    initialFormState?: Partial<LaunchFormState>;
+    /** Called when the "+" / empty-state New buttons fire. The picker
+     *  is expected to chain `tabModal.replace(newIdentityRequest)` —
+     *  this component doesn't know how to build that request.
+     *
+     *  The current launch form state is passed through so the picker
+     *  can preserve it across the new-bundle round-trip. */
+    onRequestNewIdentity?: (current: LaunchFormState) => void;
+    onRequestNewMemory?: (current: LaunchFormState) => void;
+}
+
+/** Snapshot of the editable Launch form. Used to thread the user's
+ *  in-progress edits through the new-identity / new-memory modal so
+ *  returning to Launch doesn't reset typed-but-unsubmitted values. */
+export interface LaunchFormState {
+    name: string;
+    runtime: "host" | "container";
+    image: string;
+    identityId: string;
+    memoryId: string;
 }
 
 export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.Element => {
     const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
     const displayName = () => catalog()?.displayName ?? props.agent.name;
 
-    const [name, setName] = createSignal("");
-    const [runtime, setRuntime] = createSignal<"host" | "container">("host");
-    const [image, setImage] = createSignal<string>("");
+    // Initial form values — `initialFormState` carries the user's
+    // in-progress edits through the "+ New" round-trip.
+    const initial = props.initialFormState ?? {};
+    const [name, setName] = createSignal(initial.name ?? "");
+    const [runtime, setRuntime] = createSignal<"host" | "container">(
+        initial.runtime ?? "host",
+    );
+    const [image, setImage] = createSignal<string>(initial.image ?? "");
     const [submitting, setSubmitting] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
-    const [showAdvanced, setShowAdvanced] = createSignal(false);
+    // Advanced section auto-expands when restored state has a non-
+    // default runtime/image — otherwise the user would see "host" /
+    // empty image in the dropdown row and not realize their advanced
+    // edits round-tripped.
+    const [showAdvanced, setShowAdvanced] = createSignal(
+        (initial.runtime ?? "host") !== "host" || (initial.image ?? "") !== "",
+    );
 
     // v7 — Identity + Memory bundle pickers. Both default to "blank"
     // which the resolver short-circuits as "no override". Lists fetched
     // once at mount; the blank singleton is always present. See
     // docs/specs/identity-forge-integration-and-vault-2026-05-08.md.
-    const [identityId, setIdentityId] = createSignal<string>("blank");
-    const [memoryId, setMemoryId] = createSignal<string>("blank");
+    const [identityId, setIdentityId] = createSignal<string>(
+        initial.identityId ?? "blank",
+    );
+    const [memoryId, setMemoryId] = createSignal<string>(
+        initial.memoryId ?? "blank",
+    );
 
     const [identities] = createResource<IdentityBundle[]>(async () => {
         try {
@@ -101,16 +142,22 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         (memories() ?? []).some((m) => !m.is_blank),
     );
 
-    // Phase β/γ stubs — only console.log so the click paths are
-    // observable in dev. The real handlers (which fire
-    // tabModal.replace) land in Phase β (identity) and Phase γ
-    // (memory). SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md.
-    const handleNewIdentity = () => {
-        console.log("[launch-modal] New identity clicked — modal Phase β");
-    };
-    const handleNewMemory = () => {
-        console.log("[launch-modal] New memory clicked — modal Phase γ");
-    };
+    // "+ New ..." buttons delegate to picker-injected callbacks that
+    // chain `tabModal.replace(newBundleRequest)`. The picker owns the
+    // chain because it can rebuild the Launch request with
+    // preselectedIdentityId/preselectedMemoryId after creation. A
+    // missing callback (Phase β ships Identity wiring only; Memory
+    // wiring lands in Phase γ) keeps the button visible but disabled
+    // with a "coming soon" hint — see reagent P2 on PR #910.
+    const snapshot = (): LaunchFormState => ({
+        name: name(),
+        runtime: runtime(),
+        image: image(),
+        identityId: identityId(),
+        memoryId: memoryId(),
+    });
+    const handleNewIdentity = () => props.onRequestNewIdentity?.(snapshot());
+    const handleNewMemory = () => props.onRequestNewMemory?.(snapshot());
 
     // v8 — "Continue agent" dropdown. Filters to instances of the
     // CURRENT definition (server-side; a global cap would let older
@@ -198,21 +245,70 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         setIdentityId(bundleId);
     };
     const provider = createMemo(() => getProvider(props.agent.provider));
-    // Auth gate applies ONLY to fresh launches of OAuth providers with
-    // the blank singleton selected.
+
+    // Bindings for the currently selected identity bundle — used by
+    // authRequired() to detect non-blank bundles that have no
+    // credential binding for the agent's provider (e.g. a "Work"
+    // identity created via "+ New" but never connected to Claude/Codex
+    // yet). Reagent + codex P1 on PR #910 round 3 — without this
+    // check, "+ New" could bypass the OAuth gate entirely.
+    const [selectedBundleBindings] = createResource(
+        () => identityId(),
+        async (id) => {
+            if (!id || id === "blank" || id.startsWith("pending-bundle-for-")) {
+                return [] as IdentityBinding[];
+            }
+            try {
+                return await RpcApi.ListIdentityBindingsCommand(TabRpcClient, {
+                    identity_id: id,
+                });
+            } catch {
+                return [] as IdentityBinding[];
+            }
+        },
+    );
+
+    // Wrapped in createMemo (not a bare accessor) so downstream
+    // effects only re-fire on actual boolean transitions. Codex P2
+    // on PR #910 round 5: without the memo, when bindings finish
+    // loading the value stays false (no binding yet) but the
+    // underlying resource read changes, which re-ran
+    // PreLaunchAuthPanel's createEffect — which calls
+    // controller.selected, which cancels any in-flight `waiting`
+    // OAuth session. Memo's === dedupe makes the loading→loaded
+    // false→false transition a no-op.
+    const bundleHasMatchingBinding = createMemo(() => {
+        const id = identityId();
+        if (!id || id === "blank") return false;
+        // Treat the loading state as "no binding" so a fast-launch
+        // race can't slip through the gate while bindings refetch.
+        if (selectedBundleBindings.loading) return false;
+        const providerId = provider()?.id;
+        if (!providerId) return false;
+        return (selectedBundleBindings() ?? []).some(
+            (b) => b.provider === providerId,
+        );
+    });
+
+    // Auth gate applies to fresh launches of OAuth providers when the
+    // selected identity can't supply credentials for the agent's
+    // provider. That's true when:
     //
-    // - `isContinue` bypasses: prior launch already produced creds.
-    // - API-key providers (kimi/pi) bypass: until the backend
+    // - `blank`/empty is selected — ambient creds, OAuth flow runs once.
+    // - OpenClaw provider — until identity bundles include openclaw
+    //   auth profiles, gate ALWAYS (Phase α addition, 2026-05-17).
+    //   Lifts once identity-bundles-include-openclaw lands (planned
+    //   with Phase δ persistence work).
+    // - A non-blank bundle without a matching provider binding —
+    //   e.g. "+ New" just created an empty "Work" bundle. Reagent +
+    //   codex P1 on PR #910 round 3.
+    //
+    // Bypasses:
+    // - `isContinue` — prior launch already produced creds.
+    // - API-key providers (kimi/pi) — until the backend
     //   `auth.submitapikey` persists bundles (PR C-2), the gate would
-    //   deadlock — the user can't reach `ready` because save is a
-    //   stub. Their existing `launch-flow.ts` Phase 2 prompts for the
-    //   key in-line. Reagent + codex P1 on #847.
-    // - OpenClaw: even with a non-blank identity selected, no identity
-    //   has been openclaw-authed yet (Phase α addition, 2026-05-17).
-    //   Until identity bundles include openclaw auth profiles, gate
-    //   ALWAYS — the user needs to run the OpenAI OAuth flow before
-    //   `openclaw acp` will spawn. Lifts once identity-bundles-include-
-    //   openclaw lands (planned with Phase δ persistence work).
+    //   deadlock. Their existing `launch-flow.ts` Phase 2 prompts for
+    //   the key in-line. Reagent + codex P1 on #847.
     const authRequired = () =>
         !isContinue()
         && provider()?.authType === "oauth"
@@ -220,6 +316,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
             identityId() === "blank"
             || identityId() === ""
             || provider()?.id === "openclaw"
+            || !bundleHasMatchingBinding()
         );
     const authReady = () => !authRequired() || authStateKind() === "ready";
     const canSubmit = () =>
@@ -408,7 +505,16 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                         type="button"
                                         class="agent-launch-modal-bundle-empty-btn"
                                         onClick={handleNewIdentity}
-                                        disabled={submitting() || isContinue()}
+                                        disabled={
+                                            submitting() ||
+                                            isContinue() ||
+                                            !props.onRequestNewIdentity
+                                        }
+                                        title={
+                                            props.onRequestNewIdentity
+                                                ? undefined
+                                                : "Coming soon"
+                                        }
                                     >
                                         + New identity bundle...
                                     </button>
@@ -435,8 +541,16 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                     type="button"
                                     class="agent-launch-modal-bundle-new-btn"
                                     onClick={handleNewIdentity}
-                                    disabled={submitting() || isContinue()}
-                                    title="New identity bundle..."
+                                    disabled={
+                                        submitting() ||
+                                        isContinue() ||
+                                        !props.onRequestNewIdentity
+                                    }
+                                    title={
+                                        props.onRequestNewIdentity
+                                            ? "New identity bundle..."
+                                            : "Coming soon"
+                                    }
                                     aria-label="New identity bundle"
                                 >
                                     +
@@ -467,7 +581,16 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                         type="button"
                                         class="agent-launch-modal-bundle-empty-btn"
                                         onClick={handleNewMemory}
-                                        disabled={submitting() || isContinue()}
+                                        disabled={
+                                            submitting() ||
+                                            isContinue() ||
+                                            !props.onRequestNewMemory
+                                        }
+                                        title={
+                                            props.onRequestNewMemory
+                                                ? undefined
+                                                : "Coming soon"
+                                        }
                                     >
                                         + New memory bundle...
                                     </button>
@@ -494,8 +617,16 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                     type="button"
                                     class="agent-launch-modal-bundle-new-btn"
                                     onClick={handleNewMemory}
-                                    disabled={submitting() || isContinue()}
-                                    title="New memory bundle..."
+                                    disabled={
+                                        submitting() ||
+                                        isContinue() ||
+                                        !props.onRequestNewMemory
+                                    }
+                                    title={
+                                        props.onRequestNewMemory
+                                            ? "New memory bundle..."
+                                            : "Coming soon"
+                                    }
                                     aria-label="New memory bundle"
                                 >
                                     +
@@ -507,15 +638,20 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                     {/*
                      * Pre-launch OAuth panel (spec:
                      * SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md).
-                     * Shows the Connect CTA when the user has the
-                     * blank singleton picked. Non-blank bundles are
-                     * trusted (PR B-4 / D will tighten this with a
-                     * per-bundle binding lookup).
+                     * Shows the Connect CTA whenever the selected
+                     * identity can't supply creds for this provider —
+                     * blank singleton, openclaw, or a non-blank bundle
+                     * without a matching binding (e.g. "+ New" just
+                     * created an empty bundle). The panel uses
+                     * `hasMatchingBinding` to compute its own outcome
+                     * so non-blank-but-empty bundles don't shortcut
+                     * to `ready`.
                      */}
                     <Show when={authRequired()}>
                         <PreLaunchAuthPanel
                             provider={provider()}
                             identityId={identityId}
+                            hasMatchingBinding={bundleHasMatchingBinding}
                             onStateChange={onAuthStateChange}
                             onBundleCreated={onBundleCreated}
                             disabled={submitting()}
