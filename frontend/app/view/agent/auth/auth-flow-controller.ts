@@ -128,11 +128,25 @@ export interface AuthFlowOptions {
         setTimeout: (fn: () => void, ms: number) => unknown;
         clearTimeout: (handle: unknown) => void;
     };
+    /** Externalize state ownership. When provided, the controller
+     *  reads `state()` from `externalGetState` and writes via
+     *  `externalDispatch` (which is expected to run the same
+     *  pure `update()` reducer the controller would use internally).
+     *  Used by AgentLaunchModal to fold auth state into the
+     *  launch-flow-state slice (Stage 2d of
+     *  SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md). When omitted
+     *  (the default — preserves test/standalone use), the controller
+     *  uses an internal Solid signal. */
+    externalGetState?: () => AuthState;
+    externalDispatch?: (cmd: AuthCommand) => void;
 }
 
 export class AuthFlowController {
+    /** Internal Solid signal — fallback state holder for tests and
+     *  any caller that doesn't externalize state via `opts.externalGetState`.
+     *  Untouched when externalization is wired. */
     private _state = createSignal<AuthState>(initialState());
-    state: Accessor<AuthState> = this._state[0];
+    state: Accessor<AuthState>;
 
     private rpc: AuthRpc;
     private pollIntervalMs: number;
@@ -145,6 +159,7 @@ export class AuthFlowController {
      *  `auth.submitapikey` completion from landing after the user
      *  swapped to a different bundle and submitted again. */
     private actionToken = 0;
+    private externalDispatch: ((cmd: AuthCommand) => void) | null;
 
     constructor(opts: AuthFlowOptions = {}) {
         this.rpc = opts.rpc ?? defaultAuthRpc;
@@ -153,6 +168,16 @@ export class AuthFlowController {
             setTimeout: (fn, ms) => setTimeout(fn, ms) as unknown,
             clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
         };
+        // State accessor + dispatch path. If the caller injected
+        // externalGetState + externalDispatch, route through them so
+        // the launch-flow-state slice can be the single source of
+        // truth. Otherwise keep the internal signal for back-compat.
+        if (opts.externalGetState) {
+            this.state = opts.externalGetState;
+        } else {
+            this.state = this._state[0];
+        }
+        this.externalDispatch = opts.externalDispatch ?? null;
     }
 
     /** Dispatch a command into the reducer, project state.
@@ -163,6 +188,13 @@ export class AuthFlowController {
      *  dispatch and silently invalidate any session the caller
      *  had just started. */
     dispatch(command: AuthCommand): void {
+        if (this.externalDispatch) {
+            // External dispatch (e.g. through launch-flow-state) is
+            // responsible for running the same pure `update()` reducer.
+            // We don't touch `_state` in this path.
+            this.externalDispatch(command);
+            return;
+        }
         untrack(() => {
             const prev = this._state[0]();
             const result = update(prev, command);
