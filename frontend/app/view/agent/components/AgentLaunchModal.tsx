@@ -55,26 +55,30 @@ interface AgentLaunchModalPanelProps {
     agent: ForgeAgent;
     onCancel: () => void;
     onSubmit: (overrides: LaunchOverrides) => Promise<void> | void;
-    /** Auto-select this Identity bundle on mount. Used by the
-     *  "+ New" → create → replace-back flow so the freshly-created
-     *  bundle shows up as the picker's choice. */
-    preselectedIdentityId?: string;
-    /** Same for Memory. Phase γ. */
-    preselectedMemoryId?: string;
+    /** Initial form state — used by the "+ New" → create → replace-
+     *  back flow so the user's in-progress edits (name, runtime,
+     *  image, identity, memory) survive the round-trip. All fields
+     *  default to the modal's normal initial values when omitted.
+     *  Codex P2 on PR #910 rounds 6 + 7: rounds 1-6 only restored
+     *  identity/memory selection; round 7 added the rest of the form. */
+    initialFormState?: Partial<LaunchFormState>;
     /** Called when the "+" / empty-state New buttons fire. The picker
      *  is expected to chain `tabModal.replace(newIdentityRequest)` —
      *  this component doesn't know how to build that request.
      *
-     *  The current Identity + Memory selections are passed through so
-     *  the picker can preserve them across the new-bundle round-trip
-     *  (codex P2 on PR #910 round 6 — without this, picking a Memory
-     *  before clicking "+ New Identity" silently reset to blank on
-     *  return). */
-    onRequestNewIdentity?: (current: CurrentSelection) => void;
-    onRequestNewMemory?: (current: CurrentSelection) => void;
+     *  The current launch form state is passed through so the picker
+     *  can preserve it across the new-bundle round-trip. */
+    onRequestNewIdentity?: (current: LaunchFormState) => void;
+    onRequestNewMemory?: (current: LaunchFormState) => void;
 }
 
-export interface CurrentSelection {
+/** Snapshot of the editable Launch form. Used to thread the user's
+ *  in-progress edits through the new-identity / new-memory modal so
+ *  returning to Launch doesn't reset typed-but-unsubmitted values. */
+export interface LaunchFormState {
+    name: string;
+    runtime: "host" | "container";
+    image: string;
     identityId: string;
     memoryId: string;
 }
@@ -83,22 +87,33 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
     const displayName = () => catalog()?.displayName ?? props.agent.name;
 
-    const [name, setName] = createSignal("");
-    const [runtime, setRuntime] = createSignal<"host" | "container">("host");
-    const [image, setImage] = createSignal<string>("");
+    // Initial form values — `initialFormState` carries the user's
+    // in-progress edits through the "+ New" round-trip.
+    const initial = props.initialFormState ?? {};
+    const [name, setName] = createSignal(initial.name ?? "");
+    const [runtime, setRuntime] = createSignal<"host" | "container">(
+        initial.runtime ?? "host",
+    );
+    const [image, setImage] = createSignal<string>(initial.image ?? "");
     const [submitting, setSubmitting] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
-    const [showAdvanced, setShowAdvanced] = createSignal(false);
+    // Advanced section auto-expands when restored state has a non-
+    // default runtime/image — otherwise the user would see "host" /
+    // empty image in the dropdown row and not realize their advanced
+    // edits round-tripped.
+    const [showAdvanced, setShowAdvanced] = createSignal(
+        (initial.runtime ?? "host") !== "host" || (initial.image ?? "") !== "",
+    );
 
     // v7 — Identity + Memory bundle pickers. Both default to "blank"
     // which the resolver short-circuits as "no override". Lists fetched
     // once at mount; the blank singleton is always present. See
     // docs/specs/identity-forge-integration-and-vault-2026-05-08.md.
     const [identityId, setIdentityId] = createSignal<string>(
-        props.preselectedIdentityId ?? "blank",
+        initial.identityId ?? "blank",
     );
     const [memoryId, setMemoryId] = createSignal<string>(
-        props.preselectedMemoryId ?? "blank",
+        initial.memoryId ?? "blank",
     );
 
     const [identities] = createResource<IdentityBundle[]>(async () => {
@@ -134,10 +149,15 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // missing callback (Phase β ships Identity wiring only; Memory
     // wiring lands in Phase γ) keeps the button visible but disabled
     // with a "coming soon" hint — see reagent P2 on PR #910.
-    const handleNewIdentity = () =>
-        props.onRequestNewIdentity?.({ identityId: identityId(), memoryId: memoryId() });
-    const handleNewMemory = () =>
-        props.onRequestNewMemory?.({ identityId: identityId(), memoryId: memoryId() });
+    const snapshot = (): LaunchFormState => ({
+        name: name(),
+        runtime: runtime(),
+        image: image(),
+        identityId: identityId(),
+        memoryId: memoryId(),
+    });
+    const handleNewIdentity = () => props.onRequestNewIdentity?.(snapshot());
+    const handleNewMemory = () => props.onRequestNewMemory?.(snapshot());
 
     // v8 — "Continue agent" dropdown. Filters to instances of the
     // CURRENT definition (server-side; a global cap would let older

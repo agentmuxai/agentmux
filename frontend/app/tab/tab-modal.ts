@@ -38,25 +38,31 @@ export interface LaunchAgentRequest {
      * rejects, the modal stays open and surfaces the error.
      */
     onSubmit: (overrides: LaunchAgentSubmit) => Promise<void> | void;
-    /** If set, the launch modal initialises its Identity dropdown to
-     *  this bundle id instead of the default "blank". Used by the
-     *  "+ New" → create → replace-back flow so the new bundle is
-     *  auto-selected. Phase β of
-     *  SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md. */
-    preselectedIdentityId?: string;
-    /** Same idea for the Memory dropdown. Phase γ. */
-    preselectedMemoryId?: string;
+    /** Initial form state for the launch modal — used by the
+     *  "+ New" → create → replace-back flow to restore the user's
+     *  in-progress edits (name, runtime, image, identity, memory)
+     *  across the new-bundle round-trip. Codex P2 on PR #910
+     *  rounds 6 + 7. */
+    initialFormState?: Partial<LaunchFormStateWire>;
     /** Optional callback fired when the user clicks the "+ New
      *  identity" button. Caller is expected to call
      *  tabModal.replace(newIdentityRequest) — the picker does this.
-     *  The `current` arg carries the modal's live Identity + Memory
-     *  selections so the picker can preserve them across the
-     *  new-bundle round-trip (codex P2 on PR #910 round 6 — without
-     *  this, picking a Memory before clicking "+ New Identity"
-     *  silently reset to blank on return). */
-    onRequestNewIdentity?: (current: { identityId: string; memoryId: string }) => void;
+     *  The `current` snapshot carries the modal's live form state so
+     *  the picker can preserve it across the new-bundle round-trip. */
+    onRequestNewIdentity?: (current: LaunchFormStateWire) => void;
     /** Same for "+ New memory". */
-    onRequestNewMemory?: (current: { identityId: string; memoryId: string }) => void;
+    onRequestNewMemory?: (current: LaunchFormStateWire) => void;
+}
+
+/** Snapshot of the editable Launch form. Kept here (not imported from
+ *  AgentLaunchModal) so tab-modal.ts stays a leaf type module with no
+ *  imports into the view layer. */
+export interface LaunchFormStateWire {
+    name: string;
+    runtime: "host" | "container";
+    image: string;
+    identityId: string;
+    memoryId: string;
 }
 
 export interface LaunchAgentSubmit {

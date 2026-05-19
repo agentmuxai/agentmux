@@ -245,8 +245,7 @@ function renderRequest(
                                 throw e;
                             }
                         }}
-                        preselectedIdentityId={req.preselectedIdentityId}
-                        preselectedMemoryId={req.preselectedMemoryId}
+                        initialFormState={req.initialFormState}
                         onRequestNewIdentity={req.onRequestNewIdentity}
                         onRequestNewMemory={req.onRequestNewMemory}
                     />

@@ -14,7 +14,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
-import { useTabModal } from "@/app/tab/tab-modal";
+import { useTabModal, type LaunchFormStateWire } from "@/app/tab/tab-modal";
 import { getPlatform } from "@/util/platformutil";
 import type { AgentViewModel } from "../agent-model";
 import { getProvider } from "../providers";
@@ -101,18 +101,15 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // open call so the install→launch chain can hand the same shape
     // to `tabModal.replace()` for a crossfade (no shell teardown).
     //
-    // Optional preselect args drive the "+ New" → create → replace-
-    // back-with-new-id flow: the new-identity / new-memory modal's
-    // onCreated calls this with `preselectedIdentityId: newId` (or
-    // memory equivalent) so the rebuilt Launch modal auto-selects
-    // the freshly-created bundle.
-    // Phase β of SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md.
+    // `initialFormState` carries the user's in-progress launch-form
+    // edits through the "+ New identity/memory" round-trip — name,
+    // runtime, image, identity, memory. Spec: Phase β of
+    // SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md; codex P2 on
+    // round 7 expanded preservation from identity+memory only to the
+    // full form.
     const buildLaunchRequest = (
         agent: ForgeAgent,
-        preselect: {
-            preselectedIdentityId?: string;
-            preselectedMemoryId?: string;
-        } = {},
+        initialFormState?: Partial<LaunchFormStateWire>,
     ) => ({
         kind: "launch-agent" as const,
         agent,
@@ -132,31 +129,24 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 setLaunching(null);
             }
         },
-        preselectedIdentityId: preselect.preselectedIdentityId,
-        preselectedMemoryId: preselect.preselectedMemoryId,
-        onRequestNewIdentity: (current) => {
-            // Use the modal's LIVE selections (passed via `current`)
-            // rather than the request's frozen `preselect` — the user
-            // may have changed Memory before clicking "+ New Identity".
-            // Codex P2 on PR #910 round 6.
+        initialFormState,
+        onRequestNewIdentity: (current: LaunchFormStateWire) => {
+            // Thread the user's whole live form snapshot through the
+            // new-identity round-trip so name/runtime/image/memory
+            // survive alongside the freshly-created identity id.
             tabModal.replace({
                 kind: "new-identity" as const,
                 originBlockId: props.model.blockId,
                 onCreated: (id: string) => {
                     tabModal.replace(
                         buildLaunchRequest(agent, {
-                            preselectedIdentityId: id,
-                            preselectedMemoryId: current.memoryId,
+                            ...current,
+                            identityId: id,
                         }),
                     );
                 },
                 onCancel: () => {
-                    tabModal.replace(
-                        buildLaunchRequest(agent, {
-                            preselectedIdentityId: current.identityId,
-                            preselectedMemoryId: current.memoryId,
-                        }),
-                    );
+                    tabModal.replace(buildLaunchRequest(agent, current));
                 },
             });
         },
