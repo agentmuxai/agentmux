@@ -24,7 +24,8 @@ export type TabModalRequest =
     | InstallAgentRequest
     | AgentPrereqRequest
     | NewIdentityBundleRequest
-    | NewMemoryBundleRequest;
+    | NewMemoryBundleRequest
+    | BrowserAuthRequest;
 
 export interface LaunchAgentRequest {
     kind: "launch-agent";
@@ -175,6 +176,36 @@ export interface NewMemoryBundleRequest {
      *  preselected. Layer does NOT close. */
     onCreated: (bundleId: string, bundleName: string) => void;
     /** Caller routes (replace vs close). Layer does NOT close. */
+    onCancel: () => void;
+}
+
+/**
+ * Browser-pane HTTP Basic / Digest auth challenge. Opened by the
+ * BrowserViewModel when CEF fires `browser-pane-auth-required`.
+ * Phase α of SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18.md.
+ */
+export interface BrowserAuthRequest {
+    kind: "browser-auth";
+    /** Pane that the request belongs to (used as the modal origin). */
+    blockId: string;
+    /** Opaque id correlating this prompt with the parked CEF callback
+     *  on the host side. The submit/cancel IPC echoes it back. */
+    requestId: string;
+    /** Origin of the challenge (e.g. `https://pulse.asaf.cc`). Shown
+     *  to the user so they know who's asking. */
+    origin: string;
+    /** Realm header value (e.g. `Restricted area`). Shown as the
+     *  prompt subtitle. Empty when the server didn't supply one. */
+    realm: string;
+    /** True for HTTP 407 proxy auth; false for 401 server auth.
+     *  v1 surfaces both with the same UI; future spec may diverge. */
+    isProxy: boolean;
+    /** User submitted credentials. The layer routes them to the host
+     *  via `browser_pane_auth_submit`. */
+    onSubmit: (username: string, password: string) => void;
+    /** User cancelled. The layer routes to `browser_pane_auth_cancel`,
+     *  which calls `AuthCallback.cancel()` so CEF aborts the request
+     *  and renders the 401 response body. */
     onCancel: () => void;
 }
 

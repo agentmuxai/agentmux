@@ -328,5 +328,26 @@ wrap_request_handler! {
             let mut inner = self.inner.lock();
             inner.on_render_process_terminated(browser, status, error_code, error_string);
         }
+
+        // HTTP Basic / Digest auth challenge. Phase α of
+        // SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18.md. Returns 1
+        // (async) so CEF holds the request open while we surface the
+        // credential prompt to the user.
+        fn auth_credentials(
+            &self,
+            browser: Option<&mut Browser>,
+            origin_url: Option<&CefString>,
+            is_proxy: ::std::os::raw::c_int,
+            host: Option<&CefString>,
+            port: ::std::os::raw::c_int,
+            realm: Option<&CefString>,
+            scheme: Option<&CefString>,
+            callback: Option<&mut AuthCallback>,
+        ) -> ::std::os::raw::c_int {
+            let mut inner = self.inner.lock();
+            inner.on_auth_credentials(
+                browser, origin_url, is_proxy, host, port, realm, scheme, callback,
+            )
+        }
     }
 }
