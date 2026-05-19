@@ -19,6 +19,12 @@ import { Button } from "@/element/button";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
+import {
+    createLaunchFlowStore,
+    continueLocksIdentity as flowContinueLocksIdentity,
+    continueLocksMemory as flowContinueLocksMemory,
+} from "@/app/store/launch-flow-state";
+
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { buildInstanceSlug, slugifyInstanceName } from "../defaults/instance-slug";
 import { getProvider } from "../providers";
@@ -88,35 +94,51 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
     const displayName = () => catalog()?.displayName ?? props.agent.name;
 
-    // Initial form values — `initialFormState` carries the user's
-    // in-progress edits through the "+ New" round-trip.
-    const initial = props.initialFormState ?? {};
-    const [name, setName] = createSignal(initial.name ?? "");
-    const [runtime, setRuntime] = createSignal<"host" | "container">(
-        initial.runtime ?? "host",
-    );
-    const [image, setImage] = createSignal<string>(initial.image ?? "");
+    // Form state lives in the launch-flow-state reducer slice (Stage
+    // 2b of SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md). Reads
+    // `flow.state.form.X` track the field individually via Solid's
+    // createStore; writes go through `flow.dispatch(...)`. Existing
+    // accessor names (`name()`, `setName(v)`, …) are kept as thin
+    // wrappers so the template + handler call sites stay unchanged.
+    //
+    // What's NOT migrated yet:
+    //  - `submitting` / `error` — `SubmitFailed` would auto-clear
+    //    `inFlight`, breaking the catch-path order in handleSubmit
+    //    where setError() precedes setSubmitting(false). Stage 2c
+    //    can refactor handleSubmit to dispatch SubmitClicked /
+    //    SubmitFailed directly instead of routing through the legacy
+    //    setter pairs.
+    //  - `identities`, `memories`, `selectedBundleBindings` — still
+    //    local resources. Stage 2c migrates them to the store with
+    //    push-based binding events.
+    //  - `namedAgents` (continuation list) — out of slice scope.
+    //  - `authController` — auth state stays in its own controller
+    //    (lifted to this component in Stage 1).
+    const flow = createLaunchFlowStore();
+    flow.dispatch({ type: "Opened", initial: props.initialFormState });
+    const name = () => flow.state.form.name;
+    const setName = (v: string) => flow.dispatch({ type: "NameChanged", name: v });
+    const runtime = () => flow.state.form.runtime;
+    const setRuntime = (v: "host" | "container") =>
+        flow.dispatch({ type: "RuntimeChanged", runtime: v });
+    const image = () => flow.state.form.image;
+    const setImage = (v: string) => flow.dispatch({ type: "ImageChanged", image: v });
+    const identityId = () => flow.state.form.identityId;
+    const setIdentityId = (v: string) =>
+        flow.dispatch({ type: "IdentityChanged", identityId: v });
+    const memoryId = () => flow.state.form.memoryId;
+    const setMemoryId = (v: string) =>
+        flow.dispatch({ type: "MemoryChanged", memoryId: v });
+
     const [submitting, setSubmitting] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
-    // Advanced section auto-expands when restored state has a non-
-    // default runtime/image — otherwise the user would see "host" /
-    // empty image in the dropdown row and not realize their advanced
-    // edits round-tripped.
+
+    const initial = props.initialFormState ?? {};
     const [showAdvanced, setShowAdvanced] = createSignal(
         (initial.runtime ?? "host") !== "host" || (initial.image ?? "") !== "",
     );
 
-    // Identity + Memory selections. Empty string = no selection
-    // (Launch disabled until the user picks or creates a bundle). The
-    // "blank" sentinel was removed in
-    // docs/specs/SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md —
-    // every launch now ships a real bundle id.
-    const [identityId, setIdentityId] = createSignal<string>(
-        initial.identityId ?? "",
-    );
-    const [memoryId, setMemoryId] = createSignal<string>(
-        initial.memoryId ?? "",
-    );
+    onCleanup(() => flow.dispatch({ type: "Closed" }));
 
     const [identities] = createResource<IdentityBundle[]>(async () => {
         try {
@@ -196,53 +218,52 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         }
     });
 
-    /** Empty = "— New agent —" (default). Non-empty = continuing that
+    /** "" = "— New agent —" (default). Non-empty = continuing that
      *  past instance; name + identity + memory are pre-filled and
-     *  locked. */
-    const [continueOfId, setContinueOfId] = createSignal<string>("");
+     *  locked. Mirrors the store's `form.continueOfId` (which uses
+     *  `null` instead of "" — the dropdown uses "" as its UI sentinel
+     *  for the placeholder option). */
+    const continueOfId = () => flow.state.form.continueOfId ?? "";
 
-    const continuedRow = createMemo(() =>
-        (namedAgents() ?? []).find((r) => r.instance_id === continueOfId()) ?? null,
-    );
+    const continuedRow = createMemo(() => {
+        const id = continueOfId();
+        if (!id) return null;
+        return (namedAgents() ?? []).find((r) => r.instance_id === id) ?? null;
+    });
     const isContinue = () => continuedRow() != null;
-    // Per-bundle continuation locks. Only lock the selector when the
-    // continued row carries a real (non-empty / non-legacy-"blank")
-    // value for that bundle. Legacy rows with blank carryover leave
-    // the selector editable so the user can pick a replacement —
-    // without this, legacy continuations deadlock (codex P1 on #916).
-    const continueLocksIdentity = createMemo(() => {
-        const r = continuedRow();
-        return !!r && !!r.identity_id && r.identity_id !== "blank";
-    });
-    const continueLocksMemory = createMemo(() => {
-        const r = continuedRow();
-        return !!r && !!r.memory_id && r.memory_id !== "blank";
-    });
+    // Per-bundle continuation locks come from the slice's selectors.
+    // Local memos read flow.state.form so they invalidate when the
+    // selection or carry-over identity changes.
+    const continueLocksIdentity = createMemo(() =>
+        flowContinueLocksIdentity(flow.state),
+    );
+    const continueLocksMemory = createMemo(() =>
+        flowContinueLocksMemory(flow.state),
+    );
 
-    const handleContinueSelect = (id: string) => {
-        setContinueOfId(id);
-        const row = (namedAgents() ?? []).find((r) => r.instance_id === id);
-        if (row) {
-            setName(row.instance_name);
-            // Legacy rows may carry "" or "blank" identity_id from
-            // before the blank-removal. Treat both as "no carry-over"
-            // — the user must pick or create a real bundle for the
-            // continuation.
-            const carryIdentity =
-                row.identity_id && row.identity_id !== "blank" ? row.identity_id : "";
-            const carryMemory =
-                row.memory_id && row.memory_id !== "blank" ? row.memory_id : "";
-            setIdentityId(carryIdentity);
-            setMemoryId(carryMemory);
-        } else {
-            // Selecting "— New agent —" releases the lock. Clear the
-            // fields back to defaults so the user doesn't accidentally
-            // submit a brand-new launch carrying the previously
-            // continued agent's name + bundles.
-            setName("");
-            setIdentityId("");
-            setMemoryId("");
-        }
+    const handleContinueSelect = (rawId: string) => {
+        const id = rawId === "" ? null : rawId;
+        const row =
+            id === null
+                ? null
+                : (namedAgents() ?? []).find((r) => r.instance_id === id) ?? null;
+        // Legacy rows may carry "" or "blank" identity_id/memory_id
+        // from before the blank-removal. Treat both as "no carry-over"
+        // so the user must pick a real bundle for the continuation.
+        const carry = row
+            ? {
+                  name: row.instance_name,
+                  identityId:
+                      row.identity_id && row.identity_id !== "blank"
+                          ? row.identity_id
+                          : "",
+                  memoryId:
+                      row.memory_id && row.memory_id !== "blank"
+                          ? row.memory_id
+                          : "",
+              }
+            : undefined;
+        flow.dispatch({ type: "ContinueOfChanged", continueOfId: id, carry });
     };
 
     const formatRelative = (ms: number): string => {
