@@ -344,14 +344,19 @@ async fn run_windows(
     let state = std::sync::Arc::new(tokio::sync::Mutex::new(state::State::default()));
 
     // LSD-2 — open the durable launcher saga log at
-    // `<data-dir>/launcher-sagas.db` (separate file from
+    // `<data-dir>/db/launcher-sagas.db` (separate file from
     // `launcher-events.log`; the saga log is structured SQLite, the
     // event log is append-only JSONL). Failure to open is a launcher
     // startup error — without the log, sagas have no crash-recovery
     // story (LSD-3 walks `unresolved_sagas` to mark interrupted
     // sagas `failed_compensation`). Spec
     // `docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md` §3.1.
-    let saga_log_path = paths.data_dir.join("launcher-sagas.db");
+    //
+    // `launcher_saga_log_path` performs the back-compat move from
+    // the pre-AUDIT_SQLITE_SYSTEMS_2026_05_19.md location
+    // (`<data-dir>/launcher-sagas.db` — outside `db/`) into the
+    // canonical `db/` subdir alongside srv's SQLite files.
+    let saga_log_path = data_dir::launcher_saga_log_path(&paths.data_dir);
     let saga_log = match saga::LauncherSagaLog::open(&saga_log_path) {
         Ok(l) => std::sync::Arc::new(l),
         Err(e) => {

@@ -690,7 +690,7 @@ fn format_event(e: &Event) -> String {
 // LSD-3 — `agentmux.exe --diag sagas`
 //
 // Operator visibility into the launcher saga log
-// (`<data-dir>/launcher-sagas.db`). Unlike `--diag wrr` and
+// (`<data-dir>/db/launcher-sagas.db`). Unlike `--diag wrr` and
 // `--diag srv`, this command does NOT need a running launcher: the
 // SQLite log is a passive on-disk artefact. We open it read-only via
 // `LauncherSagaLog::open_read_only` and call `snapshot_recent(50)`. Useful when
@@ -725,7 +725,10 @@ async fn run_sagas_diag_impl(launcher_exe_dir: &std::path::Path) -> Result<(), S
 
     let paths = crate::data_dir::resolve_paths(launcher_exe_dir, version)
         .map_err(|e| format!("path resolution failed: {}", e))?;
-    let saga_log_path = paths.data_dir.join("launcher-sagas.db");
+    // `--diag sagas` is a passive on-disk inspector (see the doc
+    // comment for this function); use the read-only resolver so we
+    // don't trigger the legacy-file rename here. Reagent P2 on PR #932.
+    let saga_log_path = crate::data_dir::launcher_saga_log_path_read_only(&paths.data_dir);
 
     println!("AgentMux launcher saga diagnostic");
     println!("Data dir: {}", paths.data_dir.display());
