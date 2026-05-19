@@ -19,6 +19,21 @@ import type {
 } from "./types";
 import { initialForm } from "./types";
 
+/** Helper: emit `FetchBindings` exactly when an identityId is real
+ *  (non-empty), not yet cached, and not already in flight. Three
+ *  commands trigger this fetch (Opened with preselect,
+ *  IdentityChanged, ContinueOfChanged with carry-over), so the
+ *  predicate lives here to keep the rule in one place. */
+function maybeFetchBindings(
+    state: LaunchFlowState,
+    identityId: string,
+): LaunchFlowEvent[] {
+    if (identityId === "") return [];
+    if (state.bindings[identityId] !== undefined) return [];
+    if (state.bindingsLoading[identityId]) return [];
+    return [{ type: "FetchBindings", identityId }];
+}
+
 export function update(
     state: LaunchFlowState,
     command: LaunchFlowCommand,
@@ -38,17 +53,7 @@ export function update(
                 form: { ...initialForm(), ...command.initial },
                 closed: false,
             };
-            // If Opened carries a preselected identityId we haven't
-            // seen bindings for, emit a fetch — otherwise the cache
-            // stays empty and hasMatchingBinding keeps reading false
-            // for an already-bound bundle, holding Launch behind the
-            // Connect gate (codex P2 on PR #917).
-            const events: LaunchFlowEvent[] = [];
-            const id = next.form.identityId;
-            if (id !== "" && state.bindings[id] === undefined && !state.bindingsLoading[id]) {
-                events.push({ type: "FetchBindings", identityId: id });
-            }
-            return { state: next, events };
+            return { state: next, events: maybeFetchBindings(state, next.form.identityId) };
         }
 
         case "NameChanged": {
@@ -79,17 +84,9 @@ export function update(
             if (state.form.identityId === command.identityId) {
                 return { state, events: [] };
             }
-            const events: LaunchFlowEvent[] = [];
-            // Emit FetchBindings on selection of a real identity we
-            // haven't seen yet. The view runs the RPC and dispatches
-            // BindingsLoading + BindingsLoaded.
-            const id = command.identityId;
-            if (id !== "" && state.bindings[id] === undefined && !state.bindingsLoading[id]) {
-                events.push({ type: "FetchBindings", identityId: id });
-            }
             return {
-                state: { ...state, form: { ...state.form, identityId: id } },
-                events,
+                state: { ...state, form: { ...state.form, identityId: command.identityId } },
+                events: maybeFetchBindings(state, command.identityId),
             };
         }
 
@@ -102,6 +99,15 @@ export function update(
         }
 
         case "ContinueOfChanged": {
+            // Idempotency: re-dispatching with the same continueOfId
+            // is a no-op so a stray repeat from the view doesn't
+            // overwrite mid-form edits with the original carry-over.
+            // Compare on continueOfId; the carry values are a
+            // deterministic projection of the row, so if the id is
+            // unchanged the carry is too.
+            if (state.form.continueOfId === command.continueOfId) {
+                return { state, events: [] };
+            }
             const next: LaunchFlowState = {
                 ...state,
                 form: {
@@ -117,7 +123,10 @@ export function update(
                     memoryId: command.carry?.memoryId ?? "",
                 },
             };
-            return { state: next, events: [] };
+            return {
+                state: next,
+                events: maybeFetchBindings(state, next.form.identityId),
+            };
         }
 
         case "IdentitiesLoading": {
@@ -183,9 +192,13 @@ export function update(
 
         case "BindingsLoaded":
         case "BindingsChanged": {
-            // BindingsLoaded settles the initial fetch (clears loading);
-            // BindingsChanged is the push event from the backend and
-            // doesn't toggle loading at all. Same state shape otherwise.
+            // Both commands write the new bindings array. They differ
+            // only in what they do to the per-id loading flag:
+            //   - BindingsLoaded settles a fetch the reducer asked
+            //     for via FetchBindings → clears the loading flag.
+            //   - BindingsChanged is a backend push event arriving
+            //     unsolicited (no in-flight fetch) → leaves the
+            //     loading flag alone (likely already absent).
             const nextLoading = { ...state.bindingsLoading };
             if (command.type === "BindingsLoaded") {
                 delete nextLoading[command.identityId];

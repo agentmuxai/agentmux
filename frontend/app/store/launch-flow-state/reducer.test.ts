@@ -193,6 +193,42 @@ describe("launch-flow-state reducer", () => {
             expect(continueLocksMemory(s)).toBe(false);
         });
 
+        it("emits FetchBindings for uncached real carry-over identity", () => {
+            const r = update(initialState(), {
+                type: "ContinueOfChanged",
+                continueOfId: "inst-1",
+                carry: { name: "prev", identityId: "a", memoryId: "m" },
+            });
+            expect(r.events).toEqual([{ type: "FetchBindings", identityId: "a" }]);
+        });
+
+        it("does NOT emit FetchBindings for empty carry-over identity (legacy)", () => {
+            const r = update(initialState(), {
+                type: "ContinueOfChanged",
+                continueOfId: "inst-legacy",
+                carry: { name: "old", identityId: "", memoryId: "" },
+            });
+            expect(r.events).toEqual([]);
+        });
+
+        it("re-dispatch with same continueOfId is a no-op (preserves edits)", () => {
+            let s = dispatch(initialState(), {
+                type: "ContinueOfChanged",
+                continueOfId: "inst-1",
+                carry: { name: "prev", identityId: "a", memoryId: "m" },
+            }).state;
+            // User edits name mid-flow
+            s = dispatch(s, { type: "NameChanged", name: "edited" }).state;
+            // Stray repeat from the view shouldn't overwrite the edit
+            const r = update(s, {
+                type: "ContinueOfChanged",
+                continueOfId: "inst-1",
+                carry: { name: "prev", identityId: "a", memoryId: "m" },
+            });
+            expect(r.state).toBe(s);
+            expect(r.state.form.name).toBe("edited");
+        });
+
         it("clears form on `— New agent —` (null)", () => {
             let s = dispatch(initialState(), {
                 type: "ContinueOfChanged",
