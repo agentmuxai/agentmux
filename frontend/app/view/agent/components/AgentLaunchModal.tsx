@@ -19,10 +19,12 @@ import { Button } from "@/element/button";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
+import { waveEventSubscribe } from "@/app/store/wps";
 import {
     createLaunchFlowStore,
     continueLocksIdentity as flowContinueLocksIdentity,
     continueLocksMemory as flowContinueLocksMemory,
+    hasMatchingBinding,
     realIdentities,
     realMemories,
 } from "@/app/store/launch-flow-state";
@@ -111,7 +113,19 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     //  - `namedAgents` (continuation list) — out of slice scope.
     //  - `authController` — auth state stays in its own controller
     //    (lifted to this component in Stage 1).
-    const flow = createLaunchFlowStore();
+    // Reducer events drive side-effects. The store calls `eventSink`
+    // every time the reducer emits one; we wire `FetchBindings` to
+    // run the listidentitybindings RPC + dispatch back into the
+    // store. Defining the store with the sink at creation time
+    // means the `Opened` dispatch below (with potentially preselected
+    // identityId) goes through the sink immediately.
+    const flow = createLaunchFlowStore({
+        eventSink: (event) => {
+            if (event.type === "FetchBindings") {
+                void fetchBindings(event.identityId);
+            }
+        },
+    });
     flow.dispatch({ type: "Opened", initial: props.initialFormState });
     const name = () => flow.state.form.name;
     const setName = (v: string) => flow.dispatch({ type: "NameChanged", name: v });
@@ -315,42 +329,64 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // identity created via "+ New" but never connected to Claude/Codex
     // yet). Reagent + codex P1 on PR #910 round 3 — without this
     // check, "+ New" could bypass the OAuth gate entirely.
-    const [selectedBundleBindings] = createResource(
-        () => identityId(),
-        async (id) => {
-            if (!id || id.startsWith("pending-bundle-for-")) {
-                return [] as IdentityBinding[];
-            }
-            try {
-                return await RpcApi.ListIdentityBindingsCommand(TabRpcClient, {
-                    identity_id: id,
-                });
-            } catch {
-                return [] as IdentityBinding[];
-            }
-        },
-    );
+    // Bindings now live in the reducer slice (Stage 2c.3). The store
+    // emits `FetchBindings` events whenever an identity is selected
+    // (IdentityChanged / Opened / ContinueOfChanged for uncached id).
+    // We respond by running the RPC + dispatching BindingsLoading →
+    // BindingsLoaded. The reducer's `hasMatchingBinding(state, providerId)`
+    // selector handles the race guard (loading → false) that the
+    // legacy memo did inline.
+    async function fetchBindings(id: string): Promise<void> {
+        if (!id || id.startsWith("pending-bundle-for-")) return;
+        flow.dispatch({ type: "BindingsLoading", identityId: id });
+        try {
+            const list = await RpcApi.ListIdentityBindingsCommand(TabRpcClient, {
+                identity_id: id,
+            });
+            flow.dispatch({ type: "BindingsLoaded", identityId: id, bindings: list ?? [] });
+        } catch {
+            // Settle the loading flag with an empty list — same
+            // safe-default the prior createResource catch returned.
+            flow.dispatch({ type: "BindingsLoaded", identityId: id, bindings: [] });
+        }
+    }
 
-    // Wrapped in createMemo (not a bare accessor) so downstream
-    // effects only re-fire on actual boolean transitions. Codex P2
-    // on PR #910 round 5: without the memo, when bindings finish
-    // loading the value stays false (no binding yet) but the
-    // underlying resource read changes, which re-ran
-    // PreLaunchAuthPanel's createEffect — which calls
-    // controller.selected, which cancels any in-flight `waiting`
-    // OAuth session. Memo's === dedupe makes the loading→loaded
-    // false→false transition a no-op.
-    const bundleHasMatchingBinding = createMemo(() => {
+    // Cross-tab + cross-pane reactivity: subscribe to the backend's
+    // `identitybundlebindings:changed:<id>` push event so a bind/
+    // unbind in another tab's Identity pane updates this modal
+    // without a manual refetch. Re-subscribes on identityId change
+    // since the event name embeds the identity id.
+    createEffect(() => {
         const id = identityId();
-        if (!id) return false;
-        // Treat the loading state as "no binding" so a fast-launch
-        // race can't slip through the gate while bindings refetch.
-        if (selectedBundleBindings.loading) return false;
+        if (!id) return;
+        const unsub = waveEventSubscribe({
+            eventType: `identitybundlebindings:changed:${id}`,
+            handler: () => {
+                void (async () => {
+                    try {
+                        const list = await RpcApi.ListIdentityBindingsCommand(TabRpcClient, {
+                            identity_id: id,
+                        });
+                        flow.dispatch({
+                            type: "BindingsChanged",
+                            identityId: id,
+                            bindings: list ?? [],
+                        });
+                    } catch {
+                        // Best-effort; leave the cache unchanged on
+                        // failure so the user can still launch with
+                        // whatever the last good fetch saw.
+                    }
+                })();
+            },
+        });
+        onCleanup(unsub);
+    });
+
+    const bundleHasMatchingBinding = createMemo(() => {
         const providerId = provider()?.id;
         if (!providerId) return false;
-        return (selectedBundleBindings() ?? []).some(
-            (b) => b.provider === providerId,
-        );
+        return hasMatchingBinding(flow.state, providerId);
     });
 
     // Auth gate applies to fresh launches of OAuth providers when the
