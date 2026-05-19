@@ -94,23 +94,18 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
     const displayName = () => catalog()?.displayName ?? props.agent.name;
 
-    // Form state lives in the launch-flow-state reducer slice (Stage
-    // 2b of SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md). Reads
-    // `flow.state.form.X` track the field individually via Solid's
+    // Form + submit state live in the launch-flow-state reducer slice
+    // (Stage 2b/2c of SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md).
+    // Reads `flow.state.X` track the field individually via Solid's
     // createStore; writes go through `flow.dispatch(...)`. Existing
-    // accessor names (`name()`, `setName(v)`, …) are kept as thin
-    // wrappers so the template + handler call sites stay unchanged.
+    // accessor names (`name()`, `setName(v)`, `submitting()`, …) are
+    // kept as thin wrappers so the template + handler call sites
+    // stay unchanged.
     //
-    // What's NOT migrated yet:
-    //  - `submitting` / `error` — `SubmitFailed` would auto-clear
-    //    `inFlight`, breaking the catch-path order in handleSubmit
-    //    where setError() precedes setSubmitting(false). Stage 2c
-    //    can refactor handleSubmit to dispatch SubmitClicked /
-    //    SubmitFailed directly instead of routing through the legacy
-    //    setter pairs.
-    //  - `identities`, `memories`, `selectedBundleBindings` — still
-    //    local resources. Stage 2c migrates them to the store with
-    //    push-based binding events.
+    // What's still local (Stage 2d candidates):
+    //  - `identities`, `memories`, `selectedBundleBindings` — local
+    //    resources. Stage 2d migrates them to the store with push-
+    //    based binding events.
     //  - `namedAgents` (continuation list) — out of slice scope.
     //  - `authController` — auth state stays in its own controller
     //    (lifted to this component in Stage 1).
@@ -129,9 +124,8 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     const memoryId = () => flow.state.form.memoryId;
     const setMemoryId = (v: string) =>
         flow.dispatch({ type: "MemoryChanged", memoryId: v });
-
-    const [submitting, setSubmitting] = createSignal(false);
-    const [error, setError] = createSignal<string | null>(null);
+    const submitting = () => flow.state.submit.inFlight;
+    const error = () => flow.state.submit.error;
 
     const initial = props.initialFormState ?? {};
     const [showAdvanced, setShowAdvanced] = createSignal(
@@ -397,8 +391,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
 
     const handleSubmit = async () => {
         if (!canSubmit()) return;
-        setSubmitting(true);
-        setError(null);
+        flow.dispatch({ type: "SubmitClicked" });
         try {
             const row = continuedRow();
             await props.onSubmit({
@@ -418,8 +411,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
             // true so the button keeps its "Launching…" label until
             // unmount.
         } catch (e: any) {
-            setError(String(e?.message ?? e));
-            setSubmitting(false);
+            flow.dispatch({ type: "SubmitFailed", error: String(e?.message ?? e) });
         }
     };
 
