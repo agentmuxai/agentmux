@@ -232,9 +232,11 @@ function outcomeFor(
     // Reagent + codex P1 on PR #910 round 3 — a non-blank bundle
     // without a binding for the agent's provider can't supply creds
     // (e.g. "+ New identity" created an empty "Work" bundle that the
-    // user hasn't connected yet). Treat as `needs-bundle` so OAuth
-    // runs and the binding lands on this bundle.
-    if (!hasMatchingBinding) return "needs-bundle";
+    // user hasn't connected yet). Use `needs-account` (NOT
+    // `needs-bundle`) so the reducer preserves `intoBundleId` and
+    // OAuth lands on THIS bundle instead of creating a fresh one
+    // (codex P1 round 4 — `needs-bundle` clears the bundle id).
+    if (!hasMatchingBinding) return "needs-account";
     return "ready";
 }
 
