@@ -748,6 +748,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     onTyping={() => scrollToBottomFn?.()}
                     onStopAgent={commands.stopAgent}
                     getCompletions={commands.completions}
+                    viewModel={model}
                 />
             </div>
             {/* AgentActionBar (Add / Import / Export) lives in the

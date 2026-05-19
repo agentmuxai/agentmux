@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { focusManager } from "@/app/store/focusManager";
+import { getVoiceSession } from "@/app/hook/useVoiceInput";
 import {
     atoms,
     createBlock,
@@ -556,6 +557,33 @@ function registerGlobalKeys() {
             return true;
         }
         setIsTermMultiInput(!curMI);
+        return true;
+    });
+    // Ctrl+Shift+V — toggle voice input on the currently focused pane.
+    // Mirrors MicButton click semantics: bind target first, then start
+    // OR stop OR retarget. No-op on panes whose ViewModel doesn't
+    // expose voiceHandle (e.g. browser, editor). Spec:
+    // docs/specs/SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md §6.
+    globalKeyMap.set("Ctrl:Shift:v", () => {
+        const blockId = getFocusedBlockInStaticTab();
+        if (!blockId) return true;
+        const bcm = getBlockComponentModel(blockId);
+        const vm: any = bcm?.viewModel;
+        if (!vm?.voiceHandle) {
+            // No-op on non-supporting panes. (Could surface a toast in Phase 3.)
+            return true;
+        }
+        const voice = getVoiceSession();
+        if (!voice.isAvailable()) return true;
+        const wasListening = voice.isListening();
+        const wasMine = wasListening && voice.currentTargetId() === blockId;
+        voice.registerPane(blockId, vm.voiceHandle());
+        if (!wasListening) {
+            voice.toggleListening();
+        } else if (wasMine) {
+            voice.toggleListening();
+        }
+        // else: retarget without toggle (same logic as MicButton click)
         return true;
     });
     for (let idx = 1; idx <= 9; idx++) {

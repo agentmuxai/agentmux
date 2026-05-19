@@ -10,9 +10,13 @@ export interface PaneVoiceHandle {
 
 export interface VoiceSession {
     isListening: SignalAtom<boolean>;
+    /** blockId of the pane currently receiving voice output (null when no
+     *  pane is targeted). Each pane's mic button reads this to determine
+     *  whether *it* owns the active session — multi-pane safe. */
+    currentTargetId: SignalAtom<string | null>;
     isAvailable: () => boolean;
     toggleListening: () => void;
-    registerPane: (handle: PaneVoiceHandle) => void;
+    registerPane: (blockId: string, handle: PaneVoiceHandle) => void;
 }
 
 const RESTART_DELAY_MS = 100;
@@ -20,10 +24,12 @@ const RESTART_DELAY_MS = 100;
 function createVoiceSession(): VoiceSession {
     const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
     const isListening = createSignalAtom(false);
+    const currentTargetId = createSignalAtom<string | null>(null);
 
     if (!SR) {
         return {
             isListening,
+            currentTargetId,
             isAvailable: () => false,
             toggleListening: () => {},
             registerPane: () => {},
@@ -92,6 +98,10 @@ function createVoiceSession(): VoiceSession {
                 interimActive = false;
             }
             isListening._set(false);
+            // Clear target so per-pane mic buttons reflect "no active
+            // session" instead of leaving the previous target's button
+            // stuck in active state.
+            currentTargetId._set(null);
         } else {
             try {
                 recognition.start();
@@ -104,9 +114,13 @@ function createVoiceSession(): VoiceSession {
 
     return {
         isListening,
+        currentTargetId,
         isAvailable: () => true,
         toggleListening,
-        registerPane: (handle) => { activeHandle = handle; },
+        registerPane: (blockId, handle) => {
+            activeHandle = handle;
+            currentTargetId._set(blockId);
+        },
     };
 }
 
