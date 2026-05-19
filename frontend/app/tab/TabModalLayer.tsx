@@ -266,17 +266,21 @@ function renderRequest(
                         onSubmit={async ({ name, description }) => {
                             setSubmitting(true);
                             try {
-                                const id = crypto.randomUUID();
-                                const now = Date.now();
+                                // Wire convention from identity-pane-
+                                // model.ts:bundleDraftToWire — empty id
+                                // triggers server-side uuid; 0 timestamps
+                                // trigger server-side now-stamping. Keeps
+                                // id/timestamp handling in one place
+                                // (codex P2 on PR #910 round 3).
                                 const bundle = await RpcApi.UpsertIdentityBundleCommand(
                                     TabRpcClient,
                                     {
-                                        id,
+                                        id: "",
                                         name,
                                         description,
                                         is_blank: false,
-                                        created_at: now,
-                                        updated_at: now,
+                                        created_at: 0,
+                                        updated_at: 0,
                                     },
                                 );
                                 setSubmitting(false);

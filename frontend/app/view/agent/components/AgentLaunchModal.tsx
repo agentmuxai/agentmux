@@ -212,21 +212,61 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         setIdentityId(bundleId);
     };
     const provider = createMemo(() => getProvider(props.agent.provider));
-    // Auth gate applies ONLY to fresh launches of OAuth providers with
-    // the blank singleton selected.
+
+    // Bindings for the currently selected identity bundle — used by
+    // authRequired() to detect non-blank bundles that have no
+    // credential binding for the agent's provider (e.g. a "Work"
+    // identity created via "+ New" but never connected to Claude/Codex
+    // yet). Reagent + codex P1 on PR #910 round 3 — without this
+    // check, "+ New" could bypass the OAuth gate entirely.
+    const [selectedBundleBindings] = createResource(
+        () => identityId(),
+        async (id) => {
+            if (!id || id === "blank" || id.startsWith("pending-bundle-for-")) {
+                return [] as IdentityBinding[];
+            }
+            try {
+                return await RpcApi.ListIdentityBindingsCommand(TabRpcClient, {
+                    identity_id: id,
+                });
+            } catch {
+                return [] as IdentityBinding[];
+            }
+        },
+    );
+
+    const bundleHasMatchingBinding = () => {
+        const id = identityId();
+        if (!id || id === "blank") return false;
+        // Treat the loading state as "no binding" so a fast-launch
+        // race can't slip through the gate while bindings refetch.
+        if (selectedBundleBindings.loading) return false;
+        const providerId = provider()?.id;
+        if (!providerId) return false;
+        return (selectedBundleBindings() ?? []).some(
+            (b) => b.provider === providerId,
+        );
+    };
+
+    // Auth gate applies to fresh launches of OAuth providers when the
+    // selected identity can't supply credentials for the agent's
+    // provider. That's true when:
     //
-    // - `isContinue` bypasses: prior launch already produced creds.
-    // - API-key providers (kimi/pi) bypass: until the backend
+    // - `blank`/empty is selected — ambient creds, OAuth flow runs once.
+    // - OpenClaw provider — until identity bundles include openclaw
+    //   auth profiles, gate ALWAYS (Phase α addition, 2026-05-17).
+    //   Lifts once identity-bundles-include-openclaw lands (planned
+    //   with Phase δ persistence work).
+    // - A non-blank bundle without a matching provider binding —
+    //   e.g. "+ New" just created an empty "Work" bundle. Reagent +
+    //   codex P1 on PR #910 round 3.
+    //
+    // Bypasses:
+    // - `isContinue` — prior launch already produced creds.
+    // - API-key providers (kimi/pi) — until the backend
     //   `auth.submitapikey` persists bundles (PR C-2), the gate would
-    //   deadlock — the user can't reach `ready` because save is a
-    //   stub. Their existing `launch-flow.ts` Phase 2 prompts for the
-    //   key in-line. Reagent + codex P1 on #847.
-    // - OpenClaw: even with a non-blank identity selected, no identity
-    //   has been openclaw-authed yet (Phase α addition, 2026-05-17).
-    //   Until identity bundles include openclaw auth profiles, gate
-    //   ALWAYS — the user needs to run the OpenAI OAuth flow before
-    //   `openclaw acp` will spawn. Lifts once identity-bundles-include-
-    //   openclaw lands (planned with Phase δ persistence work).
+    //   deadlock. Their existing `launch-flow.ts` Phase 2 prompts for
+    //   the key in-line. Reagent + codex P1 on #847.
     const authRequired = () =>
         !isContinue()
         && provider()?.authType === "oauth"
@@ -234,6 +274,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
             identityId() === "blank"
             || identityId() === ""
             || provider()?.id === "openclaw"
+            || !bundleHasMatchingBinding()
         );
     const authReady = () => !authRequired() || authStateKind() === "ready";
     const canSubmit = () =>
