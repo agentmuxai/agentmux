@@ -371,6 +371,157 @@ describe("launch-flow-state reducer", () => {
         });
     });
 
+    describe("Auth state (folded-in)", () => {
+        it("initial auth.kind is idle", () => {
+            const s = initialState();
+            expect(s.auth.kind).toBe("idle");
+        });
+
+        it("Auth Selected drives inner reducer + updates outer state", () => {
+            const r = update(initialState(), {
+                type: "Auth",
+                cmd: { type: "Selected", providerId: "claude", bundleId: "", outcome: "needs-bundle" },
+            });
+            // SelectionKind for "needs-bundle" → "unauthenticated"
+            expect(r.state.auth.kind).toBe("unauthenticated");
+            expect(r.state.auth.providerId).toBe("claude");
+        });
+
+        it("Auth no-op (same inner state) returns the same outer state", () => {
+            const s0 = update(initialState(), {
+                type: "Auth",
+                cmd: { type: "Selected", providerId: "claude", bundleId: "", outcome: "needs-bundle" },
+            }).state;
+            // Re-dispatching the same selection is the inner reducer's
+            // own no-op surface. We just verify the outer wrapper
+            // doesn't fabricate a state-change either.
+            const r = update(s0, {
+                type: "Auth",
+                cmd: { type: "Selected", providerId: "claude", bundleId: "", outcome: "needs-bundle" },
+            });
+            expect(r.state.auth).toBe(s0.auth);
+        });
+
+        it("inner events are wrapped + surfaced via outer ReducerResult.events", () => {
+            // Drive the inner machine into a state where it emits an
+            // event. `Connect` from unauthenticated kicks off the
+            // OAuth start RPC via `StartAuth` event.
+            let s = update(initialState(), {
+                type: "Auth",
+                cmd: { type: "Selected", providerId: "claude", bundleId: "", outcome: "needs-bundle" },
+            }).state;
+            const r = update(s, { type: "Auth", cmd: { type: "ConnectClicked" } });
+            // Outer events should contain at least one wrapped Auth
+            // event. Spot-check it's tagged correctly.
+            expect(r.events.length).toBeGreaterThan(0);
+            for (const e of r.events) {
+                expect(e.type).toBe("Auth");
+            }
+        });
+    });
+
+    describe("Cross-product: auth × form (the §6.9 regression suite)", () => {
+        // Build an "auth ready" state — the bug we shipped Stage 1
+        // to fix is "memory change after auth-ready resets the
+        // auth back to Connect". With auth folded into the slice,
+        // pure form-field commands must NEVER touch state.auth.
+        const setupReady = (): LaunchFlowState => {
+            let s = update(initialState(), {
+                type: "Auth",
+                cmd: {
+                    type: "Selected",
+                    providerId: "claude",
+                    bundleId: "ident-work",
+                    outcome: "ready",
+                },
+            }).state;
+            return s;
+        };
+
+        it("auth.kind survives NameChanged", () => {
+            let s = setupReady();
+            const before = s.auth;
+            s = update(s, { type: "NameChanged", name: "alpha" }).state;
+            expect(s.auth).toBe(before); // same object identity
+            expect(s.auth.kind).toBe("ready");
+        });
+
+        it("auth.kind survives MemoryChanged — THE original repro", () => {
+            let s = setupReady();
+            const before = s.auth;
+            s = update(s, { type: "MemoryChanged", memoryId: "mem-notes" }).state;
+            expect(s.auth).toBe(before);
+            expect(s.auth.kind).toBe("ready");
+        });
+
+        it("auth.kind survives RuntimeChanged + ImageChanged", () => {
+            let s = setupReady();
+            const before = s.auth;
+            s = update(s, { type: "RuntimeChanged", runtime: "container" }).state;
+            s = update(s, { type: "ImageChanged", image: "alpine:latest" }).state;
+            expect(s.auth).toBe(before);
+            expect(s.auth.kind).toBe("ready");
+        });
+
+        it("auth.kind survives IdentitiesLoaded + MemoriesLoaded", () => {
+            let s = setupReady();
+            const before = s.auth;
+            s = update(s, {
+                type: "IdentitiesLoaded",
+                list: [ident("ident-work", "Work")],
+            }).state;
+            s = update(s, {
+                type: "MemoriesLoaded",
+                list: [mem("mem-notes", "Notes")],
+            }).state;
+            expect(s.auth).toBe(before);
+            expect(s.auth.kind).toBe("ready");
+        });
+
+        it("auth.kind survives BindingsLoaded + BindingsChanged", () => {
+            let s = setupReady();
+            const before = s.auth;
+            s = update(s, {
+                type: "BindingsLoaded",
+                identityId: "ident-work",
+                bindings: [binding("ident-work", "claude")],
+            }).state;
+            s = update(s, {
+                type: "BindingsChanged",
+                identityId: "ident-work",
+                bindings: [binding("ident-work", "claude")],
+            }).state;
+            expect(s.auth).toBe(before);
+            expect(s.auth.kind).toBe("ready");
+        });
+
+        it("auth.kind survives SubmitClicked + SubmitFailed", () => {
+            let s = setupReady();
+            const before = s.auth;
+            s = update(s, { type: "SubmitClicked" }).state;
+            s = update(s, { type: "SubmitFailed", error: "no creds on disk" }).state;
+            expect(s.auth).toBe(before);
+            expect(s.auth.kind).toBe("ready");
+        });
+
+        it("form state survives Auth Connect (auth path doesn't touch form)", () => {
+            let s = update(initialState(), { type: "NameChanged", name: "carry-name" }).state;
+            s = update(s, { type: "IdentityChanged", identityId: "ident-a" }).state;
+            s = update(s, { type: "MemoryChanged", memoryId: "mem-a" }).state;
+            const formBefore = s.form;
+            // Drive auth machine
+            s = update(s, {
+                type: "Auth",
+                cmd: { type: "Selected", providerId: "claude", bundleId: "", outcome: "needs-bundle" },
+            }).state;
+            s = update(s, { type: "Auth", cmd: { type: "ConnectClicked" } }).state;
+            expect(s.form).toBe(formBefore);
+            expect(s.form.name).toBe("carry-name");
+            expect(s.form.identityId).toBe("ident-a");
+            expect(s.form.memoryId).toBe("mem-a");
+        });
+    });
+
     describe("canSubmit cross-product", () => {
         const baseAuth = { authReady: true, nameValid: true };
 
