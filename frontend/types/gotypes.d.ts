@@ -1293,6 +1293,7 @@ declare global {
         "telemetry:numpoints"?: number;
         "conn:*"?: boolean;
         "network:lan_discovery"?: boolean;
+        "voice:enabled"?: boolean;
     };
 
     // waveobj.StickerClickOptsType

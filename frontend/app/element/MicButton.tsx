@@ -3,16 +3,23 @@
 
 import { ToggleIconButton } from "@/app/element/iconbutton";
 import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
+import { getSettingsKeyAtom } from "@/app/store/global";
 import { Show, type JSX } from "solid-js";
 import "./MicButton.scss";
 
 interface MicButtonProps {
     blockId: string;
     handle: PaneVoiceHandle;
+    /** Optional context-aware tooltip (e.g. "Speak into this terminal").
+     *  Falls back to a generic "Voice input" label when absent. */
+    paneTitle?: string;
 }
 
 export function MicButton(props: MicButtonProps): JSX.Element {
     const voice = getVoiceSession();
+    // `voice:enabled` is a global kill-switch (default true). Absent /
+    // undefined ⇒ enabled; only an explicit `false` hides the button.
+    const voiceEnabled = getSettingsKeyAtom("voice:enabled");
 
     // Active iff this pane owns the current voice session.
     const isActiveHere = () => voice.isListening() && voice.currentTargetId() === props.blockId;
@@ -44,13 +51,13 @@ export function MicButton(props: MicButtonProps): JSX.Element {
     });
 
     return (
-        <Show when={voice.isAvailable()}>
+        <Show when={voice.isAvailable() && voiceEnabled() !== false}>
             <div class="mic-button-wrap" classList={{ "mic-active": isActiveHere() }}>
                 <ToggleIconButton
                     decl={{
                         elemtype: "toggleiconbutton",
                         icon: "regular@microphone",
-                        title: "Voice input (Ctrl+Shift+V)",
+                        title: props.paneTitle ?? "Voice input (Ctrl+Shift+V)",
                         active: activeAtom,
                     }}
                 />
