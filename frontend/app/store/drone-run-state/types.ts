@@ -2,27 +2,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Type definitions for the workflow-run-state reducer (slice #10 in the
+ * Type definitions for the drone-run-state reducer (slice #10 in the
  * frontend reducer roadmap). Pairs with the master reducer-stack
- * status doc and closes the "workflows-model.ts is not a reducer"
+ * status doc and closes the "drone-model.ts is not a reducer"
  * drift item from
  * `docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md` §5.3.
  *
- * Owns the per-workflow-pane reactive cells that fold the
- * `workflowrun:<id>` event stream (backend
- * `agentmux-srv/src/workflows/executor/engine.rs::RunEvent`).
- * The view (`WorkflowsViewModel`) keeps the canvas-edit cells
+ * Owns the per-drone-pane reactive cells that fold the
+ * `dronerun:<id>` event stream (backend
+ * `agentmux-srv/src/drone/executor/engine.rs::RunEvent`).
+ * The view (`DroneViewModel`) keeps the canvas-edit cells
  * (draft graph, selection, palette interaction) — those are
  * pure UI editing state, not folded data.
  *
  * Cells owned here:
- *   - `runId` — active workflow run id (`""` when no run is live).
- *   - `workflowId` — id of the workflow the active run was started for.
+ *   - `runId` — active drone run id (`""` when no run is live).
+ *   - `droneId` — id of the drone the active run was started for.
  *   - `status` — `"idle" | "running" | "done" | "failed"`.
  *   - `blockResults` — per-block last-run output keyed by block id;
  *     populated incrementally by `BlockDone` / `BlockError` events,
  *     and can be backfilled in bulk via `BackfilledFromRow` for the
- *     ultra-fast-workflow race covered by PR #843.
+ *     ultra-fast-drone race covered by PR #843.
  *   - `output` — final `RunDone.output` text (or stringified value).
  *   - `error` — final `RunFailed.error` text.
  *   - `closed` — terminal flag set by `Disposed`. After it flips,
@@ -30,7 +30,7 @@
  */
 
 /** What we render in the Agent block inspector for the last run. Mirror
- *  of the wire `AgentRunResult` flattened into the snake_case workflow
+ *  of the wire `AgentRunResult` flattened into the snake_case drone
  *  block-output shape (`response`, `cost_usd`). Errors arrive via
  *  `BlockError` and reuse the same slot. */
 export interface AgentBlockResult {
@@ -39,31 +39,31 @@ export interface AgentBlockResult {
     error?: string;
 }
 
-export type WorkflowRunStatus = "idle" | "running" | "done" | "failed";
+export type DroneRunStatus = "idle" | "running" | "done" | "failed";
 
-export interface WorkflowRunState {
+export interface DroneRunState {
     closed: boolean;
     runId: string;
-    workflowId: string;
-    status: WorkflowRunStatus;
+    droneId: string;
+    status: DroneRunStatus;
     blockResults: Record<string, AgentBlockResult>;
     output: string;
     error: string;
 }
 
-export const initialState = (): WorkflowRunState => ({
+export const initialState = (): DroneRunState => ({
     closed: false,
     runId: "",
-    workflowId: "",
+    droneId: "",
     status: "idle",
     blockResults: {},
     output: "",
     error: "",
 });
 
-/** Shape of one backfilled block row from `WorkflowRun.block_states`,
+/** Shape of one backfilled block row from `DroneRun.block_states`,
  *  used by `BackfilledFromRow` for the codex-P2 race recovery on PR
- *  #843. Mirror of `WorkflowBlockState` in `frontend/types/gotypes.d.ts`. */
+ *  #843. Mirror of `DroneBlockState` in `frontend/types/gotypes.d.ts`. */
 export interface BackfilledBlock {
     blockId: string;
     status: "pending" | "running" | "done" | "error" | "skipped";
@@ -71,12 +71,12 @@ export interface BackfilledBlock {
     error?: string;
 }
 
-export type WorkflowRunCommand =
+export type DroneRunCommand =
     /**
-     * The `Run` button kicked off a fresh workflow run. Resets folded
+     * The `Run` button kicked off a fresh drone run. Resets folded
      * state so the inspector starts clean. Fires before subscription.
      */
-    | { type: "RunStarted"; runId: string; workflowId: string }
+    | { type: "RunStarted"; runId: string; droneId: string }
     /**
      * Backend `BlockStarted` event. Currently a no-op in state — the
      * reducer just records it for the audit ring. Phase 2 polish may
@@ -105,10 +105,10 @@ export type WorkflowRunCommand =
      */
     | { type: "RunFailed"; error: string }
     /**
-     * Race recovery for ultra-fast workflows: when the run finished
+     * Race recovery for ultra-fast drones: when the run finished
      * before this client subscribed, the events fired into the void
      * but the backend persisted final block states in the
-     * `WorkflowRun` row. The view dispatches this command after
+     * `DroneRun` row. The view dispatches this command after
      * `refreshRuns` if the active run is already terminal so the
      * inspector still shows per-block output. Idempotent — empty
      * blocks array yields no event.
@@ -116,14 +116,14 @@ export type WorkflowRunCommand =
     | {
           type: "BackfilledFromRow";
           runId: string;
-          workflowId: string;
-          status: WorkflowRunStatus;
+          droneId: string;
+          status: DroneRunStatus;
           output: string;
           error: string;
           blocks: BackfilledBlock[];
       }
     /**
-     * View tear-down (`New workflow`, open a different one). Returns
+     * View tear-down (`New drone`, open a different one). Returns
      * to the initial state but stays subscribable. Distinct from
      * `Disposed`, which is terminal.
      */
@@ -134,8 +134,8 @@ export type WorkflowRunCommand =
      */
     | { type: "Disposed" };
 
-export type WorkflowRunEvent =
-    | { type: "run-started"; runId: string; workflowId: string }
+export type DroneRunEvent =
+    | { type: "run-started"; runId: string; droneId: string }
     | { type: "block-started"; blockId: string }
     | { type: "block-done"; blockId: string; result: AgentBlockResult }
     | { type: "block-error"; blockId: string; error: string }
@@ -144,7 +144,7 @@ export type WorkflowRunEvent =
     | {
           type: "backfilled-from-row";
           runId: string;
-          status: WorkflowRunStatus;
+          status: DroneRunStatus;
           blockCount: number;
       }
     | { type: "reset" }
@@ -152,12 +152,12 @@ export type WorkflowRunEvent =
     | { type: "post-close-command-dropped"; commandType: string };
 
 export interface ReducerResult {
-    state: WorkflowRunState;
-    events: WorkflowRunEvent[];
+    state: DroneRunState;
+    events: DroneRunEvent[];
 }
 
 /** Pull the response text + cost out of the `BlockDone.output` shape
- *  emitted by `workflows/executor/blocks/agent.rs` (spec §4.3). The
+ *  emitted by `drone/executor/blocks/agent.rs` (spec §4.3). The
  *  agent block returns `{ response, tokens, cost_usd }`; other blocks
  *  return arbitrary shapes that fall back to JSON-stringify. Pure
  *  function — safe inside the reducer + tests. */

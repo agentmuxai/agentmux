@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { update } from "./reducer";
 import { initialState, parseBlockOutput } from "./types";
 
-describe("workflow-run-state reducer", () => {
+describe("drone-run-state reducer", () => {
     describe("RunStarted", () => {
         it("flips status to running and clears folded cells", () => {
             const seed = {
@@ -18,16 +18,16 @@ describe("workflow-run-state reducer", () => {
             const r = update(seed, {
                 type: "RunStarted",
                 runId: "r1",
-                workflowId: "wf1",
+                droneId: "wf1",
             });
             expect(r.state.runId).toBe("r1");
-            expect(r.state.workflowId).toBe("wf1");
+            expect(r.state.droneId).toBe("wf1");
             expect(r.state.status).toBe("running");
             expect(r.state.blockResults).toEqual({});
             expect(r.state.output).toBe("");
             expect(r.state.error).toBe("");
             expect(r.events).toEqual([
-                { type: "run-started", runId: "r1", workflowId: "wf1" },
+                { type: "run-started", runId: "r1", droneId: "wf1" },
             ]);
         });
     });
@@ -123,7 +123,7 @@ describe("workflow-run-state reducer", () => {
             const r = update(initialState(), {
                 type: "BackfilledFromRow",
                 runId: "r1",
-                workflowId: "wf1",
+                droneId: "wf1",
                 status: "done",
                 output: "final",
                 error: "",
@@ -150,7 +150,7 @@ describe("workflow-run-state reducer", () => {
             const r = update(seeded, {
                 type: "BackfilledFromRow",
                 runId: "r1",
-                workflowId: "wf1",
+                droneId: "wf1",
                 status: "done",
                 output: "",
                 error: "",
@@ -164,7 +164,7 @@ describe("workflow-run-state reducer", () => {
             const r = update(seeded, {
                 type: "BackfilledFromRow",
                 runId: "r1",
-                workflowId: "wf1",
+                droneId: "wf1",
                 status: "done",
                 output: "",
                 error: "",

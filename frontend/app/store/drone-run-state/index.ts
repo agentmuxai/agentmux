@@ -6,9 +6,9 @@ export type {
     AgentBlockResult,
     BackfilledBlock,
     ReducerResult,
-    WorkflowRunCommand,
-    WorkflowRunEvent,
-    WorkflowRunState,
-    WorkflowRunStatus,
+    DroneRunCommand,
+    DroneRunEvent,
+    DroneRunState,
+    DroneRunStatus,
 } from "./types";
 export { initialState, parseBlockOutput } from "./types";

@@ -16,8 +16,8 @@
 
 use serde_json::{json, Value};
 
-use crate::workflows::data_flow::ExecutionScope;
-use crate::workflows::types::FlowNode;
+use crate::drone::data_flow::ExecutionScope;
+use crate::drone::types::FlowNode;
 
 pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, String> {
     let expr = node
@@ -83,7 +83,7 @@ fn split_binop(s: &str) -> Option<(&str, &str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workflows::types::NodePosition;
+    use crate::drone::types::NodePosition;
 
     fn mk(expr: &str) -> FlowNode {
         FlowNode {

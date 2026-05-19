@@ -10,7 +10,7 @@ pub(crate) mod service;
 mod tool_handlers;
 pub(crate) mod wave_obj_bridge;
 mod websocket;
-mod workflow_handlers;
+mod drone_handlers;
 
 #[cfg(test)]
 pub(crate) mod tests;

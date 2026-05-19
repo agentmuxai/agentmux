@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Workflow + run types. Mirrors the frontend shape so RPC payloads
+//! Drone + run types. Mirrors the frontend shape so RPC payloads
 //! flow through `serde_json::to_value` without manual mapping.
 
 use std::collections::HashMap;
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 /// Block (node) kinds for Phase 1. Phase 2 adds Function, Loop, Parallel,
-/// Router, Workflow. Stored as `kind` field on `FlowNode.data`.
+/// Router, Drone. Stored as `kind` field on `FlowNode.data`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BlockKind {
@@ -59,7 +59,7 @@ pub struct NodePosition {
 ///
 /// Wire format matches xyflow's TS shape (camelCase: `sourceHandle` /
 /// `targetHandle`) so JSON roundtrips through the canvas + frontend
-/// `WorkflowFlowEdge` type without field-name translation.
+/// `DroneFlowEdge` type without field-name translation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FlowEdge {
@@ -74,7 +74,7 @@ pub struct FlowEdge {
 
 /// Top-level graph payload — what the canvas saves and the executor reads.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct WorkflowGraph {
+pub struct DroneGraph {
     #[serde(default)]
     pub nodes: Vec<FlowNode>,
     #[serde(default)]
@@ -82,29 +82,29 @@ pub struct WorkflowGraph {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkflowViewport {
+pub struct DroneViewport {
     pub x: f64,
     pub y: f64,
     pub zoom: f64,
 }
 
-impl Default for WorkflowViewport {
+impl Default for DroneViewport {
     fn default() -> Self {
         Self { x: 0.0, y: 0.0, zoom: 1.0 }
     }
 }
 
-/// Wstore row shape. Matches `db_workflow_definitions` schema.
+/// Wstore row shape. Matches `db_drone_definitions` schema.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkflowDefinition {
+pub struct DroneDefinition {
     pub id: String,
     pub name: String,
     #[serde(default)]
     pub description: String,
     #[serde(default)]
-    pub graph: WorkflowGraph,
+    pub graph: DroneGraph,
     #[serde(default)]
-    pub viewport: WorkflowViewport,
+    pub viewport: DroneViewport,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -127,11 +127,11 @@ impl RunStatus {
     }
 }
 
-/// One row in `db_workflow_runs`. Append-only history of executions.
+/// One row in `db_drone_runs`. Append-only history of executions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkflowRun {
+pub struct DroneRun {
     pub id: String,
-    pub workflow_id: String,
+    pub drone_id: String,
     pub status: String,
     pub started_at: i64,
     pub ended_at: i64,

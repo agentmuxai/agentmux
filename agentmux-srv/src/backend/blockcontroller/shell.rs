@@ -770,7 +770,7 @@ impl Controller for ShellController {
             // path stays byte-equal — interactive panes (which don't
             // emit JSON) see no behavior change because every line
             // fails the JSON parse and is silently dropped. The
-            // future stream-json-mode pane and the workflow inspector
+            // future stream-json-mode pane and the drone inspector
             // (issue #830 / Phase 1.5 PR 3) will be the first real
             // consumers.
             let mut translator: Option<crate::agents::translator::claude::ClaudeTranslator> =
@@ -1005,7 +1005,7 @@ const AGENT_LINE_BUFFER_CAP: usize = 1024 * 1024;
 /// insert U+FFFD into the middle of words for non-ASCII content
 /// (CJK, emoji, accented chars), silently corrupting
 /// `AssistantText`/`Done.response` while the parallel raw-byte WPS
-/// path stays correct — workflow consumers would have no way to
+/// path stays correct — drone consumers would have no way to
 /// recover. Reagent P1 + codex P2 on PR #833.
 ///
 /// Pure function — split out from `accumulate_and_translate` so the

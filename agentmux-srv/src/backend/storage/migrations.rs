@@ -127,6 +127,7 @@ pub fn run_forge_migrations(conn: &Connection) -> Result<(), StoreError> {
     run_forge_v7_migrations(conn)?;
     run_forge_v8_migrations(conn)?;
     run_forge_v9_migrations(conn)?;
+    run_forge_v10_migrations(conn)?;
     Ok(())
 }
 
@@ -725,6 +726,93 @@ pub fn run_forge_v9_migrations(conn: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// v10 — rename "Workflows" feature to "Drone".
+///
+/// Creates the drone tables (`db_drone_definitions`, `db_drone_runs`)
+/// and copies existing data from the v9 workflow tables. Schema is
+/// identical to v9 except that `db_drone_runs` renames the
+/// `workflow_id` column to `drone_id` (and the FK now points at
+/// `db_drone_definitions`).
+///
+/// Following the v7 pattern, the legacy v9 tables (`db_workflow_*`)
+/// are NOT dropped — they remain on disk so a downgrade path stays
+/// open. Readers in the renamed code path ignore them.
+///
+/// Idempotent: re-running this migration is a no-op (the
+/// `CREATE TABLE IF NOT EXISTS` + `INSERT OR IGNORE` pattern handles
+/// repeated execution safely).
+pub fn run_forge_v10_migrations(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS db_drone_definitions (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            graph TEXT NOT NULL DEFAULT '{\"nodes\":[],\"edges\":[]}',
+            viewport TEXT NOT NULL DEFAULT '{\"x\":0,\"y\":0,\"zoom\":1}',
+            created_at INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_drone_definitions_updated
+            ON db_drone_definitions(updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS db_drone_runs (
+            id TEXT PRIMARY KEY,
+            drone_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'running',
+            started_at INTEGER NOT NULL DEFAULT 0,
+            ended_at INTEGER NOT NULL DEFAULT 0,
+            block_states TEXT NOT NULL DEFAULT '{}',
+            output TEXT NOT NULL DEFAULT '',
+            error TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY (drone_id) REFERENCES db_drone_definitions(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_drone_runs_drone_started
+            ON db_drone_runs(drone_id, started_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_drone_runs_status
+            ON db_drone_runs(status);",
+    )?;
+
+    // Copy data from v9 workflow tables if they exist. The existence
+    // guard uses sqlite_master because v9 may not have run on databases
+    // older than v9 (the schema sequence is monotonic, but a fresh DB
+    // built straight at v10 wouldn't have the legacy tables).
+    let workflow_defs_exist: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM sqlite_master
+             WHERE type='table' AND name='db_workflow_definitions'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    if workflow_defs_exist > 0 {
+        conn.execute_batch(
+            "INSERT OR IGNORE INTO db_drone_definitions
+                (id, name, description, graph, viewport, created_at, updated_at)
+             SELECT id, name, description, graph, viewport, created_at, updated_at
+             FROM db_workflow_definitions;",
+        )?;
+    }
+
+    let workflow_runs_exist: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM sqlite_master
+             WHERE type='table' AND name='db_workflow_runs'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    if workflow_runs_exist > 0 {
+        conn.execute_batch(
+            "INSERT OR IGNORE INTO db_drone_runs
+                (id, drone_id, status, started_at, ended_at, block_states, output, error)
+             SELECT id, workflow_id, status, started_at, ended_at, block_states, output, error
+             FROM db_workflow_runs;",
+        )?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1194,5 +1282,88 @@ mod tests {
             )
             .unwrap();
         assert_eq!(backfilled, "forge-1");
+    }
+
+    #[test]
+    fn test_forge_v10_copies_workflow_data_to_drone_tables() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+
+        // Run forge migrations up to v9 so the workflow tables exist
+        // (v10 is included by run_forge_migrations; we'll seed BEFORE
+        // running it explicitly by first wiping the drone tables and
+        // re-running just v10 to verify the copy path).
+        run_forge_v9_migrations(&conn).unwrap();
+
+        // Seed a workflow definition and a workflow run in the v9
+        // tables.
+        conn.execute_batch(
+            "INSERT INTO db_workflow_definitions
+                (id, name, description, graph, viewport, created_at, updated_at)
+             VALUES (
+                'wf-1', 'My Drone', 'desc',
+                '{\"nodes\":[],\"edges\":[]}',
+                '{\"x\":0,\"y\":0,\"zoom\":1}',
+                1000, 2000
+             );
+
+             INSERT INTO db_workflow_runs
+                (id, workflow_id, status, started_at, ended_at,
+                 block_states, output, error)
+             VALUES (
+                'run-1', 'wf-1', 'done', 1100, 1500,
+                '{}', 'hello', ''
+             );",
+        )
+        .unwrap();
+
+        // Run v10 — should create drone tables and copy data.
+        run_forge_v10_migrations(&conn).unwrap();
+
+        let def_row: (String, String, i64) = conn
+            .query_row(
+                "SELECT id, name, updated_at FROM db_drone_definitions
+                 WHERE id = 'wf-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(def_row.0, "wf-1");
+        assert_eq!(def_row.1, "My Drone");
+        assert_eq!(def_row.2, 2000);
+
+        let run_row: (String, String, String, String) = conn
+            .query_row(
+                "SELECT id, drone_id, status, output FROM db_drone_runs
+                 WHERE id = 'run-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(run_row.0, "run-1");
+        assert_eq!(run_row.1, "wf-1");
+        assert_eq!(run_row.2, "done");
+        assert_eq!(run_row.3, "hello");
+
+        // v9 tables remain on disk (downgrade safety).
+        let wf_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_workflow_definitions",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(wf_count, 1);
+
+        // Re-running v10 is idempotent.
+        run_forge_v10_migrations(&conn).unwrap();
+        let drone_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_drone_definitions",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(drone_count, 1);
     }
 }

@@ -11,7 +11,7 @@ mod sagas;
 mod server;
 mod srv_ipc;
 mod state;
-mod workflows;
+mod drone;
 #[cfg(windows)]
 mod crash_monitor;
 

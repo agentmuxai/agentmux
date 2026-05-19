@@ -5,7 +5,7 @@
 //!
 //! Mirrors the frontend reference implementation at
 //! `frontend/app/view/agent/providers/claude-translator.ts` so the
-//! workflow Agent block can consume the same stream without
+//! drone Agent block can consume the same stream without
 //! round-tripping through the renderer. Handled frames:
 //!
 //! - `stream_event.content_block_start.content_block.type=text` —

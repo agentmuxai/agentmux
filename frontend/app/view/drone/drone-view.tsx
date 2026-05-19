@@ -6,19 +6,19 @@ import { createResource, For, Show, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { BLOCK_KINDS, blockMeta } from "./block-registry";
-import type { WorkflowsViewModel } from "./workflows-model";
-import type { BlockKind, FlowNode } from "./workflows-types";
-import "./workflows-view.scss";
+import type { DroneViewModel } from "./drone-model";
+import type { BlockKind, FlowNode } from "./drone-types";
+import "./drone-view.scss";
 
-export const WorkflowsView = (props: { model: WorkflowsViewModel }): JSX.Element => {
+export const DroneView = (props: { model: DroneViewModel }): JSX.Element => {
     const m = props.model;
 
     return (
-        <div class="workflows-pane">
+        <div class="drone-pane">
             <Toolbar model={m} />
-            <div class="workflows-body">
+            <div class="drone-body">
                 <BlockPalette model={m} />
-                <div class="workflows-canvas-wrap">
+                <div class="drone-canvas-wrap">
                     <Canvas model={m} />
                 </div>
                 <InspectorPanel model={m} />
@@ -28,31 +28,31 @@ export const WorkflowsView = (props: { model: WorkflowsViewModel }): JSX.Element
     );
 };
 
-WorkflowsView.displayName = "WorkflowsView";
+DroneView.displayName = "DroneView";
 
 // ── Toolbar ───────────────────────────────────────────────────────────
 
-const Toolbar = (p: { model: WorkflowsViewModel }): JSX.Element => {
+const Toolbar = (p: { model: DroneViewModel }): JSX.Element => {
     const m = p.model;
     const validation = () => m.validate();
     return (
-        <header class="workflows-toolbar">
+        <header class="drone-toolbar">
             <input
-                class="workflows-toolbar-name"
+                class="drone-toolbar-name"
                 value={m.draftAtom().name}
                 onInput={(e) => m.setName(e.currentTarget.value)}
-                placeholder="Untitled Workflow"
-                aria-label="Workflow name"
+                placeholder="Untitled Drone"
+                aria-label="Drone name"
             />
-            <div class="workflows-toolbar-actions">
-                <button class="workflows-btn" onClick={() => m.newWorkflow()}>
+            <div class="drone-toolbar-actions">
+                <button class="drone-btn" onClick={() => m.newDrone()}>
                     New
                 </button>
-                <button class="workflows-btn" onClick={() => void m.save()}>
+                <button class="drone-btn" onClick={() => void m.save()}>
                     Save
                 </button>
                 <button
-                    class="workflows-btn workflows-btn--primary"
+                    class="drone-btn drone-btn--primary"
                     disabled={!validation().ok || m.runningAtom()}
                     title={validation().errors.join(" · ")}
                     onClick={() => void m.run()}
@@ -61,7 +61,7 @@ const Toolbar = (p: { model: WorkflowsViewModel }): JSX.Element => {
                 </button>
             </div>
             <Show when={m.errorAtom()}>
-                <div class="workflows-error" role="alert">
+                <div class="drone-error" role="alert">
                     {m.errorAtom()}
                 </div>
             </Show>
@@ -71,17 +71,17 @@ const Toolbar = (p: { model: WorkflowsViewModel }): JSX.Element => {
 
 // ── Block palette ─────────────────────────────────────────────────────
 
-const BlockPalette = (p: { model: WorkflowsViewModel }): JSX.Element => {
+const BlockPalette = (p: { model: DroneViewModel }): JSX.Element => {
     const m = p.model;
     return (
-        <aside class="workflows-palette" aria-label="Block palette">
-            <div class="workflows-palette-title">Blocks</div>
+        <aside class="drone-palette" aria-label="Block palette">
+            <div class="drone-palette-title">Blocks</div>
             <For each={BLOCK_KINDS}>
                 {(kind) => {
                     const meta = blockMeta(kind);
                     return (
                         <button
-                            class="workflows-palette-item"
+                            class="drone-palette-item"
                             style={{ "--block-color": meta.color }}
                             onClick={() => {
                                 // Naive placement — Phase 2 will use drag + drop
@@ -94,21 +94,21 @@ const BlockPalette = (p: { model: WorkflowsViewModel }): JSX.Element => {
                             }}
                             title={meta.description}
                         >
-                            <span class="workflows-palette-item-dot" />
-                            <span class="workflows-palette-item-label">{meta.label}</span>
+                            <span class="drone-palette-item-dot" />
+                            <span class="drone-palette-item-label">{meta.label}</span>
                         </button>
                     );
                 }}
             </For>
             <Show when={m.listAtom().length > 0}>
-                <div class="workflows-palette-section">Saved workflows</div>
+                <div class="drone-palette-section">Saved drones</div>
                 <For each={m.listAtom()}>
                     {(wf) => (
                         <button
-                            class="workflows-palette-item workflows-palette-item--workflow"
-                            onClick={() => void m.openWorkflow(wf.id)}
+                            class="drone-palette-item drone-palette-item--drone"
+                            onClick={() => void m.openDrone(wf.id)}
                         >
-                            <span class="workflows-palette-item-label">{wf.name}</span>
+                            <span class="drone-palette-item-label">{wf.name}</span>
                         </button>
                     )}
                 </For>
@@ -127,7 +127,7 @@ const BlockPalette = (p: { model: WorkflowsViewModel }): JSX.Element => {
 // path (drop nodes, click to select, draw edges by clicking source then
 // target). The Phase 1 PR-4 polish issue tracks the swap.
 
-const Canvas = (p: { model: WorkflowsViewModel }): JSX.Element => {
+const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
     const m = p.model;
     let edgeStartId: string | null = null;
 
@@ -177,8 +177,8 @@ const Canvas = (p: { model: WorkflowsViewModel }): JSX.Element => {
     };
 
     return (
-        <div class="workflows-canvas" onClick={() => m.setSelected(null)}>
-            <svg class="workflows-canvas-edges" aria-hidden="true">
+        <div class="drone-canvas" onClick={() => m.setSelected(null)}>
+            <svg class="drone-canvas-edges" aria-hidden="true">
                 <For each={m.draftAtom().graph.edges}>
                     {(edge) => {
                         const src = () =>
@@ -188,7 +188,7 @@ const Canvas = (p: { model: WorkflowsViewModel }): JSX.Element => {
                         return (
                             <Show when={src() && dst()}>
                                 <line
-                                    class="workflows-edge"
+                                    class="drone-edge"
                                     x1={src()!.position.x + 80}
                                     y1={src()!.position.y + 28}
                                     x2={dst()!.position.x}
@@ -205,9 +205,9 @@ const Canvas = (p: { model: WorkflowsViewModel }): JSX.Element => {
                     const selected = () => m.selectedAtom() === n.id;
                     return (
                         <div
-                            class="workflows-node"
+                            class="drone-node"
                             classList={{
-                                "workflows-node--selected": selected(),
+                                "drone-node--selected": selected(),
                             }}
                             style={{
                                 left: `${n.position.x}px`,
@@ -216,10 +216,10 @@ const Canvas = (p: { model: WorkflowsViewModel }): JSX.Element => {
                             }}
                             onClick={(e) => onNodeClick(e, n)}
                         >
-                            <header class="workflows-node-header">
-                                <span class="workflows-node-label">{meta.label}</span>
+                            <header class="drone-node-header">
+                                <span class="drone-node-label">{meta.label}</span>
                                 <button
-                                    class="workflows-node-close"
+                                    class="drone-node-close"
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         m.removeNode(n.id);
@@ -229,12 +229,12 @@ const Canvas = (p: { model: WorkflowsViewModel }): JSX.Element => {
                                     ×
                                 </button>
                             </header>
-                            <div class="workflows-node-body">{nodeSummary(n)}</div>
+                            <div class="drone-node-body">{nodeSummary(n)}</div>
                         </div>
                     );
                 }}
             </For>
-            <div class="workflows-canvas-hint">
+            <div class="drone-canvas-hint">
                 Click to add blocks · Shift-click two nodes to connect them
             </div>
         </div>
@@ -272,14 +272,14 @@ function truncate(s: string, max = 40): string {
 
 // ── Inspector ─────────────────────────────────────────────────────────
 
-const InspectorPanel = (p: { model: WorkflowsViewModel }): JSX.Element => {
+const InspectorPanel = (p: { model: DroneViewModel }): JSX.Element => {
     const m = p.model;
     return (
-        <aside class="workflows-inspector" aria-label="Inspector">
+        <aside class="drone-inspector" aria-label="Inspector">
             <Show
                 when={m.selectedNodeAtom()}
                 fallback={
-                    <div class="workflows-inspector-empty">Select a block to edit.</div>
+                    <div class="drone-inspector-empty">Select a block to edit.</div>
                 }
             >
                 {(node) => <InspectorForm model={m} node={node()} />}
@@ -288,20 +288,20 @@ const InspectorPanel = (p: { model: WorkflowsViewModel }): JSX.Element => {
     );
 };
 
-const InspectorForm = (p: { model: WorkflowsViewModel; node: FlowNode }): JSX.Element => {
+const InspectorForm = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element => {
     const meta = blockMeta(p.node.data.kind as BlockKind);
     const update = (patch: Record<string, unknown>) =>
         p.model.updateNodeData(p.node.id, patch);
 
     return (
-        <div class="workflows-inspector-form">
-            <div class="workflows-inspector-title">{meta.label}</div>
-            <div class="workflows-inspector-id">{p.node.id}</div>
+        <div class="drone-inspector-form">
+            <div class="drone-inspector-title">{meta.label}</div>
+            <div class="drone-inspector-id">{p.node.id}</div>
             <Show when={p.node.data.kind === "agent"}>
                 <AgentRefEditor node={p.node} update={update} />
                 <Field label="Task ({{...}} interpolation supported)">
                     <textarea
-                        class="workflows-input"
+                        class="drone-input"
                         rows="4"
                         value={(p.node.data["task"] as string) ?? ""}
                         onInput={(e) => update({ task: e.currentTarget.value })}
@@ -312,7 +312,7 @@ const InspectorForm = (p: { model: WorkflowsViewModel; node: FlowNode }): JSX.El
             <Show when={p.node.data.kind === "api"}>
                 <Field label="Method">
                     <select
-                        class="workflows-input"
+                        class="drone-input"
                         value={(p.node.data["method"] as string) ?? "GET"}
                         onChange={(e) => update({ method: e.currentTarget.value })}
                     >
@@ -325,7 +325,7 @@ const InspectorForm = (p: { model: WorkflowsViewModel; node: FlowNode }): JSX.El
                 </Field>
                 <Field label="URL">
                     <input
-                        class="workflows-input"
+                        class="drone-input"
                         value={(p.node.data["url"] as string) ?? ""}
                         onInput={(e) => update({ url: e.currentTarget.value })}
                         placeholder="https://example.com/{{var.endpoint}}"
@@ -333,7 +333,7 @@ const InspectorForm = (p: { model: WorkflowsViewModel; node: FlowNode }): JSX.El
                 </Field>
                 <Field label="Body">
                     <textarea
-                        class="workflows-input"
+                        class="drone-input"
                         rows="4"
                         value={(p.node.data["body"] as string) ?? ""}
                         onInput={(e) => update({ body: e.currentTarget.value })}
@@ -343,7 +343,7 @@ const InspectorForm = (p: { model: WorkflowsViewModel; node: FlowNode }): JSX.El
             <Show when={p.node.data.kind === "condition"}>
                 <Field label="Expression (e.g. {{var.x}} > 10)">
                     <input
-                        class="workflows-input"
+                        class="drone-input"
                         value={(p.node.data["expr"] as string) ?? ""}
                         onInput={(e) => update({ expr: e.currentTarget.value })}
                         placeholder="{{var.count}} > 0"
@@ -351,9 +351,9 @@ const InspectorForm = (p: { model: WorkflowsViewModel; node: FlowNode }): JSX.El
                 </Field>
             </Show>
             <Show when={p.node.data.kind === "response"}>
-                <Field label="Template (final workflow output)">
+                <Field label="Template (final drone output)">
                     <textarea
-                        class="workflows-input"
+                        class="drone-input"
                         rows="4"
                         value={(p.node.data["template"] as string) ?? ""}
                         onInput={(e) => update({ template: e.currentTarget.value })}
@@ -374,8 +374,8 @@ const InspectorForm = (p: { model: WorkflowsViewModel; node: FlowNode }): JSX.El
 };
 
 const Field = (p: { label: string; children: JSX.Element }): JSX.Element => (
-    <label class="workflows-field">
-        <span class="workflows-field-label">{p.label}</span>
+    <label class="drone-field">
+        <span class="drone-field-label">{p.label}</span>
         {p.children}
     </label>
 );
@@ -388,24 +388,24 @@ const VariablesEditor = (p: {
         p.onChange(p.entries.map((e, idx) => (idx === i ? { ...e, ...patch } : e)));
     };
     return (
-        <div class="workflows-vars">
+        <div class="drone-vars">
             <For each={p.entries}>
                 {(entry, i) => (
-                    <div class="workflows-vars-row">
+                    <div class="drone-vars-row">
                         <input
-                            class="workflows-input"
+                            class="drone-input"
                             value={entry.name}
                             onInput={(e) => update(i(), { name: e.currentTarget.value })}
                             placeholder="name"
                         />
                         <input
-                            class="workflows-input"
+                            class="drone-input"
                             value={entry.value}
                             onInput={(e) => update(i(), { value: e.currentTarget.value })}
                             placeholder="value"
                         />
                         <button
-                            class="workflows-btn workflows-btn--small"
+                            class="drone-btn drone-btn--small"
                             onClick={() => p.onChange(p.entries.filter((_, idx) => idx !== i()))}
                         >
                             ×
@@ -414,7 +414,7 @@ const VariablesEditor = (p: {
                 )}
             </For>
             <button
-                class="workflows-btn workflows-btn--small"
+                class="drone-btn drone-btn--small"
                 onClick={() => p.onChange([...p.entries, { name: "", value: "" }])}
             >
                 + Add
@@ -453,7 +453,7 @@ function readAgentRef(n: FlowNode): AgentRefShape {
     const legacy = n.data["forge_agent_id"];
     if (typeof legacy === "string" && legacy.length > 0) {
         console.warn(
-            `[workflows] Agent block ${n.id} uses legacy forge_agent_id="${legacy}"; re-pick identity/memory after PR 3.`,
+            `[drone] Agent block ${n.id} uses legacy forge_agent_id="${legacy}"; re-pick identity/memory after PR 3.`,
         );
     }
     return { identityId: "", memoryId: "", instanceName: "", workingDirectory: "" };
@@ -477,7 +477,7 @@ const AgentRefEditor = (p: {
         <>
             <Field label="Identity">
                 <select
-                    class="workflows-input"
+                    class="drone-input"
                     value={ref().identityId}
                     onChange={(e) => setRef({ identityId: e.currentTarget.value })}
                 >
@@ -489,7 +489,7 @@ const AgentRefEditor = (p: {
             </Field>
             <Field label="Memory">
                 <select
-                    class="workflows-input"
+                    class="drone-input"
                     value={ref().memoryId}
                     onChange={(e) => setRef({ memoryId: e.currentTarget.value })}
                 >
@@ -501,7 +501,7 @@ const AgentRefEditor = (p: {
             </Field>
             <Field label="Instance name (optional, for named-agent continuation)">
                 <input
-                    class="workflows-input"
+                    class="drone-input"
                     value={ref().instanceName}
                     onInput={(e) => setRef({ instanceName: e.currentTarget.value })}
                     placeholder="leave blank for one-shot"
@@ -514,34 +514,34 @@ const AgentRefEditor = (p: {
 // ── Agent result panel ────────────────────────────────────────────────
 //
 // Shows the most recent run's BlockDone output for the selected Agent
-// block. Subscribed via the model (`workflowrun:<id>` events → §5.2).
+// block. Subscribed via the model (`dronerun:<id>` events → §5.2).
 // Phase 1.5 ships final-result rendering only; hover-expand tool stream
 // is deferred to Phase 2 polish.
 
 const AgentResultPanel = (p: {
-    model: WorkflowsViewModel;
+    model: DroneViewModel;
     blockId: string;
 }): JSX.Element => {
     const result = () => p.model.blockResultAtom(p.blockId);
     return (
         <Show when={result()}>
             {(r) => (
-                <div class="workflows-agent-result">
-                    <div class="workflows-agent-result-label">Last run</div>
+                <div class="drone-agent-result">
+                    <div class="drone-agent-result-label">Last run</div>
                     <Show
                         when={r().error}
                         fallback={
                             <>
-                                <pre class="workflows-agent-result-text">{r().response}</pre>
+                                <pre class="drone-agent-result-text">{r().response}</pre>
                                 <Show when={r().costUsd != null}>
-                                    <div class="workflows-agent-result-cost">
+                                    <div class="drone-agent-result-cost">
                                         ${r().costUsd!.toFixed(4)}
                                     </div>
                                 </Show>
                             </>
                         }
                     >
-                        <pre class="workflows-agent-result-error">{r().error}</pre>
+                        <pre class="drone-agent-result-error">{r().error}</pre>
                     </Show>
                 </div>
             )}
@@ -551,35 +551,35 @@ const AgentResultPanel = (p: {
 
 // ── Run panel ─────────────────────────────────────────────────────────
 
-const RunPanel = (p: { model: WorkflowsViewModel }): JSX.Element => {
+const RunPanel = (p: { model: DroneViewModel }): JSX.Element => {
     const m = p.model;
     return (
-        <footer class="workflows-runpanel">
-            <div class="workflows-runpanel-title">
+        <footer class="drone-runpanel">
+            <div class="drone-runpanel-title">
                 Runs
                 <Show when={m.activeRunIdAtom()}>
-                    <span class="workflows-runpanel-active">
+                    <span class="drone-runpanel-active">
                         active: {m.activeRunIdAtom()?.slice(0, 8)}
                     </span>
                 </Show>
             </div>
-            <div class="workflows-runpanel-list">
+            <div class="drone-runpanel-list">
                 <Show
                     when={m.runsAtom().length > 0}
-                    fallback={<div class="workflows-runpanel-empty">No runs yet.</div>}
+                    fallback={<div class="drone-runpanel-empty">No runs yet.</div>}
                 >
                     <For each={m.runsAtom()}>
                         {(r) => (
                             <div
-                                class="workflows-runpanel-row"
+                                class="drone-runpanel-row"
                                 classList={{
-                                    "workflows-runpanel-row--ok": r.status === "done",
-                                    "workflows-runpanel-row--err": r.status === "failed",
+                                    "drone-runpanel-row--ok": r.status === "done",
+                                    "drone-runpanel-row--err": r.status === "failed",
                                 }}
                             >
-                                <span class="workflows-runpanel-status">{r.status}</span>
-                                <span class="workflows-runpanel-id">{r.id.slice(0, 8)}</span>
-                                <span class="workflows-runpanel-output">
+                                <span class="drone-runpanel-status">{r.status}</span>
+                                <span class="drone-runpanel-id">{r.id.slice(0, 8)}</span>
+                                <span class="drone-runpanel-output">
                                     {r.error ? r.error : r.output}
                                 </span>
                             </div>
