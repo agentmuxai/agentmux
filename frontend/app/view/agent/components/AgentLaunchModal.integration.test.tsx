@@ -100,7 +100,7 @@ const claudeAgent = {
     environment: "local",
     agent_bus_id: "",
     is_seeded: 0,
-} as ForgeAgent;
+} as AgentDefinition;
 
 const workIdentity: IdentityBundle = {
     id: "ident-work",

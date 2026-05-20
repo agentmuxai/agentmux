@@ -40,7 +40,7 @@ import { getProvider } from "../providers";
 import "../../term/xterm.css";
 
 interface AgentInstallModalPanelProps {
-    agent: ForgeAgent;
+    agent: AgentDefinition;
     onCancel: () => void;
     /**
      * Fires when the install completed successfully. The boolean tells

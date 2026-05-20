@@ -29,8 +29,8 @@ export type TabModalRequest =
 
 export interface LaunchAgentRequest {
     kind: "launch-agent";
-    /** Forge definition the user clicked. */
-    agent: ForgeAgent;
+    /** Agent definition the user clicked. */
+    agent: AgentDefinition;
     /** Block id of the pane that opened the modal. */
     originBlockId: string;
     /**
@@ -83,7 +83,7 @@ export interface LaunchAgentSubmit {
  */
 export interface InstallAgentRequest {
     kind: "install-agent";
-    agent: ForgeAgent;
+    agent: AgentDefinition;
     originBlockId: string;
     /**
      * Called by the modal once the install completes successfully. The
@@ -107,7 +107,7 @@ export interface InstallAgentRequest {
  */
 export interface AgentPrereqRequest {
     kind: "agent-prereqs";
-    agent: ForgeAgent;
+    agent: AgentDefinition;
     originBlockId: string;
     /** Missing prereqs to display. Each row is rendered with its
      *  platform-appropriate install link. */

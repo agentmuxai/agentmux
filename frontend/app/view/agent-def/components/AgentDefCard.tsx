@@ -4,10 +4,10 @@
 import { createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 import { Show } from "solid-js";
-import type { ForgeViewModel } from "../forge-model";
-import { PROVIDERS } from "../forge-constants";
+import type { AgentDefViewModel } from "../agent-def-model";
+import { PROVIDERS } from "../agent-def-constants";
 
-export function ForgeAgentCard(props: { agent: ForgeAgent; model: ForgeViewModel }): JSX.Element {
+export function AgentDefCard(props: { agent: AgentDefinition; model: AgentDefViewModel }): JSX.Element {
     const [confirming, setConfirming] = createSignal(false);
 
     const handleDelete = async () => {

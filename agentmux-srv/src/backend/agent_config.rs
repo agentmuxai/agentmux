@@ -1,7 +1,7 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Pure config-building logic for Forge agents.
+//! Pure config-building logic for agent definitions.
 //!
 //! Ports the `buildConfigFiles`, `buildMcpConfig`, and `expandTemplate`
 //! functions from `frontend/app/view/agent/agent-model.ts`.
@@ -285,8 +285,8 @@ pub fn build_mcp_config(
                 // User content parsed but isn't an object — skip merge silently
             }
             Err(_) => {
-                // Invalid JSON in forge content — keep auto-injected only (mirrors TS behavior)
-                tracing::error!("agent_config: invalid MCP JSON in forge content, using auto-injected only");
+                // Invalid JSON in agent content — keep auto-injected only (mirrors TS behavior)
+                tracing::error!("agent_config: invalid MCP JSON in agent content, using auto-injected only");
             }
         }
     }

@@ -29,7 +29,7 @@ import {
 const ALL_PROVIDERS: AccountProvider[] = ["github", "aws", "anthropic", "custom"];
 
 interface AgentIdentityPanelProps {
-    agent: ForgeAgent;
+    agent: AgentDefinition;
     model: IdentityViewModel;
     /** Called whenever the user assigns or unassigns an account. The caller
      *  is responsible for persisting the new accounts value via RPC. */
@@ -177,5 +177,5 @@ export const AgentIdentityPanel = (props: AgentIdentityPanelProps): JSX.Element 
 
 AgentIdentityPanel.displayName = "AgentIdentityPanel";
 
-/** Serialize AgentAccounts to the JSON string stored on ForgeAgent. */
+/** Serialize AgentAccounts to the JSON string stored on AgentDefinition. */
 export { serializeAgentAccounts };

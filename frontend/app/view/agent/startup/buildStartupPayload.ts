@@ -25,16 +25,16 @@ export interface ResolvedAccount {
 }
 
 export interface StartupPayloadOpts {
-    agent: ForgeAgent;
+    agent: AgentDefinition;
     providerDisplayName: string;
     workDir: string;
     version: string;
     accounts: ResolvedAccount[];
-    peerAgents: ForgeAgent[];
+    peerAgents: AgentDefinition[];
     startupContent: string | null;
 }
 
-/** Sentinel value in ForgeContent("startup") that disables the startup message. */
+/** Sentinel value in AgentContent("startup") that disables the startup message. */
 const SKIP_SENTINEL = "__SKIP__";
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -121,7 +121,7 @@ export function buildStartupPayload(opts: StartupPayloadOpts): string | null {
 // ── Account Resolution ───────────────────────────────────────────────────────
 
 /**
- * Resolve a ForgeAgent's account assignments into hydrated ResolvedAccount
+ * Resolve a AgentDefinition's account assignments into hydrated ResolvedAccount
  * objects. Reads from the Identity localStorage store.
  *
  * Never includes secrets — only metadata and access method descriptors.

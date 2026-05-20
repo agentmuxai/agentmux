@@ -50,7 +50,7 @@ export interface Account {
     /**
      * @deprecated Derive from the agent-side reverse index instead.
      * Kept for backwards compatibility. Do not write new code that
-     * reads this field — use parseAgentAccounts(agent) on ForgeAgent.
+     * reads this field — use parseAgentAccounts(agent) on AgentDefinition.
      * Scheduled for removal after SPEC_AGENT_IDENTITY_RESTRUCTURE Step 4
      * is fully rolled out.
      */
@@ -61,13 +61,13 @@ export interface Account {
 }
 
 /**
- * Per-provider account references stored on a ForgeAgent.
+ * Per-provider account references stored on a AgentDefinition.
  * A null value means no account is assigned for that provider.
  */
 export type AgentAccounts = Partial<Record<AccountProvider, string | null>>;
 
-/** Parse the JSON-encoded accounts blob from a ForgeAgent. */
-export function parseAgentAccounts(agent: ForgeAgent): AgentAccounts {
+/** Parse the JSON-encoded accounts blob from a AgentDefinition. */
+export function parseAgentAccounts(agent: AgentDefinition): AgentAccounts {
     if (!agent.accounts) return {};
     try {
         return JSON.parse(agent.accounts) as AgentAccounts;
@@ -76,7 +76,7 @@ export function parseAgentAccounts(agent: ForgeAgent): AgentAccounts {
     }
 }
 
-/** Serialize AgentAccounts back to the JSON blob stored on ForgeAgent. */
+/** Serialize AgentAccounts back to the JSON blob stored on AgentDefinition. */
 export function serializeAgentAccounts(accounts: AgentAccounts): string {
     return JSON.stringify(accounts);
 }
@@ -86,7 +86,7 @@ export function serializeAgentAccounts(accounts: AgentAccounts): string {
  * Used by the global Identity panel to show "assigned agents" without
  * reading the deprecated Account.assigned_agents field.
  */
-export function agentsAssignedToAccount(accountId: string, agents: ForgeAgent[]): string[] {
+export function agentsAssignedToAccount(accountId: string, agents: AgentDefinition[]): string[] {
     return agents
         .filter((a) => {
             const accs = parseAgentAccounts(a);

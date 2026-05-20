@@ -3,9 +3,9 @@
 
 /**
  * AgentPicker — shown when an agent pane has no agentId in block meta.
- * Lists available Forge definitions as cards; clicking a card opens
+ * Lists available agent definitions as cards; clicking a card opens
  * the Launch modal (name + runtime), which submits back through
- * `AgentViewModel.launchForgeAgent(agent, overrides)`.
+ * `AgentViewModel.launchAgentDefinition(agent, overrides)`.
  *
  * See docs/specs/SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23.md.
  */
@@ -22,21 +22,21 @@ import { AgentCard } from "./AgentCard";
 import { AgentActionBar } from "./AgentActionBar";
 import type { LaunchOverrides } from "./AgentLaunchModal";
 
-// ── useForgeAgents hook ───────────────────────────────────────────────────────
+// ── useAgentDefinitions hook ───────────────────────────────────────────────────────
 
 /**
- * Reactive accessor for the current Forge agent list. Subscribes to
- * `forgeagents:changed` and refetches when that event fires.
+ * Reactive accessor for the current agent-definition list. Subscribes to
+ * `agents:changed` and refetches when that event fires.
  */
-export function useForgeAgents(): () => ForgeAgent[] {
-    const [agents, setAgents] = createSignal<ForgeAgent[]>([]);
+export function useAgentDefinitions(): () => AgentDefinition[] {
+    const [agents, setAgents] = createSignal<AgentDefinition[]>([]);
 
     onMount(() => {
         let cancelled = false;
 
         async function load() {
             try {
-                const result = await RpcApi.ListForgeAgentsCommand(TabRpcClient);
+                const result = await RpcApi.ListAgentDefinitionsCommand(TabRpcClient);
                 if (!cancelled) setAgents(result ?? []);
             } catch {
                 // silently ignore
@@ -46,7 +46,7 @@ export function useForgeAgents(): () => ForgeAgent[] {
         load();
 
         const unsub = waveEventSubscribe({
-            eventType: "forgeagents:changed",
+            eventType: "agents:changed",
             handler: () => load(),
         });
 
@@ -68,7 +68,7 @@ interface AgentPickerProps {
 export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     const [launching, setLaunching] = createSignal<string | null>(null);
     const [nodejsError, setNodejsError] = createSignal<string | null>(null);
-    const agents = useForgeAgents();
+    const agents = useAgentDefinitions();
     const tabModal = useTabModal();
 
     // Per-agent install state, keyed by agent.id.
@@ -77,7 +77,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     //   false     = needs install — card shows the bottom-right ribbon
     const [installState, setInstallState] = createSignal<Record<string, boolean | undefined>>({});
 
-    const checkInstalled = async (agent: ForgeAgent) => {
+    const checkInstalled = async (agent: AgentDefinition) => {
         const prov = getProvider(agent.provider);
         // Non-npm providers (kimi via pip, system-PATH CLIs) don't go
         // through the install modal — never show the ribbon.
@@ -108,7 +108,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // round 7 expanded preservation from identity+memory only to the
     // full form.
     const buildLaunchRequest = (
-        agent: ForgeAgent,
+        agent: AgentDefinition,
         initialFormState?: Partial<LaunchFormStateWire>,
     ) => ({
         kind: "launch-agent" as const,
@@ -117,7 +117,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         onSubmit: async (overrides: LaunchOverrides) => {
             setLaunching(agent.id);
             try {
-                await props.model.launchForgeAgent(agent, overrides);
+                await props.model.launchAgentDefinition(agent, overrides);
                 if (props.model.nodejsError) {
                     // Surface the missing-Node banner inside the
                     // picker after the layer closes the modal —
@@ -173,14 +173,14 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         },
     });
 
-    const openLaunchModal = (agent: ForgeAgent) => {
+    const openLaunchModal = (agent: AgentDefinition) => {
         tabModal.open(buildLaunchRequest(agent));
     };
 
     // Extracted from the install branch of handleSelect so the
     // prereq modal's "Launch anyway" path can route to install when
     // needed. Same shape as the existing inline install request.
-    const buildInstallRequest = (agent: ForgeAgent) => ({
+    const buildInstallRequest = (agent: AgentDefinition) => ({
         kind: "install-agent" as const,
         agent,
         originBlockId: props.model.blockId,
@@ -229,7 +229,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             default: return "linux";
         }
     };
-    const probeMissingPrereqs = async (agent: ForgeAgent) => {
+    const probeMissingPrereqs = async (agent: AgentDefinition) => {
         const prov = getProvider(agent.provider);
         const reqs = prov?.systemPrereqs ?? [];
         if (reqs.length === 0) return [];
@@ -261,7 +261,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     };
 
     const pendingSelect = new Set<string>();
-    const handleSelect = async (agent: ForgeAgent) => {
+    const handleSelect = async (agent: AgentDefinition) => {
         if (pendingSelect.has(agent.id)) return;
         pendingSelect.add(agent.id);
         try {
@@ -336,7 +336,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     originBlockId: props.model.blockId,
                     onInstalled: (continueToLaunch: boolean) => {
                         // install.start runs at provider scope, so every
-                        // ForgeAgent definition that resolves to the same
+                        // AgentDefinition definition that resolves to the same
                         // canonical provider is now installed — not just
                         // the one the user clicked. Mark all of them so
                         // sibling cards drop their ribbon too. This flip
@@ -407,7 +407,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             <div class="agent-picker-empty-icon">{"\u2726"}</div>
                             <div class="agent-picker-empty-title">No definitions configured</div>
                             <div class="agent-picker-empty-desc">
-                                Use the Forge pane to add your first definition.
+                                Use the ⚙ Agent settings to add your first definition.
                             </div>
                         </div>
                         <AgentActionBar />

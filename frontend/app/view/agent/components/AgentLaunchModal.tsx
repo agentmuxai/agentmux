@@ -5,7 +5,7 @@
  * AgentLaunchModalPanel — the form rendered inside `<TabModalLayer>`
  * when the user clicks a definition card in the agent picker. Collects
  * the instance name + runtime (host vs container) and submits them to
- * the caller, which is responsible for calling launchForgeAgent with
+ * the caller, which is responsible for calling launchAgentDefinition with
  * the overrides.
  *
  * No Portal, no Modal v2 wrapper — the layer owns positioning, backdrop,
@@ -63,7 +63,7 @@ export interface LaunchOverrides {
 }
 
 interface AgentLaunchModalPanelProps {
-    agent: ForgeAgent;
+    agent: AgentDefinition;
     onCancel: () => void;
     onSubmit: (overrides: LaunchOverrides) => Promise<void> | void;
     /** Initial form state — used by the "+ New" → create → replace-

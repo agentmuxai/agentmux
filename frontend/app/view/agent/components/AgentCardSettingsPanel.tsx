@@ -3,7 +3,7 @@
 
 /**
  * AgentCardSettingsPanel — inline settings panel that expands below a
- * clicked AgentCard. Hosts the Forge and Identity tabs for a single
+ * clicked AgentCard. Hosts the Agent and Identity tabs for a single
  * agent.
  *
  * PR 2 of specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md.
@@ -15,9 +15,9 @@ import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "
 import type { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { ForgeViewModel } from "@/app/view/forge/forge-model";
-import { ForgeDetail } from "@/app/view/forge/components/ForgeDetail";
-import { ForgeForm } from "@/app/view/forge/components/ForgeForm";
+import { AgentDefViewModel } from "@/app/view/agent-def/agent-def-model";
+import { AgentDefDetail } from "@/app/view/agent-def/components/AgentDefDetail";
+import { AgentDefForm } from "@/app/view/agent-def/components/AgentDefForm";
 import {
     type AgentAccounts,
     IdentityViewModel,
@@ -25,13 +25,13 @@ import {
 } from "@/app/view/identity/identity-model";
 import { AgentIdentityPanel } from "./AgentIdentityPanel";
 
-export type SettingsTab = "forge" | "identity";
+export type SettingsTab = "agent" | "identity";
 
 interface AgentCardSettingsPanelProps {
     blockId: string;
     nodeModel: BlockNodeModel;
     /** The agent being edited. Undefined = create mode (new agent). */
-    agent: ForgeAgent | undefined;
+    agent: AgentDefinition | undefined;
     initialTab: SettingsTab;
     onClose: () => void;
     onTabChange?: (tab: SettingsTab) => void;
@@ -40,16 +40,16 @@ interface AgentCardSettingsPanelProps {
 export const AgentCardSettingsPanel = (props: AgentCardSettingsPanelProps): JSX.Element => {
     const [tab, setTab] = createSignal<SettingsTab>(props.initialTab);
 
-    // Dedicated Forge model for this panel session. Disposed on unmount
-    // so the wave-event subscriptions are cleaned up.
-    const forgeModel = new ForgeViewModel(props.blockId, props.nodeModel);
+    // Dedicated agent-definition model for this panel session. Disposed on
+    // unmount so the wave-event subscriptions are cleaned up.
+    const agentDefModel = new AgentDefViewModel(props.blockId, props.nodeModel);
 
     // Dedicated Identity model for the Identity tab. Currently shows the
     // global account list (same as the old identity widget); per-agent
     // scoping is deferred to SPEC_FORGE_AGENT_IDENTITY_2026_04_13.md.
     const identityModel = new IdentityViewModel(props.blockId, props.nodeModel);
 
-    // Guard for the auto-close effect below. ForgeViewModel initializes
+    // Guard for the auto-close effect below. AgentDefViewModel initializes
     // viewAtom to "list" synchronously in its constructor, and createEffect
     // fires once during component creation (before onMount). Without this
     // flag the effect would see v === "list" immediately and close the
@@ -58,9 +58,9 @@ export const AgentCardSettingsPanel = (props: AgentCardSettingsPanelProps): JSX.
 
     onMount(() => {
         if (props.agent) {
-            void forgeModel.openDetail(props.agent);
+            void agentDefModel.openDetail(props.agent);
         } else {
-            forgeModel.startCreate();
+            agentDefModel.startCreate();
         }
         mounted = true;
 
@@ -75,28 +75,28 @@ export const AgentCardSettingsPanel = (props: AgentCardSettingsPanelProps): JSX.
     });
 
     onCleanup(() => {
-        forgeModel.dispose();
+        agentDefModel.dispose();
         identityModel.dispose();
     });
 
-    // When the ForgeViewModel view flips back to "list" (e.g. user clicked
-    // the in-panel Back button inside ForgeDetail, or saved a create/edit)
+    // When the AgentDefViewModel view flips back to "list" (e.g. user clicked
+    // the in-panel Back button inside AgentDefDetail, or saved a create/edit)
     // we want to close the whole settings panel — the user explicitly
     // asked to exit. Only fires after mount to avoid the synchronous
     // initial-run problem described above.
     createEffect(() => {
-        const v = forgeModel.viewAtom();
+        const v = agentDefModel.viewAtom();
         if (mounted && v === "list") {
             props.onClose();
         }
     });
 
     // Persist updated account assignments to the backend. Sends a full
-    // UpdateForgeAgentCommand with the existing agent fields + new accounts.
+    // UpdateAgentDefinitionCommand with the existing agent fields + new accounts.
     const handleAccountsUpdate = async (newAccounts: AgentAccounts): Promise<void> => {
         const agent = props.agent;
         if (!agent) return;
-        await RpcApi.UpdateForgeAgentCommand(TabRpcClient, {
+        await RpcApi.UpdateAgentDefinitionCommand(TabRpcClient, {
             id: agent.id,
             name: agent.name,
             icon: agent.icon,
@@ -120,10 +120,10 @@ export const AgentCardSettingsPanel = (props: AgentCardSettingsPanelProps): JSX.
             <div class="agent-card-settings-header">
                 <div class="agent-card-settings-tabs">
                     <button
-                        class={`agent-card-settings-tab${tab() === "forge" ? " active" : ""}`}
-                        onClick={() => { setTab("forge"); props.onTabChange?.("forge"); }}
+                        class={`agent-card-settings-tab${tab() === "agent" ? " active" : ""}`}
+                        onClick={() => { setTab("agent"); props.onTabChange?.("agent"); }}
                     >
-                        {"\u2699"} Forge
+                        {"\u2699"} Agent
                     </button>
                     <button
                         class={`agent-card-settings-tab${tab() === "identity" ? " active" : ""}`}
@@ -142,12 +142,12 @@ export const AgentCardSettingsPanel = (props: AgentCardSettingsPanelProps): JSX.
             </div>
 
             <div class="agent-card-settings-body">
-                <Show when={tab() === "forge"}>
+                <Show when={tab() === "agent"}>
                     <Show
-                        when={forgeModel.viewAtom() === "create" || forgeModel.viewAtom() === "edit"}
-                        fallback={<ForgeDetail model={forgeModel} />}
+                        when={agentDefModel.viewAtom() === "create" || agentDefModel.viewAtom() === "edit"}
+                        fallback={<AgentDefDetail model={agentDefModel} />}
                     >
-                        <ForgeForm model={forgeModel} />
+                        <AgentDefForm model={agentDefModel} />
                     </Show>
                 </Show>
                 <Show when={tab() === "identity"}>

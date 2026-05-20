@@ -22,7 +22,7 @@ interface MissingPrereq {
 }
 
 interface AgentPrereqModalPanelProps {
-    agent: ForgeAgent;
+    agent: AgentDefinition;
     missing: MissingPrereq[];
     onRefresh: () => void;
     onProceed: () => void;

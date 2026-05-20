@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { buildStartupPayload, resolveAccounts, type ResolvedAccount, type StartupPayloadOpts } from "./buildStartupPayload";
 
-function makeAgent(overrides: Partial<ForgeAgent> = {}): ForgeAgent {
+function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
     return {
         id: "test-agent",
         slug: "test-agent",

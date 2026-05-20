@@ -4,11 +4,11 @@
 import { createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 import { For, Show } from "solid-js";
-import type { ForgeViewModel } from "../forge-model";
-import { ForgeSkillCard } from "./ForgeSkillCard";
-import { ForgeSkillForm } from "./ForgeSkillForm";
+import type { AgentDefViewModel } from "../agent-def-model";
+import { AgentSkillCard } from "./AgentSkillCard";
+import { AgentSkillForm } from "./AgentSkillForm";
 
-export function ForgeSkillsPanel(props: { model: ForgeViewModel; agentId: string }): JSX.Element {
+export function AgentSkillsPanel(props: { model: AgentDefViewModel; agentId: string }): JSX.Element {
     const skills = props.model.skillsAtom;
     const loading = props.model.skillsLoadingAtom;
     const editingSkill = props.model.editingSkillAtom;
@@ -19,7 +19,7 @@ export function ForgeSkillsPanel(props: { model: ForgeViewModel; agentId: string
         setShowForm(true);
     };
 
-    const handleEditSkill = (skill: ForgeSkill) => {
+    const handleEditSkill = (skill: AgentSkill) => {
         props.model.setEditingSkill(skill);
         setShowForm(true);
     };
@@ -34,7 +34,7 @@ export function ForgeSkillsPanel(props: { model: ForgeViewModel; agentId: string
             <div class="forge-content-loading">Loading skills...</div>
         }>
             <Show when={!showForm()} fallback={
-                <ForgeSkillForm
+                <AgentSkillForm
                     model={props.model}
                     agentId={props.agentId}
                     skill={editingSkill()}
@@ -47,7 +47,7 @@ export function ForgeSkillsPanel(props: { model: ForgeViewModel; agentId: string
                     }>
                         <div class="forge-skills-list">
                             <For each={skills()}>{(skill) =>
-                                <ForgeSkillCard
+                                <AgentSkillCard
                                     skill={skill}
                                     model={props.model}
                                     onEdit={handleEditSkill}
