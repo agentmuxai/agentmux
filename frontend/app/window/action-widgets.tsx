@@ -75,10 +75,6 @@ function getMoreWidgets(
 // ── Widget actions ────────────────────────────────────────────────────────────
 
 async function handleWidgetSelect(widget: WidgetConfigType) {
-    if (widget.blockdef?.meta?.view === "devtools") {
-        getApi().toggleDevtools();
-        return;
-    }
     createBlock(widget.blockdef, widget.magnified);
 }
 
