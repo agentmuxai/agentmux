@@ -165,12 +165,10 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     environment: cmd.environment,
                     agent_bus_id: cmd.agent_bus_id,
                     is_seeded: old.is_seeded,
-                    // Preserve existing accounts when the caller omits the field
-                    // (cmd.accounts defaults to "" via #[serde(default)]). Callers
-                    // that only update name/icon/etc. (ForgeForm, AgentPicker rename)
-                    // don't carry accounts, so falling back to old.accounts prevents
-                    // silently wiping saved assignments.
-                    accounts: if cmd.accounts.is_empty() { old.accounts.clone() } else { cmd.accounts },
+                    // `accounts` is no longer persisted — provider account
+                    // assignments live in db_agent_identity_links. The struct
+                    // field is an always-empty wire-compat vestige.
+                    accounts: String::new(),
                     // parent_id + branch_label describe provenance and
                     // are immutable post-insert (forks are separate rows,
                     // not in-place edits).

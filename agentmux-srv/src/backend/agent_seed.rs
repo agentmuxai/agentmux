@@ -351,7 +351,7 @@ fn reseed_if_needed(
             agent.auto_start = existing_agent.auto_start;
             agent.restart_on_crash = existing_agent.restart_on_crash;
             agent.created_at = existing_agent.created_at;
-            agent.accounts = existing_agent.accounts.clone();
+            // `accounts` is no longer persisted (vestige field) — nothing to copy.
             wstore.agent_def_update(&agent)?;
             updated += 1;
         } else {

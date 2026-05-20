@@ -1335,9 +1335,6 @@ pub struct CommandUpdateAgentDefinitionData {
     pub environment: String,
     #[serde(default)]
     pub agent_bus_id: String,
-    /// JSON-encoded per-provider account refs (see AgentDefinition.accounts).
-    #[serde(default)]
-    pub accounts: String,
 }
 
 /// Input for deleteforgeagent
