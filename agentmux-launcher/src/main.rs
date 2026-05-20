@@ -164,15 +164,91 @@ async fn main() {
     }
 }
 
+/// Phase 1 host supervision (spec
+/// `docs/specs/SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md`): on an
+/// abnormal host exit the launcher relaunches the host, but at most
+/// `HOST_RESTART_BUDGET` times within `HOST_RESTART_WINDOW` — a crash budget
+/// so a deterministic crash cannot spin forever (spec §10-A).
+#[cfg(target_os = "windows")]
+const HOST_RESTART_BUDGET: usize = 3;
+#[cfg(target_os = "windows")]
+const HOST_RESTART_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Spawn the CEF host suspended, assign it to the launcher's Job Object, and
+/// resume it. Returns the running child, or `None` if any step failed — the
+/// caller decides (fatal on first launch, give-up on a restart). `splash_event`
+/// is passed on every launch — including restarts — so a relaunched host can
+/// still dismiss a splash left pending by a host that crashed pre-first-frame.
+#[cfg(target_os = "windows")]
+fn spawn_host_supervised(
+    real_exe: &std::path::Path,
+    args: &[String],
+    srv: &srv_spawner::SrvSpawnResult,
+    host_env: &[(&'static str, std::ffi::OsString)],
+    pipe_path: &str,
+    job_present: bool,
+    job_handle: windows_sys::Win32::Foundation::HANDLE,
+    splash_event: Option<&str>,
+) -> Option<tokio::process::Child> {
+    use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+
+    let mut host_cmd = tokio::process::Command::new(real_exe);
+    host_cmd
+        .args(args)
+        .env("AGENTMUX_BACKEND_WS", &srv.ws_endpoint)
+        .env("AGENTMUX_BACKEND_WEB", &srv.web_endpoint)
+        .env("AGENTMUX_BACKEND_PID", srv.pid.to_string())
+        .env("AGENTMUX_AUTH_KEY", &srv.auth_key)
+        .env("AGENTMUX_INSTANCE_ID", &srv.instance_id)
+        .envs(host_env.iter().cloned())
+        .env("AGENTMUX_LAUNCHER_PIPE", pipe_path)
+        .creation_flags(CREATE_SUSPENDED)
+        .kill_on_drop(false); // J0 handles cleanup.
+    if let Some(name) = splash_event {
+        host_cmd.env("AGENTMUX_SPLASH_EVENT", name);
+    }
+
+    let mut host_child = match host_cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            log(&format!("failed to spawn CEF host: {}", e));
+            return None;
+        }
+    };
+    let host_pid = host_child.id().unwrap_or(0);
+    log(&format!("spawned CEF host pid={} (suspended)", host_pid));
+
+    // Assign to J0 BEFORE resuming so CEF render children inherit the job.
+    if job_present && host_pid != 0 {
+        match srv_spawner::assign_pid_to_job(host_pid, job_handle) {
+            Ok(()) => log(&format!(
+                "Job Object assigned to host pid={}, KILL_ON_JOB_CLOSE active",
+                host_pid
+            )),
+            Err(e) => log(&format!(
+                "WARN: AssignProcessToJobObject(host) failed: {} — host children may escape job",
+                e
+            )),
+        }
+    }
+
+    // Resume the suspended main thread.
+    if let Err(e) = resume_main_thread(host_pid) {
+        log(&format!("failed to resume host pid={}: {}", host_pid, e));
+        let _ = host_child.start_kill();
+        return None;
+    }
+    Some(host_child)
+}
+
 /// Windows main flow: resolve paths → create J0 → spawn srv → spawn
-/// host with srv endpoints in env → concurrent wait → cleanup.
+/// host with srv endpoints in env → supervised wait → cleanup.
 #[cfg(target_os = "windows")]
 async fn run_windows(
     launcher_exe_dir: &std::path::Path,
     real_exe: &std::path::Path,
     args: &[String],
 ) {
-    use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
 
     let version = env!("CARGO_PKG_VERSION");
 
@@ -505,47 +581,28 @@ async fn run_windows(
     // launcher's lifetime. (Smoke test on v0.33.447 caught this.)
     let _srv_stdin_keepalive = srv_child.stdin.take();
 
-    // 4. Spawn host SUSPENDED with srv endpoints in env vars. Host
-    // honors AGENTMUX_BACKEND_WS et al. and skips its own spawn_backend.
-    // Same CREATE_SUSPENDED → assign-to-job → resume race-fix pattern
-    // as PR #570 (codex P2 / gemini HIGH).
-    let mut host_cmd = tokio::process::Command::new(real_exe);
-    host_cmd
-        .args(args)
-        .env("AGENTMUX_BACKEND_WS", &srv_result.ws_endpoint)
-        .env("AGENTMUX_BACKEND_WEB", &srv_result.web_endpoint)
-        .env("AGENTMUX_BACKEND_PID", srv_result.pid.to_string())
-        .env("AGENTMUX_AUTH_KEY", &srv_result.auth_key)
-        .env("AGENTMUX_INSTANCE_ID", &srv_result.instance_id)
-        // Canonical AGENTMUX_* env vars from `DataPaths::to_env_vars()`
-        // (AGENTMUX_INSTANCE_DIR / DATA_DIR / CONFIG_DIR / LOG_DIR /
-        // CEF_CACHE_DIR / AGENTS_DIR / INSTANCE_RUNTIME_DIR /
-        // SHARED_DIR / RUNTIME_MODE). Replaces the old ad-hoc set
-        // (AGENTMUX_USER_HOME_DIR, AGENTMUX_DATA_HOME) that drifted
-        // between launcher / host / sidecar and forced the host to
-        // re-detect mode independently.
-        .envs(paths.common.to_env_vars())
-        // Phase B.2: tell the host where to find our IPC pipe so it
-        // can connect and Register itself. Absent → host runs the
-        // pre-Phase-B path (no IPC connection; standalone state).
-        .env("AGENTMUX_LAUNCHER_PIPE", &pipe_path)
-        .creation_flags(CREATE_SUSPENDED)
-        .kill_on_drop(false); // J0 handles cleanup; tokio's kill-on-drop would force-kill on every error path.
-    if let Some(ref name) = splash_event_name {
-        host_cmd.env("AGENTMUX_SPLASH_EVENT", name);
-    }
-
-    let mut host_child = match host_cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            log(&format!("FATAL: failed to spawn CEF host: {}", e));
-            eprintln!("Failed to launch AgentMux: {}", e);
-            // Happy path: drop(job) → KILL_ON_JOB_CLOSE reaps srv.
-            // Degraded path (job is None, J0 absent): kill srv
-            // explicitly because kill_on_drop(false) means the Child
-            // drop wouldn't terminate it; otherwise srv orphans on
-            // launcher exit. (reagent P1 + codex P2 @ main.rs:201,
-            // PR #571 round-3.)
+    // 4-6. Spawn the host (suspended) → assign to J0 → resume, via
+    // spawn_host_supervised(). The splash event is passed on every launch
+    // (including restarts) so a relaunched host still dismisses a pending
+    // splash if the first host crashed before its first frame.
+    let host_env = paths.common.to_env_vars();
+    let mut host_child = match spawn_host_supervised(
+        real_exe,
+        args,
+        &srv_result,
+        &host_env,
+        &pipe_path,
+        job.is_some(),
+        job_handle,
+        splash_event_name.as_deref(),
+    ) {
+        Some(c) => c,
+        None => {
+            // First-launch failure is fatal. Happy path: drop(job) →
+            // KILL_ON_JOB_CLOSE reaps srv. Degraded path (J0 absent):
+            // kill srv explicitly or it orphans (kill_on_drop is false).
+            log("FATAL: could not start CEF host — terminating");
+            eprintln!("Failed to launch AgentMux.");
             if job.is_none() {
                 let _ = srv_child.start_kill();
             }
@@ -553,88 +610,79 @@ async fn run_windows(
             std::process::exit(1);
         }
     };
-    let host_pid = host_child.id().unwrap_or(0);
-    log(&format!("spawned CEF host pid={} (suspended)", host_pid));
 
-    // 5. Assign host to J0 BEFORE resuming. Without this, host could
-    // spawn renderer processes (CEF subprocess) before joining J0 —
-    // those renderers would escape KILL_ON_JOB_CLOSE.
-    if job.is_some() && host_pid != 0 {
-        if let Err(e) = srv_spawner::assign_pid_to_job(host_pid, job_handle) {
-            log(&format!(
-                "WARN: AssignProcessToJobObject(host) failed: {} — host children may escape job",
-                e
-            ));
-        } else {
-            log(&format!(
-                "Job Object assigned to host pid={}, KILL_ON_JOB_CLOSE active",
-                host_pid
-            ));
-        }
-    }
-
-    // 6. Resume host. With CREATE_SUSPENDED only the main thread
-    // exists at this point, so we just need to find it via a
-    // Toolhelp32 thread snapshot and ResumeThread it. From here the
-    // host runs normally; every CEF render child it spawns inherits J0.
-    if let Err(e) = resume_main_thread(host_pid) {
-        log(&format!(
-            "FATAL: failed to resume host pid={}: {} — terminating",
-            host_pid, e
-        ));
-        // Always kill the suspended host: if J0 is held it'd reap
-        // anyway, but in degraded mode (job is None) the suspended
-        // host would be a permanent zombie. (PR #570 round-2 pattern.)
-        let _ = host_child.start_kill();
-        // Same backstop for srv in degraded mode — J0 absent, kill_on
-        // _drop(false), so dropping the Child wouldn't terminate it.
-        // (reagent P1 @ main.rs:238, PR #571 round-3.)
-        if job.is_none() {
-            let _ = srv_child.start_kill();
-        }
-        drop(job);
-        std::process::exit(1);
-    }
-
-    // 7. Concurrent wait. Whichever child exits first triggers
-    // launcher shutdown. tokio::select cancels the other branch's
-    // wait future when one fires — both children's borrows are
-    // released after the macro returns.
+    // 7. Supervised wait loop (Phase 1 — host supervision). The host is
+    // auto-restarted on abnormal exit, bounded by a crash budget so a
+    // deterministic crash can't spin forever (spec §10-A). A clean host
+    // exit (code 0) ends the loop. srv is NOT yet supervised — an srv
+    // exit still terminates the launcher; srv supervision is Phase 2.
     //
     // We don't manually kill the surviving child in the happy path:
-    // dropping `job` below triggers KILL_ON_JOB_CLOSE which reaps
-    // the entire J0 membership. The explicit start_kill is only the
-    // backstop for the degraded mode (job == None) where J0 doesn't
-    // exist to do the reaping. (PR #570 round-2 backstop pattern.)
-    log("entering host + srv concurrent wait");
-    let exit_code = tokio::select! {
-        host_status = host_child.wait() => {
-            match host_status {
-                Ok(s) => {
-                    let code = s.code().unwrap_or(1);
-                    log(&format!("CEF host exited with code {}", code));
-                    code
+    // dropping `job` below triggers KILL_ON_JOB_CLOSE which reaps the
+    // entire J0 membership. The explicit start_kill is the backstop for
+    // degraded mode (job == None) only.
+    log("entering supervised host + srv wait");
+    let mut host_restarts: Vec<std::time::Instant> = Vec::new();
+    let exit_code = loop {
+        tokio::select! {
+            host_status = host_child.wait() => {
+                let code = match host_status {
+                    Ok(s) => s.code().unwrap_or(1),
+                    Err(e) => {
+                        log(&format!("FATAL: host wait failed: {}", e));
+                        break 1;
+                    }
+                };
+                if code == 0 {
+                    log("CEF host exited cleanly (code 0) — shutting down");
+                    break 0;
                 }
-                Err(e) => {
-                    log(&format!("FATAL: host wait failed: {}", e));
-                    1
+                // Abnormal exit — relaunch within the crash budget.
+                let now = std::time::Instant::now();
+                host_restarts.retain(|t| now.duration_since(*t) < HOST_RESTART_WINDOW);
+                if host_restarts.len() >= HOST_RESTART_BUDGET {
+                    log(&format!(
+                        "CEF host exited abnormally (code {}); restart budget exhausted \
+                         ({} in {}s) — giving up",
+                        code,
+                        host_restarts.len(),
+                        HOST_RESTART_WINDOW.as_secs()
+                    ));
+                    break code;
+                }
+                host_restarts.push(now);
+                log(&format!(
+                    "CEF host exited abnormally (code {}) — relaunching (restart {}/{})",
+                    code,
+                    host_restarts.len(),
+                    HOST_RESTART_BUDGET
+                ));
+                match spawn_host_supervised(
+                    real_exe,
+                    args,
+                    &srv_result,
+                    &host_env,
+                    &pipe_path,
+                    job.is_some(),
+                    job_handle,
+                    splash_event_name.as_deref(),
+                ) {
+                    Some(c) => host_child = c,
+                    None => {
+                        log("host relaunch failed to spawn — giving up");
+                        break code;
+                    }
                 }
             }
-        }
-        srv_status = srv_child.wait() => {
-            match srv_status {
-                Ok(s) => {
-                    let code = s.code().unwrap_or(1);
-                    log(&format!(
+            srv_status = srv_child.wait() => {
+                match srv_status {
+                    Ok(s) => log(&format!(
                         "srv exited UNEXPECTEDLY (host still running) with code {} — terminating launcher",
-                        code
-                    ));
-                    1
+                        s.code().unwrap_or(1)
+                    )),
+                    Err(e) => log(&format!("FATAL: srv wait failed: {}", e)),
                 }
-                Err(e) => {
-                    log(&format!("FATAL: srv wait failed: {}", e));
-                    1
-                }
+                break 1;
             }
         }
     };
