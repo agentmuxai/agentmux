@@ -464,7 +464,7 @@ async fn main() {
         );
     }
 
-    // Auto-seed Forge agents on first launch (or empty DB)
+    // Auto-seed agent definitions on first launch (or empty DB)
     backend::agent_seed::auto_seed_on_startup(&wstore);
 
     // Event infrastructure
