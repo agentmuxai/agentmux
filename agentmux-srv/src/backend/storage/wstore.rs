@@ -1264,12 +1264,12 @@ pub struct AgentInstance {
     #[serde(default)]
     pub ended_at: i64,
     pub created_at: i64,
-    /// FK to `db_identities.id`. Empty string means "use the blank
+    /// FK to `db_identity_bundles.id`. Empty string means "use the blank
     /// singleton" (= ambient creds, no env-var injection). Set at
     /// instantiation via the launch modal's Identity dropdown.
     #[serde(default)]
     pub identity_id: String,
-    /// FK to `db_memories.id`. Empty string means "use the blank
+    /// FK to `db_memory_bundles.id`. Empty string means "use the blank
     /// singleton" (= vanilla CLI, no instructions). Set at
     /// instantiation via the launch modal's Memory dropdown.
     #[serde(default)]
@@ -1964,7 +1964,7 @@ impl WaveStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, created_at, updated_at
-             FROM db_identities
+             FROM db_identity_bundles
              ORDER BY is_blank ASC, updated_at DESC",
         )?;
         let iter = stmt.query_map([], |row| {
@@ -1988,7 +1988,7 @@ impl WaveStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, created_at, updated_at
-             FROM db_identities WHERE id = ?1",
+             FROM db_identity_bundles WHERE id = ?1",
         )?;
         let result = stmt.query_row(params![id], |row| {
             Ok(Identity {
@@ -2013,7 +2013,7 @@ impl WaveStore {
     pub fn bundle_identity_upsert(&self, identity: &Identity) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO db_identities
+            "INSERT INTO db_identity_bundles
                 (id, name, description, is_blank, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(id) DO UPDATE SET
@@ -2041,7 +2041,7 @@ impl WaveStore {
             ));
         }
         let conn = self.conn.lock().unwrap();
-        let rows = conn.execute("DELETE FROM db_identities WHERE id = ?1", params![id])?;
+        let rows = conn.execute("DELETE FROM db_identity_bundles WHERE id = ?1", params![id])?;
         Ok(rows > 0)
     }
 
@@ -2113,7 +2113,7 @@ impl WaveStore {
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, provider, model, instructions,
                     context_files, mcp_servers, skills, created_at, updated_at
-             FROM db_memories
+             FROM db_memory_bundles
              ORDER BY is_blank ASC, updated_at DESC",
         )?;
         let iter = stmt.query_map([], map_memory_row)?;
@@ -2129,7 +2129,7 @@ impl WaveStore {
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, provider, model, instructions,
                     context_files, mcp_servers, skills, created_at, updated_at
-             FROM db_memories WHERE id = ?1",
+             FROM db_memory_bundles WHERE id = ?1",
         )?;
         let result = stmt.query_row(params![id], map_memory_row);
         match result {
@@ -2142,7 +2142,7 @@ impl WaveStore {
     pub fn bundle_memory_upsert(&self, memory: &Memory) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO db_memories
+            "INSERT INTO db_memory_bundles
                 (id, name, description, is_blank, provider, model, instructions,
                  context_files, mcp_servers, skills, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
@@ -2182,7 +2182,7 @@ impl WaveStore {
             ));
         }
         let conn = self.conn.lock().unwrap();
-        let rows = conn.execute("DELETE FROM db_memories WHERE id = ?1", params![id])?;
+        let rows = conn.execute("DELETE FROM db_memory_bundles WHERE id = ?1", params![id])?;
         Ok(rows > 0)
     }
 }

@@ -34,9 +34,9 @@ pub struct NamedAgentRecordV1 {
     pub instance_id: String,
     pub instance_name: String,
     pub definition_id: String,
-    /// FK to `db_identities.id`. None = unbound (= ambient creds).
+    /// FK to `db_identity_bundles.id`. None = unbound (= ambient creds).
     pub identity_id: Option<String>,
-    /// FK to `db_memories.id`. None = unbound (= vanilla CLI).
+    /// FK to `db_memory_bundles.id`. None = unbound (= vanilla CLI).
     pub memory_id: Option<String>,
     /// Path **relative to `<shared_home>/agents/`** — never absolute.
     /// Keeps the record portable across machines where the home dir

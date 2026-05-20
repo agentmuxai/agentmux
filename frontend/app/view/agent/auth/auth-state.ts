@@ -242,7 +242,7 @@ export type AuthEvent =
           intoBundleId: string;
           name: string;
       }
-    /** Save RPC succeeded — bundle id now exists in `db_identities`. */
+    /** Save RPC succeeded — bundle id now exists in `db_identity_bundles`. */
     | { type: "bundle-saved"; bundleId: string }
     /** Save RPC failed — name conflict, DB error, etc. */
     | { type: "bundle-save-failed"; error: string }

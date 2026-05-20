@@ -41,7 +41,7 @@ export interface MemoryDraft {
 /** Empty draft for the "+ New Memory" flow.
  *
  *  All JSON-array fields default to `"[]"` (not `""`). The backend's
- *  `db_memories.skills` column is JSON-encoded; a literal `""` would
+ *  `db_memory_bundles.skills` column is JSON-encoded; a literal `""` would
  *  trip downstream `JSON.parse(skills)` readers. Reagent P1 on
  *  PR #747 (2026-05-08). */
 export function emptyDraft(): MemoryDraft {

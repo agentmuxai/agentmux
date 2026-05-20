@@ -656,7 +656,7 @@ describe("auth-state reducer", () => {
                 });
                 const r = update(seeded, {
                     type: "BundleSaveFailed",
-                    error: "UNIQUE constraint failed: db_identities.name",
+                    error: "UNIQUE constraint failed: db_identity_bundles.name",
                 });
                 expect(r.state.kind).toBe("authenticated");
                 expect(r.state.email).toBe("asaf@x.com");
