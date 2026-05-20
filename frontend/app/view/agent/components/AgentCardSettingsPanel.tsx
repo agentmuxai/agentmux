@@ -3,7 +3,7 @@
 
 /**
  * AgentCardSettingsPanel — inline settings panel that expands below a
- * clicked AgentCard. Hosts the Forge and Identity tabs for a single
+ * clicked AgentCard. Hosts the Agent and Identity tabs for a single
  * agent.
  *
  * PR 2 of specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md.
@@ -40,8 +40,8 @@ interface AgentCardSettingsPanelProps {
 export const AgentCardSettingsPanel = (props: AgentCardSettingsPanelProps): JSX.Element => {
     const [tab, setTab] = createSignal<SettingsTab>(props.initialTab);
 
-    // Dedicated Forge model for this panel session. Disposed on unmount
-    // so the wave-event subscriptions are cleaned up.
+    // Dedicated agent-definition model for this panel session. Disposed on
+    // unmount so the wave-event subscriptions are cleaned up.
     const agentDefModel = new AgentDefViewModel(props.blockId, props.nodeModel);
 
     // Dedicated Identity model for the Identity tab. Currently shows the
@@ -123,7 +123,7 @@ export const AgentCardSettingsPanel = (props: AgentCardSettingsPanelProps): JSX.
                         class={`agent-card-settings-tab${tab() === "agent" ? " active" : ""}`}
                         onClick={() => { setTab("agent"); props.onTabChange?.("agent"); }}
                     >
-                        {"\u2699"} Forge
+                        {"\u2699"} Agent
                     </button>
                     <button
                         class={`agent-card-settings-tab${tab() === "identity" ? " active" : ""}`}

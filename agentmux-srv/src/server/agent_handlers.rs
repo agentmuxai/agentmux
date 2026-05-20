@@ -62,7 +62,7 @@ use crate::backend::storage::wstore::{
 use super::AppState;
 
 pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    // listagents → return all forge agents
+    // listagents → return all agent definitions
     let wstore_lfa = state.wstore.clone();
     engine.register_handler(
         COMMAND_LIST_AGENTS,
@@ -167,7 +167,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     is_seeded: old.is_seeded,
                     // Preserve existing accounts when the caller omits the field
                     // (cmd.accounts defaults to "" via #[serde(default)]). Callers
-                    // that only update name/icon/etc. (ForgeForm, AgentPicker rename)
+                    // that only update name/icon/etc. (AgentDefForm, AgentPicker rename)
                     // don't carry accounts, so falling back to old.accounts prevents
                     // silently wiping saved assignments.
                     accounts: if cmd.accounts.is_empty() { old.accounts.clone() } else { cmd.accounts },
@@ -719,7 +719,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // exportagents — export all forge agents with content and skills
+    // exportagents — export all agent definitions with content and skills
     let wstore_efa = state.wstore.clone();
     engine.register_handler(
         COMMAND_EXPORT_AGENTS,

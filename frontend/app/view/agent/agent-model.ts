@@ -64,7 +64,7 @@ export class AgentViewModel implements ViewModel {
             const meta = this.blockAtom()?.meta;
             const provider = meta?.["agentProvider"];
             if (typeof provider === "string" && provider.length > 0) {
-                // Forge agents may store an alias (e.g. "kimi-cli") rather
+                // Agent definitions may store an alias (e.g. "kimi-cli") rather
                 // than the canonical provider key ProviderLogo matches on.
                 return buildAgentPaneIcon(resolveProviderAlias(provider));
             }
@@ -94,7 +94,7 @@ export class AgentViewModel implements ViewModel {
 
         // Pane-frame header buttons: when an agent is loaded show ⚙ .
         // Hidden when no agent is loaded (picker screen).
-        // Gear opens forge/identity panel; defaults to forge, remembers last tab.
+        // Gear opens agent/identity panel; defaults to agent, remembers last tab.
         this.endIconButtons = () => {
             const agentId = this.blockAtom()?.meta?.["agentId"];
             if (!agentId) return [];
@@ -225,7 +225,7 @@ export class AgentViewModel implements ViewModel {
     };
 
     /**
-     * Launch a Forge-managed agent in presentation view.
+     * Launch a agent in presentation view.
      * Uses the AgentDefinition's provider to look up CLI config.
      * Loads content blobs (soul, agentmd, mcp, env) and writes config files
      * to the working directory via WriteAgentConfigCommand, then creates
@@ -234,7 +234,7 @@ export class AgentViewModel implements ViewModel {
     launchAgentDefinition = async (agent: AgentDefinition, overrides?: LaunchOverrides): Promise<void> => {
         const provider = PROVIDERS[agent.provider] ?? PROVIDERS[resolveProviderAlias(agent.provider)];
         if (!provider) {
-            Logger.error("agent", "Unknown provider in forge agent", { agentId: agent.id, provider: agent.provider });
+            Logger.error("agent", "Unknown provider in agent definition", { agentId: agent.id, provider: agent.provider });
             return;
         }
 
@@ -242,7 +242,7 @@ export class AgentViewModel implements ViewModel {
         const nodejsError = await checkNodejsForProvider(provider.id);
         if (nodejsError) {
             this.nodejsError = nodejsError;
-            Logger.error("agent", "Node.js not available for forge agent", { agentId: agent.id, error: nodejsError });
+            Logger.error("agent", "Node.js not available for agent definition", { agentId: agent.id, error: nodejsError });
             return;
         }
 
@@ -250,7 +250,7 @@ export class AgentViewModel implements ViewModel {
         const cliDir = resolveCliDir(version, provider.id);
         const cliBin = `${cliDir}/node_modules/.bin/${provider.cliCommand}`;
 
-        Logger.info("agent", `Launching forge agent ${agent.name} (${agent.provider})`, {
+        Logger.info("agent", `Launching agent definition ${agent.name} (${agent.provider})`, {
             agentId: agent.id,
             provider: agent.provider,
         });
@@ -260,7 +260,7 @@ export class AgentViewModel implements ViewModel {
         try {
             contents = await RpcApi.GetAllAgentContentCommand(TabRpcClient, { agent_id: agent.id }) ?? [];
         } catch (e: any) {
-            Logger.error("agent", "Failed to load forge content", { error: String(e) });
+            Logger.error("agent", "Failed to load agent content", { error: String(e) });
         }
         const contentMap: Record<string, string> = {};
         for (const c of contents) {
@@ -272,7 +272,7 @@ export class AgentViewModel implements ViewModel {
         try {
             skills = await RpcApi.ListAgentSkillsCommand(TabRpcClient, { agent_id: agent.id }) ?? [];
         } catch (e: any) {
-            Logger.error("agent", "Failed to load forge skills", { error: String(e) });
+            Logger.error("agent", "Failed to load agent skills", { error: String(e) });
         }
 
         // Definition slug: stable across launches of this definition.
@@ -318,7 +318,7 @@ export class AgentViewModel implements ViewModel {
             cliArgs.push(...agent.provider_flags.split(/\s+/).filter(Boolean));
         }
 
-        // Build env vars from provider unsetEnv + forge env content + per-agent isolation
+        // Build env vars from provider unsetEnv + agent env content + per-agent isolation
         const envVars: Record<string, string> = {};
         if (provider.unsetEnv) {
             for (const key of provider.unsetEnv) {
@@ -514,7 +514,7 @@ export class AgentViewModel implements ViewModel {
                 );
             }
         } catch (e: any) {
-            Logger.error("agent", "Failed to launch forge agent", { error: String(e) });
+            Logger.error("agent", "Failed to launch agent definition", { error: String(e) });
         }
     };
 
@@ -812,7 +812,7 @@ function buildMcpConfig(
             }
         } catch {
             // If user MCP isn't valid JSON, skip merge but still write auto-injected
-            Logger.error("agent", "Invalid MCP JSON in forge content, using auto-injected only");
+            Logger.error("agent", "Invalid MCP JSON in agent content, using auto-injected only");
         }
     }
 
