@@ -35,8 +35,44 @@ mod srv_spawner;
 mod state;
 mod wrr;
 
-#[tokio::main]
-async fn main() {
+/// Suppress the Windows "Application Error" / WER crash dialog so an unhandled
+/// fault terminates the process immediately instead of wedging it behind a
+/// modal. No-op off Windows. Spec:
+/// docs/specs/SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md.
+#[cfg(target_os = "windows")]
+fn suppress_os_crash_dialogs() {
+    use windows_sys::Win32::System::Diagnostics::Debug::{SetErrorMode, SEM_FAILCRITICALERRORS};
+    use windows_sys::Win32::System::ErrorReporting::{WerSetFlags, WER_FAULT_REPORTING_NO_UI};
+    unsafe {
+        // Suppress the WER crash-dialog UI WITHOUT disabling WER itself —
+        // SEM_NOGPFAULTERRORBOX would also kill WER/LocalDumps crash-dump
+        // collection, the postmortem diagnostics this stability work needs.
+        // WER_FAULT_REPORTING_NO_UI is the documented "no UI, keep
+        // reports" path.
+        let _ = WerSetFlags(WER_FAULT_REPORTING_NO_UI);
+        // SEM_FAILCRITICALERRORS suppresses the critical-error handler
+        // (e.g. "no disk in drive" popups) — unrelated to crash reporting.
+        SetErrorMode(SEM_FAILCRITICALERRORS);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn suppress_os_crash_dialogs() {}
+
+/// Process entry point. `suppress_os_crash_dialogs()` runs FIRST — before the
+/// Tokio runtime is built. The runtime is built explicitly here (rather than
+/// via `#[tokio::main]`, whose generated wrapper would construct it before any
+/// of our code runs) so a fault during runtime construction can't surface the
+/// Windows crash modal either. Spec:
+/// docs/specs/SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md.
+fn main() {
+    suppress_os_crash_dialogs();
+    tokio::runtime::Runtime::new()
+        .expect("failed to build Tokio runtime")
+        .block_on(launcher_main());
+}
+
+async fn launcher_main() {
     let exe_path = std::env::current_exe().expect("cannot resolve exe path");
     let exe_dir = exe_path.parent().expect("exe has no parent directory");
     let runtime_dir = exe_dir.join("runtime");
