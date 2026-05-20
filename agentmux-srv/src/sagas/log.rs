@@ -32,7 +32,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::backend::storage::error::StoreError;
-use crate::backend::storage::migrations::run_saga_log_migrations;
+use crate::backend::storage::migrations::{
+    run_saga_log_migrations, stamp_and_check_version, SAGA_LOG_SCHEMA_VERSION,
+};
 
 /// Outcome of a saga, written by `terminate`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,6 +151,7 @@ impl SagaLog {
              PRAGMA foreign_keys=ON;",
         )?;
         run_saga_log_migrations(&conn)?;
+        stamp_and_check_version(&conn, SAGA_LOG_SCHEMA_VERSION, "sagas.db")?;
         Ok(Self {
             conn: Mutex::new(conn),
         })

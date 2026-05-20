@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use chrono::Utc;
 use serde_json::{json, Value};
 
-use crate::backend::storage::wstore::ForgeSkill;
+use crate::backend::storage::wstore::AgentSkill;
 
 /// A single file to be written to the agent working directory.
 #[derive(Debug, Clone)]
@@ -34,7 +34,7 @@ pub struct AgentConfigFile {
 /// Mirrors `buildConfigFiles()` in `frontend/app/view/agent/agent-model.ts`.
 pub fn build_config_files(
     content_map: &HashMap<String, String>,
-    skills: &[ForgeSkill],
+    skills: &[AgentSkill],
     agent_name: &str,
     agent_id: &str,
 ) -> Vec<AgentConfigFile> {
@@ -148,10 +148,10 @@ pub fn build_config_files(
 ///
 /// Same as [`build_config_files`] but also accepts an `agent_bus_id` so the
 /// MCP server entry can include `AGENTMUX_AGENT_BUS_ID`.  Prefer this overload
-/// when the caller has the full `ForgeAgent` available.
+/// when the caller has the full `AgentDefinition` available.
 pub fn build_config_files_with_bus(
     content_map: &HashMap<String, String>,
-    skills: &[ForgeSkill],
+    skills: &[AgentSkill],
     agent_name: &str,
     agent_id: &str,
     agent_bus_id: &str,
@@ -494,8 +494,8 @@ pub fn expand_template(content: &str, vars: &HashMap<String, String>) -> String 
 mod tests {
     use super::*;
 
-    fn make_skill(name: &str, trigger: &str, description: &str, content: &str) -> ForgeSkill {
-        ForgeSkill {
+    fn make_skill(name: &str, trigger: &str, description: &str, content: &str) -> AgentSkill {
+        AgentSkill {
             id: format!("skill-{}", trigger),
             agent_id: "agent-1".to_string(),
             name: name.to_string(),

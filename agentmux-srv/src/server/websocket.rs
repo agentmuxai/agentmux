@@ -1178,7 +1178,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
     );
 
     // Forge handlers (agents, content, skills, history, import, reseed)
-    super::forge_handlers::register_forge_handlers(engine, &state);
+    super::agent_handlers::register_agent_handlers(engine, &state);
 
     // Drone handlers (issue #753 — Drone pane DAG executor)
     super::drone_handlers::register_drone_handlers(engine, &state);

@@ -18,7 +18,7 @@ use crate::backend::obj::{wave_obj_from_json, wave_obj_to_json, WaveObj};
 use crate::registry::Registry;
 
 use super::error::StoreError;
-use super::migrations::{run_forge_migrations, run_wstore_migrations};
+use super::migrations::{run_object_schema, stamp_and_check_version, OBJECT_SCHEMA_VERSION};
 
 /// SQLite-backed object store for WaveObj types.
 pub struct WaveStore {
@@ -56,7 +56,7 @@ impl WaveStore {
     fn configure_and_migrate(conn: Connection) -> Result<Self, StoreError> {
         conn.execute_batch(
             // `foreign_keys=ON` is per-connection and defaults to OFF in
-            // SQLite. The v6 schema (`db_forge_agent_identities`,
+            // SQLite. The v6 schema (`db_agent_identity_links`,
             // `db_agent_instances`) relies on `ON DELETE CASCADE` to clean
             // up junction rows and instances when a parent agent or
             // identity is removed. Without this pragma on the production
@@ -70,8 +70,8 @@ impl WaveStore {
              PRAGMA mmap_size=268435456;
              PRAGMA temp_store=MEMORY;",
         )?;
-        run_wstore_migrations(&conn)?;
-        run_forge_migrations(&conn)?;
+        run_object_schema(&conn)?;
+        stamp_and_check_version(&conn, OBJECT_SCHEMA_VERSION, "objects.db")?;
         Ok(Self {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
@@ -440,12 +440,12 @@ impl<'a> StoreTx<'a> {
 }
 
 // ====================================================================
-// ForgeAgent CRUD
+// AgentDefinition CRUD
 // ====================================================================
 
 /// A user-defined AI agent managed by the Forge widget.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForgeAgent {
+pub struct AgentDefinition {
     pub id: String,
     /// Stable, filesystem-safe identifier. Drives working directory,
     /// env var keys (AGENTMUX_AGENT_ID), and cross-references.
@@ -479,11 +479,14 @@ pub struct ForgeAgent {
     pub agent_bus_id: String,
     #[serde(default)]
     pub is_seeded: i64,
-    /// JSON-encoded per-provider account references.
-    /// **Deprecated in v6** — superseded by the `db_forge_agent_identities`
-    /// junction table. Still populated on read for backward compat with
-    /// any existing DB rows; new writes leave it empty. See
-    /// specs/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md.
+    /// JSON-encoded per-provider account assignments
+    /// (`{"github":"acct-id", …}`). Written by the Agent pane's Identity
+    /// tab (`AgentIdentityPanel`) via `updateforgeagent`, read back by
+    /// `parseAgentAccounts` and consumed by startup credential
+    /// resolution. (An older v6 comment called this deprecated in favour
+    /// of `db_agent_identity_links`; that migration never completed — the
+    /// JSON blob is still the live store, so the schema flatten keeps the
+    /// column.)
     #[serde(default)]
     pub accounts: String,
     /// Parent definition id (forge_agents.id). Empty string = root
@@ -533,7 +536,7 @@ fn default_agent_type() -> String {
 
 /// A content blob associated with a forge agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForgeContent {
+pub struct AgentContent {
     pub agent_id: String,
     pub content_type: String,
     pub content: String,
@@ -542,7 +545,7 @@ pub struct ForgeContent {
 
 /// A reusable skill/capability attached to a forge agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForgeSkill {
+pub struct AgentSkill {
     pub id: String,
     pub agent_id: String,
     pub name: String,
@@ -555,7 +558,7 @@ pub struct ForgeSkill {
 
 /// An append-only session history entry for a forge agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForgeHistory {
+pub struct AgentHistory {
     pub id: i64,
     pub agent_id: String,
     pub session_date: String,
@@ -565,17 +568,17 @@ pub struct ForgeHistory {
 
 impl WaveStore {
     /// List all forge agents, ordered by created_at ascending.
-    pub fn forge_list(&self) -> Result<Vec<ForgeAgent>, StoreError> {
+    pub fn agent_def_list(&self) -> Result<Vec<AgentDefinition>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, slug, name, icon, provider, description, working_directory, shell,
                     provider_flags, auto_start, restart_on_crash, idle_timeout_minutes, created_at,
                     agent_type, environment, agent_bus_id, is_seeded, accounts,
                     parent_id, branch_label
-             FROM db_forge_agents ORDER BY created_at ASC",
+             FROM db_agent_definitions ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map([], |row| {
-            Ok(ForgeAgent {
+            Ok(AgentDefinition {
                 id: row.get(0)?,
                 slug: row.get(1)?,
                 name: row.get(2)?,
@@ -606,10 +609,10 @@ impl WaveStore {
     }
 
     /// Count forge agents (used by seed engine to check if seeding is needed).
-    pub fn forge_count(&self) -> Result<i64, StoreError> {
+    pub fn agent_def_count(&self) -> Result<i64, StoreError> {
         let conn = self.conn.lock().unwrap();
         let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM db_forge_agents",
+            "SELECT COUNT(*) FROM db_agent_definitions",
             [],
             |row| row.get(0),
         )?;
@@ -617,9 +620,9 @@ impl WaveStore {
     }
 
     /// Delete all seeded agents (is_seeded=1). Used by reseed to clear built-in agents.
-    pub fn forge_delete_seeded(&self) -> Result<usize, StoreError> {
+    pub fn agent_def_delete_seeded(&self) -> Result<usize, StoreError> {
         let conn = self.conn.lock().unwrap();
-        let rows = conn.execute("DELETE FROM db_forge_agents WHERE is_seeded=1", [])?;
+        let rows = conn.execute("DELETE FROM db_agent_definitions WHERE is_seeded=1", [])?;
         Ok(rows)
     }
 
@@ -632,7 +635,7 @@ impl WaveStore {
     /// The collision check + insert run under a single mutex lock,
     /// so this is race-safe against concurrent inserts on the same
     /// connection.
-    pub fn forge_insert(&self, agent: &mut ForgeAgent) -> Result<(), StoreError> {
+    pub fn agent_def_insert(&self, agent: &mut AgentDefinition) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         let base = if agent.slug.is_empty() {
             derive_slug(&agent.name)
@@ -640,13 +643,12 @@ impl WaveStore {
             agent.slug.clone()
         };
         // Collision-resolve: scan for existing slugs matching base or
-        // base-N. The migration backfill does the same dance for
-        // pre-existing rows (see run_forge_v4_migrations).
+        // base-N.
         let mut candidate = base.clone();
         let mut n: u32 = 2;
         loop {
             let count: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM db_forge_agents WHERE slug = ?1",
+                "SELECT COUNT(*) FROM db_agent_definitions WHERE slug = ?1",
                 params![candidate],
                 |row| row.get(0),
             )?;
@@ -658,7 +660,7 @@ impl WaveStore {
         }
         agent.slug = candidate;
         conn.execute(
-            "INSERT INTO db_forge_agents (id, slug, name, icon, provider, description,
+            "INSERT INTO db_agent_definitions (id, slug, name, icon, provider, description,
              working_directory, shell, provider_flags, auto_start, restart_on_crash,
              idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
              is_seeded, accounts, parent_id, branch_label)
@@ -694,10 +696,10 @@ impl WaveStore {
     /// `parent_id` and `branch_label` are NOT updatable post-insert — they
     /// describe the agent's provenance; renaming or re-branching is done by
     /// creating a new fork, not mutating the original.
-    pub fn forge_update(&self, agent: &ForgeAgent) -> Result<bool, StoreError> {
+    pub fn agent_def_update(&self, agent: &AgentDefinition) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let rows = conn.execute(
-            "UPDATE db_forge_agents SET name=?1, icon=?2, provider=?3, description=?4,
+            "UPDATE db_agent_definitions SET name=?1, icon=?2, provider=?3, description=?4,
              working_directory=?5, shell=?6, provider_flags=?7, auto_start=?8,
              restart_on_crash=?9, idle_timeout_minutes=?10,
              agent_type=?11, environment=?12, agent_bus_id=?13, accounts=?14
@@ -724,7 +726,7 @@ impl WaveStore {
     }
 
     /// Delete a forge agent by id. Returns true if a row was deleted.
-    pub fn forge_delete(&self, id: &str) -> Result<bool, StoreError> {
+    pub fn agent_def_delete(&self, id: &str) -> Result<bool, StoreError> {
         // Snapshot cascaded instance ids AND issue the parent DELETE
         // under one lock acquisition so no thread can `instance_create`
         // a new row for this definition between the two steps. The
@@ -740,7 +742,7 @@ impl WaveStore {
                 iter.collect::<Result<Vec<_>, _>>()?
             };
             let rows = conn.execute(
-                "DELETE FROM db_forge_agents WHERE id=?1",
+                "DELETE FROM db_agent_definitions WHERE id=?1",
                 params![id],
             )?;
             (cascaded_instance_ids, rows)
@@ -753,7 +755,7 @@ impl WaveStore {
                             instance_id = %instance_id,
                             forge_id = %id,
                             error = %e,
-                            "registry: failed to mirror forge_delete cascade"
+                            "registry: failed to mirror agent_def_delete cascade"
                         );
                     }
                 }
@@ -762,17 +764,17 @@ impl WaveStore {
         Ok(rows > 0)
     }
 
-    // ---- ForgeContent CRUD ----
+    // ---- AgentContent CRUD ----
 
     /// Get a single content blob for an agent.
-    pub fn forge_get_content(&self, agent_id: &str, content_type: &str) -> Result<Option<ForgeContent>, StoreError> {
+    pub fn agent_content_get(&self, agent_id: &str, content_type: &str) -> Result<Option<AgentContent>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT agent_id, content_type, content, updated_at
-             FROM db_forge_content WHERE agent_id=?1 AND content_type=?2",
+             FROM db_agent_content WHERE agent_id=?1 AND content_type=?2",
         )?;
         let result = stmt.query_row(params![agent_id, content_type], |row| {
-            Ok(ForgeContent {
+            Ok(AgentContent {
                 agent_id: row.get(0)?,
                 content_type: row.get(1)?,
                 content: row.get(2)?,
@@ -787,10 +789,10 @@ impl WaveStore {
     }
 
     /// Upsert a content blob for an agent.
-    pub fn forge_set_content(&self, content: &ForgeContent) -> Result<(), StoreError> {
+    pub fn agent_content_set(&self, content: &AgentContent) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO db_forge_content (agent_id, content_type, content, updated_at)
+            "INSERT INTO db_agent_content (agent_id, content_type, content, updated_at)
              VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(agent_id, content_type) DO UPDATE SET content=?3, updated_at=?4",
             params![
@@ -804,14 +806,14 @@ impl WaveStore {
     }
 
     /// Get all content blobs for an agent.
-    pub fn forge_get_all_content(&self, agent_id: &str) -> Result<Vec<ForgeContent>, StoreError> {
+    pub fn agent_content_get_all(&self, agent_id: &str) -> Result<Vec<AgentContent>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT agent_id, content_type, content, updated_at
-             FROM db_forge_content WHERE agent_id=?1 ORDER BY content_type ASC",
+             FROM db_agent_content WHERE agent_id=?1 ORDER BY content_type ASC",
         )?;
         let rows = stmt.query_map(params![agent_id], |row| {
-            Ok(ForgeContent {
+            Ok(AgentContent {
                 agent_id: row.get(0)?,
                 content_type: row.get(1)?,
                 content: row.get(2)?,
@@ -827,26 +829,26 @@ impl WaveStore {
 
     /// Delete a specific content blob. Returns true if a row was deleted.
     #[allow(dead_code)]
-    pub fn forge_delete_content(&self, agent_id: &str, content_type: &str) -> Result<bool, StoreError> {
+    pub fn agent_content_delete(&self, agent_id: &str, content_type: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let rows = conn.execute(
-            "DELETE FROM db_forge_content WHERE agent_id=?1 AND content_type=?2",
+            "DELETE FROM db_agent_content WHERE agent_id=?1 AND content_type=?2",
             params![agent_id, content_type],
         )?;
         Ok(rows > 0)
     }
 
-    // ---- ForgeSkill CRUD ----
+    // ---- AgentSkill CRUD ----
 
     /// List all skills for an agent, ordered by created_at ascending.
-    pub fn forge_list_skills(&self, agent_id: &str) -> Result<Vec<ForgeSkill>, StoreError> {
+    pub fn agent_skill_list(&self, agent_id: &str) -> Result<Vec<AgentSkill>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, agent_id, name, trigger, skill_type, description, content, created_at
-             FROM db_forge_skills WHERE agent_id=?1 ORDER BY created_at ASC",
+             FROM db_agent_skills WHERE agent_id=?1 ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map(params![agent_id], |row| {
-            Ok(ForgeSkill {
+            Ok(AgentSkill {
                 id: row.get(0)?,
                 agent_id: row.get(1)?,
                 name: row.get(2)?,
@@ -865,14 +867,14 @@ impl WaveStore {
     }
 
     /// Get a single skill by id.
-    pub fn forge_get_skill(&self, id: &str) -> Result<Option<ForgeSkill>, StoreError> {
+    pub fn agent_skill_get(&self, id: &str) -> Result<Option<AgentSkill>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, agent_id, name, trigger, skill_type, description, content, created_at
-             FROM db_forge_skills WHERE id=?1",
+             FROM db_agent_skills WHERE id=?1",
         )?;
         let result = stmt.query_row(params![id], |row| {
-            Ok(ForgeSkill {
+            Ok(AgentSkill {
                 id: row.get(0)?,
                 agent_id: row.get(1)?,
                 name: row.get(2)?,
@@ -891,10 +893,10 @@ impl WaveStore {
     }
 
     /// Insert a new skill.
-    pub fn forge_insert_skill(&self, skill: &ForgeSkill) -> Result<(), StoreError> {
+    pub fn agent_skill_insert(&self, skill: &AgentSkill) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO db_forge_skills (id, agent_id, name, trigger, skill_type, description, content, created_at)
+            "INSERT INTO db_agent_skills (id, agent_id, name, trigger, skill_type, description, content, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 skill.id,
@@ -911,10 +913,10 @@ impl WaveStore {
     }
 
     /// Update an existing skill (all fields except id, agent_id, created_at).
-    pub fn forge_update_skill(&self, skill: &ForgeSkill) -> Result<bool, StoreError> {
+    pub fn agent_skill_update(&self, skill: &AgentSkill) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let rows = conn.execute(
-            "UPDATE db_forge_skills SET name=?1, trigger=?2, skill_type=?3, description=?4, content=?5
+            "UPDATE db_agent_skills SET name=?1, trigger=?2, skill_type=?3, description=?4, content=?5
              WHERE id=?6",
             params![
                 skill.name,
@@ -929,19 +931,19 @@ impl WaveStore {
     }
 
     /// Delete a skill by id. Returns true if a row was deleted.
-    pub fn forge_delete_skill(&self, id: &str) -> Result<bool, StoreError> {
+    pub fn agent_skill_delete(&self, id: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let rows = conn.execute(
-            "DELETE FROM db_forge_skills WHERE id=?1",
+            "DELETE FROM db_agent_skills WHERE id=?1",
             params![id],
         )?;
         Ok(rows > 0)
     }
 
-    // ---- ForgeHistory methods ----
+    // ---- AgentHistory methods ----
 
     /// Append a history entry for an agent. Auto-sets session_date (today) and timestamp.
-    pub fn forge_append_history(&self, agent_id: &str, entry: &str) -> Result<ForgeHistory, StoreError> {
+    pub fn agent_history_append(&self, agent_id: &str, entry: &str) -> Result<AgentHistory, StoreError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -953,11 +955,11 @@ impl WaveStore {
         let session_date = format_epoch_date(days);
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO db_forge_history (agent_id, session_date, entry, timestamp) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO db_agent_history (agent_id, session_date, entry, timestamp) VALUES (?1, ?2, ?3, ?4)",
             params![agent_id, session_date, entry, now],
         )?;
         let id = conn.last_insert_rowid();
-        Ok(ForgeHistory {
+        Ok(AgentHistory {
             id,
             agent_id: agent_id.to_string(),
             session_date,
@@ -967,18 +969,18 @@ impl WaveStore {
     }
 
     /// List history entries for an agent, with optional date filter and pagination.
-    pub fn forge_list_history(
+    pub fn agent_history_list(
         &self,
         agent_id: &str,
         session_date: Option<&str>,
         limit: i64,
         offset: i64,
-    ) -> Result<Vec<ForgeHistory>, StoreError> {
+    ) -> Result<Vec<AgentHistory>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match session_date {
             Some(date) => (
                 "SELECT id, agent_id, session_date, entry, timestamp
-                 FROM db_forge_history WHERE agent_id=?1 AND session_date=?2
+                 FROM db_agent_history WHERE agent_id=?1 AND session_date=?2
                  ORDER BY timestamp DESC LIMIT ?3 OFFSET ?4".to_string(),
                 vec![
                     Box::new(agent_id.to_string()),
@@ -989,7 +991,7 @@ impl WaveStore {
             ),
             None => (
                 "SELECT id, agent_id, session_date, entry, timestamp
-                 FROM db_forge_history WHERE agent_id=?1
+                 FROM db_agent_history WHERE agent_id=?1
                  ORDER BY timestamp DESC LIMIT ?2 OFFSET ?3".to_string(),
                 vec![
                     Box::new(agent_id.to_string()),
@@ -1001,7 +1003,7 @@ impl WaveStore {
         let params_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params_refs.as_slice(), |row| {
-            Ok(ForgeHistory {
+            Ok(AgentHistory {
                 id: row.get(0)?,
                 agent_id: row.get(1)?,
                 session_date: row.get(2)?,
@@ -1017,21 +1019,21 @@ impl WaveStore {
     }
 
     /// Search history entries for an agent using LIKE-based matching.
-    pub fn forge_search_history(
+    pub fn agent_history_search(
         &self,
         agent_id: &str,
         query: &str,
         limit: i64,
-    ) -> Result<Vec<ForgeHistory>, StoreError> {
+    ) -> Result<Vec<AgentHistory>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let pattern = format!("%{}%", query);
         let mut stmt = conn.prepare(
             "SELECT id, agent_id, session_date, entry, timestamp
-             FROM db_forge_history WHERE agent_id=?1 AND entry LIKE ?2
+             FROM db_agent_history WHERE agent_id=?1 AND entry LIKE ?2
              ORDER BY timestamp DESC LIMIT ?3",
         )?;
         let rows = stmt.query_map(params![agent_id, pattern, limit], |row| {
-            Ok(ForgeHistory {
+            Ok(AgentHistory {
                 id: row.get(0)?,
                 agent_id: row.get(1)?,
                 session_date: row.get(2)?,
@@ -1092,7 +1094,7 @@ pub enum SecretRef {
 }
 
 /// An identity account (reusable credential, linked to agents via the
-/// `db_forge_agent_identities` junction). Replaces the browser
+/// `db_agent_identity_links` junction). Replaces the browser
 /// localStorage identity store.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IdentityAccount {
@@ -1123,7 +1125,7 @@ fn default_identity_status() -> String {
 
 /// Junction row: which identity an agent uses for a given provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForgeAgentIdentity {
+pub struct AgentIdentityLink {
     pub agent_id: String,
     pub account_id: String,
     pub provider: String,
@@ -1510,7 +1512,7 @@ impl WaveStore {
     ) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO db_forge_agent_identities (agent_id, account_id, provider)
+            "INSERT INTO db_agent_identity_links (agent_id, account_id, provider)
              VALUES (?1, ?2, ?3)
              ON CONFLICT(agent_id, provider) DO UPDATE SET account_id = excluded.account_id",
             params![agent_id, account_id, provider],
@@ -1527,7 +1529,7 @@ impl WaveStore {
     ) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let rows = conn.execute(
-            "DELETE FROM db_forge_agent_identities WHERE agent_id = ?1 AND provider = ?2",
+            "DELETE FROM db_agent_identity_links WHERE agent_id = ?1 AND provider = ?2",
             params![agent_id, provider],
         )?;
         Ok(rows > 0)
@@ -1537,16 +1539,16 @@ impl WaveStore {
     pub fn agent_identity_list_for_agent(
         &self,
         agent_id: &str,
-    ) -> Result<Vec<ForgeAgentIdentity>, StoreError> {
+    ) -> Result<Vec<AgentIdentityLink>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT agent_id, account_id, provider
-             FROM db_forge_agent_identities
+             FROM db_agent_identity_links
              WHERE agent_id = ?1
              ORDER BY provider",
         )?;
         let iter = stmt.query_map(params![agent_id], |row| {
-            Ok(ForgeAgentIdentity {
+            Ok(AgentIdentityLink {
                 agent_id: row.get(0)?,
                 account_id: row.get(1)?,
                 provider: row.get(2)?,
@@ -2516,15 +2518,15 @@ mod tests {
     }
 
     #[test]
-    fn test_forge_insert_collision_resolves_at_runtime() {
+    fn test_agent_def_insert_collision_resolves_at_runtime() {
         // Two agents whose names derive to the same slug must both
         // insert successfully, with the second getting a `-2` suffix.
         // This exercises the runtime collision-resolution path in
-        // forge_insert (separate from the migration backfill path
+        // agent_def_insert (separate from the migration backfill path
         // tested in migrations.rs).
         let store = make_store();
 
-        let mut a1 = ForgeAgent {
+        let mut a1 = AgentDefinition {
             id: "id-a".to_string(),
             slug: String::new(),
             name: "Agent X".to_string(),
@@ -2546,31 +2548,31 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
         };
-        store.forge_insert(&mut a1).unwrap();
+        store.agent_def_insert(&mut a1).unwrap();
         // "Agent X" → "agent-x"
         assert_eq!(a1.slug, "agent-x");
 
-        let mut a2 = ForgeAgent {
+        let mut a2 = AgentDefinition {
             id: "id-b".to_string(),
             // Different surface form, derives to the same slug
             name: "agent x".to_string(),
             ..a1.clone()
         };
         a2.slug = String::new();
-        store.forge_insert(&mut a2).unwrap();
+        store.agent_def_insert(&mut a2).unwrap();
         assert_eq!(a2.slug, "agent-x-2");
 
-        let mut a3 = ForgeAgent {
+        let mut a3 = AgentDefinition {
             id: "id-c".to_string(),
             name: "AGENT-X".to_string(),
             ..a1.clone()
         };
         a3.slug = String::new();
-        store.forge_insert(&mut a3).unwrap();
+        store.agent_def_insert(&mut a3).unwrap();
         assert_eq!(a3.slug, "agent-x-3");
 
         // Verify the underlying rows actually got written
-        let listed = store.forge_list().unwrap();
+        let listed = store.agent_def_list().unwrap();
         let slugs: Vec<&str> = listed.iter().map(|a| a.slug.as_str()).collect();
         assert!(slugs.contains(&"agent-x"));
         assert!(slugs.contains(&"agent-x-2"));
@@ -2578,14 +2580,14 @@ mod tests {
     }
 
     #[test]
-    fn test_forge_insert_explicit_slug_collision_resolves() {
+    fn test_agent_def_insert_explicit_slug_collision_resolves() {
         // When a caller passes an explicit (non-empty) slug that
-        // already exists, forge_insert still resolves the collision
+        // already exists, agent_def_insert still resolves the collision
         // via suffixing — guards against the seed pre-loading the
         // same slug twice or any other "I know the slug" path.
         let store = make_store();
 
-        let mut a1 = ForgeAgent {
+        let mut a1 = AgentDefinition {
             id: "id-a".to_string(),
             slug: "explicit".to_string(),
             name: "First".to_string(),
@@ -2607,15 +2609,15 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
         };
-        store.forge_insert(&mut a1).unwrap();
+        store.agent_def_insert(&mut a1).unwrap();
         assert_eq!(a1.slug, "explicit");
 
-        let mut a2 = ForgeAgent {
+        let mut a2 = AgentDefinition {
             id: "id-b".to_string(),
             ..a1.clone()
         };
         a2.slug = "explicit".to_string();
-        store.forge_insert(&mut a2).unwrap();
+        store.agent_def_insert(&mut a2).unwrap();
         assert_eq!(a2.slug, "explicit-2");
     }
 
@@ -2640,8 +2642,8 @@ mod tests {
         }
     }
 
-    fn sample_agent(id: &str, slug: &str) -> ForgeAgent {
-        ForgeAgent {
+    fn sample_agent(id: &str, slug: &str) -> AgentDefinition {
+        AgentDefinition {
             id: id.to_string(),
             slug: slug.to_string(),
             name: id.to_string(),
@@ -2706,7 +2708,7 @@ mod tests {
     fn test_agent_identity_link_and_unlink() {
         let store = v6_test_store();
         let mut agent = sample_agent("ag1", "agent-x");
-        store.forge_insert(&mut agent).unwrap();
+        store.agent_def_insert(&mut agent).unwrap();
         store.identity_upsert(&sample_account("id-gh", "github")).unwrap();
 
         store.agent_identity_link("ag1", "id-gh", "github").unwrap();
@@ -2729,11 +2731,11 @@ mod tests {
     fn test_agent_identity_cascade_on_agent_delete() {
         let store = v6_test_store();
         let mut agent = sample_agent("ag1", "agent-x");
-        store.forge_insert(&mut agent).unwrap();
+        store.agent_def_insert(&mut agent).unwrap();
         store.identity_upsert(&sample_account("id-gh", "github")).unwrap();
         store.agent_identity_link("ag1", "id-gh", "github").unwrap();
 
-        store.forge_delete("ag1").unwrap();
+        store.agent_def_delete("ag1").unwrap();
         assert!(store.agent_identity_list_for_agent("ag1").unwrap().is_empty());
     }
 
@@ -2741,7 +2743,7 @@ mod tests {
     fn test_instance_create_update_filter() {
         let store = v6_test_store();
         let mut agent = sample_agent("def1", "agent-x");
-        store.forge_insert(&mut agent).unwrap();
+        store.agent_def_insert(&mut agent).unwrap();
 
         let inst = AgentInstance {
             id: "inst1".to_string(),
@@ -2788,7 +2790,7 @@ mod tests {
     fn test_instance_cascade_on_definition_delete() {
         let store = v6_test_store();
         let mut agent = sample_agent("def1", "agent-x");
-        store.forge_insert(&mut agent).unwrap();
+        store.agent_def_insert(&mut agent).unwrap();
         let inst = AgentInstance {
             id: "inst1".to_string(),
             definition_id: "def1".to_string(),
@@ -2808,7 +2810,7 @@ mod tests {
         };
         store.instance_create(&inst).unwrap();
 
-        store.forge_delete("def1").unwrap();
+        store.agent_def_delete("def1").unwrap();
         assert!(store.instance_get("inst1").unwrap().is_none());
     }
 
@@ -3061,7 +3063,7 @@ mod tests {
         store.set_registry(reg.clone());
         // Satisfy the FK from db_agent_instances.definition_id.
         let mut agent = sample_agent("def-mirror", "mirror");
-        store.forge_insert(&mut agent).unwrap();
+        store.agent_def_insert(&mut agent).unwrap();
         (tmp, store, reg)
     }
 
@@ -3279,7 +3281,7 @@ mod tests {
     }
 
     #[test]
-    fn forge_delete_cascade_removes_registry_files() {
+    fn agent_def_delete_cascade_removes_registry_files() {
         let (tmp, store, reg) = store_with_registry();
         let agents_root = tmp.path().join("agents");
         let inst_a = make_named_inst("inst-cascade-a", "demoA", &agents_root);
@@ -3290,8 +3292,8 @@ mod tests {
 
         // Delete the forge agent — SQLite FK cascades both instance
         // rows; the mirror must also drop both registry files.
-        store.forge_delete("def-mirror").unwrap();
+        store.agent_def_delete("def-mirror").unwrap();
         assert!(reg.list_active().unwrap().is_empty(),
-            "forge_delete cascade must remove all child instance registry files");
+            "agent_def_delete cascade must remove all child instance registry files");
     }
 }
