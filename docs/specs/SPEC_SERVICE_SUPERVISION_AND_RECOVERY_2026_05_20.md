@@ -38,8 +38,10 @@ architecture. This spec names it, unifies it, and closes the gaps.
 ## 2. Goals / Non-goals
 
 ### Goals
-- A single, uniform **supervision framework** spanning every long-lived service
-  (launcher, host, srv, Chromium children, sidecar workers).
+- **Uniform recovery *discipline*** across every long-lived service (launcher,
+  host, srv, Chromium children, sidecar workers) — implemented as per-service
+  managers that share primitives and obey one prime directive (§3, §4), **not**
+  a single unified framework.
 - Any service crash → **detect → restart → rehydrate → reconcile**, fast enough
   that the user sees at most a flicker.
 - **Bounded** recovery — a crash budget and a graceful terminal state; never an
@@ -76,28 +78,59 @@ Everything below is an elaboration of this directive.
 
 ---
 
-## 4. Core abstraction — the Supervised Service
+## 4. Core approach — per-service managers + shared primitives
 
-Every long-lived service implements a uniform contract. Defined once in
-`agentmux-common`; integrated thinly per layer.
+**Decision: per-service managers, not a unified framework.** Each service gets
+its *own* manager with its own crash/restart/rehydrate logic. Managers share
+low-level *primitives*; they do not implement one uniform behavioral contract.
 
-```
-SupervisedService
-  identity        stable id + generation number (fencing, see §10-D)
-  spawn()         start the process/subsystem
-  health          liveness  (is the process alive?)
-                + responsiveness (does it answer a ping within budget?)
-  rehydrate()     replay authoritative reducer state into the fresh instance
-  restartPolicy   crash budget + backoff + degraded-mode variants
-  onCrash/onUp    events other layers project to reconcile
-```
+### Why — the VS Code precedent
 
-A **Supervisor** owns one or more services: it watches health, applies the
-restart policy on death, drives `rehydrate()`, and emits lifecycle events.
+VS Code is a mature, far larger multi-process app facing the same problem, and
+it deliberately did **not** build a unified supervisor framework:
 
-A restarted service is **not a special case** — it is simply a new subscriber
-that needs the current state snapshot. This is the central simplification: the
-framework reuses normal state-projection, it does not invent a recovery path.
+- **`UtilityProcess`** (`src/vs/platform/utilityProcess/electron-main/`) — a
+  shared process *primitive*: spawn, MessagePort wiring, `onCrash` / `onExit`
+  events. It *reports* crashes; it does not restart or rehydrate.
+- **Extension host** — its own manager (`ExtensionHostManager` /
+  `AbstractExtensionService`) with a crash counter: after ~3 crashes in a short
+  window it stops auto-restarting and shows "Extension host terminated
+  unexpectedly — Restart?" (= our crash budget + terminal state, §7 / §10-A).
+- **Pty host** — `PtyHostService`: its own restart logic, terminal
+  *reconnection* across a window reload (= our Tier-1 pattern, §6), and
+  unresponsive-detection by ping (= our liveness + responsiveness, §8).
+- **Shared process** — supervised ad-hoc by the Electron main process.
+
+No `SupervisedService` trait, no uniform contract — each manager is bespoke,
+because the services' recovery semantics genuinely differ. They differ here
+too: a host crash is Tier 1 (re-attach to a live srv), an srv crash is Tier 2
+(resume), the GPU has its own escalation. Forcing them through one contract
+would be abstraction for its own sake — the over-reach the original draft of
+this spec leaned toward.
+
+### The model
+
+- **Per-service managers.** `HostManager`, `SrvManager`, … — each owns one
+  service's crash detection, retry ladder (§7), rehydration (§5), and lifecycle
+  events. Bespoke, shaped to that service's tier and failure modes. Every
+  manager still answers the same questions, just in its own way: *identity*
+  (stable id + generation number for fencing, §10-D), *spawn*, *health*
+  (liveness + responsiveness, §8), *rehydrate*, *retry ladder*, and
+  *onCrash / onUp* events.
+- **Shared primitives** in `agentmux-common`, used by the managers — extracted
+  **only when ≥2 managers actually need them**, never speculatively:
+  - a process-handle wrapper (spawn + OS exit/crash event — the `UtilityProcess`
+    analog);
+  - the crash-budget + backoff helper;
+  - the transient/deterministic classifier (§7);
+  - the recovery-metric counter (§12).
+- **No uniform behavioral contract.** Managers are not forced into one shape.
+  Generalization is bottom-up — extract a primitive when it demonstrably
+  repeats — never top-down.
+
+A restarted service is still **not a special case**: the manager re-attaches it
+as a new subscriber that needs the current snapshot (§5). That simplification
+holds either way.
 
 ---
 
@@ -403,10 +436,12 @@ service first.
   when a full relaunch reproduces a GPU-class crash. Crash budget +
   classification + recovery metric. Full
   fault-injection tests. **This is the proof of the whole pattern.**
-- **Phase 2 — srv supervision.** Same contract; host tolerates srv reconnect.
-- **Phase 3 — Generalize.** Extract the `SupervisedService` contract into
-  `agentmux-common`; fold the saga coordinator and Chromium-child handling into
-  the uniform model.
+- **Phase 2 — srv supervision.** A bespoke `SrvManager` (Tier 2, §6); host
+  tolerates srv reconnect.
+- **Phase 3 — Extract shared primitives.** Pull the primitives that ≥2 managers
+  actually use (process-handle wrapper, crash-budget helper, classifier,
+  recovery metric) into `agentmux-common` — bottom-up, never a uniform contract
+  (§4). Fold the saga coordinator and Chromium-child handling in where it pays.
 - **Phase 4 — Root hardening.** Decide (on evidence) whether the launcher needs
   an OS-level respawn.
 
