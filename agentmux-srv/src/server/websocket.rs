@@ -391,7 +391,7 @@ async fn handle_incoming_text(
                             match base64::engine::general_purpose::STANDARD.decode(data64) {
                                 Ok(data) => {
                                     let input = blockcontroller::BlockInputUnion::data(data);
-                                    if let Err(e) = blockcontroller::send_input(block_id, input) {
+                                    if let Err(e) = blockcontroller::send_input(block_id, input, None) {
                                         tracing::debug!("ws: blockinput error: {}", e);
                                     }
                                 }
@@ -409,7 +409,7 @@ async fn handle_incoming_text(
                         match serde_json::from_value::<TermSize>(ts_val.clone()) {
                             Ok(ts) => {
                                 let input = blockcontroller::BlockInputUnion::resize(ts);
-                                if let Err(e) = blockcontroller::send_input(block_id, input) {
+                                if let Err(e) = blockcontroller::send_input(block_id, input, None) {
                                     tracing::debug!("ws: setblocktermsize error: {}", e);
                                 }
                             }
@@ -649,8 +649,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
             Box::pin(async move {
                 let cmd: CommandBlockInputData = serde_json::from_value(data)
                     .map_err(|e| format!("controllerinput: {e}"))?;
+                let seq = cmd.seq;
                 let input = parse_block_input(&cmd)?;
-                blockcontroller::send_input(&cmd.blockid, input)?;
+                blockcontroller::send_input(&cmd.blockid, input, seq)?;
                 Ok(None)
             })
         }),

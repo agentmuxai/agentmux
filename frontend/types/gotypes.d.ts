@@ -150,6 +150,7 @@ declare global {
         inputdata64?: string;
         signame?: string;
         termsize?: TermSize;
+        seq?: number;
     };
 
     // wshrpc.CommandToolDecisionData — per-tool-call permission reply.
