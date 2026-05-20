@@ -358,6 +358,7 @@ mod tests {
             accounts: String::new(),
             parent_id: String::new(),
             branch_label: String::new(),
+            updated_at: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -397,6 +398,7 @@ mod tests {
             accounts: String::new(),
             parent_id: String::new(),
             branch_label: String::new(),
+            updated_at: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -480,6 +482,7 @@ mod tests {
             accounts: String::new(),
             parent_id: String::new(),
             branch_label: String::new(),
+            updated_at: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -558,6 +561,7 @@ mod tests {
             accounts: String::new(),
             parent_id: String::new(),
             branch_label: String::new(),
+            updated_at: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 

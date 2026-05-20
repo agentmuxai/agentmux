@@ -19,7 +19,7 @@
  * closes).
  */
 
-import { createMemo, Show, type JSX } from "solid-js";
+import { createMemo, onMount, Show, type JSX } from "solid-js";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 
@@ -33,12 +33,21 @@ interface AgentCardProps {
     installed: boolean | undefined;
     /** Opens the AgentLaunchModal (or Install modal) for this definition. */
     onLaunch: (agent: AgentDefinition) => void;
+    /** When true this card is the picker's default choice (the
+     *  most-recently-used agent) — focus it on mount so Enter launches
+     *  it and the focus ring marks it as the default. */
+    defaultFocus?: boolean;
 }
 
 export const AgentCard = (props: AgentCardProps): JSX.Element => {
     const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
     const title = () => catalog()?.blurb || props.agent.description || props.agent.name;
     const caption = () => catalog()?.displayName || props.agent.name;
+
+    let cardEl: HTMLDivElement | undefined;
+    onMount(() => {
+        if (props.defaultFocus && !props.disabled) cardEl?.focus();
+    });
 
     const handleCardClick = () => {
         if (!props.disabled) props.onLaunch(props.agent);
@@ -54,6 +63,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
 
     return (
         <div
+            ref={cardEl}
             class={`agent-card${props.launching ? " agent-card--launching" : ""}`}
             classList={{
                 "agent-card--disabled": props.disabled,

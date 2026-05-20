@@ -418,13 +418,16 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     <div class="agent-picker">
                         <div class="agent-picker-list">
                             <For each={agents()}>
-                                {(agent) => (
+                                {(agent, index) => (
                                     <AgentCard
                                         agent={agent}
                                         launching={launching() === agent.id}
                                         disabled={busy()}
                                         installed={installState()[agent.id]}
                                         onLaunch={handleSelect}
+                                        // agent_def_list returns most-recently-used
+                                        // first, so index 0 is the default choice.
+                                        defaultFocus={index() === 0}
                                     />
                                 )}
                             </For>

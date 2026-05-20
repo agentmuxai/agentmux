@@ -245,6 +245,12 @@ declare global {
          * Empty for root definitions. Added in v6.
          */
         branch_label?: string;
+        /**
+         * Last-modified timestamp (epoch ms). Set to created_at on insert,
+         * refreshed on every update. Schema v2. `0` for rows last written
+         * before v2.
+         */
+        updated_at?: number;
     };
 
     // ── v6: identity, instance, junction ────────────────────────────────────
