@@ -163,6 +163,7 @@ pub fn seed_agents(wstore: &Arc<WaveStore>) -> Result<SeedReport, StoreError> {
             accounts: String::new(),
             parent_id: String::new(),
             branch_label: String::new(),
+            updated_at: now,
         };
         wstore.agent_def_insert(&mut agent)?;
 
@@ -334,6 +335,7 @@ fn reseed_if_needed(
             accounts: String::new(),
             parent_id: String::new(),
             branch_label: String::new(),
+            updated_at: now,
         };
 
         if let Some(existing_agent) = existing_map.get(agent_def.id.as_str()) {

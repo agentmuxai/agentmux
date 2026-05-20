@@ -115,6 +115,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     accounts: String::new(),
                     parent_id: String::new(),
                     branch_label: String::new(),
+                    updated_at: now,
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
@@ -176,6 +177,10 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // not in-place edits).
                     parent_id: old.parent_id.clone(),
                     branch_label: old.branch_label.clone(),
+                    // agent_def_update stamps a fresh updated_at in the DB;
+                    // the returned struct carries the prior value (the
+                    // agents:changed re-fetch corrects it client-side).
+                    updated_at: old.updated_at,
                 };
                 let found = wstore.agent_def_update(&agent).map_err(|e| format!("updateagent: {e}"))?;
                 if !found {
@@ -527,6 +532,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     accounts: String::new(),
                     parent_id: String::new(),
                     branch_label: String::new(),
+                    updated_at: now,
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
 
@@ -657,6 +663,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         accounts: String::new(),
                         parent_id: String::new(),
                         branch_label: String::new(),
+                        updated_at: now,
                     };
 
                     if let Err(e) = wstore.agent_def_insert(&mut agent) {
@@ -1415,6 +1422,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     accounts: String::new(),
                     parent_id: source.id.clone(),
                     branch_label: cmd.branch_label.clone(),
+                    updated_at: now,
                 };
                 wstore
                     .agent_def_insert(&mut fork)
