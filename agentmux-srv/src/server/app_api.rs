@@ -157,12 +157,12 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 tracing::info!(agent_id = %cmd.agent_id, "agent.open");
 
-                // 1. Load the Forge agent (by id or name)
+                // 1. Load the agent definition (by id or name)
                 let agents = wstore.agent_def_list()
                     .map_err(|e| format!("agent.open: {e}"))?;
                 let agent = agents.iter()
                     .find(|a| a.id == cmd.agent_id || a.name.eq_ignore_ascii_case(&cmd.agent_id))
-                    .ok_or_else(|| format!("AGENT_NOT_FOUND: no forge agent with id '{}'", cmd.agent_id))?
+                    .ok_or_else(|| format!("AGENT_NOT_FOUND: no agent definition with id '{}'", cmd.agent_id))?
                     .clone();
 
                 // 2. Resolve provider
@@ -1731,7 +1731,7 @@ fn write_agent_config_files(
     agent_slug: &str,
     work_dir: &str,
 ) -> Result<(), String> {
-    // Load forge contents and skills
+    // Load agent content and skills
     let contents = wstore.agent_content_get_all(&agent.id)
         .unwrap_or_default();
     let skills = wstore.agent_skill_list(&agent.id)
