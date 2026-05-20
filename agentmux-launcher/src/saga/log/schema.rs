@@ -65,3 +65,28 @@ pub(super) fn run_migrations(conn: &Connection) -> Result<(), LogError> {
     conn.execute_batch(DDL)?;
     Ok(())
 }
+
+/// `user_version` value stamped into `launcher-sagas.db`. Mirrors srv's
+/// `stamp_and_check_version` tripwire (AUDIT_SQLITE_SYSTEMS §8.5). The
+/// launcher is a separate crate from srv, so the helper is duplicated
+/// here rather than shared.
+pub(super) const LAUNCHER_SAGA_SCHEMA_VERSION: i64 = 1;
+
+/// Read `PRAGMA user_version`; warn loudly if the file was written by a
+/// newer launcher build (downgrade tripwire), then stamp the current
+/// version. The idempotent DDL above remains the schema mechanism — this
+/// only records the version.
+pub(super) fn stamp_and_check_version(conn: &Connection) -> Result<(), LogError> {
+    let found: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if found > LAUNCHER_SAGA_SCHEMA_VERSION {
+        eprintln!(
+            "[launcher-saga-log] launcher-sagas.db user_version={found} > \
+             {LAUNCHER_SAGA_SCHEMA_VERSION} — written by a newer launcher \
+             build; proceeding read-compatible"
+        );
+    }
+    conn.execute_batch(&format!(
+        "PRAGMA user_version = {LAUNCHER_SAGA_SCHEMA_VERSION};"
+    ))?;
+    Ok(())
+}

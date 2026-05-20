@@ -1273,7 +1273,7 @@ fn is_zero_usize(v: &usize) -> bool {
 
 /// Input for createforgeagent
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandCreateForgeAgentData {
+pub struct CommandCreateAgentDefinitionData {
     pub name: String,
     #[serde(default = "default_forge_icon")]
     pub icon: String,
@@ -1310,7 +1310,7 @@ fn default_forge_icon() -> String {
 
 /// Input for updateforgeagent
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandUpdateForgeAgentData {
+pub struct CommandUpdateAgentDefinitionData {
     pub id: String,
     pub name: String,
     pub icon: String,
@@ -1335,27 +1335,27 @@ pub struct CommandUpdateForgeAgentData {
     pub environment: String,
     #[serde(default)]
     pub agent_bus_id: String,
-    /// JSON-encoded per-provider account refs (see ForgeAgent.accounts).
+    /// JSON-encoded per-provider account refs (see AgentDefinition.accounts).
     #[serde(default)]
     pub accounts: String,
 }
 
 /// Input for deleteforgeagent
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandDeleteForgeAgentData {
+pub struct CommandDeleteAgentDefinitionData {
     pub id: String,
 }
 
 /// Input for getforgecontent
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandGetForgeContentData {
+pub struct CommandGetAgentContentData {
     pub agent_id: String,
     pub content_type: String,
 }
 
 /// Input for setforgecontent
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandSetForgeContentData {
+pub struct CommandSetAgentContentData {
     pub agent_id: String,
     pub content_type: String,
     pub content: String,
@@ -1363,7 +1363,7 @@ pub struct CommandSetForgeContentData {
 
 /// Input for getallforgecontent
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandGetAllForgeContentData {
+pub struct CommandGetAllAgentContentData {
     pub agent_id: String,
 }
 
@@ -1371,13 +1371,13 @@ pub struct CommandGetAllForgeContentData {
 
 /// Input for listforgeskills
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandListForgeSkillsData {
+pub struct CommandListAgentSkillsData {
     pub agent_id: String,
 }
 
 /// Input for createforgeskill
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandCreateForgeSkillData {
+pub struct CommandCreateAgentSkillData {
     pub agent_id: String,
     pub name: String,
     #[serde(default)]
@@ -1396,7 +1396,7 @@ fn default_skill_type() -> String {
 
 /// Input for updateforgeskill
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandUpdateForgeSkillData {
+pub struct CommandUpdateAgentSkillData {
     pub id: String,
     pub name: String,
     #[serde(default)]
@@ -1411,7 +1411,7 @@ pub struct CommandUpdateForgeSkillData {
 
 /// Input for deleteforgeskill
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandDeleteForgeSkillData {
+pub struct CommandDeleteAgentSkillData {
     pub id: String,
 }
 
@@ -1419,14 +1419,14 @@ pub struct CommandDeleteForgeSkillData {
 
 /// Input for appendforgehistory
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandAppendForgeHistoryData {
+pub struct CommandAppendAgentHistoryData {
     pub agent_id: String,
     pub entry: String,
 }
 
 /// Input for listforgehistory
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandListForgeHistoryData {
+pub struct CommandListAgentHistoryData {
     pub agent_id: String,
     #[serde(default)]
     pub session_date: Option<String>,
@@ -1442,7 +1442,7 @@ fn default_history_limit() -> i64 {
 
 /// Input for searchforgehistory
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandSearchForgeHistoryData {
+pub struct CommandSearchAgentHistoryData {
     pub agent_id: String,
     pub query: String,
     #[serde(default = "default_history_limit")]
@@ -1460,12 +1460,12 @@ pub struct CommandImportForgeFromClawData {
 
 /// Input for importforgeagents
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandImportForgeAgentsData {
-    pub agents: Vec<ForgeAgentImport>,
+pub struct CommandImportAgentDefinitionsData {
+    pub agents: Vec<AgentDefinitionImport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForgeAgentImport {
+pub struct AgentDefinitionImport {
     pub id: String,
     pub name: String,
     pub icon: String,
@@ -1478,11 +1478,11 @@ pub struct ForgeAgentImport {
     pub environment: String,
     pub restart_on_crash: bool,
     pub content: std::collections::HashMap<String, String>,
-    pub skills: Vec<ForgeSkillImport>,
+    pub skills: Vec<AgentSkillImport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForgeSkillImport {
+pub struct AgentSkillImport {
     pub name: String,
     pub trigger: String,
     pub skill_type: String,
@@ -1491,7 +1491,7 @@ pub struct ForgeSkillImport {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImportForgeAgentsResult {
+pub struct ImportAgentDefinitionsResult {
     pub imported: Vec<String>,
     pub skipped: Vec<String>,
     pub failed: Vec<String>,
@@ -1499,15 +1499,15 @@ pub struct ImportForgeAgentsResult {
 
 /// Response for exportforgeagents
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExportForgeAgentsResult {
+pub struct ExportAgentDefinitionsResult {
     pub version: u32,
     pub exported_at: String,
     pub source: String,
-    pub agents: Vec<ForgeAgentExport>,
+    pub agents: Vec<AgentDefinitionExport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForgeAgentExport {
+pub struct AgentDefinitionExport {
     pub id: String,
     pub name: String,
     pub icon: String,
@@ -1520,11 +1520,11 @@ pub struct ForgeAgentExport {
     pub environment: String,
     pub restart_on_crash: bool,
     pub content: std::collections::HashMap<String, String>,
-    pub skills: Vec<ForgeSkillExport>,
+    pub skills: Vec<AgentSkillExport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForgeSkillExport {
+pub struct AgentSkillExport {
     pub name: String,
     pub trigger: String,
     pub skill_type: String,
@@ -1703,7 +1703,7 @@ pub struct CommandListNamedAgentsData {
 }
 
 /// One row of the launch modal's "Continue agent" dropdown. Joins
-/// `db_agent_instances` with `db_forge_agents` (for the definition's
+/// `db_agent_instances` with `db_agent_definitions` (for the definition's
 /// display name + provider) and `db_identity_bundles` / `db_memory_bundles`
 /// (for bundle names) so the frontend renders without further lookups.
 #[derive(Debug, Clone, Serialize, Deserialize)]

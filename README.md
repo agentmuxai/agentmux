@@ -92,7 +92,7 @@ The widget bar shows pinned widgets directly; the rest live in a **More** dropdo
 | Surface | How to reach it |
 |---|---|
 | **Identity** | Tab inside an Agent pane (cog → settings → Identity). Manage the credential bundle assigned to this instance. |
-| **Memory** | Tab inside an Agent pane (cog → settings → Memory). Manage the personality / capability bundle (provider, model, instructions, MCP, skills). Replaces the old Forge concept — `db_forge_agents` rows migrated into the bundle table in the v7 schema (renamed `db_memory_bundles` by v11). |
+| **Memory** | Tab inside an Agent pane (cog → settings → Memory). Manage the personality / capability bundle (provider, model, instructions, MCP, skills). Replaces the old Forge concept. |
 | **Settings** | Hamburger menu (≡) in the top tab bar → Settings. Opens `settings.json` in your default editor. |
 
 ## Agents

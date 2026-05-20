@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
-use super::storage::wstore::{ForgeAgent, ForgeContent, ForgeSkill, WaveStore};
+use super::storage::wstore::{AgentDefinition, AgentContent, AgentSkill, WaveStore};
 use super::storage::StoreError;
 
 /// Report returned after seeding.
@@ -120,7 +120,7 @@ pub fn seed_forge_agents(wstore: &Arc<WaveStore>) -> Result<SeedReport, StoreErr
     let manifest: SeedManifest = serde_json::from_str(SEED_MANIFEST)
         .map_err(|e| StoreError::Other(format!("forge seed: parse manifest: {e}")))?;
 
-    let existing = wstore.forge_list()?;
+    let existing = wstore.agent_def_list()?;
     let existing_ids: std::collections::HashSet<String> =
         existing.iter().map(|a| a.id.clone()).collect();
 
@@ -140,9 +140,9 @@ pub fn seed_forge_agents(wstore: &Arc<WaveStore>) -> Result<SeedReport, StoreErr
 
         // Insert agent. For seeded agents, the manifest `id` is already
         // a human-readable slug-form string (agentx, agent1, etc.), so
-        // reuse it as the slug. forge_insert collision-resolves if
+        // reuse it as the slug. agent_def_insert collision-resolves if
         // needed and mutates the slug field in place.
-        let mut agent = ForgeAgent {
+        let mut agent = AgentDefinition {
             id: agent_def.id.clone(),
             slug: agent_def.id.clone(),
             name: agent_def.name.clone(),
@@ -164,7 +164,7 @@ pub fn seed_forge_agents(wstore: &Arc<WaveStore>) -> Result<SeedReport, StoreErr
             parent_id: String::new(),
             branch_label: String::new(),
         };
-        wstore.forge_insert(&mut agent)?;
+        wstore.agent_def_insert(&mut agent)?;
 
         // Insert content blobs
         let content_pairs = [
@@ -177,7 +177,7 @@ pub fn seed_forge_agents(wstore: &Arc<WaveStore>) -> Result<SeedReport, StoreErr
         for (content_type, maybe_content) in &content_pairs {
             if let Some(content) = maybe_content {
                 if !content.is_empty() {
-                    wstore.forge_set_content(&ForgeContent {
+                    wstore.agent_content_set(&AgentContent {
                         agent_id: agent_def.id.clone(),
                         content_type: content_type.to_string(),
                         content: content.clone(),
@@ -189,7 +189,7 @@ pub fn seed_forge_agents(wstore: &Arc<WaveStore>) -> Result<SeedReport, StoreErr
 
         // Insert skills
         for skill_def in &agent_def.skills {
-            let skill = ForgeSkill {
+            let skill = AgentSkill {
                 id: uuid::Uuid::new_v4().to_string(),
                 agent_id: agent_def.id.clone(),
                 name: skill_def.name.clone(),
@@ -199,7 +199,7 @@ pub fn seed_forge_agents(wstore: &Arc<WaveStore>) -> Result<SeedReport, StoreErr
                 content: skill_def.content.clone(),
                 created_at: now,
             };
-            wstore.forge_insert_skill(&skill)?;
+            wstore.agent_skill_insert(&skill)?;
         }
 
         created += 1;
@@ -219,7 +219,7 @@ pub fn auto_seed_on_startup(wstore: &Arc<WaveStore>) {
         }
     };
 
-    match wstore.forge_count() {
+    match wstore.agent_def_count() {
         Ok(0) => {
             tracing::info!("forge: no agents found, seeding from manifest v{}...", manifest.version);
             match seed_forge_agents(wstore) {
@@ -265,12 +265,12 @@ fn reseed_if_needed(
     wstore: &Arc<WaveStore>,
     manifest: &SeedManifest,
 ) -> Result<Option<ReseedReport>, StoreError> {
-    let existing = wstore.forge_list()?;
+    let existing = wstore.agent_def_list()?;
 
     // Check if any seeded agent needs updating by comparing providers/descriptions
     let manifest_ids: std::collections::HashSet<&str> =
         manifest.agents.iter().map(|a| a.id.as_str()).collect();
-    let existing_map: std::collections::HashMap<&str, &ForgeAgent> =
+    let existing_map: std::collections::HashMap<&str, &AgentDefinition> =
         existing.iter().map(|a| (a.id.as_str(), a)).collect();
 
     let mut needs_reseed = false;
@@ -313,7 +313,7 @@ fn reseed_if_needed(
 
     // Upsert agents from manifest
     for agent_def in &manifest.agents {
-        let mut agent = ForgeAgent {
+        let mut agent = AgentDefinition {
             id: agent_def.id.clone(),
             slug: agent_def.id.clone(),
             name: agent_def.name.clone(),
@@ -352,10 +352,10 @@ fn reseed_if_needed(
             agent.restart_on_crash = existing_agent.restart_on_crash;
             agent.created_at = existing_agent.created_at;
             agent.accounts = existing_agent.accounts.clone();
-            wstore.forge_update(&agent)?;
+            wstore.agent_def_update(&agent)?;
             updated += 1;
         } else {
-            wstore.forge_insert(&mut agent)?;
+            wstore.agent_def_insert(&mut agent)?;
             created += 1;
         }
     }
@@ -363,7 +363,7 @@ fn reseed_if_needed(
     // Remove seeded agents not in manifest (e.g., agent4, agent5)
     for agent in &existing {
         if agent.is_seeded == 1 && !manifest_ids.contains(agent.id.as_str()) {
-            wstore.forge_delete(&agent.id)?;
+            wstore.agent_def_delete(&agent.id)?;
             removed += 1;
             tracing::info!("forge: removed seeded agent '{}'", agent.id);
         }
