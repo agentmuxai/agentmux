@@ -177,7 +177,8 @@ const HOST_RESTART_WINDOW: std::time::Duration = std::time::Duration::from_secs(
 /// Spawn the CEF host suspended, assign it to the launcher's Job Object, and
 /// resume it. Returns the running child, or `None` if any step failed — the
 /// caller decides (fatal on first launch, give-up on a restart). `splash_event`
-/// is `Some` only for the first launch; restarts get no splash.
+/// is passed on every launch — including restarts — so a relaunched host can
+/// still dismiss a splash left pending by a host that crashed pre-first-frame.
 #[cfg(target_os = "windows")]
 fn spawn_host_supervised(
     real_exe: &std::path::Path,
@@ -581,8 +582,9 @@ async fn run_windows(
     let _srv_stdin_keepalive = srv_child.stdin.take();
 
     // 4-6. Spawn the host (suspended) → assign to J0 → resume, via
-    // spawn_host_supervised(). The first launch passes the splash event;
-    // restarts in the supervised wait loop below pass None.
+    // spawn_host_supervised(). The splash event is passed on every launch
+    // (including restarts) so a relaunched host still dismisses a pending
+    // splash if the first host crashed before its first frame.
     let host_env = paths.common.to_env_vars();
     let mut host_child = match spawn_host_supervised(
         real_exe,
@@ -663,7 +665,7 @@ async fn run_windows(
                     &pipe_path,
                     job.is_some(),
                     job_handle,
-                    None,
+                    splash_event_name.as_deref(),
                 ) {
                     Some(c) => host_child = c,
                     None => {
