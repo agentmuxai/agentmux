@@ -82,9 +82,9 @@ The widget bar shows pinned widgets directly; the rest live in a **More** dropdo
 | **Browser** | globe | `browser` | Embedded native `CefBrowserView` | Pinned |
 | **Terminal** | square-terminal | `term` | Terminal with xterm.js and real PTY | Pinned |
 | **Sysinfo** | chart-line | `sysinfo` | Live system metrics (CPU, memory, network, disk) | Pinned |
-| **DevTools** | code | `devtools` | Toggle Chromium DevTools (does not open a pane) | Pinned |
 | **Editor** | file-code | `editor` | Code editor with syntax highlighting | More |
 | **Swarm** | bee | `swarm` | Multi-agent orchestration overview | More |
+| **Drone** | diagram-project | `drone` | Visual DAG-of-blocks drone engine | More |
 | **Help** | circle-question | `help` | Built-in documentation and help | More |
 
 ### Not widgets — opened from elsewhere
@@ -94,6 +94,7 @@ The widget bar shows pinned widgets directly; the rest live in a **More** dropdo
 | **Identity** | Tab inside an Agent pane (cog → settings → Identity). Manage the credential bundle assigned to this instance. |
 | **Memory** | Tab inside an Agent pane (cog → settings → Memory). Manage the personality / capability bundle (provider, model, instructions, MCP, skills). Replaces the old Forge concept. |
 | **Settings** | Hamburger menu (≡) in the top tab bar → Settings. Opens `settings.json` in your default editor. |
+| **DevTools** | Hamburger menu (≡) in the top tab bar → DevTools. Toggles Chromium DevTools (no longer a widget). |
 
 ## Agents
 
