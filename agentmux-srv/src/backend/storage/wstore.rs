@@ -499,6 +499,11 @@ pub struct AgentDefinition {
     /// branches that didn't set a label. Added in v6.
     #[serde(default)]
     pub branch_label: String,
+    /// Last-modified timestamp (epoch ms). Set to `created_at` on insert
+    /// and refreshed on every `agent_def_update`. Schema v2. `0` for
+    /// rows written before v2 (until next update).
+    #[serde(default)]
+    pub updated_at: i64,
 }
 
 /// Derive a filesystem-safe slug from a display name. Lowercase,
@@ -567,15 +572,30 @@ pub struct AgentHistory {
 }
 
 impl WaveStore {
-    /// List all agent definitions, ordered by created_at ascending.
+    /// List all agent definitions, **most-recently-used first**.
+    ///
+    /// "Used" = the latest `started_at` of any `db_agent_instances` row for
+    /// the definition. Agents that have never been launched have no instance
+    /// row, so their `last_used` is NULL — SQLite sorts NULLs last under
+    /// `DESC`, placing never-launched agents after the launched ones,
+    /// ordered among themselves by `created_at ASC` (stable, oldest-first).
+    /// The launch picker relies on this order to default-select the
+    /// most-recent agent.
     pub fn agent_def_list(&self) -> Result<Vec<AgentDefinition>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, slug, name, icon, provider, description, working_directory, shell,
-                    provider_flags, auto_start, restart_on_crash, idle_timeout_minutes, created_at,
-                    agent_type, environment, agent_bus_id, is_seeded, accounts,
-                    parent_id, branch_label
-             FROM db_agent_definitions ORDER BY created_at ASC",
+            "SELECT d.id, d.slug, d.name, d.icon, d.provider, d.description,
+                    d.working_directory, d.shell, d.provider_flags, d.auto_start,
+                    d.restart_on_crash, d.idle_timeout_minutes, d.created_at,
+                    d.agent_type, d.environment, d.agent_bus_id, d.is_seeded,
+                    d.accounts, d.parent_id, d.branch_label, d.updated_at
+             FROM db_agent_definitions d
+             LEFT JOIN (
+                 SELECT definition_id, MAX(started_at) AS last_used
+                 FROM db_agent_instances
+                 GROUP BY definition_id
+             ) i ON i.definition_id = d.id
+             ORDER BY i.last_used DESC, d.created_at ASC",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(AgentDefinition {
@@ -599,6 +619,7 @@ impl WaveStore {
                 accounts: row.get(17)?,
                 parent_id: row.get(18)?,
                 branch_label: row.get(19)?,
+                updated_at: row.get(20)?,
             })
         })?;
         let mut agents = Vec::new();
@@ -663,9 +684,9 @@ impl WaveStore {
             "INSERT INTO db_agent_definitions (id, slug, name, icon, provider, description,
              working_directory, shell, provider_flags, auto_start, restart_on_crash,
              idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
-             is_seeded, accounts, parent_id, branch_label)
+             is_seeded, accounts, parent_id, branch_label, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19, ?20)",
+                     ?17, ?18, ?19, ?20, ?21)",
             params![
                 agent.id,
                 agent.slug,
@@ -687,6 +708,8 @@ impl WaveStore {
                 agent.accounts,
                 agent.parent_id,
                 agent.branch_label,
+                // New definitions: updated_at == created_at.
+                agent.created_at,
             ],
         )?;
         Ok(())
@@ -696,14 +719,22 @@ impl WaveStore {
     /// `parent_id` and `branch_label` are NOT updatable post-insert — they
     /// describe the agent's provenance; renaming or re-branching is done by
     /// creating a new fork, not mutating the original.
-    pub fn agent_def_update(&self, agent: &AgentDefinition) -> Result<bool, StoreError> {
+    ///
+    /// Self-stamps `updated_at` with the current time and writes it back into
+    /// `agent.updated_at`, so the caller's struct (e.g. an RPC response body)
+    /// reflects exactly what landed in the database.
+    pub fn agent_def_update(&self, agent: &mut AgentDefinition) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
         let rows = conn.execute(
             "UPDATE db_agent_definitions SET name=?1, icon=?2, provider=?3, description=?4,
              working_directory=?5, shell=?6, provider_flags=?7, auto_start=?8,
              restart_on_crash=?9, idle_timeout_minutes=?10,
-             agent_type=?11, environment=?12, agent_bus_id=?13, accounts=?14
-             WHERE id=?15",
+             agent_type=?11, environment=?12, agent_bus_id=?13, accounts=?14, updated_at=?15
+             WHERE id=?16",
             params![
                 agent.name,
                 agent.icon,
@@ -719,9 +750,13 @@ impl WaveStore {
                 agent.environment,
                 agent.agent_bus_id,
                 agent.accounts,
+                now,
                 agent.id
             ],
         )?;
+        // Reflect the persisted timestamp back to the caller's struct so an
+        // RPC response carries the fresh value, not the pre-update one.
+        agent.updated_at = now;
         Ok(rows > 0)
     }
 
@@ -2547,6 +2582,7 @@ mod tests {
             accounts: String::new(),
             parent_id: String::new(),
             branch_label: String::new(),
+            updated_at: 0,
         };
         store.agent_def_insert(&mut a1).unwrap();
         // "Agent X" → "agent-x"
@@ -2608,6 +2644,7 @@ mod tests {
             accounts: String::new(),
             parent_id: String::new(),
             branch_label: String::new(),
+            updated_at: 0,
         };
         store.agent_def_insert(&mut a1).unwrap();
         assert_eq!(a1.slug, "explicit");
@@ -2664,6 +2701,7 @@ mod tests {
             accounts: String::new(),
             parent_id: String::new(),
             branch_label: String::new(),
+            updated_at: 0,
         }
     }
 
@@ -2784,6 +2822,49 @@ mod tests {
         assert_eq!(running.len(), 0);
         let stopped = store.instance_list(None, Some("stopped")).unwrap();
         assert_eq!(stopped.len(), 1);
+    }
+
+    #[test]
+    fn test_agent_def_list_orders_by_last_used() {
+        let store = v6_test_store();
+        // Three definitions; none launched yet.
+        let mut a = sample_agent("def-a", "agent-a");
+        let mut b = sample_agent("def-b", "agent-b");
+        let mut c = sample_agent("def-c", "agent-c");
+        store.agent_def_insert(&mut a).unwrap();
+        store.agent_def_insert(&mut b).unwrap();
+        store.agent_def_insert(&mut c).unwrap();
+
+        let mk = |id: &str, def: &str, started: i64| AgentInstance {
+            id: id.to_string(),
+            definition_id: def.to_string(),
+            parent_instance_id: String::new(),
+            block_id: String::new(),
+            session_id: String::new(),
+            status: InstanceStatus::Running.as_str().to_string(),
+            github_context: String::new(),
+            started_at: started,
+            ended_at: 0,
+            created_at: started,
+            identity_id: String::new(),
+            memory_id: String::new(),
+            instance_name: String::new(),
+            working_directory: String::new(),
+            display_hidden: false,
+        };
+        // Launch def-a, then def-b later. def-c is never launched.
+        store.instance_create(&mk("i-a", "def-a", 500)).unwrap();
+        store.instance_create(&mk("i-b", "def-b", 600)).unwrap();
+
+        let ids = |s: &WaveStore| -> Vec<String> {
+            s.agent_def_list().unwrap().into_iter().map(|d| d.id).collect()
+        };
+        // Most-recently-launched first; never-launched (def-c) last.
+        assert_eq!(ids(&store), vec!["def-b", "def-a", "def-c"]);
+
+        // A newer launch of def-a flips it above def-b (MAX(started_at)).
+        store.instance_create(&mk("i-a2", "def-a", 700)).unwrap();
+        assert_eq!(ids(&store), vec!["def-a", "def-b", "def-c"]);
     }
 
     #[test]

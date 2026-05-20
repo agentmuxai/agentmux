@@ -115,6 +115,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     accounts: String::new(),
                     parent_id: String::new(),
                     branch_label: String::new(),
+                    updated_at: now,
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
@@ -147,7 +148,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // slug is preserved from the existing row — it's
                 // immutable after creation. The update path never
                 // accepts a new slug from the client.
-                let agent = AgentDefinition {
+                let mut agent = AgentDefinition {
                     id: cmd.id,
                     slug: old.slug.clone(),
                     name: cmd.name,
@@ -176,8 +177,12 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // not in-place edits).
                     parent_id: old.parent_id.clone(),
                     branch_label: old.branch_label.clone(),
+                    // Placeholder — agent_def_update self-stamps the real
+                    // timestamp and writes it back into `agent` below, so
+                    // the response body carries the fresh value.
+                    updated_at: old.updated_at,
                 };
-                let found = wstore.agent_def_update(&agent).map_err(|e| format!("updateagent: {e}"))?;
+                let found = wstore.agent_def_update(&mut agent).map_err(|e| format!("updateagent: {e}"))?;
                 if !found {
                     return Err(format!("updateagent: agent {} not found", agent.id));
                 }
@@ -527,6 +532,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     accounts: String::new(),
                     parent_id: String::new(),
                     branch_label: String::new(),
+                    updated_at: now,
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
 
@@ -657,6 +663,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         accounts: String::new(),
                         parent_id: String::new(),
                         branch_label: String::new(),
+                        updated_at: now,
                     };
 
                     if let Err(e) = wstore.agent_def_insert(&mut agent) {
@@ -1415,6 +1422,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     accounts: String::new(),
                     parent_id: source.id.clone(),
                     branch_label: cmd.branch_label.clone(),
+                    updated_at: now,
                 };
                 wstore
                     .agent_def_insert(&mut fork)

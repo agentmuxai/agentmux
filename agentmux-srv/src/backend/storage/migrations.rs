@@ -22,9 +22,11 @@ use tracing::warn;
 use super::error::StoreError;
 
 /// `user_version` value stamped into `objects.db` after `run_object_schema`.
-/// The flat schema resets the version counter to 1 — the pre-flatten
-/// migration chain never set `user_version`, so legacy files read 0.
-pub const OBJECT_SCHEMA_VERSION: i64 = 1;
+/// The flat schema reset the counter to 1 (the pre-flatten chain never set
+/// `user_version`, so legacy files read 0). Bumped per additive migration:
+///   v1 — flat schema baseline
+///   v2 — db_agent_definitions.updated_at
+pub const OBJECT_SCHEMA_VERSION: i64 = 2;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -130,7 +132,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             accounts             TEXT NOT NULL DEFAULT '',
             parent_id            TEXT NOT NULL DEFAULT '',
             branch_label         TEXT NOT NULL DEFAULT '',
-            created_at           INTEGER NOT NULL DEFAULT 0
+            created_at           INTEGER NOT NULL DEFAULT 0,
+            updated_at           INTEGER NOT NULL DEFAULT 0
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_definitions_slug
             ON db_agent_definitions(slug);
@@ -290,6 +293,25 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         CREATE INDEX IF NOT EXISTS idx_drone_runs_status
             ON db_drone_runs(status);",
     )?;
+
+    // ---- Additive column migrations (schema v2+) ----
+    // The flat CREATE batch above covers fresh databases. These ALTERs
+    // carry an existing database (e.g. a developer's dev DB that persists
+    // across builds) forward. Idempotent: the "duplicate column" error is
+    // swallowed. New additive columns append here + bump OBJECT_SCHEMA_VERSION.
+    //
+    // v2: db_agent_definitions.updated_at — last-modified timestamp
+    //     (created_at already existed; updates now stamp updated_at).
+    for stmt in &[
+        "ALTER TABLE db_agent_definitions ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
+    ] {
+        if let Err(e) = conn.execute_batch(stmt) {
+            let msg = e.to_string();
+            if !msg.contains("duplicate column") {
+                return Err(e.into());
+            }
+        }
+    }
 
     // ---- Seed blank Identity / Memory singletons ----
     // The launch UI renders these as the default option in its Identity /
