@@ -93,7 +93,7 @@ function findAuthFile(overrideWsUrl, overrideAuthKey) {
     if (candidates.length === 0) {
         throw new Error(
             `No authkey.dev found under ~/.agentmux/dev/*/data/ or ~/.agentmux/versions/*/data/.\n` +
-            `Start a dev instance first: task dev\n` +
+            `Start an instance: task dev  (dev)  or launch the portable build.\n` +
             `See docs/specs/SPEC_TEST_API_ACCESS.md §5`
         );
     }
@@ -107,7 +107,8 @@ function findAuthFile(overrideWsUrl, overrideAuthKey) {
             process.stderr.write(`Stale authkey.dev (pid ${auth.host_pid} dead): ${path}\n`);
             continue;
         }
-        process.stderr.write(`Using authkey.dev: ${path} (instance=${auth.instance}, pid=${auth.host_pid})\n`);
+        const mode = path.includes(`${join("", ".agentmux", "dev")}`) ? "dev" : "portable";
+        process.stderr.write(`Using authkey.dev: ${path} (instance=${auth.instance}, pid=${auth.host_pid}, mode=${mode})\n`);
         return auth;
     }
 
