@@ -41,11 +41,18 @@ mod wrr;
 /// docs/specs/SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md.
 #[cfg(target_os = "windows")]
 fn suppress_os_crash_dialogs() {
-    use windows_sys::Win32::System::Diagnostics::Debug::{
-        SetErrorMode, SEM_FAILCRITICALERRORS, SEM_NOGPFAULTERRORBOX,
-    };
+    use windows_sys::Win32::System::Diagnostics::Debug::{SetErrorMode, SEM_FAILCRITICALERRORS};
+    use windows_sys::Win32::System::ErrorReporting::{WerSetFlags, WER_FAULT_REPORTING_NO_UI};
     unsafe {
-        SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+        // Suppress the WER crash-dialog UI WITHOUT disabling WER itself —
+        // SEM_NOGPFAULTERRORBOX would also kill WER/LocalDumps crash-dump
+        // collection, the postmortem diagnostics this stability work needs.
+        // WER_FAULT_REPORTING_NO_UI is the documented "no UI, keep
+        // reports" path.
+        let _ = WerSetFlags(WER_FAULT_REPORTING_NO_UI);
+        // SEM_FAILCRITICALERRORS suppresses the critical-error handler
+        // (e.g. "no disk in drive" popups) — unrelated to crash reporting.
+        SetErrorMode(SEM_FAILCRITICALERRORS);
     }
 }
 

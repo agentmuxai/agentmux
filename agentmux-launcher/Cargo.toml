@@ -70,6 +70,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_JobObjects",
     "Win32_System_Threading",
     "Win32_System_Diagnostics_Debug",
+    "Win32_System_ErrorReporting",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_Foundation",
     # CreateJobObjectW takes SECURITY_ATTRIBUTES* — guarded by this
