@@ -403,6 +403,13 @@ impl Controller for ShellController {
 
         let pair = pty_system.openpty(pty_size).map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, "failed to open PTY");
+            if let Some(ref broker) = self.broker {
+                let msg = format!(
+                    "\r\n\x1b[31mTerminal failed to open: {e}\x1b[0m\r\n\
+                     \x1b[33mThis is often caused by low system memory.\x1b[0m\r\n"
+                );
+                handle_append_block_file(broker, &self.block_id, "term", msg.as_bytes(), None);
+            }
             let mut inner = self.inner.lock().unwrap();
             Self::set_status(&mut inner, STATUS_DONE);
             inner.proc_exit_code = -1;
@@ -603,6 +610,13 @@ impl Controller for ShellController {
 
         let mut child = pair.slave.spawn_command(cmd).map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, cmd = %cmd_str, "spawn failed");
+            if let Some(ref broker) = self.broker {
+                let msg = format!(
+                    "\r\n\x1b[31mShell failed to start: {e}\x1b[0m\r\n\
+                     \x1b[33mThis is often caused by low system memory.\x1b[0m\r\n"
+                );
+                handle_append_block_file(broker, &self.block_id, "term", msg.as_bytes(), None);
+            }
             let mut inner = self.inner.lock().unwrap();
             Self::set_status(&mut inner, STATUS_DONE);
             inner.proc_exit_code = -1;
