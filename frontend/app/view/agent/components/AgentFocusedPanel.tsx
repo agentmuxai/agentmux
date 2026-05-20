@@ -17,7 +17,11 @@ import type { OverlayTab } from "../agent-model";
 interface AgentFocusedPanelProps {
     blockId: string;
     nodeModel: BlockNodeModel;
-    agent: AgentDefinition;
+    /** The agent definition, or undefined when the pane can't be resolved
+     *  to a `db_agent_definitions` row (provider quick-launch, deleted
+     *  definition, list not yet loaded). Forwarded straight to
+     *  `AgentCardSettingsPanel`, which treats undefined as create-mode. */
+    agent: AgentDefinition | undefined;
     initialTab: OverlayTab;
     onClose: () => void;
     onTabChange?: (tab: SettingsTab) => void;
