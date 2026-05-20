@@ -11,7 +11,7 @@ pub mod config_watcher_fs;
 pub mod ijson;
 pub mod docsite;
 pub mod eventbus;
-pub mod forge_seed;
+pub mod agent_seed;
 pub mod history;
 pub mod lan_discovery;
 pub mod messagebus;

@@ -14,7 +14,9 @@ use rusqlite::{params, Connection};
 use super::cache::CacheEntry;
 use super::types::{FileMeta, FileOpts, WaveFile};
 use crate::backend::storage::error::StoreError;
-use crate::backend::storage::migrations::run_filestore_migrations;
+use crate::backend::storage::migrations::{
+    run_filestore_migrations, stamp_and_check_version, FILESTORE_SCHEMA_VERSION,
+};
 
 /// Default part size: 64KB (matches Go's DefaultPartDataSize).
 pub(super) const PART_DATA_SIZE: usize = 64 * 1024;
@@ -70,6 +72,7 @@ impl FileStore {
              PRAGMA busy_timeout=5000;",
         )?;
         run_filestore_migrations(&conn)?;
+        stamp_and_check_version(&conn, FILESTORE_SCHEMA_VERSION, "filestore.db")?;
         Ok(Self {
             conn: Mutex::new(conn),
             cache: Mutex::new(HashMap::new()),

@@ -10,8 +10,8 @@ pub mod migrations;
 pub mod wstore;
 
 pub use error::StoreError;
-pub use wstore::ForgeAgent;
-pub use wstore::ForgeContent;
+pub use wstore::AgentDefinition;
+pub use wstore::AgentContent;
 #[allow(unused_imports)]
-pub use wstore::ForgeHistory;
-pub use wstore::ForgeSkill;
+pub use wstore::AgentHistory;
+pub use wstore::AgentSkill;

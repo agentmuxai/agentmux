@@ -262,6 +262,7 @@ impl LauncherSagaLog {
              PRAGMA foreign_keys=ON;",
         )?;
         schema::run_migrations(&conn)?;
+        schema::stamp_and_check_version(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })

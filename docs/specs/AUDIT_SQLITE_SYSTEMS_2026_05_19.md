@@ -21,7 +21,7 @@ This document inventories every SQLite touchpoint: writer, schema, lifecycle, wh
 | File | Writer | Holds | Path | Lifecycle |
 |---|---|---|---|---|
 | `objects.db` | `agentmux-srv` | App-domain state + bundles + agents (mixed durable + runtime) | `<version-data-dir>/db/objects.db` | Lifetime of the user's install per version |
-| `filestore.db` | `agentmux-srv` | Per-block content blobs (forge configs, snapshots, file-pane content) | `<version-data-dir>/db/filestore.db` | Same; rebuildable but referenced by `objects.db` |
+| `filestore.db` | `agentmux-srv` | Per-block content blobs (agent configs, snapshots, file-pane content) | `<version-data-dir>/db/filestore.db` | Same; rebuildable but referenced by `objects.db` |
 | `sagas.db` | `agentmux-srv` | srv-side saga coordinator durability | `<version-data-dir>/db/sagas.db` | Per-version; truncated on saga completion |
 | `launcher-sagas.db` | `agentmux-launcher` | Launcher-side saga state (LSD spec) | `<version-data-dir>/db/launcher-sagas.db` (legacy installs migrate from the pre-2026-05-19 root location on first launch) | Per-version |
 | `registry/store` (NB: filesystem, not SQLite — flat file registry) | `agentmux-srv` migrator + `agentmux-launcher` reader | Cross-version named-agent history (Continue dropdown) | `~/.agentmux/shared/registry/` | One-shot migrated from per-version `objects.db` snapshots |
@@ -47,11 +47,20 @@ This document inventories every SQLite touchpoint: writer, schema, lifecycle, wh
   - `mmap_size=268435456`
   - `temp_store=MEMORY`
 
-### 2.2 Schema (current, after `run_forge_migrations` v1 → v10)
+### 2.2 Schema (current, after `run_object_schema`)
 
-Migrations are **additive, idempotent**, chained linearly in `run_forge_migrations` (`migrations.rs:111-132`). No `PRAGMA user_version` discipline — relies on `CREATE TABLE IF NOT EXISTS` + `ALTER TABLE … duplicate-column` swallowing.
+> **Updated 2026-05-19** — the v1→v11 incremental migration chain was
+> flattened into a single `run_object_schema` and the `forge` table
+> vocabulary retired. See
+> [`SPEC_SCHEMA_FLATTENING_2026_05_19.md`](./SPEC_SCHEMA_FLATTENING_2026_05_19.md).
+> Table names below reflect the post-flatten schema.
 
-#### 2.2.a Generic object tables (run_wstore_migrations)
+The schema is now **one flat `CREATE TABLE IF NOT EXISTS` batch** in
+`run_object_schema`, plus a `user_version` tripwire (`stamp_and_check_version`,
+see §8.5). A single `adopt_legacy_table_names` step renames any pre-flatten
+tables found on a dev database.
+
+#### 2.2.a Generic object tables
 
 One row-per-otype with `(oid, version, data TEXT)`:
 
@@ -65,41 +74,43 @@ These are the reducer's app-domain state. JSON blobs in `data`. Writes funnel th
 
 The `saga` + `saga_step` schema lives in `sagas.db`, owned by `SagaLog` (`sagas/log.rs`). The initial draft of this audit incorrectly claimed `run_saga_log_migrations` also runs inside `WaveStore::configure_and_migrate`; verification on `main` (2026-05-19) confirms it does **not**. `objects.db` has no saga tables; `sagas.db` is the only home. The launcher's `launcher-sagas.db` is unambiguously its own file. See §4 for both schemas.
 
-#### 2.2.c Forge agent definitions (run_forge_v1 → v2)
+#### 2.2.c Agent definitions
 
 | Table | Purpose |
 |---|---|
-| `db_forge_agents` | Agent CLI definitions (slug, provider, working_directory, shell, …) — seeded from defaults on first launch |
-| `db_forge_content` | Generated config blobs per agent (soul/agentmd/mcp/env/memory) |
-| `db_forge_skills` | Skill catalog per agent |
-| `db_forge_history` | Per-agent launch history (legacy; named-agent registry now owns this) |
+| `db_agent_definitions` (was `db_forge_agents`) | Agent CLI definitions (slug, provider, working_directory, shell, …) — seeded from defaults on first launch |
+| `db_agent_content` (was `db_forge_content`) | Generated config blobs per agent (soul/agentmd/mcp/env/memory) |
+| `db_agent_skills` (was `db_forge_skills`) | Skill catalog per agent |
+| `db_agent_history` (was `db_forge_history`) | Per-agent launch history (legacy; named-agent registry now owns this) |
 
-#### 2.2.d Identity + bundle system (v5 → v8)
+#### 2.2.d Identity + bundle system
 
 | Table | Purpose |
 |---|---|
 | `db_identity_accounts` | Provider OAuth/API-key accounts (one row per attached account) |
-| `db_forge_agent_identities` | Junction: agent ↔ account (legacy v6) |
+| `db_agent_identity_links` (was `db_forge_agent_identities`) | Junction: agent ↔ account |
 | `db_agent_instances` | Per-instance launch rows (block_id, identity_id, memory_id, working_directory, parent_instance_id) |
-| `db_identity_bundles` (v11; renamed from `db_identities` in v7) | User-named identity bundles (Work, Personal, …) |
+| `db_identity_bundles` | User-named identity bundles (Work, Personal, …) |
 | `db_identity_bindings` | Junction: identity bundle ↔ account ↔ provider |
-| `db_memory_bundles` (v11; renamed from `db_memories` in v7) | User-named memory bundles (notes/instructions) |
+| `db_memory_bundles` | User-named memory bundles (notes/instructions) |
 
-#### 2.2.e Workflow / Drone (v9 → v10)
+#### 2.2.e Drone
 
 | Table | Purpose |
 |---|---|
-| `db_workflow_definitions` (v9) | Pre-rename — kept for back-compat |
-| `db_workflow_runs` (v9) | Pre-rename — kept for back-compat |
-| `db_drone_definitions` (v10) | Renamed from workflow; user-defined drone graphs |
-| `db_drone_runs` (v10) | Drone execution history |
+| `db_drone_definitions` | User-defined drone graphs |
+| `db_drone_runs` | Drone execution history |
+
+The pre-flatten `db_workflow_definitions` / `db_workflow_runs` (and the
+`db_v10_migrated_legacy_*` sentinel tables) were dropped by the flatten —
+their data had already been copied into `db_drone_*`.
 
 ### 2.3 Indexes summary
 
 Identity / agent path indexes:
 ```
 idx_identity_accounts_provider
-idx_forge_agent_identities_account
+idx_agent_identity_links_account
 idx_agent_instances_definition
 idx_agent_instances_block
 idx_agent_instances_status
@@ -224,15 +235,15 @@ No `sqlx`, no `diesel`, no async DB layer. All SQLite access is synchronous behi
 
 ## 8. Open inconsistencies + clean-up items
 
-1. ~~**Schema naming drift.** v7 creates a table called `db_identities` (`migrations.rs:470`), but the rest of the code and docs call it `db_identity_bundles`.~~ **Fixed** — v11 (`run_forge_v11_migrations`) renames `db_identities` → `db_identity_bundles` and `db_memories` → `db_memory_bundles` via `ALTER TABLE … RENAME`. SQLite ≥ 3.25 auto-updates the FK reference in `db_identity_bindings`. v7's legacy-name DDL/seed block is guarded so it doesn't re-create empty old tables on subsequent startups. All `wstore.rs` queries and doc comments now use the bundle names.
+1. ~~**Schema naming drift.** v7 creates a table called `db_identities`, but the rest of the code and docs call it `db_identity_bundles`.~~ **Fixed** — first by the v11 rename migration (PR #933), then fully absorbed by the schema flatten: `run_object_schema` defines `db_identity_bundles` / `db_memory_bundles` (and the de-forged `db_agent_*` tables) directly. The legacy-name drift no longer exists in the source.
 
 2. ~~`saga` tables in two files.~~ **Retracted** — the initial audit miscounted; `run_saga_log_migrations` is only invoked from `SagaLog::configure_and_migrate`, so `objects.db` has no saga tables. See §2.2.b.
 
 3. **`launcher-sagas.db` lives in the wrong directory.** ~~Srv puts its DBs in `<data-dir>/db/`; launcher puts `launcher-sagas.db` directly in `<data-dir>/`.~~ **Fixed** in PR #932 — `agentmux-launcher::data_dir::launcher_saga_log_path` performs a one-shot rename of any pre-existing file from `<data-dir>/launcher-sagas.db` into `<data-dir>/db/launcher-sagas.db`. Idempotent + safe to call repeatedly. `main.rs` uses this writing variant; `diag.rs` uses the read-only sibling `launcher_saga_log_path_read_only` so `--diag sagas` stays passive.
 
-4. **`db_workflow_*` vs `db_drone_*` after the rename.** Both exist on v10. Eventually drop the v9 workflow tables (and the migration step) once we're confident no rows reference them.
+4. ~~**`db_workflow_*` vs `db_drone_*` after the rename.**~~ **Fixed** by the schema flatten — `db_workflow_definitions` / `db_workflow_runs` are no longer created, and `adopt_legacy_table_names` drops them (plus the `db_v10_migrated_legacy_*` sentinels) from any dev DB that still has them. Their data had already been copied into `db_drone_*`.
 
-5. **No `PRAGMA user_version` discipline.** All migrations rely on idempotent DDL + `ALTER TABLE ... duplicate-column` error-swallow. Works, but is fragile. A real `user_version` ladder with explicit per-version "ran" markers would catch a partially-applied migration. Lower priority unless we hit a real bug.
+5. ~~**No `PRAGMA user_version` discipline.**~~ **Fixed** — `stamp_and_check_version` stamps `user_version` on all four SQLite files (`objects.db`, `filestore.db`, `sagas.db`, `launcher-sagas.db`) and logs a loud warning when a file reports a version newer than the running build (downgrade tripwire). Deliberately a tripwire, not a migration gate — the idempotent DDL remains the schema mechanism. See `SPEC_SCHEMA_FLATTENING_2026_05_19.md` §8.
 
 6. **Foreign keys ON only set in `WaveStore`.** `FileStore`'s connection doesn't set `foreign_keys=ON` (it has no FKs to enforce so probably fine, but worth documenting the gap).
 
@@ -274,7 +285,7 @@ agentmux-docs internals currently has:
 - [`internals/data-layout.md`](https://github.com/agentmuxai/agentmux-docs/blob/main/src/content/docs/internals/data-layout.md) — accurate on the per-version tree structure. Missing: registry layout under `shared/`, the planned `shared/store.db`, the `launcher-sagas.db` filename quirk.
 - [`internals/persistence.md`](https://github.com/agentmuxai/agentmux-docs/blob/main/src/content/docs/internals/persistence.md) — accurate on the four-file model. Missing:
   - The full bundle table catalog (`db_identity_bundles`, `db_identity_bindings`, `db_memory_bundles`, `db_identity_accounts`)
-  - `db_forge_*` table family
+  - `db_agent_*` table family (`db_agent_definitions`, `db_agent_content`, `db_agent_skills`, `db_agent_history`, `db_agent_identity_links`)
   - `db_drone_*` (workflows → drone rename)
   - The dual-DB `saga` table presence
   - The named-agent registry sharing layer

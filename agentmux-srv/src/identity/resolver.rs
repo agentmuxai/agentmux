@@ -337,7 +337,7 @@ mod tests {
     fn inject_blank_identity_does_nothing() {
         let store = make_store();
         // Need a definition for the FK on db_agent_instances.
-        let mut def = crate::backend::storage::wstore::ForgeAgent {
+        let mut def = crate::backend::storage::wstore::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),
             name: "T".to_string(),
@@ -359,7 +359,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
         };
-        store.forge_insert(&mut def).unwrap();
+        store.agent_def_insert(&mut def).unwrap();
 
         let mut inst = make_instance("block-blank", "blank");
         store.instance_create(&inst).unwrap();
@@ -376,7 +376,7 @@ mod tests {
         let store = make_store();
 
         // Forge agent (definition).
-        let mut def = crate::backend::storage::wstore::ForgeAgent {
+        let mut def = crate::backend::storage::wstore::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),
             name: "T".to_string(),
@@ -398,7 +398,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
         };
-        store.forge_insert(&mut def).unwrap();
+        store.agent_def_insert(&mut def).unwrap();
 
         // Identity bundle.
         let identity = Identity {
@@ -459,7 +459,7 @@ mod tests {
     fn inject_partial_success_skips_failed_bindings() {
         let store = make_store();
 
-        let mut def = crate::backend::storage::wstore::ForgeAgent {
+        let mut def = crate::backend::storage::wstore::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),
             name: "T".to_string(),
@@ -481,7 +481,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
         };
-        store.forge_insert(&mut def).unwrap();
+        store.agent_def_insert(&mut def).unwrap();
 
         let identity = Identity {
             id: "id-mixed".to_string(),
@@ -537,7 +537,7 @@ mod tests {
     fn inject_unknown_provider_is_skipped() {
         let store = make_store();
 
-        let mut def = crate::backend::storage::wstore::ForgeAgent {
+        let mut def = crate::backend::storage::wstore::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),
             name: "T".to_string(),
@@ -559,7 +559,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
         };
-        store.forge_insert(&mut def).unwrap();
+        store.agent_def_insert(&mut def).unwrap();
 
         let identity = Identity {
             id: "id-future".to_string(),

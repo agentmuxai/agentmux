@@ -158,7 +158,7 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 tracing::info!(agent_id = %cmd.agent_id, "agent.open");
 
                 // 1. Load the Forge agent (by id or name)
-                let agents = wstore.forge_list()
+                let agents = wstore.agent_def_list()
                     .map_err(|e| format!("agent.open: {e}"))?;
                 let agent = agents.iter()
                     .find(|a| a.id == cmd.agent_id || a.name.eq_ignore_ascii_case(&cmd.agent_id))
@@ -1727,14 +1727,14 @@ pub fn allocate_agent_workdir(desired: &str) -> Result<String, String> {
 /// Write agent config files (CLAUDE.md, .mcp.json, etc.) to the working directory.
 fn write_agent_config_files(
     wstore: &WaveStore,
-    agent: &crate::backend::storage::ForgeAgent,
+    agent: &crate::backend::storage::AgentDefinition,
     agent_slug: &str,
     work_dir: &str,
 ) -> Result<(), String> {
     // Load forge contents and skills
-    let contents = wstore.forge_get_all_content(&agent.id)
+    let contents = wstore.agent_content_get_all(&agent.id)
         .unwrap_or_default();
-    let skills = wstore.forge_list_skills(&agent.id)
+    let skills = wstore.agent_skill_list(&agent.id)
         .unwrap_or_default();
 
     let mut content_map = std::collections::HashMap::new();

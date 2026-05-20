@@ -1,7 +1,7 @@
 pub(crate) mod cli_handlers;
 mod files;
 mod app_api;
-mod forge_handlers;
+mod agent_handlers;
 mod identity_handlers;
 pub mod install_handlers;
 mod messagebus;

@@ -465,7 +465,7 @@ async fn main() {
     }
 
     // Auto-seed Forge agents on first launch (or empty DB)
-    backend::forge_seed::auto_seed_on_startup(&wstore);
+    backend::agent_seed::auto_seed_on_startup(&wstore);
 
     // Event infrastructure
     let event_bus = Arc::new(EventBus::new());
