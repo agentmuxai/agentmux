@@ -136,22 +136,36 @@ function openWs(wsEndpoint, authKey) {
     const eventHandlers = [];       // (msg) => void
 
     ws.on("message", (raw) => {
-        const msg = JSON.parse(raw.toString("utf8"));
-        if (msg.wscommand === "eventrecv") {
-            for (const h of eventHandlers) h(msg);
+        // Envelope: { eventtype: "rpc", data: <RpcMessage> }
+        // RpcMessage response: { resid: <original reqid>, data: {...} }
+        // RpcMessage event:    { command: "eventrecv", data: { event, scopes, data } }
+        const envelope = JSON.parse(raw.toString("utf8"));
+        if (envelope.eventtype !== "rpc") return;
+        const rpcMsg = envelope.data;
+        if (!rpcMsg) return;
+
+        if (rpcMsg.command === "eventrecv") {
+            for (const h of eventHandlers) h(rpcMsg.data);
             return;
         }
-        if (msg.reqid && pending.has(msg.reqid)) {
-            const { resolve } = pending.get(msg.reqid);
-            pending.delete(msg.reqid);
-            resolve(msg);
+        if (rpcMsg.resid && pending.has(rpcMsg.resid)) {
+            const { resolve } = pending.get(rpcMsg.resid);
+            pending.delete(rpcMsg.resid);
+            resolve(rpcMsg);
         }
     });
 
-    function rpc(command, data) {
+    function rpc(command, data, timeoutMs = 10000) {
         return new Promise((resolve, reject) => {
             const reqid = randomUUID();
-            pending.set(reqid, { resolve, reject });
+            const timer = setTimeout(() => {
+                pending.delete(reqid);
+                reject(new Error(`RPC timeout: ${command} (${timeoutMs}ms)`));
+            }, timeoutMs);
+            pending.set(reqid, {
+                resolve: (msg) => { clearTimeout(timer); resolve(msg); },
+                reject,
+            });
             ws.send(JSON.stringify({ wscommand: "rpc", message: { command, reqid, data } }));
         });
     }
