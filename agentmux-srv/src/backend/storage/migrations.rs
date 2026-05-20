@@ -109,6 +109,24 @@ pub fn run_filestore_migrations(conn: &Connection) -> Result<(), StoreError> {
 /// Initialize the Forge schema.
 /// Creates the db_forge_agents table for user-defined AI agents.
 pub fn run_forge_migrations(conn: &Connection) -> Result<(), StoreError> {
+    run_forge_v1_migrations(conn)?;
+    run_forge_v2_migrations(conn)?;
+    run_forge_v3_migrations(conn)?;
+    run_forge_v4_migrations(conn)?;
+    run_forge_v5_migrations(conn)?;
+    run_forge_v6_migrations(conn)?;
+    run_forge_v7_migrations(conn)?;
+    run_forge_v8_migrations(conn)?;
+    run_forge_v9_migrations(conn)?;
+    run_forge_v10_migrations(conn)?;
+    run_forge_v11_migrations(conn)?;
+    Ok(())
+}
+
+/// Forge v1: original `db_forge_agents` base table. Kept as a separate
+/// step so tests can stage a pre-v7 state by composing v1..v6 without
+/// pulling later migrations (notably v11's rename to bundle tables).
+pub fn run_forge_v1_migrations(conn: &Connection) -> Result<(), StoreError> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS db_forge_agents (
             id TEXT PRIMARY KEY,
@@ -119,15 +137,6 @@ pub fn run_forge_migrations(conn: &Connection) -> Result<(), StoreError> {
             created_at INTEGER NOT NULL DEFAULT 0
         );",
     )?;
-    run_forge_v2_migrations(conn)?;
-    run_forge_v3_migrations(conn)?;
-    run_forge_v4_migrations(conn)?;
-    run_forge_v5_migrations(conn)?;
-    run_forge_v6_migrations(conn)?;
-    run_forge_v7_migrations(conn)?;
-    run_forge_v8_migrations(conn)?;
-    run_forge_v9_migrations(conn)?;
-    run_forge_v10_migrations(conn)?;
     Ok(())
 }
 
@@ -443,18 +452,20 @@ pub fn run_forge_v6_migrations(conn: &Connection) -> Result<(), StoreError> {
 ///
 /// Schema changes:
 ///
-/// - `db_identities` (new): named Identity bundles. Each row has a unique
-///   `name` (e.g. "Work", "Personal"). The `is_blank` flag tags the seeded
-///   singleton row that the launch UI defaults to.
+/// - `db_identities` (new — later renamed to `db_identity_bundles` by v11):
+///   named Identity bundles. Each row has a unique `name` (e.g. "Work",
+///   "Personal"). The `is_blank` flag tags the seeded singleton row that the
+///   launch UI defaults to.
 /// - `db_identity_bindings` (new): junction `(identity_id, provider) →
 ///   account_id`. Replaces the per-agent semantics of v6's
 ///   `db_forge_agent_identities` (which is left in place as legacy fallback;
 ///   a future v8 may drop it once all readers are migrated).
-/// - `db_memories` (new): named Memory bundles holding the agent's
-///   personality / capability stack — provider, model, instructions, context
-///   files, MCP servers, skills. Forge agents (`db_forge_agents`) get
-///   shadow-migrated into Memory rows so existing definitions remain
-///   accessible from the new code paths without data loss.
+/// - `db_memories` (new — later renamed to `db_memory_bundles` by v11): named
+///   Memory bundles holding the agent's personality / capability stack —
+///   provider, model, instructions, context files, MCP servers, skills.
+///   Forge agents (`db_forge_agents`) get shadow-migrated into Memory rows so
+///   existing definitions remain accessible from the new code paths without
+///   data loss.
 /// - `db_agent_instances.identity_id` / `db_agent_instances.memory_id` (new
 ///   columns): the launch composition. NULL means "use the blank
 ///   singleton".
@@ -465,6 +476,56 @@ pub fn run_forge_v6_migrations(conn: &Connection) -> Result<(), StoreError> {
 /// ignore them, but they remain on disk so a downgrade path stays open until
 /// v8.
 pub fn run_forge_v7_migrations(conn: &Connection) -> Result<(), StoreError> {
+    // ---- Add identity_id / memory_id columns to db_agent_instances ----
+    // Always runs (idempotent: duplicate-column errors swallowed).
+    // Unaffected by v11's bundle-table rename — these are columns on
+    // db_agent_instances, not on the renamed tables.
+    let alter_statements = [
+        "ALTER TABLE db_agent_instances ADD COLUMN identity_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agent_instances ADD COLUMN memory_id TEXT NOT NULL DEFAULT ''",
+    ];
+    for stmt in &alter_statements {
+        match conn.execute_batch(stmt) {
+            Ok(_) => {}
+            Err(e) => {
+                let msg = e.to_string();
+                if !msg.contains("duplicate column") {
+                    return Err(StoreError::Sqlite(match e {
+                        rusqlite::Error::SqliteFailure(code, _) => {
+                            rusqlite::Error::SqliteFailure(code, Some(msg))
+                        }
+                        other => other,
+                    }));
+                }
+            }
+        }
+    }
+
+    // Guard: once v11 has renamed `db_identities` → `db_identity_bundles`
+    // and `db_memories` → `db_memory_bundles`, the legacy-named CREATE +
+    // singleton seed + shadow-migrate block below would either re-create
+    // empty old-named tables alongside the renamed ones, or write to old
+    // names that no longer exist. Skip the legacy block in that case —
+    // the data is safe under the new names.
+    let bundles_exist: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master
+         WHERE type='table' AND name='db_identity_bundles'",
+        [],
+        |row| row.get(0),
+    )?;
+
+    if bundles_exist == 0 {
+        run_forge_v7_legacy_ddl_and_seed(conn)?;
+    }
+
+    Ok(())
+}
+
+/// Legacy-name DDL + singleton seed + shadow-migrate from v7. Split out
+/// of `run_forge_v7_migrations` so the guard there can skip it once v11
+/// has renamed the bundle tables. See v7's doc comment for what each
+/// statement does and why.
+fn run_forge_v7_legacy_ddl_and_seed(conn: &Connection) -> Result<(), StoreError> {
     // ---- New tables ----
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS db_identities (
@@ -506,28 +567,6 @@ pub fn run_forge_v7_migrations(conn: &Connection) -> Result<(), StoreError> {
         CREATE INDEX IF NOT EXISTS idx_memories_is_blank
             ON db_memories(is_blank);",
     )?;
-
-    // ---- Add identity_id / memory_id columns to db_agent_instances ----
-    let alter_statements = [
-        "ALTER TABLE db_agent_instances ADD COLUMN identity_id TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE db_agent_instances ADD COLUMN memory_id TEXT NOT NULL DEFAULT ''",
-    ];
-    for stmt in &alter_statements {
-        match conn.execute_batch(stmt) {
-            Ok(_) => {}
-            Err(e) => {
-                let msg = e.to_string();
-                if !msg.contains("duplicate column") {
-                    return Err(StoreError::Sqlite(match e {
-                        rusqlite::Error::SqliteFailure(code, _) => {
-                            rusqlite::Error::SqliteFailure(code, Some(msg))
-                        }
-                        other => other,
-                    }));
-                }
-            }
-        }
-    }
 
     // ---- Seed blank singletons ----
     // The launch UI always renders these as the default option in the
@@ -896,9 +935,135 @@ pub fn run_forge_v10_migrations(conn: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// Forge v11 migrations: rename `db_identities` → `db_identity_bundles`
+/// and `db_memories` → `db_memory_bundles`. The "bundle" suffix conveys
+/// that each row carries multiple facets — provider bindings + display
+/// name (for identities) and instructions + context_files + mcp_servers
+/// + skills (for memories) — so the UI's "Identity bundle" / "Memory
+/// bundle" terminology matches the storage layer.
+///
+/// Closes AUDIT_SQLITE_SYSTEMS §8.1.
+///
+/// Idempotent. Three cases per pair:
+///
+/// 1. Only the legacy table exists (first upgrade from pre-v11): ALTER
+///    TABLE RENAME. SQLite ≥ 3.25 auto-updates the FK reference in
+///    `db_identity_bindings` when its parent table is renamed.
+/// 2. Only the bundle table exists (already-migrated or fresh install):
+///    no-op.
+/// 3. **Both exist** (downgrade-then-re-upgrade — a user upgraded to a
+///    v11-aware build, then ran an older build that re-created empty
+///    `db_identities`/`db_memories` and possibly wrote new rows, then
+///    re-upgraded). Merge orphaned legacy rows into the bundle table
+///    via INSERT OR IGNORE (preserves existing bundle rows on id/name
+///    collision), then DROP the legacy table. The downgrade-era
+///    `db_identity_bindings` rows kept their `FK → db_identity_bundles`
+///    constraint across the round-trip (SQLite stores the CREATE
+///    statement, IF NOT EXISTS does not rewrite it), so the binding
+///    cascade stays intact.
+///
+/// Codex P1 on #933 (2026-05-19): without the case-3 merge, rows
+/// written during a downgrade are stranded silently. Reproduced + fixed.
+///
+/// `db_identity_bindings` itself is NOT renamed — its name was already
+/// suffix-consistent with the bundle vocabulary (a binding binds an
+/// identity bundle to a provider account; the surrounding object is the
+/// binding, not the bundle).
+pub fn run_forge_v11_migrations(conn: &Connection) -> Result<(), StoreError> {
+    reconcile_legacy_into_bundle(
+        conn,
+        "db_identities",
+        "db_identity_bundles",
+        "idx_identities_is_blank",
+        "idx_identity_bundles_is_blank",
+        // Identity table columns — must match v7 DDL exactly.
+        "id, name, description, is_blank, created_at, updated_at",
+    )?;
+    reconcile_legacy_into_bundle(
+        conn,
+        "db_memories",
+        "db_memory_bundles",
+        "idx_memories_is_blank",
+        "idx_memory_bundles_is_blank",
+        // Memory table columns — must match v7 DDL exactly.
+        "id, name, description, is_blank, provider, model, instructions, \
+         context_files, mcp_servers, skills, created_at, updated_at",
+    )?;
+    Ok(())
+}
+
+/// Idempotent rename + merge helper for v11. See `run_forge_v11_migrations`
+/// for the three cases this handles and the downgrade-roundtrip scenario
+/// that motivated case 3.
+fn reconcile_legacy_into_bundle(
+    conn: &Connection,
+    legacy: &str,
+    bundle: &str,
+    legacy_index: &str,
+    bundle_index: &str,
+    columns: &str,
+) -> Result<(), StoreError> {
+    let legacy_exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+        [legacy],
+        |row| row.get(0),
+    )?;
+    let bundle_exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+        [bundle],
+        |row| row.get(0),
+    )?;
+
+    match (legacy_exists == 1, bundle_exists == 1) {
+        (false, _) => {
+            // Case 2: legacy gone, nothing to do.
+        }
+        (true, false) => {
+            // Case 1: first upgrade — rename + reindex.
+            conn.execute_batch(&format!(
+                "ALTER TABLE {legacy} RENAME TO {bundle};
+                 DROP INDEX IF EXISTS {legacy_index};
+                 CREATE INDEX IF NOT EXISTS {bundle_index}
+                     ON {bundle}(is_blank);"
+            ))?;
+        }
+        (true, true) => {
+            // Case 3: downgrade-roundtrip — merge then drop. INSERT OR
+            // IGNORE protects existing bundle rows from being clobbered;
+            // any id/name collisions silently keep the bundle copy
+            // (which reflects the user's current-build writes). Rows
+            // unique to the legacy table get rescued.
+            conn.execute_batch(&format!(
+                "INSERT OR IGNORE INTO {bundle} ({columns})
+                     SELECT {columns} FROM {legacy};
+                 DROP TABLE {legacy};
+                 DROP INDEX IF EXISTS {legacy_index};
+                 CREATE INDEX IF NOT EXISTS {bundle_index}
+                     ON {bundle}(is_blank);"
+            ))?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Run all forge migrations up to and including v7, but NOT v11. Used by
+    /// tests that need to exercise v7's legacy-named DDL/seed/shadow-migrate
+    /// path (which the v11 rename + the guard in `run_forge_v7_migrations`
+    /// skip on post-v11 schemas).
+    fn migrate_through_v7(conn: &Connection) -> Result<(), StoreError> {
+        run_forge_v1_migrations(conn)?;
+        run_forge_v2_migrations(conn)?;
+        run_forge_v3_migrations(conn)?;
+        run_forge_v4_migrations(conn)?;
+        run_forge_v5_migrations(conn)?;
+        run_forge_v6_migrations(conn)?;
+        run_forge_v7_migrations(conn)?;
+        Ok(())
+    }
 
     #[test]
     fn test_wstore_migrations_idempotent() {
@@ -1113,8 +1278,14 @@ mod tests {
 
         run_forge_migrations(&conn).unwrap();
 
-        // Tables exist
-        for table in &["db_identities", "db_identity_bindings", "db_memories"] {
+        // Tables exist under their post-v11 names (v7 creates legacy names,
+        // v11 renames them to `*_bundles`). `db_identity_bindings` is not
+        // renamed.
+        for table in &[
+            "db_identity_bundles",
+            "db_identity_bindings",
+            "db_memory_bundles",
+        ] {
             let count: i64 = conn
                 .query_row(
                     "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
@@ -1125,10 +1296,23 @@ mod tests {
             assert_eq!(count, 1, "table {table} should exist");
         }
 
-        // Blank singletons seeded
+        // Legacy names are gone after v11's rename.
+        for legacy in &["db_identities", "db_memories"] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [legacy],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0, "legacy table {legacy} should be renamed");
+        }
+
+        // Blank singletons seeded (seeded into legacy names by v7, carried
+        // across the v11 rename into the bundle tables).
         let id_blank: i64 = conn
             .query_row(
-                "SELECT count(*) FROM db_identities WHERE id='blank' AND is_blank=1",
+                "SELECT count(*) FROM db_identity_bundles WHERE id='blank' AND is_blank=1",
                 [],
                 |row| row.get(0),
             )
@@ -1137,7 +1321,7 @@ mod tests {
 
         let mem_blank: i64 = conn
             .query_row(
-                "SELECT count(*) FROM db_memories WHERE id='blank' AND is_blank=1",
+                "SELECT count(*) FROM db_memory_bundles WHERE id='blank' AND is_blank=1",
                 [],
                 |row| row.get(0),
             )
@@ -1167,10 +1351,12 @@ mod tests {
         run_forge_migrations(&conn).unwrap();
         run_forge_migrations(&conn).unwrap(); // second pass
 
-        // Singletons remain unique (INSERT OR IGNORE on second pass)
+        // Singletons remain unique. On the second pass v7's guard skips the
+        // legacy-name INSERTs (bundles already exist); the rows live in the
+        // renamed bundle tables.
         let id_count: i64 = conn
             .query_row(
-                "SELECT count(*) FROM db_identities WHERE id='blank'",
+                "SELECT count(*) FROM db_identity_bundles WHERE id='blank'",
                 [],
                 |row| row.get(0),
             )
@@ -1179,12 +1365,28 @@ mod tests {
 
         let mem_count: i64 = conn
             .query_row(
-                "SELECT count(*) FROM db_memories WHERE id='blank'",
+                "SELECT count(*) FROM db_memory_bundles WHERE id='blank'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
         assert_eq!(mem_count, 1, "blank Memory should remain a singleton");
+
+        // Legacy names must not be re-created by the second pass — v7's
+        // guard must keep the post-v11 schema stable across replays.
+        for legacy in &["db_identities", "db_memories"] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [legacy],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                count, 0,
+                "legacy {legacy} must not be resurrected on migration replay"
+            );
+        }
     }
 
     #[test]
@@ -1193,10 +1395,10 @@ mod tests {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
             .unwrap();
 
-        // Run up through v6 first, insert a forge agent, then run v7.
-        // We fake "before-v7" by re-running migrations after a manual delete
-        // of the v7 rows the first run would have inserted.
-        run_forge_migrations(&conn).unwrap();
+        // Stop the migration chain at v7 so we can verify v7's legacy-named
+        // shadow-migrate path. Once v11 has run, v7's guard skips this block
+        // entirely (the data lives in the renamed bundle tables instead).
+        migrate_through_v7(&conn).unwrap();
         conn.execute_batch(
             "DELETE FROM db_memories;
              INSERT INTO db_forge_agents
@@ -1239,7 +1441,7 @@ mod tests {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
             .unwrap();
 
-        run_forge_migrations(&conn).unwrap();
+        migrate_through_v7(&conn).unwrap();
         conn.execute_batch(
             "DELETE FROM db_memories;
              INSERT INTO db_forge_agents
@@ -1297,7 +1499,7 @@ mod tests {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
             .unwrap();
 
-        run_forge_migrations(&conn).unwrap();
+        migrate_through_v7(&conn).unwrap();
         conn.execute_batch(
             "DELETE FROM db_memories;
              INSERT INTO db_memories
@@ -1337,12 +1539,17 @@ mod tests {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
             .unwrap();
 
-        // Bring schema up via the full migration chain. This already creates
-        // the v7 tables and runs the backfill. To prove the backfill works
-        // on data that pre-dates v7, we (a) insert a forge agent + an
-        // instance referencing it, then (b) zero memory_id and (c) re-run
-        // v7 directly. After step (c) memory_id should be populated.
-        run_forge_migrations(&conn).unwrap();
+        // Stage a pre-v7 state: v1..v6 brings the schema to where
+        // db_agent_instances exists without identity_id/memory_id, then we
+        // insert a forge agent + an instance referencing it. v7's ALTER
+        // adds the columns and the backfill copies definition_id into
+        // memory_id.
+        run_forge_v1_migrations(&conn).unwrap();
+        run_forge_v2_migrations(&conn).unwrap();
+        run_forge_v3_migrations(&conn).unwrap();
+        run_forge_v4_migrations(&conn).unwrap();
+        run_forge_v5_migrations(&conn).unwrap();
+        run_forge_v6_migrations(&conn).unwrap();
 
         conn.execute_batch(
             "INSERT INTO db_forge_agents
@@ -1350,8 +1557,8 @@ mod tests {
              VALUES ('forge-1', 'My Coder', '✦', 'claude', 'demo', 1234);
 
              INSERT INTO db_agent_instances
-                (id, definition_id, memory_id, created_at)
-             VALUES ('inst-1', 'forge-1', '', 0);",
+                (id, definition_id, created_at)
+             VALUES ('inst-1', 'forge-1', 0);",
         )
         .unwrap();
 
@@ -1365,6 +1572,339 @@ mod tests {
             )
             .unwrap();
         assert_eq!(backfilled, "forge-1");
+    }
+
+    #[test]
+    fn test_forge_v11_renames_legacy_to_bundle_tables() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+
+        // Build a pre-v11 schema (v1..v7) so the legacy-named tables are
+        // present with their seeded singletons. v11 then renames them.
+        migrate_through_v7(&conn).unwrap();
+
+        // Sanity check: legacy names exist, bundle names don't.
+        let legacy_id: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='db_identities'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let legacy_mem: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='db_memories'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_id, 1, "v7 should have created db_identities");
+        assert_eq!(legacy_mem, 1, "v7 should have created db_memories");
+
+        run_forge_v11_migrations(&conn).unwrap();
+
+        // Legacy names gone, bundle names present, data preserved.
+        for legacy in &["db_identities", "db_memories"] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [legacy],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0, "{legacy} should be renamed away");
+        }
+        for bundle in &["db_identity_bundles", "db_memory_bundles"] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [bundle],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "{bundle} should exist after rename");
+        }
+
+        let id_blank: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_identity_bundles WHERE id='blank' AND is_blank=1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(id_blank, 1, "blank Identity row must survive rename");
+        let mem_blank: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_memory_bundles WHERE id='blank' AND is_blank=1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(mem_blank, 1, "blank Memory row must survive rename");
+
+        // Indexes are renamed too.
+        for idx in &[
+            "idx_identity_bundles_is_blank",
+            "idx_memory_bundles_is_blank",
+        ] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='index' AND name=?1",
+                    [idx],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "{idx} should exist post-rename");
+        }
+        for old_idx in &["idx_identities_is_blank", "idx_memories_is_blank"] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='index' AND name=?1",
+                    [old_idx],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0, "legacy index {old_idx} should be dropped");
+        }
+    }
+
+    #[test]
+    fn test_forge_v11_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+
+        // Full chain twice — must not error and must not leave duplicate
+        // tables behind.
+        run_forge_migrations(&conn).unwrap();
+        run_forge_migrations(&conn).unwrap();
+        // Direct v11 invocation on an already-migrated db must no-op.
+        run_forge_v11_migrations(&conn).unwrap();
+    }
+
+    #[test]
+    fn test_forge_v11_fresh_install_skips_rename() {
+        // On a database that never had the legacy tables (fresh install
+        // built from v1..v10 with a hypothetical future v7 already writing
+        // to bundle names, or — more realistically — a test that creates
+        // the bundle table directly), v11 must be a no-op.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+
+        // Mint just the bundle tables, no legacy.
+        conn.execute_batch(
+            "CREATE TABLE db_identity_bundles (id TEXT PRIMARY KEY, is_blank INTEGER);
+             CREATE TABLE db_memory_bundles  (id TEXT PRIMARY KEY, is_blank INTEGER);",
+        )
+        .unwrap();
+
+        run_forge_v11_migrations(&conn).unwrap();
+
+        // No legacy tables created.
+        for legacy in &["db_identities", "db_memories"] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [legacy],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0, "v11 must not resurrect {legacy}");
+        }
+    }
+
+    #[test]
+    fn test_forge_v11_merges_legacy_into_bundle_when_both_exist() {
+        // Codex P1 on #933 (2026-05-19): the downgrade-then-re-upgrade
+        // scenario. User upgrades to v11 (legacy → bundle rename), runs an
+        // older build that recreates empty `db_identities`/`db_memories`
+        // via v7's CREATE IF NOT EXISTS and possibly writes rows, then
+        // re-upgrades. v11 must merge orphan legacy rows into the bundle
+        // and drop the legacy table — without this, downgrade-era writes
+        // are silently stranded.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+
+        // Simulate the post-upgrade-then-downgrade state: v7 has just been
+        // run for legacy creation, then v11 renames, then we manually
+        // re-create the legacy tables (= what old code would do on
+        // downgrade) and seed orphan + colliding rows.
+        migrate_through_v7(&conn).unwrap();
+        run_forge_v11_migrations(&conn).unwrap();
+
+        // Seed a row that exists ONLY in the bundle (current-build write).
+        conn.execute_batch(
+            "INSERT INTO db_identity_bundles
+                (id, name, description, is_blank, created_at, updated_at)
+             VALUES ('bundle-only', 'BundleOnly', '', 0, 100, 100);
+
+             INSERT INTO db_memory_bundles
+                (id, name, description, is_blank, provider, model, instructions,
+                 context_files, mcp_servers, skills, created_at, updated_at)
+             VALUES ('bundle-only', 'BundleOnly', '', 0, '', '', '',
+                     '[]', '[]', '[]', 100, 100);",
+        )
+        .unwrap();
+
+        // Simulate downgrade re-creating empty legacy tables, then writing
+        // orphan rows + an id collision with the bundle.
+        conn.execute_batch(
+            "CREATE TABLE db_identities (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT NOT NULL DEFAULT '',
+                is_blank INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE db_memories (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT NOT NULL DEFAULT '',
+                is_blank INTEGER NOT NULL DEFAULT 0,
+                provider TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL DEFAULT '',
+                instructions TEXT NOT NULL DEFAULT '',
+                context_files TEXT NOT NULL DEFAULT '[]',
+                mcp_servers TEXT NOT NULL DEFAULT '[]',
+                skills TEXT NOT NULL DEFAULT '[]',
+                created_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL DEFAULT 0
+             );
+
+             -- Rescuable orphans (id NOT in the bundle):
+             INSERT INTO db_identities
+                (id, name, description, is_blank, created_at, updated_at)
+             VALUES ('legacy-orphan', 'LegacyOrphan', 'from downgrade',
+                     0, 200, 200);
+             INSERT INTO db_memories
+                (id, name, description, is_blank, provider, model, instructions,
+                 context_files, mcp_servers, skills, created_at, updated_at)
+             VALUES ('legacy-orphan', 'LegacyOrphan', 'from downgrade',
+                     0, '', '', '', '[]', '[]', '[]', 200, 200);
+
+             -- Colliding id with the bundle row: OR IGNORE must keep the
+             -- bundle copy (current build's truth).
+             INSERT INTO db_identities
+                (id, name, description, is_blank, created_at, updated_at)
+             VALUES ('bundle-only', 'BundleOnly-LegacyOverride', 'stale', 0,
+                     50, 50);",
+        )
+        .unwrap();
+
+        // Re-upgrade: v11 must merge + drop legacy.
+        run_forge_v11_migrations(&conn).unwrap();
+
+        // Legacy tables gone after merge.
+        for legacy in &["db_identities", "db_memories"] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [legacy],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0, "{legacy} should be dropped after merge");
+        }
+
+        // Orphan rescued into the bundle.
+        let orphan_desc: String = conn
+            .query_row(
+                "SELECT description FROM db_identity_bundles WHERE id='legacy-orphan'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(orphan_desc, "from downgrade");
+        let orphan_mem: String = conn
+            .query_row(
+                "SELECT description FROM db_memory_bundles WHERE id='legacy-orphan'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(orphan_mem, "from downgrade");
+
+        // Colliding id: bundle copy wins (INSERT OR IGNORE preserves it).
+        let bundle_name: String = conn
+            .query_row(
+                "SELECT name FROM db_identity_bundles WHERE id='bundle-only'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            bundle_name, "BundleOnly",
+            "bundle row must survive an id collision with a legacy row"
+        );
+
+        // Index renamed; legacy index dropped.
+        let new_idx: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' \
+                 AND name='idx_identity_bundles_is_blank'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(new_idx, 1);
+        let old_idx: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' \
+                 AND name='idx_identities_is_blank'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(old_idx, 0);
+    }
+
+    #[test]
+    fn test_forge_v11_preserves_identity_bindings_fk_cascade() {
+        // SQLite >= 3.25 auto-updates FK references in db_identity_bindings
+        // when its parent (db_identities) is renamed to db_identity_bundles.
+        // Verify the cascade-delete still fires post-rename.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+
+        run_forge_migrations(&conn).unwrap();
+
+        // Seed a non-blank identity, an account, and a binding row.
+        conn.execute_batch(
+            "INSERT INTO db_identity_bundles
+                (id, name, description, is_blank, created_at, updated_at)
+             VALUES ('id1', 'Work', '', 0, 0, 0);
+
+             INSERT INTO db_identity_accounts
+                (id, name, provider, kind, secret_ref, created_at, updated_at)
+             VALUES ('acc1', 'gh', 'github', 'pat',
+                     '{\"backend\":\"env\",\"env_var\":\"GITHUB_TOKEN\"}', 0, 0);
+
+             INSERT INTO db_identity_bindings (identity_id, provider, account_id)
+             VALUES ('id1', 'github', 'acc1');",
+        )
+        .unwrap();
+
+        // Delete the parent bundle row — cascade should remove the binding.
+        conn.execute("DELETE FROM db_identity_bundles WHERE id='id1'", [])
+            .unwrap();
+
+        let remaining: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_identity_bindings WHERE identity_id='id1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            remaining, 0,
+            "FK cascade from db_identity_bundles → db_identity_bindings must \
+             survive the v11 rename"
+        );
     }
 
     #[test]

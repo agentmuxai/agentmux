@@ -19,11 +19,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRef {
-    /// FK to `db_identities.id`. Empty = blank singleton (ambient
+    /// FK to `db_identity_bundles.id`. Empty = blank singleton (ambient
     /// creds, no env-var injection at spawn).
     #[serde(default)]
     pub identity_id: String,
-    /// FK to `db_memories.id`. Empty = blank singleton (vanilla CLI,
+    /// FK to `db_memory_bundles.id`. Empty = blank singleton (vanilla CLI,
     /// no system instructions injected).
     #[serde(default)]
     pub memory_id: String,

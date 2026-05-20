@@ -41,7 +41,7 @@ This document inventories every SQLite touchpoint: writer, schema, lifecycle, wh
 - PRAGMAs applied per-connection in `WaveStore::configure_and_migrate` (`wstore.rs:56-72`):
   - `journal_mode=WAL`
   - `busy_timeout=5000`
-  - `foreign_keys=ON` (required — `db_agent_instances` cascades on `db_identities` deletion; missed cascades caused issues pre-v6)
+  - `foreign_keys=ON` (required — `db_identity_bindings` cascades on `db_identity_bundles` deletion; missed cascades caused issues pre-v6)
   - `synchronous=NORMAL`
   - `cache_size=-8000`
   - `mmap_size=268435456`
@@ -81,9 +81,9 @@ The `saga` + `saga_step` schema lives in `sagas.db`, owned by `SagaLog` (`sagas/
 | `db_identity_accounts` | Provider OAuth/API-key accounts (one row per attached account) |
 | `db_forge_agent_identities` | Junction: agent ↔ account (legacy v6) |
 | `db_agent_instances` | Per-instance launch rows (block_id, identity_id, memory_id, working_directory, parent_instance_id) |
-| `db_identities` | User-named identity bundles (Work, Personal, …) — Note: type uses `db_identities` in schema but `db_identity_bundles` in some references. **Inconsistency worth fixing.** |
-| `db_identity_bindings` | Junction: identity ↔ account ↔ provider |
-| `db_memories` | User-named memory bundles (notes/instructions) |
+| `db_identity_bundles` (v11; renamed from `db_identities` in v7) | User-named identity bundles (Work, Personal, …) |
+| `db_identity_bindings` | Junction: identity bundle ↔ account ↔ provider |
+| `db_memory_bundles` (v11; renamed from `db_memories` in v7) | User-named memory bundles (notes/instructions) |
 
 #### 2.2.e Workflow / Drone (v9 → v10)
 
@@ -224,7 +224,7 @@ No `sqlx`, no `diesel`, no async DB layer. All SQLite access is synchronous behi
 
 ## 8. Open inconsistencies + clean-up items
 
-1. **Schema naming drift.** v7 creates a table called `db_identities` (`migrations.rs:470`), but the rest of the code and docs call it `db_identity_bundles`. Decide on one; either rename via migration or correct the references. Today readers compose `SELECT … FROM db_identities` so the table name is the canonical one — comments + docs should follow.
+1. ~~**Schema naming drift.** v7 creates a table called `db_identities` (`migrations.rs:470`), but the rest of the code and docs call it `db_identity_bundles`.~~ **Fixed** — v11 (`run_forge_v11_migrations`) renames `db_identities` → `db_identity_bundles` and `db_memories` → `db_memory_bundles` via `ALTER TABLE … RENAME`. SQLite ≥ 3.25 auto-updates the FK reference in `db_identity_bindings`. v7's legacy-name DDL/seed block is guarded so it doesn't re-create empty old tables on subsequent startups. All `wstore.rs` queries and doc comments now use the bundle names.
 
 2. ~~`saga` tables in two files.~~ **Retracted** — the initial audit miscounted; `run_saga_log_migrations` is only invoked from `SagaLog::configure_and_migrate`, so `objects.db` has no saga tables. See §2.2.b.
 
@@ -273,7 +273,7 @@ agentmux-docs internals currently has:
 
 - [`internals/data-layout.md`](https://github.com/agentmuxai/agentmux-docs/blob/main/src/content/docs/internals/data-layout.md) — accurate on the per-version tree structure. Missing: registry layout under `shared/`, the planned `shared/store.db`, the `launcher-sagas.db` filename quirk.
 - [`internals/persistence.md`](https://github.com/agentmuxai/agentmux-docs/blob/main/src/content/docs/internals/persistence.md) — accurate on the four-file model. Missing:
-  - The full bundle table catalog (`db_identities`, `db_identity_bindings`, `db_memories`, `db_identity_accounts`)
+  - The full bundle table catalog (`db_identity_bundles`, `db_identity_bindings`, `db_memory_bundles`, `db_identity_accounts`)
   - `db_forge_*` table family
   - `db_drone_*` (workflows → drone rename)
   - The dual-DB `saga` table presence
