@@ -179,6 +179,8 @@ const HOST_RESTART_WINDOW: std::time::Duration = std::time::Duration::from_secs(
 /// caller decides (fatal on first launch, give-up on a restart). `splash_event`
 /// is passed on every launch — including restarts — so a relaunched host can
 /// still dismiss a splash left pending by a host that crashed pre-first-frame.
+/// `disable_gpu` is the retry ladder's rung-2 degraded mode (spec §7): when set
+/// the host is launched with `--disable-gpu` (software rendering).
 #[cfg(target_os = "windows")]
 fn spawn_host_supervised(
     real_exe: &std::path::Path,
@@ -189,6 +191,7 @@ fn spawn_host_supervised(
     job_present: bool,
     job_handle: windows_sys::Win32::Foundation::HANDLE,
     splash_event: Option<&str>,
+    disable_gpu: bool,
 ) -> Option<tokio::process::Child> {
     use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
 
@@ -206,6 +209,11 @@ fn spawn_host_supervised(
         .kill_on_drop(false); // J0 handles cleanup.
     if let Some(name) = splash_event {
         host_cmd.env("AGENTMUX_SPLASH_EVENT", name);
+    }
+    // Retry-ladder rung 2 (spec §7): software rendering — no GPU process to
+    // crash. A Chromium switch the host forwards to CEF.
+    if disable_gpu {
+        host_cmd.arg("--disable-gpu");
     }
 
     let mut host_child = match host_cmd.spawn() {
@@ -595,6 +603,7 @@ async fn run_windows(
         job.is_some(),
         job_handle,
         splash_event_name.as_deref(),
+        false,
     ) {
         Some(c) => c,
         None => {
@@ -623,6 +632,8 @@ async fn run_windows(
     // degraded mode (job == None) only.
     log("entering supervised host + srv wait");
     let mut host_restarts: Vec<std::time::Instant> = Vec::new();
+    let mut last_abnormal_code: Option<i32> = None;
+    let mut host_degraded = false;
     let exit_code = loop {
         tokio::select! {
             host_status = host_child.wait() => {
@@ -651,11 +662,21 @@ async fn run_windows(
                     break code;
                 }
                 host_restarts.push(now);
+                // Crash classification + retry ladder (spec §7): a crash that
+                // reproduces the previous abnormal exit code is deterministic —
+                // step down to a degraded (--disable-gpu) relaunch so the retry
+                // isn't "the same thing again". Degraded is sticky; the ladder
+                // only steps down.
+                if last_abnormal_code == Some(code) {
+                    host_degraded = true;
+                }
+                last_abnormal_code = Some(code);
                 log(&format!(
-                    "CEF host exited abnormally (code {}) — relaunching (restart {}/{})",
+                    "CEF host exited abnormally (code {}) — relaunching (restart {}/{}{})",
                     code,
                     host_restarts.len(),
-                    HOST_RESTART_BUDGET
+                    HOST_RESTART_BUDGET,
+                    if host_degraded { ", degraded: --disable-gpu" } else { "" }
                 ));
                 match spawn_host_supervised(
                     real_exe,
@@ -666,6 +687,7 @@ async fn run_windows(
                     job.is_some(),
                     job_handle,
                     splash_event_name.as_deref(),
+                    host_degraded,
                 ) {
                     Some(c) => host_child = c,
                     None => {
