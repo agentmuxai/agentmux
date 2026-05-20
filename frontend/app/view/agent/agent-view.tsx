@@ -94,10 +94,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         model._setOverlayTab = null;
     });
 
-    // Reactive forge agent list — used to resolve the current AgentDefinition object
+    // Reactive agent-definition list — used to resolve the current AgentDefinition object
     // so the overlay can pass it to AgentCardSettingsPanel / rename input.
-    const forgeAgents = useAgentDefinitions();
-    const currentAgent = createMemo(() => forgeAgents().find((a) => a.id === agentId));
+    const agentDefinitions = useAgentDefinitions();
+    const currentAgent = createMemo(() => agentDefinitions().find((a) => a.id === agentId));
 
     const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
 
@@ -475,7 +475,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 workDir: block()?.meta?.["cmd:cwd"] ?? "",
                 version,
                 accounts,
-                peerAgents: forgeAgents(),
+                peerAgents: agentDefinitions(),
                 startupContent: startupContentResult?.content ?? null,
             });
 

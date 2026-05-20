@@ -230,7 +230,7 @@ declare global {
         is_seeded: number;
         /**
          * JSON-encoded per-provider account refs.
-         * **Deprecated in v6** — use `db_forge_agent_identities` (junction
+         * **Deprecated in v6** — use `db_agent_identity_links` (junction
          * table) via `listAgentIdentities` RPC instead. Kept on the type
          * for compatibility with rows that still carry the legacy blob.
          */

@@ -41,7 +41,7 @@ export class AgentDefViewModel implements ViewModel {
     noPadding: Accessor<boolean> = () => false;
 
     get viewComponent(): ViewComponent {
-        return null; // set by the forge barrel to avoid circular import
+        return null; // set by the agent-def barrel to avoid circular import
     }
 
     // UI state
