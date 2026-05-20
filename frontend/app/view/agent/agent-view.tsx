@@ -622,12 +622,20 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 />
             </Show>
 
-            {/* Title-bar action overlay: ⚙ Agent / 👤 Identity */}
-            <Show when={showOverlayTab() != null && currentAgent() != null}>
+            {/* Title-bar action overlay: ⚙ Agent / 👤 Identity.
+                Gated only on the tab being open — NOT on currentAgent()
+                resolving. The pane's `agentId` is a db_agent_definitions
+                id only for definition-launched panes; provider quick-launch
+                writes a provider id, and the definition list may also be
+                mid-load or have failed to fetch. Requiring currentAgent()
+                here made the gear silently no-op in all those cases. The
+                panel handles an undefined agent (create-mode + the Identity
+                tab's "save first" fallback). */}
+            <Show when={showOverlayTab() != null}>
                 <AgentFocusedPanel
                     blockId={model.blockId}
                     nodeModel={model.nodeModel}
-                    agent={currentAgent()!}
+                    agent={currentAgent()}
                     initialTab={showOverlayTab()!}
                     onClose={() => setShowOverlayTab(null)}
                     onTabChange={(tab) => { model._lastOverlayTab = tab; }}
