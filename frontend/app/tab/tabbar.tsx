@@ -670,6 +670,11 @@ function TabBar(props: TabBarProps): JSX.Element {
             },
             { label: "", divider: true },
             {
+                label: "Documentation",
+                icon: "book",
+                onClick: () => getApi().openExternal("https://docs.agentmux.ai"),
+            },
+            {
                 label: "Settings",
                 icon: "cog",
                 onClick: () =>
@@ -679,20 +684,15 @@ function TabBar(props: TabBarProps): JSX.Element {
                     }),
             },
             {
-                label: "Command Palette",
-                icon: "magnifying-glass",
-                shortcut: kbd("⌘P", "Ctrl+P"),
-                onClick: () => modalsModel.pushModal("CommandPaletteModal"),
-            },
-            {
                 label: "DevTools",
                 icon: "code",
                 onClick: () => getApi().toggleDevtools(),
             },
             {
-                label: "Online Docs",
-                icon: "book",
-                onClick: () => getApi().openExternal("https://docs.agentmux.ai"),
+                label: "Command Palette",
+                icon: "magnifying-glass",
+                shortcut: kbd("⌘P", "Ctrl+P"),
+                onClick: () => modalsModel.pushModal("CommandPaletteModal"),
             },
             { label: "", divider: true },
             {
