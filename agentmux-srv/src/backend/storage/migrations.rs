@@ -127,6 +127,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             environment          TEXT NOT NULL DEFAULT '',
             agent_bus_id         TEXT NOT NULL DEFAULT '',
             is_seeded            INTEGER NOT NULL DEFAULT 0,
+            accounts             TEXT NOT NULL DEFAULT '',
             parent_id            TEXT NOT NULL DEFAULT '',
             branch_label         TEXT NOT NULL DEFAULT '',
             created_at           INTEGER NOT NULL DEFAULT 0
@@ -599,6 +600,7 @@ mod tests {
                 idle_timeout_minutes INTEGER NOT NULL DEFAULT 0,
                 agent_type TEXT NOT NULL DEFAULT 'standalone', environment TEXT NOT NULL DEFAULT '',
                 agent_bus_id TEXT NOT NULL DEFAULT '', is_seeded INTEGER NOT NULL DEFAULT 0,
+                accounts TEXT NOT NULL DEFAULT '',
                 parent_id TEXT NOT NULL DEFAULT '', branch_label TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL DEFAULT 0
             );
@@ -686,6 +688,7 @@ mod tests {
                 idle_timeout_minutes INTEGER NOT NULL DEFAULT 0,
                 agent_type TEXT NOT NULL DEFAULT 'standalone', environment TEXT NOT NULL DEFAULT '',
                 agent_bus_id TEXT NOT NULL DEFAULT '', is_seeded INTEGER NOT NULL DEFAULT 0,
+                accounts TEXT NOT NULL DEFAULT '',
                 parent_id TEXT NOT NULL DEFAULT '', branch_label TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL DEFAULT 0
             );

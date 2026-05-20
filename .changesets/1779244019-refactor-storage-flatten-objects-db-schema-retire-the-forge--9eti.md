@@ -27,9 +27,8 @@ frontend is untouched and the wire contract is stable.
 
 **Dead tables dropped.** `db_workflow_definitions` / `db_workflow_runs` and the
 `db_v10_migrated_legacy_*` sentinels are no longer created; `adopt_legacy_table_names`
-drops them from any pre-flatten dev DB. The dead `accounts` column on agent
-definitions is dropped from the schema (kept as an always-empty struct field
-for wire compatibility).
+drops them from any pre-flatten dev DB — their data had already been copied
+into `db_drone_*`.
 
 **Safety net.** `adopt_legacy_table_names` runs once per startup: it renames
 any pre-flatten table names found (the single surviving fragment of the old

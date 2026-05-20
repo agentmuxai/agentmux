@@ -479,11 +479,14 @@ pub struct AgentDefinition {
     pub agent_bus_id: String,
     #[serde(default)]
     pub is_seeded: i64,
-    /// **No longer persisted.** Superseded by the `db_agent_identity_links`
-    /// junction table; the backing column was dropped in the schema
-    /// flatten (SPEC_SCHEMA_FLATTENING_2026_05_19 §5.2). Retained as an
-    /// always-empty field purely so the serialized wire shape is
-    /// unchanged for existing frontend readers.
+    /// JSON-encoded per-provider account assignments
+    /// (`{"github":"acct-id", …}`). Written by the Agent pane's Identity
+    /// tab (`AgentIdentityPanel`) via `updateforgeagent`, read back by
+    /// `parseAgentAccounts` and consumed by startup credential
+    /// resolution. (An older v6 comment called this deprecated in favour
+    /// of `db_agent_identity_links`; that migration never completed — the
+    /// JSON blob is still the live store, so the schema flatten keeps the
+    /// column.)
     #[serde(default)]
     pub accounts: String,
     /// Parent definition id (forge_agents.id). Empty string = root
@@ -570,7 +573,7 @@ impl WaveStore {
         let mut stmt = conn.prepare(
             "SELECT id, slug, name, icon, provider, description, working_directory, shell,
                     provider_flags, auto_start, restart_on_crash, idle_timeout_minutes, created_at,
-                    agent_type, environment, agent_bus_id, is_seeded,
+                    agent_type, environment, agent_bus_id, is_seeded, accounts,
                     parent_id, branch_label
              FROM db_agent_definitions ORDER BY created_at ASC",
         )?;
@@ -593,11 +596,9 @@ impl WaveStore {
                 environment: row.get(14)?,
                 agent_bus_id: row.get(15)?,
                 is_seeded: row.get(16)?,
-                // `accounts` is no longer persisted (dead column, dropped in the
-                // schema flatten). Kept on the struct as a wire-compat vestige.
-                accounts: String::new(),
-                parent_id: row.get(17)?,
-                branch_label: row.get(18)?,
+                accounts: row.get(17)?,
+                parent_id: row.get(18)?,
+                branch_label: row.get(19)?,
             })
         })?;
         let mut agents = Vec::new();
@@ -662,9 +663,9 @@ impl WaveStore {
             "INSERT INTO db_agent_definitions (id, slug, name, icon, provider, description,
              working_directory, shell, provider_flags, auto_start, restart_on_crash,
              idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
-             is_seeded, parent_id, branch_label)
+             is_seeded, accounts, parent_id, branch_label)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19)",
+                     ?17, ?18, ?19, ?20)",
             params![
                 agent.id,
                 agent.slug,
@@ -683,6 +684,7 @@ impl WaveStore {
                 agent.environment,
                 agent.agent_bus_id,
                 agent.is_seeded,
+                agent.accounts,
                 agent.parent_id,
                 agent.branch_label,
             ],
@@ -700,8 +702,8 @@ impl WaveStore {
             "UPDATE db_agent_definitions SET name=?1, icon=?2, provider=?3, description=?4,
              working_directory=?5, shell=?6, provider_flags=?7, auto_start=?8,
              restart_on_crash=?9, idle_timeout_minutes=?10,
-             agent_type=?11, environment=?12, agent_bus_id=?13
-             WHERE id=?14",
+             agent_type=?11, environment=?12, agent_bus_id=?13, accounts=?14
+             WHERE id=?15",
             params![
                 agent.name,
                 agent.icon,
@@ -716,6 +718,7 @@ impl WaveStore {
                 agent.agent_type,
                 agent.environment,
                 agent.agent_bus_id,
+                agent.accounts,
                 agent.id
             ],
         )?;

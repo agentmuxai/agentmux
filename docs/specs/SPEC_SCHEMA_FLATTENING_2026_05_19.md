@@ -208,6 +208,7 @@ CREATE TABLE IF NOT EXISTS db_agent_definitions (
     environment          TEXT NOT NULL DEFAULT '',
     agent_bus_id         TEXT NOT NULL DEFAULT '',
     is_seeded            INTEGER NOT NULL DEFAULT 0,
+    accounts             TEXT NOT NULL DEFAULT '',
     parent_id            TEXT NOT NULL DEFAULT '',
     branch_label         TEXT NOT NULL DEFAULT '',
     created_at           INTEGER NOT NULL DEFAULT 0
@@ -216,10 +217,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_definitions_slug
     ON db_agent_definitions(slug);
 ```
 
-> **Dropped column: `accounts`.** Added in v5, called "dead weight" by the v6
-> doc comment, never read post-insert (only echoed through the `ForgeAgent`
-> struct). The flatten is the clean moment to drop it — see §10 for the struct
-> change. *(Open decision §12-D: keep vs. drop.)*
+> **`accounts` is kept** (decision §12-D, revised). A v6 doc comment called it
+> "deprecated, superseded by the identity-links junction," and an early draft
+> of this spec proposed dropping it. **That was wrong** — Codex review of
+> PR #934 verified the column is live: the Agent pane's Identity tab
+> (`AgentIdentityPanel`) writes per-provider account assignments into it as a
+> JSON blob via `updateforgeagent`, `parseAgentAccounts` reads it back, and
+> startup credential resolution depends on it. The deprecation never
+> completed. A flatten must be behaviour-preserving, so the column stays.
 
 ### 5.3 Agent content / skills / history (was `db_forge_*`)
 
@@ -610,9 +615,11 @@ a smoke test cover them.
   (both rewrite `migrations.rs` + `wstore.rs`). Recommend **one PR**, reviewed
   with the full test suite green. `user_version` could split out but is small
   enough to ride along.
-- **D-D — drop the `accounts` column?** §5.2. *Recommend drop* — it is
-  verified dead and the flatten is the clean moment. Costs one `ForgeAgent`/
-  `AgentDefinition` struct-field removal + 2 SQL projection edits.
+- **D-D — drop the `accounts` column?** §5.2. **Resolved: KEEP.** An early
+  draft recommended dropping it as dead weight; Codex review of PR #934
+  proved it is live (Identity-tab account assignments + startup credential
+  resolution depend on it). A flatten must be behaviour-preserving — the
+  column stays.
 - **D-E — promote `identity_id` / `memory_id` to real FKs?** §5.6. *Recommend
   no* for this PR — current code uses `''` sentinels, not NULL; a real FK
   needs a NULL migration + sentinel-row rework. Out of scope; note for later.
