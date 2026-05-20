@@ -8,7 +8,7 @@
  * by the CLI catalog when one exists for the provider — title reads
  * as a capability blurb ("Anthropic's coding agent") and the CLI
  * brand name ("Claude Code") sits as a caption below. Providers
- * without a catalog entry fall back to the ForgeAgent row's own
+ * without a catalog entry fall back to the AgentDefinition row's own
  * description/name fields.
  *
  * Clicking the body opens the Launch modal (or Install modal if
@@ -24,7 +24,7 @@ import { ProviderLogo } from "@/element/ProviderLogo";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 
 interface AgentCardProps {
-    agent: ForgeAgent;
+    agent: AgentDefinition;
     launching: boolean;
     disabled: boolean;
     /** undefined = not yet checked / non-npm provider (no install needed).
@@ -32,7 +32,7 @@ interface AgentCardProps {
      *  false = needs install — render the bottom-right ribbon. */
     installed: boolean | undefined;
     /** Opens the AgentLaunchModal (or Install modal) for this definition. */
-    onLaunch: (agent: ForgeAgent) => void;
+    onLaunch: (agent: AgentDefinition) => void;
 }
 
 export const AgentCard = (props: AgentCardProps): JSX.Element => {

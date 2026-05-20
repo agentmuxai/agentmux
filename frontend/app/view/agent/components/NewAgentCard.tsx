@@ -7,7 +7,7 @@
  * PR 1 of specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md.
  *
  * Placeholder for now — clicking is a no-op until PR 2 wires it to
- * open the ForgePanel in create mode.
+ * open the agent settings panel in create mode.
  */
 
 import type { JSX } from "solid-js";
@@ -28,7 +28,7 @@ export const NewAgentCard = (props: NewAgentCardProps): JSX.Element => {
             <span class="agent-card-icon">{"\u002B"}</span>
             <span class="agent-card-info">
                 <span class="agent-card-name">New agent</span>
-                <span class="agent-card-desc">Define a new agent in the Forge</span>
+                <span class="agent-card-desc">Define a new agent</span>
             </span>
         </button>
     );

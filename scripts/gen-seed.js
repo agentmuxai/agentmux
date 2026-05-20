@@ -1,4 +1,4 @@
-// Generates forge-seed.json — one seeded definition per CLI in the
+// Generates agent-seed.json — one seeded definition per CLI in the
 // catalog (frontend/app/view/agent/defaults/cli-catalog.ts). Each row
 // is a template; a running instance is created when the user picks a
 // card + supplies a name via AgentLaunchModal.
@@ -7,7 +7,7 @@
 //
 // Manifest version 5 (2026-04-23): replaces the AgentX/Y/Z + Agent1/2/3
 // layout with per-CLI definitions. The re-seed engine in
-// `agentmux-srv/src/backend/forge_seed.rs` deletes old seeded rows
+// `agentmux-srv/src/backend/agent_seed.rs` deletes old seeded rows
 // and inserts the new set on version bump — user customisations to
 // the old rows are lost. This is intentional: the old layout
 // conflated 6 agents into 3 providers, which no longer matches the
@@ -149,10 +149,10 @@ const manifest = {
     })),
 };
 
-// Write the manifest to `agentmux-srv/forge-seed.json` directly
+// Write the manifest to `agentmux-srv/agent-seed.json` directly
 // rather than emitting it on stdout. Previously this script did
 // `process.stdout.write(...)` and callers redirected via
-// `node gen-seed.js > forge-seed.json`. On Windows PowerShell,
+// `node gen-seed.js > agent-seed.json`. On Windows PowerShell,
 // stdout redirection transcodes the Node UTF-8 output through the
 // console code page (cp437 / cp1252), corrupting the emoji icons
 // (🔴 → "≡ƒö┤") and em-dashes (— → "ΓÇö"). Git Bash preserves bytes
@@ -172,7 +172,7 @@ const json = JSON.stringify(manifest, null, 2) + "\n";
 if (process.argv.includes("--stdout")) {
     process.stdout.write(json);
 } else {
-    const outPath = resolve(__dirname, "..", "agentmux-srv", "forge-seed.json");
+    const outPath = resolve(__dirname, "..", "agentmux-srv", "agent-seed.json");
     writeFileSync(outPath, json, { encoding: "utf8" });
     process.stdout.write(`wrote ${outPath}\n`);
 }

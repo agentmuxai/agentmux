@@ -1,10 +1,10 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Forge seed engine: preloads agents from an embedded manifest on first launch.
+//! Agent seed engine: preloads agents from an embedded manifest on first launch.
 //! Seeds agents with identity + content. Provider, agent_type, and environment
 //! are NOT baked into the manifest — they default to sensible values and are
-//! user-configurable via the Forge UI after seeding.
+//! user-configurable via the Agent settings UI after seeding.
 
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -35,10 +35,10 @@ struct SeedAgent {
     name: String,
     #[serde(default = "default_icon")]
     icon: String,
-    /// Defaults to "claude" when absent. User can change in Forge UI.
+    /// Defaults to "claude" when absent. User can change in Agent settings UI.
     #[serde(default = "default_provider")]
     provider: String,
-    /// Defaults to "host" when absent. User can change in Forge UI.
+    /// Defaults to "host" when absent. User can change in Agent settings UI.
     #[serde(default = "default_agent_type")]
     agent_type: String,
     /// Defaults to the current OS when absent.
@@ -112,13 +112,13 @@ fn default_skill_type() -> String {
 }
 
 /// The embedded seed manifest JSON.
-const SEED_MANIFEST: &str = include_str!("../../forge-seed.json");
+const SEED_MANIFEST: &str = include_str!("../../agent-seed.json");
 
-/// Seed forge agents from the embedded manifest.
+/// Seed agent definitions from the embedded manifest.
 /// Skips agents whose ID already exists in the database.
-pub fn seed_forge_agents(wstore: &Arc<WaveStore>) -> Result<SeedReport, StoreError> {
+pub fn seed_agents(wstore: &Arc<WaveStore>) -> Result<SeedReport, StoreError> {
     let manifest: SeedManifest = serde_json::from_str(SEED_MANIFEST)
-        .map_err(|e| StoreError::Other(format!("forge seed: parse manifest: {e}")))?;
+        .map_err(|e| StoreError::Other(format!("agent seed: parse manifest: {e}")))?;
 
     let existing = wstore.agent_def_list()?;
     let existing_ids: std::collections::HashSet<String> =
@@ -214,23 +214,23 @@ pub fn auto_seed_on_startup(wstore: &Arc<WaveStore>) {
     let manifest: SeedManifest = match serde_json::from_str(SEED_MANIFEST) {
         Ok(m) => m,
         Err(e) => {
-            tracing::error!("forge: failed to parse seed manifest: {e}");
+            tracing::error!("agent seed: failed to parse seed manifest: {e}");
             return;
         }
     };
 
     match wstore.agent_def_count() {
         Ok(0) => {
-            tracing::info!("forge: no agents found, seeding from manifest v{}...", manifest.version);
-            match seed_forge_agents(wstore) {
+            tracing::info!("agent seed: no agents found, seeding from manifest v{}...", manifest.version);
+            match seed_agents(wstore) {
                 Ok(report) => {
                     tracing::info!(
-                        "forge: seeded {} agents ({} skipped)",
+                        "agent seed: seeded {} agents ({} skipped)",
                         report.created,
                         report.skipped
                     );
                 }
-                Err(e) => tracing::error!("forge: seed failed: {e}"),
+                Err(e) => tracing::error!("agent seed: failed: {e}"),
             }
         }
         Ok(count) => {
@@ -238,17 +238,17 @@ pub fn auto_seed_on_startup(wstore: &Arc<WaveStore>) {
             match reseed_if_needed(wstore, &manifest) {
                 Ok(Some(report)) => {
                     tracing::info!(
-                        "forge: re-seeded from manifest v{}: {} created, {} updated, {} removed",
+                        "agent seed: re-seeded from manifest v{}: {} created, {} updated, {} removed",
                         manifest.version, report.created, report.updated, report.removed,
                     );
                 }
                 Ok(None) => {
-                    tracing::info!("forge: {} agents exist, manifest up to date", count);
+                    tracing::info!("agent seed: {} agents exist, manifest up to date", count);
                 }
-                Err(e) => tracing::error!("forge: re-seed failed: {e}"),
+                Err(e) => tracing::error!("agent seed: re-seed failed: {e}"),
             }
         }
-        Err(e) => tracing::error!("forge: failed to count agents: {e}"),
+        Err(e) => tracing::error!("agent seed: failed to count agents: {e}"),
     }
 }
 
@@ -281,7 +281,7 @@ fn reseed_if_needed(
             None => { needs_reseed = true; break; }
             Some(existing_agent) => {
                 // Only compare identity fields, NOT provider/agent_type/environment
-                // which the user may have changed via the Forge UI.
+                // which the user may have changed via the Agent settings UI.
                 if existing_agent.description != agent_def.description {
                     needs_reseed = true;
                     break;
@@ -339,7 +339,7 @@ fn reseed_if_needed(
         if let Some(existing_agent) = existing_map.get(agent_def.id.as_str()) {
             // Preserve user-modified runtime config — only update identity
             // fields (name, icon, description). Everything the user can
-            // change in the Forge UI stays as-is.
+            // change in the Agent settings UI stays as-is.
             agent.provider = existing_agent.provider.clone();
             agent.agent_type = existing_agent.agent_type.clone();
             agent.environment = existing_agent.environment.clone();
@@ -365,7 +365,7 @@ fn reseed_if_needed(
         if agent.is_seeded == 1 && !manifest_ids.contains(agent.id.as_str()) {
             wstore.agent_def_delete(&agent.id)?;
             removed += 1;
-            tracing::info!("forge: removed seeded agent '{}'", agent.id);
+            tracing::info!("agent seed: removed seeded agent '{}'", agent.id);
         }
     }
 

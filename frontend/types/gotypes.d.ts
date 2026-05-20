@@ -205,8 +205,8 @@ declare global {
         blockdef: BlockDef;
     };
 
-    // ForgeAgent
-    type ForgeAgent = {
+    // AgentDefinition
+    type AgentDefinition = {
         id: string;
         // Stable, filesystem-safe identifier. Drives working dir, env vars,
         // and cross-references. NEVER changes — distinct from `name` which
@@ -230,7 +230,7 @@ declare global {
         is_seeded: number;
         /**
          * JSON-encoded per-provider account refs.
-         * **Deprecated in v6** — use `db_forge_agent_identities` (junction
+         * **Deprecated in v6** — use `db_agent_identity_links` (junction
          * table) via `listAgentIdentities` RPC instead. Kept on the type
          * for compatibility with rows that still carry the legacy blob.
          */
@@ -273,7 +273,7 @@ declare global {
         updated_at: number;
     };
 
-    type ForgeAgentIdentity = {
+    type AgentDefinitionIdentity = {
         agent_id: string;
         account_id: string;
         provider: string;
@@ -486,16 +486,16 @@ declare global {
         block_id_hint: string;
     };
 
-    // ForgeContent
-    type ForgeContent = {
+    // AgentContent
+    type AgentContent = {
         agent_id: string;
         content_type: string;
         content: string;
         updated_at: number;
     };
 
-    // CommandCreateForgeAgentData
-    type CommandCreateForgeAgentData = {
+    // CommandCreateAgentDefinitionData
+    type CommandCreateAgentDefinitionData = {
         name: string;
         icon: string;
         provider: string;
@@ -511,8 +511,8 @@ declare global {
         agent_bus_id?: string;
     };
 
-    // CommandUpdateForgeAgentData
-    type CommandUpdateForgeAgentData = {
+    // CommandUpdateAgentDefinitionData
+    type CommandUpdateAgentDefinitionData = {
         id: string;
         name: string;
         icon: string;
@@ -527,35 +527,35 @@ declare global {
         agent_type?: string;
         environment?: string;
         agent_bus_id?: string;
-        /** JSON-encoded per-provider account refs. See ForgeAgent.accounts. */
+        /** JSON-encoded per-provider account refs. See AgentDefinition.accounts. */
         accounts?: string;
     };
 
-    // CommandDeleteForgeAgentData
-    type CommandDeleteForgeAgentData = {
+    // CommandDeleteAgentDefinitionData
+    type CommandDeleteAgentDefinitionData = {
         id: string;
     };
 
-    // CommandGetForgeContentData
-    type CommandGetForgeContentData = {
+    // CommandGetAgentContentData
+    type CommandGetAgentContentData = {
         agent_id: string;
         content_type: string;
     };
 
-    // CommandSetForgeContentData
-    type CommandSetForgeContentData = {
+    // CommandSetAgentContentData
+    type CommandSetAgentContentData = {
         agent_id: string;
         content_type: string;
         content: string;
     };
 
-    // CommandGetAllForgeContentData
-    type CommandGetAllForgeContentData = {
+    // CommandGetAllAgentContentData
+    type CommandGetAllAgentContentData = {
         agent_id: string;
     };
 
-    // ForgeSkill
-    type ForgeSkill = {
+    // AgentSkill
+    type AgentSkill = {
         id: string;
         agent_id: string;
         name: string;
@@ -566,13 +566,13 @@ declare global {
         created_at: number;
     };
 
-    // CommandListForgeSkillsData
-    type CommandListForgeSkillsData = {
+    // CommandListAgentSkillsData
+    type CommandListAgentSkillsData = {
         agent_id: string;
     };
 
-    // CommandCreateForgeSkillData
-    type CommandCreateForgeSkillData = {
+    // CommandCreateAgentSkillData
+    type CommandCreateAgentSkillData = {
         agent_id: string;
         name: string;
         trigger?: string;
@@ -581,8 +581,8 @@ declare global {
         content?: string;
     };
 
-    // CommandUpdateForgeSkillData
-    type CommandUpdateForgeSkillData = {
+    // CommandUpdateAgentSkillData
+    type CommandUpdateAgentSkillData = {
         id: string;
         name: string;
         trigger?: string;
@@ -591,13 +591,13 @@ declare global {
         content?: string;
     };
 
-    // CommandDeleteForgeSkillData
-    type CommandDeleteForgeSkillData = {
+    // CommandDeleteAgentSkillData
+    type CommandDeleteAgentSkillData = {
         id: string;
     };
 
-    // ForgeHistory
-    type ForgeHistory = {
+    // AgentHistory
+    type AgentHistory = {
         id: number;
         agent_id: string;
         session_date: string;
@@ -605,29 +605,29 @@ declare global {
         timestamp: number;
     };
 
-    // CommandAppendForgeHistoryData
-    type CommandAppendForgeHistoryData = {
+    // CommandAppendAgentHistoryData
+    type CommandAppendAgentHistoryData = {
         agent_id: string;
         entry: string;
     };
 
-    // CommandListForgeHistoryData
-    type CommandListForgeHistoryData = {
+    // CommandListAgentHistoryData
+    type CommandListAgentHistoryData = {
         agent_id: string;
         session_date?: string;
         limit?: number;
         offset?: number;
     };
 
-    // CommandSearchForgeHistoryData
-    type CommandSearchForgeHistoryData = {
+    // CommandSearchAgentHistoryData
+    type CommandSearchAgentHistoryData = {
         agent_id: string;
         query: string;
         limit?: number;
     };
 
-    // CommandImportForgeFromClawData
-    type CommandImportForgeFromClawData = {
+    // CommandImportAgentFromClawData
+    type CommandImportAgentFromClawData = {
         workspace_path: string;
         agent_name: string;
     };
@@ -2040,8 +2040,8 @@ declare global {
         byte_count: number;
     };
 
-    // CommandImportForgeAgentsData
-    type ForgeSkillImport = {
+    // CommandImportAgentDefinitionsData
+    type AgentSkillImport = {
         name: string;
         trigger: string;
         skill_type: string;
@@ -2049,7 +2049,7 @@ declare global {
         content: string;
     };
 
-    type ForgeAgentImport = {
+    type AgentDefinitionImport = {
         id: string;
         name: string;
         icon: string;
@@ -2062,21 +2062,21 @@ declare global {
         environment: string;
         restart_on_crash: boolean;
         content: Record<string, string>;
-        skills: ForgeSkillImport[];
+        skills: AgentSkillImport[];
     };
 
-    type CommandImportForgeAgentsData = {
-        agents: ForgeAgentImport[];
+    type CommandImportAgentDefinitionsData = {
+        agents: AgentDefinitionImport[];
     };
 
-    type ImportForgeAgentsResult = {
+    type ImportAgentDefinitionsResult = {
         imported: string[];
         skipped: string[];
         failed: string[];
     };
 
-    // ExportForgeAgentsResult
-    type ForgeSkillExport = {
+    // ExportAgentDefinitionsResult
+    type AgentSkillExport = {
         name: string;
         trigger: string;
         skill_type: string;
@@ -2084,7 +2084,7 @@ declare global {
         content: string;
     };
 
-    type ForgeAgentExport = {
+    type AgentDefinitionExport = {
         id: string;
         name: string;
         icon: string;
@@ -2097,14 +2097,14 @@ declare global {
         environment: string;
         restart_on_crash: boolean;
         content: Record<string, string>;
-        skills: ForgeSkillExport[];
+        skills: AgentSkillExport[];
     };
 
-    type ExportForgeAgentsResult = {
+    type ExportAgentDefinitionsResult = {
         version: number;
         exported_at: string;
         source: string;
-        agents: ForgeAgentExport[];
+        agents: AgentDefinitionExport[];
     };
 
 }

@@ -1,10 +1,11 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// NOTE: Forge is NOT a standalone pane. It is embedded inside the agent pane
-// as a floating panel (AgentCardSettingsPanel → ForgeDetail / ForgeForm).
-// The standalone forge widget was removed in v0.33.197. Do not re-register
-// this as a block view — agent configuration lives inside the agent pane.
+// NOTE: the agent-definition view is NOT a standalone pane. It is embedded
+// inside the agent pane as a floating panel (AgentCardSettingsPanel →
+// AgentDefDetail / AgentDefForm). The standalone forge widget was removed in
+// v0.33.197. Do not re-register this as a block view — agent configuration
+// lives inside the agent pane.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -12,7 +13,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 
-export type ForgeView = "list" | "create" | "edit" | "detail";
+export type AgentDefView = "list" | "create" | "edit" | "detail";
 
 export const CONTENT_TABS = ["soul", "agentmd", "mcp", "env"] as const;
 export type ContentTabId = (typeof CONTENT_TABS)[number];
@@ -29,32 +30,32 @@ export const CONTENT_TAB_LABELS: Record<ContentTabId, string> = {
 export const SKILL_TYPES = ["prompt", "command", "workflow", "mcp-tool"] as const;
 export type SkillType = (typeof SKILL_TYPES)[number];
 
-export class ForgeViewModel implements ViewModel {
-    viewType = "forge";
+export class AgentDefViewModel implements ViewModel {
+    viewType = "agent-def";
     blockId: string;
     nodeModel: BlockNodeModel;
 
     viewIcon: Accessor<string> = () => "hammer";
-    viewName: Accessor<string> = () => "Forge";
+    viewName: Accessor<string> = () => "Agents";
     viewText: Accessor<string | HeaderElem[]> = () => [];
     noPadding: Accessor<boolean> = () => false;
 
     get viewComponent(): ViewComponent {
-        return null; // set by the forge barrel to avoid circular import
+        return null; // set by the agent-def barrel to avoid circular import
     }
 
     // UI state
-    private _view = createSignal<ForgeView>("list");
-    viewAtom: Accessor<ForgeView> = this._view[0];
-    private setView: Setter<ForgeView> = this._view[1];
+    private _view = createSignal<AgentDefView>("list");
+    viewAtom: Accessor<AgentDefView> = this._view[0];
+    private setView: Setter<AgentDefView> = this._view[1];
 
-    private _agents = createSignal<ForgeAgent[]>([]);
-    agentsAtom: Accessor<ForgeAgent[]> = this._agents[0];
-    private setAgents: Setter<ForgeAgent[]> = this._agents[1];
+    private _agents = createSignal<AgentDefinition[]>([]);
+    agentsAtom: Accessor<AgentDefinition[]> = this._agents[0];
+    private setAgents: Setter<AgentDefinition[]> = this._agents[1];
 
-    private _editingAgent = createSignal<ForgeAgent | null>(null);
-    editingAgentAtom: Accessor<ForgeAgent | null> = this._editingAgent[0];
-    private setEditingAgent: Setter<ForgeAgent | null> = this._editingAgent[1];
+    private _editingAgent = createSignal<AgentDefinition | null>(null);
+    editingAgentAtom: Accessor<AgentDefinition | null> = this._editingAgent[0];
+    private setEditingAgent: Setter<AgentDefinition | null> = this._editingAgent[1];
 
     private _loading = createSignal<boolean>(false);
     loadingAtom: Accessor<boolean> = this._loading[0];
@@ -65,13 +66,13 @@ export class ForgeViewModel implements ViewModel {
     private setError: Setter<string | null> = this._error[1];
 
     // Detail view state
-    private _detailAgent = createSignal<ForgeAgent | null>(null);
-    detailAgentAtom: Accessor<ForgeAgent | null> = this._detailAgent[0];
-    private setDetailAgent: Setter<ForgeAgent | null> = this._detailAgent[1];
+    private _detailAgent = createSignal<AgentDefinition | null>(null);
+    detailAgentAtom: Accessor<AgentDefinition | null> = this._detailAgent[0];
+    private setDetailAgent: Setter<AgentDefinition | null> = this._detailAgent[1];
 
-    private _content = createSignal<Record<string, ForgeContent>>({});
-    contentAtom: Accessor<Record<string, ForgeContent>> = this._content[0];
-    private setContent: Setter<Record<string, ForgeContent>> = this._content[1];
+    private _content = createSignal<Record<string, AgentContent>>({});
+    contentAtom: Accessor<Record<string, AgentContent>> = this._content[0];
+    private setContent: Setter<Record<string, AgentContent>> = this._content[1];
 
     private _activeTab = createSignal<ContentTabId>("soul");
     activeTabAtom: Accessor<ContentTabId> = this._activeTab[0];
@@ -90,22 +91,22 @@ export class ForgeViewModel implements ViewModel {
     private setContentSaving: Setter<boolean> = this._contentSaving[1];
 
     // Skills state
-    private _skills = createSignal<ForgeSkill[]>([]);
-    skillsAtom: Accessor<ForgeSkill[]> = this._skills[0];
-    private setSkills: Setter<ForgeSkill[]> = this._skills[1];
+    private _skills = createSignal<AgentSkill[]>([]);
+    skillsAtom: Accessor<AgentSkill[]> = this._skills[0];
+    private setSkills: Setter<AgentSkill[]> = this._skills[1];
 
-    private _editingSkill = createSignal<ForgeSkill | null>(null);
-    editingSkillAtom: Accessor<ForgeSkill | null> = this._editingSkill[0];
-    setEditingSkill: Setter<ForgeSkill | null> = this._editingSkill[1];
+    private _editingSkill = createSignal<AgentSkill | null>(null);
+    editingSkillAtom: Accessor<AgentSkill | null> = this._editingSkill[0];
+    setEditingSkill: Setter<AgentSkill | null> = this._editingSkill[1];
 
     private _skillsLoading = createSignal<boolean>(false);
     skillsLoadingAtom: Accessor<boolean> = this._skillsLoading[0];
     private setSkillsLoading: Setter<boolean> = this._skillsLoading[1];
 
     // History state
-    private _history = createSignal<ForgeHistory[]>([]);
-    historyAtom: Accessor<ForgeHistory[]> = this._history[0];
-    private setHistory: Setter<ForgeHistory[]> = this._history[1];
+    private _history = createSignal<AgentHistory[]>([]);
+    historyAtom: Accessor<AgentHistory[]> = this._history[0];
+    private setHistory: Setter<AgentHistory[]> = this._history[1];
 
     private _historyLoading = createSignal<boolean>(false);
     historyLoadingAtom: Accessor<boolean> = this._historyLoading[0];
@@ -120,7 +121,7 @@ export class ForgeViewModel implements ViewModel {
     importingAtom: Accessor<boolean> = this._importing[0];
     private setImporting: Setter<boolean> = this._importing[1];
 
-    private unsubForgeChanged: (() => void) | null = null;
+    private unsubAgentDefChanged: (() => void) | null = null;
     private unsubContentChanged: (() => void) | null = null;
     private unsubSkillsChanged: (() => void) | null = null;
     private unsubHistoryChanged: (() => void) | null = null;
@@ -129,38 +130,38 @@ export class ForgeViewModel implements ViewModel {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
         this.loadAgents();
-        this.unsubForgeChanged = waveEventSubscribe({
-            eventType: "forgeagents:changed",
+        this.unsubAgentDefChanged = waveEventSubscribe({
+            eventType: "agents:changed",
             handler: () => this.loadAgents(),
         });
         this.unsubContentChanged = waveEventSubscribe({
-            eventType: "forgecontent:changed",
+            eventType: "agentcontent:changed",
             handler: () => this.reloadContentIfDetail(),
         });
         this.unsubSkillsChanged = waveEventSubscribe({
-            eventType: "forgeskills:changed",
+            eventType: "agentskills:changed",
             handler: () => this.reloadSkillsIfDetail(),
         });
         this.unsubHistoryChanged = waveEventSubscribe({
-            eventType: "forgehistory:changed",
+            eventType: "agenthistory:changed",
             handler: () => this.reloadHistoryIfDetail(),
         });
     }
 
     loadAgents = async (): Promise<void> => {
         try {
-            const agents = await RpcApi.ListForgeAgentsCommand(TabRpcClient);
+            const agents = await RpcApi.ListAgentDefinitionsCommand(TabRpcClient);
             this.setAgents(agents ?? []);
         } catch {
             // silently ignore on load
         }
     };
 
-    createAgent = async (data: CommandCreateForgeAgentData): Promise<void> => {
+    createAgent = async (data: CommandCreateAgentDefinitionData): Promise<void> => {
         this.setLoading(true);
         this.setError(null);
         try {
-            await RpcApi.CreateForgeAgentCommand(TabRpcClient, data);
+            await RpcApi.CreateAgentDefinitionCommand(TabRpcClient, data);
             this.setView("list");
         } catch (e: any) {
             this.setError(String(e?.message ?? e));
@@ -169,11 +170,11 @@ export class ForgeViewModel implements ViewModel {
         }
     };
 
-    updateAgent = async (data: CommandUpdateForgeAgentData): Promise<void> => {
+    updateAgent = async (data: CommandUpdateAgentDefinitionData): Promise<void> => {
         this.setLoading(true);
         this.setError(null);
         try {
-            await RpcApi.UpdateForgeAgentCommand(TabRpcClient, data);
+            await RpcApi.UpdateAgentDefinitionCommand(TabRpcClient, data);
             this.setView("list");
             this.setEditingAgent(null);
         } catch (e: any) {
@@ -185,7 +186,7 @@ export class ForgeViewModel implements ViewModel {
 
     deleteAgent = async (id: string): Promise<void> => {
         try {
-            await RpcApi.DeleteForgeAgentCommand(TabRpcClient, { id });
+            await RpcApi.DeleteAgentDefinitionCommand(TabRpcClient, { id });
         } catch {
             // silently ignore
         }
@@ -197,7 +198,7 @@ export class ForgeViewModel implements ViewModel {
         this.setView("create");
     };
 
-    startEdit = (agent: ForgeAgent): void => {
+    startEdit = (agent: AgentDefinition): void => {
         this.setEditingAgent(agent);
         this.setError(null);
         this.setView("edit");
@@ -211,7 +212,7 @@ export class ForgeViewModel implements ViewModel {
 
     // ── Detail view methods ──────────────────────────────────────────────
 
-    openDetail = async (agent: ForgeAgent): Promise<void> => {
+    openDetail = async (agent: AgentDefinition): Promise<void> => {
         this.setDetailAgent(agent);
         this.setActiveTab("soul");
         this.setActiveSection("content");
@@ -233,8 +234,8 @@ export class ForgeViewModel implements ViewModel {
     loadContent = async (agentId: string): Promise<void> => {
         this.setContentLoading(true);
         try {
-            const contents = await RpcApi.GetAllForgeContentCommand(TabRpcClient, { agent_id: agentId });
-            const map: Record<string, ForgeContent> = {};
+            const contents = await RpcApi.GetAllAgentContentCommand(TabRpcClient, { agent_id: agentId });
+            const map: Record<string, AgentContent> = {};
             for (const c of contents ?? []) {
                 map[c.content_type] = c;
             }
@@ -249,7 +250,7 @@ export class ForgeViewModel implements ViewModel {
     saveContent = async (agentId: string, contentType: string, content: string): Promise<void> => {
         this.setContentSaving(true);
         try {
-            const result = await RpcApi.SetForgeContentCommand(TabRpcClient, {
+            const result = await RpcApi.SetAgentContentCommand(TabRpcClient, {
                 agent_id: agentId,
                 content_type: contentType,
                 content,
@@ -280,7 +281,7 @@ export class ForgeViewModel implements ViewModel {
     loadSkills = async (agentId: string): Promise<void> => {
         this.setSkillsLoading(true);
         try {
-            const skills = await RpcApi.ListForgeSkillsCommand(TabRpcClient, { agent_id: agentId });
+            const skills = await RpcApi.ListAgentSkillsCommand(TabRpcClient, { agent_id: agentId });
             this.setSkills(skills ?? []);
         } catch {
             // silently ignore
@@ -289,20 +290,20 @@ export class ForgeViewModel implements ViewModel {
         }
     };
 
-    createSkill = async (data: CommandCreateForgeSkillData): Promise<void> => {
+    createSkill = async (data: CommandCreateAgentSkillData): Promise<void> => {
         this.setError(null);
         try {
-            await RpcApi.CreateForgeSkillCommand(TabRpcClient, data);
+            await RpcApi.CreateAgentSkillCommand(TabRpcClient, data);
             this.setEditingSkill(null);
         } catch (e: any) {
             this.setError(String(e?.message ?? e));
         }
     };
 
-    updateSkill = async (data: CommandUpdateForgeSkillData): Promise<void> => {
+    updateSkill = async (data: CommandUpdateAgentSkillData): Promise<void> => {
         this.setError(null);
         try {
-            await RpcApi.UpdateForgeSkillCommand(TabRpcClient, data);
+            await RpcApi.UpdateAgentSkillCommand(TabRpcClient, data);
             this.setEditingSkill(null);
         } catch (e: any) {
             this.setError(String(e?.message ?? e));
@@ -311,7 +312,7 @@ export class ForgeViewModel implements ViewModel {
 
     deleteSkill = async (id: string): Promise<void> => {
         try {
-            await RpcApi.DeleteForgeSkillCommand(TabRpcClient, { id });
+            await RpcApi.DeleteAgentSkillCommand(TabRpcClient, { id });
         } catch {
             // silently ignore
         }
@@ -330,7 +331,7 @@ export class ForgeViewModel implements ViewModel {
     loadHistory = async (agentId: string, sessionDate?: string): Promise<void> => {
         this.setHistoryLoading(true);
         try {
-            const entries = await RpcApi.ListForgeHistoryCommand(TabRpcClient, {
+            const entries = await RpcApi.ListAgentHistoryCommand(TabRpcClient, {
                 agent_id: agentId,
                 session_date: sessionDate,
                 limit: 100,
@@ -346,7 +347,7 @@ export class ForgeViewModel implements ViewModel {
     searchHistory = async (agentId: string, query: string): Promise<void> => {
         this.setHistoryLoading(true);
         try {
-            const entries = await RpcApi.SearchForgeHistoryCommand(TabRpcClient, {
+            const entries = await RpcApi.SearchAgentHistoryCommand(TabRpcClient, {
                 agent_id: agentId,
                 query,
                 limit: 100,
@@ -374,7 +375,7 @@ export class ForgeViewModel implements ViewModel {
         this.setImporting(true);
         this.setError(null);
         try {
-            await RpcApi.ImportForgeFromClawCommand(TabRpcClient, {
+            await RpcApi.ImportAgentFromClawCommand(TabRpcClient, {
                 workspace_path: workspacePath,
                 agent_name: agentName,
             });
@@ -391,7 +392,7 @@ export class ForgeViewModel implements ViewModel {
         this.setLoading(true);
         this.setError(null);
         try {
-            await RpcApi.ReseedForgeAgentsCommand(TabRpcClient);
+            await RpcApi.ReseedAgentDefinitionsCommand(TabRpcClient);
         } catch (e: any) {
             this.setError(String(e?.message ?? e));
         } finally {
@@ -415,7 +416,7 @@ export class ForgeViewModel implements ViewModel {
     }
 
     dispose(): void {
-        this.unsubForgeChanged?.();
+        this.unsubAgentDefChanged?.();
         this.unsubContentChanged?.();
         this.unsubSkillsChanged?.();
         this.unsubHistoryChanged?.();

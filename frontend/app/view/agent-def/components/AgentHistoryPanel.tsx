@@ -4,9 +4,9 @@
 import { createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 import { For, Show } from "solid-js";
-import type { ForgeViewModel } from "../forge-model";
+import type { AgentDefViewModel } from "../agent-def-model";
 
-export function ForgeHistoryPanel(props: { model: ForgeViewModel; agentId: string }): JSX.Element {
+export function AgentHistoryPanel(props: { model: AgentDefViewModel; agentId: string }): JSX.Element {
     const entries = props.model.historyAtom;
     const loading = props.model.historyLoadingAtom;
     const [searchQuery, setSearchQuery] = createSignal("");
@@ -27,7 +27,7 @@ export function ForgeHistoryPanel(props: { model: ForgeViewModel; agentId: strin
 
     // Group entries by session_date
     const groupedEntries = () => {
-        return entries().reduce<Record<string, ForgeHistory[]>>((acc, entry) => {
+        return entries().reduce<Record<string, AgentHistory[]>>((acc, entry) => {
             const date = entry.session_date;
             if (!acc[date]) acc[date] = [];
             acc[date].push(entry);

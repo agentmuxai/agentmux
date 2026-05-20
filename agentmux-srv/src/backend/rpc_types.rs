@@ -264,35 +264,35 @@ pub const COMMAND_SET_RT_INFO: &str = "setrtinfo";
 // Terminal
 pub const COMMAND_TERM_GET_SCROLLBACK_LINES: &str = "termgetscrollbacklines";
 
-// Forge
-pub const COMMAND_LIST_FORGE_AGENTS: &str = "listforgeagents";
-pub const COMMAND_CREATE_FORGE_AGENT: &str = "createforgeagent";
-pub const COMMAND_UPDATE_FORGE_AGENT: &str = "updateforgeagent";
-pub const COMMAND_DELETE_FORGE_AGENT: &str = "deleteforgeagent";
-pub const COMMAND_GET_FORGE_CONTENT: &str = "getforgecontent";
-pub const COMMAND_SET_FORGE_CONTENT: &str = "setforgecontent";
-pub const COMMAND_GET_ALL_FORGE_CONTENT: &str = "getallforgecontent";
+// Agent
+pub const COMMAND_LIST_AGENTS: &str = "listagents";
+pub const COMMAND_CREATE_AGENT: &str = "createagent";
+pub const COMMAND_UPDATE_AGENT: &str = "updateagent";
+pub const COMMAND_DELETE_AGENT: &str = "deleteagent";
+pub const COMMAND_GET_AGENT_CONTENT: &str = "getagentcontent";
+pub const COMMAND_SET_AGENT_CONTENT: &str = "setagentcontent";
+pub const COMMAND_GET_ALL_AGENT_CONTENT: &str = "getallagentcontent";
 
-// Forge Skills
-pub const COMMAND_LIST_FORGE_SKILLS: &str = "listforgeskills";
-pub const COMMAND_CREATE_FORGE_SKILL: &str = "createforgeskill";
-pub const COMMAND_UPDATE_FORGE_SKILL: &str = "updateforgeskill";
-pub const COMMAND_DELETE_FORGE_SKILL: &str = "deleteforgeskill";
+// Agent Skills
+pub const COMMAND_LIST_AGENT_SKILLS: &str = "listagentskills";
+pub const COMMAND_CREATE_AGENT_SKILL: &str = "createagentskill";
+pub const COMMAND_UPDATE_AGENT_SKILL: &str = "updateagentskill";
+pub const COMMAND_DELETE_AGENT_SKILL: &str = "deleteagentskill";
 
-// Forge History
-pub const COMMAND_APPEND_FORGE_HISTORY: &str = "appendforgehistory";
-pub const COMMAND_LIST_FORGE_HISTORY: &str = "listforgehistory";
-pub const COMMAND_SEARCH_FORGE_HISTORY: &str = "searchforgehistory";
+// Agent History
+pub const COMMAND_APPEND_AGENT_HISTORY: &str = "appendagenthistory";
+pub const COMMAND_LIST_AGENT_HISTORY: &str = "listagenthistory";
+pub const COMMAND_SEARCH_AGENT_HISTORY: &str = "searchagenthistory";
 
-// Forge Import
-pub const COMMAND_IMPORT_FORGE_FROM_CLAW: &str = "importforgefromclaw";
-pub const COMMAND_IMPORT_FORGE_AGENTS: &str = "importforgeagents";
+// Agent Import
+pub const COMMAND_IMPORT_AGENT_FROM_CLAW: &str = "importagentfromclaw";
+pub const COMMAND_IMPORT_AGENTS: &str = "importagents";
 
-// Forge Export
-pub const COMMAND_EXPORT_FORGE_AGENTS: &str = "exportforgeagents";
+// Agent Export
+pub const COMMAND_EXPORT_AGENTS: &str = "exportagents";
 
-// Forge Seed
-pub const COMMAND_RESEED_FORGE_AGENTS: &str = "reseedforgeagents";
+// Agent Seed
+pub const COMMAND_RESEED_AGENTS: &str = "reseedagents";
 
 // Identity accounts (v6 — replaces localStorage)
 pub const COMMAND_LIST_IDENTITY_ACCOUNTS: &str = "listidentityaccounts";
@@ -1269,13 +1269,13 @@ fn is_zero_usize(v: &usize) -> bool {
     *v == 0
 }
 
-// ---- Forge command data types ----
+// ---- Agent command data types ----
 
-/// Input for createforgeagent
+/// Input for createagent
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandCreateAgentDefinitionData {
     pub name: String,
-    #[serde(default = "default_forge_icon")]
+    #[serde(default = "default_agent_icon")]
     pub icon: String,
     pub provider: String,
     #[serde(default)]
@@ -1304,11 +1304,11 @@ fn default_agent_type() -> String {
     "standalone".to_string()
 }
 
-fn default_forge_icon() -> String {
+fn default_agent_icon() -> String {
     "✦".to_string()
 }
 
-/// Input for updateforgeagent
+/// Input for updateagent
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandUpdateAgentDefinitionData {
     pub id: String,
@@ -1341,20 +1341,20 @@ pub struct CommandUpdateAgentDefinitionData {
     pub accounts: String,
 }
 
-/// Input for deleteforgeagent
+/// Input for deleteagent
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandDeleteAgentDefinitionData {
     pub id: String,
 }
 
-/// Input for getforgecontent
+/// Input for getagentcontent
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandGetAgentContentData {
     pub agent_id: String,
     pub content_type: String,
 }
 
-/// Input for setforgecontent
+/// Input for setagentcontent
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandSetAgentContentData {
     pub agent_id: String,
@@ -1362,21 +1362,21 @@ pub struct CommandSetAgentContentData {
     pub content: String,
 }
 
-/// Input for getallforgecontent
+/// Input for getallagentcontent
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandGetAllAgentContentData {
     pub agent_id: String,
 }
 
-// ---- Forge Skills command data types ----
+// ---- Agent Skills command data types ----
 
-/// Input for listforgeskills
+/// Input for listagentskills
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandListAgentSkillsData {
     pub agent_id: String,
 }
 
-/// Input for createforgeskill
+/// Input for createagentskill
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandCreateAgentSkillData {
     pub agent_id: String,
@@ -1395,7 +1395,7 @@ fn default_skill_type() -> String {
     "prompt".to_string()
 }
 
-/// Input for updateforgeskill
+/// Input for updateagentskill
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandUpdateAgentSkillData {
     pub id: String,
@@ -1410,22 +1410,22 @@ pub struct CommandUpdateAgentSkillData {
     pub content: String,
 }
 
-/// Input for deleteforgeskill
+/// Input for deleteagentskill
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandDeleteAgentSkillData {
     pub id: String,
 }
 
-// ---- Forge History command data types ----
+// ---- Agent History command data types ----
 
-/// Input for appendforgehistory
+/// Input for appendagenthistory
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandAppendAgentHistoryData {
     pub agent_id: String,
     pub entry: String,
 }
 
-/// Input for listforgehistory
+/// Input for listagenthistory
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandListAgentHistoryData {
     pub agent_id: String,
@@ -1441,7 +1441,7 @@ fn default_history_limit() -> i64 {
     50
 }
 
-/// Input for searchforgehistory
+/// Input for searchagenthistory
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandSearchAgentHistoryData {
     pub agent_id: String,
@@ -1450,16 +1450,16 @@ pub struct CommandSearchAgentHistoryData {
     pub limit: i64,
 }
 
-// ---- Forge Import command data types ----
+// ---- Agent Import command data types ----
 
-/// Input for importforgefromclaw
+/// Input for importagentfromclaw
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandImportForgeFromClawData {
+pub struct CommandImportAgentFromClawData {
     pub workspace_path: String,
     pub agent_name: String,
 }
 
-/// Input for importforgeagents
+/// Input for importagents
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandImportAgentDefinitionsData {
     pub agents: Vec<AgentDefinitionImport>,
@@ -1498,7 +1498,7 @@ pub struct ImportAgentDefinitionsResult {
     pub failed: Vec<String>,
 }
 
-/// Response for exportforgeagents
+/// Response for exportagents
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportAgentDefinitionsResult {
     pub version: u32,

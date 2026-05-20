@@ -38,7 +38,7 @@ import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentStatusLine } from "./components/AgentFooter";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
-import { AgentPicker, useForgeAgents } from "./components/AgentPicker";
+import { AgentPicker, useAgentDefinitions } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { AgentFocusedPanel } from "./components/AgentFocusedPanel";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
@@ -94,10 +94,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         model._setOverlayTab = null;
     });
 
-    // Reactive forge agent list — used to resolve the current ForgeAgent object
+    // Reactive agent-definition list — used to resolve the current AgentDefinition object
     // so the overlay can pass it to AgentCardSettingsPanel / rename input.
-    const forgeAgents = useForgeAgents();
-    const currentAgent = createMemo(() => forgeAgents().find((a) => a.id === agentId));
+    const agentDefinitions = useAgentDefinitions();
+    const currentAgent = createMemo(() => agentDefinitions().find((a) => a.id === agentId));
 
     const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
 
@@ -446,7 +446,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // ── Startup sequence ────────────────────────────────────────────────────────
     // On first connect (no existing session), assemble a structured startup
-    // payload from Forge + Identity data and send it as the opening turn.
+    // payload from agent-definition + Identity data and send it as the opening turn.
     // See docs/specs/SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md
     onReadyFn = async () => {
         // Skip if this is a resumed session
@@ -458,7 +458,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
             // Gather inputs in parallel where possible
             const [startupContentResult, version] = await Promise.all([
-                RpcApi.GetForgeContentCommand(TabRpcClient, {
+                RpcApi.GetAgentContentCommand(TabRpcClient, {
                     agent_id: agentId,
                     content_type: "startup",
                 }).catch(() => null),
@@ -475,7 +475,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 workDir: block()?.meta?.["cmd:cwd"] ?? "",
                 version,
                 accounts,
-                peerAgents: forgeAgents(),
+                peerAgents: agentDefinitions(),
                 startupContent: startupContentResult?.content ?? null,
             });
 
@@ -622,7 +622,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 />
             </Show>
 
-            {/* Title-bar action overlay: ⚙ Forge / 👤 Identity */}
+            {/* Title-bar action overlay: ⚙ Agent / 👤 Identity */}
             <Show when={showOverlayTab() != null && currentAgent() != null}>
                 <AgentFocusedPanel
                     blockId={model.blockId}

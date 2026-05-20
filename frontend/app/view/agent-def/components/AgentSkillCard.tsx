@@ -4,12 +4,12 @@
 import { createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 import { Show } from "solid-js";
-import type { ForgeViewModel } from "../forge-model";
+import type { AgentDefViewModel } from "../agent-def-model";
 
-export function ForgeSkillCard(props: {
-    skill: ForgeSkill;
-    model: ForgeViewModel;
-    onEdit: (skill: ForgeSkill) => void;
+export function AgentSkillCard(props: {
+    skill: AgentSkill;
+    model: AgentDefViewModel;
+    onEdit: (skill: AgentSkill) => void;
 }): JSX.Element {
     const [confirming, setConfirming] = createSignal(false);
 

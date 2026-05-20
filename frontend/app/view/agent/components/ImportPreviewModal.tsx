@@ -8,7 +8,7 @@ import { Button } from "@/element/button";
 import { Modal, ModalBody, ModalFooter, ModalHeader } from "@/element/modal-v2";
 
 interface ImportPreviewModalProps {
-    payload: ExportForgeAgentsResult | null;
+    payload: ExportAgentDefinitionsResult | null;
     onClose: () => void;
 }
 
@@ -20,7 +20,7 @@ export const ImportPreviewModal = (props: ImportPreviewModalProps): JSX.Element 
     createEffect(async () => {
         if (props.payload == null) return;
         try {
-            const agents = await RpcApi.ListForgeAgentsCommand(TabRpcClient);
+            const agents = await RpcApi.ListAgentDefinitionsCommand(TabRpcClient);
             setExistingSlugs(new Set((agents ?? []).map((a) => a.slug)));
         } catch {
             // proceed without dedup info
@@ -42,7 +42,7 @@ export const ImportPreviewModal = (props: ImportPreviewModalProps): JSX.Element 
         if (importing() || toImportCount() === 0) return;
         setImporting(true);
         try {
-            const result = await RpcApi.ImportForgeAgentsCommand(TabRpcClient, {
+            const result = await RpcApi.ImportAgentDefinitionsCommand(TabRpcClient, {
                 agents: (props.payload?.agents ?? []).map((a) => ({
                     id: a.id,
                     name: a.name,

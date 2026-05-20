@@ -375,7 +375,7 @@ mod tests {
     fn inject_full_round_trip_plaintext_dev() {
         let store = make_store();
 
-        // Forge agent (definition).
+        // Agent definition.
         let mut def = crate::backend::storage::wstore::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),

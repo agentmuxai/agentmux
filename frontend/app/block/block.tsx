@@ -197,7 +197,7 @@ function BlockFull({ nodeModel, viewModel }: FullBlockProps): JSX.Element {
         // keep routing there instead of the now-focused element.
         // Browser panes' address-bar onFocus handler fires the same
         // IPC; this widens the trigger to every non-pane block
-        // (terminal, agent, forge, editor, ...). Idempotent when
+        // (terminal, agent, editor, ...). Idempotent when
         // focus is already on main.
         //
         // Pass `window_label` so the backend targets THIS window's

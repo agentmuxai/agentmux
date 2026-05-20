@@ -23,7 +23,7 @@
  */
 
 export interface CliCatalogEntry {
-    /** Value stored in ForgeAgent.provider. */
+    /** Value stored in AgentDefinition.provider. */
     provider: string;
     /** CLI brand name shown as the card's secondary caption. */
     displayName: string;
@@ -143,7 +143,7 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
  * Look up a catalog entry by provider id. Returns null when the
  * provider is unknown (e.g. a user-defined provider that predates
  * the catalog). Callers should render fallback values from the
- * ForgeAgent row in that case.
+ * AgentDefinition row in that case.
  */
 export function getCliCatalogEntry(provider: string): CliCatalogEntry | null {
     const lower = (provider || "").toLowerCase();

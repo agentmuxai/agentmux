@@ -443,7 +443,7 @@ impl<'a> StoreTx<'a> {
 // AgentDefinition CRUD
 // ====================================================================
 
-/// A user-defined AI agent managed by the Forge widget.
+/// A user-defined AI agent in the user's agent-definition catalog.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentDefinition {
     pub id: String,
@@ -481,7 +481,7 @@ pub struct AgentDefinition {
     pub is_seeded: i64,
     /// JSON-encoded per-provider account assignments
     /// (`{"github":"acct-id", …}`). Written by the Agent pane's Identity
-    /// tab (`AgentIdentityPanel`) via `updateforgeagent`, read back by
+    /// tab (`AgentIdentityPanel`) via `updateagent`, read back by
     /// `parseAgentAccounts` and consumed by startup credential
     /// resolution. (An older v6 comment called this deprecated in favour
     /// of `db_agent_identity_links`; that migration never completed — the
@@ -489,7 +489,7 @@ pub struct AgentDefinition {
     /// column.)
     #[serde(default)]
     pub accounts: String,
-    /// Parent definition id (forge_agents.id). Empty string = root
+    /// Parent definition id (db_agent_definitions.id). Empty string = root
     /// definition; non-empty = this agent was forked from another.
     /// Added in v6. See spec §Phase 1.
     #[serde(default)]
@@ -534,7 +534,7 @@ fn default_agent_type() -> String {
     "standalone".to_string()
 }
 
-/// A content blob associated with a forge agent.
+/// A content blob associated with a agent definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentContent {
     pub agent_id: String,
@@ -543,7 +543,7 @@ pub struct AgentContent {
     pub updated_at: i64,
 }
 
-/// A reusable skill/capability attached to a forge agent.
+/// A reusable skill/capability attached to a agent definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSkill {
     pub id: String,
@@ -556,7 +556,7 @@ pub struct AgentSkill {
     pub created_at: i64,
 }
 
-/// An append-only session history entry for a forge agent.
+/// An append-only session history entry for a agent definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentHistory {
     pub id: i64,
@@ -567,7 +567,7 @@ pub struct AgentHistory {
 }
 
 impl WaveStore {
-    /// List all forge agents, ordered by created_at ascending.
+    /// List all agent definitions, ordered by created_at ascending.
     pub fn agent_def_list(&self) -> Result<Vec<AgentDefinition>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -608,7 +608,7 @@ impl WaveStore {
         Ok(agents)
     }
 
-    /// Count forge agents (used by seed engine to check if seeding is needed).
+    /// Count agent definitions (used by seed engine to check if seeding is needed).
     pub fn agent_def_count(&self) -> Result<i64, StoreError> {
         let conn = self.conn.lock().unwrap();
         let count: i64 = conn.query_row(
@@ -626,7 +626,7 @@ impl WaveStore {
         Ok(rows)
     }
 
-    /// Insert a new forge agent. Auto-derives slug from name if empty,
+    /// Insert a new agent definition. Auto-derives slug from name if empty,
     /// resolves collisions by appending `-2`, `-3`, etc., and mutates
     /// `agent.slug` so the caller sees the resolved value (important
     /// for handlers that serialize the struct back to the frontend
@@ -692,7 +692,7 @@ impl WaveStore {
         Ok(())
     }
 
-    /// Update an existing forge agent (all fields except id, created_at, is_seeded).
+    /// Update an existing agent definition (all fields except id, created_at, is_seeded).
     /// `parent_id` and `branch_label` are NOT updatable post-insert — they
     /// describe the agent's provenance; renaming or re-branching is done by
     /// creating a new fork, not mutating the original.
@@ -725,7 +725,7 @@ impl WaveStore {
         Ok(rows > 0)
     }
 
-    /// Delete a forge agent by id. Returns true if a row was deleted.
+    /// Delete a agent definition by id. Returns true if a row was deleted.
     pub fn agent_def_delete(&self, id: &str) -> Result<bool, StoreError> {
         // Snapshot cascaded instance ids AND issue the parent DELETE
         // under one lock acquisition so no thread can `instance_create`
@@ -753,7 +753,7 @@ impl WaveStore {
                     if let Err(e) = reg.hard_delete(instance_id) {
                         tracing::warn!(
                             instance_id = %instance_id,
-                            forge_id = %id,
+                            agent_def_id = %id,
                             error = %e,
                             "registry: failed to mirror agent_def_delete cascade"
                         );
@@ -1160,7 +1160,7 @@ pub struct IdentityBinding {
 
 /// A Memory bundle — the agent's personality and capability stack.
 /// Provider, model, instructions, and JSON-encoded arrays of context
-/// files / MCP servers / skills. Forge agents shadow-migrate into this
+/// files / MCP servers / skills. Agent definitions shadow-migrate into this
 /// table during the v7 migration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Memory {
@@ -1246,7 +1246,7 @@ pub struct GitHubContext {
 /// One row per running/historical execution of an agent definition.
 /// `block_id` / `session_id` / `github_context` are modelled as empty
 /// strings on the wire rather than `Option<String>` to match the
-/// existing forge schema conventions (`NOT NULL DEFAULT ''`). Callers
+/// existing schema conventions (`NOT NULL DEFAULT ''`). Callers
 /// that need structured absence can use `.is_empty()`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentInstance {
@@ -3290,7 +3290,7 @@ mod tests {
         store.instance_create(&inst_b).unwrap();
         assert_eq!(reg.list_active().unwrap().len(), 2);
 
-        // Delete the forge agent — SQLite FK cascades both instance
+        // Delete the agent definition — SQLite FK cascades both instance
         // rows; the mirror must also drop both registry files.
         store.agent_def_delete("def-mirror").unwrap();
         assert!(reg.list_active().unwrap().is_empty(),

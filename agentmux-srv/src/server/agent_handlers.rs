@@ -6,20 +6,20 @@ use serde_json::json;
 
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
-    COMMAND_LIST_FORGE_AGENTS, COMMAND_CREATE_FORGE_AGENT, COMMAND_UPDATE_FORGE_AGENT,
-    COMMAND_DELETE_FORGE_AGENT, COMMAND_GET_FORGE_CONTENT, COMMAND_SET_FORGE_CONTENT,
-    COMMAND_GET_ALL_FORGE_CONTENT,
-    COMMAND_LIST_FORGE_SKILLS, COMMAND_CREATE_FORGE_SKILL, COMMAND_UPDATE_FORGE_SKILL,
-    COMMAND_DELETE_FORGE_SKILL,
-    COMMAND_APPEND_FORGE_HISTORY, COMMAND_LIST_FORGE_HISTORY, COMMAND_SEARCH_FORGE_HISTORY,
-    COMMAND_IMPORT_FORGE_FROM_CLAW, COMMAND_IMPORT_FORGE_AGENTS, COMMAND_EXPORT_FORGE_AGENTS,
-    COMMAND_RESEED_FORGE_AGENTS,
+    COMMAND_LIST_AGENTS, COMMAND_CREATE_AGENT, COMMAND_UPDATE_AGENT,
+    COMMAND_DELETE_AGENT, COMMAND_GET_AGENT_CONTENT, COMMAND_SET_AGENT_CONTENT,
+    COMMAND_GET_ALL_AGENT_CONTENT,
+    COMMAND_LIST_AGENT_SKILLS, COMMAND_CREATE_AGENT_SKILL, COMMAND_UPDATE_AGENT_SKILL,
+    COMMAND_DELETE_AGENT_SKILL,
+    COMMAND_APPEND_AGENT_HISTORY, COMMAND_LIST_AGENT_HISTORY, COMMAND_SEARCH_AGENT_HISTORY,
+    COMMAND_IMPORT_AGENT_FROM_CLAW, COMMAND_IMPORT_AGENTS, COMMAND_EXPORT_AGENTS,
+    COMMAND_RESEED_AGENTS,
     CommandCreateAgentDefinitionData, CommandUpdateAgentDefinitionData, CommandDeleteAgentDefinitionData,
     CommandGetAgentContentData, CommandSetAgentContentData, CommandGetAllAgentContentData,
     CommandListAgentSkillsData, CommandCreateAgentSkillData, CommandUpdateAgentSkillData,
     CommandDeleteAgentSkillData,
     CommandAppendAgentHistoryData, CommandListAgentHistoryData, CommandSearchAgentHistoryData,
-    CommandImportForgeFromClawData,
+    CommandImportAgentFromClawData,
     CommandImportAgentDefinitionsData, ImportAgentDefinitionsResult,
     ExportAgentDefinitionsResult, AgentDefinitionExport, AgentSkillExport,
     // v6 identity / instance / fork
@@ -62,30 +62,30 @@ use crate::backend::storage::wstore::{
 use super::AppState;
 
 pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    // listforgeagents → return all forge agents
+    // listagents → return all agent definitions
     let wstore_lfa = state.wstore.clone();
     engine.register_handler(
-        COMMAND_LIST_FORGE_AGENTS,
+        COMMAND_LIST_AGENTS,
         Box::new(move |_data, _ctx| {
             let wstore = wstore_lfa.clone();
             Box::pin(async move {
-                let agents = wstore.agent_def_list().map_err(|e| format!("listforgeagents: {e}"))?;
+                let agents = wstore.agent_def_list().map_err(|e| format!("listagents: {e}"))?;
                 Ok(Some(serde_json::to_value(&agents).unwrap_or_default()))
             })
         }),
     );
 
-    // createforgeagent → insert new agent, broadcast forgeagents:changed
+    // createagent → insert new agent, broadcast agents:changed
     let wstore_cfa = state.wstore.clone();
     let broker_cfa = state.broker.clone();
     engine.register_handler(
-        COMMAND_CREATE_FORGE_AGENT,
+        COMMAND_CREATE_AGENT,
         Box::new(move |data, _ctx| {
             let wstore = wstore_cfa.clone();
             let broker = broker_cfa.clone();
             Box::pin(async move {
                 let cmd: CommandCreateAgentDefinitionData = serde_json::from_value(data)
-                    .map_err(|e| format!("createforgeagent: {e}"))?;
+                    .map_err(|e| format!("createagent: {e}"))?;
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -116,9 +116,9 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     parent_id: String::new(),
                     branch_label: String::new(),
                 };
-                wstore.agent_def_insert(&mut agent).map_err(|e| format!("createforgeagent: {e}"))?;
+                wstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
-                    event: "forgeagents:changed".to_string(),
+                    event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
                     persist: 0,
@@ -129,21 +129,21 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // updateforgeagent → update existing agent, broadcast forgeagents:changed
+    // updateagent → update existing agent, broadcast agents:changed
     let wstore_ufa = state.wstore.clone();
     let broker_ufa = state.broker.clone();
     engine.register_handler(
-        COMMAND_UPDATE_FORGE_AGENT,
+        COMMAND_UPDATE_AGENT,
         Box::new(move |data, _ctx| {
             let wstore = wstore_ufa.clone();
             let broker = broker_ufa.clone();
             Box::pin(async move {
                 let cmd: CommandUpdateAgentDefinitionData = serde_json::from_value(data)
-                    .map_err(|e| format!("updateforgeagent: {e}"))?;
+                    .map_err(|e| format!("updateagent: {e}"))?;
                 // Fetch existing to preserve created_at
-                let existing = wstore.agent_def_list().map_err(|e| format!("updateforgeagent: {e}"))?;
+                let existing = wstore.agent_def_list().map_err(|e| format!("updateagent: {e}"))?;
                 let old = existing.iter().find(|a| a.id == cmd.id)
-                    .ok_or_else(|| format!("updateforgeagent: agent {} not found", cmd.id))?;
+                    .ok_or_else(|| format!("updateagent: agent {} not found", cmd.id))?;
                 // slug is preserved from the existing row — it's
                 // immutable after creation. The update path never
                 // accepts a new slug from the client.
@@ -167,7 +167,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     is_seeded: old.is_seeded,
                     // Preserve existing accounts when the caller omits the field
                     // (cmd.accounts defaults to "" via #[serde(default)]). Callers
-                    // that only update name/icon/etc. (ForgeForm, AgentPicker rename)
+                    // that only update name/icon/etc. (AgentDefForm, AgentPicker rename)
                     // don't carry accounts, so falling back to old.accounts prevents
                     // silently wiping saved assignments.
                     accounts: if cmd.accounts.is_empty() { old.accounts.clone() } else { cmd.accounts },
@@ -177,12 +177,12 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     parent_id: old.parent_id.clone(),
                     branch_label: old.branch_label.clone(),
                 };
-                let found = wstore.agent_def_update(&agent).map_err(|e| format!("updateforgeagent: {e}"))?;
+                let found = wstore.agent_def_update(&agent).map_err(|e| format!("updateagent: {e}"))?;
                 if !found {
-                    return Err(format!("updateforgeagent: agent {} not found", agent.id));
+                    return Err(format!("updateagent: agent {} not found", agent.id));
                 }
                 broker.publish(crate::backend::wps::WaveEvent {
-                    event: "forgeagents:changed".to_string(),
+                    event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
                     persist: 0,
@@ -193,20 +193,20 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // deleteforgeagent → delete agent by id, broadcast forgeagents:changed
+    // deleteagent → delete agent by id, broadcast agents:changed
     let wstore_dfa = state.wstore.clone();
     let broker_dfa = state.broker.clone();
     engine.register_handler(
-        COMMAND_DELETE_FORGE_AGENT,
+        COMMAND_DELETE_AGENT,
         Box::new(move |data, _ctx| {
             let wstore = wstore_dfa.clone();
             let broker = broker_dfa.clone();
             Box::pin(async move {
                 let cmd: CommandDeleteAgentDefinitionData = serde_json::from_value(data)
-                    .map_err(|e| format!("deleteforgeagent: {e}"))?;
-                wstore.agent_def_delete(&cmd.id).map_err(|e| format!("deleteforgeagent: {e}"))?;
+                    .map_err(|e| format!("deleteagent: {e}"))?;
+                wstore.agent_def_delete(&cmd.id).map_err(|e| format!("deleteagent: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
-                    event: "forgeagents:changed".to_string(),
+                    event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
                     persist: 0,
@@ -217,33 +217,33 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // getforgecontent → return a single content blob for an agent
+    // getagentcontent → return a single content blob for an agent
     let wstore_gfc = state.wstore.clone();
     engine.register_handler(
-        COMMAND_GET_FORGE_CONTENT,
+        COMMAND_GET_AGENT_CONTENT,
         Box::new(move |data, _ctx| {
             let wstore = wstore_gfc.clone();
             Box::pin(async move {
                 let cmd: CommandGetAgentContentData = serde_json::from_value(data)
-                    .map_err(|e| format!("getforgecontent: {e}"))?;
+                    .map_err(|e| format!("getagentcontent: {e}"))?;
                 let content = wstore.agent_content_get(&cmd.agent_id, &cmd.content_type)
-                    .map_err(|e| format!("getforgecontent: {e}"))?;
+                    .map_err(|e| format!("getagentcontent: {e}"))?;
                 Ok(content.map(|c| serde_json::to_value(&c).unwrap_or_default()))
             })
         }),
     );
 
-    // setforgecontent → upsert a content blob, broadcast forgecontent:changed
+    // setagentcontent → upsert a content blob, broadcast agentcontent:changed
     let wstore_sfc = state.wstore.clone();
     let broker_sfc = state.broker.clone();
     engine.register_handler(
-        COMMAND_SET_FORGE_CONTENT,
+        COMMAND_SET_AGENT_CONTENT,
         Box::new(move |data, _ctx| {
             let wstore = wstore_sfc.clone();
             let broker = broker_sfc.clone();
             Box::pin(async move {
                 let cmd: CommandSetAgentContentData = serde_json::from_value(data)
-                    .map_err(|e| format!("setforgecontent: {e}"))?;
+                    .map_err(|e| format!("setagentcontent: {e}"))?;
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -254,9 +254,9 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     content: cmd.content,
                     updated_at: now,
                 };
-                wstore.agent_content_set(&content).map_err(|e| format!("setforgecontent: {e}"))?;
+                wstore.agent_content_set(&content).map_err(|e| format!("setagentcontent: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
-                    event: "forgecontent:changed".to_string(),
+                    event: "agentcontent:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
                     persist: 0,
@@ -267,51 +267,51 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // getallforgecontent → return all content blobs for an agent
+    // getallagentcontent → return all content blobs for an agent
     let wstore_gafc = state.wstore.clone();
     engine.register_handler(
-        COMMAND_GET_ALL_FORGE_CONTENT,
+        COMMAND_GET_ALL_AGENT_CONTENT,
         Box::new(move |data, _ctx| {
             let wstore = wstore_gafc.clone();
             Box::pin(async move {
                 let cmd: CommandGetAllAgentContentData = serde_json::from_value(data)
-                    .map_err(|e| format!("getallforgecontent: {e}"))?;
+                    .map_err(|e| format!("getallagentcontent: {e}"))?;
                 let contents = wstore.agent_content_get_all(&cmd.agent_id)
-                    .map_err(|e| format!("getallforgecontent: {e}"))?;
+                    .map_err(|e| format!("getallagentcontent: {e}"))?;
                 Ok(Some(serde_json::to_value(&contents).unwrap_or_default()))
             })
         }),
     );
 
-    // ── Forge Skills handlers ──────────────────────────────────────────────
+    // ── Agent Skills handlers ──────────────────────────────────────────────
 
-    // listforgeskills → return all skills for an agent
+    // listagentskills → return all skills for an agent
     let wstore_lfs = state.wstore.clone();
     engine.register_handler(
-        COMMAND_LIST_FORGE_SKILLS,
+        COMMAND_LIST_AGENT_SKILLS,
         Box::new(move |data, _ctx| {
             let wstore = wstore_lfs.clone();
             Box::pin(async move {
                 let cmd: CommandListAgentSkillsData = serde_json::from_value(data)
-                    .map_err(|e| format!("listforgeskills: {e}"))?;
+                    .map_err(|e| format!("listagentskills: {e}"))?;
                 let skills = wstore.agent_skill_list(&cmd.agent_id)
-                    .map_err(|e| format!("listforgeskills: {e}"))?;
+                    .map_err(|e| format!("listagentskills: {e}"))?;
                 Ok(Some(serde_json::to_value(&skills).unwrap_or_default()))
             })
         }),
     );
 
-    // createforgeskill → insert new skill, broadcast forgeskills:changed
+    // createagentskill → insert new skill, broadcast agentskills:changed
     let wstore_cfs = state.wstore.clone();
     let broker_cfs = state.broker.clone();
     engine.register_handler(
-        COMMAND_CREATE_FORGE_SKILL,
+        COMMAND_CREATE_AGENT_SKILL,
         Box::new(move |data, _ctx| {
             let wstore = wstore_cfs.clone();
             let broker = broker_cfs.clone();
             Box::pin(async move {
                 let cmd: CommandCreateAgentSkillData = serde_json::from_value(data)
-                    .map_err(|e| format!("createforgeskill: {e}"))?;
+                    .map_err(|e| format!("createagentskill: {e}"))?;
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -326,9 +326,9 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     content: cmd.content,
                     created_at: now,
                 };
-                wstore.agent_skill_insert(&skill).map_err(|e| format!("createforgeskill: {e}"))?;
+                wstore.agent_skill_insert(&skill).map_err(|e| format!("createagentskill: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
-                    event: "forgeskills:changed".to_string(),
+                    event: "agentskills:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
                     persist: 0,
@@ -339,20 +339,20 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // updateforgeskill → update existing skill, broadcast forgeskills:changed
+    // updateagentskill → update existing skill, broadcast agentskills:changed
     let wstore_ufs = state.wstore.clone();
     let broker_ufs = state.broker.clone();
     engine.register_handler(
-        COMMAND_UPDATE_FORGE_SKILL,
+        COMMAND_UPDATE_AGENT_SKILL,
         Box::new(move |data, _ctx| {
             let wstore = wstore_ufs.clone();
             let broker = broker_ufs.clone();
             Box::pin(async move {
                 let cmd: CommandUpdateAgentSkillData = serde_json::from_value(data)
-                    .map_err(|e| format!("updateforgeskill: {e}"))?;
+                    .map_err(|e| format!("updateagentskill: {e}"))?;
                 let existing = wstore.agent_skill_get(&cmd.id)
-                    .map_err(|e| format!("updateforgeskill: {e}"))?
-                    .ok_or_else(|| format!("updateforgeskill: skill {} not found", cmd.id))?;
+                    .map_err(|e| format!("updateagentskill: {e}"))?
+                    .ok_or_else(|| format!("updateagentskill: skill {} not found", cmd.id))?;
                 let skill = AgentSkill {
                     id: cmd.id,
                     agent_id: existing.agent_id,
@@ -363,12 +363,12 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     content: cmd.content,
                     created_at: existing.created_at,
                 };
-                let found = wstore.agent_skill_update(&skill).map_err(|e| format!("updateforgeskill: {e}"))?;
+                let found = wstore.agent_skill_update(&skill).map_err(|e| format!("updateagentskill: {e}"))?;
                 if !found {
-                    return Err(format!("updateforgeskill: skill {} not found", skill.id));
+                    return Err(format!("updateagentskill: skill {} not found", skill.id));
                 }
                 broker.publish(crate::backend::wps::WaveEvent {
-                    event: "forgeskills:changed".to_string(),
+                    event: "agentskills:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
                     persist: 0,
@@ -379,20 +379,20 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // deleteforgeskill → delete skill by id, broadcast forgeskills:changed
+    // deleteagentskill → delete skill by id, broadcast agentskills:changed
     let wstore_dfs = state.wstore.clone();
     let broker_dfs = state.broker.clone();
     engine.register_handler(
-        COMMAND_DELETE_FORGE_SKILL,
+        COMMAND_DELETE_AGENT_SKILL,
         Box::new(move |data, _ctx| {
             let wstore = wstore_dfs.clone();
             let broker = broker_dfs.clone();
             Box::pin(async move {
                 let cmd: CommandDeleteAgentSkillData = serde_json::from_value(data)
-                    .map_err(|e| format!("deleteforgeskill: {e}"))?;
-                wstore.agent_skill_delete(&cmd.id).map_err(|e| format!("deleteforgeskill: {e}"))?;
+                    .map_err(|e| format!("deleteagentskill: {e}"))?;
+                wstore.agent_skill_delete(&cmd.id).map_err(|e| format!("deleteagentskill: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
-                    event: "forgeskills:changed".to_string(),
+                    event: "agentskills:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
                     persist: 0,
@@ -403,23 +403,23 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // ── Forge History handlers ─────────────────────────────────────────────
+    // ── Agent History handlers ─────────────────────────────────────────────
 
-    // appendforgehistory → append a history entry, broadcast forgehistory:changed
+    // appendagenthistory → append a history entry, broadcast agenthistory:changed
     let wstore_afh = state.wstore.clone();
     let broker_afh = state.broker.clone();
     engine.register_handler(
-        COMMAND_APPEND_FORGE_HISTORY,
+        COMMAND_APPEND_AGENT_HISTORY,
         Box::new(move |data, _ctx| {
             let wstore = wstore_afh.clone();
             let broker = broker_afh.clone();
             Box::pin(async move {
                 let cmd: CommandAppendAgentHistoryData = serde_json::from_value(data)
-                    .map_err(|e| format!("appendforgehistory: {e}"))?;
+                    .map_err(|e| format!("appendagenthistory: {e}"))?;
                 let entry = wstore.agent_history_append(&cmd.agent_id, &cmd.entry)
-                    .map_err(|e| format!("appendforgehistory: {e}"))?;
+                    .map_err(|e| format!("appendagenthistory: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
-                    event: "forgehistory:changed".to_string(),
+                    event: "agenthistory:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
                     persist: 0,
@@ -430,59 +430,59 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // listforgehistory → return history entries with pagination
+    // listagenthistory → return history entries with pagination
     let wstore_lfh = state.wstore.clone();
     engine.register_handler(
-        COMMAND_LIST_FORGE_HISTORY,
+        COMMAND_LIST_AGENT_HISTORY,
         Box::new(move |data, _ctx| {
             let wstore = wstore_lfh.clone();
             Box::pin(async move {
                 let cmd: CommandListAgentHistoryData = serde_json::from_value(data)
-                    .map_err(|e| format!("listforgehistory: {e}"))?;
+                    .map_err(|e| format!("listagenthistory: {e}"))?;
                 let entries = wstore.agent_history_list(
                     &cmd.agent_id,
                     cmd.session_date.as_deref(),
                     cmd.limit,
                     cmd.offset,
-                ).map_err(|e| format!("listforgehistory: {e}"))?;
+                ).map_err(|e| format!("listagenthistory: {e}"))?;
                 Ok(Some(serde_json::to_value(&entries).unwrap_or_default()))
             })
         }),
     );
 
-    // searchforgehistory → search history entries by query
+    // searchagenthistory → search history entries by query
     let wstore_sfh = state.wstore.clone();
     engine.register_handler(
-        COMMAND_SEARCH_FORGE_HISTORY,
+        COMMAND_SEARCH_AGENT_HISTORY,
         Box::new(move |data, _ctx| {
             let wstore = wstore_sfh.clone();
             Box::pin(async move {
                 let cmd: CommandSearchAgentHistoryData = serde_json::from_value(data)
-                    .map_err(|e| format!("searchforgehistory: {e}"))?;
+                    .map_err(|e| format!("searchagenthistory: {e}"))?;
                 let entries = wstore.agent_history_search(&cmd.agent_id, &cmd.query, cmd.limit)
-                    .map_err(|e| format!("searchforgehistory: {e}"))?;
+                    .map_err(|e| format!("searchagenthistory: {e}"))?;
                 Ok(Some(serde_json::to_value(&entries).unwrap_or_default()))
             })
         }),
     );
 
-    // ── Forge Import handler ───────────────────────────────────────────────
+    // ── Agent Import handler ───────────────────────────────────────────────
 
-    // importforgefromclaw → read claw workspace, create agent + content
+    // importagentfromclaw → read claw workspace, create agent + content
     let wstore_ifc = state.wstore.clone();
     let broker_ifc = state.broker.clone();
     engine.register_handler(
-        COMMAND_IMPORT_FORGE_FROM_CLAW,
+        COMMAND_IMPORT_AGENT_FROM_CLAW,
         Box::new(move |data, _ctx| {
             let wstore = wstore_ifc.clone();
             let broker = broker_ifc.clone();
             Box::pin(async move {
-                let cmd: CommandImportForgeFromClawData = serde_json::from_value(data)
-                    .map_err(|e| format!("importforgefromclaw: {e}"))?;
+                let cmd: CommandImportAgentFromClawData = serde_json::from_value(data)
+                    .map_err(|e| format!("importagentfromclaw: {e}"))?;
 
                 let workspace_path = std::path::Path::new(&cmd.workspace_path);
                 if !workspace_path.exists() {
-                    return Err(format!("importforgefromclaw: path does not exist: {}", cmd.workspace_path));
+                    return Err(format!("importagentfromclaw: path does not exist: {}", cmd.workspace_path));
                 }
 
                 let now = SystemTime::now()
@@ -528,7 +528,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     parent_id: String::new(),
                     branch_label: String::new(),
                 };
-                wstore.agent_def_insert(&mut agent).map_err(|e| format!("importforgefromclaw: {e}"))?;
+                wstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
 
                 // Read CLAUDE.md → agentmd content
                 let claude_md_path = workspace_path.join("CLAUDE.md");
@@ -559,7 +559,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
 
                 broker.publish(crate::backend::wps::WaveEvent {
-                    event: "forgeagents:changed".to_string(),
+                    event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
                     persist: 0,
@@ -570,25 +570,25 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // reseedforgeagents → delete all seeded agents and re-run seed from manifest
+    // reseedagents → delete all seeded agents and re-run seed from manifest
     let wstore_rsfa = state.wstore.clone();
     let broker_rsfa = state.broker.clone();
     engine.register_handler(
-        COMMAND_RESEED_FORGE_AGENTS,
+        COMMAND_RESEED_AGENTS,
         Box::new(move |_data, _ctx| {
             let wstore = wstore_rsfa.clone();
             let broker = broker_rsfa.clone();
             Box::pin(async move {
                 // Delete all previously seeded agents (cascade deletes content, skills, history)
                 let deleted = wstore.agent_def_delete_seeded()
-                    .map_err(|e| format!("reseedforgeagents: delete seeded: {e}"))?;
+                    .map_err(|e| format!("reseedagents: delete seeded: {e}"))?;
 
                 // Re-run seed
-                let report = crate::backend::agent_seed::seed_forge_agents(&wstore)
-                    .map_err(|e| format!("reseedforgeagents: seed: {e}"))?;
+                let report = crate::backend::agent_seed::seed_agents(&wstore)
+                    .map_err(|e| format!("reseedagents: seed: {e}"))?;
 
                 broker.publish(crate::backend::wps::WaveEvent {
-                    event: "forgeagents:changed".to_string(),
+                    event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
                     persist: 0,
@@ -603,17 +603,17 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // importforgeagents — bulk import from JSON export format
+    // importagents — bulk import from JSON export format
     let wstore_ifa = state.wstore.clone();
     let broker_ifa = state.broker.clone();
     engine.register_handler(
-        COMMAND_IMPORT_FORGE_AGENTS,
+        COMMAND_IMPORT_AGENTS,
         Box::new(move |data, _ctx| {
             let wstore = wstore_ifa.clone();
             let broker = broker_ifa.clone();
             Box::pin(async move {
                 let cmd: CommandImportAgentDefinitionsData = serde_json::from_value(data)
-                    .map_err(|e| format!("importforgeagents: {e}"))?;
+                    .map_err(|e| format!("importagents: {e}"))?;
 
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -706,7 +706,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
 
                 broker.publish(crate::backend::wps::WaveEvent {
-                    event: "forgeagents:changed".to_string(),
+                    event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
                     persist: 0,
@@ -719,15 +719,15 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // exportforgeagents — export all forge agents with content and skills
+    // exportagents — export all agent definitions with content and skills
     let wstore_efa = state.wstore.clone();
     engine.register_handler(
-        COMMAND_EXPORT_FORGE_AGENTS,
+        COMMAND_EXPORT_AGENTS,
         Box::new(move |_data, _ctx| {
             let wstore = wstore_efa.clone();
             Box::pin(async move {
                 let agents = wstore.agent_def_list()
-                    .map_err(|e| format!("exportforgeagents: list: {e}"))?;
+                    .map_err(|e| format!("exportagents: list: {e}"))?;
 
                 let mut agent_exports: Vec<AgentDefinitionExport> = Vec::new();
 
@@ -1457,7 +1457,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
 
                 broker.publish(crate::backend::wps::WaveEvent {
-                    event: "forgeagents:changed".to_string(),
+                    event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
                     persist: 0,
