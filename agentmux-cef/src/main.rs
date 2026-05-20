@@ -62,7 +62,40 @@ pub type OsKeyEvent = cef::sys::_XEvent;
 #[cfg(target_os = "macos")]
 pub type OsKeyEvent = std::ffi::c_void;
 
+/// Suppress the Windows "Application Error" / WER crash dialog so an unhandled
+/// fault (a Chromium `LOG(FATAL)`, an `abort()`, a breakpoint) terminates the
+/// process immediately instead of wedging it behind a modal the user must
+/// dismiss. While that dialog is up the process is frozen and cannot be
+/// auto-recovered. No-op off Windows. Spec:
+/// docs/specs/SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md.
+#[cfg(target_os = "windows")]
+fn suppress_os_crash_dialogs() {
+    use windows_sys::Win32::System::Diagnostics::Debug::{SetErrorMode, SEM_FAILCRITICALERRORS};
+    use windows_sys::Win32::System::ErrorReporting::{WerSetFlags, WER_FAULT_REPORTING_NO_UI};
+    // Process-wide; also covers the CEF subprocesses.
+    unsafe {
+        // Suppress the WER crash-dialog UI WITHOUT disabling WER itself —
+        // SEM_NOGPFAULTERRORBOX would also kill WER/LocalDumps crash-dump
+        // collection, the postmortem diagnostics this stability work needs.
+        // WER_FAULT_REPORTING_NO_UI is the documented "no UI, keep
+        // reports" path.
+        let _ = WerSetFlags(WER_FAULT_REPORTING_NO_UI);
+        // SEM_FAILCRITICALERRORS suppresses the critical-error handler
+        // (e.g. "no disk in drive" popups) — unrelated to crash reporting.
+        SetErrorMode(SEM_FAILCRITICALERRORS);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn suppress_os_crash_dialogs() {}
+
 fn main() {
+    // Phase 0 (service supervision & recovery): suppress the Windows crash
+    // modal so a fault terminates the process immediately instead of freezing
+    // it behind an "Application Error" dialog. Must be the first statement —
+    // set before anything can fault.
+    suppress_os_crash_dialogs();
+
     // Set the DLL search path so CEF's runtime LoadLibrary calls (chrome_elf,
     // libEGL, libGLESv2, d3dcompiler_47, …) resolve against the directory that
     // actually holds libcef.dll. Two layouts exist:
