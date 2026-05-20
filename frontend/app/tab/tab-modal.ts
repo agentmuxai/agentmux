@@ -29,7 +29,7 @@ export type TabModalRequest =
 
 export interface LaunchAgentRequest {
     kind: "launch-agent";
-    /** Forge definition the user clicked. */
+    /** Agent definition the user clicked. */
     agent: AgentDefinition;
     /** Block id of the pane that opened the modal. */
     originBlockId: string;

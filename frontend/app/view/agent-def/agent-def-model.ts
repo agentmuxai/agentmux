@@ -1,10 +1,11 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// NOTE: Forge is NOT a standalone pane. It is embedded inside the agent pane
-// as a floating panel (AgentCardSettingsPanel → AgentDefDetail / AgentDefForm).
-// The standalone forge widget was removed in v0.33.197. Do not re-register
-// this as a block view — agent configuration lives inside the agent pane.
+// NOTE: the agent-definition view is NOT a standalone pane. It is embedded
+// inside the agent pane as a floating panel (AgentCardSettingsPanel →
+// AgentDefDetail / AgentDefForm). The standalone forge widget was removed in
+// v0.33.197. Do not re-register this as a block view — agent configuration
+// lives inside the agent pane.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -35,7 +36,7 @@ export class AgentDefViewModel implements ViewModel {
     nodeModel: BlockNodeModel;
 
     viewIcon: Accessor<string> = () => "hammer";
-    viewName: Accessor<string> = () => "Forge";
+    viewName: Accessor<string> = () => "Agents";
     viewText: Accessor<string | HeaderElem[]> = () => [];
     noPadding: Accessor<boolean> = () => false;
 

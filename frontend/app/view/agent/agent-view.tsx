@@ -446,7 +446,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // ── Startup sequence ────────────────────────────────────────────────────────
     // On first connect (no existing session), assemble a structured startup
-    // payload from Forge + Identity data and send it as the opening turn.
+    // payload from agent-definition + Identity data and send it as the opening turn.
     // See docs/specs/SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md
     onReadyFn = async () => {
         // Skip if this is a resumed session
@@ -622,7 +622,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 />
             </Show>
 
-            {/* Title-bar action overlay: ⚙ Forge / 👤 Identity */}
+            {/* Title-bar action overlay: ⚙ Agent / 👤 Identity */}
             <Show when={showOverlayTab() != null && currentAgent() != null}>
                 <AgentFocusedPanel
                     blockId={model.blockId}

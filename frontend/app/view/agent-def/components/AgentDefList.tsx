@@ -16,7 +16,7 @@ export function AgentDefList(props: { model: AgentDefViewModel }): JSX.Element {
     return (
         <div class="forge-pane">
             <div class="forge-header">
-                <span class="forge-title">Forge</span>
+                <span class="forge-title">Agents</span>
                 <button class="forge-new-btn forge-new-btn-primary" onClick={() => props.model.startCreate()}>
                     + New Agent
                 </button>

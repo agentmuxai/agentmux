@@ -3,7 +3,7 @@
 
 /**
  * AgentPicker — shown when an agent pane has no agentId in block meta.
- * Lists available Forge definitions as cards; clicking a card opens
+ * Lists available agent definitions as cards; clicking a card opens
  * the Launch modal (name + runtime), which submits back through
  * `AgentViewModel.launchAgentDefinition(agent, overrides)`.
  *
@@ -25,7 +25,7 @@ import type { LaunchOverrides } from "./AgentLaunchModal";
 // ── useAgentDefinitions hook ───────────────────────────────────────────────────────
 
 /**
- * Reactive accessor for the current Forge agent list. Subscribes to
+ * Reactive accessor for the current agent-definition list. Subscribes to
  * `agents:changed` and refetches when that event fires.
  */
 export function useAgentDefinitions(): () => AgentDefinition[] {
@@ -407,7 +407,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             <div class="agent-picker-empty-icon">{"\u2726"}</div>
                             <div class="agent-picker-empty-title">No definitions configured</div>
                             <div class="agent-picker-empty-desc">
-                                Use the Forge pane to add your first definition.
+                                Use the ⚙ Agent settings to add your first definition.
                             </div>
                         </div>
                         <AgentActionBar />

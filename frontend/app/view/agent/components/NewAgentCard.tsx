@@ -28,7 +28,7 @@ export const NewAgentCard = (props: NewAgentCardProps): JSX.Element => {
             <span class="agent-card-icon">{"\u002B"}</span>
             <span class="agent-card-info">
                 <span class="agent-card-name">New agent</span>
-                <span class="agent-card-desc">Define a new agent in the Forge</span>
+                <span class="agent-card-desc">Define a new agent</span>
             </span>
         </button>
     );

@@ -59,7 +59,7 @@ export function AgentDefForm(props: { model: AgentDefViewModel }): JSX.Element {
         <div class="forge-pane">
             <div class="forge-header">
                 <span class="forge-title">
-                    Forge&nbsp;/&nbsp;<span class="forge-title-sub">{title()}</span>
+                    Agents&nbsp;/&nbsp;<span class="forge-title-sub">{title()}</span>
                 </span>
             </div>
             <div class="forge-divider" />
