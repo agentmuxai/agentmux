@@ -944,60 +944,105 @@ pub fn run_forge_v10_migrations(conn: &Connection) -> Result<(), StoreError> {
 ///
 /// Closes AUDIT_SQLITE_SYSTEMS §8.1.
 ///
-/// Idempotent: skips when the new names already exist. SQLite ≥ 3.25
-/// auto-updates the FK reference in `db_identity_bindings` when its
-/// parent table is renamed, so no separate touch of the binding table
-/// is required.
+/// Idempotent. Three cases per pair:
+///
+/// 1. Only the legacy table exists (first upgrade from pre-v11): ALTER
+///    TABLE RENAME. SQLite ≥ 3.25 auto-updates the FK reference in
+///    `db_identity_bindings` when its parent table is renamed.
+/// 2. Only the bundle table exists (already-migrated or fresh install):
+///    no-op.
+/// 3. **Both exist** (downgrade-then-re-upgrade — a user upgraded to a
+///    v11-aware build, then ran an older build that re-created empty
+///    `db_identities`/`db_memories` and possibly wrote new rows, then
+///    re-upgraded). Merge orphaned legacy rows into the bundle table
+///    via INSERT OR IGNORE (preserves existing bundle rows on id/name
+///    collision), then DROP the legacy table. The downgrade-era
+///    `db_identity_bindings` rows kept their `FK → db_identity_bundles`
+///    constraint across the round-trip (SQLite stores the CREATE
+///    statement, IF NOT EXISTS does not rewrite it), so the binding
+///    cascade stays intact.
+///
+/// Codex P1 on #933 (2026-05-19): without the case-3 merge, rows
+/// written during a downgrade are stranded silently. Reproduced + fixed.
 ///
 /// `db_identity_bindings` itself is NOT renamed — its name was already
 /// suffix-consistent with the bundle vocabulary (a binding binds an
 /// identity bundle to a provider account; the surrounding object is the
 /// binding, not the bundle).
 pub fn run_forge_v11_migrations(conn: &Connection) -> Result<(), StoreError> {
-    let identities_exists: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM sqlite_master
-         WHERE type='table' AND name='db_identities'",
-        [],
+    reconcile_legacy_into_bundle(
+        conn,
+        "db_identities",
+        "db_identity_bundles",
+        "idx_identities_is_blank",
+        "idx_identity_bundles_is_blank",
+        // Identity table columns — must match v7 DDL exactly.
+        "id, name, description, is_blank, created_at, updated_at",
+    )?;
+    reconcile_legacy_into_bundle(
+        conn,
+        "db_memories",
+        "db_memory_bundles",
+        "idx_memories_is_blank",
+        "idx_memory_bundles_is_blank",
+        // Memory table columns — must match v7 DDL exactly.
+        "id, name, description, is_blank, provider, model, instructions, \
+         context_files, mcp_servers, skills, created_at, updated_at",
+    )?;
+    Ok(())
+}
+
+/// Idempotent rename + merge helper for v11. See `run_forge_v11_migrations`
+/// for the three cases this handles and the downgrade-roundtrip scenario
+/// that motivated case 3.
+fn reconcile_legacy_into_bundle(
+    conn: &Connection,
+    legacy: &str,
+    bundle: &str,
+    legacy_index: &str,
+    bundle_index: &str,
+    columns: &str,
+) -> Result<(), StoreError> {
+    let legacy_exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+        [legacy],
         |row| row.get(0),
     )?;
-    let identity_bundles_exists: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM sqlite_master
-         WHERE type='table' AND name='db_identity_bundles'",
-        [],
+    let bundle_exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+        [bundle],
         |row| row.get(0),
     )?;
 
-    if identities_exists == 1 && identity_bundles_exists == 0 {
-        conn.execute_batch(
-            "ALTER TABLE db_identities RENAME TO db_identity_bundles;
-             DROP INDEX IF EXISTS idx_identities_is_blank;
-             CREATE INDEX IF NOT EXISTS idx_identity_bundles_is_blank
-                 ON db_identity_bundles(is_blank);",
-        )?;
+    match (legacy_exists == 1, bundle_exists == 1) {
+        (false, _) => {
+            // Case 2: legacy gone, nothing to do.
+        }
+        (true, false) => {
+            // Case 1: first upgrade — rename + reindex.
+            conn.execute_batch(&format!(
+                "ALTER TABLE {legacy} RENAME TO {bundle};
+                 DROP INDEX IF EXISTS {legacy_index};
+                 CREATE INDEX IF NOT EXISTS {bundle_index}
+                     ON {bundle}(is_blank);"
+            ))?;
+        }
+        (true, true) => {
+            // Case 3: downgrade-roundtrip — merge then drop. INSERT OR
+            // IGNORE protects existing bundle rows from being clobbered;
+            // any id/name collisions silently keep the bundle copy
+            // (which reflects the user's current-build writes). Rows
+            // unique to the legacy table get rescued.
+            conn.execute_batch(&format!(
+                "INSERT OR IGNORE INTO {bundle} ({columns})
+                     SELECT {columns} FROM {legacy};
+                 DROP TABLE {legacy};
+                 DROP INDEX IF EXISTS {legacy_index};
+                 CREATE INDEX IF NOT EXISTS {bundle_index}
+                     ON {bundle}(is_blank);"
+            ))?;
+        }
     }
-
-    let memories_exists: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM sqlite_master
-         WHERE type='table' AND name='db_memories'",
-        [],
-        |row| row.get(0),
-    )?;
-    let memory_bundles_exists: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM sqlite_master
-         WHERE type='table' AND name='db_memory_bundles'",
-        [],
-        |row| row.get(0),
-    )?;
-
-    if memories_exists == 1 && memory_bundles_exists == 0 {
-        conn.execute_batch(
-            "ALTER TABLE db_memories RENAME TO db_memory_bundles;
-             DROP INDEX IF EXISTS idx_memories_is_blank;
-             CREATE INDEX IF NOT EXISTS idx_memory_bundles_is_blank
-                 ON db_memory_bundles(is_blank);",
-        )?;
-    }
-
     Ok(())
 }
 
@@ -1668,6 +1713,153 @@ mod tests {
                 .unwrap();
             assert_eq!(count, 0, "v11 must not resurrect {legacy}");
         }
+    }
+
+    #[test]
+    fn test_forge_v11_merges_legacy_into_bundle_when_both_exist() {
+        // Codex P1 on #933 (2026-05-19): the downgrade-then-re-upgrade
+        // scenario. User upgrades to v11 (legacy → bundle rename), runs an
+        // older build that recreates empty `db_identities`/`db_memories`
+        // via v7's CREATE IF NOT EXISTS and possibly writes rows, then
+        // re-upgrades. v11 must merge orphan legacy rows into the bundle
+        // and drop the legacy table — without this, downgrade-era writes
+        // are silently stranded.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+
+        // Simulate the post-upgrade-then-downgrade state: v7 has just been
+        // run for legacy creation, then v11 renames, then we manually
+        // re-create the legacy tables (= what old code would do on
+        // downgrade) and seed orphan + colliding rows.
+        migrate_through_v7(&conn).unwrap();
+        run_forge_v11_migrations(&conn).unwrap();
+
+        // Seed a row that exists ONLY in the bundle (current-build write).
+        conn.execute_batch(
+            "INSERT INTO db_identity_bundles
+                (id, name, description, is_blank, created_at, updated_at)
+             VALUES ('bundle-only', 'BundleOnly', '', 0, 100, 100);
+
+             INSERT INTO db_memory_bundles
+                (id, name, description, is_blank, provider, model, instructions,
+                 context_files, mcp_servers, skills, created_at, updated_at)
+             VALUES ('bundle-only', 'BundleOnly', '', 0, '', '', '',
+                     '[]', '[]', '[]', 100, 100);",
+        )
+        .unwrap();
+
+        // Simulate downgrade re-creating empty legacy tables, then writing
+        // orphan rows + an id collision with the bundle.
+        conn.execute_batch(
+            "CREATE TABLE db_identities (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT NOT NULL DEFAULT '',
+                is_blank INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE db_memories (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT NOT NULL DEFAULT '',
+                is_blank INTEGER NOT NULL DEFAULT 0,
+                provider TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL DEFAULT '',
+                instructions TEXT NOT NULL DEFAULT '',
+                context_files TEXT NOT NULL DEFAULT '[]',
+                mcp_servers TEXT NOT NULL DEFAULT '[]',
+                skills TEXT NOT NULL DEFAULT '[]',
+                created_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL DEFAULT 0
+             );
+
+             -- Rescuable orphans (id NOT in the bundle):
+             INSERT INTO db_identities
+                (id, name, description, is_blank, created_at, updated_at)
+             VALUES ('legacy-orphan', 'LegacyOrphan', 'from downgrade',
+                     0, 200, 200);
+             INSERT INTO db_memories
+                (id, name, description, is_blank, provider, model, instructions,
+                 context_files, mcp_servers, skills, created_at, updated_at)
+             VALUES ('legacy-orphan', 'LegacyOrphan', 'from downgrade',
+                     0, '', '', '', '[]', '[]', '[]', 200, 200);
+
+             -- Colliding id with the bundle row: OR IGNORE must keep the
+             -- bundle copy (current build's truth).
+             INSERT INTO db_identities
+                (id, name, description, is_blank, created_at, updated_at)
+             VALUES ('bundle-only', 'BundleOnly-LegacyOverride', 'stale', 0,
+                     50, 50);",
+        )
+        .unwrap();
+
+        // Re-upgrade: v11 must merge + drop legacy.
+        run_forge_v11_migrations(&conn).unwrap();
+
+        // Legacy tables gone after merge.
+        for legacy in &["db_identities", "db_memories"] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [legacy],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0, "{legacy} should be dropped after merge");
+        }
+
+        // Orphan rescued into the bundle.
+        let orphan_desc: String = conn
+            .query_row(
+                "SELECT description FROM db_identity_bundles WHERE id='legacy-orphan'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(orphan_desc, "from downgrade");
+        let orphan_mem: String = conn
+            .query_row(
+                "SELECT description FROM db_memory_bundles WHERE id='legacy-orphan'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(orphan_mem, "from downgrade");
+
+        // Colliding id: bundle copy wins (INSERT OR IGNORE preserves it).
+        let bundle_name: String = conn
+            .query_row(
+                "SELECT name FROM db_identity_bundles WHERE id='bundle-only'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            bundle_name, "BundleOnly",
+            "bundle row must survive an id collision with a legacy row"
+        );
+
+        // Index renamed; legacy index dropped.
+        let new_idx: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' \
+                 AND name='idx_identity_bundles_is_blank'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(new_idx, 1);
+        let old_idx: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' \
+                 AND name='idx_identities_is_blank'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(old_idx, 0);
     }
 
     #[test]
