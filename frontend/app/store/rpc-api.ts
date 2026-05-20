@@ -483,94 +483,94 @@ class RpcApiType {
         return client.rpcCall("wslstatus", null, opts);
     }
 
-    // command "listforgeagents" [call]
-    ListForgeAgentsCommand(client: RpcClient, opts?: RpcOpts): Promise<ForgeAgent[]> {
-        return client.rpcCall("listforgeagents", {}, opts);
+    // command "listagents" [call]
+    ListAgentDefinitionsCommand(client: RpcClient, opts?: RpcOpts): Promise<AgentDefinition[]> {
+        return client.rpcCall("listagents", {}, opts);
     }
 
-    // command "createforgeagent" [call]
-    CreateForgeAgentCommand(client: RpcClient, data: CommandCreateForgeAgentData, opts?: RpcOpts): Promise<ForgeAgent> {
-        return client.rpcCall("createforgeagent", data, opts);
+    // command "createagent" [call]
+    CreateAgentDefinitionCommand(client: RpcClient, data: CommandCreateAgentDefinitionData, opts?: RpcOpts): Promise<AgentDefinition> {
+        return client.rpcCall("createagent", data, opts);
     }
 
-    // command "updateforgeagent" [call]
-    UpdateForgeAgentCommand(client: RpcClient, data: CommandUpdateForgeAgentData, opts?: RpcOpts): Promise<ForgeAgent> {
-        return client.rpcCall("updateforgeagent", data, opts);
+    // command "updateagent" [call]
+    UpdateAgentDefinitionCommand(client: RpcClient, data: CommandUpdateAgentDefinitionData, opts?: RpcOpts): Promise<AgentDefinition> {
+        return client.rpcCall("updateagent", data, opts);
     }
 
-    // command "deleteforgeagent" [call]
-    DeleteForgeAgentCommand(client: RpcClient, data: CommandDeleteForgeAgentData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("deleteforgeagent", data, opts);
+    // command "deleteagent" [call]
+    DeleteAgentDefinitionCommand(client: RpcClient, data: CommandDeleteAgentDefinitionData, opts?: RpcOpts): Promise<void> {
+        return client.rpcCall("deleteagent", data, opts);
     }
 
-    // command "getforgecontent" [call]
-    GetForgeContentCommand(client: RpcClient, data: CommandGetForgeContentData, opts?: RpcOpts): Promise<ForgeContent | null> {
-        return client.rpcCall("getforgecontent", data, opts);
+    // command "getagentcontent" [call]
+    GetAgentContentCommand(client: RpcClient, data: CommandGetAgentContentData, opts?: RpcOpts): Promise<AgentContent | null> {
+        return client.rpcCall("getagentcontent", data, opts);
     }
 
-    // command "setforgecontent" [call]
-    SetForgeContentCommand(client: RpcClient, data: CommandSetForgeContentData, opts?: RpcOpts): Promise<ForgeContent> {
-        return client.rpcCall("setforgecontent", data, opts);
+    // command "setagentcontent" [call]
+    SetAgentContentCommand(client: RpcClient, data: CommandSetAgentContentData, opts?: RpcOpts): Promise<AgentContent> {
+        return client.rpcCall("setagentcontent", data, opts);
     }
 
-    // command "getallforgecontent" [call]
-    GetAllForgeContentCommand(client: RpcClient, data: CommandGetAllForgeContentData, opts?: RpcOpts): Promise<ForgeContent[]> {
-        return client.rpcCall("getallforgecontent", data, opts);
+    // command "getallagentcontent" [call]
+    GetAllAgentContentCommand(client: RpcClient, data: CommandGetAllAgentContentData, opts?: RpcOpts): Promise<AgentContent[]> {
+        return client.rpcCall("getallagentcontent", data, opts);
     }
 
-    // command "listforgeskills" [call]
-    ListForgeSkillsCommand(client: RpcClient, data: CommandListForgeSkillsData, opts?: RpcOpts): Promise<ForgeSkill[]> {
-        return client.rpcCall("listforgeskills", data, opts);
+    // command "listagentskills" [call]
+    ListAgentSkillsCommand(client: RpcClient, data: CommandListAgentSkillsData, opts?: RpcOpts): Promise<AgentSkill[]> {
+        return client.rpcCall("listagentskills", data, opts);
     }
 
-    // command "createforgeskill" [call]
-    CreateForgeSkillCommand(client: RpcClient, data: CommandCreateForgeSkillData, opts?: RpcOpts): Promise<ForgeSkill> {
-        return client.rpcCall("createforgeskill", data, opts);
+    // command "createagentskill" [call]
+    CreateAgentSkillCommand(client: RpcClient, data: CommandCreateAgentSkillData, opts?: RpcOpts): Promise<AgentSkill> {
+        return client.rpcCall("createagentskill", data, opts);
     }
 
-    // command "updateforgeskill" [call]
-    UpdateForgeSkillCommand(client: RpcClient, data: CommandUpdateForgeSkillData, opts?: RpcOpts): Promise<ForgeSkill> {
-        return client.rpcCall("updateforgeskill", data, opts);
+    // command "updateagentskill" [call]
+    UpdateAgentSkillCommand(client: RpcClient, data: CommandUpdateAgentSkillData, opts?: RpcOpts): Promise<AgentSkill> {
+        return client.rpcCall("updateagentskill", data, opts);
     }
 
-    // command "deleteforgeskill" [call]
-    DeleteForgeSkillCommand(client: RpcClient, data: CommandDeleteForgeSkillData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("deleteforgeskill", data, opts);
+    // command "deleteagentskill" [call]
+    DeleteAgentSkillCommand(client: RpcClient, data: CommandDeleteAgentSkillData, opts?: RpcOpts): Promise<void> {
+        return client.rpcCall("deleteagentskill", data, opts);
     }
 
-    // command "appendforgehistory" [call]
-    AppendForgeHistoryCommand(client: RpcClient, data: CommandAppendForgeHistoryData, opts?: RpcOpts): Promise<ForgeHistory> {
-        return client.rpcCall("appendforgehistory", data, opts);
+    // command "appendagenthistory" [call]
+    AppendAgentHistoryCommand(client: RpcClient, data: CommandAppendAgentHistoryData, opts?: RpcOpts): Promise<AgentHistory> {
+        return client.rpcCall("appendagenthistory", data, opts);
     }
 
-    // command "listforgehistory" [call]
-    ListForgeHistoryCommand(client: RpcClient, data: CommandListForgeHistoryData, opts?: RpcOpts): Promise<ForgeHistory[]> {
-        return client.rpcCall("listforgehistory", data, opts);
+    // command "listagenthistory" [call]
+    ListAgentHistoryCommand(client: RpcClient, data: CommandListAgentHistoryData, opts?: RpcOpts): Promise<AgentHistory[]> {
+        return client.rpcCall("listagenthistory", data, opts);
     }
 
-    // command "searchforgehistory" [call]
-    SearchForgeHistoryCommand(client: RpcClient, data: CommandSearchForgeHistoryData, opts?: RpcOpts): Promise<ForgeHistory[]> {
-        return client.rpcCall("searchforgehistory", data, opts);
+    // command "searchagenthistory" [call]
+    SearchAgentHistoryCommand(client: RpcClient, data: CommandSearchAgentHistoryData, opts?: RpcOpts): Promise<AgentHistory[]> {
+        return client.rpcCall("searchagenthistory", data, opts);
     }
 
-    // command "importforgefromclaw" [call]
-    ImportForgeFromClawCommand(client: RpcClient, data: CommandImportForgeFromClawData, opts?: RpcOpts): Promise<ForgeAgent> {
-        return client.rpcCall("importforgefromclaw", data, opts);
+    // command "importagentfromclaw" [call]
+    ImportAgentFromClawCommand(client: RpcClient, data: CommandImportAgentFromClawData, opts?: RpcOpts): Promise<AgentDefinition> {
+        return client.rpcCall("importagentfromclaw", data, opts);
     }
 
-    // command "importforgeagents" [call]
-    ImportForgeAgentsCommand(client: RpcClient, data: CommandImportForgeAgentsData, opts?: RpcOpts): Promise<ImportForgeAgentsResult> {
-        return client.rpcCall("importforgeagents", data, opts);
+    // command "importagents" [call]
+    ImportAgentDefinitionsCommand(client: RpcClient, data: CommandImportAgentDefinitionsData, opts?: RpcOpts): Promise<ImportAgentDefinitionsResult> {
+        return client.rpcCall("importagents", data, opts);
     }
 
-    // command "exportforgeagents" [call]
-    ExportForgeAgentsCommand(client: RpcClient, opts?: RpcOpts): Promise<ExportForgeAgentsResult> {
-        return client.rpcCall("exportforgeagents", {}, opts);
+    // command "exportagents" [call]
+    ExportAgentDefinitionsCommand(client: RpcClient, opts?: RpcOpts): Promise<ExportAgentDefinitionsResult> {
+        return client.rpcCall("exportagents", {}, opts);
     }
 
-    // command "reseedforgeagents" [call]
-    ReseedForgeAgentsCommand(client: RpcClient, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("reseedforgeagents", {}, opts);
+    // command "reseedagents" [call]
+    ReseedAgentDefinitionsCommand(client: RpcClient, opts?: RpcOpts): Promise<void> {
+        return client.rpcCall("reseedagents", {}, opts);
     }
 
     // ── v6: identity / instance / fork ──────────────────────────────────────
@@ -634,7 +634,7 @@ class RpcApiType {
         client: RpcClient,
         data: { agent_id: string },
         opts?: RpcOpts,
-    ): Promise<ForgeAgentIdentity[]> {
+    ): Promise<AgentDefinitionIdentity[]> {
         return client.rpcCall("listagentidentities", data, opts);
     }
 
@@ -1005,7 +1005,7 @@ class RpcApiType {
         client: RpcClient,
         data: { source_id: string; branch_label?: string },
         opts?: RpcOpts,
-    ): Promise<ForgeAgent> {
+    ): Promise<AgentDefinition> {
         return client.rpcCall("forkagentdefinition", data, opts);
     }
 

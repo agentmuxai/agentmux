@@ -3,14 +3,14 @@
 
 import type { JSX } from "solid-js";
 import { For, Show } from "solid-js";
-import type { ForgeViewModel, ContentTabId } from "../forge-model";
-import { CONTENT_TABS, CONTENT_TAB_LABELS } from "../forge-model";
+import type { AgentDefViewModel, ContentTabId } from "../agent-def-model";
+import { CONTENT_TABS, CONTENT_TAB_LABELS } from "../agent-def-model";
 import { ContentEditor } from "./ContentEditor";
 
 function ContentTabButton(props: {
     tab: ContentTabId;
     activeTab: ContentTabId;
-    model: ForgeViewModel;
+    model: AgentDefViewModel;
 }): JSX.Element {
     const handleClick = async () => {
         props.model.setActiveTab(props.tab);
@@ -26,7 +26,7 @@ function ContentTabButton(props: {
     );
 }
 
-export function ForgeContentSection(props: { model: ForgeViewModel; agentId: string }): JSX.Element {
+export function AgentContentSection(props: { model: AgentDefViewModel; agentId: string }): JSX.Element {
     const contentMap = props.model.contentAtom;
     const activeTab = props.model.activeTabAtom;
     const contentLoading = props.model.contentLoadingAtom;

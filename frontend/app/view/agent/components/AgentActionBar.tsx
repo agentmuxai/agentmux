@@ -11,7 +11,7 @@ import { ImportPreviewModal } from "./ImportPreviewModal";
 export const AgentActionBar = (): JSX.Element => {
     const [importing, setImporting] = createSignal(false);
     const [exporting, setExporting] = createSignal(false);
-    const [importPayload, setImportPayload] = createSignal<ExportForgeAgentsResult | null>(null);
+    const [importPayload, setImportPayload] = createSignal<ExportAgentDefinitionsResult | null>(null);
     // Error dialog replaces the four `alert()` callsites — in-app,
     // styled, focus-managed, matches the rest of the UI.
     const [errorMsg, setErrorMsg] = createSignal<string | null>(null);
@@ -28,7 +28,7 @@ export const AgentActionBar = (): JSX.Element => {
             setImporting(true);
             try {
                 const text = await file.text();
-                let parsed: ExportForgeAgentsResult;
+                let parsed: ExportAgentDefinitionsResult;
                 try {
                     parsed = JSON.parse(text);
                 } catch {
@@ -56,7 +56,7 @@ export const AgentActionBar = (): JSX.Element => {
         if (exporting()) return;
         setExporting(true);
         try {
-            const result = await RpcApi.ExportForgeAgentsCommand(TabRpcClient);
+            const result = await RpcApi.ExportAgentDefinitionsCommand(TabRpcClient);
             const json = JSON.stringify(result, null, 2);
             const blob = new Blob([json], { type: "application/json" });
             const url = URL.createObjectURL(blob);

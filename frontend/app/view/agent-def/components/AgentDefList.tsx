@@ -3,10 +3,10 @@
 
 import type { JSX } from "solid-js";
 import { For, Show } from "solid-js";
-import type { ForgeViewModel } from "../forge-model";
-import { ForgeAgentCard } from "./ForgeAgentCard";
+import type { AgentDefViewModel } from "../agent-def-model";
+import { AgentDefCard } from "./AgentDefCard";
 
-export function ForgeList(props: { model: ForgeViewModel }): JSX.Element {
+export function AgentDefList(props: { model: AgentDefViewModel }): JSX.Element {
     const agents = props.model.agentsAtom;
 
     const hostAgents = () => agents().filter((a) => a.agent_type === "host");
@@ -33,19 +33,19 @@ export function ForgeList(props: { model: ForgeViewModel }): JSX.Element {
                     <Show when={hostAgents().length > 0}>
                         <div class="forge-group-header">Host Agents</div>
                         <For each={hostAgents()}>{(agent) =>
-                            <ForgeAgentCard agent={agent} model={props.model} />
+                            <AgentDefCard agent={agent} model={props.model} />
                         }</For>
                     </Show>
                     <Show when={containerAgents().length > 0}>
                         <div class="forge-group-header">Container Agents</div>
                         <For each={containerAgents()}>{(agent) =>
-                            <ForgeAgentCard agent={agent} model={props.model} />
+                            <AgentDefCard agent={agent} model={props.model} />
                         }</For>
                     </Show>
                     <Show when={customAgents().length > 0}>
                         <div class="forge-group-header">Custom Agents</div>
                         <For each={customAgents()}>{(agent) =>
-                            <ForgeAgentCard agent={agent} model={props.model} />
+                            <AgentDefCard agent={agent} model={props.model} />
                         }</For>
                     </Show>
                 </div>

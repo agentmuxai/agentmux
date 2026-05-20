@@ -4,13 +4,13 @@
 import { createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 import { For, Show } from "solid-js";
-import type { ForgeViewModel } from "../forge-model";
-import { SKILL_TYPES } from "../forge-model";
+import type { AgentDefViewModel } from "../agent-def-model";
+import { SKILL_TYPES } from "../agent-def-model";
 
-export function ForgeSkillForm(props: {
-    model: ForgeViewModel;
+export function AgentSkillForm(props: {
+    model: AgentDefViewModel;
     agentId: string;
-    skill: ForgeSkill | null;
+    skill: AgentSkill | null;
     onClose: () => void;
 }): JSX.Element {
     const error = props.model.errorAtom;

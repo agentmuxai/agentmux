@@ -14,7 +14,7 @@ import { Logger } from "@/util/logger";
 import { buildInstanceSlug } from "./defaults/instance-slug";
 import type { LaunchOverrides } from "./components/AgentLaunchModal";
 
-export type OverlayTab = "forge" | "identity";
+export type OverlayTab = "agent" | "identity";
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -36,7 +36,7 @@ export class AgentViewModel implements ViewModel {
     // in the model (signals must live inside the component tree).
     _setOverlayTab: ((tab: OverlayTab | null) => void) | null = null;
     // Last-used overlay tab — gear re-opens to whichever tab was active last.
-    _lastOverlayTab: OverlayTab = "forge";
+    _lastOverlayTab: OverlayTab = "agent";
 
     // Voice-input target ref. AgentFooter populates this on mount with a
     // textarea-backed handle (and clears it on unmount). The exposed
@@ -226,12 +226,12 @@ export class AgentViewModel implements ViewModel {
 
     /**
      * Launch a Forge-managed agent in presentation view.
-     * Uses the ForgeAgent's provider to look up CLI config.
+     * Uses the AgentDefinition's provider to look up CLI config.
      * Loads content blobs (soul, agentmd, mcp, env) and writes config files
      * to the working directory via WriteAgentConfigCommand, then creates
      * a SubprocessController ready for user input.
      */
-    launchForgeAgent = async (agent: ForgeAgent, overrides?: LaunchOverrides): Promise<void> => {
+    launchAgentDefinition = async (agent: AgentDefinition, overrides?: LaunchOverrides): Promise<void> => {
         const provider = PROVIDERS[agent.provider] ?? PROVIDERS[resolveProviderAlias(agent.provider)];
         if (!provider) {
             Logger.error("agent", "Unknown provider in forge agent", { agentId: agent.id, provider: agent.provider });
@@ -256,9 +256,9 @@ export class AgentViewModel implements ViewModel {
         });
 
         // Load all content for this agent
-        let contents: ForgeContent[] = [];
+        let contents: AgentContent[] = [];
         try {
-            contents = await RpcApi.GetAllForgeContentCommand(TabRpcClient, { agent_id: agent.id }) ?? [];
+            contents = await RpcApi.GetAllAgentContentCommand(TabRpcClient, { agent_id: agent.id }) ?? [];
         } catch (e: any) {
             Logger.error("agent", "Failed to load forge content", { error: String(e) });
         }
@@ -268,9 +268,9 @@ export class AgentViewModel implements ViewModel {
         }
 
         // Load skills for this agent (lazy-loading: only names/descriptions injected)
-        let skills: ForgeSkill[] = [];
+        let skills: AgentSkill[] = [];
         try {
-            skills = await RpcApi.ListForgeSkillsCommand(TabRpcClient, { agent_id: agent.id }) ?? [];
+            skills = await RpcApi.ListAgentSkillsCommand(TabRpcClient, { agent_id: agent.id }) ?? [];
         } catch (e: any) {
             Logger.error("agent", "Failed to load forge skills", { error: String(e) });
         }
@@ -583,8 +583,8 @@ function resolveCliDir(version: string, providerId: string): string {
  */
 function buildConfigFiles(
     contentMap: Record<string, string>,
-    skills: ForgeSkill[] = [],
-    agent?: ForgeAgent,
+    skills: AgentSkill[] = [],
+    agent?: AgentDefinition,
     instanceName?: string,
 ): AgentConfigFile[] {
     const files: AgentConfigFile[] = [];
@@ -780,7 +780,7 @@ function buildSettingsWithHooks(
  */
 function buildMcpConfig(
     userMcpContent: string | undefined,
-    agent?: ForgeAgent,
+    agent?: AgentDefinition,
     instanceName?: string,
 ): string | null {
     // Auto-inject AgentMux MCP server for inter-agent messaging.

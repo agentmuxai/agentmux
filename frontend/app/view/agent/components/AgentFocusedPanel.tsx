@@ -17,7 +17,7 @@ import type { OverlayTab } from "../agent-model";
 interface AgentFocusedPanelProps {
     blockId: string;
     nodeModel: BlockNodeModel;
-    agent: ForgeAgent;
+    agent: AgentDefinition;
     initialTab: OverlayTab;
     onClose: () => void;
     onTabChange?: (tab: SettingsTab) => void;

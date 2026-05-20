@@ -4,10 +4,10 @@
 import { createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 import { For, Show } from "solid-js";
-import type { ForgeViewModel } from "../forge-model";
-import { PROVIDERS } from "../forge-constants";
+import type { AgentDefViewModel } from "../agent-def-model";
+import { PROVIDERS } from "../agent-def-constants";
 
-export function ForgeForm(props: { model: ForgeViewModel }): JSX.Element {
+export function AgentDefForm(props: { model: AgentDefViewModel }): JSX.Element {
     const view = props.model.viewAtom;
     const editingAgent = props.model.editingAgentAtom;
     const loading = props.model.loadingAtom;

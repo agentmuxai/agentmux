@@ -38,7 +38,7 @@ import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentStatusLine } from "./components/AgentFooter";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
-import { AgentPicker, useForgeAgents } from "./components/AgentPicker";
+import { AgentPicker, useAgentDefinitions } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { AgentFocusedPanel } from "./components/AgentFocusedPanel";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
@@ -94,9 +94,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         model._setOverlayTab = null;
     });
 
-    // Reactive forge agent list — used to resolve the current ForgeAgent object
+    // Reactive forge agent list — used to resolve the current AgentDefinition object
     // so the overlay can pass it to AgentCardSettingsPanel / rename input.
-    const forgeAgents = useForgeAgents();
+    const forgeAgents = useAgentDefinitions();
     const currentAgent = createMemo(() => forgeAgents().find((a) => a.id === agentId));
 
     const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
@@ -458,7 +458,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
             // Gather inputs in parallel where possible
             const [startupContentResult, version] = await Promise.all([
-                RpcApi.GetForgeContentCommand(TabRpcClient, {
+                RpcApi.GetAgentContentCommand(TabRpcClient, {
                     agent_id: agentId,
                     content_type: "startup",
                 }).catch(() => null),

@@ -3,11 +3,11 @@
 
 import type { JSX } from "solid-js";
 import { For, Show } from "solid-js";
-import type { ForgeViewModel, DetailSection } from "../forge-model";
-import { PROVIDERS } from "../forge-constants";
-import { ForgeContentSection } from "./ForgeContentSection";
-import { ForgeSkillsPanel } from "./ForgeSkillsPanel";
-import { ForgeHistoryPanel } from "./ForgeHistoryPanel";
+import type { AgentDefViewModel, DetailSection } from "../agent-def-model";
+import { PROVIDERS } from "../agent-def-constants";
+import { AgentContentSection } from "./AgentContentSection";
+import { AgentSkillsPanel } from "./AgentSkillsPanel";
+import { AgentHistoryPanel } from "./AgentHistoryPanel";
 
 const DETAIL_SECTIONS: { id: DetailSection; label: string }[] = [
     { id: "content", label: "Content" },
@@ -18,7 +18,7 @@ const DETAIL_SECTIONS: { id: DetailSection; label: string }[] = [
 function DetailSectionButton(props: {
     section: { id: DetailSection; label: string };
     activeSection: DetailSection;
-    model: ForgeViewModel;
+    model: AgentDefViewModel;
     agentId: string;
 }): JSX.Element {
     const handleClick = async () => {
@@ -40,7 +40,7 @@ function DetailSectionButton(props: {
     );
 }
 
-export function ForgeDetail(props: { model: ForgeViewModel }): JSX.Element {
+export function AgentDefDetail(props: { model: AgentDefViewModel }): JSX.Element {
     const agent = props.model.detailAgentAtom;
     const activeSection = props.model.activeSectionAtom;
 
@@ -87,13 +87,13 @@ export function ForgeDetail(props: { model: ForgeViewModel }): JSX.Element {
                         </div>
                         <div class="forge-section-body">
                             <Show when={activeSection() === "content"}>
-                                <ForgeContentSection model={props.model} agentId={agentVal().id} />
+                                <AgentContentSection model={props.model} agentId={agentVal().id} />
                             </Show>
                             <Show when={activeSection() === "skills"}>
-                                <ForgeSkillsPanel model={props.model} agentId={agentVal().id} />
+                                <AgentSkillsPanel model={props.model} agentId={agentVal().id} />
                             </Show>
                             <Show when={activeSection() === "history"}>
-                                <ForgeHistoryPanel model={props.model} agentId={agentVal().id} />
+                                <AgentHistoryPanel model={props.model} agentId={agentVal().id} />
                             </Show>
                         </div>
                     </div>
