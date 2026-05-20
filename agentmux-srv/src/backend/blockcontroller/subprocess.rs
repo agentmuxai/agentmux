@@ -778,7 +778,7 @@ impl Controller for SubprocessController {
         self.get_status_snapshot()
     }
 
-    fn send_input(&self, input: BlockInputUnion) -> Result<(), String> {
+    fn send_input(&self, input: BlockInputUnion, _seq: Option<u64>) -> Result<(), String> {
         // SubprocessController doesn't accept raw PTY input — user messages
         // go through spawn_turn() (via AgentInputCommand RPC).
         //
@@ -853,7 +853,7 @@ mod tests {
             None,
             None,
         );
-        let result = ctrl.send_input(BlockInputUnion::data(b"hello".to_vec()));
+        let result = ctrl.send_input(BlockInputUnion::data(b"hello".to_vec()), None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("AgentInputCommand"));
     }

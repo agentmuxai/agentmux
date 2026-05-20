@@ -14,6 +14,7 @@
 //! 3. Wait loop: monitor process exit, update status
 
 
+use std::collections::BTreeMap;
 use std::io::Read as _;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -113,6 +114,10 @@ struct ShellControllerInner {
     last_pty_output: Option<Instant>,
     /// True if this pane is running an agent CLI (e.g. claude).
     is_agent_pane: bool,
+    /// Next expected input sequence number (0 = fresh block).
+    input_seq_next: u64,
+    /// Reorder buffer: early-arriving inputs keyed by their seq.
+    input_seq_buf: BTreeMap<u64, BlockInputUnion>,
 }
 
 /// Factory function type for creating ConnInterface instances.
@@ -169,6 +174,8 @@ impl ShellController {
                 spawn_ts_ms: None,
                 last_pty_output: None,
                 is_agent_pane: false,
+                input_seq_next: 0,
+                input_seq_buf: BTreeMap::new(),
             })),
             conn_factory: Mutex::new(None),
             broker,
@@ -976,13 +983,43 @@ impl Controller for ShellController {
         self.get_status_snapshot()
     }
 
-    fn send_input(&self, input: BlockInputUnion) -> Result<(), String> {
-        let inner = self.inner.lock().unwrap();
-        match &inner.input_tx {
-            Some(tx) => tx
-                .try_send(input)
-                .map_err(|e| format!("failed to send input: {e}")),
-            None => Err("controller is not running".to_string()),
+    fn send_input(&self, input: BlockInputUnion, seq: Option<u64>) -> Result<(), String> {
+        let mut inner = self.inner.lock().unwrap();
+        let tx = match &inner.input_tx {
+            Some(tx) => tx.clone(),
+            None => return Err("controller is not running".to_string()),
+        };
+        match seq {
+            None => tx.try_send(input).map_err(|e| format!("send_input: {e}")),
+            Some(s) => {
+                let next = inner.input_seq_next;
+                if s == next {
+                    tx.try_send(input).map_err(|e| format!("send_input: {e}"))?;
+                    inner.input_seq_next += 1;
+                    loop {
+                        let expected = inner.input_seq_next;
+                        match inner.input_seq_buf.remove(&expected) {
+                            Some(buffered) => {
+                                tx.try_send(buffered)
+                                    .map_err(|e| format!("send_input drain: {e}"))?;
+                                inner.input_seq_next += 1;
+                            }
+                            None => break,
+                        }
+                    }
+                    Ok(())
+                } else if s > next {
+                    if inner.input_seq_buf.len() < SHELL_INPUT_CH_SIZE {
+                        inner.input_seq_buf.insert(s, input);
+                    } else {
+                        tracing::warn!(block_id = %self.block_id, seq = s, "input reorder buffer full, dropping");
+                    }
+                    Ok(())
+                } else {
+                    tracing::warn!(block_id = %self.block_id, seq = s, next, "duplicate input seq, discarding");
+                    Ok(())
+                }
+            }
         }
     }
 
@@ -1378,7 +1415,7 @@ mod tests {
             None,
         );
 
-        let result = ctrl.send_input(BlockInputUnion::data(b"hello".to_vec()));
+        let result = ctrl.send_input(BlockInputUnion::data(b"hello".to_vec()), None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not running"));
     }

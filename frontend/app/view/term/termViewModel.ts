@@ -72,6 +72,7 @@ class TermViewModel implements ViewModel {
     agentRuntimeLabel: () => string | null;
     searchAtoms?: SearchAtoms;
     voiceHandle: () => PaneVoiceHandle;
+    private inputSeq: number = 0;
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.viewType = "term";
@@ -341,7 +342,7 @@ class TermViewModel implements ViewModel {
 
     sendDataToController(data: string) {
         const b64data = stringToBase64(data);
-        RpcApi.ControllerInputCommand(TabRpcClient, { blockid: this.blockId, inputdata64: b64data });
+        RpcApi.ControllerInputCommand(TabRpcClient, { blockid: this.blockId, inputdata64: b64data, seq: this.inputSeq++ });
     }
 
     triggerRestartAtom() {

@@ -592,7 +592,7 @@ impl Controller for PersistentSubprocessController {
         self.get_status_snapshot()
     }
 
-    fn send_input(&self, _input: BlockInputUnion) -> Result<(), String> {
+    fn send_input(&self, _input: BlockInputUnion, _seq: Option<u64>) -> Result<(), String> {
         Err("persistent controller does not accept raw input; use send_message()".to_string())
     }
 

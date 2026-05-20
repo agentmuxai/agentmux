@@ -510,6 +510,12 @@ pub struct CommandBlockInputData {
     pub signame: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub termsize: Option<serde_json::Value>,
+    /// Monotonically increasing per-block counter attached by the frontend.
+    /// None = legacy client; inputs are forwarded unconditionally.
+    /// When present, the backend uses a reorder buffer to guarantee PTY
+    /// insertion order even if tokio::spawn tasks execute out of sequence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seq: Option<u64>,
 }
 
 /// Data for `tooldecision` — frontend's reply to a per-tool-call
