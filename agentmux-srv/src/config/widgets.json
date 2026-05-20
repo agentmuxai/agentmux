@@ -100,17 +100,5 @@
                 "view": "help"
             }
         }
-    },
-    "defwidget@devtools": {
-        "display:order": 8,
-        "display:pinned": true,
-        "icon": "code",
-        "label": "devtools",
-        "description": "Toggle Developer Tools",
-        "blockdef": {
-            "meta": {
-                "view": "devtools"
-            }
-        }
     }
 }

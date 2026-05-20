@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, createBlock, createTab, getApi, setActiveTab, settingsAtom } from "@/store/global";
+import { atoms, createTab, getApi, setActiveTab, settingsAtom } from "@/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { THEME_OPTIONS } from "@/app/menu/base-menus";
@@ -645,13 +645,6 @@ function TabBar(props: TabBarProps): JSX.Element {
 
         return [
             {
-                label: "Command Palette",
-                icon: "magnifying-glass",
-                shortcut: kbd("⌘P", "Ctrl+P"),
-                onClick: () => modalsModel.pushModal("CommandPaletteModal"),
-            },
-            { label: "", divider: true },
-            {
                 label: "New Tab",
                 icon: "plus",
                 shortcut: kbd("⌘T", "Ctrl+T"),
@@ -677,9 +670,9 @@ function TabBar(props: TabBarProps): JSX.Element {
             },
             { label: "", divider: true },
             {
-                label: "Help",
-                icon: "circle-question",
-                onClick: () => fireAndForget(() => createBlock({ meta: { view: "help" } })),
+                label: "Documentation",
+                icon: "book",
+                onClick: () => getApi().openExternal("https://docs.agentmux.ai"),
             },
             {
                 label: "Settings",
@@ -689,6 +682,17 @@ function TabBar(props: TabBarProps): JSX.Element {
                         const path = await invokeCommand<string>("ensure_settings_file");
                         await invokeCommand("open_in_editor", { path });
                     }),
+            },
+            {
+                label: "DevTools",
+                icon: "code",
+                onClick: () => getApi().toggleDevtools(),
+            },
+            {
+                label: "Command Palette",
+                icon: "magnifying-glass",
+                shortcut: kbd("⌘P", "Ctrl+P"),
+                onClick: () => modalsModel.pushModal("CommandPaletteModal"),
             },
             { label: "", divider: true },
             {
