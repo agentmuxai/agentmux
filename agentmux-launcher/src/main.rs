@@ -35,8 +35,30 @@ mod srv_spawner;
 mod state;
 mod wrr;
 
+/// Suppress the Windows "Application Error" / WER crash dialog so an unhandled
+/// fault terminates the process immediately instead of wedging it behind a
+/// modal. No-op off Windows. Spec:
+/// docs/specs/SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md.
+#[cfg(target_os = "windows")]
+fn suppress_os_crash_dialogs() {
+    use windows_sys::Win32::System::Diagnostics::Debug::{
+        SetErrorMode, SEM_FAILCRITICALERRORS, SEM_NOGPFAULTERRORBOX,
+    };
+    unsafe {
+        SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn suppress_os_crash_dialogs() {}
+
 #[tokio::main]
 async fn main() {
+    // Phase 0 (service supervision & recovery): suppress the Windows crash
+    // modal so a fault terminates immediately instead of freezing behind an
+    // "Application Error" dialog. First statement — before anything can fault.
+    suppress_os_crash_dialogs();
+
     let exe_path = std::env::current_exe().expect("cannot resolve exe path");
     let exe_dir = exe_path.parent().expect("exe has no parent directory");
     let runtime_dir = exe_dir.join("runtime");
