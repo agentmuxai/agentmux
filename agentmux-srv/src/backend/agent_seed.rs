@@ -354,7 +354,7 @@ fn reseed_if_needed(
             agent.restart_on_crash = existing_agent.restart_on_crash;
             agent.created_at = existing_agent.created_at;
             agent.accounts = existing_agent.accounts.clone();
-            wstore.agent_def_update(&agent)?;
+            wstore.agent_def_update(&mut agent)?;
             updated += 1;
         } else {
             wstore.agent_def_insert(&mut agent)?;

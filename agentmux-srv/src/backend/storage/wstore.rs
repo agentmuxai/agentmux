@@ -719,7 +719,11 @@ impl WaveStore {
     /// `parent_id` and `branch_label` are NOT updatable post-insert — they
     /// describe the agent's provenance; renaming or re-branching is done by
     /// creating a new fork, not mutating the original.
-    pub fn agent_def_update(&self, agent: &AgentDefinition) -> Result<bool, StoreError> {
+    ///
+    /// Self-stamps `updated_at` with the current time and writes it back into
+    /// `agent.updated_at`, so the caller's struct (e.g. an RPC response body)
+    /// reflects exactly what landed in the database.
+    pub fn agent_def_update(&self, agent: &mut AgentDefinition) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -750,6 +754,9 @@ impl WaveStore {
                 agent.id
             ],
         )?;
+        // Reflect the persisted timestamp back to the caller's struct so an
+        // RPC response carries the fresh value, not the pre-update one.
+        agent.updated_at = now;
         Ok(rows > 0)
     }
 

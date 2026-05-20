@@ -148,7 +148,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // slug is preserved from the existing row — it's
                 // immutable after creation. The update path never
                 // accepts a new slug from the client.
-                let agent = AgentDefinition {
+                let mut agent = AgentDefinition {
                     id: cmd.id,
                     slug: old.slug.clone(),
                     name: cmd.name,
@@ -177,12 +177,12 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // not in-place edits).
                     parent_id: old.parent_id.clone(),
                     branch_label: old.branch_label.clone(),
-                    // agent_def_update stamps a fresh updated_at in the DB;
-                    // the returned struct carries the prior value (the
-                    // agents:changed re-fetch corrects it client-side).
+                    // Placeholder — agent_def_update self-stamps the real
+                    // timestamp and writes it back into `agent` below, so
+                    // the response body carries the fresh value.
                     updated_at: old.updated_at,
                 };
-                let found = wstore.agent_def_update(&agent).map_err(|e| format!("updateagent: {e}"))?;
+                let found = wstore.agent_def_update(&mut agent).map_err(|e| format!("updateagent: {e}"))?;
                 if !found {
                     return Err(format!("updateagent: agent {} not found", agent.id));
                 }
