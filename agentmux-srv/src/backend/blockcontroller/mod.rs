@@ -180,7 +180,8 @@ pub trait Controller: Send + Sync {
     fn get_runtime_status(&self) -> BlockControllerRuntimeStatus;
 
     /// Send input (terminal data, signal, or resize) to the controller.
-    fn send_input(&self, input: BlockInputUnion) -> Result<(), String>;
+    /// `seq` is the per-TermViewModel monotonic counter; `None` means fire-and-forget (no ordering).
+    fn send_input(&self, input: BlockInputUnion, seq: Option<u64>) -> Result<(), String>;
 
     /// Get the controller type (e.g., "shell", "cmd").
     fn controller_type(&self) -> &str;
@@ -267,9 +268,9 @@ pub fn stop_block_controller(block_id: &str) -> Result<(), String> {
 }
 
 /// Send input to a block's controller.
-pub fn send_input(block_id: &str, input: BlockInputUnion) -> Result<(), String> {
+pub fn send_input(block_id: &str, input: BlockInputUnion, seq: Option<u64>) -> Result<(), String> {
     match get_controller(block_id) {
-        Some(ctrl) => ctrl.send_input(input),
+        Some(ctrl) => ctrl.send_input(input, seq),
         None => Err(format!("no controller for block {block_id}")),
     }
 }
@@ -523,7 +524,7 @@ mod tests {
 
     #[test]
     fn test_send_input_no_controller() {
-        let result = send_input("nonexistent", BlockInputUnion::data(b"test".to_vec()));
+        let result = send_input("nonexistent", BlockInputUnion::data(b"test".to_vec()), None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("no controller"));
     }

@@ -510,6 +510,9 @@ pub struct CommandBlockInputData {
     pub signame: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub termsize: Option<serde_json::Value>,
+    /// Per-TermViewModel monotonic counter for seq-based input ordering (optional, shell only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seq: Option<u64>,
 }
 
 /// Data for `tooldecision` — frontend's reply to a per-tool-call
