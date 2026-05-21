@@ -1,18 +1,13 @@
 fn main() {
-    // Emitting any rerun-if-changed directive disables Cargo's default
-    // "rerun build.rs if any package file changed", so every input is listed
-    // explicitly. The git-ref entries make the embedded commit hash / build
-    // timestamp refresh whenever HEAD moves, even if no package file changed.
-    println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-env-changed=CARGO_PKG_VERSION");
-    println!("cargo:rerun-if-env-changed=TARGET");
-    for git_path in ["../.git/HEAD", "../.git/refs", "../.git/packed-refs"] {
-        if std::path::Path::new(git_path).exists() {
-            println!("cargo:rerun-if-changed={git_path}");
-        }
-    }
-    #[cfg(target_os = "windows")]
-    println!("cargo:rerun-if-changed=resources/win/agentmux.ico");
+    // No `cargo:rerun-if-changed` directives by design: emitting any of them
+    // disables Cargo's default "rerun build.rs when any package file changes".
+    // That default is exactly what keeps AGENTMUX_GIT_HASH / AGENTMUX_BUILD_TIME
+    // honest — build.rs re-runs whenever agentmux-cef is rebuilt, so the
+    // embedded metadata always describes the binary just produced. A commit
+    // that touches no agentmux-cef file yields no new binary; the prior binary
+    // (carrying its own correct metadata) is what continues to run. An explicit
+    // rerun-if-changed list would instead disable source-tree watching and go
+    // stale on ordinary source edits.
 
     // Emit the target triple so we can locate sidecar binaries at runtime.
     println!(
