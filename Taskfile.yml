@@ -180,8 +180,16 @@ tasks:
         platforms: [windows]
         cmds:
             - cargo build --release -p agentmux-srv
-            - cmd: pwsh -Command "New-Item -ItemType Directory -Force -Path dist/bin | Out-Null; Copy-Item target/release/agentmux-srv.exe dist/bin/agentmux-srv-{{.VERSION}}-windows.x64.exe -Force"
-            - echo "✓ Built agentmux-srv for Windows (dist/bin/agentmux-srv-{{.VERSION}}-windows.x64.exe)"
+            # Read the version LIVE from package.json — `{{.VERSION}}` is frozen
+            # at `task` invocation start, BEFORE `task package`'s auto-bump
+            # runs, so it would stamp the binary with the stale (pre-bump)
+            # version while package-portable.sh resolves the version live.
+            #
+            # The pwsh command is SINGLE-quoted: Task runs cmds through a POSIX
+            # shell, which would otherwise expand `$v` to empty before pwsh
+            # sees it (naming the binary `agentmux-srv--windows.x64.exe`).
+            # Single quotes pass `$v` through literally for pwsh to evaluate.
+            - cmd: pwsh -Command '$v = (Get-Content -Raw package.json | ConvertFrom-Json).version; New-Item -ItemType Directory -Force -Path dist/bin | Out-Null; Copy-Item target/release/agentmux-srv.exe dist/bin/agentmux-srv-$v-windows.x64.exe -Force'
 
     # agentmux-wsh build tasks removed — wsh has been retired.
     # See specs/SPEC_RETIRE_WSH_2026_04_12.md.
