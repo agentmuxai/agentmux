@@ -113,6 +113,10 @@ struct ShellControllerInner {
     last_pty_output: Option<Instant>,
     /// True if this pane is running an agent CLI (e.g. claude).
     is_agent_pane: bool,
+    /// Next expected input seq number (per-TermViewModel monotonic counter).
+    input_seq_next: u64,
+    /// Out-of-order input packets waiting for their seq slot (capped at SHELL_INPUT_CH_SIZE).
+    input_seq_buf: std::collections::BTreeMap<u64, BlockInputUnion>,
 }
 
 /// Factory function type for creating ConnInterface instances.
@@ -169,6 +173,8 @@ impl ShellController {
                 spawn_ts_ms: None,
                 last_pty_output: None,
                 is_agent_pane: false,
+                input_seq_next: 0,
+                input_seq_buf: std::collections::BTreeMap::new(),
             })),
             conn_factory: Mutex::new(None),
             broker,
@@ -344,6 +350,8 @@ impl Controller for ShellController {
         {
             let mut inner = self.inner.lock().unwrap();
             inner.input_tx = Some(input_tx);
+            inner.input_seq_next = 0;
+            inner.input_seq_buf.clear();
         }
 
         // Check if we have a conn_factory (test/mock path)
@@ -962,13 +970,75 @@ impl Controller for ShellController {
         self.get_status_snapshot()
     }
 
-    fn send_input(&self, input: BlockInputUnion) -> Result<(), String> {
-        let inner = self.inner.lock().unwrap();
-        match &inner.input_tx {
-            Some(tx) => tx
-                .try_send(input)
-                .map_err(|e| format!("failed to send input: {e}")),
-            None => Err("controller is not running".to_string()),
+    fn send_input(&self, input: BlockInputUnion, seq: Option<u64>) -> Result<(), String> {
+        let mut inner = self.inner.lock().unwrap();
+        let tx = match &inner.input_tx {
+            Some(tx) => tx.clone(),
+            None => return Err("controller is not running".to_string()),
+        };
+        match seq {
+            None => tx.try_send(input).map_err(|e| format!("send_input: {e}")),
+            Some(s) => {
+                // Detect session reset: seq==0 means the TermViewModel restarted,
+                // or the arriving seq is far below expected (e.g. benchmark advanced
+                // next to 1357, user's new TermViewModel is at seq 6).
+                const SESSION_RESET_THRESHOLD: u64 = 64;
+                let large_gap = s < inner.input_seq_next
+                    && inner.input_seq_next - s > SESSION_RESET_THRESHOLD;
+                if (s == 0 && inner.input_seq_next > 0) || large_gap {
+                    tracing::info!(
+                        block_id = %self.block_id,
+                        prev_next = inner.input_seq_next,
+                        new_seq = s,
+                        "input seq reset (session reset detected)"
+                    );
+                    inner.input_seq_next = s;
+                    inner.input_seq_buf.clear();
+                }
+
+                let next = inner.input_seq_next;
+                if s == next {
+                    // Advance before sending — a try_send failure must not leave the
+                    // backend stuck waiting for a seq the frontend will never resend.
+                    inner.input_seq_next += 1;
+                    if let Err(e) = tx.try_send(input) {
+                        tracing::warn!(
+                            block_id = %self.block_id,
+                            seq = s,
+                            "send_input: channel full, dropping in-order packet: {e}"
+                        );
+                        return Ok(());
+                    }
+                    // Drain any buffered out-of-order packets now in order.
+                    loop {
+                        let expected = inner.input_seq_next;
+                        match inner.input_seq_buf.remove(&expected) {
+                            Some(buffered) => {
+                                inner.input_seq_next += 1;
+                                if let Err(e) = tx.try_send(buffered) {
+                                    tracing::warn!(
+                                        block_id = %self.block_id,
+                                        seq = expected,
+                                        "send_input drain: channel full, dropping buffered packet: {e}"
+                                    );
+                                }
+                            }
+                            None => break,
+                        }
+                    }
+                    Ok(())
+                } else if s > next {
+                    if inner.input_seq_buf.len() < SHELL_INPUT_CH_SIZE {
+                        inner.input_seq_buf.insert(s, input);
+                    } else {
+                        tracing::warn!(block_id = %self.block_id, seq = s, "input reorder buffer full, dropping");
+                    }
+                    Ok(())
+                } else {
+                    tracing::warn!(block_id = %self.block_id, seq = s, next, "duplicate input seq, discarding");
+                    Ok(())
+                }
+            }
         }
     }
 
@@ -1364,7 +1434,7 @@ mod tests {
             None,
         );
 
-        let result = ctrl.send_input(BlockInputUnion::data(b"hello".to_vec()));
+        let result = ctrl.send_input(BlockInputUnion::data(b"hello".to_vec()), None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not running"));
     }

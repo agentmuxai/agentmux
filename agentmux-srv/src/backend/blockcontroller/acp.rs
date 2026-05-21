@@ -562,7 +562,7 @@ impl Controller for AcpController {
         self.get_status_snapshot()
     }
 
-    fn send_input(&self, input: BlockInputUnion) -> Result<(), String> {
+    fn send_input(&self, input: BlockInputUnion, _seq: Option<u64>) -> Result<(), String> {
         if let Some(data) = input.input_data {
             // Raw input from the frontend — treat as a user message.
             // The frontend sends the user prompt as UTF-8 bytes.
