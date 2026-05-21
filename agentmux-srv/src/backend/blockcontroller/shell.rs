@@ -979,13 +979,12 @@ impl Controller for ShellController {
         match seq {
             None => tx.try_send(input).map_err(|e| format!("send_input: {e}")),
             Some(s) => {
-                // Detect session reset: seq==0 means the TermViewModel restarted,
-                // or the arriving seq is far below expected (e.g. benchmark advanced
-                // next to 1357, user's new TermViewModel is at seq 6).
-                const SESSION_RESET_THRESHOLD: u64 = 64;
-                let large_gap = s < inner.input_seq_next
-                    && inner.input_seq_next - s > SESSION_RESET_THRESHOLD;
-                if (s == 0 && inner.input_seq_next > 0) || large_gap {
+                // Detect session reset: seq==0 means the TermViewModel
+                // restarted and its per-block counter is back at zero.
+                // (A gap-threshold heuristic was tried and removed — a
+                // stale/duplicate packet far behind could falsely trigger
+                // a reset and replay old input.)
+                if s == 0 && inner.input_seq_next > 0 {
                     tracing::info!(
                         block_id = %self.block_id,
                         prev_next = inner.input_seq_next,

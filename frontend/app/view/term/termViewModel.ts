@@ -7,6 +7,7 @@ import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { appHandleKeyDown } from "@/app/store/keymodel";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { RpcApi } from "@/app/store/rpc-api";
+import { sendWSCommand } from "@/app/store/ws";
 import { makeFeBlockRouteId } from "@/app/store/rpc-router";
 import { DefaultRouter, TabRpcClient } from "@/app/store/rpc-util";
 import { TermRpcClient } from "@/app/view/term/term-rpc";
@@ -291,18 +292,18 @@ class TermViewModel implements ViewModel {
         });
 
         // Voice input handle — streams transcript characters into the
-        // PTY via the same controllerinput RPC that keystrokes use, so
+        // PTY via the same blockinput path that keystrokes use, so
         // xterm input modes (echo, line-buffered, etc.) are honored.
         // No interim preview: the terminal has no affordance for it.
         this.voiceHandle = () => ({
             appendFinal: (text: string) => {
                 const inputdata64 = stringToBase64(text);
-                RpcApi.ControllerInputCommand(TabRpcClient, {
+                const cmd: BlockInputWSCommand = {
+                    wscommand: "blockinput",
                     blockid: this.blockId,
                     inputdata64,
-                    signame: "",
-                    termsize: undefined,
-                });
+                };
+                sendWSCommand(cmd);
             },
             setInterim: () => { /* terminal has no preview affordance */ },
         });
@@ -340,8 +341,13 @@ class TermViewModel implements ViewModel {
     }
 
     sendDataToController(data: string) {
-        const b64data = stringToBase64(data);
-        RpcApi.ControllerInputCommand(TabRpcClient, { blockid: this.blockId, inputdata64: b64data });
+        const inputdata64 = stringToBase64(data);
+        // Use the blockinput wscommand, not the controllerinput RPC: blockinput
+        // is processed inline & synchronously in the WS receive loop, so
+        // consecutive keystrokes reach the PTY in TCP order. The RPC path is
+        // dispatched concurrently by the engine and can reorder fast typing.
+        const cmd: BlockInputWSCommand = { wscommand: "blockinput", blockid: this.blockId, inputdata64 };
+        sendWSCommand(cmd);
     }
 
     triggerRestartAtom() {
