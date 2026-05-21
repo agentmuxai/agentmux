@@ -134,17 +134,25 @@ function openWs(wsEndpoint, authKey) {
     const eventHandlers = [];
 
     ws.on("message", (raw) => {
-        const msg = JSON.parse(raw.toString("utf8"));
-        if (msg.wscommand === "eventrecv") {
-            for (const h of eventHandlers) h(msg);
+        const outer = JSON.parse(raw.toString("utf8"));
+        // All messages from the server are wrapped as { eventtype: "rpc", data: RpcMessage }.
+        // RpcMessage is either:
+        //   - an event push:    { command: "eventrecv", data: WaveEvent }
+        //   - an RPC response:  { resid: "uuid", data: response_data }
+        if (outer.eventtype !== "rpc" || !outer.data) return;
+        const rpc = outer.data;
+        if (rpc.command === "eventrecv") {
+            // WaveEvent is in rpc.data; pass the full rpc payload so handlers
+            // can inspect rpc.data.event, rpc.data.scopes, rpc.data.data.
+            for (const h of eventHandlers) h(rpc);
             return;
         }
-        // Server sends resid (response id) to match the original reqid.
-        const matchId = msg.resid || msg.reqid;
+        // RPC response: match on resid (or reqid for compat).
+        const matchId = rpc.resid || rpc.reqid;
         if (matchId && pending.has(matchId)) {
             const { resolve } = pending.get(matchId);
             pending.delete(matchId);
-            resolve(msg);
+            resolve(rpc);  // rpc.data = response payload
         }
     });
 
@@ -230,9 +238,11 @@ async function waitForPattern(client, pattern, timeoutMs = 5000) {
             unsub?.();
             reject(new Error(`Timeout waiting for: ${pattern}`));
         }, timeoutMs);
-        const handler = (msg) => {
-            if (msg.data?.data64) {
-                buf += Buffer.from(msg.data.data64, "base64").toString("utf8");
+        const handler = (rpc) => {
+            // rpc.data is the WaveEvent: { event, scopes, data: { data64 } }
+            const data64 = rpc.data?.data?.data64;
+            if (data64) {
+                buf += Buffer.from(data64, "base64").toString("utf8");
                 if (buf.includes(pattern)) {
                     clearTimeout(timer);
                     unsub?.();
@@ -310,9 +320,10 @@ async function measureStreamThroughput(client, blockId, streamLen, count, warmup
         const endSentinel   = `Y${tag}Y`;
 
         let capturedOutput = "";
-        const unsub = client.onEvent((msg) => {
-            if (msg.data?.data64) {
-                capturedOutput += Buffer.from(msg.data.data64, "base64").toString("utf8");
+        const unsub = client.onEvent((rpc) => {
+            const data64 = rpc.data?.data?.data64;
+            if (data64) {
+                capturedOutput += Buffer.from(data64, "base64").toString("utf8");
             }
         });
 
