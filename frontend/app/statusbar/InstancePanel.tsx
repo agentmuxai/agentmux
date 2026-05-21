@@ -321,6 +321,12 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                             const win = getObjectValue<WaveWindow>(makeORef("window", entry.windowId));
                             return (win?.meta?.["window:opacity"] as number | undefined) ?? 1.0;
                         };
+                        // While the slider is being dragged, `dragOpacity` holds the
+                        // live value so the thumb + % label track the drag. It's
+                        // cleared on release, after which `currentOpacity()` (the
+                        // persisted meta, written by onChange) is the source again.
+                        const [dragOpacity, setDragOpacity] = createSignal<number | null>(null);
+                        const displayOpacity = () => dragOpacity() ?? currentOpacity();
                         return (
                             <>
                             <div
@@ -423,9 +429,10 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                         min={0.35}
                                         max={1.0}
                                         step={0.05}
-                                        value={currentOpacity()}
+                                        value={displayOpacity()}
                                         onInput={(e) => {
                                             const val = parseFloat(e.currentTarget.value);
+                                            setDragOpacity(val);
                                             dispatchWindowOpacity({
                                                 type: "SetWindowOpacity",
                                                 windowId: entry.windowId!,
@@ -435,6 +442,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                             });
                                         }}
                                         onChange={(e) => {
+                                            setDragOpacity(null);
                                             const raw = parseFloat(e.currentTarget.value);
                                             const val = Math.round(raw * 100) / 100;
                                             if (!entry.windowId) return;
@@ -453,7 +461,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                         }}
                                     />
                                     <span class="instance-panel-opacity-value">
-                                        {Math.round(currentOpacity() * 100)}%
+                                        {Math.round(displayOpacity() * 100)}%
                                     </span>
                                 </div>
                             </Show>
