@@ -11,8 +11,10 @@
  * canonical `<Modal>`). Spec: SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md §4.2.
  */
 
-import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { autoUpdate } from "@floating-ui/dom";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
+import { computeMenuPosition } from "@/app/util/menu-position";
 import { ConfirmModal } from "@/element/modal";
 import { getCliCatalogEntry } from "@/app/view/agent/defaults/cli-catalog";
 import {
@@ -69,19 +71,45 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
         return getTotal();
     });
 
-    // Anchor positioning — popover bottom-edge pins to the status bar's
-    // top, horizontally aligned to the right edge of the indicator so
-    // it extends leftward into the main pane area. Clamped so it never
-    // runs off the viewport.
+    // Positioning routes through the shared primitive (Phase 3): anchored to
+    // the TokenUsageIndicator rect, preferred placement top-end so the popover
+    // opens upward and right-aligns to the indicator (it lives in the status
+    // bar at the bottom of the window). flip/shift/size + the paintable-area
+    // boundary replace the old bespoke 8px-GUTTER viewport clamp.
     const POPOVER_WIDTH = 320;
-    const GUTTER = 8;
-    const positioning = createMemo(() => {
-        const r = props.anchorRect;
-        if (!r) return { bottom: GUTTER, right: GUTTER };
-        const rightFromViewport = Math.max(GUTTER, window.innerWidth - r.right);
-        const bottomFromViewport = Math.max(GUTTER, window.innerHeight - r.top);
-        return { bottom: bottomFromViewport, right: rightFromViewport };
+    const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
+        position: "fixed",
+        left: "0px",
+        top: "0px",
     });
+    let cleanupAutoUpdate: (() => void) | null = null;
+
+    const registerFloating = (el: HTMLDivElement) => {
+        rootRef = el;
+        props.ref?.(el);
+        requestAnimationFrame(() => {
+            const r = props.anchorRect;
+            if (!r || !(el instanceof Element)) return;
+            const update = async () => {
+                const cur = props.anchorRect;
+                if (!cur) return;
+                const pos = await computeMenuPosition(
+                    { anchor: cur, placement: "top-end" },
+                    el,
+                );
+                setFloatingStyle(pos.style);
+            };
+            cleanupAutoUpdate?.();
+            // anchorRect is a static DOMRect → virtual reference element.
+            cleanupAutoUpdate = autoUpdate(
+                { getBoundingClientRect: () => props.anchorRect ?? r },
+                el,
+                update,
+            );
+        });
+    };
+
+    onCleanup(() => cleanupAutoUpdate?.());
 
     const handleResetClick = () => setConfirmingReset(true);
 
@@ -94,19 +122,12 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
     return (
         <>
             <div
-                ref={(el) => {
-                    rootRef = el;
-                    props.ref?.(el);
-                }}
+                ref={registerFloating}
                 class="token-usage-breakdown"
                 role="dialog"
                 aria-label="Token usage breakdown"
-                style={{
-                    position: "fixed",
-                    bottom: `${positioning().bottom}px`,
-                    right: `${positioning().right}px`,
-                    width: `${POPOVER_WIDTH}px`,
-                }}
+                data-pane-overlay
+                style={{ ...floatingStyle(), width: `${POPOVER_WIDTH}px` }}
             >
                 <div class="token-usage-breakdown-header">
                     <span class="token-usage-breakdown-title">Token Usage</span>
