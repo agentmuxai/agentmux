@@ -2,10 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button } from "@/element/button";
+import { computeMenuPosition, type MenuPositionResult } from "@/app/util/menu-position";
 import {
     autoUpdate,
-    computePosition,
-    offset as offsetMiddleware,
     type Middleware,
     type OffsetOptions,
     type Placement,
@@ -56,12 +55,29 @@ const Popover = (props: PopoverProps): JSX.Element => {
     let floatingEl: HTMLElement | null = null;
     let cleanupAutoUpdate: (() => void) | null = null;
 
-    const middleware: Middleware[] = [...(props.middleware ?? []), offsetMiddleware(offsetVal as any)];
+    // props.middleware is still accepted for backward-compat (no caller passes
+    // it today), but flip + shift + size + the paintable-area boundary are now
+    // applied unconditionally via computeMenuPosition — they are no longer
+    // caller-optional. The gutter (gap from the anchor) maps from props.offset:
+    // a bare number is the gutter; an object form contributes its mainAxis.
+    const gutter = (): number => {
+        if (typeof offsetVal === "number") return offsetVal;
+        if (offsetVal && typeof offsetVal === "object" && "mainAxis" in offsetVal) {
+            return typeof offsetVal.mainAxis === "number" ? offsetVal.mainAxis : 3;
+        }
+        return 3;
+    };
+
+    const styleToString = (s: MenuPositionResult["style"]): string =>
+        `position:${s.position};left:${s.left};top:${s.top}`;
 
     const updatePosition = async () => {
         if (!referenceEl || !floatingEl) return;
-        const pos = await computePosition(referenceEl, floatingEl, { placement, middleware });
-        setFloatingStyle(`position:absolute;left:${pos.x}px;top:${pos.y}px`);
+        const pos = await computeMenuPosition(
+            { anchor: referenceEl, placement, gutter: gutter() },
+            floatingEl,
+        );
+        setFloatingStyle(styleToString(pos.style));
     };
 
     const openPopover = () => {
