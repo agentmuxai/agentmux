@@ -31,6 +31,17 @@ export interface MenuPositionRequest {
     placement?: Placement;
     /** Minimum gap from the anchor and from any paintable edge. Default 8. */
     gutter?: number;
+    /**
+     * Cross-axis nudge (px) — shifts the menu perpendicular to its placement
+     * side, exactly like Floating UI's `offset({ crossAxis })`. Default 0.
+     */
+    offsetCrossAxis?: number;
+    /**
+     * Alignment-axis nudge (px) — overrides {@link offsetCrossAxis} for aligned
+     * (`*-start` / `*-end`) placements, like Floating UI's
+     * `offset({ alignmentAxis })`. Default: unset (crossAxis applies).
+     */
+    offsetAlignmentAxis?: number;
     /** Treat native browser-pane rects as boundaries. Default true. */
     avoidNativePanes?: boolean;
 }
@@ -268,7 +279,8 @@ function virtualReference(rect: DOMRect): { getBoundingClientRect: () => DOMRect
 
 /**
  * Run the fixed floating-ui middleware stack (spec §5.1 step 2):
- * offset(gutter) → flip() → shift({padding:gutter}) → size().
+ * offset({mainAxis:gutter, crossAxis, alignmentAxis}) → flip() →
+ * shift({padding:gutter}) → size().
  *
  * When `avoidNativePanes` is true, every overflow-detecting middleware uses the
  * paintable area's largest free rect as `boundary` — this is the line that
@@ -314,7 +326,11 @@ export async function computeMenuPosition(
         strategy: "fixed",
         placement,
         middleware: [
-            offset(gutter),
+            offset({
+                mainAxis: gutter,
+                crossAxis: request.offsetCrossAxis ?? 0,
+                alignmentAxis: request.offsetAlignmentAxis,
+            }),
             flip({ ...overflowOpts }),
             shift({ ...overflowOpts }),
             size({

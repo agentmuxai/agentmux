@@ -62,14 +62,30 @@ const Popover = (props: PopoverProps): JSX.Element => {
     // props.middleware is still accepted for backward-compat (no caller passes
     // it today), but flip + shift + size + the paintable-area boundary are now
     // applied unconditionally via computeMenuPosition — they are no longer
-    // caller-optional. The gutter (gap from the anchor) maps from props.offset:
-    // a bare number is the gutter; an object form contributes its mainAxis.
-    const gutter = (): number => {
-        if (typeof offsetVal === "number") return offsetVal;
-        if (offsetVal && typeof offsetVal === "object" && "mainAxis" in offsetVal) {
-            return typeof offsetVal.mainAxis === "number" ? offsetVal.mainAxis : 3;
+    // caller-optional. props.offset keeps full Floating UI `offset()` object
+    // semantics: a bare number is the gutter; an object form maps mainAxis →
+    // gutter and preserves crossAxis/alignmentAxis (NotificationPopover relies
+    // on crossAxis to nudge its caret-aligned popover).
+    const resolveOffset = (): {
+        gutter: number;
+        crossAxis: number;
+        alignmentAxis: number | undefined;
+    } => {
+        if (typeof offsetVal === "number") {
+            return { gutter: offsetVal, crossAxis: 0, alignmentAxis: undefined };
         }
-        return 3;
+        if (offsetVal && typeof offsetVal === "object") {
+            const num = (v: unknown): number | undefined =>
+                typeof v === "number" ? v : undefined;
+            return {
+                gutter: num((offsetVal as { mainAxis?: unknown }).mainAxis) ?? 3,
+                crossAxis: num((offsetVal as { crossAxis?: unknown }).crossAxis) ?? 0,
+                alignmentAxis: num(
+                    (offsetVal as { alignmentAxis?: unknown }).alignmentAxis,
+                ),
+            };
+        }
+        return { gutter: 3, crossAxis: 0, alignmentAxis: undefined };
     };
 
     const styleToString = (s: MenuPositionResult["style"]): string =>
@@ -77,8 +93,15 @@ const Popover = (props: PopoverProps): JSX.Element => {
 
     const updatePosition = async () => {
         if (!referenceEl || !floatingEl) return;
+        const off = resolveOffset();
         const pos = await computeMenuPosition(
-            { anchor: referenceEl, placement, gutter: gutter() },
+            {
+                anchor: referenceEl,
+                placement,
+                gutter: off.gutter,
+                offsetCrossAxis: off.crossAxis,
+                offsetAlignmentAxis: off.alignmentAxis,
+            },
             floatingEl,
         );
         setFloatingStyle(styleToString(pos.style));

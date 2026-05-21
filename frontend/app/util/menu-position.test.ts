@@ -244,3 +244,46 @@ describe("computeMenuPosition — too-tall menu shrink (§5.2 step 1)", () => {
         expect(res.maxHeight).toBeLessThanOrEqual(400);
     });
 });
+
+describe("computeMenuPosition — cross-axis offset (Floating UI offset() parity)", () => {
+    const menuRect = makeRect(0, 0, 200, 300);
+
+    it("shifts the menu along the cross axis by offsetCrossAxis", async () => {
+        // bottom-start placement → cross axis is horizontal. The same anchor
+        // with a +40 crossAxis must land 40px further right than with none.
+        const base = await computeMenuPosition(
+            { anchor: { x: 100, y: 100 }, placement: "bottom-start", avoidNativePanes: false },
+            elementWithRect(menuRect),
+        );
+        const nudged = await computeMenuPosition(
+            {
+                anchor: { x: 100, y: 100 },
+                placement: "bottom-start",
+                offsetCrossAxis: 40,
+                avoidNativePanes: false,
+            },
+            elementWithRect(menuRect),
+        );
+        const baseLeft = parseInt(base.style.left as string, 10);
+        const nudgedLeft = parseInt(nudged.style.left as string, 10);
+        expect(nudgedLeft - baseLeft).toBe(40);
+    });
+
+    it("leaves placement unchanged when no cross-axis offset is given", async () => {
+        const a = await computeMenuPosition(
+            { anchor: { x: 100, y: 100 }, placement: "bottom-start", avoidNativePanes: false },
+            elementWithRect(menuRect),
+        );
+        const b = await computeMenuPosition(
+            {
+                anchor: { x: 100, y: 100 },
+                placement: "bottom-start",
+                offsetCrossAxis: 0,
+                avoidNativePanes: false,
+            },
+            elementWithRect(menuRect),
+        );
+        expect(a.style.left).toBe(b.style.left);
+        expect(a.style.top).toBe(b.style.top);
+    });
+});
