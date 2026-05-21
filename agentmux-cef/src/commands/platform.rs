@@ -126,7 +126,8 @@ pub fn get_about_modal_details(state: &Arc<AppState>) -> serde_json::Value {
 
     serde_json::json!({
         "version": version,
-        "buildTime": version,
+        "gitHash": env!("AGENTMUX_GIT_HASH"),
+        "buildTime": env!("AGENTMUX_BUILD_TIME").parse::<i64>().unwrap_or(0),
         "platform": match std::env::consts::OS {
             "macos" => "darwin",
             "windows" => "win32",
