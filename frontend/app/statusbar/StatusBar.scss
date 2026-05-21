@@ -247,6 +247,19 @@
             opacity: 0.6;
             font-size: 0.9em;
         }
+
+        // DEV build marker — distinguishes a `task dev` instance from a
+        // packaged portable at a glance. Gated on isDev() in StatusBar.tsx.
+        .status-version-dev {
+            margin-left: 4px;
+            padding: 0 3px;
+            border: 1px solid var(--accent-color);
+            border-radius: 3px;
+            font-size: 0.85em;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            color: var(--accent-color);
+        }
     }
 }
 
