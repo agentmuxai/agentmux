@@ -33,9 +33,9 @@ tasks:
             - bash scripts/release.sh {{.CLI_ARGS}}
 
     package:local:
-        desc: 'Build a portable ZIP with a temporarily-bumped version label (for side-by-side build comparisons). Restores version files on exit — no git mutation, no pushed bump commit. Usage: task package:local (defaults to patch bump) or task package:local -- minor.'
+        desc: 'DEPRECATED — alias of `task package`. `package` now auto-bumps every build, so the old ephemeral-label variant is gone: it kept no memory of the last build number and so reused the same version every run.'
         cmds:
-            - bash scripts/package-local.sh {{.CLI_ARGS}}
+            - task: package
 
     dev:local:
         desc: 'Run task dev with a temporarily-bumped version label so the dev build advertises a unique version and cargo''s incremental cache cannot serve stale .o files. Restores version files on Ctrl+C — no git mutation, no pushed bump commit. Usage: task dev:local (defaults to patch bump) or task dev:local -- minor.'
@@ -89,9 +89,14 @@ tasks:
               platforms: [linux, darwin]
 
     package:
-        desc: Build everything and package as a portable directory + ZIP (Windows). Outputs to ~/Desktop by default.
+        desc: 'Bump the patch version (committed), then build + package a portable to ~/Desktop. The bump is automatic, so EVERY portable gets a unique, monotonic version — two builds never collide on version or data dir.'
         platforms: [windows]
         cmds:
+            # Auto-bump FIRST: makes a stale-versioned portable structurally
+            # impossible. The committed version is the durable monotonic
+            # counter — each build advances it for real (CI/release do not
+            # call `task package`, so this is safe).
+            - bash scripts/bump-wrapper.sh patch -m "build" --commit
             - task: build:frontend
             - task: build:backend
             - task: build:host
