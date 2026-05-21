@@ -341,3 +341,84 @@ export async function computeMenuPosition(
         maxWidth,
     };
 }
+
+// ── Dev-mode guard (spec §6.1) ───────────────────────────────────────────────
+
+/** True only in dev builds. Vite static-replaces `import.meta.env.DEV`, so the
+ *  whole guard body is dead-code-eliminated from release bundles. */
+function isDevBuild(): boolean {
+    try {
+        return import.meta.env.DEV === true;
+    } catch {
+        return false;
+    }
+}
+
+/** Elements that have already logged a violation this open — debounce so the
+ *  guard logs at most once per element per open (spec §10 risk row 4). A
+ *  WeakSet keeps no element alive past unmount. */
+const guardedElements = new WeakSet<HTMLElement>();
+
+/**
+ * Dev-only runtime assertion (spec §6.1): one RAF after a menu opens, measure
+ * its rect and confirm the whole body lands inside the paintable area — i.e.
+ * within the window and not behind a native browser-pane child window. Any
+ * violation is a `console.error` tagged `[menu-guard]` (surfaces via
+ * `muxlog host '[menu-guard]'`).
+ *
+ * Zero-cost in release builds: the `isDevBuild()` gate is static-replaced to
+ * `false` by Vite and the whole body is dropped. Callers still gate the call
+ * site too so the RAF schedule itself is elided.
+ *
+ * @param el    the menu's floating DOM node
+ * @param label short identifier for the menu surface, e.g. "flyout-menu"
+ */
+export function assertMenuInPaintableArea(el: HTMLElement, label: string): void {
+    if (!isDevBuild()) return;
+    if (typeof requestAnimationFrame === "undefined") return;
+    requestAnimationFrame(() => {
+        if (!el.isConnected) return;
+        if (guardedElements.has(el)) return;
+
+        const rect = el.getBoundingClientRect();
+        // A not-yet-laid-out menu reports a zero rect — skip, RAF was too early.
+        if (rect.width <= 0 || rect.height <= 0) return;
+
+        const vw = typeof window !== "undefined" ? window.innerWidth : 0;
+        const vh = typeof window !== "undefined" ? window.innerHeight : 0;
+
+        const violations: string[] = [];
+
+        // 1. Window edges.
+        if (rect.left < 0) violations.push(`left edge (left=${Math.round(rect.left)})`);
+        if (rect.top < 0) violations.push(`top edge (top=${Math.round(rect.top)})`);
+        if (rect.right > vw) {
+            violations.push(`right edge (right=${Math.round(rect.right)} > ${vw})`);
+        }
+        if (rect.bottom > vh) {
+            violations.push(`bottom edge (bottom=${Math.round(rect.bottom)} > ${vh})`);
+        }
+
+        // 2. Native-pane rects — a menu overlapping one is drawn behind it.
+        for (const pane of getNativePaneRects()) {
+            if (intersects(rect, pane)) {
+                violations.push(
+                    `behind native pane (pane ${Math.round(pane.left)},` +
+                        `${Math.round(pane.top)} ${Math.round(pane.width)}x` +
+                        `${Math.round(pane.height)})`,
+                );
+            }
+        }
+
+        if (violations.length > 0) {
+            guardedElements.add(el);
+            // eslint-disable-next-line no-console
+            console.error(
+                `[menu-guard] "${label}" rendered outside the paintable area: ` +
+                    violations.join("; ") +
+                    ` — menu rect ${Math.round(rect.left)},${Math.round(rect.top)} ` +
+                    `${Math.round(rect.width)}x${Math.round(rect.height)}`,
+            );
+        }
+    });
+}

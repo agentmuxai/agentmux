@@ -14,7 +14,10 @@
 import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { autoUpdate } from "@floating-ui/dom";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
-import { computeMenuPosition } from "@/app/util/menu-position";
+import {
+    assertMenuInPaintableArea,
+    computeMenuPosition,
+} from "@/app/util/menu-position";
 import { ConfirmModal } from "@/element/modal";
 import { getCliCatalogEntry } from "@/app/view/agent/defaults/cli-catalog";
 import {
@@ -106,6 +109,8 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                 el,
                 update,
             );
+            // Dev-only paintable-area guard (spec §6.1).
+            assertMenuInPaintableArea(el, "token-breakdown-popover");
         });
     };
 

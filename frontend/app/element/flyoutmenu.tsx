@@ -9,7 +9,11 @@ import clsx from "clsx";
 import { createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 
-import { computeMenuPosition, type MenuPositionResult } from "@/app/util/menu-position";
+import {
+    assertMenuInPaintableArea,
+    computeMenuPosition,
+    type MenuPositionResult,
+} from "@/app/util/menu-position";
 
 import "./flyoutmenu.scss";
 
@@ -65,6 +69,9 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
             if (!(referenceEl instanceof Element) || !(floatingEl instanceof Element)) return;
             cleanupAutoUpdate?.();
             cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
+            // Dev-only paintable-area guard (spec §6.1); gated so it is
+            // zero-cost in release builds.
+            assertMenuInPaintableArea(el, "flyout-menu");
         });
     };
 
@@ -294,6 +301,8 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
                 el,
                 update,
             );
+            // Dev-only paintable-area guard (spec §6.1).
+            assertMenuInPaintableArea(el, "submenu");
         });
     };
 

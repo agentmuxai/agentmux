@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button } from "@/element/button";
-import { computeMenuPosition, type MenuPositionResult } from "@/app/util/menu-position";
+import {
+    assertMenuInPaintableArea,
+    computeMenuPosition,
+    type MenuPositionResult,
+} from "@/app/util/menu-position";
 import {
     autoUpdate,
     type Middleware,
@@ -104,6 +108,9 @@ const Popover = (props: PopoverProps): JSX.Element => {
             if (referenceEl instanceof Element && floatingEl instanceof Element) {
                 cleanupAutoUpdate?.();
                 cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
+                // Dev-only paintable-area guard (spec §6.1); gated so it is
+                // zero-cost in release builds.
+                assertMenuInPaintableArea(el, "popover");
             }
         });
     };

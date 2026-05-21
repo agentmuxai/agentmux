@@ -20,7 +20,10 @@ import { atoms, createBlock, getApi } from "@/store/global";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import { invokeCommand } from "@/app/platform/ipc";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
-import { computeMenuPosition } from "@/app/util/menu-position";
+import {
+    assertMenuInPaintableArea,
+    computeMenuPosition,
+} from "@/app/util/menu-position";
 import { autoUpdate } from "@floating-ui/dom";
 import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
@@ -181,6 +184,8 @@ const MoreDropdown = ({
             };
             cleanupAutoUpdate?.();
             cleanupAutoUpdate = autoUpdate(anchorEl, el, update);
+            // Dev-only paintable-area guard (spec §6.1).
+            assertMenuInPaintableArea(el, "more-dropdown");
         });
     };
 
