@@ -50,7 +50,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         const d = getApi().getAboutModalDetails();
         return {
             version: d?.version ?? "unknown",
-            gitHash: (d as any)?.gitHash ?? null,
+            gitHash: d?.gitHash ?? null,
             buildTime: typeof d?.buildTime === "number" && d.buildTime > 0 ? d.buildTime : null,
             platform: (d as any)?.platform ?? null,
             arch: (d as any)?.arch ?? null,

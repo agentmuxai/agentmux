@@ -1,4 +1,19 @@
 fn main() {
+    // Emitting any rerun-if-changed directive disables Cargo's default
+    // "rerun build.rs if any package file changed", so every input is listed
+    // explicitly. The git-ref entries make the embedded commit hash / build
+    // timestamp refresh whenever HEAD moves, even if no package file changed.
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=CARGO_PKG_VERSION");
+    println!("cargo:rerun-if-env-changed=TARGET");
+    for git_path in ["../.git/HEAD", "../.git/refs", "../.git/packed-refs"] {
+        if std::path::Path::new(git_path).exists() {
+            println!("cargo:rerun-if-changed={git_path}");
+        }
+    }
+    #[cfg(target_os = "windows")]
+    println!("cargo:rerun-if-changed=resources/win/agentmux.ico");
+
     // Emit the target triple so we can locate sidecar binaries at runtime.
     println!(
         "cargo:rustc-env=AGENTMUX_TARGET_TRIPLE={}",
