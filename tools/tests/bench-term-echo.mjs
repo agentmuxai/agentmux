@@ -139,9 +139,11 @@ function openWs(wsEndpoint, authKey) {
             for (const h of eventHandlers) h(msg);
             return;
         }
-        if (msg.reqid && pending.has(msg.reqid)) {
-            const { resolve } = pending.get(msg.reqid);
-            pending.delete(msg.reqid);
+        // Server sends resid (response id) to match the original reqid.
+        const matchId = msg.resid || msg.reqid;
+        if (matchId && pending.has(matchId)) {
+            const { resolve } = pending.get(matchId);
+            pending.delete(matchId);
             resolve(msg);
         }
     });
