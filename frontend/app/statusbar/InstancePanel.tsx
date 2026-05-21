@@ -50,11 +50,26 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         const d = getApi().getAboutModalDetails();
         return {
             version: d?.version ?? "unknown",
-            buildTime: d?.buildTime ? String(d.buildTime) : null,
+            gitHash: (d as any)?.gitHash ?? null,
+            buildTime: typeof d?.buildTime === "number" && d.buildTime > 0 ? d.buildTime : null,
             platform: (d as any)?.platform ?? null,
             arch: (d as any)?.arch ?? null,
         };
     });
+
+    // Build timestamp -> "Jan 3, 2019 8:12AM": abbreviated month, no
+    // leading-zero day/hour, 2-digit minute, AM/PM with no separating space.
+    const formatBuildTime = (ms: number): string => {
+        const s = new Date(ms).toLocaleString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+        });
+        return s.replace(/, (\d{1,2}:\d{2})/, " $1").replace(/\s(AM|PM)$/, "$1");
+    };
 
     const entries = openWindowEntriesAtom;
     const [myLabel, setMyLabel] = createSignal<string | null>(null);
@@ -291,10 +306,18 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                         ⧉
                     </button>
                 </div>
-                <Show when={about().buildTime}>
+                <Show when={about().gitHash}>
                     <div class="instance-panel-row instance-panel-row-meta">
                         <span class="instance-panel-label">Build</span>
-                        <span class="instance-panel-value instance-panel-mono">{about().buildTime}</span>
+                        <span class="instance-panel-value instance-panel-mono">{about().gitHash}</span>
+                    </div>
+                </Show>
+                <Show when={about().buildTime}>
+                    <div class="instance-panel-row instance-panel-row-meta">
+                        <span class="instance-panel-label">Time</span>
+                        <span class="instance-panel-value instance-panel-mono">
+                            {formatBuildTime(about().buildTime!)}
+                        </span>
                     </div>
                 </Show>
                 <Show when={about().platform || about().arch}>
