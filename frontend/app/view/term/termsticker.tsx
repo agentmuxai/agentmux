@@ -1,8 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
+import { sendWSCommand } from "@/app/store/ws";
 import { createBlock } from "@/store/global";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { stringToBase64 } from "@/util/util";
@@ -82,8 +81,13 @@ function TermSticker(props: { sticker: StickerType; config: StickerTermConfig })
         clickHandler = () => {
             console.log("clickHandler", sticker.clickcmd, sticker.clickblockdef);
             if (sticker.clickcmd) {
-                const b64data = stringToBase64(sticker.clickcmd);
-                RpcApi.ControllerInputCommand(TabRpcClient, { blockid: config.blockId, inputdata64: b64data });
+                const inputdata64 = stringToBase64(sticker.clickcmd);
+                const cmd: BlockInputWSCommand = {
+                    wscommand: "blockinput",
+                    blockid: config.blockId,
+                    inputdata64,
+                };
+                sendWSCommand(cmd);
             }
             if (sticker.clickblockdef) {
                 createBlock(sticker.clickblockdef);
