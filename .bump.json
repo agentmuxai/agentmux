@@ -15,7 +15,8 @@
   "lockfiles": [
     {
       "type": "cargo",
-      "command": "cargo generate-lockfile"
+      "_note": "Use `cargo update --workspace`, NOT `cargo generate-lockfile`: the latter regenerates the whole lock and drifts transitive deps to latest-compatible on every bump. --workspace re-syncs only the workspace members' version lines.",
+      "command": "cargo update --workspace"
     }
   ],
   "_npm_lockfile_note": "npm lockfile sync is handled by scripts/bump-wrapper.sh because bump-cli's 'npm-version' strategy fails with 'Unknown error' inside its temporary git state and silently skips the lockfile. Use scripts/bump-wrapper.sh instead of bare bump.",
