@@ -3,20 +3,16 @@
 
 import { Button } from "@/element/button";
 import { Modal, ModalBody, ModalFooter } from "@/element/modal";
-import { modalsModel } from "@/app/store/modalmodel";
+import type { ModalCloseProps } from "@/app/store/modalmodel";
 
 import type { JSX } from "solid-js";
 
-const MessageModal = ({ children }: { children: JSX.Element }) => {
-    function closeModal() {
-        modalsModel.popModal();
-    }
-
+const MessageModal = ({ children, close }: { children: JSX.Element } & ModalCloseProps) => {
     return (
-        <Modal open={true} onClose={closeModal} size="md" ariaLabel="Message">
+        <Modal open={true} onClose={close} size="md" ariaLabel="Message">
             <ModalBody>{children}</ModalBody>
             <ModalFooter>
-                <Button onClick={closeModal}>Ok</Button>
+                <Button onClick={close}>Ok</Button>
             </ModalFooter>
         </Modal>
     );

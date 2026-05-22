@@ -1,7 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { modalsModel } from "@/app/store/modalmodel";
+import { openModal } from "@/app/store/modalmodel";
+import { MessageModal } from "@/app/modals/messagemodal";
 import { lanInstancesAtom } from "@/store/global";
 import { For, Show, type JSX } from "solid-js";
 
@@ -31,7 +32,7 @@ const LanStatus = (): JSX.Element => {
     const count = () => lanInstancesAtom().length;
 
     const handleClick = () => {
-        modalsModel.pushModal("MessageModal", {
+        openModal(MessageModal, {
             children: <LanInstancesModal instances={lanInstancesAtom()} />,
         });
     };
