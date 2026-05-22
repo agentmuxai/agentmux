@@ -30,7 +30,8 @@ import * as keyutil from "@/util/keyutil";
 import { CHORD_TIMEOUT } from "@/util/sharedconst";
 import { fireAndForget } from "@/util/util";
 import { createSignal } from "solid-js";
-import { modalsModel } from "./modalmodel";
+import { modalsModel, openModal } from "./modalmodel";
+import { CommandPaletteModal } from "@/app/modals/command-palette";
 
 // Debug logging function - writes to file
 const DEBUG_LOG_PATH = "C:/Systems/agentmux-debug.log";
@@ -625,7 +626,7 @@ function registerGlobalKeys() {
     globalKeyMap.set("Cmd:f", activateSearch);
     globalKeyMap.set("Escape", () => {
         if (modalsModel.hasOpenModals()) {
-            modalsModel.popModal();
+            modalsModel.closeTopModal();
             return true;
         }
         if (deactivateSearch()) {
@@ -689,7 +690,7 @@ function registerGlobalKeys() {
     globalChordMap.set("Ctrl:Shift:s", splitBlockKeys);
 
     globalKeyMap.set("Ctrl:p", () => {
-        modalsModel.pushModal("CommandPaletteModal");
+        openModal(CommandPaletteModal);
         return true;
     });
 }

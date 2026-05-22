@@ -30,7 +30,9 @@ import {
     setBackendDeathInfoAtom,
     setBackendStatusAtom,
 } from "./backendStatus";
-import { modalsModel } from "./modalmodel";
+import { openModal } from "./modalmodel";
+import { AboutModal } from "@/app/modals/about";
+import { UserInputModal } from "@/app/modals/userinputmodal";
 import { TAB_COLORS } from "@/app/tab/tab";
 import { ClientService, ObjectService, WorkspaceService } from "./services";
 import { holdRevealGate, scheduleRevealLift } from "./tab-reveal";
@@ -217,7 +219,7 @@ function initGlobalSignals(initOpts: GlobalInitOptions) {
     } catch (_) {}
 
     try {
-        getApi().onMenuItemAbout(() => modalsModel.pushModal("AboutModal"));
+        getApi().onMenuItemAbout(() => openModal(AboutModal));
     } catch (_) {}
 
     try {
@@ -265,7 +267,7 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
             eventType: "userinput",
             handler: (event) => {
                 const data: UserInputRequest = event.data;
-                modalsModel.pushModal("UserInputModal", { ...data });
+                openModal(UserInputModal, { ...data });
             },
             scope: initOpts.windowId,
         },

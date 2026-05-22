@@ -1,7 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { modalsModel } from "@/app/store/modalmodel";
+import { openModal } from "@/app/store/modalmodel";
+import { MessageModal } from "@/app/modals/messagemodal";
 import { ConfigErrorMessage } from "@/app/window/system-status";
 import { atoms } from "@/store/global";
 import { Show, type JSX } from "solid-js";
@@ -10,7 +11,7 @@ const ConfigStatus = (): JSX.Element => {
     const fullConfig = atoms.fullConfigAtom;
 
     const handleClick = () => {
-        modalsModel.pushModal("MessageModal", { children: <ConfigErrorMessage /> });
+        openModal(MessageModal, { children: <ConfigErrorMessage /> });
     };
 
     return (

@@ -4,14 +4,15 @@
 import { Button } from "@/element/button";
 import { Markdown } from "@/element/markdown";
 import { Modal, ModalBody, ModalFooter, ModalHeader } from "@/element/modal";
-import { modalsModel } from "@/store/modalmodel";
+import type { ModalCloseProps } from "@/app/store/modalmodel";
 import * as keyutil from "@/util/keyutil";
 import { fireAndForget } from "@/util/util";
 import { createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { UserInputService } from "../store/services";
 import "./userinputmodal.scss";
 
-const UserInputModal = (userInputRequest: UserInputRequest) => {
+const UserInputModal = (props: UserInputRequest & ModalCloseProps) => {
+    const userInputRequest = props;
     const [responseText, setResponseText] = createSignal("");
     const [countdown, setCountdown] = createSignal(Math.floor(userInputRequest.timeoutms / 1000));
     let checkboxRef!: HTMLInputElement;
@@ -24,7 +25,7 @@ const UserInputModal = (userInputRequest: UserInputRequest) => {
                 errormsg: "Canceled by the user",
             })
         );
-        modalsModel.popModal();
+        props.close();
     };
 
     const handleSendText = () => {
@@ -36,7 +37,7 @@ const UserInputModal = (userInputRequest: UserInputRequest) => {
                 checkboxstat: checkboxRef?.checked ?? false,
             })
         );
-        modalsModel.popModal();
+        props.close();
     };
 
     const handleSendConfirm = (response: boolean) => {
@@ -48,7 +49,7 @@ const UserInputModal = (userInputRequest: UserInputRequest) => {
                 checkboxstat: checkboxRef?.checked ?? false,
             })
         );
-        modalsModel.popModal();
+        props.close();
     };
 
     const handleSubmit = () => {

@@ -6,7 +6,7 @@
 // specific chrome (search row + scroll list) lives in the panel body.
 
 import { commandRegistry, type CommandEntry } from "@/app/store/command-registry";
-import { modalsModel } from "@/app/store/modalmodel";
+import type { ModalCloseProps } from "@/app/store/modalmodel";
 import { disableGlobalKeybindings, enableGlobalKeybindings } from "@/app/store/keymodel";
 import { Modal } from "@/element/modal";
 import { createMemo, createSignal, For, onCleanup, onMount, type JSX } from "solid-js";
@@ -25,7 +25,7 @@ function sortCommands(cmds: CommandEntry[]): CommandEntry[] {
     });
 }
 
-const CommandPaletteModal = (): JSX.Element => {
+const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
     const [query, setQuery] = createSignal("");
     const [selectedIdx, setSelectedIdx] = createSignal(0);
     let inputRef!: HTMLInputElement;
@@ -62,7 +62,7 @@ const CommandPaletteModal = (): JSX.Element => {
     });
 
     function close() {
-        modalsModel.popModal();
+        props.close();
     }
 
     function executeSelected() {

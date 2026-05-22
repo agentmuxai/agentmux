@@ -8,7 +8,8 @@ import { THEME_OPTIONS } from "@/app/menu/base-menus";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
 import { invokeCommand } from "@/app/platform/ipc";
 import { fireAndForget } from "@/util/util";
-import { modalsModel } from "@/app/store/modalmodel";
+import { openModal } from "@/app/store/modalmodel";
+import { CommandPaletteModal } from "@/app/modals/command-palette";
 import { isMacOS } from "@/util/platformutil";
 import { getTabGrabOffset } from "./tab-grab-offset";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
@@ -682,7 +683,7 @@ function TabBar(props: TabBarProps): JSX.Element {
                 label: "Command Palette",
                 icon: "magnifying-glass",
                 shortcut: kbd("⌘P", "Ctrl+P"),
-                onClick: () => modalsModel.pushModal("CommandPaletteModal"),
+                onClick: () => openModal(CommandPaletteModal),
             },
             {
                 label: "DevTools",
