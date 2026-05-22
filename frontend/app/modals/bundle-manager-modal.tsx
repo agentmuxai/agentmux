@@ -32,7 +32,7 @@
  * the app shell, reactive to `singletonHolder`.
  */
 
-import { createMemo, createSignal, For, Show, type Accessor, type JSX } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 
 import { getApi } from "@/store/global";
 import { openWindowEntriesAtom } from "@/app/store/global";
@@ -82,10 +82,15 @@ function windowNameForLabel(label: string): string {
 export const BundleManagerModal = (props: ModalCloseProps): JSX.Element => {
     const [section, setSection] = createSignal<BundleSection>("identities");
 
-    const handleClose = () => {
-        releaseSingleton(SINGLETON_KIND_BUNDLE_MANAGER);
-        props.close();
-    };
+    // Release the singleton on unmount — guaranteed regardless of HOW the
+    // modal closes. The Close button and ESC route through `onClose`, but
+    // the global Escape handler (keymodel.ts) closes via
+    // `modalsModel.closeTopModal()`, which bypasses `onClose` entirely.
+    // An onCleanup release covers every path. (releaseSingleton is
+    // idempotent — a no-op when this window isn't the holder.)
+    onCleanup(() => releaseSingleton(SINGLETON_KIND_BUNDLE_MANAGER));
+
+    const handleClose = () => props.close();
 
     const rail: { id: BundleSection; label: string; icon: string }[] = [
         { id: "identities", label: "Identities", icon: "id-card" },
