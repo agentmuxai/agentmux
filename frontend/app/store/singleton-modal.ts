@@ -374,7 +374,11 @@ export function releaseSingleton(kind: SingletonKind): void {
  * Reactive — safe to call inside a memo.
  */
 export function holdsSingleton(kind: SingletonKind): boolean {
-    return kindState(kind).holder() === myLabelSync();
+    // Guard on a resolved label — with `me` null (early boot) and no
+    // holder, `null === null` would wrongly report this window as the
+    // holder. Nobody holds it ⇒ false.
+    const me = myLabelSync();
+    return me != null && kindState(kind).holder() === me;
 }
 
 // ── Test-only helpers ──────────────────────────────────────────────────
