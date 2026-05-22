@@ -10,6 +10,7 @@ import { invokeCommand } from "@/app/platform/ipc";
 import { fireAndForget } from "@/util/util";
 import { openModal } from "@/app/store/modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
+import { openSingletonPlaceholderDemo } from "@/app/modals/singleton-placeholder-demo";
 import { isMacOS } from "@/util/platformutil";
 import { getTabGrabOffset } from "./tab-grab-offset";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
@@ -684,6 +685,17 @@ function TabBar(props: TabBarProps): JSX.Element {
                 icon: "magnifying-glass",
                 shortcut: kbd("⌘P", "Ctrl+P"),
                 onClick: () => openModal(CommandPaletteModal),
+            },
+            {
+                // Bundle-management PR 3 — placeholder demo for the
+                // app-wide singleton-modal coordination layer. Opens the
+                // placeholder modal here if the singleton is free; if it
+                // is held in another window, focuses that window instead
+                // (and that window's banner stays the persistent
+                // affordance). PR 4 replaces this with "Identity & Memory".
+                label: "Singleton demo",
+                icon: "object-group",
+                onClick: () => openSingletonPlaceholderDemo(),
             },
             {
                 label: "DevTools",
