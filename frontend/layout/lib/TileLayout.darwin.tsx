@@ -16,7 +16,6 @@ import { Key } from "@solid-primitives/keyed";
 import { debounce, throttle } from "throttle-debounce";
 import { LayoutModel } from "./layoutModel";
 import { useNodeModel, useTileLayout } from "./layoutModelHooks";
-import { getNodeModel } from "./layoutNodeModels";
 import "./tilelayout.scss";
 import {
     LayoutNode,
@@ -230,7 +229,7 @@ function NodeBackdrops(props: { layoutModel: LayoutModel }) {
 const MagnifiedPaneOverlay = (props: { layoutModel: LayoutModel }) => {
     const magnifiedNodeId = () => props.layoutModel.magnifiedNodeIdAtom();
     const magnifiedBlockSizeAtom = getSettingsKeyAtom("window:magnifiedblocksize");
-    const magnifiedNodeSize = () => magnifiedBlockSizeAtom() ?? 0.9;
+    const magnifiedNodeSize = () => magnifiedBlockSizeAtom() ?? 1.0;
 
     // Find the leaf node matching the magnified node ID
     const magnifiedNode = createMemo(() => {
@@ -260,18 +259,24 @@ const MagnifiedPaneOverlay = (props: { layoutModel: LayoutModel }) => {
         } as JSX.CSSProperties;
     });
 
+    // The magnified pane is NOT rendered here. `DisplayNode` keeps the single
+    // `.tile-leaf` instance and reparents it into `.magnify-pane` below while
+    // magnified — one Block, one ViewModel, one browser-pane HWND across the
+    // magnify/restore cycle. Rendering a second copy here left the restored
+    // pane without zoom (terminal) or black (browser-pane native window
+    // destroyed on the duplicate's unmount). See
+    // SPEC_MAGNIFY_ZOOM_IMPLEMENTATION_2026-05-21.md.
     return (
         <Show when={magnifiedNode()}>
-            {(node) => {
-                const nodeModel = getNodeModel(props.layoutModel, node());
-                return (
-                    <div class="magnify-container" style={containerStyle()}>
-                        <div class="magnify-pane">
-                            {props.layoutModel.renderContent(nodeModel)}
-                        </div>
-                    </div>
-                );
-            }}
+            <div class="magnify-container" style={containerStyle()}>
+                <div
+                    class="magnify-pane"
+                    ref={(el) => {
+                        props.layoutModel.magnifyMount._set(el);
+                        onCleanup(() => props.layoutModel.magnifyMount._set(null));
+                    }}
+                />
+            </div>
         </Show>
     );
 };
@@ -302,9 +307,15 @@ const DisplayNode = (props: DisplayNodeProps) => {
     const nodeModel = useNodeModel(props.layoutModel, props.node);
     let tileNodeRef: HTMLDivElement | undefined;
     let previewRef: HTMLDivElement | undefined;
+    let leafRef: HTMLDivElement | undefined;
     const addlProps = () => nodeModel.additionalProps();
     const isEphemeral = () => nodeModel.isEphemeral();
     const isMagnified = () => nodeModel.isMagnified();
+    // True when any pane is magnified. Every tile node is then hidden
+    // (display:none) so nothing inside AgentMux — DOM panes or native browser
+    // panes — shows behind the magnified pane. The magnified pane itself is
+    // reparented into the magnify overlay, outside the tile nodes.
+    const magnifyActive = () => !!props.layoutModel.magnifiedNodeIdAtom();
     const [isDragging, setIsDragging] = createSignal(false);
 
 
@@ -414,10 +425,28 @@ const DisplayNode = (props: DisplayNodeProps) => {
     });
 
     const leafContent = () => (
-        <div class="tile-leaf">
+        <div class="tile-leaf" ref={leafRef}>
             {props.layoutModel.renderContent(nodeModel)}
         </div>
     );
+
+    // Single-instance magnify: the pane's `.tile-leaf` is rendered exactly
+    // once (below, in the tile node). While this node is magnified, move that
+    // same DOM node into the magnify overlay's mount slot rather than letting
+    // the overlay render a second copy. Moving a DOM subtree does not dispose
+    // its SolidJS component, so the Block, its ViewModel, the block-component
+    // registry entry, and any browser-pane native window all survive the
+    // magnify/restore cycle intact. See
+    // SPEC_MAGNIFY_ZOOM_IMPLEMENTATION_2026-05-21.md.
+    createEffect(() => {
+        const mount = props.layoutModel.magnifyMount();
+        if (!leafRef) return;
+        if (isMagnified() && mount) {
+            if (leafRef.parentElement !== mount) mount.appendChild(leafRef);
+        } else if (tileNodeRef && leafRef.parentElement !== tileNodeRef) {
+            tileNodeRef.insertBefore(leafRef, tileNodeRef.firstChild);
+        }
+    });
 
     const previewElement = () => {
         const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
@@ -442,7 +471,7 @@ const DisplayNode = (props: DisplayNodeProps) => {
 
     return (
         <div
-            class={clsx("tile-node", { dragging: isDragging(), "tile-hidden": isMagnified() })}
+            class={clsx("tile-node", { dragging: isDragging(), "tile-hidden": magnifyActive() })}
             ref={tileNodeRef}
             id={props.node.id}
             style={tileTransform() as JSX.CSSProperties}

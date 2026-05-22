@@ -272,6 +272,13 @@ export class LayoutModel {
      */
     lastEphemeralNodeId: string;
     magnifiedNodeSizeAtom: () => number;
+    /**
+     * Mount element of the magnify overlay's pane slot. `MagnifiedPaneOverlay`
+     * publishes it while a node is magnified; `DisplayNode` reparents its
+     * single `.tile-leaf` into it instead of the overlay rendering a second
+     * copy of the pane. See SPEC_MAGNIFY_ZOOM_IMPLEMENTATION_2026-05-21.md.
+     */
+    magnifyMount: SignalAtom<HTMLElement | null>;
 
     /**
      * The size of the resize handles, in CSS pixels.
@@ -425,6 +432,7 @@ export class LayoutModel {
 
             this.ephemeralNode = createSignalAtom<LayoutNode>(undefined);
             this.magnifiedNodeSizeAtom = getSettingsKeyAtom("window:magnifiedblocksize");
+            this.magnifyMount = createSignalAtom<HTMLElement | null>(null);
 
             this.magnifiedNodeIdAtom = createMemo(() => {
                 const treeState = this.localTreeStateAtom();

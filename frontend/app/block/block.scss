@@ -305,12 +305,20 @@
             }
         }
 
-        --magnified-block-opacity: 0.95;
+        --magnified-block-opacity: 1;
         --magnified-block-blur: 10px;
 
         &.ephemeral {
             background-color: rgb(from var(--block-bg-color) r g b / var(--magnified-block-opacity));
             backdrop-filter: blur(var(--magnified-block-blur));
+        }
+
+        // A magnified pane floats over the blurred magnify backdrop. The
+        // default --block-bg-color is translucent in every theme (e.g. 50%),
+        // so without this the backdrop bleeds through. Force the opaque form
+        // of the theme colour (r g b with no alpha = fully opaque).
+        &.magnified .block-frame-default-inner {
+            background-color: rgb(from var(--block-bg-color) r g b);
         }
 
         .connstatus-overlay {
