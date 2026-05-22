@@ -313,6 +313,15 @@
             backdrop-filter: blur(var(--magnified-block-blur));
         }
 
+        // A magnified pane floats over the blurred magnify backdrop. The
+        // default --block-bg-color is translucent in every theme (e.g. 50%),
+        // so without this the backdrop bleeds through the magnified pane.
+        // Force the configured opacity — default 1 (fully opaque), still
+        // overridable via the window:magnifiedblockopacity setting.
+        &.magnified .block-frame-default-inner {
+            background-color: rgb(from var(--block-bg-color) r g b / var(--magnified-block-opacity));
+        }
+
         .connstatus-overlay {
             position: absolute;
             top: calc(var(--header-height) + 6px);

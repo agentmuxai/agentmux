@@ -220,20 +220,38 @@ the frontend fallback *is* the default; no backend change is required.
 
 ### 4.1 Current behaviour
 
-The magnified block's background opacity comes from
-`--magnified-block-opacity`, declared in
-`frontend/app/block/block.scss:308` as **`0.95`**, consumed at
-`block.scss:312` (`background-color: rgb(... / var(--magnified-block-opacity))`).
-`blockframe.tsx:754` overrides it inline from the
-`window:magnifiedblockopacity` setting when that setting is present;
-when unset, the `0.95` fallback applies.
+A magnified pane renders translucent: `--block-bg-color` is translucent in
+every theme (`theme.scss` default `rgba(0,0,0,0.5)` — 50%; named themes
+~70%), and a magnified pane has **no opacity override** — so the blurred
+magnify backdrop bleeds through it.
+
+The `--magnified-block-opacity` CSS var *looks* like the control for this,
+but it is misapplied: declared in `block.scss:308` and consumed only by the
+`&.ephemeral` selector (`block.scss:312`) — never by `.magnified`. So
+neither the var's default nor the `window:magnifiedblockopacity` setting
+(`blockframe.tsx:754` feeds the var inline) has ever affected magnified
+panes. There is no `.magnified` opacity rule anywhere in `block.scss`.
 
 ### 4.2 Change
 
-Change the `--magnified-block-opacity` default in `block.scss:308` from
-`0.95` to `1` (fully opaque). `window:magnifiedblockopacity` is likewise
-`Option<f64>` in the backend (`types.rs:164`, default `None`), so this CSS
-fallback is the effective default; no backend change required.
+Two parts:
+
+1. **Add the missing rule.** In `block.scss`, give a magnified pane an
+   opaque inner background:
+   ```scss
+   &.magnified .block-frame-default-inner {
+       background-color: rgb(from var(--block-bg-color) r g b / var(--magnified-block-opacity));
+   }
+   ```
+   This is what actually makes a magnified pane honor an opacity at all.
+2. **Default the var to fully opaque.** `--magnified-block-opacity`
+   `0.95` → `1` (`block.scss:308`). It stays shared with the existing
+   `&.ephemeral` rule — a 0.95→1 shift for ephemeral panes is imperceptible
+   and not worth a separate variable.
+
+`window:magnifiedblockopacity` stays `Option<f64>` (`types.rs:164`,
+default `None`), so the CSS var fallback is the effective default and the
+setting still overrides — no backend change required.
 
 The blur (`--magnified-block-blur: 10px`,
 `window:magnifiedblockblur*px`) is **out of scope** — left unchanged unless
