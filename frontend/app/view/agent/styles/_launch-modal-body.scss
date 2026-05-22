@@ -254,6 +254,29 @@
     }
 }
 
+// Feature A — Continue/New view-mode toggle. A borderless text button
+// that flips the launch modal between resuming an existing agent and
+// configuring a new one (SPEC_AGENT_LAUNCH_AND_MODAL_DISMISSAL §A).
+.agent-launch-modal-mode-toggle {
+    align-self: flex-start;
+    background: none;
+    border: none;
+    padding: var(--space-0-5) 0;
+    font-size: 12px;
+    font-family: inherit;
+    color: var(--accent-color);
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+        text-decoration: underline;
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+}
+
 // Inline "+" button next to the dropdown when bundles exist.
 .agent-launch-modal-bundle-new-btn {
     width: 28px;
