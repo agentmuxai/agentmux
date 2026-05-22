@@ -1,3 +1,6 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Local MessageBus for inter-agent communication.
 //!
 //! Provides agent registration, point-to-point messaging, terminal injection,

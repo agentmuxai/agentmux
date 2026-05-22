@@ -1,3 +1,6 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
 fn main() {
     // No `cargo:rerun-if-changed` directives by design: emitting any of them
     // disables Cargo's default "rerun build.rs when any package file changes".

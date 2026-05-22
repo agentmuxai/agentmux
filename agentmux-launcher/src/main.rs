@@ -1,3 +1,6 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
 // AgentMux Launcher — Sets DLL search path then spawns srv + the CEF host.
 //
 // Phase B.1: launcher now spawns srv directly (sibling of host) so srv

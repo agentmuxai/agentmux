@@ -1,3 +1,6 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
 /// Resolved target of a Windows `.cmd` npm shim.
 #[cfg(windows)]
 enum ResolvedShim {
