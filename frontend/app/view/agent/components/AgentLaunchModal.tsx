@@ -73,13 +73,25 @@ interface AgentLaunchModalPanelProps {
      *  Codex P2 on PR #910 rounds 6 + 7: rounds 1-6 only restored
      *  identity/memory selection; round 7 added the rest of the form. */
     initialFormState?: Partial<LaunchFormState>;
-    /** Called when the "+" / empty-state New buttons fire. The picker
-     *  is expected to chain `tabModal.replace(newIdentityRequest)` —
-     *  this component doesn't know how to build that request.
+    /** When true, the OAuth Connect panel fires `startConnect()` once
+     *  on mount — set by the OAuth-Connect → New Identity → launch
+     *  round-trip so the user doesn't re-click Connect after naming
+     *  the bundle. Spec SPEC_BUNDLE_MANAGEMENT_2026_05_22.md §2. */
+    autoStartAuth?: boolean;
+    /** Called when the "+" / empty-state New buttons fire, OR when the
+     *  OAuth Connect panel needs the New Identity modal interposed
+     *  (`purpose: "oauth-continue"`). The picker is expected to chain
+     *  `tabModal.replace(newIdentityRequest)` — this component doesn't
+     *  know how to build that request.
      *
      *  The current launch form state is passed through so the picker
-     *  can preserve it across the new-bundle round-trip. */
-    onRequestNewIdentity?: (current: LaunchFormState) => void;
+     *  can preserve it across the new-bundle round-trip; `purpose`
+     *  tells the picker whether to set `autoStartAuth` on the return
+     *  launch request. */
+    onRequestNewIdentity?: (
+        current: LaunchFormState,
+        purpose: "create" | "oauth-continue",
+    ) => void;
     onRequestNewMemory?: (current: LaunchFormState) => void;
 }
 
@@ -216,7 +228,12 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         identityId: identityId(),
         memoryId: memoryId(),
     });
-    const handleNewIdentity = () => props.onRequestNewIdentity?.(snapshot());
+    // The plain `+ New identity` button uses `purpose: "create"`. The
+    // OAuth Connect (`needs-bundle`) interposition routes through the
+    // same callback with `purpose: "oauth-continue"` — see the
+    // PreLaunchAuthPanel `onRequestNewIdentity` wiring below.
+    const handleNewIdentity = () =>
+        props.onRequestNewIdentity?.(snapshot(), "create");
     const handleNewMemory = () => props.onRequestNewMemory?.(snapshot());
 
     // v8 — "Continue agent" dropdown. Filters to instances of the
@@ -818,6 +835,16 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                             hasMatchingBinding={bundleHasMatchingBinding}
                             controller={authController}
                             onBundleCreated={onBundleCreated}
+                            autoStartAuth={props.initialFormState != null && props.autoStartAuth === true}
+                            onRequestNewIdentity={
+                                props.onRequestNewIdentity
+                                    ? () =>
+                                          props.onRequestNewIdentity?.(
+                                              snapshot(),
+                                              "oauth-continue",
+                                          )
+                                    : undefined
+                            }
                             disabled={submitting()}
                         />
                     </Show>

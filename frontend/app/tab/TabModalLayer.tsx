@@ -194,6 +194,7 @@ function renderRequest(
                             }
                         }}
                         initialFormState={req.initialFormState}
+                        autoStartAuth={req.autoStartAuth}
                         onRequestNewIdentity={req.onRequestNewIdentity}
                         onRequestNewMemory={req.onRequestNewMemory}
                     />
@@ -205,6 +206,7 @@ function renderRequest(
                 panel: (
                     <AgentNewIdentityModalPanel
                         initialName={req.initialName}
+                        purpose={req.purpose}
                         // The layer owns the RPC + chaining so its
                         // `submitting()` flag (which gates safeClose)
                         // tracks the in-flight call. Mirrors the

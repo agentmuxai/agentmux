@@ -24,6 +24,17 @@ export interface NewIdentityFormData {
 interface AgentNewIdentityModalPanelProps {
     /** Suggested initial name (often empty). */
     initialName?: string;
+    /** Why this modal was opened — controls only the primary button
+     *  label, nothing else about the form:
+     *   - `"create"` (default): plain `+ New identity` button — the
+     *     primary action reads "Create" (creates a named bundle and
+     *     returns to the launch form).
+     *   - `"oauth-continue"`: the OAuth Connect (`needs-bundle`) click
+     *     interposed this modal first — the primary action reads
+     *     "Continue" because the caller chains into OAuth after the
+     *     bundle is created.
+     *  Spec: SPEC_BUNDLE_MANAGEMENT_2026_05_22.md §2. */
+    purpose?: "create" | "oauth-continue";
     onCancel: () => void;
     /** Runs the RPC + downstream chaining. Owned by the layer so its
      *  `submitting()` signal correctly gates ESC / backdrop while the
@@ -43,6 +54,18 @@ export const AgentNewIdentityModalPanel = (
     const [error, setError] = createSignal<string | null>(null);
 
     const canSubmit = () => name().trim().length > 0 && !submitting();
+
+    // Primary-button label. `oauth-continue` callers chain into OAuth
+    // after the bundle is created, so "Continue" reads better than
+    // "Create" — spec §2 decision 4. The progress label tracks the
+    // same split so the in-flight state stays coherent.
+    const purpose = () => props.purpose ?? "create";
+    const primaryLabel = () => {
+        if (submitting()) {
+            return purpose() === "oauth-continue" ? "Continuing…" : "Creating…";
+        }
+        return purpose() === "oauth-continue" ? "Continue" : "Create";
+    };
 
     const submit = async () => {
         if (!canSubmit()) return;
@@ -127,7 +150,7 @@ export const AgentNewIdentityModalPanel = (
                     className="green solid"
                     disabled={!canSubmit()}
                 >
-                    {submitting() ? "Creating…" : "Create"}
+                    {primaryLabel()}
                 </Button>
             </footer>
         </>
