@@ -2,15 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import logoUrl from "@/app/asset/logo.svg?url";
-import { modalsModel } from "@/app/store/modalmodel";
+import type { ModalCloseProps } from "@/app/store/modalmodel";
 import { Modal, ModalBody } from "@/element/modal";
 
 import { isDev } from "@/util/isdev";
 import { getApi } from "../store/global";
 
-interface AboutModalProps {}
-
-const AboutModal = ({}: AboutModalProps) => {
+const AboutModal = ({ close }: ModalCloseProps) => {
     const currentDate = new Date();
     const details = getApi().getAboutModalDetails();
     const updaterChannel = getApi().getUpdaterChannel();
@@ -18,7 +16,7 @@ const AboutModal = ({}: AboutModalProps) => {
     return (
         <Modal
             open={true}
-            onClose={() => modalsModel.popModal()}
+            onClose={close}
             size="md"
             ariaLabel="About AgentMux"
             showCloseButton
