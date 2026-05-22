@@ -1,26 +1,29 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Memory pane view — thin wrapper around the context-free
-// <MemoryManagerBody/>.
+// Memory pane view — the agent-settings `view: "memory"` tab.
 //
-// The full list / create / edit / delete UI was extracted into
-// `memory-manager.tsx` (PR 2 of SPEC_BUNDLE_MANAGEMENT_2026_05_22.md)
-// so the same surface can render both here (the `view: "memory"`
-// settings pane) and inside the window-scoped bundle manager modal.
-// This file exists only so the BlockRegistry barrel has a
-// `viewComponent` taking the pane's ViewModel; it renders the shared
-// body verbatim, so the settings pane is byte-for-byte unchanged.
+// PR 5 of SPEC_BUNDLE_MANAGEMENT_2026_05_22.md (§5 decision 3) DEMOTED
+// this tab from full CRUD to a read-only summary. Full Memory-bundle
+// management now lives in exactly one place: the hamburger "Identity &
+// Memory" manager (`BundleManagerModal`).
+//
+// This file no longer renders `MemoryManagerBody` — it renders the
+// context-free, CRUD-free `<BundleSummaryPanel/>`, which points the user
+// at the app-wide manager. The `MemoryViewModel` is still the registered
+// `viewComponent` ViewModel (BlockRegistry needs one), and the
+// context-free `MemoryManager` (used by the hamburger modal) is
+// untouched — only this agent-settings wrapper changed.
 
 import { type JSX } from "solid-js";
 
-import { MemoryManagerBody } from "./memory-manager";
+import { BundleSummaryPanel } from "@/app/view/bundle-summary";
 import type { MemoryViewModel } from "./memory-model";
 
 interface MemoryViewProps {
     model: MemoryViewModel;
 }
 
-export const MemoryView = (props: MemoryViewProps): JSX.Element => {
-    return <MemoryManagerBody model={props.model} />;
+export const MemoryView = (_props: MemoryViewProps): JSX.Element => {
+    return <BundleSummaryPanel kind="Memory" />;
 };
