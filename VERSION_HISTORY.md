@@ -1,5 +1,187 @@
 # AgentMux Version History
 
+## 0.38.0 — 2026-05-22
+
+- fix(term): remove writeInFlight guard from small-data fast path in scheduleRafWrite
+- docs(bench): add terminal echo-latency benchmark and spec
+- feat(voice): per-pane mic button in frame header (Phase 2)
+- feat(voice): Phase 3 polish — tooltips, permission toast, settings toggle
+- fix(launcher): relocate launcher-sagas.db into `<data-dir>/db/`
+- Closes audit item §8.3. The launcher saga log previously lived
+- directly in `<data-dir>/launcher-sagas.db` while srv put all its
+- SQLite files under `<data-dir>/db/`. The new
+- `data_dir::launcher_saga_log_path()` returns the canonical
+- `<data-dir>/db/launcher-sagas.db` and performs a one-shot back-
+- compat rename from the legacy location on first launch.
+- Idempotent + safe to call repeatedly; +4 unit tests cover fresh
+- install, legacy migration, both-files-present, repeated calls.
+- Audit doc also corrected: §8.2 (duplicate saga tables) was a
+- false alarm — retracted.
+- refactor(storage): rename `db_identities` → `db_identity_bundles` and `db_memories` → `db_memory_bundles` (v11)
+- Closes AUDIT_SQLITE_SYSTEMS §8.1 — the schema-naming drift where v7 created
+- tables under the bare names but the rest of the codebase + UI vocabulary used
+- "identity bundle" / "memory bundle." The "bundle" suffix conveys that each row
+- carries multiple facets (provider bindings + display name for identities;
+- instructions + context_files + mcp_servers + skills for memories).
+- - New `run_forge_v11_migrations`: idempotent `ALTER TABLE … RENAME` for both
+-   tables, plus DROP+CREATE on the `is_blank` indexes. SQLite ≥ 3.25
+-   auto-updates the FK reference in `db_identity_bindings`, so the binding
+-   cascade-delete still works through the rename (covered by a new test).
+- - v7 now guards its legacy-name DDL/seed/shadow-migrate block on
+-   `db_identity_bundles` not yet existing — prevents re-creating empty old
+-   tables alongside the renamed ones on every subsequent startup.
+- - v1 (the base `db_forge_agents` CREATE) extracted into its own
+-   `run_forge_v1_migrations` so tests can stage a pre-v7 schema and exercise
+-   the legacy path independently.
+- - All `wstore.rs` queries + doc comments updated to the bundle names.
+- - `db_identity_bindings` is intentionally NOT renamed — its name was already
+-   bundle-consistent (a binding binds an identity bundle to a provider
+-   account; the surrounding object IS the binding, not the bundle).
+- refactor(storage): flatten objects.db schema, retire the "forge" vocabulary, add user_version tripwire
+- Implements `docs/specs/SPEC_SCHEMA_FLATTENING_2026_05_19.md`. Closes
+- AUDIT_SQLITE_SYSTEMS §8.5 (and absorbs the §8.1 / PR #933 v11 rename).
+- **Flatten.** The 11-step incremental migration chain (`run_forge_v1` …
+- `run_forge_v11`) is replaced by a single flat `run_object_schema` that defines
+- the final `objects.db` schema directly. Per-version data dirs mean every new
+- version was always born with a fresh DB and ran the whole chain in one shot
+- anyway — the intermediate states were never reachable. ~1,400 lines of
+- migration code + tests deleted.
+- **De-forge.** "Forge" is dead vocabulary (replaced by Memory / Identity /
+- agent-definition). Renamed Rust-side: `db_forge_agents` → `db_agent_definitions`,
+- `db_forge_content` → `db_agent_content`, `db_forge_skills` → `db_agent_skills`,
+- `db_forge_history` → `db_agent_history`, `db_forge_agent_identities` →
+- `db_agent_identity_links`; structs `ForgeAgent`/`ForgeContent`/… →
+- `AgentDefinition`/`AgentContent`/…; `forge_*` store methods → `agent_def_*` /
+- `agent_content_*` / `agent_skill_*` / `agent_history_*`; files
+- `forge_handlers.rs` → `agent_handlers.rs`, `forge_seed.rs` → `agent_seed.rs`.
+- The RPC wire command strings are intentionally unchanged (decision A1) — the
+- frontend is untouched and the wire contract is stable.
+- **Dead tables dropped.** `db_workflow_definitions` / `db_workflow_runs` and the
+- `db_v10_migrated_legacy_*` sentinels are no longer created; `adopt_legacy_table_names`
+- drops them from any pre-flatten dev DB — their data had already been copied
+- into `db_drone_*`.
+- **Safety net.** `adopt_legacy_table_names` runs once per startup: it renames
+- any pre-flatten table names found (the single surviving fragment of the old
+- chain — it also subsumes the v11 bundle rename) so a developer's pre-flatten
+- `objects.db` carries forward without data loss. SQLite ≥ 3.25 auto-updates FK
+- references when a parent table is renamed.
+- **user_version tripwire.** `stamp_and_check_version` stamps `PRAGMA user_version`
+- on all four SQLite files (`objects.db`, `filestore.db`, `sagas.db`,
+- `launcher-sagas.db`) and logs a loud warning if a file was written by a newer
+- build (downgrade detection — the bug class behind PR #933's Codex P1). A
+- tripwire, not a migration gate: idempotent DDL remains the schema mechanism.
+- refactor(a2): retire the "forge" vocabulary from the IPC wire + frontend
+- Follow-up A2 to the storage de-forge (PR #934). That PR renamed the Rust
+- storage layer but deliberately left the IPC wire command strings and the
+- whole frontend `forge` view untouched (decision A1). This completes the job
+- — "forge" is now gone from every layer a developer reasons about.
+- The IPC wire is internal (CEF frontend ↔ srv, shipped together), so the
+- command strings are renamed outright with no compat shim; srv + frontend
+- land atomically.
+- - **Wire commands** — `listforgeagents` → `listagents`, `createforgeagent`
+-   → `createagent`, `getforgecontent` → `getagentcontent`,
+-   `listforgeskills` → `listagentskills`, `appendforgehistory` →
+-   `appendagenthistory`, `importforgefromclaw` → `importagentfromclaw`,
+-   `reseedforgeagents` → `reseedagents`, etc. (18 commands). The
+-   `COMMAND_*_FORGE_*` constants rename to match.
+- - **Frontend view** — `frontend/app/view/forge/` → `view/agent-def/`;
+-   `forge-model.ts` → `agent-def-model.ts`, `forge-constants.ts` →
+-   `agent-def-constants.ts`; `ForgeViewModel` → `AgentDefViewModel`; the 9
+-   `Forge*` components → `AgentDef*` / `AgentSkill*` / `AgentContent*` /
+-   `AgentHistory*`.
+- - **Types** — `gotypes.d.ts` + `rpc-api.ts` updated: `ForgeAgent` →
+-   `AgentDefinition`, `ForgeContent` → `AgentContent`, `ForgeSkill` →
+-   `AgentSkill`, `ForgeHistory` → `AgentHistory`, and the `Command*Forge*Data`
+-   types, matching the Rust struct names from #934.
+- - **Settings/overlay tab** — the internal `"forge"` tab enum value →
+-   `"agent"`. The `block.tsx` `view: "forge"` → `"agent"` migration shim is
+-   kept (back-compat for already-persisted blocks).
+- - `forge-seed.json` → `agent-seed.json`; `seed_forge_agents` →
+-   `seed_agents`; `default_forge_icon` → `default_agent_icon`.
+- Out of scope (follow-up): the `forge-*` CSS class names (~74) are an
+- internal styling layer — renaming them risks silent visual regressions the
+- compiler can't catch, so they're left for a dedicated cosmetic sweep.
+- Verified: `agentmux-srv` builds clean; frontend vite build clean; 3,270
+- frontend tests pass.
+- feat(menu): hamburger menu tweaks — reorder, DevTools item, Documentation link
+- Three tab-bar hamburger (≡) menu changes:
+- - **Reorder.** "New Tab" is now the topmost item. "Command Palette" moves
+-   from the top down to just below Settings.
+- - **DevTools is no longer a widget.** Removed `defwidget@devtools` from
+-   `widgets.json` (and the now-dead devtools special-case in
+-   `handleWidgetSelect`). DevTools toggling moves into the hamburger menu as
+-   a "DevTools" item between Settings and Command Palette — same
+-   `toggleDevtools()` action. (The Command Palette's "Toggle DevTools"
+-   command is unaffected.)
+- - **"Help" → "Documentation".** The menu item is renamed and now opens
+-   `https://docs.agentmux.ai` in the external browser via
+-   `getApi().openExternal(...)`, instead of opening the in-app help pane.
+-   The `help` widget / `view: "help"` pane are unchanged.
+- New bottom-of-menu order: Documentation · Settings · DevTools · Command
+- Palette · — · Exit.
+- fix(agent): gear/cog opens the settings panel reliably
+- Clicking the ⚙ gear in an agent pane header did nothing. The gear flips an
+- overlay-tab signal, but the panel was rendered behind
+- `<Show when={showOverlayTab() != null && currentAgent() != null}>`.
+- `currentAgent()` resolves the pane's `agentId` block-meta against the
+- `db_agent_definitions` list. That only matches for panes launched via
+- `launchAgentDefinition` (the AgentPicker → launch-modal path). It is `null`
+- for provider quick-launch panes (`launchAgent` writes a *provider* id), for
+- a pane whose definition was deleted, and during the async window before /
+- if `ListAgentDefinitionsCommand` resolves. In every one of those cases the
+- gear silently no-op'd — click, nothing.
+- Fix: gate the overlay only on `showOverlayTab() != null` and pass
+- `currentAgent()` (possibly `undefined`) straight through. The panel chain
+- already handles a missing definition — `AgentCardSettingsPanel.agent` is
+- typed `AgentDefinition | undefined` (create-mode), and the Identity tab has
+- a "save the agent first" fallback. `AgentFocusedPanel`'s `agent` prop is
+- widened to `AgentDefinition | undefined` to match what it forwards.
+- feat(agent): recency-sorted launch picker + updated_at on agent definitions
+- **Recency-sorted picker.** `agent_def_list` previously ordered by
+- `created_at ASC` (oldest first). It now orders **most-recently-used first**:
+- a `LEFT JOIN` on `MAX(db_agent_instances.started_at)` per definition. Never-
+- launched agents (no instance rows → NULL `last_used`) sort after the launched
+- ones under `DESC`, ordered among themselves by `created_at ASC`. The
+- AgentPicker reflects this order directly.
+- **Default selection.** The AgentPicker now focuses the first card (the
+- most-recently-used agent) on mount via a new `AgentCard.defaultFocus` prop —
+- so the focus ring marks the default and Enter launches it immediately.
+- **`updated_at` on agent definitions.** `db_agent_definitions` gains an
+- `updated_at` column (schema v2 — `OBJECT_SCHEMA_VERSION` bumped, with an
+- idempotent `ALTER TABLE ADD COLUMN` for existing dev databases). It is set to
+- `created_at` on insert and stamped fresh on every `agent_def_update`. Surfaced
+- on the `AgentDefinition` struct + `gotypes.d.ts` type. (`db_memory_bundles` /
+- `db_identity_bundles` already had `updated_at`; agent definitions did not.)
+- feat(menu): hamburger order — Settings, Command Palette, DevTools, Online Docs
+- Follow-up tweak to PR #936's hamburger menu. The bottom group is reordered
+- to **Settings · Command Palette · DevTools · Online Docs**, and the
+- "Documentation" item is renamed to **"Online Docs"** (its action — open
+- `https://docs.agentmux.ai` in the browser — is unchanged).
+- Frontend-only; one block in `tabbar.tsx`.
+- docs(readme): fix Widgets table — DevTools removed, Drone added
+- The README's Widgets table drifted from `widgets.json`:
+- - Removed the **DevTools** widget row — DevTools stopped being a widget in
+-   PR #936; it's now a hamburger-menu item. Added a corresponding row to the
+-   "Not widgets — opened from elsewhere" table (Hamburger ≡ → DevTools).
+- - Added the **Drone** widget row (`diagram-project` icon, More tier) — it
+-   was present in `widgets.json` but missing from the README table.
+- feat(stability): suppress Windows crash modal (supervision Phase 0)
+- feat(authfile): write authkey.dev for all runtime modes so portable builds are discoverable by the benchmark
+- feat(stability): launcher auto-restarts the host on crash (supervision Phase 1)
+- feat(stability): host retry ladder + crash classification (supervision Phase 1)
+- build: task package auto-bumps the patch version every build
+- fix(shell): seq-based input reorder buffer + threshold session reset — prevents terminal freeze from out-of-order or concurrent input RPCs
+- fix(build): stamp srv binary with the live post-bump version
+- feat(statusbar): DEV badge on the version chip
+- fix(term): route keyboard input through the blockinput wscommand so fast typing stays in order
+- feat(statusbar): Build row shows commit hash, new Time row shows build timestamp
+- feat(modal): unified scope-based modal primitive (stage 1)
+- refactor(modal): migrate window-scope callers to unified modal (stage 2)
+- refactor(modal): migrate tab-scope agent modals to unified modal (stage 3)
+- refactor(modal): delete legacy modal-v2 primitive (stage 5)
+- refactor(modal): retire v1 modal registry (stage 4)
+
+
 ## 0.37.0 — 2026-05-19
 
 - feat(voice): cherry-pick voice-input building blocks + per-pane spec
