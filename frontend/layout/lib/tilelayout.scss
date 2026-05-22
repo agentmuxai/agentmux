@@ -152,8 +152,13 @@
         background-color: rgb(from var(--block-bg-color) r g b);
     }
 
+    // While a pane is magnified, every tile node is hidden with display:none
+    // (not visibility:hidden — that keeps layout box, so a browser pane inside
+    // would still report a non-zero rect and its native window would bleed
+    // through the magnified pane). display:none collapses the node to 0×0, and
+    // the host's airspace logic hides any browser pane reporting a 0×0 rect.
     .tile-node.tile-hidden {
-        visibility: hidden;
+        display: none;
     }
 
     &.animate {

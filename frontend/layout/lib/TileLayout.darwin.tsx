@@ -311,6 +311,11 @@ const DisplayNode = (props: DisplayNodeProps) => {
     const addlProps = () => nodeModel.additionalProps();
     const isEphemeral = () => nodeModel.isEphemeral();
     const isMagnified = () => nodeModel.isMagnified();
+    // True when any pane is magnified. Every tile node is then hidden
+    // (display:none) so nothing inside AgentMux — DOM panes or native browser
+    // panes — shows behind the magnified pane. The magnified pane itself is
+    // reparented into the magnify overlay, outside the tile nodes.
+    const magnifyActive = () => !!props.layoutModel.magnifiedNodeIdAtom();
     const [isDragging, setIsDragging] = createSignal(false);
 
 
@@ -466,7 +471,7 @@ const DisplayNode = (props: DisplayNodeProps) => {
 
     return (
         <div
-            class={clsx("tile-node", { dragging: isDragging(), "tile-hidden": isMagnified() })}
+            class={clsx("tile-node", { dragging: isDragging(), "tile-hidden": magnifyActive() })}
             ref={tileNodeRef}
             id={props.node.id}
             style={tileTransform() as JSX.CSSProperties}
