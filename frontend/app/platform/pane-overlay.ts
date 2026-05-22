@@ -105,12 +105,13 @@ function rectFromElement(el: HTMLElement): OverlayRect {
  * component rendering a DOM overlay that could overlap a pane.
  *
  * The hook reads the element's bounding rect on mount, re-reads it on
- * `window.resize` (so viewport-sized overlays like the modal-v2 backdrop
- * follow resizes correctly), and deregisters on unmount. Overlays that
- * move independently of window resize (dropped anchors, animated
- * transitions) can layer a `ResizeObserver` / `IntersectionObserver` on
- * top and re-call the hook — for now, window resize is the only
- * observed mutation in the live surfaces.
+ * `window.resize`, and re-reads it whenever a `ResizeObserver` reports
+ * the element's box changing — including the collapse to 0 when a
+ * tab-scoped overlay's tab is hidden with `display:none` (no `resize`
+ * fires for that, so without the observer the backend keeps a stale clip
+ * that punches a hole through the newly active tab's panes). It
+ * deregisters on unmount. Overlays that move without any size change
+ * (dropped anchors) may still need an `IntersectionObserver` layered on.
  *
  * Safe to nest — each call registers its own rect, the union is applied.
  * No-op on platforms without native pane HWNDs (backend IPC is a no-op).
@@ -120,15 +121,33 @@ export function usePaneOverlay(getEl: Accessor<HTMLElement | null | undefined>):
     const update = (): void => {
         const el = getEl();
         if (!el) return;
-        overlayRects.set(id, rectFromElement(el));
+        const rect = rectFromElement(el);
+        // A collapsed box (e.g. the overlay's tab hidden via display:none)
+        // contributes no hole — drop the entry rather than send a 0×0 rect.
+        if (rect.w > 0 && rect.h > 0) {
+            overlayRects.set(id, rect);
+        } else {
+            overlayRects.delete(id);
+        }
         sendClip();
     };
+    let observer: ResizeObserver | undefined;
     onMount(() => {
         update();
         window.addEventListener("resize", update);
+        // A tab-scoped modal overlay is hidden via `display:none` when
+        // its tab goes inactive — the box collapses to 0 but no `resize`
+        // fires, so a ResizeObserver is needed to drop the now-stale rect
+        // (and to restore it when the tab is shown again).
+        const el = getEl();
+        if (el && typeof ResizeObserver !== "undefined") {
+            observer = new ResizeObserver(() => update());
+            observer.observe(el);
+        }
     });
     onCleanup(() => {
         window.removeEventListener("resize", update);
+        observer?.disconnect();
         if (overlayRects.delete(id)) {
             sendClip();
         }
