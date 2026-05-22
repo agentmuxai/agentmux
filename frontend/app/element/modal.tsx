@@ -151,30 +151,21 @@ function covers(outer: StackEntry, inner: StackEntry): boolean {
 }
 
 /**
- * The modal a global ESC / backdrop interaction should act on: the
- * highest-stacked modal not contained within any *higher* modal's lock
- * region. Modals shadowed by a higher overlapping modal are skipped.
+ * True when `self` should respond to a global ESC / backdrop interaction:
+ * no modal stacked *above* `self` covers its lock region.
+ *
+ * This is per-region, not a single global winner — modals in disjoint
+ * regions (two pane modals in different panes; a pane modal and a tab
+ * modal in another tab) are each independently reachable. Only a higher
+ * modal whose lock region *contains* `self`'s shadows it.
  */
-function reachableTopmost(): StackEntry | undefined {
-    // Walk from the top down; the first entry not covered by anything
-    // strictly above it is the reachable topmost.
-    for (let i = stack.length - 1; i >= 0; i--) {
-        const candidate = stack[i];
-        let shadowed = false;
-        for (let j = i + 1; j < stack.length; j++) {
-            if (covers(stack[j], candidate)) {
-                shadowed = true;
-                break;
-            }
-        }
-        if (!shadowed) return candidate;
+function isReachable(self: StackEntry): boolean {
+    const i = stack.findIndex((e) => e.id === self.id);
+    if (i < 0) return false;
+    for (let j = i + 1; j < stack.length; j++) {
+        if (covers(stack[j], self)) return false;
     }
-    return undefined;
-}
-
-/** True when `self` is the modal a global ESC / backdrop should target. */
-function isReachableTopmost(self: StackEntry): boolean {
-    return reachableTopmost()?.id === self.id;
+    return true;
 }
 
 // ── Per-region scroll + inert lock (spec §5) ────────────────────────────────
@@ -490,7 +481,7 @@ export const Modal: Component<ModalProps> = (props) => {
     const handleKeyDown = (ev: KeyboardEvent): void => {
         if (ev.key !== "Escape") return;
         if (props.closeOnEscape === false) return;
-        if (!stackEntry || !isReachableTopmost(stackEntry)) return;
+        if (!stackEntry || !isReachable(stackEntry)) return;
         ev.preventDefault();
         ev.stopPropagation();
         props.onClose();
@@ -500,7 +491,7 @@ export const Modal: Component<ModalProps> = (props) => {
     // topmost. When `closeOnBackdropClick` is false the click does not
     // dismiss — it nudges the panel's `[data-modal-dismiss]` control.
     const handleBackdropClick = (ev: MouseEvent): void => {
-        if (!stackEntry || !isReachableTopmost(stackEntry)) return;
+        if (!stackEntry || !isReachable(stackEntry)) return;
         // Only the backdrop itself, not a click bubbling up from the
         // panel. The panel is a sibling of the backdrop, so the simplest
         // correct test is `target === currentTarget`.
