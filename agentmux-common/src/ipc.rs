@@ -1,3 +1,6 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Phase B.2 IPC wire protocol — shared between agentmux-launcher
 //! (server) and agentmux-cef (client). One source of truth so the
 //! Command / Event shapes can't drift between binaries on a

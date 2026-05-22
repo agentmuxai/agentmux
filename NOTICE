@@ -1,0 +1,11 @@
+AgentMux
+Copyright 2025-2026 AgentMux Corp.
+
+This product includes software developed at:
+
+- Wave Terminal (https://github.com/wavetermdev/waveterm)
+  Copyright 2025, Command Line Inc.
+  Licensed under the Apache License, Version 2.0.
+
+Third-party dependency notices are listed in ACKNOWLEDGEMENTS.md and in the
+dependency manifests (package.json, Cargo.toml).

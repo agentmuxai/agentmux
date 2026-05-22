@@ -1,3 +1,6 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
 // Generates agent-seed.json — one seeded definition per CLI in the
 // catalog (frontend/app/view/agent/defaults/cli-catalog.ts). Each row
 // is a template; a running instance is created when the user picks a
