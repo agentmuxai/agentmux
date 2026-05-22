@@ -10,7 +10,7 @@ import { invokeCommand } from "@/app/platform/ipc";
 import { fireAndForget } from "@/util/util";
 import { openModal } from "@/app/store/modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
-import { openSingletonPlaceholderDemo } from "@/app/modals/singleton-placeholder-demo";
+import { openBundleManager } from "@/app/modals/bundle-manager-modal";
 import { isMacOS } from "@/util/platformutil";
 import { getTabGrabOffset } from "./tab-grab-offset";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
@@ -687,15 +687,15 @@ function TabBar(props: TabBarProps): JSX.Element {
                 onClick: () => openModal(CommandPaletteModal),
             },
             {
-                // Bundle-management PR 3 — placeholder demo for the
-                // app-wide singleton-modal coordination layer. Opens the
-                // placeholder modal here if the singleton is free; if it
+                // Bundle-management PR 4 (Feature 2) — the app-wide
+                // Identity & Memory bundle manager. Opens the manager
+                // modal here when the app-wide singleton is free; when it
                 // is held in another window, focuses that window instead
-                // (and that window's banner stays the persistent
-                // affordance). PR 4 replaces this with "Identity & Memory".
-                label: "Singleton demo",
-                icon: "object-group",
-                onClick: () => openSingletonPlaceholderDemo(),
+                // (the persistent "open elsewhere" banner stays the
+                // durable affordance). See SPEC_BUNDLE_MANAGEMENT §3.
+                label: "Identity & Memory",
+                icon: "id-card",
+                onClick: () => openBundleManager(),
             },
             {
                 label: "DevTools",
