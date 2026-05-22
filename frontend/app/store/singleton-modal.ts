@@ -71,13 +71,11 @@ export const EVENT_SINGLETON_CLAIM = "singleton:claim";
 
 /**
  * Kind of singleton modal. Open enum (string) so future singletons add a
- * value without touching this module. PR 3 ships a placeholder kind for
- * the demo; PR 4 adds `"bundle-manager"`.
+ * value without touching this module — each consumer defines its own
+ * kind constant (e.g. `SINGLETON_KIND_BUNDLE_MANAGER` in
+ * `bundle-manager-modal.tsx`).
  */
 export type SingletonKind = string;
-
-/** Placeholder kind used by the PR-3 demo. PR 4 replaces this usage. */
-export const SINGLETON_KIND_PLACEHOLDER: SingletonKind = "placeholder-demo";
 
 /**
  * Payload of an `EVENT_SINGLETON_CLAIM` WPS event. `data` on the wire.
