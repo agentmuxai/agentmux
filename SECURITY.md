@@ -33,7 +33,7 @@ In scope:
 
 - The AgentMux desktop application (`agentmux-cef`, `agentmux-launcher`)
 - The bundled backend (`agentmux-srv`)
-- The shell integration binary (`wsh`)
+- Shell integration (`agentmux-bashwrap` crate and the `shell-integration/` scripts)
 - Build and release tooling that produces shipped binaries
 
 Out of scope:
