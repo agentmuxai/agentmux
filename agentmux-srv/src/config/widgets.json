@@ -45,6 +45,7 @@
     },
     "defwidget@editor": {
         "display:order": 3,
+        "display:pinned": true,
         "icon": "file-code",
         "label": "editor",
         "description": "Code editor with syntax highlighting",
@@ -80,6 +81,7 @@
     },
     "defwidget@drone": {
         "display:order": 9,
+        "display:pinned": true,
         "icon": "diagram-project",
         "color": "#06b6d4",
         "label": "drone",
@@ -92,6 +94,7 @@
     },
     "defwidget@help": {
         "display:order": 7,
+        "display:pinned": true,
         "icon": "circle-question",
         "label": "help",
         "description": "Help and documentation",

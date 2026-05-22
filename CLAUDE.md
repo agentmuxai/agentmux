@@ -93,7 +93,7 @@ This means:
 
 Widgets are defined in `agentmux-srv/src/config/widgets.json`. These are the **only** widget types — do not invent or reference widgets that don't exist here.
 
-The widget bar's visibility logic is in `frontend/app/window/action-widgets.tsx`: pinned widgets (`"display:pinned": true`) appear directly in the bar; everything else lives in the **More** dropdown. Both tiers are user-facing.
+The widget bar's visibility logic is in `frontend/app/window/action-widgets.tsx`: pinned widgets (`"display:pinned": true`) appear directly in the bar; everything else lives in the **More** dropdown. Both tiers are user-facing. By default every surfaced widget is pinned. Their text labels collapse to icon-only automatically when the title bar is too narrow (and the manual `widget:icononly` setting can force icon-only at any width).
 
 | Widget Key | View | Label | Tier |
 |------------|------|-------|------|
@@ -101,10 +101,10 @@ The widget bar's visibility logic is in `frontend/app/window/action-widgets.tsx`
 | `defwidget@browser` | `browser` | browser | Pinned |
 | `defwidget@terminal` | `term` | terminal | Pinned |
 | `defwidget@sysinfo` | `sysinfo` | sysinfo | Pinned |
-| `defwidget@editor` | `editor` | editor | More dropdown |
-| `defwidget@swarm` | `swarm` | swarm | More dropdown |
-| `defwidget@drone` | `drone` | drone | More dropdown |
-| `defwidget@help` | `help` | help | More dropdown |
+| `defwidget@editor` | `editor` | editor | Pinned |
+| `defwidget@drone` | `drone` | drone | Pinned |
+| `defwidget@help` | `help` | help | Pinned |
+| `defwidget@swarm` | `swarm` | swarm | More dropdown (`display:hidden`) |
 
 ### Not widgets
 
