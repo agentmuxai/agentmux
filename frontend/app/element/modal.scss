@@ -1,0 +1,275 @@
+// Copyright 2024-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Modal — the unified, scope-based modal primitive (Stage 1 of
+// SPEC_UNIFIED_MODAL_SYSTEM_2026_05_21). Ports modal-v2.scss's rules and
+// adds: scope-specific positioning (tab/pane backdrops are absolute
+// within their mount node, not fixed full-window) and the cancel-nudge
+// keyframes (spec §9).
+//
+// Consumes design tokens from `theme.scss` (SPEC_DESIGN_SYSTEM_2026_04_23).
+
+@use "../mixins.scss";
+
+.modal-root {
+    // Window scope: a fixed full-window overlay (identical to modal-v2).
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal);
+    display: grid;
+    place-items: center;
+    padding: var(--space-6);
+
+    // Tab / pane scope: the modal is portalled INTO the tab-content /
+    // pane root, which is `position:relative`. The root then fills that
+    // mount node instead of the whole window — `position:absolute`
+    // anchors to the scoped ancestor, not the viewport.
+    &[data-scope="tab"],
+    &[data-scope="pane"] {
+        position: absolute;
+    }
+
+    // Top-anchored placement for command-palette-style surfaces that
+    // drop from the top of the region.
+    &[data-placement="top"] {
+        align-items: start;
+        padding-top: 15vh;
+    }
+
+    // The root itself is focusable as a last-resort target (when the
+    // panel has no focusable children, `firstFocusable(panelRef)`
+    // returns null and we fall back to panelRef. panelRef has
+    // tabindex=-1 so this still works without adding to the tab order).
+    &:focus-visible {
+        outline: none;
+    }
+}
+
+.modal-backdrop {
+    // Sized to the lock region: `inset:0` covers the full `.modal-root`,
+    // which is the window for `data-scope="window"` and the tab/pane
+    // mount node for `data-scope="tab" | "pane"`.
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    animation: modal-fade-in 120ms ease-out;
+}
+
+.modal-panel {
+    position: relative;
+    max-width: 100%;
+    max-height: calc(100vh - #{2 * 24px});  // 2 × --space-6 literal; avoid var() in calc mult
+    overflow: auto;
+    background: var(--main-bg-color);
+    color: var(--main-text-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-modal);
+    animation: modal-pop-in 140ms cubic-bezier(0.2, 1, 0.3, 1);
+
+    // Focus ring when the panel itself is the focus target (only
+    // happens when there are no focusable descendants).
+    &:focus-visible {
+        box-shadow: var(--shadow-modal), var(--shadow-focus-ring);
+        outline: none;
+    }
+
+    &[data-size="sm"]  { width: 360px; }
+    &[data-size="md"]  { width: 520px; }
+    &[data-size="lg"]  { width: 720px; }
+    &[data-size="xl"]  { width: 960px; }
+    &[data-size="fit"] { width: auto; }
+}
+
+// Tab / pane scoped panels cannot rely on viewport-relative height —
+// the mount node is usually smaller than the window. Cap the panel to
+// its scoped ancestor instead.
+.modal-root[data-scope="tab"] .modal-panel,
+.modal-root[data-scope="pane"] .modal-panel {
+    max-height: calc(100% - #{2 * 24px});
+}
+
+.modal-focus-sentinel {
+    // A visually-hidden but focusable element. Bookends the panel so
+    // Tab and Shift+Tab wrap within the dialog instead of escaping.
+    @include mixins.sr-only;
+}
+
+// ── Close button (opt-in via showCloseButton prop) ───────────────────────────
+
+.modal-panel-close-btn {
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-2);
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    color: var(--secondary-text-color);
+    font-size: var(--text-md);
+    line-height: 1;
+    cursor: pointer;
+    transition: all var(--motion-fast);
+
+    &:hover {
+        color: var(--main-text-color);
+        background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+        border-color: var(--border-color);
+    }
+
+    &:focus-visible {
+        outline: none;
+        box-shadow: var(--shadow-focus-ring);
+    }
+}
+
+// ── Panel subcomponents ──────────────────────────────────────────────────────
+
+.modal-panel-header {
+    padding: var(--space-4) var(--space-5) var(--space-2);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.modal-panel-title {
+    margin: 0;
+    font-size: var(--text-xl);
+    font-weight: var(--font-weight-bold);
+    line-height: var(--leading-tight);
+    color: var(--main-text-color);
+}
+
+.modal-panel-description {
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+    line-height: var(--leading-normal);
+}
+
+.modal-panel-body {
+    padding: var(--space-4) var(--space-5);
+    font-size: var(--text-md);
+    line-height: var(--leading-normal);
+}
+
+.modal-panel-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-5);
+    border-top: 1px solid var(--border-color);
+    background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+}
+
+// ── ConfirmModal button styling ──────────────────────────────────────────────
+// Only the preset uses these classes; other modals use the shared
+// <Button> component.
+
+.modal-btn {
+    padding: var(--space-1-5) var(--space-4);
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-medium);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+    color: var(--main-text-color);
+    cursor: pointer;
+    transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
+
+    &:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
+        border-color: color-mix(in srgb, var(--border-color) 80%, var(--main-text-color));
+    }
+
+    &:focus-visible {
+        outline: none;
+        box-shadow: var(--shadow-focus-ring);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+}
+
+.modal-btn--confirm {
+    background: var(--accent-color);
+    border-color: var(--accent-color);
+    color: var(--button-text-color);
+
+    &:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--accent-color) 85%, var(--main-text-color));
+        border-color: color-mix(in srgb, var(--accent-color) 85%, var(--main-text-color));
+    }
+}
+
+.modal-btn--destructive {
+    background: var(--error-color);
+    border-color: var(--error-color);
+    /* stylelint-disable color-no-hex --
+       Pure white text on the red destructive button is intentional
+       for contrast; no semantic token currently maps to "always
+       white regardless of theme". */
+    color: #fff;
+
+    &:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--error-color) 85%, #fff);
+        border-color: color-mix(in srgb, var(--error-color) 85%, #fff);
+    }
+    /* stylelint-enable color-no-hex */
+}
+
+// ── Cancel nudge (spec §9) ───────────────────────────────────────────────────
+// When `closeOnBackdropClick={false}`, a rejected backdrop click adds
+// `modal-dismiss--nudge` to the panel's `[data-modal-dismiss]` control.
+// The class is removed on `animationend` so a later click re-triggers
+// it. A subtle scale-up pulse draws the eye to "this is how you close".
+
+.modal-dismiss--nudge {
+    animation: modal-dismiss-nudge 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes modal-dismiss-nudge {
+    0%   { transform: scale(1); }
+    45%  { transform: scale(1.12); }
+    100% { transform: scale(1); }
+}
+
+// ── Animations ───────────────────────────────────────────────────────────────
+
+@keyframes modal-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+@keyframes modal-pop-in {
+    from { opacity: 0; transform: scale(0.96) translateY(4px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+// Reduced-motion variant of the nudge. It must still be a *brief*
+// animation — not `none` — so the JS `animationend` listener fires and
+// the `modal-dismiss--nudge` class is cleared. A non-moving outline
+// flash highlights the dismiss control without any scale/translate.
+@keyframes modal-dismiss-nudge-static {
+    0%, 100% { box-shadow: none; }
+    50%      { box-shadow: var(--shadow-focus-ring); }
+}
+
+@include mixins.respect-reduced-motion {
+    .modal-backdrop,
+    .modal-panel {
+        animation: none;
+    }
+
+    .modal-dismiss--nudge {
+        // Still animated (so `animationend` fires) but motion-free.
+        animation: modal-dismiss-nudge-static 240ms ease-in-out;
+    }
+}
