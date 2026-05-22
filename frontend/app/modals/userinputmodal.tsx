@@ -3,7 +3,7 @@
 
 import { Button } from "@/element/button";
 import { Markdown } from "@/element/markdown";
-import { Modal, ModalBody, ModalFooter, ModalHeader } from "@/element/modal-v2";
+import { Modal, ModalBody, ModalFooter, ModalHeader } from "@/element/modal";
 import { modalsModel } from "@/store/modalmodel";
 import * as keyutil from "@/util/keyutil";
 import { fireAndForget } from "@/util/util";

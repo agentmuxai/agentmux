@@ -8,7 +8,7 @@
 import { commandRegistry, type CommandEntry } from "@/app/store/command-registry";
 import { modalsModel } from "@/app/store/modalmodel";
 import { disableGlobalKeybindings, enableGlobalKeybindings } from "@/app/store/keymodel";
-import { Modal } from "@/element/modal-v2";
+import { Modal } from "@/element/modal";
 import { createMemo, createSignal, For, onCleanup, onMount, type JSX } from "solid-js";
 import "./command-palette.scss";
 
