@@ -162,24 +162,23 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         untrack(() => controller.selected(prov.id, id, outcomeFor(id, prov.id, hasBinding)));
     });
 
-    // Connect / Retry click handler. When the outcome is `needs-bundle`
-    // (no identity bundle selected — a genuinely fresh OAuth) we DON'T
-    // start OAuth immediately: the spec (SPEC_BUNDLE_MANAGEMENT_2026_
-    // 05_22.md §2) interposes the New Identity modal so the user names
-    // the bundle first. The parent's `onRequestNewIdentity` owns the
-    // tabModal.replace chain into that modal. For `needs-account` /
-    // `expired` / openclaw (an existing, named bundle), Connect goes
-    // straight to OAuth — unchanged behaviour. If the parent didn't
-    // supply the callback we fall back to starting OAuth directly.
+    // Connect / Retry click handler. When the user has no identity
+    // bundle selected — a genuinely fresh OAuth — we DON'T start OAuth
+    // immediately: the spec (SPEC_BUNDLE_MANAGEMENT_2026_05_22.md §2)
+    // interposes the New Identity modal so the user names the bundle
+    // first; the parent's `onRequestNewIdentity` owns the
+    // tabModal.replace chain into that modal. With a bundle already
+    // selected — `needs-account`, `expired`, or openclaw's force-fresh
+    // — Connect goes straight to OAuth. Without the callback we fall
+    // back to starting OAuth directly.
     const handleConnect = (): void => {
         const prov = props.provider;
         if (!prov) return;
-        const outcome = outcomeFor(
-            props.identityId(),
-            prov.id,
-            props.hasMatchingBinding(),
-        );
-        if (outcome === "needs-bundle" && props.onRequestNewIdentity) {
+        // Gate on a genuinely empty selection, NOT the `needs-bundle`
+        // outcome: `outcomeFor()` returns `needs-bundle` for openclaw
+        // even with a bundle selected, so an outcome-based gate would
+        // trap openclaw in the New Identity step instead of OAuth.
+        if (props.identityId() === "" && props.onRequestNewIdentity) {
             props.onRequestNewIdentity();
             return;
         }
