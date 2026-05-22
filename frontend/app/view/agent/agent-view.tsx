@@ -48,7 +48,7 @@ import { SessionDigestBanner } from "./components/SessionDigestBanner";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createBlock, getApi, WOS } from "@/app/store/global";
-import { ConfirmModal } from "@/element/modal-v2";
+import { ConfirmModal } from "@/element/modal";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { parseAgentAccounts, loadAccounts } from "@/app/view/identity/identity-model";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";

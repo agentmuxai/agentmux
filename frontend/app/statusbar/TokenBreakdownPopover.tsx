@@ -13,7 +13,7 @@
 
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
-import { ConfirmModal } from "@/element/modal-v2";
+import { ConfirmModal } from "@/element/modal";
 import { getCliCatalogEntry } from "@/app/view/agent/defaults/cli-catalog";
 import {
     getBreakdown,
