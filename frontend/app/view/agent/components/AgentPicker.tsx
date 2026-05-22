@@ -110,10 +110,17 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     const buildLaunchRequest = (
         agent: AgentDefinition,
         initialFormState?: Partial<LaunchFormStateWire>,
+        // When set, the re-opened launch modal fires its OAuth
+        // `startConnect()` once on mount. Used by the OAuth-Connect →
+        // New Identity → launch round-trip so the user doesn't re-click
+        // Connect after naming the bundle — spec
+        // SPEC_BUNDLE_MANAGEMENT_2026_05_22.md §2.
+        autoStartAuth?: boolean,
     ) => ({
         kind: "launch-agent" as const,
         agent,
         originBlockId: props.model.blockId,
+        autoStartAuth,
         onSubmit: async (overrides: LaunchOverrides) => {
             setLaunching(agent.id);
             try {
@@ -130,19 +137,38 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             }
         },
         initialFormState,
-        onRequestNewIdentity: (current: LaunchFormStateWire) => {
+        onRequestNewIdentity: (
+            current: LaunchFormStateWire,
+            purpose: "create" | "oauth-continue",
+        ) => {
             // Thread the user's whole live form snapshot through the
             // new-identity round-trip so name/runtime/image/memory
             // survive alongside the freshly-created identity id.
+            //
+            // Two entry points share this chain (spec §2):
+            //  - `"create"`  — the plain `+ New identity` button. On
+            //    Continue/Create, return to the launch form with the
+            //    new id selected; the user clicks Launch when ready.
+            //  - `"oauth-continue"` — the OAuth Connect (`needs-bundle`)
+            //    click. The New Identity modal's primary button reads
+            //    "Continue"; on success the launch form re-opens with
+            //    the new id selected AND `autoStartAuth` set so OAuth
+            //    resumes automatically against the freshly-named
+            //    bundle.
             tabModal.replace({
                 kind: "new-identity" as const,
                 originBlockId: props.model.blockId,
+                purpose,
                 onCreated: (id: string) => {
                     tabModal.replace(
-                        buildLaunchRequest(agent, {
-                            ...current,
-                            identityId: id,
-                        }),
+                        buildLaunchRequest(
+                            agent,
+                            {
+                                ...current,
+                                identityId: id,
+                            },
+                            purpose === "oauth-continue",
+                        ),
                     );
                 },
                 onCancel: () => {

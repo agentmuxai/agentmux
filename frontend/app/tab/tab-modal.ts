@@ -46,12 +46,32 @@ export interface LaunchAgentRequest {
      *  across the new-bundle round-trip. Codex P2 on PR #910
      *  rounds 6 + 7. */
     initialFormState?: Partial<LaunchFormStateWire>;
-    /** Optional callback fired when the user clicks the "+ New
-     *  identity" button. Caller is expected to call
+    /** When true, the launch modal fires its OAuth `startConnect()`
+     *  exactly once on mount. Set by the OAuth-Connect → New Identity
+     *  → launch round-trip (spec SPEC_BUNDLE_MANAGEMENT_2026_05_22.md
+     *  §2): after the user names the bundle and clicks Continue, the
+     *  launch modal re-opens with the new identity preselected and
+     *  this hint set, so OAuth resumes automatically against the
+     *  freshly-named bundle instead of waiting for a second click. */
+    autoStartAuth?: boolean;
+    /** Optional callback fired when the user wants to create a new
+     *  identity bundle. Caller is expected to call
      *  tabModal.replace(newIdentityRequest) — the picker does this.
      *  The `current` snapshot carries the modal's live form state so
-     *  the picker can preserve it across the new-bundle round-trip. */
-    onRequestNewIdentity?: (current: LaunchFormStateWire) => void;
+     *  the picker can preserve it across the new-bundle round-trip.
+     *
+     *  `purpose` distinguishes the two entry points:
+     *   - `"create"` (the plain `+ New identity` button): create a
+     *     named bundle and return to the launch form.
+     *   - `"oauth-continue"` (the OAuth Connect `needs-bundle` click):
+     *     create a named bundle, return to the launch form with the
+     *     new id preselected AND `autoStartAuth` set so OAuth resumes
+     *     automatically against the named bundle.
+     *  Spec SPEC_BUNDLE_MANAGEMENT_2026_05_22.md §2. */
+    onRequestNewIdentity?: (
+        current: LaunchFormStateWire,
+        purpose: "create" | "oauth-continue",
+    ) => void;
     /** Same for "+ New memory". */
     onRequestNewMemory?: (current: LaunchFormStateWire) => void;
 }
@@ -144,6 +164,12 @@ export interface NewIdentityBundleRequest {
     originBlockId: string;
     /** Initial value for the name field. Usually empty. */
     initialName?: string;
+    /** Why the modal opened — controls the primary button label only
+     *  ("Create" vs "Continue"). `"create"` (default) is the plain
+     *  `+ New identity` button; `"oauth-continue"` is the OAuth-Connect
+     *  (`needs-bundle`) interposition. Spec
+     *  SPEC_BUNDLE_MANAGEMENT_2026_05_22.md §2. */
+    purpose?: "create" | "oauth-continue";
     /** Called after the bundle is persisted on disk. Caller should
      *  `tabModal.replace(launchRequest)` with the new id preselected;
      *  the layer does NOT close after this fires. */
