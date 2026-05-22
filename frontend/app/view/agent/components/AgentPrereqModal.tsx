@@ -84,7 +84,7 @@ export const AgentPrereqModalPanel = (props: AgentPrereqModalPanelProps): JSX.El
                 </p>
             </div>
             <footer class="modal-panel-footer">
-                <Button onClick={() => props.onCancel()}>Cancel</Button>
+                <Button onClick={() => props.onCancel()} data-modal-dismiss>Cancel</Button>
                 <Button onClick={() => props.onRefresh()}>Refresh</Button>
                 <Button onClick={() => props.onProceed()} className="green solid">
                     Launch anyway
