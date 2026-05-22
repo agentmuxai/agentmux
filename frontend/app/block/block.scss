@@ -315,11 +315,10 @@
 
         // A magnified pane floats over the blurred magnify backdrop. The
         // default --block-bg-color is translucent in every theme (e.g. 50%),
-        // so without this the backdrop bleeds through the magnified pane.
-        // Force the configured opacity — default 1 (fully opaque), still
-        // overridable via the window:magnifiedblockopacity setting.
+        // so without this the backdrop bleeds through. Force the opaque form
+        // of the theme colour (r g b with no alpha = fully opaque).
         &.magnified .block-frame-default-inner {
-            background-color: rgb(from var(--block-bg-color) r g b / var(--magnified-block-opacity));
+            background-color: rgb(from var(--block-bg-color) r g b);
         }
 
         .connstatus-overlay {

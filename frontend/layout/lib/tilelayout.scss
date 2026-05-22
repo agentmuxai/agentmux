@@ -145,6 +145,11 @@
     .magnify-pane {
         width: 100%;
         height: 100%;
+        // Opaque base behind the magnified pane. The pane content
+        // (--block-bg-color) is translucent in every theme; without a solid
+        // backing the blurred magnify backdrop bleeds through. `r g b` with
+        // no alpha = the theme colour at full opacity.
+        background-color: rgb(from var(--block-bg-color) r g b);
     }
 
     .tile-node.tile-hidden {

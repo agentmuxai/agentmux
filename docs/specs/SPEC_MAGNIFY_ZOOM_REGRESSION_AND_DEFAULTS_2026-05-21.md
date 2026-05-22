@@ -234,24 +234,27 @@ panes. There is no `.magnified` opacity rule anywhere in `block.scss`.
 
 ### 4.2 Change
 
-Two parts:
+A magnified pane is made **fully opaque, unconditionally** — two solid
+layers, neither depending on a CSS variable resolving:
 
-1. **Add the missing rule.** In `block.scss`, give a magnified pane an
-   opaque inner background:
-   ```scss
-   &.magnified .block-frame-default-inner {
-       background-color: rgb(from var(--block-bg-color) r g b / var(--magnified-block-opacity));
-   }
-   ```
-   This is what actually makes a magnified pane honor an opacity at all.
-2. **Default the var to fully opaque.** `--magnified-block-opacity`
-   `0.95` → `1` (`block.scss:308`). It stays shared with the existing
-   `&.ephemeral` rule — a 0.95→1 shift for ephemeral panes is imperceptible
-   and not worth a separate variable.
+1. **Magnify overlay base.** `tilelayout.scss` `.magnify-pane` gets
+   `background-color: rgb(from var(--block-bg-color) r g b)` — the theme
+   colour with no alpha (fully opaque). This is the slot the single pane
+   instance is reparented into, so it backs the whole magnified area.
+2. **Block inner.** `block.scss` `&.magnified .block-frame-default-inner`
+   gets the same opaque `rgb(from var(--block-bg-color) r g b)`, so the
+   pane's own frame is opaque too (headers, rounded corners, browser-pane
+   edges).
 
-`window:magnifiedblockopacity` stays `Option<f64>` (`types.rs:164`,
-default `None`), so the CSS var fallback is the effective default and the
-setting still overrides — no backend change required.
+`rgb(from <color> r g b)` with the alpha omitted yields a fully opaque
+colour — so the result does not depend on `--magnified-block-opacity`
+resolving (an earlier var-based attempt failed when the var was out of
+scope, leaving the declaration invalid and dropped).
+
+The `--magnified-block-opacity` variable / `window:magnifiedblockopacity`
+setting were never actually wired to magnified panes (only `.ephemeral`),
+and remain so — left untouched. A configurable magnified-pane opacity, if
+ever wanted, is a separate feature; the requirement here is simply 100%.
 
 The blur (`--magnified-block-blur: 10px`,
 `window:magnifiedblockblur*px`) is **out of scope** — left unchanged unless
