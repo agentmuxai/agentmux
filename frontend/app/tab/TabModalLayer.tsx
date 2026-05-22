@@ -4,25 +4,44 @@
 /**
  * TabModalLayer — per-tab modal host.
  *
- * Provides a context for opening tab-scoped modals and renders the
- * overlay as a sibling of `<TileLayout>` inside `<TabContent>`. No
- * extra DOM wrappers are added around the tile layout — `<Context.Provider>`
- * emits no DOM node, so the existing flex layout in TabContent is
- * completely undisturbed. The overlay uses `position:absolute; inset:0`
- * against TabContent's `position:relative` root div.
+ * Stage 3 of SPEC_UNIFIED_MODAL_SYSTEM_2026_05_21. This layer keeps its
+ * imperative request API (`TabModalApi`: open / replace / close /
+ * current) exactly as callers know it, but no longer hand-rolls the
+ * overlay / backdrop / panel DOM. Instead it:
  *
- * Switching tabs hides the modal via the existing `display:none` on
- * inactive tab content. The top tab bar stays interactive.
+ *  1. Renders a real mount node (`.tab-modal-mount`) inside `TabContent`'s
+ *     `position:relative` root. `TabContent`'s tile layout (`props.children`)
+ *     is a child of that mount node, and a `scope="tab"` `<Modal>` portals
+ *     into the *same* node — becoming a sibling of the tile layout.
+ *  2. Wraps everything in a `<TabModalScope.Provider>` whose value is an
+ *     accessor for that mount node, so the descendant `<Modal scope="tab">`
+ *     resolves its tab via `useContext(TabModalScope)`.
+ *  3. Delegates all rendering — backdrop, panel chrome, ESC, focus trap,
+ *     scope-relative `inert` + scroll lock, pane-overlay clip — to the
+ *     unified `<Modal>`. The dispatched agent panel (`renderRequest().panel`)
+ *     is the modal's children.
  *
- * The legacy global `Modal` (modal-v2) stays for window-level dialogs
- * (command palette, about, backend prompts). This layer is additive.
+ * The unified `<Modal>`'s scope-relative `inert` (spec §5) handles what
+ * the old hand-rolled `inert` wrapper did: when the modal is open the
+ * mount node's non-`.modal-root` children (the tile layout) are inerted,
+ * trapping focus inside the panel while the tab bar + other tabs stay
+ * live. Switching tabs still hides the modal via the existing
+ * `display:none` on inactive tab content.
  *
- * See docs/specs/launch-modal-rearchitecture-2026-05-01.md.
+ * Dismissal (spec §9): `closeOnBackdropClick={false}` folds in the old
+ * no-backdrop-dismiss behaviour — a backdrop click nudges the panel's
+ * `[data-modal-dismiss]` Cancel/Close control instead of closing. ESC is
+ * the unified `<Modal>`'s. The submit-in-flight guard still lives here:
+ * `safeClose` no-ops while `submitting()`, so ESC routed through
+ * `onClose` is swallowed mid-RPC.
+ *
+ * See docs/specs/launch-modal-rearchitecture-2026-05-01.md (superseded)
+ * and docs/specs/SPEC_UNIFIED_MODAL_SYSTEM_2026_05_21.md §3/§5/§7/§9/§11.
  */
 
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type Component, type JSX } from "solid-js";
+import { createMemo, createSignal, Show, type Component, type JSX } from "solid-js";
 
-import { usePaneOverlay } from "@/app/platform/pane-overlay";
+import { Modal, TabModalScope } from "@/element/modal";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { AgentLaunchModalPanel } from "@/app/view/agent/components/AgentLaunchModal";
@@ -42,101 +61,22 @@ interface TabModalLayerProps {
     children: JSX.Element;
 }
 
-// Registers the overlay element with the backend pane-clip system so
-// native browser-pane HWNDs cut a transparent hole matching the overlay
-// rect. Without this, hardware-windowed panes composite above HTML
-// regardless of CSS z-index and render on top of the modal.
-// Mirrors the ModalPaneOverlayClip pattern in modal-v2.tsx.
-//
-// ResizeObserver supplement: inactive tabs go display:none on their
-// container, which makes the overlay's bounding rect collapse to zero.
-// usePaneOverlay only refreshes on window.resize, so we observe the
-// element for size changes and dispatch a synthetic resize to flush the
-// now-zero rect to the backend, clearing the stale clip.
-const PaneOverlayClip: Component<{ getEl: Accessor<HTMLElement | null | undefined> }> = (p) => {
-    usePaneOverlay(p.getEl);
-    onMount(() => {
-        const el = p.getEl();
-        if (!el) return;
-        const ro = new ResizeObserver(() => window.dispatchEvent(new Event("resize")));
-        ro.observe(el);
-        onCleanup(() => ro.disconnect());
-    });
-    return null;
-};
-
 export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
     const [current, setCurrent] = createSignal<TabModalRequest | null>(null);
     const [submitting, setSubmitting] = createSignal(false);
-    // Paint gate — see SPEC_MODAL_PAINT_GATE_2026_05_18.md.
-    //
-    // Outer gate (`ready`): arms ONLY on a null→non-null transition,
-    // i.e. cold open of a modal session. `tabModal.replace()` keeps
-    // the backdrop + outer panel mounted, so we must NOT toggle ready
-    // back to false on replace — that would briefly hide the
-    // persistent shell mid-crossfade (reagent P1 + codex P2 on PR
-    // #900). Stays true through replaces; resets only on close.
-    //
-    // Inner gate (`contentReady`): re-arms on every request identity
-    // change so each replace swaps content through a hidden frame
-    // before the crossfade keyframe runs.
-    //
-    // Both gates schedule rAF×2 (waits for one full paint cycle to
-    // commit) with a 200ms failsafe in case the renderer is suspended
-    // (background tab). Both rAF handles AND the failsafe are
-    // cancelled in onCleanup so stale callbacks from a prior arm
-    // don't flip the new arm early (reagent P2 on #900).
-    const [ready, setReady] = createSignal(false);
-    const [contentReady, setContentReady] = createSignal(false);
 
-    const armGate = (setGate: (v: boolean) => void): (() => void) => {
-        setGate(false);
-        let innerRaf: number | null = null;
-        const failsafe = setTimeout(() => setGate(true), 200);
-        const outerRaf = requestAnimationFrame(() => {
-            innerRaf = requestAnimationFrame(() => {
-                clearTimeout(failsafe);
-                setGate(true);
-            });
-        });
-        return () => {
-            clearTimeout(failsafe);
-            cancelAnimationFrame(outerRaf);
-            if (innerRaf != null) cancelAnimationFrame(innerRaf);
-        };
-    };
+    // The mount node `<Modal scope="tab">` portals into. It also wraps
+    // the tab's tile layout — so the unified Modal's scope-relative
+    // `inert` (spec §5) inerts the tile layout (a non-`.modal-root`
+    // sibling) while leaving the modal panel live. Held in a signal so
+    // the `TabModalScope` accessor resolves lazily once the ref lands.
+    const [mountEl, setMountEl] = createSignal<HTMLElement | null>(null);
 
-    // Outer gate: arm only on cold open (null→non-null). On replace()
-    // (non-null → non-null) the gate stays as-is so a mid-crossfade
-    // doesn't briefly hide the persistent shell.
-    //
-    // Edge case (codex P2 / reagent P2 on PR #900): if replace() fires
-    // BEFORE the cold-open rAF×2 / 200ms failsafe has flipped ready to
-    // true, Solid runs this effect's previous onCleanup — which cancels
-    // both rAFs and the failsafe — then re-runs the body. If we
-    // unconditionally bail on `prevWasOpen`, no callback survives to
-    // flip ready, and the overlay stays opacity:0 forever. Fix: only
-    // bail when the gate has actually fired. If the gate is still
-    // in-flight at the moment of replace(), re-arm it.
-    let prevWasOpen = false;
-    createEffect(() => {
-        const isOpen = current() != null;
-        if (!isOpen) { prevWasOpen = false; setReady(false); return; }
-        if (prevWasOpen && ready()) return;   // gate already fired — leave it alone
-        prevWasOpen = true;
-        const cleanup = armGate(setReady);
-        onCleanup(cleanup);
-    });
-
-    // Inner gate: re-arm on every request identity change.
-    createEffect(() => {
-        if (current() == null) { setContentReady(false); return; }
-        const cleanup = armGate(setContentReady);
-        onCleanup(cleanup);
-    });
-
-    // Guard close: ESC and backdrop click are blocked while a submit RPC is
-    // in-flight so the user can't lose error feedback or trigger a duplicate launch.
+    // Guard close: ESC (routed via the unified Modal's `onClose`) and a
+    // would-be backdrop dismiss are blocked while a submit RPC is
+    // in-flight so the user can't lose error feedback or trigger a
+    // duplicate launch. `closeOnBackdropClick={false}` already prevents
+    // backdrop dismissal outright; this additionally gates ESC.
     const safeClose = () => {
         if (!submitting()) setCurrent(null);
     };
@@ -144,12 +84,11 @@ export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
     const api: TabModalApi = {
         open: (req) => { setSubmitting(false); setCurrent(req); },
         replace: (next) => {
-            // Identical to `open` at the signal level — the visual
-            // difference (cold open plays the backdrop fade-in + panel
-            // pop-in; warm replace fires only the content keyframe) is
-            // emergent from <Show>'s mount state. Reagent caught this:
-            // splitting the assignment into two branches was dead code.
-            // See SPEC_MODAL_TRANSITIONS_2026_05_18.md §3.3.
+            // Identical to `open` at the signal level — `replace` is a
+            // continuation of the same modal session. The unified
+            // <Modal> stays mounted across the swap (its `open` prop
+            // stays true), and the keyed inner <Show> remounts only the
+            // panel content, firing the content-fade keyframe.
             setSubmitting(false);
             setCurrent(next);
         },
@@ -157,72 +96,78 @@ export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
         current,
     };
 
-    const handleOverlayKeyDown = (e: KeyboardEvent) => {
-        if (e.key === "Escape") {
-            e.stopPropagation();
-            safeClose();
-        }
-    };
+    // Accessible label for the dialog. Derived from the request kind
+    // alone — kept separate from `renderRequest` so reading it does NOT
+    // build (and thus side-effect) a throwaway panel.
+    const modalLabel = createMemo(() => {
+        const req = current();
+        return req ? requestLabel(req) : undefined;
+    });
 
-    // `display:contents` is layout-transparent — TileLayout still sees
-    // TabContent's flex-row container as its parent. `inert` makes the
-    // subtree non-interactive when a modal is open, trapping focus inside
-    // the overlay panel without the layout disruption a normal div would cause.
     return (
         <TabModalContext.Provider value={api}>
-            <div style="display:contents" inert={current() != null || undefined}>
-                {props.children}
-            </div>
-            <Show when={current()}>
-                {(reqAcc) => {
-                    // Backdrop + outer panel persist for the lifetime of
-                    // a "modal session" (one or more chained requests via
-                    // `replace`). The inner keyed <Show> remounts the
-                    // content subtree on each request swap, triggering
-                    // the content-fade animation while the shell stays
-                    // put — no backdrop flicker, no entrance-pop replay.
-                    let overlayRef: HTMLDivElement | undefined;
-                    const meta = createMemo(() => renderRequest(reqAcc(), api, setSubmitting));
-                    return (
-                        <div
-                            class="tab-modal-overlay"
-                            data-ready={ready() ? "" : undefined}
-                            data-content-ready={contentReady() ? "" : undefined}
-                            ref={(el) => { overlayRef = el; }}
-                            role="presentation"
-                            tabIndex={-1}
-                            onKeyDown={handleOverlayKeyDown}
-                        >
-                            <PaneOverlayClip getEl={() => overlayRef} />
-                            {/* Click on backdrop (not panel) closes. Handler is on the
-                                backdrop element itself — the backdrop covers the full
-                                overlay area, so e.target === e.currentTarget on the
-                                overlay would never fire. */}
-                            <div class="tab-modal-backdrop" onClick={safeClose} />
-                            <div
-                                class="tab-modal-panel"
-                                role="dialog"
-                                aria-modal="true"
-                                aria-label={meta().label}
-                                onClick={(e) => e.stopPropagation()}
-                            >
-                                <Show keyed when={reqAcc()}>
-                                    {(_req) => (
-                                        <div class="tab-modal-content">
-                                            {meta().panel}
-                                        </div>
-                                    )}
-                                </Show>
-                            </div>
-                        </div>
-                    );
-                }}
-            </Show>
+            <TabModalScope.Provider value={mountEl}>
+                {/* Real mount node: wraps the tile layout AND hosts the
+                    portalled <Modal>. `display:contents` keeps it
+                    layout-transparent so TileLayout still sees
+                    TabContent's flex container as its parent. */}
+                <div class="tab-modal-mount" style="display:contents" ref={setMountEl}>
+                    {props.children}
+                    <Modal
+                        open={current() != null}
+                        scope="tab"
+                        onClose={safeClose}
+                        closeOnBackdropClick={false}
+                        size="fit"
+                        ariaLabel={modalLabel()}
+                    >
+                        {/* Keyed on the request identity so each
+                            `replace` remounts the panel subtree — the
+                            content-fade animation fires fresh for the
+                            new content while the <Modal> shell (backdrop
+                            + panel chrome) stays put. `renderRequest` is
+                            called only inside this keyed scope so the
+                            panel — and its on-create side effects
+                            (reducer dispatch, store creation) — is built
+                            exactly once per request, not on every
+                            unrelated `current()` read. */}
+                        <Show keyed when={current()}>
+                            {(req) => (
+                                <div class="tab-modal-content">
+                                    {renderRequest(req, api, setSubmitting).panel}
+                                </div>
+                            )}
+                        </Show>
+                    </Modal>
+                </div>
+            </TabModalScope.Provider>
         </TabModalContext.Provider>
     );
 };
 
 // ── Render dispatch ──────────────────────────────────────────────────────────
+
+/**
+ * Accessible label for a request — pure, side-effect-free. Split out so
+ * `modalLabel` can read it without building a panel. `renderRequest`
+ * reuses it so the two stay in sync.
+ */
+function requestLabel(req: TabModalRequest): string {
+    switch (req.kind) {
+        case "launch-agent":
+            return `Launch ${req.agent.name}`;
+        case "new-identity":
+            return "New Identity";
+        case "new-memory":
+            return "New Memory";
+        case "agent-prereqs":
+            return `Install required tools for ${req.agent.name}`;
+        case "install-agent":
+            return `Install ${req.agent.name}`;
+        case "browser-auth":
+            return req.isProxy ? "Proxy authentication required" : "Authentication required";
+    }
+}
 
 function renderRequest(
     req: TabModalRequest,
@@ -232,7 +177,7 @@ function renderRequest(
     switch (req.kind) {
         case "launch-agent":
             return {
-                label: `Launch ${req.agent.name}`,
+                label: requestLabel(req),
                 panel: (
                     <AgentLaunchModalPanel
                         agent={req.agent}
@@ -256,7 +201,7 @@ function renderRequest(
             };
         case "new-identity":
             return {
-                label: "New Identity",
+                label: requestLabel(req),
                 panel: (
                     <AgentNewIdentityModalPanel
                         initialName={req.initialName}
@@ -307,7 +252,7 @@ function renderRequest(
             };
         case "new-memory":
             return {
-                label: "New Memory",
+                label: requestLabel(req),
                 panel: (
                     <AgentNewMemoryModalPanel
                         initialName={req.initialName}
@@ -352,7 +297,7 @@ function renderRequest(
             };
         case "agent-prereqs":
             return {
-                label: `Install required tools for ${req.agent.name}`,
+                label: requestLabel(req),
                 panel: (
                     <AgentPrereqModalPanel
                         agent={req.agent}
@@ -368,7 +313,7 @@ function renderRequest(
             };
         case "install-agent":
             return {
-                label: `Install ${req.agent.name}`,
+                label: requestLabel(req),
                 panel: (
                     <AgentInstallModalPanel
                         agent={req.agent}
@@ -388,7 +333,7 @@ function renderRequest(
             };
         case "browser-auth":
             return {
-                label: req.isProxy ? "Proxy authentication required" : "Authentication required",
+                label: requestLabel(req),
                 panel: (
                     <BrowserAuthModalPanel
                         origin={req.origin}

@@ -809,7 +809,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                 </div>
             </div>
             <footer class="modal-panel-footer">
-                <Button onClick={props.onCancel} disabled={submitting()}>
+                <Button onClick={props.onCancel} disabled={submitting()} data-modal-dismiss>
                     Cancel
                 </Button>
                 <Button onClick={() => void handleSubmit()} disabled={!canSubmit()}>

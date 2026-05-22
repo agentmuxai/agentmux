@@ -176,7 +176,7 @@ export const AgentNewMemoryModalPanel = (
                 )}
             </div>
             <footer class="modal-panel-footer">
-                <Button onClick={() => props.onCancel()} disabled={submitting()}>
+                <Button onClick={() => props.onCancel()} disabled={submitting()} data-modal-dismiss>
                     Cancel
                 </Button>
                 <Button

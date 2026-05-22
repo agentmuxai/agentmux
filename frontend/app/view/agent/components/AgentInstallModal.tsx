@@ -390,22 +390,22 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             </div>
             <footer class="modal-panel-footer">
                 <Show when={phase() === "idle"}>
-                    <Button onClick={() => props.onCancel()}>Cancel</Button>
+                    <Button onClick={() => props.onCancel()} data-modal-dismiss>Cancel</Button>
                     <Button onClick={() => void startInstall()} className="green solid">
                         Install now
                     </Button>
                 </Show>
                 <Show when={phase() === "installing"}>
-                    <Button onClick={() => void cancel()}>Cancel</Button>
+                    <Button onClick={() => void cancel()} data-modal-dismiss>Cancel</Button>
                 </Show>
                 <Show when={phase() === "failed"}>
-                    <Button onClick={() => props.onCancel()}>Close</Button>
+                    <Button onClick={() => props.onCancel()} data-modal-dismiss>Close</Button>
                     <Button onClick={() => void startInstall()} className="green solid">
                         Retry
                     </Button>
                 </Show>
                 <Show when={phase() === "done"}>
-                    <Button onClick={() => { notifiedDone = true; props.onInstalled(false); }}>Close</Button>
+                    <Button onClick={() => { notifiedDone = true; props.onInstalled(false); }} data-modal-dismiss>Close</Button>
                     <Button onClick={() => { notifiedDone = true; props.onInstalled(true); }} className="green solid">
                         Continue to Launch
                     </Button>

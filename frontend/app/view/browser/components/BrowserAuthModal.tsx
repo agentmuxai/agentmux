@@ -92,7 +92,7 @@ export const BrowserAuthModalPanel = (props: BrowserAuthModalPanelProps): JSX.El
                 </label>
             </div>
             <footer class="modal-panel-footer">
-                <Button onClick={cancel}>Cancel</Button>
+                <Button onClick={cancel} data-modal-dismiss>Cancel</Button>
                 <Button onClick={submit} className="green solid">Sign in</Button>
             </footer>
         </>
