@@ -8,6 +8,7 @@
 // the React app bootstraps.
 
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import { computeMenuPosition } from "@/app/util/menu-position";
 import { benchMark } from "@/util/startup-bench";
 
 // Cache for "synchronous" values that are fetched once at startup.
@@ -144,6 +145,10 @@ function showJsContextMenu(
     menuEl.setAttribute("data-pane-overlay", "");
     menuEl.style.left = `${position.x}px`;
     menuEl.style.top = `${position.y}px`;
+    // Hidden until computeMenuPosition places it — avoids a one-frame flash
+    // at the cursor and stops the pane-overlay clip from firing for a
+    // not-yet-positioned menu (visibility:hidden de-registers the rect).
+    menuEl.style.visibility = "hidden";
 
     function renderItems(container: HTMLElement, itemList: NativeContextMenuItem[]) {
         for (const item of itemList) {
@@ -216,16 +221,27 @@ function showJsContextMenu(
 
     renderItems(menuEl, items);
 
-    // Clamp to viewport
     overlay.appendChild(menuEl);
     document.body.appendChild(overlay);
-    const rect = menuEl.getBoundingClientRect();
-    if (rect.right > window.innerWidth) {
-        menuEl.style.left = `${Math.max(0, window.innerWidth - rect.width - 4)}px`;
-    }
-    if (rect.bottom > window.innerHeight) {
-        menuEl.style.top = `${Math.max(0, window.innerHeight - rect.height - 4)}px`;
-    }
+
+    // Position through the shared paintable-area framework. A native browser
+    // pane is an OS child window that paints above the DOM, so a context menu
+    // drawn over one is occluded (the airspace clip is a fragile fallback).
+    // computeMenuPosition flips/shifts/sizes the menu into the free area
+    // around any browser pane, so it lands clear of the pane entirely.
+    void computeMenuPosition(
+        { anchor: { x: position.x, y: position.y }, placement: "bottom-start" },
+        menuEl,
+    ).then((pos) => {
+        if (!menuEl.isConnected) return;
+        if (pos.style.left != null) menuEl.style.left = String(pos.style.left);
+        if (pos.style.top != null) menuEl.style.top = String(pos.style.top);
+        menuEl.style.visibility = "";
+    }).catch(() => {
+        // computeMenuPosition should not throw; if it does, fall back to the
+        // raw cursor position rather than leaving the menu invisible.
+        if (menuEl.isConnected) menuEl.style.visibility = "";
+    });
 }
 
 /**
