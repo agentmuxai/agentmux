@@ -283,6 +283,41 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         flow.dispatch({ type: "ContinueOfChanged", continueOfId: id, carry });
     };
 
+    // ── Feature A — Continue / New view mode ──────────────────────────
+    // SPEC_AGENT_LAUNCH_AND_MODAL_DISMISSAL §A. When this definition has
+    // past instances, default to Continue (most-recent preselected) so
+    // re-opening a configured agent is one step, not a dropdown hunt.
+    const mostRecentInstance = (): NamedAgentRow | null => {
+        const rows = namedAgents() ?? [];
+        if (rows.length === 0) return null;
+        return [...rows].sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0))[0];
+    };
+    const [viewMode, setViewMode] = createSignal<"continue" | "new">("new");
+    // A `+ New bundle` round-trip re-opens the panel with initialFormState
+    // and only ever originates from New mode (the +New buttons are disabled
+    // while continuing) — so skip the auto-decide and keep New.
+    let viewModeDecided = props.initialFormState != null;
+    createEffect(() => {
+        const rows = namedAgents();
+        if (rows === undefined || viewModeDecided) return;
+        viewModeDecided = true;
+        const recent = mostRecentInstance();
+        if (recent) {
+            setViewMode("continue");
+            handleContinueSelect(recent.instance_id);
+        }
+    });
+    const enterNewMode = () => {
+        setViewMode("new");
+        handleContinueSelect(""); // clears continueOfId; unlocks identity/memory
+    };
+    const enterContinueMode = () => {
+        setViewMode("continue");
+        if (continueOfId()) return;
+        const recent = mostRecentInstance();
+        if (recent) handleContinueSelect(recent.instance_id);
+    };
+
     const formatRelative = (ms: number): string => {
         if (!ms) return "";
         const delta = Date.now() - ms;
@@ -492,43 +527,66 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                         </p>
                     </Show>
 
-                    {/* v8 — "Continue agent" dropdown. Only shows if
-                        there are past named agents of this definition.
-                        Picking one pre-fills + locks name/identity/
-                        memory; the launch becomes a continuation that
-                        reuses the prior working directory. */}
+                    {/* Feature A — Continue / New view mode
+                        (SPEC_AGENT_LAUNCH_AND_MODAL_DISMISSAL §A). When this
+                        definition has past instances the modal opens in
+                        Continue mode: the dropdown picks which instance to
+                        resume (pre-fills + locks name/identity/memory) and a
+                        toggle drops to the full New-agent form. No past
+                        instances ⇒ no toggle, New is the only path. */}
                     <Show when={(namedAgents() ?? []).length > 0}>
-                        <label class="agent-launch-modal-field">
-                            <span class="agent-launch-modal-label">Continue an existing agent</span>
-                            <select
-                                class="agent-launch-modal-input"
-                                value={continueOfId()}
-                                onChange={(e) => handleContinueSelect(e.currentTarget.value)}
+                        <Show
+                            when={viewMode() === "continue"}
+                            fallback={
+                                <button
+                                    type="button"
+                                    class="agent-launch-modal-mode-toggle"
+                                    onClick={enterContinueMode}
+                                    disabled={submitting()}
+                                >
+                                    ↩ Continue an existing agent
+                                </button>
+                            }
+                        >
+                            <label class="agent-launch-modal-field">
+                                <span class="agent-launch-modal-label">Continue an existing agent</span>
+                                <select
+                                    class="agent-launch-modal-input"
+                                    value={continueOfId()}
+                                    onChange={(e) => handleContinueSelect(e.currentTarget.value)}
+                                    disabled={submitting()}
+                                    aria-label="Continue an existing agent"
+                                >
+                                    <For each={namedAgents() ?? []}>
+                                        {(row) => {
+                                            const parts = [
+                                                row.instance_name,
+                                                row.identity_name?.trim() || "(ambient creds)",
+                                                row.memory_name?.trim() || "(vanilla CLI)",
+                                            ];
+                                            if (row.started_at) parts.push(formatRelative(row.started_at));
+                                            return (
+                                                <option value={row.instance_id}>
+                                                    {parts.join(" · ")}
+                                                </option>
+                                            );
+                                        }}
+                                    </For>
+                                </select>
+                                <span class="agent-launch-modal-hint">
+                                    Picks up where the agent left off — same files,
+                                    same identity, same memory.
+                                </span>
+                            </label>
+                            <button
+                                type="button"
+                                class="agent-launch-modal-mode-toggle"
+                                onClick={enterNewMode}
                                 disabled={submitting()}
-                                aria-label="Continue an existing agent"
                             >
-                                <option value="">— New agent —</option>
-                                <For each={namedAgents() ?? []}>
-                                    {(row) => {
-                                        const parts = [
-                                            row.instance_name,
-                                            row.identity_name?.trim() || "(ambient creds)",
-                                            row.memory_name?.trim() || "(vanilla CLI)",
-                                        ];
-                                        if (row.started_at) parts.push(formatRelative(row.started_at));
-                                        return (
-                                            <option value={row.instance_id}>
-                                                {parts.join(" · ")}
-                                            </option>
-                                        );
-                                    }}
-                                </For>
-                            </select>
-                            <span class="agent-launch-modal-hint">
-                                Picks up where the agent left off — same files,
-                                same identity, same memory.
-                            </span>
-                        </label>
+                                + Start a new agent instead
+                            </button>
+                        </Show>
                     </Show>
 
                     <label class="agent-launch-modal-field">
