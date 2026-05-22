@@ -1,0 +1,48 @@
+// Read-only summary panel for the demoted agent-settings Identity /
+// Memory tabs (PR 5 of SPEC_BUNDLE_MANAGEMENT_2026_05_22.md).
+
+.bundle-summary {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    height: 100%;
+    overflow-y: auto;
+    background: var(--main-bg-color);
+    color: var(--main-text-color);
+
+    .bundle-summary-inner {
+        max-width: 480px;
+        padding: 32px 24px;
+    }
+
+    .bundle-summary-title {
+        font-size: 18px;
+        margin: 0 0 12px;
+    }
+
+    .bundle-summary-body {
+        font-size: 13px;
+        line-height: 1.6;
+        color: var(--secondary-text-color, rgba(255, 255, 255, 0.7));
+        margin: 0 0 12px;
+    }
+
+    .bundle-summary-hint {
+        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.5));
+    }
+
+    .bundle-summary-btn {
+        margin-top: 4px;
+        padding: 7px 16px;
+        background: var(--accent-color);
+        color: var(--accent-text-color, #fff);
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+
+        &:hover {
+            filter: brightness(1.1);
+        }
+    }
+}
