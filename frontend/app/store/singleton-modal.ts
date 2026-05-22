@@ -135,7 +135,13 @@ let myLabelPromise: Promise<string> | null = null;
 function resolveMyLabel(): Promise<string> {
     if (myLabel != null) return Promise.resolve(myLabel);
     if (!myLabelPromise) {
-        myLabelPromise = getApi()
+        const api = getApi();
+        // `window.api` may not exist yet at very early boot. Calling
+        // through a missing bridge throws synchronously — which would
+        // crash app init. Bail without caching so a later call (the
+        // post-init kick-off in `startSingletonCrashRelease`) retries.
+        if (api == null) return Promise.resolve("main");
+        myLabelPromise = api
             .getWindowLabel()
             .then((l) => {
                 myLabel = l;
@@ -154,9 +160,6 @@ function resolveMyLabel(): Promise<string> {
 function myLabelSync(): string | null {
     return myLabel;
 }
-
-// Kick off resolution eagerly so `acquireSingleton` (sync) has it ready.
-void resolveMyLabel();
 
 // ── Publish ────────────────────────────────────────────────────────────
 
@@ -222,6 +225,14 @@ function ensureWired(kind: SingletonKind, st: KindState): void {
     if (st.wired) return;
     st.wired = true;
 
+    // Resolve this window's label here too. A kind is first wired when a
+    // component reads `singletonHolder`/`acquireSingleton` — which only
+    // happens once the app shell has rendered, so `window.api` is ready.
+    // This is the retry path: if the `startSingletonCrashRelease`
+    // kick-off ran before the API bridge existed (and bailed), this
+    // recovers the label so `acquireSingleton` is not a permanent no-op.
+    void resolveMyLabel();
+
     // 1. Subscribe to live claim/release broadcasts for this kind.
     waveEventSubscribe({
         eventType: EVENT_SINGLETON_CLAIM,
@@ -265,6 +276,12 @@ let crashReleaseWired = false;
 export function startSingletonCrashRelease(): void {
     if (crashReleaseWired) return;
     crashReleaseWired = true;
+
+    // Kick off this window's label resolution here. `app-init` calls
+    // this once `window.api` exists, so resolving from here (not at
+    // module-eval) keeps `getApi()` safe; `myLabelSync()` is then ready
+    // well before any user-triggered acquire.
+    void resolveMyLabel();
 
     subscribeLauncherEvent((evt) => {
         const isExit =
