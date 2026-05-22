@@ -225,6 +225,14 @@ function ensureWired(kind: SingletonKind, st: KindState): void {
     if (st.wired) return;
     st.wired = true;
 
+    // Resolve this window's label here too. A kind is first wired when a
+    // component reads `singletonHolder`/`acquireSingleton` — which only
+    // happens once the app shell has rendered, so `window.api` is ready.
+    // This is the retry path: if the `startSingletonCrashRelease`
+    // kick-off ran before the API bridge existed (and bailed), this
+    // recovers the label so `acquireSingleton` is not a permanent no-op.
+    void resolveMyLabel();
+
     // 1. Subscribe to live claim/release broadcasts for this kind.
     waveEventSubscribe({
         eventType: EVENT_SINGLETON_CLAIM,
