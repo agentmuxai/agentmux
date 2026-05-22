@@ -224,13 +224,19 @@ function showJsContextMenu(
     overlay.appendChild(menuEl);
     document.body.appendChild(overlay);
 
-    // Position through the shared paintable-area framework. A native browser
-    // pane is an OS child window that paints above the DOM, so a context menu
-    // drawn over one is occluded (the airspace clip is a fragile fallback).
-    // computeMenuPosition flips/shifts/sizes the menu into the free area
-    // around any browser pane, so it lands clear of the pane entirely.
+    // Position at the cursor via the shared framework — flip/shift/size keep
+    // the menu on-screen near window edges. Unlike FlyoutMenu/Popover, a
+    // right-click context menu MUST appear where the user clicked, so
+    // `avoidNativePanes` is OFF: it is *expected* to land over a browser
+    // pane. The `data-pane-overlay` clip reveals it through the native pane;
+    // holding it visibility:hidden until placed means the clip rect registers
+    // once, at the final position — no flapping, no stale-rect black artifact.
     void computeMenuPosition(
-        { anchor: { x: position.x, y: position.y }, placement: "bottom-start" },
+        {
+            anchor: { x: position.x, y: position.y },
+            placement: "bottom-start",
+            avoidNativePanes: false,
+        },
         menuEl,
     ).then((pos) => {
         if (!menuEl.isConnected) return;
