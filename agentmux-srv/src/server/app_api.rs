@@ -1,3 +1,6 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
 //! App API — high-level commands for programmatic control of AgentMux.
 //!
 //! These commands orchestrate multiple low-level operations (CreateBlock, SetMeta,

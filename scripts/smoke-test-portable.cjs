@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
 // Smoke-test the portable build by spawning agentmux-srv directly and
 // exercising the App API RPC surface over WebSocket. No CEF host required —
 // just the backend, which is what ultra-long-sessions lives in anyway.

@@ -1,3 +1,6 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Filesystem watcher for settings.json — detects saves and pushes updated
 //! config to all connected WebSocket clients in real time.
 

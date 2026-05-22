@@ -288,6 +288,27 @@ curl -sf https://agentmux.ai/release.json | jq .version  # landing shows new ver
 
 For enterprises interested in adopting or deploying AgentMux at scale, including technical consulting, sponsorship opportunities, or partnership inquiries, please contact us at [enterprise@agentmux.ai](mailto:enterprise@agentmux.ai).
 
+## Disclaimer
+
+AgentMux is provided "AS IS", without warranty of any kind, express or implied,
+including but not limited to the warranties of merchantability, fitness for a
+particular purpose, and non-infringement.
+
+Performance figures, feature descriptions, and any claims in this README are
+best-effort observations from our development environment — they are not
+guarantees. See [LICENSE](./LICENSE) sections 7 (Disclaimer of Warranty) and
+8 (Limitation of Liability) for the full terms.
+
 ## License
 
-Apache-2.0 — Originally forked from [Wave Terminal](https://github.com/wavetermdev/waveterm)
+AgentMux is released under the [Apache License 2.0](./LICENSE).
+
+- [NOTICE](./NOTICE) — required attributions per Apache License 2.0 § 4(d)
+- [LEGAL.md](./LEGAL.md) — corporate entity, trademark, contact
+- [ACKNOWLEDGEMENTS.md](./ACKNOWLEDGEMENTS.md) — third-party software and attributions
+- [SECURITY.md](./SECURITY.md) — vulnerability disclosure policy
+
+Originally forked from [Wave Terminal](https://github.com/wavetermdev/waveterm),
+copyright Command Line Inc., licensed under the Apache License 2.0.
+
+Copyright © 2025-2026 AgentMux Corp.

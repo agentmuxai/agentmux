@@ -1,3 +1,6 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Native pre-splash for Windows: a borderless layered popup showing
 //! the AgentMux brain logo (pulsing) on a solid dark background while
 //! CefInitialize runs (200–600 ms cold start).

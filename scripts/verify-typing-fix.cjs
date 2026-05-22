@@ -1,3 +1,6 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
 // Verify the autoGrow fix by capturing a DevTools trace against 0.33.106
 // and comparing keypress event timing vs the 0.33.105 baseline.
 //
