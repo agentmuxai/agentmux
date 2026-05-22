@@ -69,6 +69,23 @@ export interface PreLaunchAuthPanelProps {
      *  submission — parent should refresh the identity list and
      *  switch the dropdown to this new bundle. */
     onBundleCreated: (bundleId: string) => void;
+    /** Called when the user clicks Connect and the outcome is
+     *  `needs-bundle` (no identity bundle selected — a genuinely
+     *  fresh OAuth). Instead of starting OAuth immediately the panel
+     *  asks the parent to interpose the New Identity modal so the
+     *  user names the bundle first; OAuth then resumes against the
+     *  named bundle. When omitted the panel falls back to starting
+     *  OAuth directly (legacy behaviour). Spec
+     *  SPEC_BUNDLE_MANAGEMENT_2026_05_22.md §2. */
+    onRequestNewIdentity?: () => void;
+    /** When true, the panel fires its OAuth `startConnect()` exactly
+     *  once on mount — used by the New Identity → launch round-trip so
+     *  the user doesn't have to click Connect a second time after
+     *  naming the bundle. Spec SPEC_BUNDLE_MANAGEMENT_2026_05_22.md §2.
+     *  The auto-start only fires from a connect-able state
+     *  (`unauthenticated` / `expired`); a panel that already shows
+     *  `ready` / `waiting` is left alone. */
+    autoStartAuth?: boolean;
     /** Inline-disabled flag mirroring the modal's submitting state.
      *  Prevents starting a Connect mid-launch. */
     disabled?: boolean;
@@ -145,6 +162,48 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         untrack(() => controller.selected(prov.id, id, outcomeFor(id, prov.id, hasBinding)));
     });
 
+    // Connect / Retry click handler. When the outcome is `needs-bundle`
+    // (no identity bundle selected — a genuinely fresh OAuth) we DON'T
+    // start OAuth immediately: the spec (SPEC_BUNDLE_MANAGEMENT_2026_
+    // 05_22.md §2) interposes the New Identity modal so the user names
+    // the bundle first. The parent's `onRequestNewIdentity` owns the
+    // tabModal.replace chain into that modal. For `needs-account` /
+    // `expired` / openclaw (an existing, named bundle), Connect goes
+    // straight to OAuth — unchanged behaviour. If the parent didn't
+    // supply the callback we fall back to starting OAuth directly.
+    const handleConnect = (): void => {
+        const prov = props.provider;
+        if (!prov) return;
+        const outcome = outcomeFor(
+            props.identityId(),
+            prov.id,
+            props.hasMatchingBinding(),
+        );
+        if (outcome === "needs-bundle" && props.onRequestNewIdentity) {
+            props.onRequestNewIdentity();
+            return;
+        }
+        void startConnect(controller, prov);
+    };
+
+    // Auto-start OAuth once on mount when the parent set `autoStartAuth`
+    // — the New Identity → launch round-trip (spec §2). By this point
+    // the user has named + created the bundle, so the dropdown carries
+    // a non-blank `identityId` and `outcomeFor()` resolves to
+    // `needs-account`; `handleConnect()` therefore routes straight to
+    // OAuth (NOT back into the New Identity modal) with `intoBundleId`
+    // = the new bundle. Guarded so it fires exactly once and only from
+    // a connect-able state — a re-render must not re-trigger it, and a
+    // panel that's already `waiting`/`ready` is left untouched.
+    let autoStartFired = false;
+    createEffect(() => {
+        if (!props.autoStartAuth || autoStartFired) return;
+        const kind = controller.state().kind;
+        if (kind !== "unauthenticated" && kind !== "expired") return;
+        autoStartFired = true;
+        untrack(() => handleConnect());
+    });
+
     // No onCleanup here — controller lifetime is owned by the parent
     // (AgentLaunchModal). Disposing on panel unmount would destroy
     // in-flight auth state any time the parent's `<Show when={authRequired()}>`
@@ -186,7 +245,7 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
                 <Match when={controller.state().kind === "failed"}>
                     <FailedBanner
                         state={controller.state()}
-                        onRetry={() => void startConnect(controller, props.provider)}
+                        onRetry={() => handleConnect()}
                         canRetry={!props.disabled}
                     />
                 </Match>
@@ -199,7 +258,7 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
                     <ConnectCta
                         provider={props.provider}
                         state={controller.state()}
-                        onConnect={() => void startConnect(controller, props.provider)}
+                        onConnect={() => handleConnect()}
                         disabled={props.disabled ?? false}
                     />
                 </Match>
