@@ -15,7 +15,7 @@
  * Per-window token totals deferred until token-usage is per-window.
  */
 
-import { atoms, getApi, openWindowEntriesAtom, type WindowEntry } from "@/store/global";
+import { atoms, getApi, isDev, openWindowEntriesAtom, type WindowEntry } from "@/store/global";
 import { reconcileKnownEntriesFromSnapshot } from "@/app/store/launcher-event-reducer";
 import { launcherEventsActive } from "@/util/launcher-events";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
@@ -296,7 +296,12 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
             <div class="instance-panel-header">
                 <div class="instance-panel-row instance-panel-row-meta">
                     <span class="instance-panel-label">Version</span>
-                    <span class="instance-panel-value">v{about().version}</span>
+                    <span class="instance-panel-value">
+                        v{about().version}
+                        <Show when={isDev()}>
+                            <span class="status-version-dev">DEV</span>
+                        </Show>
+                    </span>
                     <button
                         type="button"
                         class="instance-panel-copy"
