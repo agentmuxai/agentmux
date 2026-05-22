@@ -24,6 +24,7 @@ import { PerfHud } from "@/perf/hud";
 import { DiagPanel } from "./devtools/diag-panel";
 import { checkSeparatorParity, setupDprTracking } from "./init/dpr";
 import { NotificationBubbles } from "./notification/notificationbubbles";
+import { SingletonDemoBanner } from "./modals/singleton-placeholder-demo";
 
 import "./app.scss";
 
@@ -389,6 +390,12 @@ const AppInner = () => {
                 <AppZoomHandler />
                 <AppFocusHandler />
                 <AppSettingsUpdater />
+                {/* Bundle-management PR 3 — placeholder demo banner for the
+                    app-wide singleton-modal coordination layer. Shows
+                    "open in <Window N> — click to focus" in non-holding
+                    windows; renders nothing otherwise. PR 4 swaps this for
+                    the real bundle-manager banner. */}
+                <SingletonDemoBanner />
                 <Workspace />
                 <CrossWindowDragMonitor />
                 <DragOverlay />

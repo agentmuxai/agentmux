@@ -55,6 +55,7 @@ import {
     seedKnownEntriesFromSnapshot,
     startLauncherEventReducer,
 } from "@/app/store/launcher-event-reducer";
+import { startSingletonCrashRelease } from "@/app/store/singleton-modal";
 
 // Deferred — assigned inside initApp() after window.api is ready.
 // Do NOT call getApi() at module level: this file is statically imported by
@@ -454,6 +455,10 @@ async function initWaveWrap(initOpts: AgentMuxInitOpts) {
         // that global state is wired. Idempotent: subsequent calls
         // (e.g. via reinitWave path) are no-ops.
         startLauncherEventReducer();
+        // Bundle-management PR 3 — wire singleton-modal crash release.
+        // Subscribes to the launcher window-exit signal so a dead
+        // holder's singleton claim is auto-released. Idempotent.
+        startSingletonCrashRelease();
     } catch (e) {
         getApi().sendLog("Error in initWave " + e.message + "\n" + e.stack);
         console.error("Error in initWave", e);
