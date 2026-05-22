@@ -3,7 +3,7 @@
 
 import logoUrl from "@/app/asset/logo.svg?url";
 import { modalsModel } from "@/app/store/modalmodel";
-import { Modal, ModalBody } from "@/element/modal-v2";
+import { Modal, ModalBody } from "@/element/modal";
 
 import { isDev } from "@/util/isdev";
 import { getApi } from "../store/global";

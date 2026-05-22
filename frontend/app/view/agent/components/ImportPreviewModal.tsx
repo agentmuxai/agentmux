@@ -5,7 +5,7 @@ import { createEffect, createMemo, createSignal, For, Show, type JSX } from "sol
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Button } from "@/element/button";
-import { Modal, ModalBody, ModalFooter, ModalHeader } from "@/element/modal-v2";
+import { Modal, ModalBody, ModalFooter, ModalHeader } from "@/element/modal";
 
 interface ImportPreviewModalProps {
     payload: ExportAgentDefinitionsResult | null;

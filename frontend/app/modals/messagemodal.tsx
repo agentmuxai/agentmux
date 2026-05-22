@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button } from "@/element/button";
-import { Modal, ModalBody, ModalFooter } from "@/element/modal-v2";
+import { Modal, ModalBody, ModalFooter } from "@/element/modal";
 import { modalsModel } from "@/app/store/modalmodel";
 
 import type { JSX } from "solid-js";
