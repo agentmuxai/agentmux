@@ -475,6 +475,7 @@ declare global {
 
     interface AboutModalDetails {
         version: string;
+        gitHash?: string;
         buildTime: number;
     }
 

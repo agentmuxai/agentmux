@@ -36,7 +36,7 @@ const AboutModal = ({}: AboutModalProps) => {
                     </div>
                     <div class="items-center gap-4 self-stretch w-full text-center">
                         Client Version {details.version} ({isDev() ? "dev-" : ""}
-                        {details.buildTime})
+                        {details.gitHash})
                         <br />
                         Update Channel: {updaterChannel}
                     </div>
