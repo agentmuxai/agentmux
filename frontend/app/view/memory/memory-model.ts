@@ -115,7 +115,7 @@ export function draftToWire(d: MemoryDraft): Memory {
 export class MemoryViewModel implements ViewModel {
     viewType = "memory";
     blockId: string;
-    nodeModel: BlockNodeModel;
+    nodeModel: BlockNodeModel | null;
 
     viewIcon: Accessor<string> = () => "brain";
     viewName: Accessor<string>;
@@ -151,10 +151,19 @@ export class MemoryViewModel implements ViewModel {
     /** Memo: the currently-selected Memory row, or null. */
     selectedAtom: Accessor<Memory | null>;
 
-    constructor(blockId: string, nodeModel: BlockNodeModel) {
-        this.blockId = blockId;
-        this.nodeModel = nodeModel;
-        this.blockAtom = getWaveObjectAtom(makeORef("block", blockId));
+    // `nodeModel` is optional: when this ViewModel backs a `view: "memory"`
+    // block pane the BlockRegistry passes the real (blockId, nodeModel)
+    // pair; when it backs the context-free <MemoryManager/> component
+    // (window modal / extracted manager) there is no block, so both are
+    // absent. The block is used only for the cosmetic header title —
+    // every other code path drives off `bundle_*` RPCs and is
+    // block-independent.
+    constructor(blockId?: string, nodeModel?: BlockNodeModel) {
+        this.blockId = blockId ?? "";
+        this.nodeModel = nodeModel ?? null;
+        this.blockAtom = blockId
+            ? getWaveObjectAtom(makeORef("block", blockId))
+            : () => undefined;
         this.viewName = createMemo(() => {
             const block = this.blockAtom();
             return (block?.meta?.["frame:title"] as string) ?? "Memory";

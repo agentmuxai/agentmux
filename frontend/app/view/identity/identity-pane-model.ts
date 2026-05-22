@@ -70,7 +70,7 @@ export function bundleDraftToWire(d: IdentityBundleDraft): IdentityBundle {
 export class IdentityPaneViewModel implements ViewModel {
     viewType = "identity";
     blockId: string;
-    nodeModel: BlockNodeModel;
+    nodeModel: BlockNodeModel | null;
 
     viewIcon: Accessor<string> = () => "user";
     viewName: Accessor<string>;
@@ -121,10 +121,19 @@ export class IdentityPaneViewModel implements ViewModel {
     /** Unsubscribe handle for the account-change subscription. */
     private _unsubscribeAccounts: (() => void) | null = null;
 
-    constructor(blockId: string, nodeModel: BlockNodeModel) {
-        this.blockId = blockId;
-        this.nodeModel = nodeModel;
-        this.blockAtom = getWaveObjectAtom(makeORef("block", blockId));
+    // `nodeModel` is optional: when this ViewModel backs a `view: "identity"`
+    // block pane the BlockRegistry passes the real (blockId, nodeModel)
+    // pair; when it backs the context-free <IdentityManager/> component
+    // (window modal / extracted manager) there is no block, so both are
+    // absent. The block is used only for the cosmetic header title —
+    // every other code path drives off `bundle_*` RPCs and is
+    // block-independent.
+    constructor(blockId?: string, nodeModel?: BlockNodeModel) {
+        this.blockId = blockId ?? "";
+        this.nodeModel = nodeModel ?? null;
+        this.blockAtom = blockId
+            ? getWaveObjectAtom(makeORef("block", blockId))
+            : () => undefined;
         this.viewName = createMemo(() => {
             const block = this.blockAtom();
             return (block?.meta?.["frame:title"] as string) ?? "Identity";
