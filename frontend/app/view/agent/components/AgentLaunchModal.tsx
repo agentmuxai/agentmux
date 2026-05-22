@@ -104,6 +104,13 @@ export interface LaunchFormState {
     image: string;
     identityId: string;
     memoryId: string;
+    /** Continuation context. `null` = "— New agent —". Round-trip
+     *  preserved alongside the form fields so Continue mode survives
+     *  the `+ New bundle` flow (otherwise an ambient-creds
+     *  continuation drops out of Continue and the auth gate wrongly
+     *  re-engages on return — see
+     *  docs/analysis/LAUNCH_MODAL_CONTINUE_LOST_2026_05_22.md). */
+    continueOfId: string | null;
 }
 
 export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.Element => {
@@ -227,6 +234,11 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         image: image(),
         identityId: identityId(),
         memoryId: memoryId(),
+        // Capture continuation context so the `+ New bundle` round-trip
+        // restores Continue mode on return; without this the launch
+        // modal flips to New and an ambient-creds continuation's auth
+        // gate wrongly re-engages.
+        continueOfId: flow.state.form.continueOfId,
     });
     // The plain `+ New identity` button uses `purpose: "create"`. The
     // OAuth Connect (`needs-bundle`) interposition routes through the
@@ -264,7 +276,14 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         if (!id) return null;
         return (namedAgents() ?? []).find((r) => r.instance_id === id) ?? null;
     });
-    const isContinue = () => continuedRow() != null;
+    // Continuation status is read from the reducer's `form.continueOfId`
+    // (the source of truth) rather than from `continuedRow()` — the
+    // latter depends on `namedAgents()` having loaded, so on round-trip
+    // re-open isContinue() would transiently be false until that
+    // resource lands, flipping the auth gate on for a tick. Reading the
+    // form directly keeps the answer stable from the moment Opened
+    // dispatches with a restored continueOfId.
+    const isContinue = () => flow.state.form.continueOfId !== null;
     // Per-bundle continuation locks come from the slice's selectors.
     // Local memos read flow.state.form so they invalidate when the
     // selection or carry-over identity changes.
@@ -309,10 +328,19 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         if (rows.length === 0) return null;
         return [...rows].sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0))[0];
     };
-    const [viewMode, setViewMode] = createSignal<"continue" | "new">("new");
-    // A `+ New bundle` round-trip re-opens the panel with initialFormState
-    // and only ever originates from New mode (the +New buttons are disabled
-    // while continuing) — so skip the auto-decide and keep New.
+    // Initial viewMode honors a restored continuation: if the snapshot
+    // captured a `continueOfId`, the user was in Continue mode when
+    // they left for the `+ New bundle` flow — restore them there. The
+    // previous "+New buttons disabled while continuing → always restore
+    // as New" assumption was false for ambient-creds continuations
+    // (continueLocksIdentity is false when the carried identity is
+    // empty, so the +New button stays enabled even in Continue mode).
+    const [viewMode, setViewMode] = createSignal<"continue" | "new">(
+        props.initialFormState?.continueOfId != null ? "continue" : "new",
+    );
+    // viewModeDecided suppresses the auto-decide effect when we're
+    // restoring from a snapshot — the snapshot's continueOfId decides
+    // it, not the most-recent-instance heuristic.
     let viewModeDecided = props.initialFormState != null;
     createEffect(() => {
         const rows = namedAgents();

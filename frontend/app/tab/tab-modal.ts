@@ -85,6 +85,13 @@ export interface LaunchFormStateWire {
     image: string;
     identityId: string;
     memoryId: string;
+    /** Continuation context — the `continueOfId` from the Continue
+     *  dropdown. `null` = "— New agent —". Threaded through the
+     *  `+ New bundle` round-trip so the re-opened launch modal restores
+     *  Continue mode (otherwise an ambient-creds continuation drops out
+     *  of Continue and the auth gate wrongly re-engages — see
+     *  docs/analysis/LAUNCH_MODAL_CONTINUE_LOST_2026_05_22.md). */
+    continueOfId: string | null;
 }
 
 export interface LaunchAgentSubmit {
