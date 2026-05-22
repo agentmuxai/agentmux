@@ -1,5 +1,19 @@
 # AgentMux Version History
 
+## 0.38.1 — 2026-05-22
+
+- fix(magnify): single-instance pane render — fixes zoom + browser-pane black on restore
+- fix(statusbar): show DEV badge in dev mode + add to instance panel
+- feat(agent): launch modal defaults to Continue mode for known definitions
+- chore(legal): add NOTICE, SECURITY.md, ACKNOWLEDGEMENTS.md, README disclaimer, and SPDX headers
+- fix(security): correct shell integration component name in SECURITY.md scope
+- refactor(bundles): extract IdentityManager/MemoryManager components
+- feat(agent): OAuth Connect creates a named Identity bundle first
+- feat(modal): app-wide singleton modal coordination layer
+- feat(bundles): Identity & Memory manager modal + hamburger entry
+- refactor(bundles): demote agent-settings Identity/Memory tabs to read-only
+
+
 ## 0.38.0 — 2026-05-22
 
 - fix(term): remove writeInFlight guard from small-data fast path in scheduleRafWrite
