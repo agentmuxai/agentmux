@@ -17,12 +17,17 @@ const publishedClaims: Array<Record<string, unknown>> = [];
 /** Captured launcher-event subscriber so tests can drive crash-release. */
 let launcherCb: ((evt: { event: string; label?: string }) => void) | null = null;
 
+/** Mockable window registry — `isWindowLive` reads this via the
+ *  `@/store/global` mock. `[]` ⇒ registry treated as not-yet-populated. */
+let mockWindowEntries: Array<{ label: string }> = [];
+
 vi.mock("@/store/global", () => ({
     getApi: () => ({
         getWindowLabel: () => Promise.resolve("window-self"),
         getAuthKey: () => "test-key",
         focusWindow: () => Promise.resolve(),
     }),
+    openWindowEntriesAtom: () => mockWindowEntries,
 }));
 
 vi.mock("@/util/endpoints", () => ({
@@ -88,6 +93,7 @@ beforeEach(() => {
     __setMyLabelForTests("window-self");
     publishedClaims.length = 0;
     launcherCb = null;
+    mockWindowEntries = [];
     fetchMock.mockClear();
 });
 
@@ -129,6 +135,29 @@ describe("acquireSingleton", () => {
         publishedClaims.length = 0;
         acquireSingleton(KIND);
         expect(publishedClaims).toHaveLength(0);
+    });
+
+    test("returns false when this window's label is unresolved", () => {
+        // Boot-instant call before getWindowLabel resolves: `true` must
+        // mean "holds it NOW", which can't be honoured without a label.
+        __setMyLabelForTests(null);
+        expect(acquireSingleton(KIND)).toBe(false);
+        expect(publishedClaims).toHaveLength(0);
+    });
+
+    test("refused when the holder is still a live window", () => {
+        __applyClaimForTests({ kind: KIND, holder: "window-other", epoch: 1 });
+        mockWindowEntries = [{ label: "window-self" }, { label: "window-other" }];
+        expect(acquireSingleton(KIND)).toBe(false);
+    });
+
+    test("acquires over a stale holder whose window is no longer live", () => {
+        // A persisted claim from a window that crashed — the launcher
+        // registry no longer lists it, so it must not block forever.
+        __applyClaimForTests({ kind: KIND, holder: "window-dead", epoch: 1 });
+        mockWindowEntries = [{ label: "window-self" }];
+        expect(acquireSingleton(KIND)).toBe(true);
+        expect(read(singletonHolder(KIND))).toBe("window-self");
     });
 });
 

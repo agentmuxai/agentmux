@@ -59,7 +59,7 @@
 
 import { createSignal, type Accessor } from "solid-js";
 
-import { getApi } from "@/store/global";
+import { getApi, openWindowEntriesAtom } from "@/store/global";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -313,44 +313,54 @@ export function singletonHolder(kind: SingletonKind): Accessor<string | null> {
 }
 
 /**
+ * True if `label` is a currently-open window per the launcher's window
+ * registry. Used to reject a stale claim left behind by a crashed
+ * holder — one that exited with no live sibling to publish its
+ * crash-release.
+ */
+function isWindowLive(label: string): boolean {
+    const entries = openWindowEntriesAtom();
+    // Empty registry ⇒ not yet populated. Don't judge a holder dead on
+    // incomplete data — that would wrongly steal a live singleton.
+    if (entries.length === 0) return true;
+    return entries.some((e) => e.label === label);
+}
+
+/**
  * Attempt to acquire the app-wide singleton for `kind` for THIS window.
  *
- * Returns `true` if this window now holds it (it was free, or this
- * window already held it). Returns `false` if another window already
- * holds it — the caller should then show the focus banner instead of
- * opening the modal.
+ * Returns `true` only when this window definitely holds it now — it was
+ * free, held by a crashed/stale window, or already ours. Returns
+ * `false` if another LIVE window holds it, or if this window's label
+ * hasn't resolved yet; the caller then shows the focus banner instead
+ * of opening the modal.
  *
- * The decision is synchronous against the locally-known holder, then the
- * claim is broadcast. Two windows racing a genuinely-free singleton is
- * possible but rare (both must call within the WPS round-trip window);
- * if it happens, both windows' claims broadcast and last-write-wins —
- * both windows then converge on the same holder, and the loser's modal
- * (if it opened) should be closed by observing `singletonHolder`. For
- * the bundle manager (PR 4) the realistic trigger is a deliberate
+ * Two windows racing a genuinely-free singleton is possible but rare
+ * (both must call within the WPS round-trip); last-write-wins and both
+ * converge. For the bundle manager the trigger is a deliberate
  * hamburger click, so the race is not a practical concern.
  */
 export function acquireSingleton(kind: SingletonKind): boolean {
     const st = kindState(kind);
     const me = myLabelSync();
+    // `true` must mean "holds it NOW" — only honourable synchronously,
+    // so a window whose label hasn't resolved cannot acquire. In
+    // practice the label is URL-derived and resolves at module load,
+    // well before any user-triggered acquire; this guards a boot-instant
+    // call only.
+    if (me == null) return false;
+
     const current = st.holder();
-
-    // Held by another window → cannot acquire.
-    if (current != null && current !== me) return false;
-
-    // Free, or already ours. Claim it.
-    if (me != null) {
-        st.setHolder(me);
-        void publishClaim({ kind, holder: me, epoch: ++st.epoch });
-    } else {
-        // Label not resolved yet (very early boot). Claim once it lands.
-        void resolveMyLabel().then((label) => {
-            // Re-check: another window may have claimed during the await.
-            const now = st.holder();
-            if (now != null && now !== label) return;
-            st.setHolder(label);
-            void publishClaim({ kind, holder: label, epoch: ++st.epoch });
-        });
+    // Blocked only by a holder that is BOTH another window AND still
+    // live. A holder that crashed with no live sibling to emit
+    // crash-release leaves a stale persisted claim; a non-live holder is
+    // treated as free so the singleton can never get permanently stuck.
+    if (current != null && current !== me && isWindowLive(current)) {
+        return false;
     }
+
+    st.setHolder(me);
+    void publishClaim({ kind, holder: me, epoch: ++st.epoch });
     return true;
 }
 
