@@ -19,14 +19,60 @@
 // IdentityPaneViewModel) plus the account-change broadcaster, so two
 // live instances stay consistent for free.
 
-import { For, onCleanup, Show, type JSX } from "solid-js";
+import { createMemo, For, onCleanup, Show, type JSX } from "solid-js";
 
 import { IdentityPaneViewModel } from "./identity-pane-model";
+import type { Account } from "./identity-model";
 
 import "./identity-pane-view.scss";
 
 interface IdentityManagerBodyProps {
     model: IdentityPaneViewModel;
+    /**
+     * Optional callback wired by the host (the bundle-manager modal /
+     * agent settings pane) so a `Reconnect` button next to a
+     * `needs_reauth` status badge can route to the same OAuth flow the
+     * launch modal uses. Called with the (bundleId, providerId) pair
+     * the user clicked; the host re-runs OAuth into the SAME bundle dir
+     * — PR C's `persist_oauth_binding_or_synthetic` reuses the existing
+     * account_id, so a clean OAuth flips the status back to `valid` via
+     * the success path + `identitybundlebindings:changed:<id>` push.
+     *
+     * Spec: SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md §4.4. Omitted
+     * callback → button hidden (no dead affordance).
+     */
+    onReconnect?: (bundleId: string, providerId: string) => void;
+}
+
+/**
+ * Map an oauth-class binding's account status to the small status-badge
+ * descriptor rendered in the bindings table. Per spec §4.4. The
+ * fallback (`label = status string verbatim, dot = "unknown"`) keeps
+ * api-key rows whose `status` is a freeform legacy string visible
+ * without forcing them through this dispatch.
+ */
+function statusBadge(status: string | undefined): {
+    label: string;
+    dot: "valid" | "expired" | "needs_reauth" | "unknown";
+    reconnect: boolean;
+} {
+    switch (status) {
+        case "valid":
+            return { label: "Valid", dot: "valid", reconnect: false };
+        case "expired":
+            return { label: "Expired", dot: "expired", reconnect: false };
+        case "needs_reauth":
+            return { label: "Reconnect needed", dot: "needs_reauth", reconnect: true };
+        case "unknown":
+        case undefined:
+        case "":
+            return { label: "—", dot: "unknown", reconnect: false };
+        default:
+            // api-key freeform strings (e.g. "ok", "invalid", "checking")
+            // render verbatim with the neutral dot so legacy rows stay
+            // readable.
+            return { label: status, dot: "unknown", reconnect: false };
+    }
 }
 
 /**
@@ -41,6 +87,18 @@ interface IdentityManagerBodyProps {
  */
 export const IdentityManagerBody = (props: IdentityManagerBodyProps): JSX.Element => {
     const { model } = props;
+
+    /**
+     * Index of accounts by id, derived from the model's `accountsAtom`.
+     * Used to look up the bound Account row for a given (provider,
+     * account_id) binding so the Status column can read its `status`
+     * directly. Memoised so the lookup is O(1) per row.
+     */
+    const accountsById = createMemo<Map<string, Account>>(() => {
+        const m = new Map<string, Account>();
+        for (const a of model.accountsAtom()) m.set(a.id, a);
+        return m;
+    });
 
     // Clicking a list item SELECTS the bundle so the binding table
     // becomes visible. The metadata draft (name + description) opens
@@ -149,52 +207,92 @@ export const IdentityManagerBody = (props: IdentityManagerBodyProps): JSX.Elemen
                                                 <tr>
                                                     <th>Provider</th>
                                                     <th>Account</th>
+                                                    <th>Status</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 <For each={model.providersForBindingRows()}>
-                                                    {(provider) => (
-                                                        <tr>
-                                                            <td>{model.providerLabel(provider)}</td>
-                                                            <td>
-                                                                <select
-                                                                    class="identity-pane-input"
-                                                                    value={
-                                                                        model
-                                                                            .bindingsAtom()
-                                                                            .find(
-                                                                                (b) =>
-                                                                                    b.provider ===
-                                                                                    provider,
-                                                                            )?.account_id ?? ""
-                                                                    }
-                                                                    disabled={!!bundle().is_blank}
-                                                                    onChange={(e) =>
-                                                                        void model.setBinding(
-                                                                            provider,
-                                                                            e.currentTarget.value,
-                                                                        )
-                                                                    }
-                                                                >
-                                                                    <option value="">— None —</option>
-                                                                    <For
-                                                                        each={
-                                                                            model
-                                                                                .accountsByProvider()
-                                                                                .get(provider) ?? []
+                                                    {(provider) => {
+                                                        const binding = createMemo(() =>
+                                                            model
+                                                                .bindingsAtom()
+                                                                .find((b) => b.provider === provider),
+                                                        );
+                                                        const boundAccount = createMemo(() => {
+                                                            const id = binding()?.account_id;
+                                                            return id ? accountsById().get(id) : undefined;
+                                                        });
+                                                        const badge = createMemo(() =>
+                                                            statusBadge(boundAccount()?.status),
+                                                        );
+                                                        return (
+                                                            <tr>
+                                                                <td>{model.providerLabel(provider)}</td>
+                                                                <td>
+                                                                    <select
+                                                                        class="identity-pane-input"
+                                                                        value={binding()?.account_id ?? ""}
+                                                                        disabled={!!bundle().is_blank}
+                                                                        onChange={(e) =>
+                                                                            void model.setBinding(
+                                                                                provider,
+                                                                                e.currentTarget.value,
+                                                                            )
                                                                         }
                                                                     >
-                                                                        {(acc) => (
-                                                                            <option value={acc.id}>
-                                                                                {acc.display_name?.trim() ||
-                                                                                    acc.name}
-                                                                            </option>
-                                                                        )}
-                                                                    </For>
-                                                                </select>
-                                                            </td>
-                                                        </tr>
-                                                    )}
+                                                                        <option value="">— None —</option>
+                                                                        <For
+                                                                            each={
+                                                                                model
+                                                                                    .accountsByProvider()
+                                                                                    .get(provider) ?? []
+                                                                            }
+                                                                        >
+                                                                            {(acc) => (
+                                                                                <option value={acc.id}>
+                                                                                    {acc.display_name?.trim() ||
+                                                                                        acc.name}
+                                                                                </option>
+                                                                            )}
+                                                                        </For>
+                                                                    </select>
+                                                                </td>
+                                                                <td>
+                                                                    <Show when={binding()}>
+                                                                        <span class="identity-pane-status">
+                                                                            <span
+                                                                                class={`identity-pane-status-dot is-${badge().dot}`}
+                                                                                aria-hidden="true"
+                                                                            />
+                                                                            <span class="identity-pane-status-label">
+                                                                                {badge().label}
+                                                                            </span>
+                                                                            <Show
+                                                                                when={
+                                                                                    badge().reconnect &&
+                                                                                    props.onReconnect
+                                                                                }
+                                                                            >
+                                                                                <button
+                                                                                    type="button"
+                                                                                    class="identity-pane-reconnect-btn"
+                                                                                    onClick={() =>
+                                                                                        props.onReconnect?.(
+                                                                                            bundle().id,
+                                                                                            provider,
+                                                                                        )
+                                                                                    }
+                                                                                    title="Re-run OAuth into this bundle"
+                                                                                >
+                                                                                    Reconnect
+                                                                                </button>
+                                                                            </Show>
+                                                                        </span>
+                                                                    </Show>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    }}
                                                 </For>
                                             </tbody>
                                         </table>
@@ -301,12 +399,20 @@ export const IdentityManagerBody = (props: IdentityManagerBodyProps): JSX.Elemen
  * constructs cleanly with no block and drives entirely off the
  * `bundle_*` RPCs and the account-change broadcaster.
  */
-export const IdentityManager = (): JSX.Element => {
+export interface IdentityManagerProps {
+    /** Forwarded to `IdentityManagerBody.onReconnect`. Host wires this to
+     *  the OAuth flow it owns (e.g. the bundle-manager modal opens a
+     *  Reconnect tabModal request). When omitted, the Reconnect button
+     *  is hidden — no dead affordance. */
+    onReconnect?: (bundleId: string, providerId: string) => void;
+}
+
+export const IdentityManager = (props: IdentityManagerProps = {}): JSX.Element => {
     // Component setup runs once; the model lives for this component's
     // lifetime and is disposed on unmount.
     const model = new IdentityPaneViewModel();
     onCleanup(() => model.dispose());
-    return <IdentityManagerBody model={model} />;
+    return <IdentityManagerBody model={model} onReconnect={props.onReconnect} />;
 };
 
 // Local alias mirroring `IdentityBundleDraft` from the model — see the

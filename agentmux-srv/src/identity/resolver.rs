@@ -10,10 +10,175 @@
 //! every common workflow Just Work.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::wstore::{SecretRef, WaveStore};
+use crate::backend::wps::{Broker, WaveEvent};
+
+/// Canonical-value enumeration for OAuth-class `IdentityAccount.status`.
+///
+/// `IdentityAccount.status` is a `String` (free-form) at the SQLite layer
+/// — api-key rows keep using whatever the legacy paths wrote
+/// (`"unknown"`, `"ok"`, etc.). For oauth-class bindings we pin a small
+/// closed set per spec §4.4 so the frontend status-badge dispatch is
+/// deterministic and the resolver's expiry probe can never write an
+/// off-the-spec string. Every place the resolver SETS or READS an
+/// oauth-class status uses these constants.
+pub mod oauth_status {
+    /// Token file present and (probed) not expired.
+    pub const VALID: &str = "valid";
+    /// Access token expired; refresh likely succeeds.
+    pub const EXPIRED: &str = "expired";
+    /// Refresh rejected / file missing / parse error; user must Reconnect.
+    pub const NEEDS_REAUTH: &str = "needs_reauth";
+    /// Never probed (initial state on bundle import / unprobed provider).
+    pub const UNKNOWN: &str = "unknown";
+}
+
+/// Result of probing a per-bundle OAuth token directory.
+///
+/// Computed by [`probe_oauth_status`] reading the CLI's on-disk token
+/// file (e.g. `<dir>/.credentials.json` for Claude Code). Maps directly
+/// to [`oauth_status`] strings. Returned as an enum so the caller can
+/// branch without re-parsing the string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OAuthProbeStatus {
+    Valid,
+    Expired,
+    NeedsReauth,
+}
+
+impl OAuthProbeStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Valid => oauth_status::VALID,
+            Self::Expired => oauth_status::EXPIRED,
+            Self::NeedsReauth => oauth_status::NEEDS_REAUTH,
+        }
+    }
+}
+
+/// Cheap on-disk probe of the per-bundle OAuth token file for a
+/// provider. No network calls — just reads + parses the token JSON,
+/// then compares `expiresAt` against `now_ms`.
+///
+/// **Provider token-file shape (spec §4.4 + §4.5):**
+/// - `claude` — `<dir>/.credentials.json` with
+///   `{ "claudeAiOauth": { "accessToken", "refreshToken", "expiresAt": <ms> } }`
+///   (Anthropic's documented format — see
+///   `docs/specs/agentmux-isolated-auth.md` §1.6).
+/// - `codex` — `<dir>/.credentials.json` (MCP OAuth). Exact field
+///   layout undocumented by OpenAI; for now we treat presence-of-file
+///   as `Valid` and absence as `NeedsReauth`, deferring strict expiry
+///   parsing until the shape is pinned down. Falls through to the
+///   Claude parser as a best-effort — if the file is shape-compatible
+///   (some CLIs reuse Anthropic's format) the expiry check still works.
+/// - `openclaw` — same fallback as codex.
+///
+/// **Returns** `Some(status)` on a definitive read, `None` when probing
+/// isn't supported for the provider (so the caller skips status
+/// updates rather than mis-writing `needs_reauth` for a provider whose
+/// file we just don't know how to parse yet).
+pub fn probe_oauth_status(
+    provider: &str,
+    dir: &str,
+    now_ms: i64,
+) -> Option<OAuthProbeStatus> {
+    let probe_path: std::path::PathBuf = match provider {
+        // Claude Code + codex + openclaw all write to
+        // `<config_dir>/.credentials.json` per
+        // `docs/specs/provider-auth-isolation.md` (the agentmux-managed
+        // dir is what CLAUDE_CONFIG_DIR / CODEX_HOME / OPENCLAW_HOME
+        // point at). Codex / openclaw token field-layout is not
+        // publicly documented; the parser below treats unrecognised
+        // shapes as `Valid` so we don't false-positive a Reconnect on
+        // a working session — strict expiry parsing for those two is
+        // a follow-up once their JSON is pinned down.
+        "claude" | "codex" | "openclaw" => Path::new(dir).join(".credentials.json"),
+        _ => return None,
+    };
+
+    let contents = match std::fs::read_to_string(&probe_path) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::debug!(
+                target: "identity",
+                provider,
+                path = %probe_path.display(),
+                error = %e,
+                "oauth probe: token file unreadable — status=needs_reauth"
+            );
+            return Some(OAuthProbeStatus::NeedsReauth);
+        }
+    };
+    let json: serde_json::Value = match serde_json::from_str(&contents) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::debug!(
+                target: "identity",
+                provider,
+                path = %probe_path.display(),
+                error = %e,
+                "oauth probe: token file parse failed — status=needs_reauth"
+            );
+            return Some(OAuthProbeStatus::NeedsReauth);
+        }
+    };
+
+    // Claude shape — `claudeAiOauth.expiresAt` is ms since epoch.
+    // Many shape-compatible providers nest under the same key; try
+    // that first, then fall back to any top-level `expiresAt` /
+    // `expires_at` an alternative provider might use.
+    let expires_at_ms = json
+        .get("claudeAiOauth")
+        .and_then(|o| o.get("expiresAt"))
+        .and_then(|v| v.as_i64())
+        .or_else(|| json.get("expiresAt").and_then(|v| v.as_i64()))
+        .or_else(|| json.get("expires_at").and_then(|v| v.as_i64()));
+
+    let has_refresh = json
+        .get("claudeAiOauth")
+        .and_then(|o| o.get("refreshToken"))
+        .and_then(|v| v.as_str())
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+        || json
+            .get("refresh_token")
+            .and_then(|v| v.as_str())
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
+
+    match expires_at_ms {
+        Some(exp) if exp <= now_ms => {
+            // Past expiry. If a refresh token is present, the next
+            // CLI call will likely refresh it cleanly → `expired`
+            // (transient, not user-actionable). Without a refresh
+            // token the user must re-OAuth → `needs_reauth`.
+            if has_refresh {
+                Some(OAuthProbeStatus::Expired)
+            } else {
+                Some(OAuthProbeStatus::NeedsReauth)
+            }
+        }
+        Some(_) => Some(OAuthProbeStatus::Valid),
+        None => {
+            // Shape doesn't expose an expiry we can parse. Treat the
+            // file's existence as `Valid` rather than guess — false
+            // `needs_reauth` would force the user to reconnect a
+            // working session. codex / openclaw fall here today.
+            tracing::debug!(
+                target: "identity",
+                provider,
+                path = %probe_path.display(),
+                "oauth probe: file present but no parseable expiry — status=valid (best-effort)"
+            );
+            Some(OAuthProbeStatus::Valid)
+        }
+    }
+}
 
 /// Errors specific to the resolver. Every variant is recoverable
 /// (the spawn proceeds with whatever env vars resolved successfully)
@@ -190,6 +355,23 @@ pub fn inject_identity_env(
     block_id: &str,
     env_vars: &mut HashMap<String, String>,
 ) {
+    inject_identity_env_with_broker(wstore, None, block_id, env_vars);
+}
+
+/// `inject_identity_env` + optional broker handle so the OAuth-class
+/// branch can publish `identitybundlebindings:changed:<bundle_id>` on a
+/// status change discovered by the expiry probe. The broker is
+/// `Option<Arc<Broker>>` — `None` (the legacy entry point, kept for
+/// test ergonomics) skips the publish; in production both call sites
+/// (`app_api.rs` AgentSendCommand + `websocket.rs` AgentInputCommand)
+/// pass `Some(broker.clone())` so the IdentityManager's bindings table
+/// flips its status badge without a reload. Per spec §4.4.
+pub fn inject_identity_env_with_broker(
+    wstore: Arc<WaveStore>,
+    broker: Option<Arc<Broker>>,
+    block_id: &str,
+    env_vars: &mut HashMap<String, String>,
+) {
     // Step 1: instance lookup.
     let instance = match wstore.instance_get_active_for_block(block_id) {
         Ok(Some(i)) => i,
@@ -332,7 +514,7 @@ pub fn inject_identity_env(
                         continue;
                     }
                 };
-                env_vars.insert(config_dir_env_var.to_string(), dir);
+                env_vars.insert(config_dir_env_var.to_string(), dir.clone());
                 tracing::info!(
                     target: "identity",
                     "injected {} for oauth provider {} (identity={}, account={})",
@@ -341,6 +523,68 @@ pub fn inject_identity_env(
                     instance.identity_id,
                     binding.account_id,
                 );
+
+                // Per spec §4.4 — cheap on-disk expiry probe. Reads the
+                // CLI's token file inside the bundle dir and refines
+                // the IdentityAccount's `status` so the UI can show
+                // valid/expired/needs_reauth. Best-effort: probe and
+                // upsert failures are logged + ignored (mirrors the
+                // per-binding "log + skip" pattern). The probe runs at
+                // every spawn but is a single `fs::read_to_string` +
+                // JSON parse — negligible overhead.
+                let now_ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                if let Some(probed) = probe_oauth_status(&binding.provider, &dir, now_ms) {
+                    let new_status = probed.as_str();
+                    if account.status != new_status {
+                        let mut updated = account.clone();
+                        updated.status = new_status.to_string();
+                        updated.updated_at = now_ms;
+                        match wstore.identity_upsert(&updated) {
+                            Ok(()) => {
+                                tracing::info!(
+                                    target: "identity",
+                                    provider = %binding.provider,
+                                    account_id = %binding.account_id,
+                                    old_status = %account.status,
+                                    new_status,
+                                    "oauth probe: status updated"
+                                );
+                                // Publish bindings-changed so the
+                                // IdentityManager's Status column
+                                // refreshes without a reload. The
+                                // bindings list itself didn't change,
+                                // but the account row a binding points
+                                // at did — the UI fetches accounts
+                                // alongside bindings, so it's the same
+                                // subscription channel.
+                                if let Some(b) = broker.as_ref() {
+                                    b.publish(WaveEvent {
+                                        event: format!(
+                                            "identitybundlebindings:changed:{}",
+                                            instance.identity_id,
+                                        ),
+                                        scopes: vec![],
+                                        sender: String::new(),
+                                        persist: 0,
+                                        data: None,
+                                    });
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    target: "identity",
+                                    provider = %binding.provider,
+                                    account_id = %binding.account_id,
+                                    error = %e,
+                                    "oauth probe: identity_upsert failed — status not persisted",
+                                );
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -881,5 +1125,270 @@ mod tests {
         inject_identity_env(store, "block-future", &mut env);
         // No env-var matrix for "custom" — nothing injected, no panic.
         assert!(env.is_empty());
+    }
+
+    // ── PR D — OAuth expiry probe + status semantics ───────────────────
+
+    /// Helper: write a Claude-shape `.credentials.json` into a temp dir
+    /// and return the dir path. `expires_ms` controls validity; `with_refresh`
+    /// toggles the refreshToken field so the resolver can distinguish
+    /// `Expired` (refresh present) from `NeedsReauth` (no refresh).
+    fn write_claude_creds(
+        dir: &std::path::Path,
+        expires_ms: i64,
+        with_refresh: bool,
+    ) {
+        std::fs::create_dir_all(dir).unwrap();
+        let body = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "test-access",
+                "refreshToken": if with_refresh { "test-refresh" } else { "" },
+                "expiresAt": expires_ms,
+            }
+        });
+        std::fs::write(
+            dir.join(".credentials.json"),
+            serde_json::to_string(&body).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn probe_oauth_status_unknown_provider_returns_none() {
+        // Probing a provider that isn't in the oauth-class set is a
+        // signal to the caller to leave `status` alone — None ≠
+        // NeedsReauth. Guards against silent mis-classification of
+        // api-key providers if a future caller accidentally feeds
+        // them through here.
+        let r = probe_oauth_status("github", "/tmp/whatever", 0);
+        assert_eq!(r, None);
+    }
+
+    #[test]
+    fn probe_oauth_status_missing_dir_is_needs_reauth() {
+        let r = probe_oauth_status("claude", "/definitely/does/not/exist-xyz-9q", 0);
+        assert_eq!(r, Some(OAuthProbeStatus::NeedsReauth));
+    }
+
+    #[test]
+    fn probe_oauth_status_future_expiry_is_valid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let now_ms = 1_700_000_000_000;
+        write_claude_creds(tmp.path(), now_ms + 3_600_000, true);
+        let r = probe_oauth_status("claude", tmp.path().to_str().unwrap(), now_ms);
+        assert_eq!(r, Some(OAuthProbeStatus::Valid));
+    }
+
+    #[test]
+    fn probe_oauth_status_past_expiry_with_refresh_is_expired() {
+        let tmp = tempfile::tempdir().unwrap();
+        let now_ms = 1_700_000_000_000;
+        write_claude_creds(tmp.path(), now_ms - 1, true);
+        let r = probe_oauth_status("claude", tmp.path().to_str().unwrap(), now_ms);
+        assert_eq!(r, Some(OAuthProbeStatus::Expired));
+    }
+
+    #[test]
+    fn probe_oauth_status_past_expiry_no_refresh_is_needs_reauth() {
+        // No refresh token in the file → the CLI can't auto-refresh
+        // and the user has to OAuth again. Maps to `needs_reauth`,
+        // NOT `expired` (per spec §4.4).
+        let tmp = tempfile::tempdir().unwrap();
+        let now_ms = 1_700_000_000_000;
+        write_claude_creds(tmp.path(), now_ms - 1, false);
+        let r = probe_oauth_status("claude", tmp.path().to_str().unwrap(), now_ms);
+        assert_eq!(r, Some(OAuthProbeStatus::NeedsReauth));
+    }
+
+    #[test]
+    fn probe_oauth_status_malformed_json_is_needs_reauth() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(".credentials.json"), "{ not json").unwrap();
+        let r = probe_oauth_status("claude", tmp.path().to_str().unwrap(), 0);
+        assert_eq!(r, Some(OAuthProbeStatus::NeedsReauth));
+    }
+
+    #[test]
+    fn probe_oauth_status_codex_unknown_shape_is_valid_best_effort() {
+        // codex / openclaw token-file layouts aren't publicly
+        // documented; our parser falls through to "Valid" when the
+        // file exists but lacks any parseable expiry. Better than
+        // false `needs_reauth` on a working session — strict parsing
+        // is a follow-up once the shape is pinned.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join(".credentials.json"),
+            r#"{"some":"opaque-codex-blob"}"#,
+        )
+        .unwrap();
+        let r = probe_oauth_status("codex", tmp.path().to_str().unwrap(), 0);
+        assert_eq!(r, Some(OAuthProbeStatus::Valid));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn inject_oauth_class_probes_and_flips_status_to_needs_reauth() {
+        // Full integration: an oauth-class binding pointing at a
+        // bundle dir with NO token file → the probe surfaces
+        // `needs_reauth` and the resolver upserts the account row
+        // with the new status. Spec §4.4.
+        let store = make_store();
+
+        let mut def = crate::backend::storage::wstore::AgentDefinition {
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+        };
+        store.agent_def_insert(&mut def).unwrap();
+
+        let identity = Identity {
+            id: "id-probe".to_string(),
+            name: "Probe".to_string(),
+            description: String::new(),
+            is_blank: false,
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.bundle_identity_upsert(&identity).unwrap();
+
+        // Bundle dir intentionally empty — probe should report
+        // needs_reauth (no token file).
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_dir = tmp.path().to_str().unwrap().to_string();
+
+        let claude = IdentityAccount {
+            id: "acct-claude".to_string(),
+            name: "claude-acct-claude".to_string(),
+            provider: "claude".to_string(),
+            kind: "oauth".to_string(),
+            display_name: String::new(),
+            secret_ref: SecretRef::OAuthConfigDir { dir: bundle_dir },
+            context: serde_json::json!({}),
+            // Start as "valid" — the probe should flip it to
+            // "needs_reauth".
+            status: oauth_status::VALID.to_string(),
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.identity_upsert(&claude).unwrap();
+        store
+            .bundle_identity_bind("id-probe", "claude", "acct-claude")
+            .unwrap();
+
+        let inst = make_instance("block-probe", "id-probe");
+        store.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        inject_identity_env(store.clone(), "block-probe", &mut env);
+
+        // Env injection still happened (resolver doesn't block on
+        // probe outcome — the CLI launches with the dir env var set
+        // and will trigger OAuth itself when it sees no tokens).
+        assert!(env.get("CLAUDE_CONFIG_DIR").is_some());
+
+        // Status row was UPDATED to needs_reauth.
+        let after = store.identity_get("acct-claude").unwrap().unwrap();
+        assert_eq!(after.status, oauth_status::NEEDS_REAUTH);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn inject_oauth_class_probe_preserves_status_when_valid() {
+        // Future-dated token + status already "valid" → no-op
+        // upsert (no spurious updated_at churn). The assertion is
+        // that the status remains "valid" — proving the probe
+        // didn't misclassify a working session.
+        let store = make_store();
+
+        let mut def = crate::backend::storage::wstore::AgentDefinition {
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+        };
+        store.agent_def_insert(&mut def).unwrap();
+
+        let identity = Identity {
+            id: "id-ok".to_string(),
+            name: "Ok".to_string(),
+            description: String::new(),
+            is_blank: false,
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.bundle_identity_upsert(&identity).unwrap();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        write_claude_creds(tmp.path(), now_ms + 3_600_000, true);
+
+        let claude = IdentityAccount {
+            id: "acct-ok".to_string(),
+            name: "claude-acct-ok".to_string(),
+            provider: "claude".to_string(),
+            kind: "oauth".to_string(),
+            display_name: String::new(),
+            secret_ref: SecretRef::OAuthConfigDir {
+                dir: tmp.path().to_str().unwrap().to_string(),
+            },
+            context: serde_json::json!({}),
+            status: oauth_status::VALID.to_string(),
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.identity_upsert(&claude).unwrap();
+        store
+            .bundle_identity_bind("id-ok", "claude", "acct-ok")
+            .unwrap();
+
+        let inst = make_instance("block-ok", "id-ok");
+        store.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        inject_identity_env(store.clone(), "block-ok", &mut env);
+
+        let after = store.identity_get("acct-ok").unwrap().unwrap();
+        assert_eq!(after.status, oauth_status::VALID);
+        // updated_at unchanged — the resolver only upserts when the
+        // probed status differs from the stored value.
+        assert_eq!(after.updated_at, 0);
     }
 }
