@@ -19,7 +19,9 @@
 
 import {
     AgentPaneCommand,
+    AgentPaneEvent,
     AgentPaneState,
+    INTERRUPT_TIMEOUT_MS,
     KindBeforeDisconnect,
     ReducerResult,
     STUCK_THRESHOLD_MS,
@@ -237,10 +239,26 @@ export function update(
             // Merge stats with live turn-tokens (mirrors prior finalizeTurn
             // logic — see PR #549 reagent/codex P1 reference).
             const merged = mergeStats(command.stats, state.turnTokens);
+            // Codex P1 on #991: when an `InterruptTimeoutElapsed` has
+            // already forced us to `Done.interrupted` (clearing `stopping`
+            // in the process), a late backend `TurnEnd` ack would see
+            // `stoppingWasSet === false` and classify the outcome as
+            // "completed", overwriting the forced interrupted state.
+            // First-done-wins: if we're already in `Done`, preserve the
+            // existing outcome and only refresh the stats sidecar. The
+            // late ack is confirmatory, not authoritative.
+            const alreadyDone = state.turnPhase.kind === "Done";
             // Dual-write outcome: stop-in-flight → "stopped"; otherwise
             // "completed". "interrupted" / "errored" are reserved for
             // future-PR commands (StreamStalled, Disconnected, etc.).
-            const outcome: TurnOutcome = stoppingWasSet ? "stopped" : "completed";
+            const outcome: TurnOutcome = alreadyDone
+                ? state.turnPhase.outcome
+                : stoppingWasSet
+                    ? "stopped"
+                    : "completed";
+            const finishedAt = alreadyDone
+                ? state.turnPhase.finishedAt
+                : nowMs;
             return {
                 state: {
                     ...state,
@@ -252,7 +270,7 @@ export function update(
                     turnPhase: {
                         kind: "Done",
                         outcome,
-                        finishedAt: nowMs,
+                        finishedAt,
                     },
                 },
                 events: [
@@ -331,16 +349,41 @@ export function update(
             const k = state.turnPhase.kind;
             const isWorking =
                 k === "Submitting" || k === "Streaming" || k === "Interrupting";
-            const nextPhase: TurnPhase = isWorking
-                ? {
-                      kind: "Interrupting",
-                      reason: "user",
-                      sigintSentAt: command.at,
-                  }
-                : state.turnPhase;
+            // PR C: only schedule the bounded-interrupt watchdog when we
+            // actually CROSS INTO Interrupting (not when we're already
+            // there — that would double-arm the timeout). Spec §8: SIGINT
+            // is only emitted once on entry; the timeout follows the same
+            // rule so a second Stop press doesn't reset the deadline.
+            const enteringInterrupting =
+                isWorking && k !== "Interrupting";
+            // Codex P2 on #991: preserve the original sigintSentAt on a
+            // repeated Stop press. The timeout was armed from the FIRST
+            // press's deadline; rebuilding the phase with a fresh
+            // `command.at` here makes consumers see a `sigintSentAt`
+            // that doesn't match the active deadline. When we're
+            // already Interrupting, reuse the existing phase so the
+            // timestamp stays pinned to the original SIGINT.
+            const nextPhase: TurnPhase = !isWorking
+                ? state.turnPhase
+                : k === "Interrupting"
+                    ? state.turnPhase
+                    : {
+                          kind: "Interrupting",
+                          reason: "user",
+                          sigintSentAt: command.at,
+                      };
+            const events: AgentPaneEvent[] = [
+                { type: "stop-requested", at: command.at },
+            ];
+            if (enteringInterrupting) {
+                events.push({
+                    type: "schedule-interrupt-timeout",
+                    deadlineMs: command.at + INTERRUPT_TIMEOUT_MS,
+                });
+            }
             return {
                 state: { ...state, stopping: true, turnPhase: nextPhase },
-                events: [{ type: "stop-requested", at: command.at }],
+                events,
             };
         }
 
@@ -365,6 +408,42 @@ export function update(
             return {
                 state: { ...state, stopping: false, turnPhase: nextPhase },
                 events: [{ type: "stop-failed" }],
+            };
+        }
+
+        case "InterruptTimeoutElapsed": {
+            // PR C — bounded `Interrupting → Done.interrupted`.
+            //
+            // The dispatch side schedules a setTimeout when it sees the
+            // `schedule-interrupt-timeout` event. A shared cancel flag
+            // (the JS analogue of `Arc<AtomicBool>`) prevents a stale
+            // timer from firing after a graceful TurnEnd / unsubscribe
+            // already moved us off Interrupting — but defence in depth:
+            // the reducer ALSO checks the current phase and treats a
+            // late tick as a no-op. Three independent paths into
+            // Done.interrupted (TurnEnd, StreamUnsubscribe → Disconnected,
+            // and this timeout) — so the working animation can never
+            // hang on Interrupting indefinitely. Spec §8.
+            if (state.turnPhase.kind !== "Interrupting") {
+                return { state, events: [] };
+            }
+            return {
+                state: {
+                    ...state,
+                    // Legacy: a forced exit from Interrupting is the
+                    // same shape as a graceful TurnEnd for the boolean
+                    // consumers (turnActive=false, stopping cleared).
+                    turnActive: false,
+                    stopping: false,
+                    currentTool: null,
+                    turnTokens: null,
+                    turnPhase: {
+                        kind: "Done",
+                        outcome: "interrupted",
+                        finishedAt: command.at,
+                    },
+                },
+                events: [{ type: "interrupt-timed-out", at: command.at }],
             };
         }
 
