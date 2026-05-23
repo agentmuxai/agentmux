@@ -76,6 +76,21 @@ export type KindBeforeDisconnect =
     | "Interrupting";
 
 /**
+ * Why the stream dropped while a turn was in-flight (PR F).
+ *
+ *   stream-unsubscribed : the dispatch layer / hook fired a clean
+ *                         `StreamUnsubscribe` (component unmount, PTY
+ *                         exited, etc.) — the local end tore down.
+ *   transport-error     : reserved for an in-flight transport failure
+ *                         surface; the dispatcher decides which reason
+ *                         to attach. Not yet wired by any caller — the
+ *                         union is part of PR F's API contract so the
+ *                         dispatcher can adopt it without a follow-up
+ *                         type churn.
+ */
+export type DisconnectReason = "stream-unsubscribed" | "transport-error";
+
+/**
  * Single source of truth for the turn lifecycle. PR A introduces this
  * alongside the legacy booleans — both are written by the reducer.
  *
@@ -104,9 +119,24 @@ export type TurnPhase =
       }
     | { kind: "Done"; outcome: TurnOutcome; finishedAt: number }
     | {
+          /**
+           * Stream dropped while a turn was in flight. PR F fleshes out
+           * the variant payload:
+           *   - `lastKind`     : the working-kind we lost (so the UI can
+           *                      say "was streaming" vs "was submitting").
+           *                      Carried since PR A.
+           *   - `lastConnectedAt` : wall-clock ms at which the disconnect
+           *                      command was processed (= `command.at`
+           *                      from `StreamUnsubscribe`). Drives a
+           *                      "disconnected 5s ago" age label and
+           *                      keeps the variant audit-friendly.
+           *   - `reason`       : a finite literal union (was `string` in
+           *                      PR A) — see {@link DisconnectReason}.
+           */
           kind: "Disconnected";
           lastKind: KindBeforeDisconnect;
-          reason: string;
+          lastConnectedAt: number;
+          reason: DisconnectReason;
       };
 
 /**
@@ -186,6 +216,18 @@ export function isWorking(state: AgentPaneState): boolean {
 export function workingFromPhase(phase: TurnPhase): boolean {
     const k = phase.kind;
     return k === "Submitting" || k === "Streaming" || k === "Interrupting";
+}
+
+/**
+ * Selector — `true` iff the pane is in the `Disconnected` phase. PR F:
+ * drives the {@link AgentDisconnectedBanner} visibility, replacing any
+ * ad-hoc "streaming.active === false but turn was active" checks. Pure
+ * projection of `turnPhase.kind` — same SoT as `isWorking`.
+ *
+ * Spec: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §6.4.
+ */
+export function isDisconnected(state: AgentPaneState): boolean {
+    return state.turnPhase.kind === "Disconnected";
 }
 
 export type AgentPaneCommand =
@@ -316,6 +358,20 @@ export type AgentPaneEvent =
     | { type: "init-failed"; reason: string }
     | { type: "stream-subscribed"; at: number }
     | { type: "stream-unsubscribed"; at: number }
+    /**
+     * PR F: the stream tore down while a turn was in flight
+     * (Submitting / Streaming / Interrupting). Surfaced alongside the
+     * generic `stream-unsubscribed` so the view can drive a dedicated
+     * "Disconnected — reconnecting…" banner without re-deriving from
+     * `turnPhase.kind`. Emitted ONLY on the working-set → Disconnected
+     * transition; idle-state unsubscribes do not emit it.
+     */
+    | {
+          type: "stream-disconnected";
+          at: number;
+          lastKind: KindBeforeDisconnect;
+          reason: DisconnectReason;
+      }
     | { type: "stream-flush-observed"; addedCount: number }
     | {
           /**

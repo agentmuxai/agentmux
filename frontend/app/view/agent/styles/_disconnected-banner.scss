@@ -1,0 +1,76 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Disconnected banner (PR F of the turn-phase migration). Shown when
+// `turnPhase.kind === "Disconnected"` — i.e. the stream tore down while
+// a turn was in flight (Submitting / Streaming / Interrupting). Wrapped
+// in .agent-view so the cascade chain matches the pre-split file
+// (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
+.agent-view {
+    .agent-disconnected-banner {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1-5);
+        margin: var(--space-1) 0 var(--space-0-5);
+        padding: var(--space-1) var(--space-2);
+        background: color-mix(in srgb, var(--error-color) 12%, transparent);
+        border: 1px solid color-mix(in srgb, var(--error-color) 50%, transparent);
+        border-radius: 4px;
+        font-size: 12px;
+        flex-shrink: 0;
+        color: var(--main-text-color);
+    }
+
+    .agent-disconnected-banner-icon {
+        color: var(--error-color);
+        font-size: 14px;
+        line-height: 1;
+        flex-shrink: 0;
+    }
+
+    .agent-disconnected-banner-message {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0;
+    }
+
+    .agent-disconnected-banner-title {
+        font-weight: 600;
+        color: var(--main-text-color);
+    }
+
+    .agent-disconnected-banner-detail {
+        font-weight: normal;
+        opacity: 0.75;
+        font-size: 11px;
+    }
+
+    .agent-disconnected-banner-action {
+        background: none;
+        border: 1px solid color-mix(in srgb, var(--error-color) 50%, transparent);
+        cursor: pointer;
+        padding: var(--space-0-5) var(--space-1-5);
+        color: var(--error-color);
+        font-size: 11px;
+        line-height: 1.4;
+        border-radius: 3px;
+        transition: background 0.1s, color 0.1s;
+        flex-shrink: 0;
+
+        &:hover:not(:disabled) {
+            background: color-mix(in srgb, var(--error-color) 20%, transparent);
+        }
+
+        &:active:not(:disabled) {
+            background: color-mix(in srgb, var(--error-color) 30%, transparent);
+        }
+
+        &:disabled {
+            cursor: default;
+            opacity: 0.4;
+        }
+    }
+}
