@@ -503,3 +503,101 @@
 
     }
 }
+
+// ── Per-block error boundary fallback ───────────────────────────────────────
+// Localized "this pane crashed" panel that replaces ONLY the broken pane's
+// body. Other panes in the tab + the layout chrome stay alive.
+// See: docs/retro/retro-agent-pane-cascade-replacechild-2026-05-23.md.
+.block-error-fallback {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: auto;
+    background: var(--main-bg-color);
+    color: var(--main-text-color);
+    border: 1px solid var(--error-color);
+    border-radius: var(--radius-md);
+    padding: var(--space-3) var(--space-4);
+    gap: var(--space-3);
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
+
+    .block-error-fallback-header {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+    }
+
+    .block-error-fallback-icon {
+        color: var(--error-color);
+        font-size: var(--text-lg);
+    }
+
+    .block-error-fallback-title {
+        font-size: var(--text-md);
+        font-weight: var(--font-weight-bold);
+        color: var(--error-color);
+    }
+
+    .block-error-fallback-body {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        min-height: 0;
+    }
+
+    .block-error-fallback-message {
+        word-break: break-word;
+        white-space: pre-wrap;
+    }
+
+    .block-error-fallback-meta {
+        color: var(--secondary-text-color);
+        font-size: var(--text-xs);
+
+        code {
+            font-family: var(--fixed-font);
+            font-size: inherit;
+            background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+            padding: 1px 4px;
+            border-radius: var(--radius-sm);
+        }
+    }
+
+    .block-error-fallback-stack-toggle {
+        align-self: flex-start;
+        background: transparent;
+        border: 1px solid var(--border-color);
+        color: var(--secondary-text-color);
+        font-size: var(--text-xs);
+        padding: 2px 8px;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+
+        &:hover {
+            color: var(--main-text-color);
+            background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+        }
+    }
+
+    .block-error-fallback-stack {
+        margin: 0;
+        max-height: 220px;
+        overflow: auto;
+        font-family: var(--fixed-font);
+        font-size: var(--text-xs);
+        background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+        padding: var(--space-2);
+        border-radius: var(--radius-sm);
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+
+    .block-error-fallback-footer {
+        display: flex;
+        gap: var(--space-2);
+        margin-top: auto;
+    }
+}
