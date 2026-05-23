@@ -145,4 +145,47 @@ describe("agent-pane-state-store (cascade contracts)", () => {
             }
         });
     });
+
+    // ── PR B (turn-phase view migration) ────────────────────────────────
+    // PR A added `turnPhase` to the reducer state with dual-write; PR B —
+    // this PR — exposes a projection setter for it so the agent VIEW can
+    // bind its "working" animation to `workingFromPhase(turnPhase)` via
+    // a Solid signal. Verify the setter is invoked with the dual-written
+    // phase value at each lifecycle transition.
+    describe("turnPhase projection (PR B)", () => {
+        it("calls the turnPhase setter with the dual-written phase value", () => {
+            const phaseCalls: { kind: string }[] = [];
+            const proj: AgentPaneProjections = {
+                ...noopProj(),
+                turnPhase: (next) => {
+                    phaseCalls.push({ kind: next.kind });
+                },
+            };
+            registerPane("blockD", "agentA", proj);
+
+            // Sequence: InitReady → StreamSubscribe (Idle stays Idle)
+            //         → TurnStart (Idle → Submitting)
+            //         → StreamFlushObserved (Submitting → Streaming)
+            //         → RequestStop (Streaming → Interrupting)
+            //         → TurnEnd (Interrupting → Done.stopped)
+            dispatch("blockD", { type: "InitReady" });
+            dispatch("blockD", { type: "StreamSubscribe", at: 100 });
+            dispatch("blockD", { type: "TurnStart", at: 110 });
+            dispatch("blockD", { type: "StreamFlushObserved", addedCount: 1, at: 120 });
+            dispatch("blockD", { type: "RequestStop", at: 130 });
+            dispatch("blockD", { type: "TurnEnd", stats: null });
+
+            // Only ACTUAL transitions hit the setter (reducer skips
+            // setter calls when prev === next reference). Subscribing
+            // from Idle keeps phase Idle (no spontaneous promotion), so
+            // there's no setter call there.
+            const kinds = phaseCalls.map((c) => c.kind);
+            expect(kinds).toEqual([
+                "Submitting", // TurnStart
+                "Streaming", // StreamFlushObserved promotes from Submitting
+                "Interrupting", // RequestStop while working
+                "Done", // TurnEnd
+            ]);
+        });
+    });
 });

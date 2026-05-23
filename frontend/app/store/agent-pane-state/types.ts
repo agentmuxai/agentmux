@@ -151,7 +151,18 @@ export const initialState = (agentId: string): AgentPaneState => ({
  * footer's working indicator to this selector.
  */
 export function isWorking(state: AgentPaneState): boolean {
-    const k = state.turnPhase.kind;
+    return workingFromPhase(state.turnPhase);
+}
+
+/**
+ * Phase-only variant of {@link isWorking}. The view layer projects
+ * `turnPhase` through a dedicated signal (PR B); call sites that only
+ * have the phase (not the whole state) use this helper. Same predicate.
+ *
+ * Returns true ⇔ `phase.kind ∈ {Submitting, Streaming, Interrupting}`.
+ */
+export function workingFromPhase(phase: TurnPhase): boolean {
+    const k = phase.kind;
     return k === "Submitting" || k === "Streaming" || k === "Interrupting";
 }
 

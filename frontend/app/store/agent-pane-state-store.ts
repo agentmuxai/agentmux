@@ -23,6 +23,7 @@ import {
     AgentPaneState,
     type InitPhase,
     initialState,
+    type TurnPhase,
 } from "./agent-pane-state/types";
 import { type CommandSource, recordDispatch } from "./command-source";
 
@@ -42,6 +43,14 @@ export interface AgentPaneProjections {
     pending: (next: PendingMessage[]) => void;
     /** Init phase — drives the "Loading history…" overlay (issue #728 gap 1). */
     initPhase?: (next: InitPhase) => void;
+    /**
+     * Turn phase (PR A added the union + dual-write in the reducer; PR B —
+     * this PR — projects it through to the view so the "working" animation
+     * can bind to `isWorking(state)` instead of `turnActive || stopping`).
+     * Optional so existing callers (and the cascade-store test's no-op
+     * projection) keep compiling.
+     */
+    turnPhase?: (next: TurnPhase) => void;
 }
 
 interface Slot {
@@ -122,6 +131,7 @@ export function dispatch(
     proj("stopping", prev.stopping, slot.state.stopping, slot.proj.stopping);
     proj("pending", prev.pending, slot.state.pending, slot.proj.pending);
     proj("initPhase", prev.initPhase, slot.state.initPhase, slot.proj.initPhase);
+    proj("turnPhase", prev.turnPhase, slot.state.turnPhase, slot.proj.turnPhase);
 
     if (cascadeSetter != null) {
         console.warn(
