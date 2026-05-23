@@ -67,21 +67,30 @@ export function setEventSink(sink: EventSink): void {
 }
 
 /**
- * Register a pane with the store. Call from the agent-view component
- * onMount, passing the pane's documentAtom setter. The slot owns the
- * pane's reducer state and writes through the setter on each mutation.
+ * Register a pane with the store. The slot owns the pane's reducer
+ * state and writes through the setter on each mutation.
  *
  * Idempotent: re-registering a blockId resets its state to initialState
  * and rebinds the setter. (Useful for hot-reload scenarios.)
+ *
+ * @internal — production callers MUST use `registerPane` from
+ * `agent-pane-registration.ts` so the pane is registered atomically
+ * across BOTH stores (document + pane-state). Direct callers of this
+ * function are limited to single-store unit tests (cascade-detection
+ * scenarios that need a custom single-store projection). PR-3 of the
+ * cascade follow-up sequence — see agent-pane-registration.ts for
+ * rationale + Option A/B discussion.
  */
 export function registerPane(blockId: string, setter: DocumentSetter): void {
     slots.set(blockId, { state: initialState(), setter });
 }
 
 /**
- * Release a pane's slot. Call from agent-view component onCleanup.
- * Failure to release leaks a state cell — every register MUST have a
- * matching unregister.
+ * Release a pane's slot. Failure to release leaks a state cell —
+ * every register MUST have a matching unregister.
+ *
+ * @internal — see `registerPane` above. Production code uses
+ * `unregisterPane` from `agent-pane-registration.ts`.
  */
 export function unregisterPane(blockId: string): void {
     slots.delete(blockId);
