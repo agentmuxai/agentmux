@@ -46,20 +46,74 @@ pub enum ResolverError {
     Storage(#[from] StoreError),
 }
 
-/// Map a `(provider, secret-string)` pair to the env vars that should
-/// receive it. Returning a Vec lets a single secret populate multiple
-/// var names — github writes both GITHUB_TOKEN and GH_TOKEN, AWS
-/// writes its standard triplet (today only the access-key-id slot is
-/// expressed; multi-secret AWS modeled as three separate accounts is
-/// the documented workaround until the matrix learns multi-var
-/// emission).
-pub fn provider_env_vars(provider: &str) -> Vec<&'static str> {
+/// What kind of credential a provider uses, and how
+/// `inject_identity_env` puts it into the agent's env at spawn time.
+/// Per `SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md` §4.3.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderClass {
+    /// **API-key class.** The binding's `SecretRef` resolves to a
+    /// single secret string, injected as the listed env vars. All
+    /// listed vars receive the same value — multi-var emission
+    /// covers "two CLIs want different var names for the same secret"
+    /// (e.g. github writes both `GITHUB_TOKEN` and `GH_TOKEN`).
+    ApiKey { env_vars: &'static [&'static str] },
+    /// **OAuth class.** The binding's `SecretRef` is a
+    /// `SecretRef::OAuthConfigDir` pointer; the resolver sets
+    /// `config_dir_env_var = <dir>` at spawn so the CLI reads its
+    /// OAuth tokens from the per-bundle directory.
+    OAuth { config_dir_env_var: &'static str },
+}
+
+/// Classify a provider id. `None` for unknown providers — the
+/// resolver logs and skips them.
+pub fn provider_class(provider: &str) -> Option<ProviderClass> {
     match provider {
-        "github" => vec!["GITHUB_TOKEN", "GH_TOKEN"],
-        "anthropic" => vec!["ANTHROPIC_API_KEY"],
-        "openai" => vec!["OPENAI_API_KEY"],
-        "kimi" => vec!["MOONSHOT_API_KEY"],
-        "aws" => vec!["AWS_ACCESS_KEY_ID"],
+        // ── API-key class ─────────────────────────────────────────
+        // ApiKey.env_vars values match the legacy provider_env_vars
+        // matrix exactly — the new dispatch is additive.
+        "github" => Some(ProviderClass::ApiKey {
+            env_vars: &["GITHUB_TOKEN", "GH_TOKEN"],
+        }),
+        "anthropic" => Some(ProviderClass::ApiKey {
+            env_vars: &["ANTHROPIC_API_KEY"],
+        }),
+        "openai" => Some(ProviderClass::ApiKey {
+            env_vars: &["OPENAI_API_KEY"],
+        }),
+        "kimi" => Some(ProviderClass::ApiKey {
+            env_vars: &["MOONSHOT_API_KEY"],
+        }),
+        "aws" => Some(ProviderClass::ApiKey {
+            env_vars: &["AWS_ACCESS_KEY_ID"],
+        }),
+        // ── OAuth class ───────────────────────────────────────────
+        // Env-var names come from the CLI provider registry
+        // (`agentmux-srv/src/backend/providers.rs` —
+        // `ProviderConfig::auth_config_dir_env_var`) so the resolver
+        // can never drift from the launcher spawn path: there is one
+        // source of truth per CLI for which env var redirects its
+        // config / auth directory. The match arm enumerates which
+        // providers we currently treat as OAuth-class for identity
+        // bundles (claude / codex / openclaw — per spec §4.3); the
+        // env-var string is read from the registry, not duplicated.
+        "claude" | "codex" | "openclaw" => {
+            crate::backend::providers::get_provider(provider).map(|cfg| {
+                ProviderClass::OAuth {
+                    config_dir_env_var: cfg.auth_config_dir_env_var,
+                }
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Legacy convenience: env vars for an api-key provider. Delegates to
+/// [`provider_class`]; returns empty for oauth-class providers (their
+/// resolution path doesn't go through string-secret env-var injection)
+/// and for unknown providers.
+pub fn provider_env_vars(provider: &str) -> Vec<&'static str> {
+    match provider_class(provider) {
+        Some(ProviderClass::ApiKey { env_vars }) => env_vars.to_vec(),
         _ => Vec::new(),
     }
 }
@@ -185,18 +239,30 @@ pub fn inject_identity_env(
         return;
     }
 
-    // Step 4: per-binding resolution + env-var write.
+    // Step 4: per-binding resolution + env injection.
+    //
+    // Each binding's provider determines HOW its account contributes
+    // to the agent's env (SPEC_OAUTH_IDENTITY_BUNDLES §4.3):
+    //   - ApiKey  — resolve secret_ref to a string, inject as env var(s).
+    //   - OAuth   — expect SecretRef::OAuthConfigDir, inject its dir
+    //               as the provider's config-dir env var.
+    //
+    // Per-binding failures (unknown provider, account row missing,
+    // mismatched secret_ref, secret resolution failed) are logged and
+    // skipped — other bindings still inject.
     for binding in &bindings {
-        let env_keys = provider_env_vars(&binding.provider);
-        if env_keys.is_empty() {
-            tracing::warn!(
-                target: "identity",
-                "no env-var mapping for provider {} (binding for identity {})",
-                binding.provider,
-                instance.identity_id,
-            );
-            continue;
-        }
+        let class = match provider_class(&binding.provider) {
+            Some(c) => c,
+            None => {
+                tracing::warn!(
+                    target: "identity",
+                    "no provider class for {} (binding for identity {}) — skipping",
+                    binding.provider,
+                    instance.identity_id,
+                );
+                continue;
+            }
+        };
 
         let account = match wstore.identity_get(&binding.account_id) {
             Ok(Some(a)) => a,
@@ -220,33 +286,63 @@ pub fn inject_identity_env(
             }
         };
 
-        let secret = match resolve_secret(&account.secret_ref) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!(
+        match class {
+            ProviderClass::ApiKey { env_vars: env_keys } => {
+                let secret = match resolve_secret(&account.secret_ref) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!(
+                            target: "identity",
+                            "secret resolution failed for account {} (provider {}): {} — skipping",
+                            binding.account_id,
+                            binding.provider,
+                            e,
+                        );
+                        continue;
+                    }
+                };
+                let env_key_count = env_keys.len();
+                for key in env_keys {
+                    env_vars.insert(key.to_string(), secret.clone());
+                }
+                tracing::info!(
                     target: "identity",
-                    "secret resolution failed for account {} (provider {}): {} — skipping",
-                    binding.account_id,
+                    "injected {} env var(s) for api-key provider {} (identity={}, account={})",
+                    env_key_count,
                     binding.provider,
-                    e,
+                    instance.identity_id,
+                    binding.account_id,
                 );
-                continue;
             }
-        };
-
-        let env_key_count = env_keys.len();
-        for key in env_keys {
-            env_vars.insert(key.to_string(), secret.clone());
+            ProviderClass::OAuth { config_dir_env_var } => {
+                // OAuth-class bindings expect SecretRef::OAuthConfigDir.
+                // Any other variant is a misconfiguration — log and
+                // skip rather than mis-inject the wrong secret.
+                let dir = match &account.secret_ref {
+                    SecretRef::OAuthConfigDir { dir } => dir.clone(),
+                    other => {
+                        tracing::warn!(
+                            target: "identity",
+                            "oauth-class provider {} has non-OAuthConfigDir secret_ref \
+                             ({:?}) on account {} — skipping",
+                            binding.provider,
+                            other,
+                            binding.account_id,
+                        );
+                        continue;
+                    }
+                };
+                env_vars.insert(config_dir_env_var.to_string(), dir);
+                tracing::info!(
+                    target: "identity",
+                    "injected {} for oauth provider {} (identity={}, account={})",
+                    config_dir_env_var,
+                    binding.provider,
+                    instance.identity_id,
+                    binding.account_id,
+                );
+            }
         }
-
-        tracing::info!(
-            target: "identity",
-            "injected {} env var(s) for provider {} (identity={}, account={})",
-            env_key_count,
-            binding.provider,
-            instance.identity_id,
-            binding.account_id,
-        );
     }
 }
 
@@ -342,6 +438,163 @@ mod tests {
             sm_json_path: None,
         });
         assert!(matches!(res, Err(ResolverError::SecretsManagerUnsupported)));
+    }
+
+    #[test]
+    fn provider_class_oauth_providers() {
+        // Spec §4.3 — the three known oauth providers must classify
+        // as OAuth with the SAME config-dir env vars the CLI provider
+        // registry defines (single source of truth). Pinning the
+        // expected strings here catches drift in either direction —
+        // if the registry changes a value, this test fails and the
+        // change becomes deliberate.
+        assert_eq!(
+            provider_class("claude"),
+            Some(ProviderClass::OAuth { config_dir_env_var: "CLAUDE_CONFIG_DIR" }),
+        );
+        assert_eq!(
+            provider_class("codex"),
+            Some(ProviderClass::OAuth { config_dir_env_var: "CODEX_HOME" }),
+        );
+        assert_eq!(
+            provider_class("openclaw"),
+            Some(ProviderClass::OAuth { config_dir_env_var: "OPENCLAW_HOME" }),
+        );
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn inject_oauth_class_sets_config_dir_env_var() {
+        let store = make_store();
+
+        let mut def = crate::backend::storage::wstore::AgentDefinition {
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+        };
+        store.agent_def_insert(&mut def).unwrap();
+
+        let identity = Identity {
+            id: "id-oauth".to_string(),
+            name: "OAuth".to_string(),
+            description: String::new(),
+            is_blank: false,
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.bundle_identity_upsert(&identity).unwrap();
+
+        let claude = make_account(
+            "acct-claude",
+            "claude",
+            SecretRef::OAuthConfigDir {
+                dir: "/var/agentmux/identities/id-oauth/claude".to_string(),
+            },
+        );
+        store.identity_upsert(&claude).unwrap();
+        store
+            .bundle_identity_bind("id-oauth", "claude", "acct-claude")
+            .unwrap();
+
+        let inst = make_instance("block-oauth", "id-oauth");
+        store.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        inject_identity_env(store, "block-oauth", &mut env);
+
+        // OAuth dispatch sets the provider's config-dir env var.
+        assert_eq!(
+            env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+            Some("/var/agentmux/identities/id-oauth/claude"),
+        );
+        // And does NOT set the anthropic api-key env var — dispatch
+        // is by provider class, not by token shape.
+        assert!(env.get("ANTHROPIC_API_KEY").is_none());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn inject_oauth_class_skips_account_with_non_oauth_secret_ref() {
+        // An oauth-class provider (claude) bound to an account whose
+        // SecretRef is the API-key shape (Env) is a misconfiguration:
+        // the resolver logs + skips rather than mis-injecting the
+        // wrong secret as if it were a config-dir.
+        let store = make_store();
+
+        let mut def = crate::backend::storage::wstore::AgentDefinition {
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+        };
+        store.agent_def_insert(&mut def).unwrap();
+
+        let identity = Identity {
+            id: "id-bad".to_string(),
+            name: "Bad".to_string(),
+            description: String::new(),
+            is_blank: false,
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.bundle_identity_upsert(&identity).unwrap();
+
+        let bad = make_account(
+            "acct-bad",
+            "claude",
+            SecretRef::Env {
+                env_var: "CLAUDE_TOKEN_NOT_A_DIR".to_string(),
+            },
+        );
+        store.identity_upsert(&bad).unwrap();
+        store
+            .bundle_identity_bind("id-bad", "claude", "acct-bad")
+            .unwrap();
+
+        let inst = make_instance("block-bad", "id-bad");
+        store.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        inject_identity_env(store, "block-bad", &mut env);
+
+        // Nothing injected — the binding was skipped.
+        assert!(env.get("CLAUDE_CONFIG_DIR").is_none());
+        assert!(env.is_empty());
     }
 
     #[test]
