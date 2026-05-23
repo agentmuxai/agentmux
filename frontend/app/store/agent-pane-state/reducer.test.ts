@@ -6,6 +6,7 @@ import { update } from "./reducer";
 import {
     AgentPaneState,
     initialState,
+    INTERRUPT_TIMEOUT_MS,
     isWorking,
     STUCK_THRESHOLD_MS,
     TurnPhase,
@@ -814,6 +815,247 @@ describe("agent-pane-state reducer", () => {
                 expect(isWorking(stateWith(phase))).toBe(expected);
             });
         }
+    });
+
+    // ─────────────────────────────────────────────────────────────────
+    // PR C — bounded `Interrupting → Done.interrupted`.
+    //
+    // Spec: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §8.
+    // RequestStop while a turn is in flight schedules an interrupt
+    // timeout (via the `schedule-interrupt-timeout` event); if no
+    // graceful ack arrives, the dispatch layer fires
+    // `InterruptTimeoutElapsed` and we force-transition to
+    // Done.interrupted. The reducer guards against stale ticks by
+    // checking the current phase on receipt.
+    // ─────────────────────────────────────────────────────────────────
+    describe("Bounded interrupt (PR C)", () => {
+        it("RequestStop while Streaming emits schedule-interrupt-timeout", () => {
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "StreamSubscribe", at: 120 }).state;
+            expect(s2.turnPhase.kind).toBe("Streaming");
+            const r = update(s2, { type: "RequestStop", at: 200 });
+            expect(r.state.turnPhase.kind).toBe("Interrupting");
+            // Two events: stop-requested, and the timeout schedule.
+            expect(r.events).toHaveLength(2);
+            expect(r.events[0]).toMatchObject({
+                type: "stop-requested",
+                at: 200,
+            });
+            expect(r.events[1]).toMatchObject({
+                type: "schedule-interrupt-timeout",
+                deadlineMs: 200 + INTERRUPT_TIMEOUT_MS,
+            });
+        });
+
+        it("RequestStop while Submitting also schedules the timeout", () => {
+            // Phase enters Submitting before any chunk arrives. Stop
+            // pressed here must still be bounded — same code path.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            expect(s1.turnPhase.kind).toBe("Submitting");
+            const r = update(s1, { type: "RequestStop", at: 150 });
+            expect(r.state.turnPhase.kind).toBe("Interrupting");
+            expect(r.events[1]).toMatchObject({
+                type: "schedule-interrupt-timeout",
+                deadlineMs: 150 + INTERRUPT_TIMEOUT_MS,
+            });
+        });
+
+        it("RequestStop while already Interrupting does NOT re-schedule", () => {
+            // A second Stop press must not double-arm the timeout
+            // (spec §8: SIGINT only emitted once on entry, timeout
+            // follows the same rule so the deadline isn't reset).
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "StreamSubscribe", at: 120 }).state;
+            const s3 = update(s2, { type: "RequestStop", at: 200 }).state;
+            expect(s3.turnPhase.kind).toBe("Interrupting");
+            const r = update(s3, { type: "RequestStop", at: 250 });
+            expect(r.state.turnPhase.kind).toBe("Interrupting");
+            // Only the stop-requested event — no second schedule.
+            expect(r.events).toHaveLength(1);
+            expect(r.events[0]).toMatchObject({ type: "stop-requested" });
+        });
+
+        it("RequestStop while Idle does NOT schedule the timeout", () => {
+            // Stop pressed without a turn in flight: legacy boolean
+            // flips but no Interrupting phase, so no watchdog.
+            const start = mk();
+            const r = update(start, { type: "RequestStop", at: 100 });
+            expect(r.state.turnPhase.kind).toBe("Idle");
+            expect(r.events).toHaveLength(1);
+            expect(r.events[0]).toMatchObject({ type: "stop-requested" });
+        });
+
+        it("RequestStop while Done does NOT schedule the timeout", () => {
+            // After TurnEnd lands the phase in Done; a late Stop press
+            // mustn't start a watchdog over an already-finished turn.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "TurnEnd", stats: null }, 200).state;
+            expect(s2.turnPhase.kind).toBe("Done");
+            const r = update(s2, { type: "RequestStop", at: 250 });
+            expect(r.events).toHaveLength(1);
+            expect(r.events[0]).toMatchObject({ type: "stop-requested" });
+        });
+
+        it("InterruptTimeoutElapsed while Interrupting → Done.interrupted", () => {
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "StreamSubscribe", at: 120 }).state;
+            const s3 = update(s2, { type: "RequestStop", at: 200 }).state;
+            expect(s3.turnPhase.kind).toBe("Interrupting");
+            const deadline = 200 + INTERRUPT_TIMEOUT_MS;
+            const r = update(s3, {
+                type: "InterruptTimeoutElapsed",
+                at: deadline,
+            });
+            expect(r.state.turnPhase.kind).toBe("Done");
+            if (r.state.turnPhase.kind === "Done") {
+                expect(r.state.turnPhase.outcome).toBe("interrupted");
+                expect(r.state.turnPhase.finishedAt).toBe(deadline);
+            }
+            // Legacy fields cleared the same way TurnEnd would clear them.
+            expect(r.state.turnActive).toBe(false);
+            expect(r.state.stopping).toBe(false);
+            expect(r.state.currentTool).toBe(null);
+            expect(r.state.turnTokens).toBe(null);
+            // Animation invariant: isWorking flips false.
+            expect(isWorking(r.state)).toBe(false);
+            // Audit event.
+            expect(r.events).toHaveLength(1);
+            expect(r.events[0]).toMatchObject({
+                type: "interrupt-timed-out",
+                at: deadline,
+            });
+        });
+
+        it("InterruptTimeoutElapsed while Streaming is a no-op (agent acked first)", () => {
+            // Realistic race: user pressed Stop, agent ack landed first
+            // (TurnEnd → Done), then the user submitted again and we're
+            // back in Streaming. The stale setTimeout finally fires —
+            // it must not move us off Streaming.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "StreamSubscribe", at: 120 }).state;
+            expect(s2.turnPhase.kind).toBe("Streaming");
+            const r = update(s2, {
+                type: "InterruptTimeoutElapsed",
+                at: 500,
+            });
+            // Reducer must return the SAME reference (no-op pattern).
+            expect(r.state).toBe(s2);
+            expect(r.events).toEqual([]);
+        });
+
+        it("InterruptTimeoutElapsed while Submitting is a no-op", () => {
+            // Even more stale: phase rolled back to Submitting (e.g. a
+            // fresh turn started before the timer fired).
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            expect(s1.turnPhase.kind).toBe("Submitting");
+            const r = update(s1, {
+                type: "InterruptTimeoutElapsed",
+                at: 500,
+            });
+            expect(r.state).toBe(s1);
+            expect(r.events).toEqual([]);
+        });
+
+        it("InterruptTimeoutElapsed while Idle is a no-op", () => {
+            const start = mk();
+            const r = update(start, {
+                type: "InterruptTimeoutElapsed",
+                at: 100,
+            });
+            expect(r.state).toBe(start);
+            expect(r.events).toEqual([]);
+        });
+
+        it("InterruptTimeoutElapsed while Done is a no-op (graceful ack already landed)", () => {
+            // The agent acked the SIGINT and we landed in Done.stopped
+            // before the timer fired. The late tick must not overwrite
+            // the outcome.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "RequestStop", at: 200 }).state;
+            expect(s2.turnPhase.kind).toBe("Interrupting");
+            const s3 = update(s2, { type: "TurnEnd", stats: null }, 300).state;
+            expect(s3.turnPhase.kind).toBe("Done");
+            if (s3.turnPhase.kind === "Done") {
+                expect(s3.turnPhase.outcome).toBe("stopped");
+            }
+            const r = update(s3, {
+                type: "InterruptTimeoutElapsed",
+                at: 500,
+            });
+            expect(r.state).toBe(s3);
+            expect(r.events).toEqual([]);
+            // Outcome preserved.
+            if (r.state.turnPhase.kind === "Done") {
+                expect(r.state.turnPhase.outcome).toBe("stopped");
+            }
+        });
+
+        it("InterruptTimeoutElapsed while Disconnected is a no-op", () => {
+            // Stream dropped after stop was requested → Disconnected.
+            // The timeout that was armed must not corrupt that state.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "RequestStop", at: 200 }).state;
+            const s3 = update(s2, { type: "StreamUnsubscribe", at: 300 }).state;
+            expect(s3.turnPhase.kind).toBe("Disconnected");
+            const r = update(s3, {
+                type: "InterruptTimeoutElapsed",
+                at: 500,
+            });
+            expect(r.state).toBe(s3);
+            expect(r.events).toEqual([]);
+        });
+
+        it("Three-paths invariant: TurnEnd, StreamUnsubscribe, and timeout all exit Interrupting", () => {
+            // Spec §8: "Three independent paths into Done.Interrupted" —
+            // the working animation can never get stuck.
+            const buildInterrupting = () => {
+                const a = ready(100);
+                const b = update(a, { type: "TurnStart", at: 110 }).state;
+                const c = update(b, { type: "StreamSubscribe", at: 120 }).state;
+                return update(c, { type: "RequestStop", at: 200 }).state;
+            };
+
+            // Path 1: graceful TurnEnd.
+            const p1 = update(buildInterrupting(), {
+                type: "TurnEnd",
+                stats: null,
+            }, 300);
+            expect(isWorking(p1.state)).toBe(false);
+            expect(p1.state.turnPhase.kind).toBe("Done");
+
+            // Path 2: stream torn down → Disconnected (also not working).
+            const p2 = update(buildInterrupting(), {
+                type: "StreamUnsubscribe",
+                at: 300,
+            });
+            expect(isWorking(p2.state)).toBe(false);
+            expect(p2.state.turnPhase.kind).toBe("Disconnected");
+
+            // Path 3: bounded timeout.
+            const p3 = update(buildInterrupting(), {
+                type: "InterruptTimeoutElapsed",
+                at: 200 + INTERRUPT_TIMEOUT_MS,
+            });
+            expect(isWorking(p3.state)).toBe(false);
+            expect(p3.state.turnPhase.kind).toBe("Done");
+            if (p3.state.turnPhase.kind === "Done") {
+                expect(p3.state.turnPhase.outcome).toBe("interrupted");
+            }
+        });
+
+        it("INTERRUPT_TIMEOUT_MS is 5000 (sanity)", () => {
+            // Pinned so a sneaky bump can't slip in unreviewed.
+            expect(INTERRUPT_TIMEOUT_MS).toBe(5_000);
+        });
     });
 });
 
