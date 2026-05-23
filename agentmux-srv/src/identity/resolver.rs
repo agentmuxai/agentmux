@@ -46,13 +46,6 @@ pub enum ResolverError {
     Storage(#[from] StoreError),
 }
 
-/// Map a `(provider, secret-string)` pair to the env vars that should
-/// receive it. Returning a Vec lets a single secret populate multiple
-/// var names — github writes both GITHUB_TOKEN and GH_TOKEN, AWS
-/// writes its standard triplet (today only the access-key-id slot is
-/// expressed; multi-secret AWS modeled as three separate accounts is
-/// the documented workaround until the matrix learns multi-var
-/// emission).
 /// What kind of credential a provider uses, and how
 /// `inject_identity_env` puts it into the agent's env at spawn time.
 /// Per `SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md` §4.3.
