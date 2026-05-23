@@ -205,6 +205,25 @@ impl DataPaths {
             mode,
         })
     }
+
+    /// `~/.agentmux/shared/identities/` — root for per-bundle OAuth
+    /// credential directories. Lives under `shared_dir` so it's
+    /// account-wide and version-independent: upgrading agentmux does
+    /// not move a user's bundle credentials. Per
+    /// `SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md` §4.1.
+    pub fn identities_dir(&self) -> PathBuf {
+        self.shared_dir.join("identities")
+    }
+
+    /// `~/.agentmux/shared/identities/<bundle_id>/` — a specific
+    /// bundle's credential root. Per-provider subdirectories (e.g.
+    /// `claude/`, `codex/`) hang off this when the bundle gains an
+    /// OAuth binding (PR C). The directory is created lazily by the
+    /// bundle / OAuth flow that needs it — `ensure_dirs()` does not
+    /// pre-create it.
+    pub fn identity_dir(&self, bundle_id: &str) -> PathBuf {
+        self.identities_dir().join(bundle_id)
+    }
 }
 
 /// `~/.agentmux/` root, or the test override via
