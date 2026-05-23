@@ -31,6 +31,7 @@ import {
     KindBeforeDisconnect,
     ReducerResult,
     STUCK_THRESHOLD_MS,
+    SUBMIT_TIMEOUT_MS,
     TurnOutcome,
     TurnPhase,
 } from "./types";
@@ -231,6 +232,23 @@ export function update(
                     ],
                 };
             }
+            // PR D: only schedule the submit watchdog when we actually
+            // CROSS INTO Submitting (not when we're already there — that
+            // would double-arm the timeout). Mirrors the PR C entry
+            // pattern for the interrupt watchdog. In practice TurnStart
+            // is dispatched once per user-send so we expect this branch
+            // ~always, but defence in depth keeps the contract clean for
+            // any future re-entrant caller.
+            const enteringSubmitting = state.turnPhase.kind !== "Submitting";
+            const events: AgentPaneEvent[] = [
+                { type: "turn-started", at: command.at },
+            ];
+            if (enteringSubmitting) {
+                events.push({
+                    type: "schedule-submit-timeout",
+                    deadlineMs: command.at + SUBMIT_TIMEOUT_MS,
+                });
+            }
             return {
                 state: {
                     ...state,
@@ -247,7 +265,7 @@ export function update(
                         pendingContent: "",
                     },
                 },
-                events: [{ type: "turn-started", at: command.at }],
+                events,
             };
         }
 
@@ -461,6 +479,48 @@ export function update(
                     },
                 },
                 events: [{ type: "interrupt-timed-out", at: command.at }],
+            };
+        }
+
+        case "SubmitTimeoutElapsed": {
+            // PR D — bounded `Submitting → Done.errored`.
+            //
+            // The dispatch side schedules a setTimeout when it sees the
+            // `schedule-submit-timeout` event emitted by `TurnStart`. A
+            // shared cancel flag (the JS analogue of `Arc<AtomicBool>`,
+            // same pattern as the PR C interrupt timer) prevents a stale
+            // timer from firing after a graceful promotion to Streaming
+            // (via `StreamFlushObserved` or `bumpEvent` from a tool /
+            // token event). Defence in depth: the reducer ALSO checks
+            // the current phase and treats a late tick as a no-op.
+            //
+            // Three independent paths out of Submitting — promotion via
+            // `StreamFlushObserved`, promotion via `bumpEvent` (tool /
+            // token), and this timeout — so the working animation can
+            // never get stuck on Submitting indefinitely. The first
+            // promotion wins; this timeout fires only if none arrived.
+            // Spec §8 / issue #728 gap 2.
+            if (state.turnPhase.kind !== "Submitting") {
+                return { state, events: [] };
+            }
+            return {
+                state: {
+                    ...state,
+                    // Legacy cleanup mirrors the InterruptTimeoutElapsed
+                    // arm — a forced exit from a working state clears
+                    // the boolean consumers (turnActive=false, stopping
+                    // cleared) and per-turn sidecars.
+                    turnActive: false,
+                    stopping: false,
+                    currentTool: null,
+                    turnTokens: null,
+                    turnPhase: {
+                        kind: "Done",
+                        outcome: "errored",
+                        finishedAt: command.at,
+                    },
+                },
+                events: [{ type: "submit-timed-out", at: command.at }],
             };
         }
 
