@@ -17,9 +17,12 @@ s = s.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "<redacted-emai
 // 2) AgentA-* identity slug -> placeholder
 s = s.replace(/AgentA-[a-zA-Z0-9_-]+/g, "<redacted-user>");
 
-// 3) Windows paths C:\Users\<user>\... -> ~/...
-//    Use a character class for the backslash to side-step sed-style escape weirdness.
-s = s.replace(/[Cc]:[\\]+Users[\\]+[^\\\s]+[\\]+/g, "~/");
+// 3) Windows paths — both slash directions
+//    Codex P1 on #990: the original only matched backslash paths, missing
+//    forward-slash forms like `C:/Users/<user>/...` that show up wherever
+//    a JS / Node tool normalized the path. Match BOTH separators in one
+//    character class so the username segment is always replaced.
+s = s.replace(/[Cc]:[\\/]+Users[\\/]+[^\\/\s]+[\\/]+/g, "~/");
 
 // 4) Standalone username "area54" -> placeholder
 s = s.replace(/\barea54\b/g, "<redacted-user>");

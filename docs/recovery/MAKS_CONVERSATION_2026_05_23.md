@@ -361,9 +361,9 @@ Now "Running..." → "Thinking...":
 Now
 
 - 🔧 **2026-05-23 08:11:56Z** 🔧 Bash code \
-  "C:/Users/<redacted-user>/AppData/Local/Temp/agentmux-inspect/frontend/app/view/agent/components/ToolBlock.tsx" \
-  "C:/Users/<redacted-user>/AppData/Local/Temp/agentmux-inspect/frontend/app/view/agent/components/ToolOverlayLog.tsx" \
-  "C:/Users/<redacted-user>/AppData/Local/Temp/agentmux-inspect/frontend/app/view/agent/styles/_document-nodes.scss" 2>&1 ✓ (collapsed)
+  "~/<tmp>/agentmux-inspect/frontend/app/view/agent/components/ToolBlock.tsx" \
+  "~/<tmp>/agentmux-inspect/frontend/app/view/agent/components/ToolOverlayLog.tsx" \
+  "~/<tmp>/agentmux-inspect/frontend/app/view/agent/styles/_document-nodes.scss" 2>&1 ✓ (collapsed)
 ### 🤖 Maks — 2026-05-23 08:11:57Z — _node_26_
 
 All four changes written and files open in VS Code. Here's what landed:
@@ -388,7 +388,7 @@ The user wants me to write the spec to a file and open it in VS Code. The spec w
 
 The spec was already written to the cloned repo. Opening it now.
 
-- 🔧 **2026-05-23 08:12:39Z** 🔧 Bash code "C:/Users/<redacted-user>/AppData/Local/Temp/agentmux-inspect/docs/specs/SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md" 2>&1 ✓ (collapsed)
+- 🔧 **2026-05-23 08:12:39Z** 🔧 Bash code "~/<tmp>/agentmux-inspect/docs/specs/SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md" 2>&1 ✓ (collapsed)
 ### 🤖 Maks — 2026-05-23 08:12:43Z — _node_29_
 
 Done — `SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md` is open in VS Code. It's at `docs/specs/` in the cloned repo alongside the other specs.
@@ -401,8 +401,8 @@ check the filename, file not found
 
 The user is saying the file is not found. Let me check what's actually in the specs directory and verify the file exists.
 
-- 🔧 **2026-05-23 08:13:08Z** 🔧 Bash ls "C:/Users/<redacted-user>/AppData/Local/Temp/agentmux-inspect/docs/specs/" | grep POLISH ✗
-- 🔧 **2026-05-23 08:13:16Z** 🔧 Bash ls "C:/Users/<redacted-user>/AppData/Local/Temp/agentmux-inspect/docs/specs/" | tail -5 ✓ (collapsed)
+- 🔧 **2026-05-23 08:13:08Z** 🔧 Bash ls "~/<tmp>/agentmux-inspect/docs/specs/" | grep POLISH ✗
+- 🔧 **2026-05-23 08:13:16Z** 🔧 Bash ls "~/<tmp>/agentmux-inspect/docs/specs/" | tail -5 ✓ (collapsed)
 ### 💭 thinking — 2026-05-23 08:13:19Z — _node_31_
 
 The file wasn't written - the Write tool earlier wrote to `/tmp/agentmux-inspect/docs/specs/` using bash path, but the Edit tool uses Windows paths. The Write tool worked but wrote to a different temp path than what the Edit tool uses. Let me find the actual file.
@@ -410,7 +410,7 @@ The file wasn't written - the Write tool earlier wrote to `/tmp/agentmux-inspect
 - 🔧 **2026-05-23 08:13:27Z** 🔧 Bash find /tmp/agentmux-inspect/docs/specs -name "*POLISH*" 2>/dev/null; find /tmp/agentmux-inspect/docs/specs -name "*UX*" 2>/dev/null ✓ (collapsed)
 ### 💭 thinking — 2026-05-23 08:13:28Z — _node_32_
 
-The Write tool wrote to `/tmp/agentmux-inspect/docs/specs/SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md` but it seems the file doesn't exist there either. The bash tmp path `/tmp/` maps to a different Windows path than `C:/Users/<redacted-user>/AppData/Local/Temp/`. Let me find where it actually ended up.
+The Write tool wrote to `/tmp/agentmux-inspect/docs/specs/SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md` but it seems the file doesn't exist there either. The bash tmp path `/tmp/` maps to a different Windows path than `~/<tmp>/`. Let me find where it actually ended up.
 
 ### 🤖 Maks — 2026-05-23 08:13:30Z — _node_33_
 
@@ -438,7 +438,7 @@ But I know from the successful ToolBlock.tsx edit that the code changes went to 
 Two different clones ended up in two locations
 
 - 🔧 **2026-05-23 08:14:43Z** 📝 Write ~/AppData\Local\Temp\agentmux-inspect\docs\specs\SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md ✓ (collapsed)
-- 🔧 **2026-05-23 08:14:54Z** 🔧 Bash code "C:/Users/<redacted-user>/AppData/Local/Temp/agentmux-inspect/docs/specs/SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md" ✓ (collapsed)
+- 🔧 **2026-05-23 08:14:54Z** 🔧 Bash code "~/<tmp>/agentmux-inspect/docs/specs/SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md" ✓ (collapsed)
 ### 🤖 Maks — 2026-05-23 08:14:58Z — _node_36_
 
 `SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md` is written to the correct clone and open in VS Code.
@@ -483,8 +483,8 @@ Let me add this to the spec. The fix is straightforward CSS: `overscroll-behavio
 Now I'm checking what the current CSS looks like for that element.
 
 - 🔧 **2026-05-23 08:18:32Z** 🔧 Bash grep -n "agent-tool-overlay-log\|overscroll" /tmp/agentmux-inspect/frontend/app/view/agent/styles/_document-nodes.scss ✗
-- 🔧 **2026-05-23 08:18:41Z** 🔧 Bash grep -rn "agent-tool-overlay-log\|overscroll" "C:/Users/<redacted-user>/AppData/Local/Temp/agentmux-inspect/frontend/app/view/agent/styles/" ✓ (collapsed)
-- 🔧 **2026-05-23 08:18:50Z** 🔧 Bash sed -n '40,65p' "C:/Users/<redacted-user>/AppData/Local/Temp/agentmux-inspect/frontend/app/view/agent/styles/_tool-overlay-portal.scss" ✓ (collapsed)
+- 🔧 **2026-05-23 08:18:41Z** 🔧 Bash grep -rn "agent-tool-overlay-log\|overscroll" "~/<tmp>/agentmux-inspect/frontend/app/view/agent/styles/" ✓ (collapsed)
+- 🔧 **2026-05-23 08:18:50Z** 🔧 Bash sed -n '40,65p' "~/<tmp>/agentmux-inspect/frontend/app/view/agent/styles/_tool-overlay-portal.scss" ✓ (collapsed)
 ### 🤖 Maks — 2026-05-23 08:18:53Z — _node_41_
 
 Got it. The fix is one CSS line — `overscroll-behavior: contain` on `.agent-tool-overlay-log`. Now adding Change 5 to the spec.
