@@ -1,0 +1,164 @@
+// Copyright 2024-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// AgentPicker "Recent sessions" surface (cascade follow-up 2026-05-23).
+// Sits ABOVE the agent-card list inside `.agent-picker`. Visually
+// secondary to the "+New" tiles (the cards) — same width cap, lighter
+// border, smaller type, but actionable rows that match the card hover
+// affordance so users learn one interaction model.
+.agent-view {
+    .agent-recent-sessions {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        max-width: 520px;
+        width: 100%;
+        align-self: center;
+        // Hard cap so the list doesn't swallow the picker when the
+        // user has 20 active sessions. Internal scroll instead.
+        max-height: 40vh;
+        overflow: hidden;
+    }
+
+    .agent-recent-sessions-header {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-1);
+        padding: 0 2px;
+    }
+
+    .agent-recent-sessions-title {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--secondary-text-color);
+    }
+
+    .agent-recent-sessions-count {
+        font-size: 11px;
+        color: color-mix(in srgb, var(--secondary-text-color) 60%, transparent);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .agent-recent-sessions-empty {
+        font-size: 12px;
+        color: color-mix(in srgb, var(--secondary-text-color) 75%, transparent);
+        padding: var(--space-2) var(--space-3);
+        border: 1px dashed var(--border-color);
+        border-radius: 6px;
+        background: transparent;
+        text-align: center;
+        font-style: italic;
+    }
+
+    .agent-recent-sessions-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        overflow-y: auto;
+        // Scroll containment so wheeling inside the list doesn't
+        // spill into the picker-list below once we hit the boundary.
+        overscroll-behavior: contain;
+    }
+
+    .agent-recent-sessions-row {
+        margin: 0;
+    }
+
+    .agent-recent-sessions-entry {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--space-2);
+        padding: var(--space-2) 10px;
+        width: 100%;
+        border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+        background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+        border-radius: 5px;
+        cursor: pointer;
+        text-align: left;
+        color: var(--main-text-color);
+        font-family: inherit;
+        transition: all 0.15s;
+
+        &:hover {
+            border-color: var(--accent-color);
+            background: color-mix(in srgb, var(--accent-color) 6%, transparent);
+        }
+
+        &:focus-visible {
+            outline: 2px solid var(--accent-color);
+            outline-offset: 1px;
+        }
+    }
+
+    .agent-recent-sessions-icon {
+        flex-shrink: 0;
+        margin-top: 2px;
+    }
+
+    .agent-recent-sessions-body {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        flex: 1;
+        min-width: 0;
+    }
+
+    .agent-recent-sessions-line1 {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-2);
+        min-width: 0;
+    }
+
+    .agent-recent-sessions-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--main-text-color);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex-shrink: 0;
+        max-width: 60%;
+    }
+
+    .agent-recent-sessions-meta {
+        font-size: 11px;
+        color: color-mix(in srgb, var(--secondary-text-color) 85%, transparent);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex: 1;
+        min-width: 0;
+    }
+
+    .agent-recent-sessions-preview {
+        font-size: 12px;
+        color: var(--secondary-text-color);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-style: normal;
+    }
+
+    .agent-recent-sessions-preview--empty {
+        color: color-mix(in srgb, var(--secondary-text-color) 55%, transparent);
+        font-style: italic;
+    }
+
+    .agent-recent-sessions-line3 {
+        display: flex;
+        gap: var(--space-2);
+        font-size: 10px;
+        color: color-mix(in srgb, var(--secondary-text-color) 70%, transparent);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .agent-recent-sessions-nodes {
+        // Numeric "12 messages" stays inline with timestamp.
+    }
+}

@@ -492,6 +492,30 @@ declare global {
         block_id_hint: string;
     };
 
+    /** Cascade follow-up (2026-05-23) — one row of the AgentPicker's
+     * "Recent sessions" list. Mirrors NamedAgentRow + adds a preview
+     * (first user message text) and node count read from the filestore
+     * `output.state.json` snapshot. has_snapshot: false means the
+     * pane never wrote a snapshot (legacy / pre-persistence row); the
+     * row still surfaces so the user can reattach. */
+    type RecentSessionRow = {
+        instance_id: string;
+        instance_name: string;
+        definition_id: string;
+        definition_name: string;
+        provider: string;
+        working_directory: string;
+        identity_id: string;
+        identity_name: string;
+        memory_id: string;
+        memory_name: string;
+        block_id_hint: string;
+        preview: string;
+        node_count: number;
+        last_active_at: number;
+        has_snapshot: boolean;
+    };
+
     // AgentContent
     type AgentContent = {
         agent_id: string;

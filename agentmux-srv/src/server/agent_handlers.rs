@@ -36,6 +36,8 @@ use crate::backend::rpc_types::{
     COMMAND_LIST_NAMED_AGENTS, COMMAND_HIDE_NAMED_AGENT,
     CommandListNamedAgentsData, CommandHideNamedAgentData,
     NamedAgentRow,
+    COMMAND_LIST_RECENT_SESSIONS, CommandListRecentSessionsData,
+    RecentSessionRow,
     COMMAND_FORK_AGENT_DEFINITION,
     CommandListIdentityAccountsData, CommandGetIdentityAccountData,
     CommandDeleteIdentityAccountData,
@@ -1366,6 +1368,157 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
+    // ---- Recent sessions (cascade follow-up 2026-05-23) ----
+    //
+    // listrecentsessions — joins `db_agent_instances` with the
+    // filestore `output.state.json` snapshot for each instance's
+    // block_id_hint, producing a preview + node count so the
+    // AgentPicker can show actual conversation context instead of just
+    // metadata. Sort key is the snapshot modts (last activity)
+    // descending; rows without a snapshot fall back to the instance
+    // started_at and are de-prioritized. Cap at 20 rows.
+    //
+    // The reattach mechanism is the existing continuation flow:
+    // continueOfInstanceId + workDirOverride (see PR #977). This RPC
+    // is a more discoverable surface for finding sessions to continue
+    // — particularly orphaned ones whose pane crashed.
+    let wstore = state.wstore.clone();
+    let filestore = state.filestore.clone();
+    engine.register_handler(
+        COMMAND_LIST_RECENT_SESSIONS,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let filestore = filestore.clone();
+            Box::pin(async move {
+                let cmd: CommandListRecentSessionsData =
+                    serde_json::from_value(data).unwrap_or_default();
+                let limit = if cmd.limit == 0 {
+                    20
+                } else {
+                    cmd.limit.min(100)
+                };
+                // Pull up to ~10x the requested cap so we can post-
+                // filter by snapshot presence + identity_id without
+                // running out of candidates. 10x is a safety margin
+                // and stays well inside the 200 default of
+                // instance_list_named.
+                let raw_limit = (limit * 10).max(50).min(500);
+                let instances = wstore
+                    .instance_list_named(raw_limit, None)
+                    .map_err(|e| format!("listrecentsessions: {e}"))?;
+
+                let defs = wstore
+                    .agent_def_list()
+                    .map_err(|e| format!("listrecentsessions: defs: {e}"))?;
+                let identities = wstore
+                    .bundle_identity_list()
+                    .map_err(|e| format!("listrecentsessions: identities: {e}"))?;
+                let memories = wstore
+                    .bundle_memory_list()
+                    .map_err(|e| format!("listrecentsessions: memories: {e}"))?;
+
+                let identity_filter = cmd
+                    .identity_id
+                    .as_deref()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty());
+
+                // Build rows. Hits filestore once per instance; with
+                // raw_limit ≤ 500 and stat() being a single indexed
+                // SQLite query, the per-call cost is dominated by
+                // the eventual snapshot read for the top-20.
+                let mut rows: Vec<RecentSessionRow> = Vec::with_capacity(instances.len());
+                for inst in instances {
+                    // Identity filter — applied before any filestore
+                    // I/O so the rejected rows don't pay for a stat.
+                    if let Some(filter) = identity_filter {
+                        if inst.identity_id != filter {
+                            continue;
+                        }
+                    }
+                    let def = defs.iter().find(|d| d.id == inst.definition_id);
+                    let identity_name = if inst.identity_id.is_empty() {
+                        "(ambient creds)".to_string()
+                    } else {
+                        identities
+                            .iter()
+                            .find(|i| i.id == inst.identity_id)
+                            .map(|i| i.name.clone())
+                            .unwrap_or_else(|| "(missing identity)".to_string())
+                    };
+                    let memory_name = if inst.memory_id.is_empty() {
+                        "(vanilla CLI)".to_string()
+                    } else {
+                        memories
+                            .iter()
+                            .find(|m| m.id == inst.memory_id)
+                            .map(|m| m.name.clone())
+                            .unwrap_or_else(|| "(missing memory)".to_string())
+                    };
+
+                    // Stat first (cheap) — gives us the modts for
+                    // sorting. Only fetch the full content if the
+                    // snapshot exists.
+                    let (has_snapshot, last_active_at, preview, node_count) =
+                        if inst.block_id.is_empty() {
+                            (false, inst.started_at, String::new(), 0usize)
+                        } else {
+                            match filestore.stat(&inst.block_id, "output.state.json") {
+                                Ok(Some(file)) => {
+                                    let modts = if file.modts > 0 {
+                                        file.modts
+                                    } else {
+                                        inst.started_at
+                                    };
+                                    let (preview, node_count) = read_session_preview(
+                                        &filestore,
+                                        &inst.block_id,
+                                    );
+                                    (true, modts, preview, node_count)
+                                }
+                                _ => (false, inst.started_at, String::new(), 0usize),
+                            }
+                        };
+
+                    rows.push(RecentSessionRow {
+                        instance_id: inst.id,
+                        instance_name: inst.instance_name,
+                        definition_id: inst.definition_id.clone(),
+                        definition_name: def
+                            .map(|d| d.name.clone())
+                            .unwrap_or_else(|| "(missing definition)".to_string()),
+                        provider: def.map(|d| d.provider.clone()).unwrap_or_default(),
+                        working_directory: inst.working_directory,
+                        identity_id: inst.identity_id,
+                        identity_name,
+                        memory_id: inst.memory_id,
+                        memory_name,
+                        block_id_hint: inst.block_id,
+                        preview,
+                        node_count,
+                        last_active_at,
+                        has_snapshot,
+                    });
+                }
+
+                // Sort: rows with a snapshot first (descending by
+                // modts), then no-snapshot rows by started_at desc.
+                // This keeps live conversations at the top while
+                // still surfacing legacy rows.
+                rows.sort_by(|a, b| match (a.has_snapshot, b.has_snapshot) {
+                    (true, true) | (false, false) => {
+                        b.last_active_at.cmp(&a.last_active_at)
+                    }
+                    (true, false) => std::cmp::Ordering::Less,
+                    (false, true) => std::cmp::Ordering::Greater,
+                });
+                rows.truncate(limit);
+
+                Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
+            })
+        }),
+    );
+
     // ---- Definition fork ----
 
     let wstore = state.wstore.clone();
@@ -1771,4 +1924,510 @@ fn register_v7_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+}
+
+/// Read the per-block `output.state.json` snapshot from filestore and
+/// extract a `(preview, node_count)` pair for the AgentPicker's
+/// "Recent sessions" list.
+///
+/// The snapshot shape is owned by the frontend (see
+/// `frontend/app/view/agent/agent-view.tsx::writeSnapshotNow`):
+/// `{ schemaVersion, savedAt, highWaterMark, historyOffset, nodes: [DocumentNode...] }`.
+/// We only touch two fields:
+/// - `nodes.length` → `node_count`.
+/// - The first node with `type === "user_message"`, `message` field →
+///   `preview` (trimmed, newlines collapsed, max 240 chars).
+///
+/// On any error (snapshot missing, malformed JSON, no user message),
+/// returns `("", 0)`. Callers treat that the same as "no preview".
+fn read_session_preview(
+    filestore: &crate::backend::storage::filestore::FileStore,
+    block_id: &str,
+) -> (String, usize) {
+    let bytes = match filestore.read_file(block_id, "output.state.json") {
+        Ok(Some(b)) => b,
+        _ => return (String::new(), 0),
+    };
+    // Cap the parse budget — a misbehaving / corrupted snapshot
+    // shouldn't be able to stall this handler. 4MiB is well above the
+    // typical conversation snapshot (Maks's was ~750KiB for 169 nodes)
+    // but bounded enough to fail fast on garbage.
+    if bytes.len() > 4 * 1024 * 1024 {
+        tracing::warn!(
+            block_id = %block_id,
+            size = bytes.len(),
+            "listrecentsessions: snapshot too large; skipping preview"
+        );
+        return (String::new(), 0);
+    }
+    let json: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(_) => return (String::new(), 0),
+    };
+    let nodes = match json.get("nodes").and_then(|v| v.as_array()) {
+        Some(a) => a,
+        None => return (String::new(), 0),
+    };
+    let node_count = nodes.len();
+    // First user_message wins. Skip the bootstrap "Session Context"
+    // prompt when present — it's always the first node and is system
+    // boilerplate the user didn't type; if a subsequent user_message
+    // exists, that's the more useful preview. Heuristic: if the first
+    // user message starts with "# Session Context", scan for the next.
+    let mut preview = String::new();
+    for node in nodes {
+        let ty = node.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        if ty != "user_message" {
+            continue;
+        }
+        let msg = node
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        if msg.is_empty() {
+            continue;
+        }
+        if preview.is_empty() && msg.starts_with("# Session Context") {
+            // Stash as fallback in case there's no later user_message.
+            preview = collapse_preview(msg);
+            continue;
+        }
+        preview = collapse_preview(msg);
+        break;
+    }
+    (preview, node_count)
+}
+
+/// Collapse newlines + extra whitespace, cap at 240 chars. Output is
+/// safe to render inline in a single-line preview row.
+fn collapse_preview(s: &str) -> String {
+    const MAX_CHARS: usize = 240;
+    let mut buf = String::with_capacity(s.len().min(MAX_CHARS + 4));
+    let mut prev_space = false;
+    for ch in s.chars() {
+        if buf.chars().count() >= MAX_CHARS {
+            buf.push('\u{2026}'); // "…"
+            return buf;
+        }
+        if ch.is_whitespace() {
+            if !prev_space && !buf.is_empty() {
+                buf.push(' ');
+                prev_space = true;
+            }
+        } else {
+            buf.push(ch);
+            prev_space = false;
+        }
+    }
+    buf
+}
+
+#[cfg(test)]
+mod recent_sessions_tests {
+    use super::*;
+    use crate::backend::storage::filestore::FileStore;
+
+    fn fresh_filestore() -> std::sync::Arc<FileStore> {
+        std::sync::Arc::new(FileStore::open_in_memory().unwrap())
+    }
+
+    fn write_snapshot(fs: &FileStore, block_id: &str, body: &str) {
+        // make_file then write_file mirrors the production
+        // BlockfileWriteState handler path.
+        let meta: crate::backend::storage::filestore::FileMeta =
+            std::collections::HashMap::new();
+        let opts = crate::backend::storage::filestore::FileOpts::default();
+        fs.make_file(block_id, "output.state.json", meta, opts)
+            .expect("make_file");
+        fs.write_file(block_id, "output.state.json", body.as_bytes())
+            .expect("write_file");
+    }
+
+    #[test]
+    fn collapse_preview_strips_newlines_and_caps_length() {
+        let s = "hello\n\nworld\n  next   line";
+        assert_eq!(collapse_preview(s), "hello world next line");
+        let long: String = "a".repeat(500);
+        let out = collapse_preview(&long);
+        // 240 chars + ellipsis.
+        assert!(out.ends_with('\u{2026}'));
+        assert!(out.chars().count() <= 241);
+    }
+
+    #[test]
+    fn read_session_preview_missing_returns_zero() {
+        let fs = fresh_filestore();
+        let (preview, count) = read_session_preview(&fs, "no-such-block");
+        assert_eq!(preview, "");
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn read_session_preview_extracts_first_user_message_skipping_context() {
+        let fs = fresh_filestore();
+        // Two user messages: first is the boilerplate Session Context;
+        // second is the user's real prompt. Preview should be the real one.
+        let snapshot = serde_json::json!({
+            "schemaVersion": 1,
+            "savedAt": "2026-05-23T08:00:00Z",
+            "highWaterMark": 169,
+            "historyOffset": 0,
+            "nodes": [
+                {
+                    "type": "user_message",
+                    "id": "u0",
+                    "timestamp": 0,
+                    "collapsed": false,
+                    "summary": "👤 User Message",
+                    "message": "# Session Context\nIdentity: Claude\n## Description\nStartup boilerplate"
+                },
+                { "type": "markdown", "id": "m0", "content": "ack" },
+                {
+                    "type": "user_message",
+                    "id": "u1",
+                    "timestamp": 100,
+                    "collapsed": false,
+                    "summary": "👤 User Message",
+                    "message": "check the agentmuxai/agentmux history, get the latest code"
+                }
+            ]
+        });
+        write_snapshot(&fs, "blk-1", &snapshot.to_string());
+        let (preview, count) = read_session_preview(&fs, "blk-1");
+        assert_eq!(count, 3);
+        assert!(preview.starts_with("check the agentmuxai/agentmux"));
+    }
+
+    #[test]
+    fn read_session_preview_falls_back_to_session_context_when_only_one() {
+        let fs = fresh_filestore();
+        let snapshot = serde_json::json!({
+            "schemaVersion": 1,
+            "nodes": [
+                {
+                    "type": "user_message",
+                    "id": "u0",
+                    "message": "# Session Context\nIdentity: Claude\nStartup boilerplate"
+                }
+            ]
+        });
+        write_snapshot(&fs, "blk-2", &snapshot.to_string());
+        let (preview, count) = read_session_preview(&fs, "blk-2");
+        assert_eq!(count, 1);
+        // Newlines collapsed; starts with the boilerplate marker.
+        assert!(preview.starts_with("# Session Context"));
+    }
+
+    #[test]
+    fn read_session_preview_handles_malformed_json() {
+        let fs = fresh_filestore();
+        write_snapshot(&fs, "blk-3", "not valid json {");
+        let (preview, count) = read_session_preview(&fs, "blk-3");
+        assert_eq!(preview, "");
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn read_session_preview_handles_no_user_messages() {
+        let fs = fresh_filestore();
+        let snapshot = serde_json::json!({
+            "schemaVersion": 1,
+            "nodes": [
+                { "type": "markdown", "id": "m0", "content": "system note" }
+            ]
+        });
+        write_snapshot(&fs, "blk-4", &snapshot.to_string());
+        let (preview, count) = read_session_preview(&fs, "blk-4");
+        assert_eq!(preview, "");
+        assert_eq!(count, 1);
+    }
+
+    // ── Integration test: full listrecentsessions handler ────────────
+    //
+    // Spins up the same engine + state shape as the production
+    // websocket path so the handler runs end-to-end against an
+    // in-memory wstore + filestore. Asserts the row shape, the
+    // identity filter, the snapshot-first sort, the preview extraction,
+    // and the cross-version "no snapshot" fallback. This is the
+    // backend correctness gate for the AgentPicker's Recent Sessions
+    // surface (cascade follow-up 2026-05-23).
+    use crate::backend::storage::wstore::{
+        AgentDefinition, AgentInstance, Identity, InstanceStatus, Memory, WaveStore,
+    };
+    use crate::backend::rpc::engine::WshRpcEngine;
+    use crate::server::AppState;
+    use std::sync::Arc;
+
+    /// Drive a single RPC round-trip against the in-memory engine,
+    /// asserting success + deserializing the JSON payload into `T`.
+    async fn call_rpc<T: serde::de::DeserializeOwned>(
+        engine: &Arc<WshRpcEngine>,
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::backend::rpc_types::RpcMessage>,
+        command: &str,
+        data: serde_json::Value,
+    ) -> T {
+        let req_id = format!("test-{}", uuid::Uuid::new_v4());
+        let msg = crate::backend::rpc_types::RpcMessage {
+            command: command.to_string(),
+            reqid: req_id.clone(),
+            data: Some(data),
+            ..Default::default()
+        };
+        engine.handle_message(msg);
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("handler timed out")
+            .expect("output channel closed");
+        assert_eq!(resp.resid, req_id, "unexpected response id");
+        assert!(resp.error.is_empty(), "handler returned error: {}", resp.error);
+        let payload = resp.data.unwrap_or(serde_json::Value::Null);
+        serde_json::from_value(payload).expect("response deserialize")
+    }
+
+    fn build_state_with_seed() -> (
+        AppState,
+        Arc<WshRpcEngine>,
+        tokio::sync::mpsc::UnboundedReceiver<crate::backend::rpc_types::RpcMessage>,
+    ) {
+        let wstore = Arc::new(WaveStore::open_in_memory().unwrap());
+        let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+        let event_bus = Arc::new(crate::backend::eventbus::EventBus::new());
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let reactive_handler = crate::backend::reactive::get_global_handler();
+        let poller = Arc::new(crate::backend::reactive::Poller::new(
+            crate::backend::reactive::PollerConfig {
+                agentmux_url: None,
+                agentmux_token: None,
+                poll_interval_secs: 30,
+            },
+            reactive_handler,
+        ));
+        crate::backend::wcore::ensure_initial_data(&wstore).unwrap();
+        let config_watcher = Arc::new(crate::backend::wconfig::ConfigWatcher::new());
+        let process_tracker = Arc::new(
+            crate::backend::process_tracker::registry::AgentProcessRegistry::new(Some(broker.clone())),
+        );
+        let state = AppState {
+            auth_key: "test".to_string(),
+            version: "test".to_string(),
+            app_path: String::new(),
+            wstore: wstore.clone(),
+            filestore: filestore.clone(),
+            event_bus: event_bus.clone(),
+            broker,
+            reactive_handler,
+            poller,
+            config_watcher,
+            messagebus: Arc::new(crate::backend::messagebus::MessageBus::new()),
+            http_client: reqwest::Client::new(),
+            local_web_url: String::new(),
+            subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus)),
+            history_service: Arc::new(crate::backend::history::HistoryService::new()),
+            lan_discovery: None,
+            process_tracker,
+            srv_state: Arc::new(tokio::sync::Mutex::new(crate::state::State::default())),
+            srv_events_tx: tokio::sync::broadcast::channel::<agentmux_common::ipc::Event>(64).0,
+            saga_id_alloc: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            saga_log: Arc::new(crate::sagas::log::SagaLog::open_in_memory().unwrap()),
+            auth_session_manager: Arc::new(crate::identity::auth_session::AuthSessionManager::new()),
+            install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
+        };
+
+        // Seed: 1 definition, 1 identity bundle, 1 memory bundle.
+        let def = AgentDefinition {
+            id: "def-claude".to_string(),
+            slug: "claude-code".to_string(),
+            name: "Claude Code".to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+        };
+        let mut def_mut = def.clone();
+        wstore.agent_def_insert(&mut def_mut).unwrap();
+        let identity = Identity {
+            id: "id-work".to_string(),
+            name: "Work".to_string(),
+            description: String::new(),
+            is_blank: false,
+            created_at: 0,
+            updated_at: 0,
+        };
+        wstore.bundle_identity_upsert(&identity).unwrap();
+        let memory = Memory {
+            id: "mem-notes".to_string(),
+            name: "Notes".to_string(),
+            description: String::new(),
+            is_blank: false,
+            provider: String::new(),
+            model: String::new(),
+            instructions: String::new(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        };
+        wstore.bundle_memory_upsert(&memory).unwrap();
+
+        // 3 instances:
+        //   - blk-recent: has snapshot, more recent activity
+        //   - blk-older:  has snapshot, older activity
+        //   - blk-none:   no snapshot at all (legacy / pre-persistence row)
+        // All three use the same identity bundle so the filter test
+        // can also exercise it without re-seeding.
+        for (id, block, started) in [
+            ("inst-recent", "blk-recent", 1_700_000_100_000_i64),
+            ("inst-older", "blk-older", 1_700_000_000_000_i64),
+            ("inst-none", "blk-none", 1_700_000_050_000_i64),
+        ] {
+            let inst = AgentInstance {
+                id: id.to_string(),
+                definition_id: "def-claude".to_string(),
+                parent_instance_id: String::new(),
+                block_id: block.to_string(),
+                session_id: String::new(),
+                status: InstanceStatus::Running.as_str().to_string(),
+                github_context: String::new(),
+                started_at: started,
+                ended_at: 0,
+                created_at: started,
+                identity_id: "id-work".to_string(),
+                memory_id: "mem-notes".to_string(),
+                instance_name: format!("name-{id}"),
+                working_directory: format!("/tmp/{id}"),
+                display_hidden: false,
+            };
+            wstore.instance_create(&inst).unwrap();
+        }
+
+        // Snapshots for the two with snapshots.
+        let snap_recent = serde_json::json!({
+            "schemaVersion": 1,
+            "nodes": [
+                {"type": "user_message", "id": "u0",
+                 "message": "# Session Context\nboilerplate"},
+                {"type": "markdown", "id": "m0", "content": "ack"},
+                {"type": "user_message", "id": "u1",
+                 "message": "fix the live-feed hover delay"}
+            ]
+        });
+        write_snapshot(&filestore, "blk-recent", &snap_recent.to_string());
+        let snap_older = serde_json::json!({
+            "schemaVersion": 1,
+            "nodes": [
+                {"type": "user_message", "id": "u0",
+                 "message": "earlier conversation"}
+            ]
+        });
+        write_snapshot(&filestore, "blk-older", &snap_older.to_string());
+
+        let (engine, rx) = WshRpcEngine::new();
+        super::register_agent_handlers(&engine, &state);
+        (state, engine, rx)
+    }
+
+    #[tokio::test]
+    async fn handler_returns_sessions_with_previews_sorted_by_snapshot_first() {
+        let (_state, engine, mut rx) = build_state_with_seed();
+        let rows: Vec<RecentSessionRow> = call_rpc(
+            &engine,
+            &mut rx,
+            COMMAND_LIST_RECENT_SESSIONS,
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(rows.len(), 3, "all three sessions surfaced");
+
+        // Sort: snapshot-bearing rows first (recent then older), then
+        // the no-snapshot row at the tail.
+        assert_eq!(rows[0].instance_id, "inst-recent");
+        assert!(rows[0].has_snapshot);
+        assert_eq!(rows[0].node_count, 3);
+        assert!(
+            rows[0].preview.starts_with("fix the live-feed"),
+            "preview should be the post-context user message, got {:?}",
+            rows[0].preview
+        );
+
+        assert_eq!(rows[1].instance_id, "inst-older");
+        assert!(rows[1].has_snapshot);
+        assert_eq!(rows[1].node_count, 1);
+        assert_eq!(rows[1].preview, "earlier conversation");
+
+        assert_eq!(rows[2].instance_id, "inst-none");
+        assert!(!rows[2].has_snapshot);
+        assert_eq!(rows[2].node_count, 0);
+        assert_eq!(rows[2].preview, "");
+
+        // Joins: definition + identity + memory names resolved.
+        assert_eq!(rows[0].definition_name, "Claude Code");
+        assert_eq!(rows[0].identity_name, "Work");
+        assert_eq!(rows[0].memory_name, "Notes");
+        assert_eq!(rows[0].block_id_hint, "blk-recent");
+    }
+
+    #[tokio::test]
+    async fn handler_identity_filter_restricts_rows() {
+        let (_state, engine, mut rx) = build_state_with_seed();
+        // Filter to a non-existent identity → empty list.
+        let rows: Vec<RecentSessionRow> = call_rpc(
+            &engine,
+            &mut rx,
+            COMMAND_LIST_RECENT_SESSIONS,
+            serde_json::json!({ "identity_id": "no-such-bundle" }),
+        )
+        .await;
+        assert_eq!(rows.len(), 0);
+
+        // Filter to the seeded one → all three.
+        let rows: Vec<RecentSessionRow> = call_rpc(
+            &engine,
+            &mut rx,
+            COMMAND_LIST_RECENT_SESSIONS,
+            serde_json::json!({ "identity_id": "id-work" }),
+        )
+        .await;
+        assert_eq!(rows.len(), 3);
+
+        // Empty-string identity_id is treated as "no filter" so the
+        // frontend can pass `""` without special-casing.
+        let rows: Vec<RecentSessionRow> = call_rpc(
+            &engine,
+            &mut rx,
+            COMMAND_LIST_RECENT_SESSIONS,
+            serde_json::json!({ "identity_id": "" }),
+        )
+        .await;
+        assert_eq!(rows.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn handler_respects_limit() {
+        let (_state, engine, mut rx) = build_state_with_seed();
+        let rows: Vec<RecentSessionRow> = call_rpc(
+            &engine,
+            &mut rx,
+            COMMAND_LIST_RECENT_SESSIONS,
+            serde_json::json!({ "limit": 1 }),
+        )
+        .await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].instance_id, "inst-recent");
+    }
 }
