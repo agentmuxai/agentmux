@@ -1,0 +1,44 @@
+name: Release consistency check
+
+# Verify the release-consistency invariant on every PR that touches a
+# version-bearing file. See docs/retro/retro-release-version-desync-2026-05-22.md
+# for the v0.38.0 incident this guard addresses. Three layers of defense:
+#
+#   1. scripts/release.sh runs the same check after `task release` bumps.
+#   2. reagent reviews check the invariant on any PR touching these files.
+#   3. THIS workflow — the deterministic CI gate that can't be reviewed past.
+#
+# The job is fast (no build, no install) and only triggers on PRs that
+# touch a version file, so it doesn't slow down feature PRs.
+
+on:
+  # Only fire when VERSION_HISTORY.md itself is touched — that's the
+  # canonical signal of a release-intent commit, which is when all five
+  # version locations MUST agree. Between releases, `task package`'s
+  # patch bumps move package.json + lockfiles ahead of VERSION_HISTORY
+  # by design (VH is only updated by `task release`), so a full-five
+  # check on every PR would mis-fire on every feature build.
+  #
+  pull_request:
+    paths:
+      - 'VERSION_HISTORY.md'
+  push:
+    branches:
+      - main
+    paths:
+      - 'VERSION_HISTORY.md'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run release-consistency check
+        run: bash scripts/verify-release-consistency.sh
