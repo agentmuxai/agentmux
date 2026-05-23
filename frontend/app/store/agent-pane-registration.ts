@@ -96,10 +96,11 @@ import type { DocumentNode } from "../view/agent/types";
  *   - `agentId` — identity of the agent occupying this pane. Drives
  *     reducer initialState for the pane-state slot.
  *   - `documentSetter` — write-only projection for the documentAtom.
- *   - `projections` — the eight per-field setters the pane-state slot
+ *   - `projections` — the seven per-field setters the pane-state slot
  *     writes through (streaming / sessionStats / currentTool /
- *     turnTokens / turnActive / stopping / pending / initPhase /
- *     turnPhase).
+ *     turnTokens / pending / initPhase / turnPhase). PR G dropped the
+ *     legacy `turnActive` and `stopping` projections — see
+ *     `AgentPaneProjections` in `agent-pane-state-store.ts`.
  */
 export interface PaneRegistration {
     agentId: string;
