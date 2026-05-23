@@ -30,7 +30,7 @@ import {
     StreamingState,
     TurnTokens,
 } from "./types";
-import type { InitPhase } from "@/app/store/agent-pane-state/types";
+import type { InitPhase, TurnPhase } from "@/app/store/agent-pane-state/types";
 
 /**
  * A signal pair: [getter, setter]
@@ -72,6 +72,17 @@ export interface AgentAtoms {
      * Issue #728 gap 1.
      */
     initPhaseAtom: SignalPair<InitPhase>;
+    /**
+     * Single-source-of-truth turn phase (PR A introduced TurnPhase + dual-
+     * write in the reducer; PR B — this PR — switched the view's "working"
+     * animation binding to read it via the `isWorking(state)` selector).
+     * The reducer continues to dual-write the legacy `turnActiveAtom` /
+     * `stoppingAtom` / `streamingStateAtom.active` fields; PR G will drop
+     * them once every consumer is migrated.
+     *
+     * Spec: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §5–§7.
+     */
+    turnPhaseAtom: SignalPair<TurnPhase>;
 }
 
 /**
@@ -117,5 +128,6 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         stoppingAtom: createSignal<boolean>(false),
         pendingMessagesAtom: createSignal<PendingMessage[]>([]),
         initPhaseAtom: createSignal<InitPhase>("loading"),
+        turnPhaseAtom: createSignal<TurnPhase>({ kind: "Idle" }),
     };
 }
