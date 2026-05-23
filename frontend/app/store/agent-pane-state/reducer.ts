@@ -340,13 +340,22 @@ export function update(
             // rule so a second Stop press doesn't reset the deadline.
             const enteringInterrupting =
                 isWorking && k !== "Interrupting";
-            const nextPhase: TurnPhase = isWorking
-                ? {
-                      kind: "Interrupting",
-                      reason: "user",
-                      sigintSentAt: command.at,
-                  }
-                : state.turnPhase;
+            // Codex P2 on #991: preserve the original sigintSentAt on a
+            // repeated Stop press. The timeout was armed from the FIRST
+            // press's deadline; rebuilding the phase with a fresh
+            // `command.at` here makes consumers see a `sigintSentAt`
+            // that doesn't match the active deadline. When we're
+            // already Interrupting, reuse the existing phase so the
+            // timestamp stays pinned to the original SIGINT.
+            const nextPhase: TurnPhase = !isWorking
+                ? state.turnPhase
+                : k === "Interrupting"
+                    ? state.turnPhase
+                    : {
+                          kind: "Interrupting",
+                          reason: "user",
+                          sigintSentAt: command.at,
+                      };
             const events: AgentPaneEvent[] = [
                 { type: "stop-requested", at: command.at },
             ];
