@@ -819,22 +819,19 @@ fn spawn_auth_cli_pty(
                                         &sid2,
                                     );
                                     mgr2.finish_success(&sid2, bundle_id);
-                                } else {
-                                    // Confirm failed AFTER LoginSuccess
-                                    // pattern matched. Pre-fix the
-                                    // session would stay in InProgress
-                                    // forever (drain skipped outer
-                                    // fallback, detached did nothing).
-                                    // Reagent P1 follow-up on #981.
-                                    mgr2.finish_failure(
-                                        &sid2,
-                                        "CLI auth-check failed after login pattern match".to_string(),
-                                    );
+                                    // Atomic set ONLY on confirm-success
+                                    // — mirrors the pipes path. On
+                                    // confirm-miss the detached does
+                                    // nothing (atomic stays false),
+                                    // outer's post-exit fallback gets
+                                    // another shot at confirm by the
+                                    // time creds are fully written.
+                                    // Outer awaits this handle first,
+                                    // so the atomic is correctly
+                                    // reflected by the time it checks.
+                                    // codex P1 follow-up on #981.
+                                    success_for_detached.store(true, Ordering::Release);
                                 }
-                                // Atomic set AFTER the transition lands
-                                // — outer awaits this handle before
-                                // checking, so this is visible.
-                                success_for_detached.store(true, Ordering::Release);
                             });
                             maybe_detached = Some(handle);
                         }
@@ -996,9 +993,23 @@ fn compute_and_ensure_bundle_dir(
             return None;
         }
     };
-    let dir = paths
-        .identity_dir(bundle_id)
-        .join(provider.auth_dir_name);
+    // identity_dir rejects unsafe path segments (empty / `.` / `..` /
+    // segment with `/`, `\`, drive-letter, …). bundle_id comes from
+    // the auth.start request body, so this guard prevents a crafted
+    // id from escaping the identities root.
+    let bundle_root = match paths.identity_dir(bundle_id) {
+        Some(p) => p,
+        None => {
+            tracing::warn!(
+                target: "identity",
+                provider_id,
+                bundle_id,
+                "auth.start: bundle_id is not a safe path segment — skipping per-bundle dir override"
+            );
+            return None;
+        }
+    };
+    let dir = bundle_root.join(provider.auth_dir_name);
     if let Err(e) = std::fs::create_dir_all(&dir) {
         tracing::warn!(
             target: "identity",
@@ -1338,7 +1349,10 @@ mod tests {
 
         // Dir is `DataPaths::identity_dir(<id>).join(<auth_dir_name>)`
         // — claude's `auth_dir_name` is "claude" per the registry.
-        let expected = paths.identity_dir(bundle_id).join("claude");
+        let expected = paths
+            .identity_dir(bundle_id)
+            .expect("test bundle_id is a safe segment")
+            .join("claude");
         assert_eq!(
             std::path::Path::new(&dir),
             expected,

@@ -216,13 +216,24 @@ impl DataPaths {
     }
 
     /// `~/.agentmux/shared/identities/<bundle_id>/` — a specific
-    /// bundle's credential root. Per-provider subdirectories (e.g.
-    /// `claude/`, `codex/`) hang off this when the bundle gains an
-    /// OAuth binding (PR C). The directory is created lazily by the
-    /// bundle / OAuth flow that needs it — `ensure_dirs()` does not
-    /// pre-create it.
-    pub fn identity_dir(&self, bundle_id: &str) -> PathBuf {
-        self.identities_dir().join(bundle_id)
+    /// bundle's credential root, when `bundle_id` is a safe path
+    /// segment. Returns `None` for empty / `.` / `..` / any segment
+    /// containing `/`, `\`, drive-letter colons, or Windows-reserved
+    /// characters (same rules as the version/branch sanitizer in
+    /// `resolve`).
+    ///
+    /// Defensive return type: `bundle_id` flows from `auth.start`
+    /// request bodies (PR C) into `create_dir_all`, so an
+    /// unvalidated `PathBuf::join` would let a crafted id escape the
+    /// identities root and write outside the bundle area. codex P1
+    /// follow-up on #981.
+    ///
+    /// Per-provider subdirectories (e.g. `claude/`, `codex/`) hang
+    /// off this when the bundle gains an OAuth binding (PR C). The
+    /// directory is created lazily by the bundle / OAuth flow that
+    /// needs it — `ensure_dirs()` does not pre-create it.
+    pub fn identity_dir(&self, bundle_id: &str) -> Option<PathBuf> {
+        sanitize_path_segment(bundle_id).map(|safe| self.identities_dir().join(safe))
     }
 }
 
@@ -359,6 +370,38 @@ mod tests {
             assert_eq!(p.instance_dir, root.join("dev").join("main"));
             assert_eq!(p.data_dir, root.join("dev").join("main").join("data"));
             assert_eq!(p.shared_dir, root.join("shared"));
+        });
+    }
+
+    #[test]
+    fn identity_dir_rejects_unsafe_segments() {
+        // bundle_id flows from auth.start request bodies into
+        // create_dir_all. Without sanitization a crafted id would
+        // escape the identities root. The function must return None
+        // for traversal attempts, separator-bearing segments, and
+        // Windows-reserved characters. codex P1 follow-up on #981.
+        with_home_override(|_root| {
+            let p = DataPaths::resolve("0.33.639", &RuntimeMode::Installed).unwrap();
+
+            // Happy path — a normal UUID-shaped id resolves.
+            assert!(p.identity_dir("abc-123-uuid").is_some());
+
+            // Path traversal.
+            assert_eq!(p.identity_dir(".."), None);
+            assert_eq!(p.identity_dir("."), None);
+            assert_eq!(p.identity_dir("../../../etc"), None);
+            assert_eq!(p.identity_dir("a/b"), None);
+            assert_eq!(p.identity_dir("a\\b"), None);
+
+            // Empty / whitespace-only.
+            assert_eq!(p.identity_dir(""), None);
+            assert_eq!(p.identity_dir("   "), None);
+
+            // Windows-reserved characters.
+            assert_eq!(p.identity_dir("C:foo"), None);
+            assert_eq!(p.identity_dir("foo*bar"), None);
+            assert_eq!(p.identity_dir("foo?bar"), None);
+            assert_eq!(p.identity_dir("with\0nul"), None);
         });
     }
 
