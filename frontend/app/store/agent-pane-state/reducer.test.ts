@@ -9,6 +9,7 @@ import {
     INTERRUPT_TIMEOUT_MS,
     isInitReady,
     isWorking,
+    STREAMING_IDLE_TIMEOUT_MS,
     STUCK_THRESHOLD_MS,
     SUBMIT_TIMEOUT_MS,
     TurnPhase,
@@ -1423,6 +1424,340 @@ describe("agent-pane-state reducer", () => {
         it("SUBMIT_TIMEOUT_MS is 30000 (sanity)", () => {
             // Pinned so a sneaky bump can't slip in unreviewed.
             expect(SUBMIT_TIMEOUT_MS).toBe(30_000);
+        });
+    });
+
+    // ─────────────────────────────────────────────────────────────────
+    // PR E — bounded `Streaming → Done.errored("stream-stalled")`.
+    //
+    // Spec: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §10.
+    // Stream activity that lands inside Streaming emits a
+    // `schedule-stream-watchdog` event carrying the deadline; the
+    // dispatch layer cancels the prior arm and schedules a fresh
+    // setTimeout that fires `StreamStalled` if no new event refreshes
+    // `lastEventMs` within `STREAMING_IDLE_TIMEOUT_MS`. The reducer
+    // makes the final call: if the phase is still Streaming AND truly
+    // idle on receipt, transition to Done.errored; otherwise no-op.
+    // ─────────────────────────────────────────────────────────────────
+    describe("Bounded streaming watchdog (PR E)", () => {
+        it("STREAMING_IDLE_TIMEOUT_MS is 60000 (sanity)", () => {
+            // Pinned so a sneaky bump can't slip in unreviewed.
+            expect(STREAMING_IDLE_TIMEOUT_MS).toBe(60_000);
+        });
+
+        it("first stream activity from Submitting emits schedule-stream-watchdog", () => {
+            // Realistic flow: subscribe ONCE at mount, then a user
+            // message starts a new turn (Submitting). The first chunk
+            // arrives via StreamFlushObserved → promotes to Streaming.
+            // That promotion must arm the bounded idle watchdog.
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
+            const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
+            const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
+            expect(s2.turnPhase.kind).toBe("Submitting");
+            const r = update(s2, {
+                type: "StreamFlushObserved",
+                addedCount: 3,
+                at: 200,
+            });
+            expect(r.state.turnPhase.kind).toBe("Streaming");
+            // Two events: the flush itself, then the watchdog schedule.
+            expect(r.events).toHaveLength(2);
+            expect(r.events[0]).toMatchObject({
+                type: "stream-flush-observed",
+                addedCount: 3,
+            });
+            expect(r.events[1]).toMatchObject({
+                type: "schedule-stream-watchdog",
+                deadlineMs: 200 + STREAMING_IDLE_TIMEOUT_MS,
+            });
+        });
+
+        it("ToolStart from Submitting promotes to Streaming AND emits schedule-stream-watchdog", () => {
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
+            const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
+            const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
+            const r = update(s2, { type: "ToolStart", name: "Read" }, 150);
+            expect(r.state.turnPhase.kind).toBe("Streaming");
+            expect(r.events).toHaveLength(2);
+            expect(r.events[0]).toMatchObject({ type: "tool-started" });
+            expect(r.events[1]).toMatchObject({
+                type: "schedule-stream-watchdog",
+                deadlineMs: 150 + STREAMING_IDLE_TIMEOUT_MS,
+            });
+        });
+
+        it("TokensIn from Submitting promotes to Streaming AND emits schedule-stream-watchdog", () => {
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
+            const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
+            const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
+            const r = update(s2, { type: "TokensIn", input: 50 }, 175);
+            expect(r.state.turnPhase.kind).toBe("Streaming");
+            expect(r.events).toHaveLength(2);
+            expect(r.events[1]).toMatchObject({
+                type: "schedule-stream-watchdog",
+                deadlineMs: 175 + STREAMING_IDLE_TIMEOUT_MS,
+            });
+        });
+
+        it("subsequent stream activity within Streaming re-emits schedule-stream-watchdog with refreshed deadline", () => {
+            // Idempotent re-arm: every chunk / tool / token / flush
+            // while Streaming must extend the deadline. The dispatcher
+            // cancels the previous timer; the reducer's job is just to
+            // emit the new schedule.
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
+            const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
+            const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
+            // Promote to Streaming with first flush.
+            const s3 = update(s2, {
+                type: "StreamFlushObserved",
+                addedCount: 1,
+                at: 200,
+            }).state;
+            expect(s3.turnPhase.kind).toBe("Streaming");
+
+            // Second flush — must re-emit with refreshed deadline.
+            const r1 = update(s3, {
+                type: "StreamFlushObserved",
+                addedCount: 2,
+                at: 300,
+            });
+            expect(r1.events).toHaveLength(2);
+            expect(r1.events[1]).toMatchObject({
+                type: "schedule-stream-watchdog",
+                deadlineMs: 300 + STREAMING_IDLE_TIMEOUT_MS,
+            });
+
+            // Tool activity inside Streaming — also re-emits.
+            const s4 = r1.state;
+            const r2 = update(s4, { type: "ToolStart", name: "Bash" }, 400);
+            expect(r2.events).toHaveLength(2);
+            expect(r2.events[1]).toMatchObject({
+                type: "schedule-stream-watchdog",
+                deadlineMs: 400 + STREAMING_IDLE_TIMEOUT_MS,
+            });
+
+            // TokensOut inside Streaming — also re-emits.
+            const s5 = r2.state;
+            const r3 = update(s5, { type: "TokensOut", output: 200 }, 500);
+            expect(r3.events).toHaveLength(2);
+            expect(r3.events[1]).toMatchObject({
+                type: "schedule-stream-watchdog",
+                deadlineMs: 500 + STREAMING_IDLE_TIMEOUT_MS,
+            });
+
+            // ToolEnd inside Streaming — also re-emits (still activity).
+            const s6 = r3.state;
+            const r4 = update(s6, { type: "ToolEnd" }, 600);
+            expect(r4.events).toHaveLength(2);
+            expect(r4.events[1]).toMatchObject({
+                type: "schedule-stream-watchdog",
+                deadlineMs: 600 + STREAMING_IDLE_TIMEOUT_MS,
+            });
+        });
+
+        it("StreamSubscribe from Submitting emits schedule-stream-watchdog", () => {
+            // The hand-off case: subscribe finally lands after submit
+            // (e.g. reconnect mid-turn). Promotes to Streaming and arms.
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
+            const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
+            const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
+            const r = update(s2, { type: "StreamSubscribe", at: 120 });
+            expect(r.state.turnPhase.kind).toBe("Streaming");
+            expect(r.events).toHaveLength(2);
+            expect(r.events[0]).toMatchObject({ type: "stream-subscribed" });
+            expect(r.events[1]).toMatchObject({
+                type: "schedule-stream-watchdog",
+                deadlineMs: 120 + STREAMING_IDLE_TIMEOUT_MS,
+            });
+        });
+
+        it("StreamSubscribe from Idle does NOT emit schedule-stream-watchdog", () => {
+            // Subscribe alone (no Submitting) doesn't promote to
+            // Streaming — phase stays Idle — so no watchdog is armed.
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
+            const r = update(s0, { type: "StreamSubscribe", at: 100 });
+            expect(r.state.turnPhase.kind).toBe("Idle");
+            expect(r.events).toHaveLength(1);
+            expect(r.events[0]).toMatchObject({ type: "stream-subscribed" });
+        });
+
+        it("StreamStalled after STREAMING_IDLE_TIMEOUT_MS → Done.errored stream-stalled", () => {
+            // Build a Streaming phase whose lastEventMs is far enough
+            // in the past that the deadline has elapsed.
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
+            const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
+            const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
+            const s3 = update(s2, {
+                type: "StreamFlushObserved",
+                addedCount: 1,
+                at: 1_000,
+            }).state;
+            expect(s3.turnPhase.kind).toBe("Streaming");
+            if (s3.turnPhase.kind === "Streaming") {
+                expect(s3.turnPhase.lastEventMs).toBe(1_000);
+            }
+            const stalledAt = 1_000 + STREAMING_IDLE_TIMEOUT_MS;
+            const r = update(s3, { type: "StreamStalled", at: stalledAt });
+            // Phase forced to Done.errored.
+            expect(r.state.turnPhase.kind).toBe("Done");
+            if (r.state.turnPhase.kind === "Done") {
+                expect(r.state.turnPhase.outcome).toBe("errored");
+                expect(r.state.turnPhase.finishedAt).toBe(stalledAt);
+            }
+            // Legacy fields cleared, same as TurnEnd / interrupt timeout.
+            expect(r.state.turnActive).toBe(false);
+            expect(r.state.stopping).toBe(false);
+            expect(r.state.currentTool).toBe(null);
+            expect(r.state.turnTokens).toBe(null);
+            // Animation invariant: isWorking flips false.
+            expect(isWorking(r.state)).toBe(false);
+            // Audit event.
+            expect(r.events).toHaveLength(1);
+            expect(r.events[0]).toMatchObject({
+                type: "stream-stalled",
+                at: stalledAt,
+            });
+        });
+
+        it("StreamStalled while Streaming but NOT yet stale is a same-ref no-op", () => {
+            // Early callback / race: a fresh event refreshed
+            // `lastEventMs` between the dispatcher seeing the timer pop
+            // and the command landing. The reducer's defence-in-depth
+            // check sees idleMs < STREAMING_IDLE_TIMEOUT_MS and no-ops;
+            // the dispatcher re-arms on the next activity.
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
+            const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
+            const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
+            const s3 = update(s2, {
+                type: "StreamFlushObserved",
+                addedCount: 1,
+                at: 1_000,
+            }).state;
+            expect(s3.turnPhase.kind).toBe("Streaming");
+            // 1ms before the deadline — still within the live window.
+            const earlyAt = 1_000 + STREAMING_IDLE_TIMEOUT_MS - 1;
+            const r = update(s3, { type: "StreamStalled", at: earlyAt });
+            // Same-ref no-op pattern — no mutation, no event.
+            expect(r.state).toBe(s3);
+            expect(r.events).toEqual([]);
+        });
+
+        it("StreamStalled while Idle is a same-ref no-op", () => {
+            const start = mk();
+            const r = update(start, { type: "StreamStalled", at: 100_000 });
+            expect(r.state).toBe(start);
+            expect(r.events).toEqual([]);
+        });
+
+        it("StreamStalled while Submitting is a same-ref no-op", () => {
+            // The stale timer was from a prior turn that already ended.
+            // The fresh Submitting must not be force-failed.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            expect(s1.turnPhase.kind).toBe("Submitting");
+            const r = update(s1, { type: "StreamStalled", at: 999_999 });
+            expect(r.state).toBe(s1);
+            expect(r.events).toEqual([]);
+        });
+
+        it("StreamStalled while Interrupting is a same-ref no-op", () => {
+            // User pressed Stop and we're awaiting the SIGINT ack —
+            // the interrupt timeout (PR C) owns this state, not the
+            // stream-stalled watchdog.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "StreamSubscribe", at: 120 }).state;
+            const s3 = update(s2, { type: "RequestStop", at: 200 }).state;
+            expect(s3.turnPhase.kind).toBe("Interrupting");
+            const r = update(s3, { type: "StreamStalled", at: 999_999 });
+            expect(r.state).toBe(s3);
+            expect(r.events).toEqual([]);
+        });
+
+        it("StreamStalled while Done is a same-ref no-op (first-done-wins)", () => {
+            // Graceful TurnEnd landed first. The late stalled tick must
+            // not overwrite the existing outcome.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "TurnEnd", stats: null }, 200).state;
+            expect(s2.turnPhase.kind).toBe("Done");
+            if (s2.turnPhase.kind === "Done") {
+                expect(s2.turnPhase.outcome).toBe("completed");
+            }
+            const r = update(s2, { type: "StreamStalled", at: 999_999 });
+            expect(r.state).toBe(s2);
+            expect(r.events).toEqual([]);
+            // Outcome preserved.
+            if (r.state.turnPhase.kind === "Done") {
+                expect(r.state.turnPhase.outcome).toBe("completed");
+            }
+        });
+
+        it("StreamStalled while Disconnected is a same-ref no-op", () => {
+            // Stream dropped mid-turn → Disconnected. The stale watchdog
+            // must not corrupt that state.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "StreamUnsubscribe", at: 200 }).state;
+            expect(s2.turnPhase.kind).toBe("Disconnected");
+            const r = update(s2, { type: "StreamStalled", at: 999_999 });
+            expect(r.state).toBe(s2);
+            expect(r.events).toEqual([]);
+        });
+
+        it("First-done-wins: late TurnEnd after StreamStalled does NOT overwrite the errored outcome", () => {
+            // PR C's `TurnEnd` arm already has the `alreadyDone` guard:
+            // when phase is already Done, the outcome is preserved and
+            // only stats merging happens. Exercise that interaction for
+            // the stream-stalled path.
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
+            const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
+            const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
+            const s3 = update(s2, {
+                type: "StreamFlushObserved",
+                addedCount: 1,
+                at: 1_000,
+            }).state;
+            const stalledAt = 1_000 + STREAMING_IDLE_TIMEOUT_MS;
+            const s4 = update(s3, { type: "StreamStalled", at: stalledAt })
+                .state;
+            expect(s4.turnPhase.kind).toBe("Done");
+            if (s4.turnPhase.kind === "Done") {
+                expect(s4.turnPhase.outcome).toBe("errored");
+                expect(s4.turnPhase.finishedAt).toBe(stalledAt);
+            }
+            // Late ack from the backend (e.g. socket eventually unfroze
+            // and emitted a final session_end). PR C's alreadyDone guard
+            // must keep `errored`, not overwrite to `completed`.
+            const lateAck = stalledAt + 5_000;
+            const r = update(
+                s4,
+                {
+                    type: "TurnEnd",
+                    stats: { input_tokens: 50, output_tokens: 100 } as any,
+                },
+                lateAck,
+            );
+            expect(r.state.turnPhase.kind).toBe("Done");
+            if (r.state.turnPhase.kind === "Done") {
+                expect(r.state.turnPhase.outcome).toBe("errored");
+                // finishedAt preserved from the stall, not bumped to lateAck.
+                expect(r.state.turnPhase.finishedAt).toBe(stalledAt);
+            }
+        });
+
+        it("StreamFlushObserved while inactive does NOT emit schedule-stream-watchdog", () => {
+            // Defence: the watchdog must only re-arm when we genuinely
+            // land in Streaming. Inactive-stream flushes are dropped
+            // with no events — including no watchdog.
+            const start = mk();
+            const r = update(start, {
+                type: "StreamFlushObserved",
+                addedCount: 3,
+                at: 110,
+            });
+            expect(r.state).toBe(start);
+            expect(r.events).toEqual([]);
         });
     });
 });
