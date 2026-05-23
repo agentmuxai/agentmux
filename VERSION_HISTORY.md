@@ -1,5 +1,9 @@
 # AgentMux Version History
 
+## 0.99.0 — 2026-05-23
+
+- test(reagent): synthetic release-consistency mismatch — VERSION_HISTORY advanced to 0.99.0 while package.json / Cargo.toml stay at 0.38.2. This entry exists only to verify a5af/reagent#158 fires `[P0] Release-consistency mismatch` instead of approving the PR. **Do not merge.**
+
 ## 0.38.1 — 2026-05-22
 
 - fix(magnify): single-instance pane render — fixes zoom + browser-pane black on restore
