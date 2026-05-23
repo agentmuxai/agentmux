@@ -76,21 +76,45 @@ export function usePtyWidth(opts: UsePtyWidthOpts): void {
         let lastCols = -1;
         let timer: ReturnType<typeof setTimeout> | undefined;
 
-        const send = (cols: number) => {
+        // codex P1 on #986: the controller can be unregistered at first
+        // mount (launcher async-spawns it AFTER `startLaunchFlow` runs),
+        // so the initial `controllerinput` send fails with "controller is
+        // not running" and `lastCols` was being set BEFORE the RPC
+        // resolved — meaning we'd never retry the same width and the PTY
+        // stayed at the fallback 200 for the whole session unless the
+        // user manually resized the pane.
+        //
+        // Fix: only mark `lastCols` AFTER the RPC succeeds. Retry up to 2
+        // times on failure with a short backoff so the controller has a
+        // chance to come up. A user-driven resize remains independent —
+        // each new width attempts a fresh send.
+        const send = (cols: number, retriesLeft: number = 2) => {
             if (cols === lastCols) return;
-            lastCols = cols;
             RpcApi.ControllerInputCommand(TabRpcClient, {
                 blockid: opts.blockId,
                 termsize: { rows: DEFAULT_ROWS, cols },
-            }).catch((err: unknown) => {
-                opts.log?.(
-                    "pty",
-                    `resize to ${cols} cols failed: ${
-                        err instanceof Error ? err.message : String(err)
-                    }`,
-                    "warn",
-                );
-            });
+            })
+                .then(() => {
+                    lastCols = cols;
+                })
+                .catch((err: unknown) => {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    if (retriesLeft > 0) {
+                        const delay = (3 - retriesLeft) * 500;
+                        opts.log?.(
+                            "pty",
+                            `resize to ${cols} cols failed: ${msg} (retrying in ${delay}ms)`,
+                            "warn",
+                        );
+                        setTimeout(() => send(cols, retriesLeft - 1), delay);
+                    } else {
+                        opts.log?.(
+                            "pty",
+                            `resize to ${cols} cols failed after 3 attempts: ${msg}`,
+                            "warn",
+                        );
+                    }
+                });
         };
 
         const compute = () => {
