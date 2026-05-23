@@ -141,12 +141,14 @@ the browser picks up the transition from the new rule and animates.
 
 ---
 
-## Change 3 — 1-second post-completion hold before auto-collapse
+## Change 3 — 5-second post-completion hold before auto-collapse
 
 ### Why
 `autoExpanded()` currently returns `false` the instant `status` changes from
-`running` → `success`. The panel snaps shut with zero reading time. A 1-second
-grace period lets the user see the final output line before the block collapses.
+`running` → `success`. The panel snaps shut with zero reading time. A
+5-second grace period lets the user actually finish reading the final output
+lines before the block collapses. (Initially shipped at 1 s; bumped to 5 s
+after live testing — 1 s was too tight to read more than a single line.)
 
 This only affects the **auto-expand** path (running tools). A user who has
 manually pinned the block is unaffected — `props.pinned` still wins.
@@ -154,16 +156,22 @@ manually pinned the block is unaffected — `props.pinned` still wins.
 ### Implementation — `frontend/app/view/agent/components/ToolBlock.tsx`
 
 ```tsx
-// New signal — stays true for 1s after a running tool completes:
+// New signal — stays true for POST_COMPLETION_HOLD_MS (5 s) after a
+// running tool completes. The hold is gated on a real active→inactive
+// TRANSITION (not status-snapshot) to avoid arming on mount of loaded
+// transcripts. See ToolBlock.tsx for the prevStatus comparator.
+const POST_COMPLETION_HOLD_MS = 5000;
 const [postCompletionHold, setPostCompletionHold] = createSignal(false);
+let prevStatus: string = props.node.status;
+const isActive = (s: string) => s === "running" || s === "pending_approval" || s === "failed";
 createEffect(() => {
     const s = props.node.status;
-    if (s !== "running" && s !== "pending_approval" && s !== "failed") {
-        if (postCompletionHold()) return;
+    if (isActive(prevStatus) && !isActive(s)) {
         setPostCompletionHold(true);
-        const t = setTimeout(() => setPostCompletionHold(false), 1000);
+        const t = setTimeout(() => setPostCompletionHold(false), POST_COMPLETION_HOLD_MS);
         onCleanup(() => clearTimeout(t));
     }
+    prevStatus = s;
 });
 
 // Updated autoExpanded:
@@ -258,7 +266,7 @@ included) since Chrome 63. No fallback needed for the Tauri/Electron target.
 | Cursor skims over a collapsed tool | Instant expand | 150ms delay — no expand on quick pass |
 | Cursor enters and stays | Instant expand | Expands after 150ms |
 | Cursor leaves expanded block | Instant collapse, no animation | 200ms slide-out animation |
-| Running tool finishes | Panel snaps shut immediately | Panel stays open 1s then collapses with animation |
+| Running tool finishes | Panel snaps shut immediately | Panel stays open 5s then collapses with animation |
 | No chunks yet, tool running | "⏳ Running..." | "⏳ Thinking..." |
 | Scroll reaches end of log | Chains to agent pane scroll | Stops at log boundary |
 | User has pinned block | Already works | Unaffected — pin still wins |
