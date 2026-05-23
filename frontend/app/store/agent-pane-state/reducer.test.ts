@@ -587,6 +587,55 @@ describe("agent-pane-state reducer", () => {
             expect(r.state.streaming.active).toBe(false);
         });
 
+        it("StreamFlushObserved while Submitting promotes phase to Streaming (codex P1 on #987)", () => {
+            // Realistic runtime flow: subscribe ONCE at mount, then each
+            // user message dispatches TurnStart. Submitting → Streaming
+            // must promote on the first chunk arrival, NOT depend on a
+            // re-subscribe that never fires in practice.
+            const s0 = update(mk(), { type: "InitReady" }).state;
+            const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
+            // (no second subscribe — that was the synthetic test crutch)
+            const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
+            expect(s2.turnPhase.kind).toBe("Submitting");
+            const r = update(s2, {
+                type: "StreamFlushObserved",
+                addedCount: 3,
+                at: 120,
+            });
+            expect(r.state.turnPhase.kind).toBe("Streaming");
+            if (r.state.turnPhase.kind === "Streaming") {
+                expect(r.state.turnPhase.bufferSize).toBe(3);
+                expect(r.state.turnPhase.toolsActive).toBe(0);
+                expect(r.state.turnPhase.lastEventMs).toBe(120);
+            }
+        });
+
+        it("ToolStart while Submitting promotes phase to Streaming with toolsActive=1", () => {
+            const s0 = update(mk(), { type: "InitReady" }).state;
+            const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
+            const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
+            expect(s2.turnPhase.kind).toBe("Submitting");
+            const r = update(s2, { type: "ToolStart", name: "Read" }, 130);
+            expect(r.state.turnPhase.kind).toBe("Streaming");
+            if (r.state.turnPhase.kind === "Streaming") {
+                expect(r.state.turnPhase.toolsActive).toBe(1);
+                expect(r.state.turnPhase.lastEventMs).toBe(130);
+            }
+        });
+
+        it("TokensIn while Submitting promotes phase to Streaming", () => {
+            const s0 = update(mk(), { type: "InitReady" }).state;
+            const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
+            const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
+            expect(s2.turnPhase.kind).toBe("Submitting");
+            const r = update(s2, { type: "TokensIn", input: 50 }, 200);
+            expect(r.state.turnPhase.kind).toBe("Streaming");
+            if (r.state.turnPhase.kind === "Streaming") {
+                expect(r.state.turnPhase.lastEventMs).toBe(200);
+                expect(r.state.turnPhase.toolsActive).toBe(0);
+            }
+        });
+
         it("ToolStart while Streaming increments toolsActive on the phase", () => {
             const s0 = update(mk(), { type: "InitReady" }).state;
             const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;

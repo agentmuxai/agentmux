@@ -125,10 +125,12 @@ export function update(
                 return { state, events: [] };
             }
             const newBuf = state.streaming.bufferSize + command.addedCount;
-            // Dual-write: while Streaming, mirror bufferSize + lastEventMs
-            // onto the phase. Other phases (Idle/Submitting/etc.) keep
-            // their shape — flushes outside a Streaming phase are
-            // ambient and shouldn't promote phase.
+            // Dual-write: while Streaming, mirror bufferSize + lastEventMs.
+            // From Submitting, PROMOTE — a flush is the first concrete
+            // "stream is producing" signal after a turn submit. codex P1
+            // on #987 (companion to the bumpEvent promotion). Other
+            // phases (Idle, Done, Disconnected, Interrupting) keep their
+            // shape — flushes outside a turn are ambient.
             const nextPhase: TurnPhase =
                 state.turnPhase.kind === "Streaming"
                     ? {
@@ -136,7 +138,14 @@ export function update(
                           bufferSize: newBuf,
                           lastEventMs: command.at,
                       }
-                    : state.turnPhase;
+                    : state.turnPhase.kind === "Submitting"
+                        ? {
+                              kind: "Streaming",
+                              bufferSize: newBuf,
+                              toolsActive: 0,
+                              lastEventMs: command.at,
+                          }
+                        : state.turnPhase;
             return {
                 state: {
                     ...state,
@@ -461,6 +470,19 @@ function bumpEvent(
             ...next.turnPhase,
             lastEventMs: nowMs,
             toolsActive: Math.max(0, next.turnPhase.toolsActive + toolsDelta),
+        };
+    } else if (next.turnPhase.kind === "Submitting") {
+        // codex P1 on #987: `StreamSubscribe` fires once at mount, so
+        // subsequent turns enter Submitting and then no transition
+        // arm ever advances them to Streaming — chunks/tokens/tools
+        // arrive but phase stayed stuck. First stream activity from
+        // Submitting is the actual "stream is producing" signal;
+        // promote here so the dual-written phase reflects reality.
+        next.turnPhase = {
+            kind: "Streaming",
+            bufferSize: next.streaming.bufferSize,
+            toolsActive: Math.max(0, toolsDelta),
+            lastEventMs: nowMs,
         };
     }
     return next;
