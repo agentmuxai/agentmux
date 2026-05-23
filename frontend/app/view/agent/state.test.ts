@@ -6,6 +6,7 @@ import {
     createAgentAtoms,
     type AgentAtoms,
 } from "./state";
+import { workingFromPhase } from "@/app/store/agent-pane-state/types";
 
 let atoms: AgentAtoms;
 
@@ -51,5 +52,59 @@ describe("createAgentAtoms", () => {
         setActive1(true);
         expect(getActive1()).toBe(true);
         expect(getActive2()).toBe(false);
+    });
+
+    // ── PR B (turn-phase view migration) ────────────────────────────────
+    // Verifies that the view's "working" animation binding can be driven
+    // entirely from `turnPhaseAtom` via the `workingFromPhase` selector —
+    // no read of the legacy `turnActiveAtom` / `stoppingAtom` is required.
+    // The reducer still dual-writes the legacy fields (PR G drops them).
+    // Spec: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §7.
+    test("turnPhaseAtom defaults to Idle and drives workingFromPhase = false", () => {
+        const [getPhase] = atoms.turnPhaseAtom;
+        expect(getPhase().kind).toBe("Idle");
+        expect(workingFromPhase(getPhase())).toBe(false);
+    });
+
+    test("workingFromPhase(turnPhaseAtom) = true for Submitting/Streaming/Interrupting", () => {
+        const [getPhase, setPhase] = atoms.turnPhaseAtom;
+
+        setPhase({ kind: "Submitting", submittedAt: 1, pendingContent: "" });
+        expect(workingFromPhase(getPhase())).toBe(true);
+
+        setPhase({
+            kind: "Streaming",
+            bufferSize: 0,
+            toolsActive: 0,
+            lastEventMs: 1,
+        });
+        expect(workingFromPhase(getPhase())).toBe(true);
+
+        setPhase({ kind: "Interrupting", reason: "user", sigintSentAt: 1 });
+        expect(workingFromPhase(getPhase())).toBe(true);
+
+        setPhase({ kind: "Done", outcome: "completed", finishedAt: 1 });
+        expect(workingFromPhase(getPhase())).toBe(false);
+
+        setPhase({
+            kind: "Disconnected",
+            lastKind: "Streaming",
+            reason: "x",
+        });
+        expect(workingFromPhase(getPhase())).toBe(false);
+    });
+
+    test("Interrupting phase drives the 'Stopping…' label (replaces legacy stoppingAtom read)", () => {
+        const [getPhase, setPhase] = atoms.turnPhaseAtom;
+        // The view's `stopping` prop on AgentStatusLine reads
+        // `turnPhaseAtom[0]().kind === "Interrupting"` — no read of the
+        // legacy `stoppingAtom`. Verify the predicate flips correctly.
+        expect(getPhase().kind === "Interrupting").toBe(false);
+
+        setPhase({ kind: "Interrupting", reason: "user", sigintSentAt: 1 });
+        expect(getPhase().kind === "Interrupting").toBe(true);
+
+        setPhase({ kind: "Done", outcome: "stopped", finishedAt: 2 });
+        expect(getPhase().kind === "Interrupting").toBe(false);
     });
 });
