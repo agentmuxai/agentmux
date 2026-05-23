@@ -1,5 +1,37 @@
 # AgentMux Version History
 
+## 0.38.3 — 2026-05-23
+
+- feat(widgets): responsive labels collapse to icons on narrow title bars; all widgets pinned by default
+- fix(modal): defer singleton-modal label resolution past app boot
+- fix(launch-modal): thread continueOfId through the +New bundle round-trip
+- feat(identity): add SecretRef::OAuthConfigDir + per-bundle dir helpers (oauth bundles PR A)
+- feat(identity): resolver provider-class + OAuth config-dir dispatch (oauth bundles PR B)
+- build(release): self-verify version-file consistency after task release
+- feat(oauth): bind OAuth credentials into identity bundles on Connect (oauth bundles PR C)
+- feat(oauth): identity-binding status + reconnect UI (oauth bundles PR D)
+- feat(oauth): seed Default identity bundle from ambient ~/.claude on startup (oauth bundles PR E)
+- refactor(oauth): drop openclaw always-gate hack; bundle path handles all oauth providers (oauth bundles PR F)
+- fix(agent-pane): PTY cols follow pane width + bump default to 200
+- feat(agent-pane): add TurnPhase discriminated union (turn-phase PR A dual-write)
+- fix(agent-pane): migrate throwing dispatch sites + capture uncaught DOM errors
+- docs(recovery): recovered Maks conversation transcript from v0.38.3 cascade incident
+- fix(tool-block): post-completion hold timer was cancelled by reactive self-loop
+- feat(agent-pane): bounded interrupt timeout
+- feat(agent-pane): view reads isWorking(state)
+- feat(agent-pane): initPhase state machine
+- feat(tool-block): UX polish — hover delay, collapse animation, post-completion hold, scroll isolation, a11y inert
+- feat(agent-pane): bounded submit timeout
+- feat(agent-pane): bounded streaming watchdog
+- feat(agent-pane): Disconnected state + banner
+- refactor(agent-pane): drop legacy turnActive/stopping/streaming.active
+- feat(block): per-block error boundary + localized reload
+- feat(agent-pane): unified per-pane registration
+- feat(agent): recent sessions reattach UX
+- ci: add release-consistency gate (closes retro action item 3)
+- feat(agent-pane): model-level dispatchIfAlive helper
+
+
 ## 0.38.1 — 2026-05-22
 
 - fix(magnify): single-instance pane render — fixes zoom + browser-pane black on restore
