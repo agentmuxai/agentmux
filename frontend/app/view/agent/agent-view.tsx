@@ -9,14 +9,14 @@ import { createAgentAtoms } from "./state";
 import {
     dispatch as dispatchDoc,
     dispatchIfRegistered as dispatchDocIfRegistered,
-    registerPane as registerAgentDocPane,
-    unregisterPane as unregisterAgentDocPane,
 } from "@/app/store/agent-document-store";
 import {
     dispatch as dispatchPane,
-    registerPane as registerAgentPaneStatePane,
-    unregisterPane as unregisterAgentPaneStatePane,
 } from "@/app/store/agent-pane-state-store";
+import {
+    registerPane as registerAgentPane,
+    unregisterPane as unregisterAgentPane,
+} from "@/app/store/agent-pane-registration";
 import { workingFromPhase } from "@/app/store/agent-pane-state/types";
 import type { SubagentLinkNode } from "./types";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
@@ -104,39 +104,44 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
 
-    // Register this pane with the document store SYNCHRONOUSLY during
-    // component-body execution — before any hook's onMount can dispatch
-    // (codex P1 PR #681 round 1). The store throws on dispatch to an
-    // unregistered slot to prevent silent reducer-command drops, so the
-    // slot must exist before useAgentStream / useHistoryPagination call
-    // dispatchDoc from their own onMount handlers. See
-    // docs/specs/agent-pane-document-reducer-2026-05-03.md.
-    registerAgentDocPane(model.blockId, agentAtoms().documentAtom[1]);
-    onCleanup(() => unregisterAgentDocPane(model.blockId));
-
-    // Slice #4 — agent-pane-state slot: bundles streaming/sessionStats/
-    // currentTool/turnTokens/pending atoms behind a single reducer with
-    // cross-atom invariants. Same synchronous-register rule as the
-    // agent-document slot.
+    // Register this pane with BOTH the document store and the pane-state
+    // store SYNCHRONOUSLY in one atomic call, during component-body
+    // execution — before any hook's onMount can dispatch
+    // (codex P1 PR #681 round 1). The stores throw on dispatch to an
+    // unregistered slot to prevent silent reducer-command drops, so both
+    // slots must exist before useAgentStream / useHistoryPagination call
+    // their first dispatch from `onMount` handlers.
+    //
+    // PR-3 of the cascade follow-up sequence: registration is unified so
+    // a dispatcher can never observe the pane registered in one store
+    // but not the other. The half-registered window was the structural
+    // root of the cascade-mid-dispatch failure mode PR #878 detected and
+    // PR #989 migrated three call sites away from
+    // (docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md + the
+    // 2026-05-23 replaceChild retro). See agent-pane-registration.ts.
     //
     // `turnPhase` is the single-source-of-truth working/stopping signal
     // since PR G — the legacy `turnActive` / `stopping` /
-    // `streaming.active` fields and their projection setters have been
+    // `streaming.active` fields and their projection setters were
     // removed. The view binds the working animation to
     // `workingFromPhase(turnPhase)` and the "Stopping…" label to
     // `turnPhase.kind === "Interrupting"` (see AgentStatusLine below).
     {
         const a = agentAtoms();
-        registerAgentPaneStatePane(model.blockId, agentId, {
-            streaming: a.streamingStateAtom[1],
-            sessionStats: a.sessionStatsAtom[1],
-            currentTool: a.currentToolAtom[1],
-            turnTokens: a.turnTokensAtom[1],
-            pending: a.pendingMessagesAtom[1],
-            initPhase: a.initPhaseAtom[1],
-            turnPhase: a.turnPhaseAtom[1],
+        registerAgentPane(model.blockId, {
+            agentId,
+            documentSetter: a.documentAtom[1],
+            projections: {
+                streaming: a.streamingStateAtom[1],
+                sessionStats: a.sessionStatsAtom[1],
+                currentTool: a.currentToolAtom[1],
+                turnTokens: a.turnTokensAtom[1],
+                pending: a.pendingMessagesAtom[1],
+                initPhase: a.initPhaseAtom[1],
+                turnPhase: a.turnPhaseAtom[1],
+            },
         });
-        onCleanup(() => unregisterAgentPaneStatePane(model.blockId));
+        onCleanup(() => unregisterAgentPane(model.blockId));
     }
 
     // Activity log — collects per-session diagnostic entries from launch

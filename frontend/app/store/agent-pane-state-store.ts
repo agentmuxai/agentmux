@@ -80,6 +80,14 @@ export function setEventSink(sink: EventSink): void {
  * Register a pane. Call SYNCHRONOUSLY from the component body, before
  * any hook can dispatch. Re-registering a blockId resets the state cell
  * to initialState (useful for hot-reload).
+ *
+ * @internal — production callers MUST use `registerPane` from
+ * `agent-pane-registration.ts` so the pane is registered atomically
+ * across BOTH stores (document + pane-state). Direct callers of this
+ * function are limited to single-store unit tests (cascade-detection
+ * scenarios that need a custom single-store projection). PR-3 of the
+ * cascade follow-up sequence — see agent-pane-registration.ts for
+ * rationale + Option A/B discussion.
  */
 export function registerPane(
     blockId: string,
@@ -89,6 +97,10 @@ export function registerPane(
     slots.set(blockId, { state: initialState(agentId), proj });
 }
 
+/**
+ * @internal — see `registerPane` above. Production code uses
+ * `unregisterPane` from `agent-pane-registration.ts`.
+ */
 export function unregisterPane(blockId: string): void {
     slots.delete(blockId);
 }
