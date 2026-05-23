@@ -333,6 +333,12 @@ pub const COMMAND_LIST_NAMED_AGENTS: &str = "listnamedagents";
 /// v8 — soft-delete (hide) a named agent instance from the dropdown.
 /// Row + working directory remain on disk for audit + recovery.
 pub const COMMAND_HIDE_NAMED_AGENT: &str = "hidenamedagent";
+/// Cascade follow-up (2026-05-23) — list recent agent sessions with
+/// conversation previews extracted from the filestore `output.state.json`
+/// snapshot. Powers the AgentPicker's "Recent sessions" surface so a
+/// pane crash that orphans a conversation becomes recoverable from
+/// normal UI. See `docs/recovery/MAKS_CONVERSATION_2026_05_23.md`.
+pub const COMMAND_LIST_RECENT_SESSIONS: &str = "listrecentsessions";
 
 // Agent definition branching
 pub const COMMAND_FORK_AGENT_DEFINITION: &str = "forkagentdefinition";
@@ -1734,6 +1740,62 @@ pub struct NamedAgentRow {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandHideNamedAgentData {
     pub id: String,
+}
+
+/// Request for `listrecentsessions` — powers the AgentPicker's "Recent
+/// sessions" surface (cascade follow-up, 2026-05-23). Optional
+/// `identity_id` filter narrows the results to sessions that used the
+/// given identity bundle (matches `db_agent_instances.identity_id`).
+/// `limit` defaults to 20 (capped at 100); rows are sorted by the
+/// most-recent activity timestamp (filestore `output.state.json` modts
+/// when available, otherwise instance `started_at`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CommandListRecentSessionsData {
+    #[serde(default)]
+    pub limit: usize,
+    /// When set + non-empty, filter to sessions whose `identity_id`
+    /// matches. `Some("")` is treated the same as `None` (no filter)
+    /// to make the frontend wiring straightforward.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_id: Option<String>,
+}
+
+/// One row of the AgentPicker's "Recent sessions" list. Mirrors
+/// `NamedAgentRow` but adds preview fields read from the per-block
+/// `output.state.json` snapshot in filestore. `node_count == 0` and an
+/// empty `preview` mean the snapshot wasn't readable (the block may
+/// pre-date the persistence flow or have crashed before its first
+/// 30s snapshot) — the row still surfaces so the user can reattach.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecentSessionRow {
+    pub instance_id: String,
+    pub instance_name: String,
+    pub definition_id: String,
+    pub definition_name: String,
+    pub provider: String,
+    pub working_directory: String,
+    pub identity_id: String,
+    pub identity_name: String,
+    pub memory_id: String,
+    pub memory_name: String,
+    /// The pane / block whose filestore zone holds the conversation.
+    /// Empty when the instance row exists but no SQLite row resolved
+    /// the block_id (cross-version registry rows). Reattach falls
+    /// back to the working-directory continuation path in that case.
+    pub block_id_hint: String,
+    /// Snapshot of the first user message in the conversation (up to
+    /// 240 chars, newlines collapsed). Empty when the snapshot doesn't
+    /// exist or doesn't contain a user_message node yet.
+    pub preview: String,
+    /// Total `nodes.length` from the snapshot. 0 when unavailable.
+    pub node_count: usize,
+    /// Last activity timestamp (filestore modts when the snapshot
+    /// exists, otherwise `started_at`). Drives the sort order.
+    pub last_active_at: i64,
+    /// Whether `output.state.json` was found in filestore for this
+    /// block. False when the snapshot doesn't exist yet (no preview)
+    /// or the block_id_hint was empty.
+    pub has_snapshot: bool,
 }
 
 /// Mutable subset of AgentInstance for PATCH-style updates. Every field is
