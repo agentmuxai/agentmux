@@ -478,6 +478,24 @@ async fn main() {
     let bridge = backend::eventbus::EventBusBridge::new(event_bus.clone());
     broker.set_client(Box::new(bridge));
 
+    // OAuth-bundles startup migration (PR E, spec §5):
+    // on first launch after an upgrade, detect ambient OAuth
+    // credentials in `<HOME>/.<auth_dir_name>/.credentials.json` for
+    // each oauth-class provider (claude / codex / openclaw) and seed a
+    // "Default" identity bundle whose binding points at the ambient
+    // dir via `SecretRef::OAuthConfigDir`. Idempotent across restarts —
+    // a second invocation sees the existing binding and exits early
+    // for each already-covered provider. Legacy empty / "blank"
+    // identity_id rows on `db_agent_instances` are back-filled to the
+    // Default bundle in the same pass. Pure no-op when no ambient
+    // creds exist (fresh install) or every oauth-class provider is
+    // already bound by a user-driven flow.
+    let _oauth_migration_stats = identity::migration::run_default_bundle_migration(
+        &wstore,
+        Some(&broker),
+        None,
+    );
+
     // Config watcher (created before sysinfo loop so it can read telemetry:interval)
     let config_watcher = Arc::new(wconfig::ConfigWatcher::with_config(wconfig::build_default_config()));
 

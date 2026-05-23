@@ -1896,6 +1896,36 @@ impl WaveStore {
         Ok(rows > 0)
     }
 
+    /// Back-fill `db_agent_instances.identity_id` for legacy rows that
+    /// have either the empty string (post-v7 default before the launch
+    /// modal required Identity) or the literal `"blank"` sentinel
+    /// (pre-v8 placeholder for "use ambient creds"). Both shapes map
+    /// to "no Identity bundle assigned" and the OAuth-bundles startup
+    /// migration (PR E, spec §5) routes them to the newly-seeded
+    /// Default bundle so the resolver can inject env vars from the
+    /// captured ambient credentials at the next spawn.
+    ///
+    /// Returns the number of rows touched. Caller must verify that
+    /// `new_identity_id` is a real `db_identity_bundles.id` — this
+    /// method does NOT enforce FK validity (the column has no FK
+    /// constraint per the v7 migration). Mis-use would orphan the
+    /// rows to a non-existent bundle; the OAuth-bundles migration
+    /// guards against this by only calling here when it just upserted
+    /// the bundle row.
+    pub fn instance_backfill_identity_id(
+        &self,
+        new_identity_id: &str,
+    ) -> Result<usize, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "UPDATE db_agent_instances
+             SET identity_id = ?1
+             WHERE identity_id = '' OR identity_id = 'blank'",
+            params![new_identity_id],
+        )?;
+        Ok(rows)
+    }
+
     /// Mirror a `db_agent_instances` mutation into the cross-version
     /// registry. Only fires for **named** rows. Routes by
     /// `display_hidden` so the registry file ends up in the tree
