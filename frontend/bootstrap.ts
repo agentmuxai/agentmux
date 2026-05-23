@@ -6,6 +6,7 @@
 // then launches the main application (app-init.ts).
 
 import { initLogPipe } from "./log/log-pipe";
+import { initErrorForwarder } from "./log/error-forwarder";
 import { setupCefApi } from "./cef-init";
 import { initApp } from "./app-init";
 import { renderFloatingPaneShell } from "./app/floating-pane/floating-pane-shell";
@@ -15,6 +16,14 @@ import { initPerf } from "@/perf";
 // Pipe all console.log/warn/error to the Rust host log file.
 // Must run before any other code so early messages are captured.
 initLogPipe();
+
+// Capture uncaught errors + unhandled promise rejections and forward
+// them via the same fe_log_structured IPC channel as the console pipe.
+// SolidJS reconciler DOM exceptions (e.g. replaceChild NotFoundError)
+// surface only as window "error" events and would otherwise leave no
+// trace in the host log. Retro 2026-05-23 (agent-pane cascade →
+// replaceChild quick-win).
+initErrorForwarder();
 
 // Phase 0 perf instrumentation: Long Tasks observer + INP/event
 // observer. Must run before any user-interactive code so we never
@@ -161,12 +170,10 @@ async function bootstrap() {
     }
 }
 
-// Capture unhandled errors to backend log
-window.addEventListener("error", (event) => {
-    log("UNCAUGHT-ERROR", event.message, "at", event.filename, "line", String(event.lineno));
-});
-window.addEventListener("unhandledrejection", (event) => {
-    log("UNHANDLED-REJECTION", event.reason?.message ?? String(event.reason));
-});
+// Uncaught error / unhandled promise rejection forwarding is handled
+// by initErrorForwarder() at the top of this file. That path captures
+// stack / name / source and ships via the same fe_log_structured IPC
+// channel as the console pipe, so DOM exceptions from the SolidJS
+// reconciler land in the host log.
 
 bootstrap();

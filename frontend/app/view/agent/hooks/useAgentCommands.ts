@@ -28,7 +28,6 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
 import {
-    dispatch as dispatchPane,
     dispatchIfRegistered as dispatchPaneIfRegistered,
     snapshot as paneSnapshot,
 } from "@/app/store/agent-pane-state-store";
@@ -264,7 +263,10 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // the acceptance event promotes it. This is the architecture
         // from AGENT_PANE_QUEUED_MESSAGE_FEEDBACK_SPEC.md (two lists,
         // migration on accept).
-        dispatchPane(
+        // Soft variant — cascade-during-dispatch could dispose the pane
+        // before this fires; retro 2026-05-23 (agent-pane cascade →
+        // replaceChild quick-win).
+        dispatchPaneIfRegistered(
             opts.blockId,
             {
                 type: "PendingMessageQueued",
@@ -350,7 +352,10 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // and it also runs a fallback timer that does the same cleanup
         // if `session_end` never arrives (killing a subprocess prevents
         // the CLI from emitting its own terminating result event).
-        dispatchPane(opts.blockId, { type: "RequestStop", at: Date.now() }, "user");
+        // Soft variant — cascade-during-dispatch could dispose the pane
+        // before this fires; retro 2026-05-23 (agent-pane cascade →
+        // replaceChild quick-win).
+        dispatchPaneIfRegistered(opts.blockId, { type: "RequestStop", at: Date.now() }, "user");
         RpcApi.ControllerInputCommand(TabRpcClient, {
             blockid: opts.blockId,
             signame: "SIGINT",

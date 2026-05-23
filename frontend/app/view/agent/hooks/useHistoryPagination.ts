@@ -35,10 +35,7 @@ import { createSignal, onCleanup, onMount, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { dispatchIfRegistered as dispatchDocIfRegistered } from "@/app/store/agent-document-store";
-import {
-    dispatch as dispatchPane,
-    dispatchIfRegistered as dispatchPaneIfRegistered,
-} from "@/app/store/agent-pane-state-store";
+import { dispatchIfRegistered as dispatchPaneIfRegistered } from "@/app/store/agent-pane-state-store";
 import { parseHistoryLines } from "../parseHistoryLines";
 
 import type { LogFn } from "../types";
@@ -135,7 +132,10 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
         // fetch, InitReady on success, InitFailed on error. The reducer
         // gates TurnStart on initPhase === "ready" so we don't accept
         // sends while history is still loading.
-        dispatchPane(opts.blockId, { type: "InitStart" });
+        // Soft variant — cascade-during-dispatch could dispose the pane
+        // before this fires; retro 2026-05-23 (agent-pane cascade →
+        // replaceChild quick-win).
+        dispatchPaneIfRegistered(opts.blockId, { type: "InitStart" });
         (async () => {
             // Fast path: try the reducer-state snapshot first. If it exists
             // and the schema version matches, restore wholesale and skip
