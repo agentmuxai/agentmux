@@ -20,6 +20,7 @@
 //! frontend (PR B) can integrate against the real shape.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -435,9 +436,18 @@ fn spawn_auth_cli(
         let into_bundle_id_stdout = into_bundle_id_for_task.clone();
         let bundle_dir_stdout = bundle_dir_for_task.clone();
         let provider_id_stdout = provider_id_for_task.clone();
+        // Shared between drain + post-exit. The drain sets it after
+        // persisting on a LoginSuccess match; the post-exit transition
+        // block (below) checks it and skips its entire success path if
+        // already transitioned — without this guard the drain's
+        // persist + post-exit's persist both ran on every successful
+        // OAuth, producing orphan IdentityAccount rows (each `Uuid::new_v4`)
+        // and duplicate `identitybundlebindings:changed:<id>` publishes.
+        // Reagent P1 on #981.
+        let success_transitioned = Arc::new(AtomicBool::new(false));
+        let success_transitioned_drain = Arc::clone(&success_transitioned);
         let stdout_drain = tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
-            let mut success_transitioned = false;
             while let Ok(Some(line)) = lines.next_line().await {
                 // NOT logging the raw line — OAuth providers print
                 // auth URLs / callback codes / device codes on stdout
@@ -446,7 +456,7 @@ fn spawn_auth_cli(
                 // CLI emitted something" diagnostics. Reagent P2 on #847.
                 tracing::debug!(session_id = %sid_stdout, bytes = line.len(), "auth.spawn: stdout line");
                 let m = mgr_stdout.record_line(&sid_stdout, &line);
-                if !success_transitioned
+                if !success_transitioned_drain.load(Ordering::Acquire)
                     && matches!(
                         m,
                         Some(crate::identity::auth_patterns::AuthPatternMatch::LoginSuccess { .. })
@@ -479,7 +489,7 @@ fn spawn_auth_cli(
                             &sid_stdout,
                         );
                         mgr_stdout.finish_success(&sid_stdout, bundle_id);
-                        success_transitioned = true;
+                        success_transitioned_drain.store(true, Ordering::Release);
                     }
                 }
             }
@@ -515,42 +525,53 @@ fn spawn_auth_cli(
         // Final transition if we haven't already hit Success on the
         // login-pattern path. Re-run authCheck because some CLIs exit
         // cleanly without printing a "logged in as" line.
-        match exit {
-            Ok(s) if s.success() => {
-                if confirm_authenticated(
-                    &cli_path_for_check,
-                    &auth_check_args_for_check,
-                    &auth_env_for_check,
-                )
-                .await
-                {
-                    let bundle_id = persist_oauth_binding_or_synthetic(
-                        &wstore_for_task,
-                        &broker_for_task,
-                        into_bundle_id_for_task.as_deref(),
-                        &provider_id_for_task,
-                        bundle_dir_for_task.as_deref(),
-                        &session_id_for_task,
-                    );
-                    mgr_for_task.finish_success(&session_id_for_task, bundle_id);
-                } else {
+        //
+        // Skip the entire block when the drain has already transitioned
+        // (LoginSuccess pattern matched + confirm_authenticated + persist
+        // ran). Without this guard, persist_oauth_binding_or_synthetic
+        // would fire a second time on every successful OAuth — a fresh
+        // IdentityAccount UUID would be upserted, `bundle_identity_bind`
+        // would repoint to the new account (orphaning the first), and
+        // the broker would re-publish the bindings-changed event.
+        // Reagent P1 on #981.
+        if !success_transitioned.load(Ordering::Acquire) {
+            match exit {
+                Ok(s) if s.success() => {
+                    if confirm_authenticated(
+                        &cli_path_for_check,
+                        &auth_check_args_for_check,
+                        &auth_env_for_check,
+                    )
+                    .await
+                    {
+                        let bundle_id = persist_oauth_binding_or_synthetic(
+                            &wstore_for_task,
+                            &broker_for_task,
+                            into_bundle_id_for_task.as_deref(),
+                            &provider_id_for_task,
+                            bundle_dir_for_task.as_deref(),
+                            &session_id_for_task,
+                        );
+                        mgr_for_task.finish_success(&session_id_for_task, bundle_id);
+                    } else {
+                        mgr_for_task.finish_failure(
+                            &session_id_for_task,
+                            "CLI exited 0 but authentication check failed".to_string(),
+                        );
+                    }
+                }
+                Ok(s) => {
                     mgr_for_task.finish_failure(
                         &session_id_for_task,
-                        "CLI exited 0 but authentication check failed".to_string(),
+                        format!("CLI exited with status {s}"),
                     );
                 }
-            }
-            Ok(s) => {
-                mgr_for_task.finish_failure(
-                    &session_id_for_task,
-                    format!("CLI exited with status {s}"),
-                );
-            }
-            Err(e) => {
-                mgr_for_task.finish_failure(
-                    &session_id_for_task,
-                    format!("wait error: {e}"),
-                );
+                Err(e) => {
+                    mgr_for_task.finish_failure(
+                        &session_id_for_task,
+                        format!("wait error: {e}"),
+                    );
+                }
             }
         }
 
@@ -730,10 +751,20 @@ fn spawn_auth_cli_pty(
         let into_bundle_id_drain = into_bundle_id_for_task.clone();
         let bundle_dir_drain = bundle_dir_for_task.clone();
         let provider_id_drain = provider_id_for_task.clone();
+        // Shared with the post-exit fallback block below — same pattern
+        // as the pipes path. Drain's detached `Handle::current().spawn`
+        // task does the persist + finish_success; the drain sets this
+        // atomic BEFORE returning so the outer's check sees it. The
+        // detached task may still be in flight when the outer checks
+        // (PTY drain returns on EOF, the persist task runs async) — that
+        // is fine because the OUTER would only re-persist if the atomic
+        // is false, which it never is once the drain matched the
+        // LoginSuccess pattern. Reagent P1 on #981.
+        let success_transitioned = Arc::new(AtomicBool::new(false));
+        let success_transitioned_drain = Arc::clone(&success_transitioned);
         let drain_handle = tokio::task::spawn_blocking(move || {
             use std::io::BufRead;
             let mut reader = std::io::BufReader::new(reader);
-            let mut success_transitioned = false;
             let mut line = String::new();
             loop {
                 line.clear();
@@ -744,7 +775,7 @@ fn spawn_auth_cli_pty(
                         // OAuth URLs / codes can be in here.
                         tracing::debug!(session_id = %sid_drain, bytes = line.len(), "auth.spawn (PTY): line");
                         let m = mgr_drain.record_line(&sid_drain, &line);
-                        if !success_transitioned
+                        if !success_transitioned_drain.load(Ordering::Acquire)
                             && matches!(
                                 m,
                                 Some(crate::identity::auth_patterns::AuthPatternMatch::LoginSuccess { .. })
@@ -774,7 +805,12 @@ fn spawn_auth_cli_pty(
                                     mgr2.finish_success(&sid2, bundle_id);
                                 }
                             });
-                            success_transitioned = true;
+                            // Atomic set BEFORE the detached spawn's
+                            // body runs — but the outer only awaits
+                            // `drain_handle`, so it'll see this set
+                            // before its own post-exit check. The
+                            // detached persist runs once, unraced.
+                            success_transitioned_drain.store(true, Ordering::Release);
                         }
                     }
                     Err(_) => break,
@@ -800,48 +836,54 @@ fn spawn_auth_cli_pty(
 
         // Final transition fallback — some CLIs exit cleanly without
         // emitting a login-success line that record_line recognizes.
-        match exit {
-            Ok(Ok(s)) if s.success() => {
-                if confirm_authenticated(
-                    &cli_path_for_check,
-                    &auth_check_args_for_check,
-                    &auth_env_for_check,
-                )
-                .await
-                {
-                    let bundle_id = persist_oauth_binding_or_synthetic(
-                        &wstore_for_task,
-                        &broker_for_task,
-                        into_bundle_id_for_task.as_deref(),
-                        &provider_id_for_task,
-                        bundle_dir_for_task.as_deref(),
-                        &session_id_for_task,
-                    );
-                    mgr_for_task.finish_success(&session_id_for_task, bundle_id);
-                } else {
+        //
+        // Skip the whole block when the drain already transitioned —
+        // same double-persist guard as the pipes path. Reagent P1 on
+        // #981.
+        if !success_transitioned.load(Ordering::Acquire) {
+            match exit {
+                Ok(Ok(s)) if s.success() => {
+                    if confirm_authenticated(
+                        &cli_path_for_check,
+                        &auth_check_args_for_check,
+                        &auth_env_for_check,
+                    )
+                    .await
+                    {
+                        let bundle_id = persist_oauth_binding_or_synthetic(
+                            &wstore_for_task,
+                            &broker_for_task,
+                            into_bundle_id_for_task.as_deref(),
+                            &provider_id_for_task,
+                            bundle_dir_for_task.as_deref(),
+                            &session_id_for_task,
+                        );
+                        mgr_for_task.finish_success(&session_id_for_task, bundle_id);
+                    } else {
+                        mgr_for_task.finish_failure(
+                            &session_id_for_task,
+                            "CLI exited cleanly but auth-check still failed".to_string(),
+                        );
+                    }
+                }
+                Ok(Ok(s)) => {
                     mgr_for_task.finish_failure(
                         &session_id_for_task,
-                        "CLI exited cleanly but auth-check still failed".to_string(),
+                        format!("CLI exited with code {:?}", s.exit_code()),
                     );
                 }
-            }
-            Ok(Ok(s)) => {
-                mgr_for_task.finish_failure(
-                    &session_id_for_task,
-                    format!("CLI exited with code {:?}", s.exit_code()),
-                );
-            }
-            Ok(Err(e)) => {
-                mgr_for_task.finish_failure(
-                    &session_id_for_task,
-                    format!("PTY wait error: {e}"),
-                );
-            }
-            Err(e) => {
-                mgr_for_task.finish_failure(
-                    &session_id_for_task,
-                    format!("PTY wait task join error: {e}"),
-                );
+                Ok(Err(e)) => {
+                    mgr_for_task.finish_failure(
+                        &session_id_for_task,
+                        format!("PTY wait error: {e}"),
+                    );
+                }
+                Err(e) => {
+                    mgr_for_task.finish_failure(
+                        &session_id_for_task,
+                        format!("PTY wait task join error: {e}"),
+                    );
+                }
             }
         }
 
