@@ -1000,6 +1000,22 @@ class RpcApiType {
         return client.rpcCall("hidenamedagent", data, opts);
     }
 
+    // command "listrecentsessions" [call]
+    // Cascade follow-up (2026-05-23) — powers the AgentPicker's
+    // "Recent sessions" surface. Each row joins an agent-instance
+    // record with the filestore `output.state.json` snapshot for that
+    // block, producing a conversation preview + node count so an
+    // orphaned conversation (e.g. after a renderer crash) becomes
+    // recoverable from normal UI. See docs/recovery/MAKS_CONVERSATION_2026_05_23.md
+    // and PR #977 for the underlying continueOfId reattach plumbing.
+    ListRecentSessionsCommand(
+        client: RpcClient,
+        data: { limit?: number; identity_id?: string },
+        opts?: RpcOpts,
+    ): Promise<RecentSessionRow[]> {
+        return client.rpcCall("listrecentsessions", data, opts);
+    }
+
     // command "forkagentdefinition" [call]
     ForkAgentDefinitionCommand(
         client: RpcClient,
