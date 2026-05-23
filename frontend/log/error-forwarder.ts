@@ -91,11 +91,28 @@ export function initErrorForwarder(): void {
     initialized = true;
 
     window.addEventListener("error", (event: ErrorEvent) => {
+        // Codex P2 on #989: when `event.error` is null/undefined (common
+        // for cross-origin and resource/script errors), the previous
+        // implementation passed `undefined` through `extractErrorFields`
+        // which returned the literal string "undefined" via
+        // `safeStringify(undefined)`. That string is truthy, so the
+        // `fields.message || event.message` chain never reached the
+        // ErrorEvent fallback — the host logged "undefined" instead of
+        // the browser-provided error text. Short-circuit when there is
+        // no Error object: build the payload from ErrorEvent fields
+        // directly.
+        if (event.error == null) {
+            forward("[uncaught-error]", {
+                name: null,
+                message: event.message || "(no message)",
+                stack: null,
+                source: event.filename || null,
+            });
+            return;
+        }
         const fields = extractErrorFields(event.error);
         forward("[uncaught-error]", {
             name: fields.name,
-            // ErrorEvent.message exists even when event.error is null
-            // (e.g. cross-origin script errors).
             message: fields.message || event.message || "(no message)",
             stack: fields.stack,
             source: event.filename || null,
