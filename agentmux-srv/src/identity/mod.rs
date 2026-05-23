@@ -32,4 +32,10 @@ pub mod auth_patterns;
 pub mod auth_session;
 pub mod resolver;
 
+// Legacy convenience re-export — newer call sites use
+// `resolver::inject_identity_env_with_broker` directly so the OAuth
+// expiry probe (PR D, spec §4.4) can publish on status change. The
+// broker-less wrapper is kept for tests and is intentionally allowed
+// to be unused in production.
+#[allow(unused_imports)]
 pub use resolver::inject_identity_env;

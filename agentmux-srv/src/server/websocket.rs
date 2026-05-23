@@ -787,11 +787,16 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
     // handler's closure so each spawn can inject it into Claude's env.
     // See SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §7.
     let auth_key_ai = state.auth_key.clone();
+    // Broker — passed into the identity-injection path so the OAuth
+    // expiry probe (PR D, spec §4.4) can publish
+    // `identitybundlebindings:changed:<bundle_id>` on status change.
+    let broker_ai = state.broker.clone();
     engine.register_handler(
         COMMAND_AGENT_INPUT,
         Box::new(move |data, _ctx| {
             let wstore = wstore_ai.clone();
             let auth_key = auth_key_ai.clone();
+            let broker = broker_ai.clone();
             Box::pin(async move {
                 let cmd: CommandAgentInputData = serde_json::from_value(data)
                     .map_err(|e| format!("agentinput: {e}"))?;
@@ -837,9 +842,13 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 // each per-provider env var into the spawn map. Failures
                 // are logged and skipped — the agent CLI launches with
                 // whatever resolved cleanly plus the static cmd:env block.
-                // See agentmux-srv/src/identity/resolver.rs.
-                crate::identity::inject_identity_env(
+                // See agentmux-srv/src/identity/resolver.rs. Broker
+                // hand-in lets the OAuth expiry probe (PR D, spec §4.4)
+                // publish `identitybundlebindings:changed:<bundle_id>`
+                // when it flips a token's status valid→expired etc.
+                crate::identity::resolver::inject_identity_env_with_broker(
                     wstore.clone(),
+                    Some(broker.clone()),
                     &cmd.blockid,
                     &mut env_vars,
                 );

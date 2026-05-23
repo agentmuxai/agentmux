@@ -34,6 +34,7 @@ import { buildInstanceSlug, slugifyInstanceName } from "../defaults/instance-slu
 import { getProvider } from "../providers";
 import { PreLaunchAuthPanel } from "./PreLaunchAuthPanel";
 import { AuthFlowController } from "../auth";
+import { loadAccounts, subscribeAccountChanges } from "@/app/view/identity/identity-model";
 
 export interface LaunchOverrides {
     /** Instance name — written into AGENTMUX_AGENT_ID and used to
@@ -477,6 +478,45 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         return hasMatchingBinding(flow.state, providerId);
     });
 
+    // Account-cache backed memo that resolves the bound account row for
+    // the current (identity, provider) pair and exposes its `status`
+    // string. Per spec §4.4 the canonical oauth-class values are
+    // `"valid" | "expired" | "needs_reauth" | "unknown"`. Returns `null`
+    // when there's no matching binding or the account row isn't in the
+    // cache yet — the consumer (`PreLaunchAuthPanel`) treats `null` as
+    // "no status info, use generic wording".
+    //
+    // The cache is the same one `IdentityPaneViewModel` subscribes to,
+    // so a status flip pushed by the backend's expiry probe
+    // (`identitybundlebindings:changed:<id>` → refreshes cache)
+    // reactively updates this memo and re-renders the panel.
+    const [accountCacheTick, setAccountCacheTick] = createSignal(0);
+    const accountCacheUnsub = subscribeAccountChanges(() => {
+        setAccountCacheTick((n) => n + 1);
+    });
+    onCleanup(accountCacheUnsub);
+    const bundleBindingStatus = createMemo<string | null>(() => {
+        accountCacheTick();
+        const id = flow.state.form.identityId;
+        const providerId = provider()?.id;
+        if (!id || !providerId) return null;
+        const bindings = flow.state.bindings[id] ?? [];
+        const b = bindings.find((bb) => bb.provider === providerId);
+        if (!b) return null;
+        const acc = loadAccounts().find((a) => a.id === b.account_id);
+        return acc?.status ?? null;
+    });
+
+    // True when the bound account is in an oauth-class state that
+    // benefits from a Reconnect nudge — strictly a wording trigger, not
+    // a launch-blocker (spec §4.4: "wording-only nudge"). The Launch
+    // button stays enabled because the binding still counts; the CLI
+    // will refresh on its first call.
+    const bundleNeedsReconnectNudge = createMemo(() => {
+        const s = bundleBindingStatus();
+        return s === "needs_reauth" || s === "expired";
+    });
+
     // Auth gate applies to fresh launches of OAuth providers when the
     // selected identity can't supply credentials for the agent's
     // provider. That's true when:
@@ -496,7 +536,10 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     //   `auth.submitapikey` persists bundles (PR C-2), the gate would
     //   deadlock. Their existing `launch-flow.ts` Phase 2 prompts for
     //   the key in-line. Reagent + codex P1 on #847.
-    const authRequired = () =>
+    // Hard auth-blockers: launch CANNOT proceed without the user
+    // completing OAuth. Drives both the panel mount AND the launch
+    // gate. (Pre-PR-D `authRequired` was this exact set.)
+    const authBlocksLaunch = () =>
         !isContinue()
         && provider()?.authType === "oauth"
         && (
@@ -504,7 +547,24 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
             || provider()?.id === "openclaw"
             || !bundleHasMatchingBinding()
         );
-    const authReady = () => !authRequired() || authStateKind() === "ready";
+    // Soft nudges: show the Connect CTA (with status-aware wording)
+    // when the binding is present but its account status is
+    // `needs_reauth` / `expired`. Per spec §4.4 this is a "wording-only
+    // nudge" — does NOT block Launch. The CLI's own refresh path
+    // handles the rest on first call; the nudge just gives the user a
+    // one-click path to refresh proactively.
+    const authNeedsReconnectWording = () =>
+        !isContinue()
+        && provider()?.authType === "oauth"
+        && bundleHasMatchingBinding()
+        && bundleNeedsReconnectNudge();
+    // Mount the panel for EITHER reason (hard block or soft nudge).
+    const authRequired = () => authBlocksLaunch() || authNeedsReconnectWording();
+    // Launch-readiness gate. Note this only consults `authBlocksLaunch`
+    // — the wording-only path doesn't gate. The panel may still show a
+    // `ConnectCta` in the nudge case, but `authReady` returns true and
+    // Launch is clickable.
+    const authReady = () => !authBlocksLaunch() || authStateKind() === "ready";
     const canSubmit = () =>
         !submitting()
         && slugifyInstanceName(name()).length > 0
@@ -861,6 +921,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                             provider={provider()}
                             identityId={identityId}
                             hasMatchingBinding={bundleHasMatchingBinding}
+                            bindingStatus={bundleBindingStatus}
                             controller={authController}
                             onBundleCreated={onBundleCreated}
                             autoStartAuth={props.initialFormState != null && props.autoStartAuth === true}

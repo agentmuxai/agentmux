@@ -430,11 +430,13 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
 
     engine.register_handler(
         COMMAND_AGENT_SEND,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let broker = broker.clone();
             Box::pin(async move {
                 let cmd: CommandAgentSendData = serde_json::from_value(data)
                     .map_err(|e| format!("agent.send: {e}"))?;
@@ -467,9 +469,14 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     _ => std::collections::HashMap::new(),
                 };
                 // Identity injection — same path as websocket.rs's
-                // AgentInputCommand. See identity/resolver.rs.
-                crate::identity::inject_identity_env(
+                // AgentInputCommand. See identity/resolver.rs. Passes
+                // the broker so the OAuth-class branch can publish a
+                // `identitybundlebindings:changed:<bundle_id>` event
+                // when the expiry probe updates an account's status
+                // (PR D — spec §4.4).
+                crate::identity::resolver::inject_identity_env_with_broker(
                     wstore.clone(),
+                    Some(broker.clone()),
                     &cmd.block_id,
                     &mut env_vars,
                 );
