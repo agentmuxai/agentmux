@@ -447,10 +447,15 @@ export interface FilterState {
 }
 
 /**
- * Streaming state
+ * Streaming state — telemetry sub-object on the agent-pane reducer.
+ *
+ * PR G dropped the legacy `active: boolean` field; "is the stream
+ * subscribed?" is now derived from the reducer's `lastEventMs !== null`
+ * (or the {@link isStreamSubscribed} selector). The remaining fields
+ * are write-only telemetry consumed by the reducer for buffer
+ * accounting and the stuck-stream watchdog.
  */
 export interface StreamingState {
-    active: boolean;
     agentId: string | null;
     bufferSize: number; // Number of events buffered
     lastEventTime: number;

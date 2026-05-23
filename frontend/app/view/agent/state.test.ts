@@ -18,19 +18,13 @@ describe("createAgentAtoms", () => {
     test("creates signals with correct default values", () => {
         const [getDoc] = atoms.documentAtom;
         const [getStats] = atoms.sessionStatsAtom;
-        const [getTurnActive] = atoms.turnActiveAtom;
+        const [getPhase] = atoms.turnPhaseAtom;
 
         expect(getDoc()).toEqual([]);
         expect(getStats()).toBeNull();
-        expect(getTurnActive()).toBe(false);
-    });
-
-    test("turnActiveAtom can be toggled", () => {
-        const [getTurnActive, setTurnActive] = atoms.turnActiveAtom;
-        setTurnActive(true);
-        expect(getTurnActive()).toBe(true);
-        setTurnActive(false);
-        expect(getTurnActive()).toBe(false);
+        // PR G: the working signal is `turnPhase` only — Idle by default
+        // (the legacy `turnActiveAtom` was dropped).
+        expect(getPhase().kind).toBe("Idle");
     });
 
     test("documentStateAtom has correct default filter", () => {
@@ -45,20 +39,19 @@ describe("createAgentAtoms", () => {
 
     test("separate instances have independent state", () => {
         const atoms2 = createAgentAtoms("test-block-2");
-        const [, setActive1] = atoms.turnActiveAtom;
-        const [getActive1] = atoms.turnActiveAtom;
-        const [getActive2] = atoms2.turnActiveAtom;
+        const [getPhase1, setPhase1] = atoms.turnPhaseAtom;
+        const [getPhase2] = atoms2.turnPhaseAtom;
 
-        setActive1(true);
-        expect(getActive1()).toBe(true);
-        expect(getActive2()).toBe(false);
+        setPhase1({ kind: "Submitting", submittedAt: 1, pendingContent: "" });
+        expect(getPhase1().kind).toBe("Submitting");
+        expect(getPhase2().kind).toBe("Idle");
     });
 
-    // ── PR B (turn-phase view migration) ────────────────────────────────
-    // Verifies that the view's "working" animation binding can be driven
-    // entirely from `turnPhaseAtom` via the `workingFromPhase` selector —
-    // no read of the legacy `turnActiveAtom` / `stoppingAtom` is required.
-    // The reducer still dual-writes the legacy fields (PR G drops them).
+    // ── Turn-phase view binding ─────────────────────────────────────────
+    // The view's working animation and "Stopping…" label both bind to
+    // `turnPhaseAtom`. Verifies the SoT is wired correctly — these are
+    // the only working/stopping signals after PR G dropped the legacy
+    // `turnActiveAtom` / `stoppingAtom`.
     // Spec: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §7.
     test("turnPhaseAtom defaults to Idle and drives workingFromPhase = false", () => {
         const [getPhase] = atoms.turnPhaseAtom;
@@ -95,11 +88,11 @@ describe("createAgentAtoms", () => {
         expect(workingFromPhase(getPhase())).toBe(false);
     });
 
-    test("Interrupting phase drives the 'Stopping…' label (replaces legacy stoppingAtom read)", () => {
+    test("Interrupting phase drives the 'Stopping…' label", () => {
         const [getPhase, setPhase] = atoms.turnPhaseAtom;
         // The view's `stopping` prop on AgentStatusLine reads
-        // `turnPhaseAtom[0]().kind === "Interrupting"` — no read of the
-        // legacy `stoppingAtom`. Verify the predicate flips correctly.
+        // `turnPhaseAtom[0]().kind === "Interrupting"`. Verify the
+        // predicate flips correctly.
         expect(getPhase().kind === "Interrupting").toBe(false);
 
         setPhase({ kind: "Interrupting", reason: "user", sigintSentAt: 1 });
