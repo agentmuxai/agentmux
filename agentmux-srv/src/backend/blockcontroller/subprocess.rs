@@ -853,7 +853,7 @@ mod tests {
             None,
             None,
         );
-        let result = ctrl.send_input(BlockInputUnion::data(b"hello".to_vec()));
+        let result = ctrl.send_input(BlockInputUnion::data(b"hello".to_vec()), None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("AgentInputCommand"));
     }

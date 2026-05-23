@@ -32,6 +32,16 @@ pub enum ResolverError {
     #[error("PlaintextDev secrets are disabled in release builds")]
     PlaintextDevDisabledInRelease,
 
+    /// `OAuthConfigDir` is a filesystem pointer, not a secret string —
+    /// `resolve_secret` cannot turn it into a credential value because
+    /// the credential lives in a CLI-managed token file inside the dir.
+    /// Oauth-class providers must be routed through the config-dir
+    /// injection path that PR B adds to `inject_identity_env`. Seeing
+    /// this error from `resolve_secret` means the caller forgot to
+    /// dispatch by provider class first.
+    #[error("OAuthConfigDir is a config-dir pointer, not a resolvable secret — routed via the oauth-class injection path, not resolve_secret")]
+    OAuthConfigDirNotASecret,
+
     #[error("storage error: {0}")]
     Storage(#[from] StoreError),
 }
@@ -85,6 +95,15 @@ pub fn resolve_secret(secret_ref: &SecretRef) -> Result<String, ResolverError> {
             }
         }
         SecretRef::SecretsManager { .. } => Err(ResolverError::SecretsManagerUnsupported),
+        SecretRef::OAuthConfigDir { dir } => {
+            // Read but ignored — the resolver doesn't consume the
+            // pointer; PR B's oauth-class dispatch in
+            // `inject_identity_env` reads `dir` and sets the
+            // provider's config-dir env var directly, bypassing
+            // `resolve_secret` entirely.
+            let _ = dir;
+            Err(ResolverError::OAuthConfigDirNotASecret)
+        }
     }
 }
 
@@ -323,6 +342,21 @@ mod tests {
             sm_json_path: None,
         });
         assert!(matches!(res, Err(ResolverError::SecretsManagerUnsupported)));
+    }
+
+    #[test]
+    fn resolve_oauth_config_dir_is_not_a_secret() {
+        // OAuthConfigDir is a pointer to a CLI-managed token directory,
+        // not a resolvable secret string. PR B's oauth-class dispatch
+        // in `inject_identity_env` reads `dir` and sets the provider's
+        // config-dir env var directly, bypassing `resolve_secret`. The
+        // error here is a guard against a caller forgetting that
+        // dispatch — pre-PR-B nothing produces this variant, but the
+        // arm has to exist for the match to be exhaustive.
+        let res = resolve_secret(&SecretRef::OAuthConfigDir {
+            dir: "/path/to/bundle/claude".to_string(),
+        });
+        assert!(matches!(res, Err(ResolverError::OAuthConfigDirNotASecret)));
     }
 
     #[test]
