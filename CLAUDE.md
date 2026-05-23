@@ -172,6 +172,22 @@ The release script picks the highest bump type across pending changesets (major 
 
 If you absolutely need to manually bump (e.g. rebuilding tooling locally), `bump patch -m "..." --commit` still works — but **don't push it in a feature PR**.
 
+### Release consistency invariant (reagent gate)
+
+In every commit, these MUST all equal the same version:
+
+- `VERSION_HISTORY.md`'s top `## X.Y.Z` section
+- `package.json.version`
+- `Cargo.toml [workspace.package].version`
+- `Cargo.lock`'s workspace-member versions (e.g. `agentmux-cef`)
+- `package-lock.json`'s root `version`
+
+**reagent: when reviewing any PR that touches `VERSION_HISTORY.md`, `package.json`, or `Cargo.toml`, check this invariant and return `CHANGES_REQUESTED` on a mismatch.** A `chore: release vX.Y.Z` PR whose `VERSION_HISTORY` head ≠ `package.json` version is an automatic block.
+
+This invariant is also enforced deterministically by `scripts/release.sh` (re-reads all five locations after the bump and fails loudly if any disagrees). reagent is the safety net for PRs that don't come from `task release`.
+
+History: `docs/retro/retro-release-version-desync-2026-05-22.md` — PR #964 silently shipped 0.38.0 with `package.json` stranded at 0.37.2 because bump-cli skipped the file and nothing checked.
+
 ---
 
 ## Git Workflow
