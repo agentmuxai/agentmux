@@ -89,15 +89,19 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     };
     onCleanup(() => clearTimeout(enterTimer));
 
-    // Stays true for 1s after a running tool completes so the user can read
-    // the final output line before the panel collapses.
-    // (SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md §Change 3)
+    // Stays true for POST_COMPLETION_HOLD_MS after a running tool
+    // completes so the user can read the final output line before the
+    // panel collapses.
+    // (SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md §Change 3 — bumped from
+    // 1s to 5s on user request after live testing showed 1s was too
+    // tight to actually finish reading the last lines of a Bash/Read.)
+    const POST_COMPLETION_HOLD_MS = 5000;
     const [postCompletionHold, setPostCompletionHold] = createSignal(false);
     // Gate the post-completion hold on a real active → inactive
     // TRANSITION (not on a status-value snapshot). The earlier draft
     // simply checked `s !== "running" && ...` which fired on mount
     // for already-completed tools — loaded transcripts would briefly
-    // auto-expand every completed tool row for 1s on initial render
+    // auto-expand every completed tool row on initial render
     // (codex P1 round 2 on #988).
     //
     // Background on the older self-loop bug (round 1): reading
@@ -116,7 +120,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         const s = props.node.status;
         if (isActive(prevStatus) && !isActive(s)) {
             setPostCompletionHold(true);
-            const t = setTimeout(() => setPostCompletionHold(false), 1000);
+            const t = setTimeout(() => setPostCompletionHold(false), POST_COMPLETION_HOLD_MS);
             onCleanup(() => clearTimeout(t));
         }
         prevStatus = s;
