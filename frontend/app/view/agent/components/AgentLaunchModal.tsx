@@ -34,7 +34,11 @@ import { buildInstanceSlug, slugifyInstanceName } from "../defaults/instance-slu
 import { getProvider } from "../providers";
 import { PreLaunchAuthPanel } from "./PreLaunchAuthPanel";
 import { AuthFlowController } from "../auth";
-import { loadAccounts, subscribeAccountChanges } from "@/app/view/identity/identity-model";
+import {
+    loadAccounts,
+    refreshAccountCache,
+    subscribeAccountChanges,
+} from "@/app/view/identity/identity-model";
 
 export interface LaunchOverrides {
     /** Instance name — written into AGENTMUX_AGENT_ID and used to
@@ -452,6 +456,13 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
             eventType: `identitybundlebindings:changed:${id}`,
             handler: () => {
                 void (async () => {
+                    // Refresh the account cache too. The backend's
+                    // expiry probe (PR D) updates IdentityAccount.status
+                    // and publishes this same event — without refreshing
+                    // accounts here, `bundleBindingStatus` reads stale
+                    // status from the in-memory cache until something
+                    // unrelated triggers a refresh. codex P2 on #982.
+                    void refreshAccountCache();
                     try {
                         const list = await RpcApi.ListIdentityBindingsCommand(TabRpcClient, {
                             identity_id: id,

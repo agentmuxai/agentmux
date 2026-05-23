@@ -249,6 +249,34 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     return (
         <div class="pre-launch-auth-panel">
             <Switch>
+                {/* A bound binding that the backend's expiry probe
+                    flagged stale (`needs_reauth` / `expired`) lands the
+                    controller in `ready` because outcomeFor() only
+                    looks at "has a binding?". Without this arm the
+                    panel would render <ReadyBanner /> and the
+                    reconnect wording in ConnectCta would never be
+                    seen — the user would have no signal their
+                    credentials need refreshing. Match BEFORE the
+                    generic ready arm so the reconnect CTA wins.
+                    Clicking Connect re-runs OAuth into the SAME
+                    bundle dir (PR C invariant), refreshing the
+                    token in place. codex P1 on #982. */}
+                <Match
+                    when={
+                        controller.state().kind === "ready" &&
+                        (props.bindingStatus?.() === "needs_reauth" ||
+                            props.bindingStatus?.() === "expired")
+                    }
+                >
+                    <ConnectCta
+                        provider={props.provider}
+                        state={controller.state()}
+                        bindingStatus={props.bindingStatus?.() ?? null}
+                        hasBinding={props.hasMatchingBinding()}
+                        onConnect={() => handleConnect()}
+                        disabled={props.disabled ?? false}
+                    />
+                </Match>
                 <Match when={controller.state().kind === "ready"}>
                     <ReadyBanner />
                 </Match>
