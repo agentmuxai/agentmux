@@ -162,24 +162,44 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         untrack(() => controller.selected(prov.id, id, outcomeFor(id, prov.id, hasBinding)));
     });
 
-    // Connect / Retry click handler. When the user has no identity
-    // bundle selected — a genuinely fresh OAuth — we DON'T start OAuth
-    // immediately: the spec (SPEC_BUNDLE_MANAGEMENT_2026_05_22.md §2)
-    // interposes the New Identity modal so the user names the bundle
-    // first; the parent's `onRequestNewIdentity` owns the
-    // tabModal.replace chain into that modal. With a bundle already
-    // selected — `needs-account`, `expired`, or openclaw's force-fresh
-    // — Connect goes straight to OAuth. Without the callback we fall
-    // back to starting OAuth directly.
+    // Connect / Retry click handler. The OAuth invariant per
+    // SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md §4.5 is that OAuth
+    // never starts without a bundle id in hand — tokens always land
+    // INSIDE a known bundle dir, never ambient. So:
+    //   - empty identityId → route to New Identity modal first; OAuth
+    //     resumes against the new bundle on the autoStartAuth round
+    //     trip. The parent's `onRequestNewIdentity` owns the
+    //     tabModal.replace chain into that modal.
+    //   - empty identityId AND no `onRequestNewIdentity` callback →
+    //     refuse to start OAuth. This is a guard against a future
+    //     parent forgetting to wire the callback; a silent ambient-
+    //     creds OAuth would re-open the §4.5 hole this PR closes.
+    //     Surface a failed state so the user sees something instead
+    //     of a dead Connect button.
+    //   - non-empty identityId → straight to OAuth. Reused for
+    //     `needs-account`, `expired`, and openclaw's force-fresh
+    //     `needs-bundle` (where outcomeFor() returns `needs-bundle`
+    //     even with a bundle selected — the gate is on the actual
+    //     identityId, not the outcome).
     const handleConnect = (): void => {
         const prov = props.provider;
         if (!prov) return;
-        // Gate on a genuinely empty selection, NOT the `needs-bundle`
-        // outcome: `outcomeFor()` returns `needs-bundle` for openclaw
-        // even with a bundle selected, so an outcome-based gate would
-        // trap openclaw in the New Identity step instead of OAuth.
-        if (props.identityId() === "" && props.onRequestNewIdentity) {
-            props.onRequestNewIdentity();
+        if (props.identityId() === "") {
+            if (props.onRequestNewIdentity) {
+                props.onRequestNewIdentity();
+                return;
+            }
+            // OAuth-without-bundle invariant — no quiet fallback to
+            // ambient OAuth (would defeat the per-bundle isolation
+            // PR C wires). Bail visibly.
+            console.warn(
+                "[auth-diag] handleConnect: empty identityId and no onRequestNewIdentity callback — refusing to start OAuth (PR C invariant)",
+            );
+            controller.failConnect(
+                new Error(
+                    "OAuth requires a named Identity bundle. Click '+ New identity' first.",
+                ),
+            );
             return;
         }
         void startConnect(controller, prov);
