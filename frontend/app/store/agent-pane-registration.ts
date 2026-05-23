@@ -87,6 +87,10 @@ import {
     snapshot as agentPaneStateSnapshot,
     unregisterPane as unregisterAgentPaneStatePaneRaw,
 } from "./agent-pane-state-store";
+import {
+    type AgentPaneModel,
+    _createAgentPaneModel,
+} from "./agent-pane-model";
 import type { DocumentNode } from "../view/agent/types";
 
 /**
@@ -109,6 +113,22 @@ export interface PaneRegistration {
 }
 
 /**
+ * Per-pane model registry. Each `registerPane` call creates one entry;
+ * `unregisterPane` flips its `disposed` flag and removes it. The model
+ * outlives the actual store slots by exactly long enough to ensure the
+ * disposed flag is set BEFORE the underlying store deletes run (so any
+ * synchronous cascade those deletes might trigger sees `disposed`
+ * first).
+ *
+ * Internal — callers receive the model handle from `registerPane`'s
+ * return value and pass it down.
+ */
+const paneModels = new Map<
+    string,
+    AgentPaneModel & { _markDisposed(): void }
+>();
+
+/**
  * Atomically register a pane in BOTH stores. Either both succeed or
  * neither does — if the second store throws during registration, the
  * first is rolled back so observers never see the half-state.
@@ -118,8 +138,19 @@ export interface PaneRegistration {
  *
  * MUST be called synchronously from the agent component body, before
  * any hook can dispatch. See `agent-view.tsx`.
+ *
+ * **Returns** the per-pane `AgentPaneModel` whose lifetime matches the
+ * pane. Threading the returned model into hooks/views gives them a
+ * `dispatchPane` / `dispatchDoc` surface that is default-safe against
+ * post-unmount dispatch races — the model carries a `disposed` flag
+ * flipped before `unregisterPane` runs the store deletes. See
+ * `agent-pane-model.ts` for the rationale (PR-4 of the cascade
+ * follow-up sequence).
  */
-export function registerPane(blockId: string, reg: PaneRegistration): void {
+export function registerPane(
+    blockId: string,
+    reg: PaneRegistration,
+): AgentPaneModel {
     // Register both stores synchronously. JS is single-threaded — no
     // dispatcher can observe the gap between these two lines unless one
     // of them triggers a reactive cascade. Both register functions are
@@ -142,6 +173,17 @@ export function registerPane(blockId: string, reg: PaneRegistration): void {
         }
         throw e;
     }
+
+    // Re-registering a blockId (the hot-reload / re-mount case) drops
+    // the prior model — its callers will keep dispatching against a
+    // disposed handle, which silently drops, which is the right
+    // behavior. The fresh model takes over the active dispatches.
+    const prior = paneModels.get(blockId);
+    if (prior) prior._markDisposed();
+
+    const model = _createAgentPaneModel(blockId);
+    paneModels.set(blockId, model);
+    return model;
 }
 
 /**
@@ -171,6 +213,19 @@ export function registerPane(blockId: string, reg: PaneRegistration): void {
  * helper, not the callers.
  */
 export function unregisterPane(blockId: string): void {
+    // PR-4 — flip the model's `disposed` flag BEFORE either store
+    // unregisters. The contract: any synchronous cascade triggered by
+    // a future store-delete that fires setters (the current stores
+    // don't, but a future projection might) observes `model.disposed
+    // === true` and the model's dispatch helpers no-op. Closes the
+    // residual race where a deferred dispatcher (setTimeout / await
+    // continuation) lands after the unregister starts but before it
+    // completes its second store-delete.
+    const model = paneModels.get(blockId);
+    if (model) {
+        model._markDisposed();
+        paneModels.delete(blockId);
+    }
     try {
         unregisterAgentPaneStatePaneRaw(blockId);
     } catch {
@@ -181,6 +236,21 @@ export function unregisterPane(blockId: string): void {
     } catch {
         // Best-effort — see above.
     }
+}
+
+/**
+ * Diagnostic accessor for the currently-registered model. Returns
+ * `null` if `blockId` is not registered. Used for tests + the rare
+ * code path that doesn't receive the model from registerPane's return
+ * (e.g. integration smoke that needs to peek at the live model
+ * without re-registering).
+ *
+ * Production code that needs a model should plumb the registerPane
+ * return value down through its options — that's the contract the
+ * model is built around.
+ */
+export function getPaneModel(blockId: string): AgentPaneModel | null {
+    return paneModels.get(blockId) ?? null;
 }
 
 /**
@@ -208,3 +278,4 @@ export function isPaneHalfRegistered(blockId: string): boolean {
 }
 
 export type { AgentPaneProjections };
+export type { AgentPaneModel } from "./agent-pane-model";

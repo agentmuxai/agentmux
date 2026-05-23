@@ -27,10 +27,8 @@ import { type Accessor, createMemo, createSignal, onCleanup } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
-import {
-    dispatchIfRegistered as dispatchPaneIfRegistered,
-    snapshot as paneSnapshot,
-} from "@/app/store/agent-pane-state-store";
+import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
+import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { buildRuntimeArgs, getRuntimeConfig } from "../buildRuntimeArgs";
 import { dispatchSlashCommand } from "../commands/dispatch";
 import { buildRegistry } from "../commands/registry";
@@ -50,6 +48,13 @@ const PENDING_TIMEOUT_MS = 30_000;
 
 export interface UseAgentCommandsOptions {
     blockId: string;
+    /**
+     * Per-pane model handle returned by `registerPane`. Threaded in so
+     * the hook can dispatch via `model.dispatchPane` — default-safe
+     * against post-unmount races. PR-4 of the cascade follow-up
+     * sequence. See `agent-pane-model.ts`.
+     */
+    model: AgentPaneModel;
     block: Accessor<{ meta?: Record<string, any> } | undefined>;
     provider: Accessor<ProviderDefinition | undefined>;
     documentAtom: SignalPair<DocumentNode[]>;
@@ -259,8 +264,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // Soft variant — cascade-during-dispatch could dispose the pane
         // before this fires; retro 2026-05-23 (agent-pane cascade →
         // replaceChild quick-win).
-        dispatchPaneIfRegistered(
-            opts.blockId,
+        opts.model.dispatchPane(
             {
                 type: "PendingMessageQueued",
                 id: messageId,
@@ -310,7 +314,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // RPC outright failed — remove the pending entry so the user
             // doesn't see a ghost row for a message the backend never
             // received. Log already surfaces the error elsewhere.
-            dispatchPaneIfRegistered(opts.blockId, {
+            opts.model.dispatchPane({
                 type: "PendingMessageRejected",
                 id: messageId,
             });
@@ -324,7 +328,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // an unregistered slot (which throws).
         const expiryId = setTimeout(() => {
             pendingExpiryTimers.delete(expiryId);
-            dispatchPaneIfRegistered(opts.blockId, {
+            opts.model.dispatchPane({
                 type: "PendingMessageExpired",
                 id: messageId,
             });
@@ -351,13 +355,13 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // Soft variant — cascade-during-dispatch could dispose the pane
         // before this fires; retro 2026-05-23 (agent-pane cascade →
         // replaceChild quick-win).
-        dispatchPaneIfRegistered(opts.blockId, { type: "RequestStop", at: Date.now() }, "user");
+        opts.model.dispatchPane({ type: "RequestStop", at: Date.now() }, "user");
         RpcApi.ControllerInputCommand(TabRpcClient, {
             blockid: opts.blockId,
             signame: "SIGINT",
         }).catch((err) => {
             opts.log("warn", `stop failed: ${err?.message ?? String(err)}`, "warn");
-            dispatchPaneIfRegistered(opts.blockId, { type: "StopFailed" });
+            opts.model.dispatchPane({ type: "StopFailed" });
         });
     };
 
