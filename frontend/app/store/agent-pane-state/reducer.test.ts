@@ -10,6 +10,7 @@ import {
     isInitReady,
     isWorking,
     STUCK_THRESHOLD_MS,
+    SUBMIT_TIMEOUT_MS,
     TurnPhase,
 } from "./types";
 
@@ -1153,6 +1154,275 @@ describe("agent-pane-state reducer", () => {
         it("INTERRUPT_TIMEOUT_MS is 5000 (sanity)", () => {
             // Pinned so a sneaky bump can't slip in unreviewed.
             expect(INTERRUPT_TIMEOUT_MS).toBe(5_000);
+        });
+    });
+
+    // ─────────────────────────────────────────────────────────────────
+    // PR D — bounded `Submitting → Done.errored`.
+    //
+    // Spec: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §8 /
+    // issue #728 gap 2. TurnStart promotes the phase to Submitting and
+    // emits `schedule-submit-timeout`; if no stream activity arrives
+    // (no flush, no tool, no token) within SUBMIT_TIMEOUT_MS, the
+    // dispatch layer fires `SubmitTimeoutElapsed` and we force-transition
+    // to Done.errored. The reducer guards against stale ticks by
+    // checking the current phase on receipt.
+    // ─────────────────────────────────────────────────────────────────
+    describe("Bounded submit timeout (PR D)", () => {
+        it("TurnStart emits schedule-submit-timeout with correct deadlineMs", () => {
+            const s0 = ready(100);
+            const r = update(s0, { type: "TurnStart", at: 110 });
+            expect(r.state.turnPhase.kind).toBe("Submitting");
+            // Two events: turn-started, and the submit-timeout schedule.
+            expect(r.events).toHaveLength(2);
+            expect(r.events[0]).toMatchObject({
+                type: "turn-started",
+                at: 110,
+            });
+            expect(r.events[1]).toMatchObject({
+                type: "schedule-submit-timeout",
+                deadlineMs: 110 + SUBMIT_TIMEOUT_MS,
+            });
+        });
+
+        it("Suppressed TurnStart does NOT emit schedule-submit-timeout", () => {
+            // Stream inactive → suppressed; only the suppression event,
+            // no watchdog arming.
+            const start = mk();
+            const r = update(start, { type: "TurnStart", at: 100 });
+            expect(r.events).toHaveLength(1);
+            expect(r.events[0]).toMatchObject({
+                type: "turn-start-suppressed",
+            });
+        });
+
+        it("TurnStart while still loading history does NOT emit schedule-submit-timeout", () => {
+            // Subscribed but not InitReady — invariant 2 suppresses;
+            // watchdog must not arm against a turn that never started.
+            const s0 = update(mk(), { type: "StreamSubscribe", at: 100 }).state;
+            const r = update(s0, { type: "TurnStart", at: 110 });
+            expect(r.events).toHaveLength(1);
+            expect(r.events[0]).toMatchObject({
+                type: "turn-start-suppressed",
+                reason: "init still loading",
+            });
+        });
+
+        it("SubmitTimeoutElapsed while Submitting → Done.errored", () => {
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            expect(s1.turnPhase.kind).toBe("Submitting");
+            const deadline = 110 + SUBMIT_TIMEOUT_MS;
+            const r = update(s1, {
+                type: "SubmitTimeoutElapsed",
+                at: deadline,
+            });
+            expect(r.state.turnPhase.kind).toBe("Done");
+            if (r.state.turnPhase.kind === "Done") {
+                expect(r.state.turnPhase.outcome).toBe("errored");
+                expect(r.state.turnPhase.finishedAt).toBe(deadline);
+            }
+            // Legacy fields cleared the same way TurnEnd would clear them.
+            expect(r.state.turnActive).toBe(false);
+            expect(r.state.stopping).toBe(false);
+            expect(r.state.currentTool).toBe(null);
+            expect(r.state.turnTokens).toBe(null);
+            // Animation invariant: isWorking flips false.
+            expect(isWorking(r.state)).toBe(false);
+            // Audit event.
+            expect(r.events).toHaveLength(1);
+            expect(r.events[0]).toMatchObject({
+                type: "submit-timed-out",
+                at: deadline,
+            });
+        });
+
+        it("SubmitTimeoutElapsed clears live tool + tokens that snuck in pre-promotion", () => {
+            // Edge case: the dispatch layer might set legacy currentTool
+            // / turnTokens during Submitting before the phase promotion
+            // path actually runs (e.g. an ill-ordered call site). The
+            // forced-Done.errored path must still scrub the sidecars so
+            // the next turn starts clean.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            // Inject live per-turn sidecars without dispatching the
+            // commands (which would also promote to Streaming via
+            // bumpEvent and defeat the test).
+            const sDirty: AgentPaneState = {
+                ...s1,
+                currentTool: "Read",
+                turnTokens: { input: 42, output: 17 },
+            };
+            const r = update(sDirty, {
+                type: "SubmitTimeoutElapsed",
+                at: 5_000,
+            });
+            expect(r.state.turnPhase.kind).toBe("Done");
+            expect(r.state.currentTool).toBe(null);
+            expect(r.state.turnTokens).toBe(null);
+        });
+
+        it("SubmitTimeoutElapsed while Streaming is a no-op (same ref)", () => {
+            // Realistic race: the first chunk arrived (Submitting →
+            // Streaming via StreamFlushObserved) just before the timer
+            // fired. The reducer must not corrupt the live Streaming
+            // phase.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, {
+                type: "StreamFlushObserved",
+                addedCount: 1,
+                at: 120,
+            }).state;
+            expect(s2.turnPhase.kind).toBe("Streaming");
+            const r = update(s2, {
+                type: "SubmitTimeoutElapsed",
+                at: 30_110,
+            });
+            expect(r.state).toBe(s2);
+            expect(r.events).toEqual([]);
+        });
+
+        it("SubmitTimeoutElapsed while Interrupting is a no-op (same ref)", () => {
+            // User pressed Stop while still in Submitting (e.g. instant
+            // regret). Phase moved to Interrupting; submit watchdog
+            // should not retroactively classify as errored.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "RequestStop", at: 120 }).state;
+            expect(s2.turnPhase.kind).toBe("Interrupting");
+            const r = update(s2, {
+                type: "SubmitTimeoutElapsed",
+                at: 30_110,
+            });
+            expect(r.state).toBe(s2);
+            expect(r.events).toEqual([]);
+        });
+
+        it("SubmitTimeoutElapsed while Idle is a no-op (same ref)", () => {
+            const start = mk();
+            const r = update(start, {
+                type: "SubmitTimeoutElapsed",
+                at: 100,
+            });
+            expect(r.state).toBe(start);
+            expect(r.events).toEqual([]);
+        });
+
+        it("SubmitTimeoutElapsed while Done is a no-op (same ref)", () => {
+            // Graceful TurnEnd already landed → Done.completed.
+            // Late submit watchdog must not overwrite the outcome.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "TurnEnd", stats: null }, 200).state;
+            expect(s2.turnPhase.kind).toBe("Done");
+            if (s2.turnPhase.kind === "Done") {
+                expect(s2.turnPhase.outcome).toBe("completed");
+            }
+            const r = update(s2, {
+                type: "SubmitTimeoutElapsed",
+                at: 30_110,
+            });
+            expect(r.state).toBe(s2);
+            expect(r.events).toEqual([]);
+            // Outcome preserved.
+            if (r.state.turnPhase.kind === "Done") {
+                expect(r.state.turnPhase.outcome).toBe("completed");
+            }
+        });
+
+        it("SubmitTimeoutElapsed while Disconnected is a no-op (same ref)", () => {
+            // Stream dropped mid-Submitting → Disconnected.lastKind=
+            // Submitting. The submit watchdog must not corrupt that.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            expect(s1.turnPhase.kind).toBe("Submitting");
+            const s2 = update(s1, { type: "StreamUnsubscribe", at: 200 }).state;
+            expect(s2.turnPhase.kind).toBe("Disconnected");
+            const r = update(s2, {
+                type: "SubmitTimeoutElapsed",
+                at: 30_110,
+            });
+            expect(r.state).toBe(s2);
+            expect(r.events).toEqual([]);
+        });
+
+        it("Three-paths invariant: bumpEvent, StreamFlushObserved, and timeout all exit Submitting", () => {
+            // Spec §8 — "Three independent paths out of Submitting" — so
+            // the working animation can never hang on Submitting.
+            const buildSubmitting = () => {
+                const a = ready(100);
+                return update(a, { type: "TurnStart", at: 110 }).state;
+            };
+
+            // Path 1: promotion via bumpEvent (a tool starts).
+            const p1 = update(
+                buildSubmitting(),
+                { type: "ToolStart", name: "Read" },
+                130,
+            );
+            expect(p1.state.turnPhase.kind).toBe("Streaming");
+
+            // Path 1b: promotion via bumpEvent (token activity).
+            const p1b = update(
+                buildSubmitting(),
+                { type: "TokensIn", input: 10 },
+                130,
+            );
+            expect(p1b.state.turnPhase.kind).toBe("Streaming");
+
+            // Path 2: promotion via StreamFlushObserved.
+            const p2 = update(buildSubmitting(), {
+                type: "StreamFlushObserved",
+                addedCount: 1,
+                at: 130,
+            });
+            expect(p2.state.turnPhase.kind).toBe("Streaming");
+
+            // Path 3: bounded timeout — no stream activity arrived.
+            const p3 = update(buildSubmitting(), {
+                type: "SubmitTimeoutElapsed",
+                at: 110 + SUBMIT_TIMEOUT_MS,
+            });
+            expect(isWorking(p3.state)).toBe(false);
+            expect(p3.state.turnPhase.kind).toBe("Done");
+            if (p3.state.turnPhase.kind === "Done") {
+                expect(p3.state.turnPhase.outcome).toBe("errored");
+            }
+        });
+
+        it("Late TurnEnd after SubmitTimeoutElapsed does NOT overwrite errored (first-done-wins)", () => {
+            // PR C added `alreadyDone` to the TurnEnd arm so a late
+            // graceful ack after a forced Done can't reclassify the
+            // outcome. PR D inherits the same guarantee: timeout fires,
+            // turn lands in Done.errored, a stray backend TurnEnd that
+            // arrives afterwards must preserve "errored", not overwrite
+            // with "completed" or "stopped".
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const deadline = 110 + SUBMIT_TIMEOUT_MS;
+            const s2 = update(s1, {
+                type: "SubmitTimeoutElapsed",
+                at: deadline,
+            }).state;
+            expect(s2.turnPhase.kind).toBe("Done");
+            if (s2.turnPhase.kind === "Done") {
+                expect(s2.turnPhase.outcome).toBe("errored");
+            }
+            // Late backend ack — graceful TurnEnd lands.
+            const r = update(s2, { type: "TurnEnd", stats: null }, deadline + 1_000);
+            expect(r.state.turnPhase.kind).toBe("Done");
+            if (r.state.turnPhase.kind === "Done") {
+                // First-done-wins: outcome stays "errored".
+                expect(r.state.turnPhase.outcome).toBe("errored");
+                // finishedAt is also pinned (not bumped to the late ack).
+                expect(r.state.turnPhase.finishedAt).toBe(deadline);
+            }
+        });
+
+        it("SUBMIT_TIMEOUT_MS is 30000 (sanity)", () => {
+            // Pinned so a sneaky bump can't slip in unreviewed.
+            expect(SUBMIT_TIMEOUT_MS).toBe(30_000);
         });
     });
 });
