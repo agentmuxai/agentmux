@@ -38,6 +38,7 @@ import clsx from "clsx";
 import type { JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, Suspense } from "solid-js";
 import "./block.scss";
+import { BlockErrorBoundary } from "./BlockErrorBoundary";
 import { BlockFrame } from "./blockframe";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
 
@@ -318,12 +319,25 @@ function Block(props: BlockProps): JSX.Element {
 
     const ready = createMemo(() => !loading() && !isBlank(props.nodeModel.blockId) && blockData() != null && viewModel() != null);
 
+    // Per-block ErrorBoundary: a renderer fault in this pane only blanks
+    // THIS pane, not the whole tab. See retro
+    // docs/retro/retro-agent-pane-cascade-replacechild-2026-05-23.md.
+    // The fallback reads only from props passed in (blockId, viewType,
+    // error, reset, onClose) — never touches the broken pane's reactive
+    // graph, which may be half-flushed.
+    const viewTypeStr = createMemo(() => blockData()?.meta?.view);
     return (
         <Show when={ready()}>
-            {props.preview
-                ? <BlockPreview nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} />
-                : <BlockFull nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} />
-            }
+            <BlockErrorBoundary
+                blockId={props.nodeModel.blockId}
+                viewType={viewTypeStr()}
+                onClose={props.nodeModel.onClose}
+            >
+                {props.preview
+                    ? <BlockPreview nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} />
+                    : <BlockFull nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} />
+                }
+            </BlockErrorBoundary>
         </Show>
     );
 }
@@ -353,9 +367,16 @@ function SubBlock(props: SubBlockProps): JSX.Element {
         viewModel()?.dispose?.();
     });
 
+    const viewTypeStr = createMemo(() => blockData()?.meta?.view);
     return (
         <Show when={!loading() && !isBlank(props.nodeModel.blockId) && blockData() != null && viewModel()}>
-            <BlockSubBlock nodeModel={props.nodeModel} viewModel={viewModel()} />
+            <BlockErrorBoundary
+                blockId={props.nodeModel.blockId}
+                viewType={viewTypeStr()}
+                onClose={props.nodeModel.onClose}
+            >
+                <BlockSubBlock nodeModel={props.nodeModel} viewModel={viewModel()} />
+            </BlockErrorBoundary>
         </Show>
     );
 }
