@@ -400,11 +400,18 @@ impl Controller for ShellController {
             return Ok(());
         }
 
-        // Real PTY path
+        // Real PTY path.
+        //
+        // Initial cols bumped to 200 (was 80) so the agent-pane live-log
+        // doesn't render hard-wrapped at ~80 chars before the frontend's
+        // dynamic resize lands (see hooks/usePtyWidth.ts and
+        // docs/analysis/AGENT_PANE_PTY_WRAP_2026_05_23.md). The dynamic
+        // resize coalesces over a ~150 ms debounce after mount, so the
+        // PTY uses this default for the very first batch of output.
         let pty_system = native_pty_system();
         let pty_size = PtySize {
             rows: 25,
-            cols: 80,
+            cols: 200,
             pixel_width: 0,
             pixel_height: 0,
         };
@@ -418,7 +425,7 @@ impl Controller for ShellController {
             self.unlock_run();
             format!("failed to open PTY: {e}")
         })?;
-        tracing::info!(block_id = %self.block_id, rows = 25, cols = 80, "PTY opened");
+        tracing::info!(block_id = %self.block_id, rows = 25, cols = 200, "PTY opened");
 
         // Determine shell command
         let cmd_str = Self::get_cmd_str(&block_meta);

@@ -29,6 +29,7 @@ import { useBookmarks } from "./hooks/useBookmarks";
 import { useScrollToNode } from "./hooks/useScrollToNode";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useProcessCount } from "./hooks/useProcessCount";
+import { usePtyWidth } from "./hooks/usePtyWidth";
 import { useSubagentEvents } from "./hooks/useSubagentEvents";
 import { useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
 import { useAgentCommands } from "./hooks/useAgentCommands";
@@ -536,6 +537,18 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // note below where the inline handlers were removed.
 
     let rootRef: HTMLDivElement | undefined;
+
+    // Track pane width → PTY cols so tools running inside the agent CLI
+    // (git, ls, claude, …) wrap their output to match the pane instead of
+    // the hard-coded `cols: 80` the PTY was opened with. ResizeObserver
+    // on the root element; debounced 150 ms; one ControllerInputCommand
+    // per net size change. See docs/analysis/AGENT_PANE_PTY_WRAP_2026_05_23.md.
+    // Caveat: already-captured live-log lines stay at their original wrap.
+    usePtyWidth({
+        blockId: model.blockId,
+        elementRef: () => rootRef,
+        log,
+    });
 
     // Zoom input is handled by the universal framework — `keymodel.ts`
     // intercepts Ctrl+/-/0 and dispatches to `zoomIn/Out/Reset`, and
