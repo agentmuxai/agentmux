@@ -262,18 +262,27 @@ fn resolve_root() -> Result<PathBuf, String> {
 /// not a literal filename, so `PathBuf::join("versions").join("C:temp")`
 /// would resolve OUTSIDE the intended `~/.agentmux/versions/` subtree.
 fn sanitize_path_segment(s: &str) -> Option<String> {
-    let trimmed = s.trim();
-    if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
+    // Reject whitespace padding rather than silently normalizing it
+    // away — otherwise distinct caller-supplied ids like "foo" and
+    // " foo " would alias to the same directory. bundle_id is a real
+    // caller-supplied identifier (passed through RPC payloads), so
+    // this matters for credential isolation. codex P2 follow-up on
+    // #981. Internally-generated version strings + branch names
+    // shouldn't carry padding anyway, so this is no-op for them.
+    if s != s.trim() {
+        return None;
+    }
+    if s.is_empty() || s == "." || s == ".." {
         return None;
     }
     // Filesystem separators + Windows-reserved characters + NUL.
-    if trimmed
+    if s
         .chars()
         .any(|c| matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0'))
     {
         return None;
     }
-    Some(trimmed.to_string())
+    Some(s.to_string())
 }
 
 #[cfg(test)]

@@ -1099,7 +1099,20 @@ fn persist_oauth_binding_or_synthetic(
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
-    let account_id = uuid::Uuid::new_v4().to_string();
+    // Re-OAuth (token expiry / Reconnect): load any existing binding
+    // for this (bundle, provider) and reuse its `account_id` so the
+    // upsert UPDATES the prior IdentityAccount in place instead of
+    // creating a fresh UUID + orphaning the old row in
+    // `db_identity_accounts`. Fresh UUID only on first bind. codex
+    // P2 follow-up on #981.
+    let account_id = wstore
+        .bundle_identity_bindings(bundle_id)
+        .ok()
+        .into_iter()
+        .flatten()
+        .find(|b| b.provider == provider_id)
+        .map(|b| b.account_id)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let account = IdentityAccount {
         id: account_id.clone(),
         name: format!("{provider_id}-oauth"),
