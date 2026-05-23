@@ -37,13 +37,14 @@ import {
 } from "./agent-pane-registration";
 
 function noopProjections(): AgentPaneProjections {
+    // Reagent P1 on #999: PR G dropped `turnActive` and `stopping` from
+    // AgentPaneProjections; including them here would trip excess-property
+    // checking on the explicit return type.
     return {
         streaming: () => {},
         sessionStats: () => {},
         currentTool: () => {},
         turnTokens: () => {},
-        turnActive: () => {},
-        stopping: () => {},
         pending: () => {},
         initPhase: () => {},
         turnPhase: () => {},
