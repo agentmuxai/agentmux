@@ -46,6 +46,7 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: var(--space-1-5) 10px var(--space-1-5) var(--space-2);
 
     .agent-tool-log-line {
