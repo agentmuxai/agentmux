@@ -87,20 +87,22 @@ pub fn provider_class(provider: &str) -> Option<ProviderClass> {
             env_vars: &["AWS_ACCESS_KEY_ID"],
         }),
         // ── OAuth class ───────────────────────────────────────────
-        // `claude` reads `CLAUDE_CONFIG_DIR` — documented Claude Code
-        // behavior. `codex` / `openclaw` env-var names are best-
-        // effort placeholders flagged as open questions in
-        // SPEC_OAUTH_IDENTITY_BUNDLES §8; they get confirmed when
-        // PR C wires the OAuth flow controller to each CLI.
-        "claude" => Some(ProviderClass::OAuth {
-            config_dir_env_var: "CLAUDE_CONFIG_DIR",
-        }),
-        "codex" => Some(ProviderClass::OAuth {
-            config_dir_env_var: "CODEX_HOME",
-        }),
-        "openclaw" => Some(ProviderClass::OAuth {
-            config_dir_env_var: "OPENCLAW_CONFIG_DIR",
-        }),
+        // Env-var names come from the CLI provider registry
+        // (`agentmux-srv/src/backend/providers.rs` —
+        // `ProviderConfig::auth_config_dir_env_var`) so the resolver
+        // can never drift from the launcher spawn path: there is one
+        // source of truth per CLI for which env var redirects its
+        // config / auth directory. The match arm enumerates which
+        // providers we currently treat as OAuth-class for identity
+        // bundles (claude / codex / openclaw — per spec §4.3); the
+        // env-var string is read from the registry, not duplicated.
+        "claude" | "codex" | "openclaw" => {
+            crate::backend::providers::get_provider(provider).map(|cfg| {
+                ProviderClass::OAuth {
+                    config_dir_env_var: cfg.auth_config_dir_env_var,
+                }
+            })
+        }
         _ => None,
     }
 }
@@ -441,19 +443,23 @@ mod tests {
     #[test]
     fn provider_class_oauth_providers() {
         // Spec §4.3 — the three known oauth providers must classify
-        // as OAuth with their documented config-dir env vars.
-        assert!(matches!(
+        // as OAuth with the SAME config-dir env vars the CLI provider
+        // registry defines (single source of truth). Pinning the
+        // expected strings here catches drift in either direction —
+        // if the registry changes a value, this test fails and the
+        // change becomes deliberate.
+        assert_eq!(
             provider_class("claude"),
-            Some(ProviderClass::OAuth { config_dir_env_var: "CLAUDE_CONFIG_DIR" })
-        ));
-        assert!(matches!(
+            Some(ProviderClass::OAuth { config_dir_env_var: "CLAUDE_CONFIG_DIR" }),
+        );
+        assert_eq!(
             provider_class("codex"),
-            Some(ProviderClass::OAuth { .. })
-        ));
-        assert!(matches!(
+            Some(ProviderClass::OAuth { config_dir_env_var: "CODEX_HOME" }),
+        );
+        assert_eq!(
             provider_class("openclaw"),
-            Some(ProviderClass::OAuth { .. })
-        ));
+            Some(ProviderClass::OAuth { config_dir_env_var: "OPENCLAW_HOME" }),
+        );
     }
 
     #[cfg(debug_assertions)]
