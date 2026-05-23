@@ -104,9 +104,13 @@ export function update(
         // ── Stream lifecycle ───────────────────────────────────────
         case "StreamSubscribe": {
             // Dual-write: if a turn was Submitting, the subscription is
-            // its expected hand-off to Streaming. Otherwise the phase
-            // stays as-is (subscribing without a pending send isn't
-            // "working"; Idle/Done/Disconnected/Streaming stay put).
+            // its expected hand-off to Streaming. If already Streaming,
+            // the resubscribe IS fresh activity — refresh
+            // `lastEventMs` to `command.at` so the re-armed watchdog
+            // deadline is in the future. (P1 on #995 from reagent +
+            // codex: stale `lastEventMs` could schedule a deadline in
+            // the past, firing `StreamStalled` immediately on a freshly-
+            // resubscribed turn.) Idle/Done/Disconnected stay put.
             const nextPhase: TurnPhase =
                 state.turnPhase.kind === "Submitting"
                     ? {
@@ -115,19 +119,19 @@ export function update(
                           toolsActive: 0,
                           lastEventMs: command.at,
                       }
-                    : state.turnPhase;
+                    : state.turnPhase.kind === "Streaming"
+                        ? {
+                              ...state.turnPhase,
+                              lastEventMs: command.at,
+                          }
+                        : state.turnPhase;
             const events: AgentPaneEvent[] = [
                 { type: "stream-subscribed", at: command.at },
             ];
             // PR E: re-arm the bounded streaming watchdog on every
-            // activity that lands inside Streaming. Submitting →
-            // Streaming above qualifies; if the phase was already
-            // Streaming the resubscribe is also fresh activity (we
-            // leave phase.lastEventMs as-is by design — re-subscribe
-            // doesn't bump the phase clock in PR A, only the legacy
-            // streaming.lastEventTime — but the dispatcher still
-            // re-arms to the existing deadline so a previously stale
-            // timer is replaced).
+            // activity that lands inside Streaming. The refresh of
+            // `lastEventMs` above ensures the new deadline is always
+            // `command.at + STREAMING_IDLE_TIMEOUT_MS`, never in the past.
             const wd = streamWatchdogEvent(nextPhase);
             if (wd) events.push(wd);
             return {
