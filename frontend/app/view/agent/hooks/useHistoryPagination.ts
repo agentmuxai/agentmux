@@ -130,8 +130,8 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
 
         // Init lifecycle (issue #728 gap 1): dispatch InitStart before the
         // fetch, InitReady on success, InitFailed on error. The reducer
-        // gates TurnStart on initPhase === "ready" so we don't accept
-        // sends while history is still loading.
+        // gates TurnStart on initPhase.kind !== "InitPending" so we don't
+        // accept sends while history is still loading.
         // Soft variant — cascade-during-dispatch could dispose the pane
         // before this fires; retro 2026-05-23 (agent-pane cascade →
         // replaceChild quick-win).
@@ -162,7 +162,10 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                             `restored ${snapshot.nodes.length} nodes from snapshot ` +
                                 `(savedAt=${snapshot.savedAt ?? "unknown"}, loadOlder offset=${offset})`,
                         );
-                        dispatchPaneIfRegistered(opts.blockId, { type: "InitReady" });
+                        dispatchPaneIfRegistered(opts.blockId, {
+                            type: "InitReady",
+                            at: Date.now(),
+                        });
                         return;
                     }
                     opts.log(
@@ -189,7 +192,10 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
 
                 const total = countResp?.count ?? 0;
                 if (total === 0) {
-                    dispatchPaneIfRegistered(opts.blockId, { type: "InitReady" });
+                    dispatchPaneIfRegistered(opts.blockId, {
+                        type: "InitReady",
+                        at: Date.now(),
+                    });
                     return;
                 }
 
@@ -219,7 +225,10 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 setHistoryTotal(available);
 
                 opts.log("history", `loaded ${nodes.length} of ${available} previous messages`);
-                dispatchPaneIfRegistered(opts.blockId, { type: "InitReady" });
+                dispatchPaneIfRegistered(opts.blockId, {
+                    type: "InitReady",
+                    at: Date.now(),
+                });
             } catch (err: any) {
                 if (!mounted) return;
                 // Non-fatal — fresh session or backend not ready yet.
@@ -229,10 +238,14 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 const reason = err?.message ?? String(err);
                 opts.log("history", `could not load history: ${reason}`, "warn");
                 // Surface the failure for diagnostics. The reducer's
-                // TurnStart guard treats `error` as fail-open (only
-                // `loading` blocks sends), so no follow-up InitReady
+                // TurnStart guard treats `InitFailed` as fail-open (only
+                // `InitPending` blocks sends), so no follow-up InitReady
                 // is needed — the user can still send.
-                dispatchPaneIfRegistered(opts.blockId, { type: "InitFailed", reason });
+                dispatchPaneIfRegistered(opts.blockId, {
+                    type: "InitFailed",
+                    at: Date.now(),
+                    reason,
+                });
             }
         })();
     });
