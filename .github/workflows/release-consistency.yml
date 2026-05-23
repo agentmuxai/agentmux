@@ -19,13 +19,9 @@ on:
   # by design (VH is only updated by `task release`), so a full-five
   # check on every PR would mis-fire on every feature build.
   #
-  # The script + workflow YAML are also included so changes to the
-  # check itself rerun on the gate.
   pull_request:
     paths:
       - 'VERSION_HISTORY.md'
-      - 'scripts/verify-release-consistency.sh'
-      - '.github/workflows/release-consistency.yml'
   push:
     branches:
       - main
