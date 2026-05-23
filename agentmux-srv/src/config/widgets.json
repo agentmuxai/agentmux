@@ -19,7 +19,7 @@
     },
     "defwidget@swarm": {
         "display:order": 4,
-        "display:hidden": true,
+        "display:pinned": true,
         "icon": "bee",
         "color": "#f59e0b",
         "label": "swarm",
