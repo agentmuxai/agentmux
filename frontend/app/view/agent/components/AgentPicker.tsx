@@ -21,6 +21,7 @@ import { getProvider } from "../providers";
 import { AgentCard } from "./AgentCard";
 import { AgentActionBar } from "./AgentActionBar";
 import type { LaunchOverrides } from "./AgentLaunchModal";
+import { RecentSessionsList } from "./RecentSessionsList";
 
 // ── useAgentDefinitions hook ───────────────────────────────────────────────────────
 
@@ -201,6 +202,48 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
 
     const openLaunchModal = (agent: AgentDefinition) => {
         tabModal.open(buildLaunchRequest(agent));
+    };
+
+    // Cascade follow-up (2026-05-23) — reattach via Recent Sessions.
+    // We bypass the launch modal entirely (no Identity / Memory picks
+    // to make — the row carries them) and call launchAgentDefinition
+    // directly with the same `continueOfInstanceId + workDirOverride`
+    // shape the modal's Continue dropdown produces. That keeps the
+    // continuation path single-sourced: same backend RPCs, same
+    // CreateAgentInstance lineage, same env injection. If the
+    // definition for this row no longer exists (rare, but possible if
+    // the user deleted it), fall back to the launch modal for the
+    // first matching definition so the user can pick a substitute.
+    // See: RecentSessionsList.tsx file header for the full mechanism
+    // discussion.
+    const handleReattach = async (row: RecentSessionRow) => {
+        const def = agents().find((a) => a.id === row.definition_id);
+        if (!def) {
+            // Definition gone — log + no-op rather than spawn into a
+            // missing definition. The frontend logger forwards to the
+            // sidecar so this shows up in muxlog. Surfacing a toast is
+            // a UX polish follow-up; for the cascade-recovery flow,
+            // not crashing the picker is the priority.
+            // eslint-disable-next-line no-console
+            console.warn(
+                `recent-session reattach: definition ${row.definition_id} not found`,
+            );
+            return;
+        }
+        setLaunching(def.id);
+        try {
+            await props.model.launchAgentDefinition(def, {
+                instanceName: row.instance_name,
+                agentType: (def.agent_type as "host" | "container") || "host",
+                environment: def.agent_type === "container" ? "docker" : "local",
+                identityId: row.identity_id,
+                memoryId: row.memory_id,
+                continueOfInstanceId: row.instance_id,
+                workDirOverride: row.working_directory,
+            });
+        } finally {
+            setLaunching(null);
+        }
     };
 
     // Extracted from the install branch of handleSelect so the
@@ -442,6 +485,15 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             >
                 <div class="agent-view" style={{ zoom: zoomFactor() }}>
                     <div class="agent-picker">
+                        {/* Cascade follow-up (2026-05-23) — recent
+                            sessions appear ABOVE the agent cards so
+                            users see "continue what you were doing"
+                            before they see "start something new". This
+                            makes orphaned conversations recoverable
+                            from normal UI. Picker is generic (no
+                            identity filter) — the modal-level
+                            Continue dropdown handles per-identity. */}
+                        <RecentSessionsList onReattach={handleReattach} />
                         <div class="agent-picker-list">
                             <For each={agents()}>
                                 {(agent, index) => (
