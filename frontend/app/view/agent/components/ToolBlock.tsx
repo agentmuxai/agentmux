@@ -73,7 +73,14 @@ const HOVER_ENTER_DELAY_MS = 150;
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     const [hovering, setHovering] = createSignal(false);
     let enterTimer: ReturnType<typeof setTimeout> | undefined;
+    // Codex P1 on #988: both the block container AND the inline panel
+    // bind these handlers. A fast cursor traversal (container → panel)
+    // fires enter twice without an intervening leave; without clearing
+    // the previous timer, multiple stale timeouts accumulate and
+    // `handleMouseLeave` only clears the most recent. Clearing at the
+    // top of enter makes the timer a single-active-armed value.
     const handleMouseEnter = () => {
+        clearTimeout(enterTimer);
         enterTimer = setTimeout(() => setHovering(true), HOVER_ENTER_DELAY_MS);
     };
     const handleMouseLeave = () => {
