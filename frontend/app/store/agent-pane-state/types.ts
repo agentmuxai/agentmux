@@ -261,6 +261,18 @@ export type AgentPaneCommand =
      * (e.g. agent acked first, user already resumed). Spec §8.
      */
     | { type: "InterruptTimeoutElapsed"; at: number }
+    /**
+     * Submit timeout watchdog fired (caller-scheduled setTimeout — see
+     * `schedule-submit-timeout` event). PR D — bounded
+     * `Submitting → Done.errored` force-transition: if the backend never
+     * acks a TurnStart with a chunk / token / tool event within
+     * `SUBMIT_TIMEOUT_MS`, the pane was previously stuck in Submitting
+     * forever (no `isWorking → false` signal) and the working animation
+     * would never settle. No-op if the phase has already moved off
+     * Submitting (e.g. promotion to Streaming via flush / bumpEvent,
+     * user already stopped, stream dropped). Spec §8 / issue #728 gap 2.
+     */
+    | { type: "SubmitTimeoutElapsed"; at: number }
 
     // ── Pending message queue (composer side) ─────────────────────
     | { type: "PendingMessageQueued"; id: string; text: string; at: number }
@@ -327,6 +339,27 @@ export type AgentPaneEvent =
      * "interrupt timed out — assuming dead" if needed. Spec §8.
      */
     | { type: "interrupt-timed-out"; at: number }
+    /**
+     * Reducer signal: a turn has just entered Submitting. The dispatch
+     * layer is expected to start a setTimeout for `SUBMIT_TIMEOUT_MS`
+     * and fire `SubmitTimeoutElapsed` when it expires — gated by a
+     * shared cancel flag so a graceful promotion to Streaming (via
+     * `StreamFlushObserved` or `bumpEvent` from tool / token activity)
+     * cancels the timer before it fires. `deadlineMs` is
+     * `at + SUBMIT_TIMEOUT_MS` so the caller can compute the remaining
+     * slice deterministically. PR D — spec §8 / issue #728 gap 2.
+     */
+    | {
+          type: "schedule-submit-timeout";
+          deadlineMs: number;
+      }
+    /**
+     * Reducer signal: the bounded `Submitting → Done.{errored}`
+     * force-transition fired because no stream activity arrived within
+     * `SUBMIT_TIMEOUT_MS`. Carries the firing wall-clock for audit.
+     * PR D — spec §8 / issue #728 gap 2.
+     */
+    | { type: "submit-timed-out"; at: number }
     | { type: "pending-queued"; id: string }
     | { type: "pending-accepted"; id: string; wasPresent: boolean }
     | { type: "pending-rejected"; id: string; wasPresent: boolean }
@@ -368,3 +401,22 @@ export const STUCK_THRESHOLD_MS = 45_000;
  * on live agents.
  */
 export const INTERRUPT_TIMEOUT_MS = 5_000;
+
+/**
+ * Bounded `Submitting → Done.{errored}` window. After `TurnStart` puts a
+ * turn into Submitting, if no stream activity (flush / bumpEvent from
+ * tool / token) lands within this many ms the reducer force-transitions
+ * to Done.errored on receipt of `SubmitTimeoutElapsed`. 30 s is the
+ * generous outer bound for a backend ack — network handshakes, agent
+ * spawn, and the first model token round-trip on a fresh session. Any
+ * longer and the working animation has been pinned past the user's
+ * patience window; PR E's streaming watchdog covers the longer "agent
+ * is thinking" idle case once we're in Streaming.
+ *
+ * PR D — spec §8 / issue #728 gap 2. The dispatcher arms this via the
+ * `schedule-submit-timeout` event emitted when `TurnStart` promotes the
+ * phase into Submitting; the standard cancel-flag pattern (the same
+ * `Arc<AtomicBool>` analogue used for the interrupt timeout) gates a
+ * stale fire against a graceful promotion to Streaming.
+ */
+export const SUBMIT_TIMEOUT_MS = 30_000;
