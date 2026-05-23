@@ -30,6 +30,7 @@
 
 pub mod auth_patterns;
 pub mod auth_session;
+pub mod migration;
 pub mod resolver;
 
 // Legacy convenience re-export — newer call sites use
