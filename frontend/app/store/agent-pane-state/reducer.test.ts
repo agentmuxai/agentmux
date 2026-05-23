@@ -29,30 +29,33 @@ const ready = (atMs = 100) => {
 
 describe("agent-pane-state reducer", () => {
     describe("Stream lifecycle", () => {
-        it("StreamSubscribe sets active + lastEventTime", () => {
+        it("StreamSubscribe sets lastEventMs + streaming telemetry", () => {
             const r = update(mk(), { type: "StreamSubscribe", at: 100 });
-            expect(r.state.streaming.active).toBe(true);
+            // PR G: subscribed-ness is `lastEventMs !== null`; the
+            // legacy `streaming.active` boolean was dropped.
+            expect(r.state.lastEventMs).toBe(100);
             expect(r.state.streaming.lastEventTime).toBe(100);
             expect(r.events[0]).toMatchObject({ type: "stream-subscribed", at: 100 });
         });
 
-        it("StreamUnsubscribe clears active and force-clears turnActive", () => {
+        it("StreamUnsubscribe clears subscription and forces working turn into Disconnected", () => {
             const s0 = ready(100);
             const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
-            expect(s1.turnActive).toBe(true);
+            expect(isWorking(s1)).toBe(true);
             const r = update(s1, { type: "StreamUnsubscribe", at: 200 });
-            expect(r.state.streaming.active).toBe(false);
-            expect(r.state.turnActive).toBe(false);
+            expect(r.state.lastEventMs).toBe(null);
+            expect(isWorking(r.state)).toBe(false);
+            expect(r.state.turnPhase.kind).toBe("Disconnected");
         });
 
-        it("StreamFlushObserved bumps bufferSize when active", () => {
+        it("StreamFlushObserved bumps bufferSize when subscribed", () => {
             const s0 = update(mk(), { type: "StreamSubscribe", at: 100 }).state;
             const r = update(s0, { type: "StreamFlushObserved", addedCount: 3, at: 110 });
             expect(r.state.streaming.bufferSize).toBe(3);
             expect(r.state.streaming.lastEventTime).toBe(110);
         });
 
-        it("StreamFlushObserved is no-op when stream inactive", () => {
+        it("StreamFlushObserved is no-op when stream unsubscribed", () => {
             const start = mk();
             const r = update(start, { type: "StreamFlushObserved", addedCount: 3, at: 110 });
             // Reducer must return SAME reference when no work was done.
@@ -62,23 +65,24 @@ describe("agent-pane-state reducer", () => {
     });
 
     describe("Turn lifecycle invariants", () => {
-        it("TurnStart while stream inactive is suppressed", () => {
+        it("TurnStart while stream unsubscribed is suppressed", () => {
             const start = mk();
             const r = update(start, { type: "TurnStart", at: 100 });
-            expect(r.state.turnActive).toBe(false);
+            expect(r.state.turnPhase.kind).toBe("Idle");
             expect(r.state).toBe(start);
             expect(r.events[0]).toMatchObject({ type: "turn-start-suppressed" });
         });
 
-        it("TurnStart while active sets turnActive + clears stale stats", () => {
+        it("TurnStart while subscribed transitions to Submitting + clears stale stats", () => {
             const s0 = ready(100);
             const sWithStats = { ...s0, sessionStats: { input_tokens: 50, output_tokens: 100 } };
             const r = update(sWithStats, { type: "TurnStart", at: 110 });
-            expect(r.state.turnActive).toBe(true);
+            expect(r.state.turnPhase.kind).toBe("Submitting");
+            expect(isWorking(r.state)).toBe(true);
             expect(r.state.sessionStats).toBe(null);
         });
 
-        it("TurnEnd clears tool/tokens/turnActive AND stopping in one shot", () => {
+        it("TurnEnd clears tool/tokens and lands in Done in one shot", () => {
             const s0 = ready(100);
             const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
             const s2 = update(s1, { type: "ToolStart", name: "Read" }).state;
@@ -89,15 +93,18 @@ describe("agent-pane-state reducer", () => {
                 type: "TurnEnd",
                 stats: null,
             });
-            expect(r.state.turnActive).toBe(false);
+            expect(isWorking(r.state)).toBe(false);
+            expect(r.state.turnPhase.kind).toBe("Done");
             expect(r.state.currentTool).toBe(null);
             expect(r.state.turnTokens).toBe(null);
-            expect(r.state.stopping).toBe(false);
             // Stats merged from live tokens (mergeStats fallback path).
             expect(r.state.sessionStats).toEqual({ input_tokens: 50, output_tokens: 200 });
             expect(r.events[0]).toMatchObject({
                 type: "turn-ended",
                 statsMerged: true,
+                // stoppingCleared still carries the audit signal — true
+                // iff the turn ended while in Interrupting (PR G:
+                // derived from `turnPhase.kind === "Interrupting"`).
                 stoppingCleared: true,
             });
         });
@@ -117,7 +124,7 @@ describe("agent-pane-state reducer", () => {
             });
         });
 
-        it("TurnReset clears turn-scoped state but keeps streaming + pending", () => {
+        it("TurnReset clears turn-scoped state but keeps subscription + pending", () => {
             const s0 = ready(100);
             const s1 = update(s0, {
                 type: "PendingMessageQueued",
@@ -128,10 +135,12 @@ describe("agent-pane-state reducer", () => {
             const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
             const s3 = update(s2, { type: "ToolStart", name: "Edit" }).state;
             const r = update(s3, { type: "TurnReset" });
-            expect(r.state.streaming.active).toBe(true); // preserved
+            // PR G: subscription gate is `lastEventMs !== null` (was
+            // `streaming.active`). Preserved across TurnReset.
+            expect(r.state.lastEventMs).not.toBeNull();
             expect(r.state.pending).toHaveLength(1); // preserved
             expect(r.state.currentTool).toBe(null);
-            expect(r.state.turnActive).toBe(false);
+            expect(r.state.turnPhase.kind).toBe("Idle");
         });
     });
 
@@ -163,23 +172,45 @@ describe("agent-pane-state reducer", () => {
     });
 
     describe("Stop flow", () => {
-        it("RequestStop sets stopping", () => {
-            const r = update(mk(), { type: "RequestStop", at: 100 });
-            expect(r.state.stopping).toBe(true);
+        it("RequestStop while working transitions to Interrupting", () => {
+            // PR G: RequestStop is only meaningful while a turn is in
+            // flight. Subscribe + start a turn first, then stop.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const r = update(s1, { type: "RequestStop", at: 120 });
+            expect(r.state.turnPhase.kind).toBe("Interrupting");
         });
 
-        it("StopFailed clears stopping", () => {
-            const s0 = update(mk(), { type: "RequestStop", at: 100 }).state;
-            const r = update(s0, { type: "StopFailed" });
-            expect(r.state.stopping).toBe(false);
+        it("RequestStop while Idle is a state no-op (only emits audit event)", () => {
+            // PR G: legacy `stopping` boolean used to flip true here
+            // even with no turn in flight; that was a latent bug
+            // surface (the stop could not actually be acted on).
+            // Now it's a clean no-op state-wise.
+            const start = mk();
+            const r = update(start, { type: "RequestStop", at: 100 });
+            expect(r.state).toBe(start);
+            expect(r.events[0]).toMatchObject({ type: "stop-requested", at: 100 });
         });
 
-        it("TurnEnd clears stopping (the normal path — no explicit StopApplied needed)", () => {
+        it("StopFailed clears Interrupting → Streaming (when subscribed)", () => {
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "RequestStop", at: 120 }).state;
+            expect(s2.turnPhase.kind).toBe("Interrupting");
+            const r = update(s2, { type: "StopFailed" });
+            // Rolls back to Streaming since the stream is still subscribed.
+            expect(r.state.turnPhase.kind).toBe("Streaming");
+        });
+
+        it("TurnEnd transitions Interrupting → Done.stopped (was the legacy 'stopping cleared' path)", () => {
             const s0 = ready(100);
             const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
             const s2 = update(s1, { type: "RequestStop", at: 120 }).state;
             const r = update(s2, { type: "TurnEnd", stats: null });
-            expect(r.state.stopping).toBe(false);
+            expect(r.state.turnPhase.kind).toBe("Done");
+            if (r.state.turnPhase.kind === "Done") {
+                expect(r.state.turnPhase.outcome).toBe("stopped");
+            }
         });
     });
 
@@ -352,7 +383,7 @@ describe("agent-pane-state reducer", () => {
             // Subscribed but not InitReady — gap 1 invariant.
             const s0 = update(mk(), { type: "StreamSubscribe", at: 100 }).state;
             const r = update(s0, { type: "TurnStart", at: 110 });
-            expect(r.state.turnActive).toBe(false);
+            expect(r.state.turnPhase.kind).toBe("Idle");
             expect(r.events[0]).toMatchObject({
                 type: "turn-start-suppressed",
                 reason: "init still loading",
@@ -367,7 +398,8 @@ describe("agent-pane-state reducer", () => {
             }).state;
             const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
             const r = update(s1, { type: "TurnStart", at: 110 });
-            expect(r.state.turnActive).toBe(true);
+            expect(r.state.turnPhase.kind).toBe("Submitting");
+            expect(isWorking(r.state)).toBe(true);
         });
 
         it("isInitReady selector tracks InitReady only", () => {
@@ -486,31 +518,26 @@ describe("agent-pane-state reducer", () => {
     });
 
     // ─────────────────────────────────────────────────────────────────
-    // PR A — TurnPhase dual-write
+    // TurnPhase transitions — single source of truth (since PR G).
     //
     // Spec: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §5.
-    // Every command that mutates legacy {turnActive, stopping,
-    // streaming.active} must also write the corresponding turnPhase
-    // kind. These tests pin the dual-write invariant — legacy + new
-    // fields agree.
+    // PR A introduced dual-write against legacy {turnActive, stopping,
+    // streaming.active}; PR B migrated views; PR G removed the legacy
+    // fields. These tests now pin the phase transitions on their own.
     // ─────────────────────────────────────────────────────────────────
-    describe("TurnPhase dual-write (PR A)", () => {
-        it("initialState starts in turnPhase Idle", () => {
+    describe("TurnPhase transitions", () => {
+        it("initialState starts in turnPhase Idle (and not subscribed)", () => {
             const s = mk();
             expect(s.turnPhase).toEqual({ kind: "Idle" });
-            // Legacy invariant: nothing is "working" yet.
-            expect(s.turnActive).toBe(false);
-            expect(s.stopping).toBe(false);
-            expect(s.streaming.active).toBe(false);
+            expect(isWorking(s)).toBe(false);
+            expect(s.lastEventMs).toBeNull();
         });
 
-        it("TurnStart sets phase to Submitting AND turnActive=true", () => {
+        it("TurnStart sets phase to Submitting", () => {
             const s0 = ready(100);
             const r = update(s0, { type: "TurnStart", at: 110 });
-            // Legacy
-            expect(r.state.turnActive).toBe(true);
-            // New phase
             expect(r.state.turnPhase.kind).toBe("Submitting");
+            expect(isWorking(r.state)).toBe(true);
             if (r.state.turnPhase.kind === "Submitting") {
                 expect(r.state.turnPhase.submittedAt).toBe(110);
                 expect(r.state.turnPhase.pendingContent).toBe("");
@@ -518,11 +545,11 @@ describe("agent-pane-state reducer", () => {
         });
 
         it("Suppressed TurnStart does NOT advance turnPhase", () => {
-            // Stream inactive → suppressed; phase stays Idle.
+            // Stream unsubscribed → suppressed; phase stays Idle.
             const start = mk();
             const r = update(start, { type: "TurnStart", at: 100 });
             expect(r.state.turnPhase.kind).toBe("Idle");
-            expect(r.state.turnActive).toBe(false);
+            expect(isWorking(r.state)).toBe(false);
         });
 
         it("StreamSubscribe after Submitting advances phase to Streaming", () => {
@@ -540,15 +567,15 @@ describe("agent-pane-state reducer", () => {
                 expect(r.state.turnPhase.toolsActive).toBe(0);
                 expect(r.state.turnPhase.lastEventMs).toBe(120);
             }
-            // Legacy still consistent.
-            expect(r.state.streaming.active).toBe(true);
-            expect(r.state.turnActive).toBe(true);
+            // Subscription gate (PR G: replaces `streaming.active`).
+            expect(r.state.lastEventMs).toBe(120);
+            expect(isWorking(r.state)).toBe(true);
         });
 
         it("StreamSubscribe from Idle keeps phase Idle (no spontaneous promotion)", () => {
             const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
             const r = update(s0, { type: "StreamSubscribe", at: 100 });
-            expect(r.state.streaming.active).toBe(true);
+            expect(r.state.lastEventMs).toBe(100);
             expect(r.state.turnPhase.kind).toBe("Idle");
         });
 
@@ -571,14 +598,11 @@ describe("agent-pane-state reducer", () => {
             }
         });
 
-        it("TurnEnd transitions phase to Done.completed AND clears turnActive/stopping", () => {
+        it("TurnEnd transitions phase to Done.completed", () => {
             const s0 = ready(100);
             const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
             const r = update(s1, { type: "TurnEnd", stats: null }, 200);
-            // Legacy
-            expect(r.state.turnActive).toBe(false);
-            expect(r.state.stopping).toBe(false);
-            // New phase
+            expect(isWorking(r.state)).toBe(false);
             expect(r.state.turnPhase.kind).toBe("Done");
             if (r.state.turnPhase.kind === "Done") {
                 expect(r.state.turnPhase.outcome).toBe("completed");
@@ -586,7 +610,7 @@ describe("agent-pane-state reducer", () => {
             }
         });
 
-        it("TurnEnd while stopping was set produces Done.stopped", () => {
+        it("TurnEnd while in Interrupting produces Done.stopped", () => {
             const s0 = ready(100);
             const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
             const s2 = update(s1, { type: "RequestStop", at: 115 }).state;
@@ -595,27 +619,22 @@ describe("agent-pane-state reducer", () => {
             if (r.state.turnPhase.kind === "Done") {
                 expect(r.state.turnPhase.outcome).toBe("stopped");
             }
-            expect(r.state.stopping).toBe(false);
-            expect(r.state.turnActive).toBe(false);
+            expect(isWorking(r.state)).toBe(false);
         });
 
-        it("TurnReset returns phase to Idle AND clears turnActive/stopping", () => {
+        it("TurnReset returns phase to Idle", () => {
             const s0 = ready(100);
             const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
             const s2 = update(s1, { type: "RequestStop", at: 115 }).state;
             const r = update(s2, { type: "TurnReset" });
             expect(r.state.turnPhase).toEqual({ kind: "Idle" });
-            expect(r.state.turnActive).toBe(false);
-            expect(r.state.stopping).toBe(false);
+            expect(isWorking(r.state)).toBe(false);
         });
 
-        it("RequestStop while working sets phase to Interrupting AND stopping=true", () => {
+        it("RequestStop while working sets phase to Interrupting", () => {
             const s0 = ready(100);
             const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
             const r = update(s1, { type: "RequestStop", at: 120 });
-            // Legacy
-            expect(r.state.stopping).toBe(true);
-            // New phase
             expect(r.state.turnPhase.kind).toBe("Interrupting");
             if (r.state.turnPhase.kind === "Interrupting") {
                 expect(r.state.turnPhase.reason).toBe("user");
@@ -623,17 +642,20 @@ describe("agent-pane-state reducer", () => {
             }
         });
 
-        it("RequestStop while Idle sets legacy stopping but leaves phase Idle", () => {
-            // Edge case: stop pressed without a turn in flight. The
-            // legacy boolean still flips; the phase is unaffected
-            // (there's no working state to interrupt).
+        it("RequestStop while Idle is a same-ref no-op (PR G)", () => {
+            // PR G removed the legacy `stopping` boolean. The pre-PR-G
+            // behaviour flipped `stopping` true even with no turn in
+            // flight; that was a latent bug surface (the stop could
+            // not actually be acted on). The new behaviour leaves
+            // state untouched and only emits the audit event.
             const start = mk();
             const r = update(start, { type: "RequestStop", at: 100 });
-            expect(r.state.stopping).toBe(true);
+            expect(r.state).toBe(start);
             expect(r.state.turnPhase.kind).toBe("Idle");
+            expect(r.events[0]).toMatchObject({ type: "stop-requested", at: 100 });
         });
 
-        it("StopFailed while Interrupting rolls back to Streaming AND clears stopping", () => {
+        it("StopFailed while Interrupting rolls back to Streaming (subscribed)", () => {
             // Build up: ready → submit → re-subscribe to Streaming →
             // stop → stop-rpc-fails.
             const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
@@ -644,31 +666,27 @@ describe("agent-pane-state reducer", () => {
             const s4 = update(s3, { type: "RequestStop", at: 130 }).state;
             expect(s4.turnPhase.kind).toBe("Interrupting");
             const r = update(s4, { type: "StopFailed" });
-            // Legacy
-            expect(r.state.stopping).toBe(false);
-            // New phase — rolled back because stream is still active.
+            // Rolled back because stream is still subscribed.
             expect(r.state.turnPhase.kind).toBe("Streaming");
         });
 
-        it("StopFailed when not Interrupting just clears stopping (phase unchanged)", () => {
+        it("StopFailed when not Interrupting is a no-op (phase unchanged)", () => {
+            // PR G: previously cleared the legacy `stopping` flag; now
+            // there's nothing to clear and the phase is unchanged.
             const start = mk();
-            const flagged: AgentPaneState = { ...start, stopping: true };
-            const r = update(flagged, { type: "StopFailed" });
-            expect(r.state.stopping).toBe(false);
-            // Phase was Idle and remains Idle.
+            const r = update(start, { type: "StopFailed" });
             expect(r.state.turnPhase.kind).toBe("Idle");
         });
 
         it("StreamUnsubscribe while working surfaces Disconnected.{lastKind, lastConnectedAt}", () => {
             const s0 = ready(100);
             const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
-            // Phase is Submitting (legacy turnActive=true).
             expect(s1.turnPhase.kind).toBe("Submitting");
             const r = update(s1, { type: "StreamUnsubscribe", at: 200 });
-            // Legacy: stream + turnActive cleared.
-            expect(r.state.streaming.active).toBe(false);
-            expect(r.state.turnActive).toBe(false);
-            // New (PR F): Disconnected with Submitting as the lost kind,
+            // Subscription cleared (PR G: replaces `streaming.active=false`).
+            expect(r.state.lastEventMs).toBeNull();
+            expect(isWorking(r.state)).toBe(false);
+            // Disconnected with Submitting as the lost kind,
             // lastConnectedAt = command.at, and a literal reason.
             expect(r.state.turnPhase.kind).toBe("Disconnected");
             if (r.state.turnPhase.kind === "Disconnected") {
@@ -678,14 +696,10 @@ describe("agent-pane-state reducer", () => {
             }
         });
 
-        it("StreamUnsubscribe while Idle is a same-ref no-op (PR F)", () => {
-            // PR F tightened the contract: an unsubscribe from a non-
-            // working phase (Idle / Done / Disconnected) is idempotent
-            // and returns the same state reference. The pre-PR-F
-            // behaviour also cleared `streaming.active` here, but that
-            // was a side-effect of the dual-write era — the legacy
-            // boolean leaves with PR G and the new no-op shape is the
-            // canonical one. The view does not observe a phantom
+        it("StreamUnsubscribe while Idle is a same-ref no-op", () => {
+            // An unsubscribe from a non-working phase (Idle / Done /
+            // Disconnected) is idempotent and returns the same state
+            // reference. The view does not observe a phantom
             // disconnect (no event emitted).
             const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
             const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
@@ -851,30 +865,28 @@ describe("agent-pane-state reducer", () => {
             expect(r.state.turnPhase.kind).toBe("Idle");
         });
 
-        it("dual-write invariant: legacy.turnActive ↔ phase.kind ∈ working set", () => {
-            // Walk a normal turn and assert the invariant at every step.
-            const s0 = ready(100); // Idle, !turnActive
-            expect(s0.turnActive).toBe(false);
-            expect(workingByLegacy(s0)).toBe(false);
+        it("isWorking tracks the working-phase set across a full turn", () => {
+            // Walk a normal turn and assert isWorking flips at the
+            // right boundaries. PR G: this replaced the "legacy ↔
+            // phase dual-write invariant" test since the legacy
+            // booleans no longer exist.
+            const s0 = ready(100); // Idle
             expect(isWorking(s0)).toBe(false);
 
-            const s1 = update(s0, { type: "TurnStart", at: 110 }).state; // Submitting, turnActive
-            expect(s1.turnActive).toBe(true);
-            expect(workingByLegacy(s1)).toBe(true);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state; // Submitting
+            expect(s1.turnPhase.kind).toBe("Submitting");
             expect(isWorking(s1)).toBe(true);
 
             const s2 = update(s1, { type: "StreamSubscribe", at: 120 }).state; // Streaming
-            expect(s2.turnActive).toBe(true);
+            expect(s2.turnPhase.kind).toBe("Streaming");
             expect(isWorking(s2)).toBe(true);
 
             const s3 = update(s2, { type: "RequestStop", at: 130 }).state; // Interrupting
-            expect(s3.stopping).toBe(true);
+            expect(s3.turnPhase.kind).toBe("Interrupting");
             expect(isWorking(s3)).toBe(true);
 
             const s4 = update(s3, { type: "TurnEnd", stats: null }, 140).state; // Done
-            expect(s4.turnActive).toBe(false);
-            expect(s4.stopping).toBe(false);
-            expect(workingByLegacy(s4)).toBe(false);
+            expect(s4.turnPhase.kind).toBe("Done");
             expect(isWorking(s4)).toBe(false);
         });
     });
@@ -1029,9 +1041,7 @@ describe("agent-pane-state reducer", () => {
                 expect(r.state.turnPhase.outcome).toBe("interrupted");
                 expect(r.state.turnPhase.finishedAt).toBe(deadline);
             }
-            // Legacy fields cleared the same way TurnEnd would clear them.
-            expect(r.state.turnActive).toBe(false);
-            expect(r.state.stopping).toBe(false);
+            // Per-turn sidecars cleared the same way TurnEnd does.
             expect(r.state.currentTool).toBe(null);
             expect(r.state.turnTokens).toBe(null);
             // Animation invariant: isWorking flips false.
@@ -1236,9 +1246,7 @@ describe("agent-pane-state reducer", () => {
                 expect(r.state.turnPhase.outcome).toBe("errored");
                 expect(r.state.turnPhase.finishedAt).toBe(deadline);
             }
-            // Legacy fields cleared the same way TurnEnd would clear them.
-            expect(r.state.turnActive).toBe(false);
-            expect(r.state.stopping).toBe(false);
+            // Per-turn sidecars cleared the same way TurnEnd does.
             expect(r.state.currentTool).toBe(null);
             expect(r.state.turnTokens).toBe(null);
             // Animation invariant: isWorking flips false.
@@ -1252,8 +1260,8 @@ describe("agent-pane-state reducer", () => {
         });
 
         it("SubmitTimeoutElapsed clears live tool + tokens that snuck in pre-promotion", () => {
-            // Edge case: the dispatch layer might set legacy currentTool
-            // / turnTokens during Submitting before the phase promotion
+            // Edge case: the dispatch layer might set currentTool /
+            // turnTokens during Submitting before the phase promotion
             // path actually runs (e.g. an ill-ordered call site). The
             // forced-Done.errored path must still scrub the sidecars so
             // the next turn starts clean.
@@ -1617,9 +1625,7 @@ describe("agent-pane-state reducer", () => {
                 expect(r.state.turnPhase.outcome).toBe("errored");
                 expect(r.state.turnPhase.finishedAt).toBe(stalledAt);
             }
-            // Legacy fields cleared, same as TurnEnd / interrupt timeout.
-            expect(r.state.turnActive).toBe(false);
-            expect(r.state.stopping).toBe(false);
+            // Per-turn sidecars cleared, same as TurnEnd / interrupt timeout.
             expect(r.state.currentTool).toBe(null);
             expect(r.state.turnTokens).toBe(null);
             // Animation invariant: isWorking flips false.
@@ -1800,8 +1806,8 @@ describe("agent-pane-state reducer", () => {
             }).state;
             expect(s3.turnPhase.kind).toBe("Streaming");
             // Tool + tokens so we can verify they're cleared on
-            // disconnect (legacy cleanup mirrors the bounded force-
-            // transition arms — see reducer.ts §StreamUnsubscribe).
+            // disconnect (cleanup mirrors the bounded force-transition
+            // arms — see reducer.ts §StreamUnsubscribe).
             const s4 = update(s3, { type: "ToolStart", name: "Read" }, 210)
                 .state;
             const s5 = update(s4, { type: "TokensIn", input: 42 }, 220)
@@ -1817,10 +1823,10 @@ describe("agent-pane-state reducer", () => {
                 expect(r.state.turnPhase.lastConnectedAt).toBe(300);
                 expect(r.state.turnPhase.reason).toBe("stream-unsubscribed");
             }
-            // Legacy cleanup.
-            expect(r.state.streaming.active).toBe(false);
-            expect(r.state.turnActive).toBe(false);
-            expect(r.state.stopping).toBe(false);
+            // Subscription cleared (PR G: `lastEventMs !== null` replaces
+            // the legacy `streaming.active` boolean).
+            expect(r.state.lastEventMs).toBeNull();
+            // Per-turn sidecars cleared.
             expect(r.state.currentTool).toBe(null);
             expect(r.state.turnTokens).toBe(null);
             // Animation invariant: isWorking false; isDisconnected true.
@@ -1872,8 +1878,8 @@ describe("agent-pane-state reducer", () => {
                 expect(r.state.turnPhase.lastKind).toBe("Interrupting");
                 expect(r.state.turnPhase.lastConnectedAt).toBe(300);
             }
-            // stopping was set when we entered Interrupting — must clear.
-            expect(r.state.stopping).toBe(false);
+            // Working phase exited (PR G: was previously asserted on the
+            // legacy `stopping` boolean).
             expect(isWorking(r.state)).toBe(false);
             expect(isDisconnected(r.state)).toBe(true);
         });
@@ -1881,7 +1887,7 @@ describe("agent-pane-state reducer", () => {
         it("StreamUnsubscribe while Idle is a same-ref no-op", () => {
             // Already in Idle (no working state to disconnect from).
             // The unsubscribe is non-news; no event, no state churn.
-            const s0 = ready(100); // Idle + streaming.active=true
+            const s0 = ready(100); // Idle + subscribed (lastEventMs set)
             expect(s0.turnPhase.kind).toBe("Idle");
             const r = update(s0, { type: "StreamUnsubscribe", at: 200 });
             expect(r.state).toBe(s0);
@@ -1942,8 +1948,10 @@ describe("agent-pane-state reducer", () => {
             // Now the dispatcher (or the reconnect button) re-subscribes.
             const r = update(s3, { type: "StreamSubscribe", at: 400 });
             expect(r.state.turnPhase.kind).toBe("Idle");
-            // streaming.active true again so a fresh TurnStart can fire.
-            expect(r.state.streaming.active).toBe(true);
+            // Subscribed again (PR G: `lastEventMs !== null` replaces
+            // the legacy `streaming.active === true` check) so a fresh
+            // TurnStart can fire.
+            expect(r.state.lastEventMs).toBe(400);
             // No working state → no watchdog re-arm event. Just the
             // standard `stream-subscribed` event.
             expect(r.events).toHaveLength(1);
@@ -2012,12 +2020,6 @@ describe("agent-pane-state reducer", () => {
     });
 });
 
-/**
- * Convenience: the "working" predicate as derived from the legacy
- * booleans only. Used to pin the dual-write invariant — must agree
- * with `isWorking(state)` (which reads turnPhase). PR G removes this
- * once the legacy fields are gone.
- */
-function workingByLegacy(state: AgentPaneState): boolean {
-    return state.turnActive || state.stopping;
-}
+// `workingByLegacy` was the dual-write invariant helper (turnActive ||
+// stopping) — removed in PR G alongside the legacy fields it read.
+// Use `isWorking(state)` directly.

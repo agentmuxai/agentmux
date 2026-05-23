@@ -43,20 +43,18 @@ export type SignalPair<T> = [Accessor<T>, Setter<T>];
 export interface AgentAtoms {
     documentAtom: SignalPair<DocumentNode[]>;
     documentStateAtom: SignalPair<DocumentState>;
+    /**
+     * Telemetry sub-object — `bufferSize`, `lastEventTime`, `agentId`.
+     * Write-only from the view layer's perspective (no current
+     * consumer reads it); the reducer maintains it for buffer
+     * accounting + the stuck-stream watchdog. The legacy `active`
+     * boolean was dropped in PR G — "is the stream subscribed?" is
+     * derived from `lastEventMs !== null` on the reducer state.
+     */
     streamingStateAtom: SignalPair<StreamingState>;
     sessionStatsAtom: SignalPair<SessionStats | null>;
     currentToolAtom: SignalPair<string | null>;
     turnTokensAtom: SignalPair<TurnTokens | null>;
-    /** True from the moment the user sends a message until session_end arrives. */
-    turnActiveAtom: SignalPair<boolean>;
-    /**
-     * True from the moment the user presses Esc (stopAgent) until session_end
-     * arrives. Drives the "Stopping…" label on the status line and triggers
-     * an "⏹ Interrupted by user" chat row to be appended when the session
-     * actually ends — so the user gets immediate acknowledgment *and*
-     * confirmation that the interrupt landed.
-     */
-    stoppingAtom: SignalPair<boolean>;
     /**
      * Messages sent by the user that the backend hasn't picked up yet.
      * Rendered in a pending zone between the conversation and the composer.
@@ -74,12 +72,11 @@ export interface AgentAtoms {
      */
     initPhaseAtom: SignalPair<InitPhase>;
     /**
-     * Single-source-of-truth turn phase (PR A introduced TurnPhase + dual-
-     * write in the reducer; PR B — this PR — switched the view's "working"
-     * animation binding to read it via the `isWorking(state)` selector).
-     * The reducer continues to dual-write the legacy `turnActiveAtom` /
-     * `stoppingAtom` / `streamingStateAtom.active` fields; PR G will drop
-     * them once every consumer is migrated.
+     * Single-source-of-truth turn phase. PR A introduced TurnPhase
+     * with dual-write against the legacy `turnActive` / `stopping` /
+     * `streaming.active` fields, PR B migrated the view onto the
+     * `isWorking(state)` / `state.turnPhase.kind` selectors, and
+     * PR G removed the legacy fields entirely.
      *
      * Spec: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §5–§7.
      */
@@ -117,7 +114,6 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
             },
         }),
         streamingStateAtom: createSignal<StreamingState>({
-            active: false,
             agentId: agentId,
             bufferSize: 0,
             lastEventTime: 0,
@@ -125,11 +121,10 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         sessionStatsAtom: createSignal<SessionStats | null>(null),
         currentToolAtom: createSignal<string | null>(null),
         turnTokensAtom: createSignal<TurnTokens | null>(null),
-        turnActiveAtom: createSignal<boolean>(false),
-        stoppingAtom: createSignal<boolean>(false),
         pendingMessagesAtom: createSignal<PendingMessage[]>([]),
         // gap1 (#993) reshaped InitPhase from string union to discriminated
-        // union; turnPhase from PR B stays alongside.
+        // union; turnPhase from PR B is now the sole working-state encoding
+        // after PR G removed the legacy `turnActiveAtom` / `stoppingAtom`.
         initPhaseAtom: createSignal<InitPhase>({ kind: "InitPending" }),
         turnPhaseAtom: createSignal<TurnPhase>({ kind: "Idle" }),
     };

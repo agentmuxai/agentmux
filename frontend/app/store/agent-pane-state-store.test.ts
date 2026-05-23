@@ -35,8 +35,6 @@ function noopProj(): AgentPaneProjections {
         sessionStats: () => {},
         currentTool: () => {},
         turnTokens: () => {},
-        turnActive: () => {},
-        stopping: () => {},
         pending: () => {},
         initPhase: () => {},
     };
@@ -168,7 +166,7 @@ describe("agent-pane-state-store (cascade contracts)", () => {
             //         → StreamFlushObserved (Submitting → Streaming)
             //         → RequestStop (Streaming → Interrupting)
             //         → TurnEnd (Interrupting → Done.stopped)
-            dispatch("blockD", { type: "InitReady" });
+            dispatch("blockD", { type: "InitReady", at: 100 });
             dispatch("blockD", { type: "StreamSubscribe", at: 100 });
             dispatch("blockD", { type: "TurnStart", at: 110 });
             dispatch("blockD", { type: "StreamFlushObserved", addedCount: 1, at: 120 });
