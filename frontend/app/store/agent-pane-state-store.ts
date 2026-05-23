@@ -32,21 +32,24 @@ import { type CommandSource, recordDispatch } from "./command-source";
  * to a pre-existing per-pane Solid signal in `createAgentAtoms`. Readers
  * keep using the existing accessors; only writes are routed through this
  * store.
+ *
+ * PR G dropped the `turnActive` and `stopping` setters — the legacy
+ * fields they backed are gone. The view binds its "working" animation
+ * to `workingFromPhase(turnPhase)` and its "Stopping…" label to
+ * `turnPhase.kind === "Interrupting"`.
  */
 export interface AgentPaneProjections {
     streaming: (next: StreamingState) => void;
     sessionStats: (next: SessionStats | null) => void;
     currentTool: (next: string | null) => void;
     turnTokens: (next: TurnTokens | null) => void;
-    turnActive: (next: boolean) => void;
-    stopping: (next: boolean) => void;
     pending: (next: PendingMessage[]) => void;
     /** Init phase — drives the "Loading history…" overlay (issue #728 gap 1). */
     initPhase?: (next: InitPhase) => void;
     /**
-     * Turn phase (PR A added the union + dual-write in the reducer; PR B —
-     * this PR — projects it through to the view so the "working" animation
-     * can bind to `isWorking(state)` instead of `turnActive || stopping`).
+     * Single-source-of-truth turn phase. Since PR G this is the only
+     * working/stopping signal the view binds to (via
+     * `workingFromPhase(turnPhase)` and `turnPhase.kind === "Interrupting"`).
      * Optional so existing callers (and the cascade-store test's no-op
      * projection) keep compiling.
      */
@@ -127,8 +130,6 @@ export function dispatch(
     proj("sessionStats", prev.sessionStats, slot.state.sessionStats, slot.proj.sessionStats);
     proj("currentTool", prev.currentTool, slot.state.currentTool, slot.proj.currentTool);
     proj("turnTokens", prev.turnTokens, slot.state.turnTokens, slot.proj.turnTokens);
-    proj("turnActive", prev.turnActive, slot.state.turnActive, slot.proj.turnActive);
-    proj("stopping", prev.stopping, slot.state.stopping, slot.proj.stopping);
     proj("pending", prev.pending, slot.state.pending, slot.proj.pending);
     proj("initPhase", prev.initPhase, slot.state.initPhase, slot.proj.initPhase);
     proj("turnPhase", prev.turnPhase, slot.state.turnPhase, slot.proj.turnPhase);

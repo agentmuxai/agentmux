@@ -6,9 +6,18 @@
  * docs/specs/frontend-reducer-architecture-2026-05-03.md).
  *
  * Bundles the per-pane atoms that have cohesive cross-atom invariants:
- *   streaming, sessionStats, currentTool, turnTokens, turnActive,
- *   stopping, pendingMessages, plus init phase and stream-watchdog fields
- *   added in issue #728.
+ *   streaming, sessionStats, currentTool, turnTokens, pendingMessages,
+ *   plus init phase, turn phase, and stream-watchdog fields added in
+ *   issue #728.
+ *
+ * PR G (turn-phase cleanup): the legacy `turnActive` / `stopping`
+ * booleans and `streaming.active` boolean were dropped — every view
+ * now reads `isWorking(state)` / `state.turnPhase.kind` /
+ * `isDisconnected(state)` instead. The reducer-internal "is the
+ * stream subscribed?" gate (previously `state.streaming.active`)
+ * now uses `state.lastEventMs !== null` — both moved in lockstep
+ * already (only `StreamSubscribe` / `StreamUnsubscribe` ever set
+ * them), so the substitution is mechanical.
  *
  * The agent document (message list) lives in its own slice
  * (`agent-document/`); reducer scope is intentionally separate per the
@@ -42,13 +51,14 @@ export type InitPhase =
     | { kind: "InitFailed"; at: number; reason: string };
 
 // ─────────────────────────────────────────────────────────────────────────
-// TurnPhase discriminated union (PR A — dual-write phase)
+// TurnPhase discriminated union — single source of truth for the turn
+// lifecycle (since PR G).
 //
 // SPEC: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §5.
 // This union replaces the scattered { turnActive, stopping, streaming.active }
-// booleans with a single explicit phase. PR A is ADDITIVE: the legacy
-// booleans stay and the reducer dual-writes both. View migration is PR B;
-// the legacy fields are removed in PR G.
+// booleans that PR A introduced as a dual-write, PR B migrated the view
+// off, and PR G removed entirely. Consumers project via `isWorking` /
+// `isDisconnected` / `state.turnPhase.kind`.
 // ─────────────────────────────────────────────────────────────────────────
 
 /** Why the turn entered Interrupting. */
@@ -91,8 +101,10 @@ export type KindBeforeDisconnect =
 export type DisconnectReason = "stream-unsubscribed" | "transport-error";
 
 /**
- * Single source of truth for the turn lifecycle. PR A introduces this
- * alongside the legacy booleans — both are written by the reducer.
+ * Single source of truth for the turn lifecycle. Since PR G this is the
+ * only place where "is the agent working", "is a stop in flight", and
+ * "did the stream drop" are encoded — the legacy `turnActive` /
+ * `stopping` / `streaming.active` booleans have been removed.
  *
  *   Idle          : no turn in flight.
  *   Submitting    : user pressed send; awaiting `StreamSubscribe` / first
@@ -142,15 +154,20 @@ export type TurnPhase =
 /**
  * The reducer's state. Each field maps 1:1 to a Solid signal that the
  * agent pane projects from. The reducer enforces invariants ACROSS
- * fields (e.g. turnActive can't be true while streaming inactive).
+ * fields (e.g. a turn can't enter Submitting/Streaming while the
+ * stream is unsubscribed — see the `TurnStart` arm).
+ *
+ * PR G cleanup: `turnActive` / `stopping` (top-level) and `active` (on
+ * `streaming`) have all been removed. `state.turnPhase.kind` is the
+ * sole working-state encoding; "is the stream subscribed?" is now
+ * derived from `state.lastEventMs !== null` (cleared atomically with
+ * the stream on `StreamSubscribe` / `StreamUnsubscribe`).
  */
 export interface AgentPaneState {
     streaming: StreamingState;
     sessionStats: SessionStats | null;
     currentTool: string | null;
     turnTokens: TurnTokens | null;
-    turnActive: boolean;
-    stopping: boolean;
     pending: PendingMessage[];
     /**
      * Init phase — `InitPending` until history fetch resolves (or fails).
@@ -160,32 +177,49 @@ export interface AgentPaneState {
     initPhase: InitPhase;
     /**
      * Wall-clock ms of the last observable stream activity (subscribe,
-     * flush, tool, tokens). Drives the stuck-stream watchdog. null
-     * when no stream is active.
+     * flush, tool, tokens). Drives the stuck-stream watchdog.
+     *
+     * Doubles as the "is the stream subscribed?" gate since PR G:
+     * `lastEventMs !== null` ⇔ the pane has seen a `StreamSubscribe`
+     * that no subsequent `StreamUnsubscribe` has cleared. Both fields
+     * always moved in lockstep when the legacy `streaming.active`
+     * boolean existed, so the substitution is exact.
      */
     lastEventMs: number | null;
     /**
-     * PR A (dual-write): the single-source-of-truth turn phase. The
-     * reducer writes BOTH this and the legacy {turnActive, stopping,
-     * streaming.active} fields on every command. Subsequent PRs (B
-     * onward) migrate view code off the legacy booleans onto this
-     * field; PR G removes the booleans.
+     * Single-source-of-truth turn phase. PR A added it with dual-write
+     * against the legacy `turnActive` / `stopping` / `streaming.active`
+     * booleans; PR B migrated every view consumer onto it via
+     * `isWorking(state)` / `isDisconnected(state)` /
+     * `state.turnPhase.kind`; PR G removed the legacy fields.
      */
     turnPhase: TurnPhase;
 }
 
 export const initialState = (agentId: string): AgentPaneState => ({
-    streaming: { active: false, agentId, bufferSize: 0, lastEventTime: 0 },
+    streaming: { agentId, bufferSize: 0, lastEventTime: 0 },
     sessionStats: null,
     currentTool: null,
     turnTokens: null,
-    turnActive: false,
-    stopping: false,
     pending: [],
     initPhase: { kind: "InitPending" },
     lastEventMs: null,
     turnPhase: { kind: "Idle" },
 });
+
+/**
+ * Selector — `true` iff the pane currently holds a stream subscription
+ * (i.e. between `StreamSubscribe` and the next `StreamUnsubscribe`).
+ *
+ * Since PR G, this replaces the legacy `state.streaming.active`
+ * boolean. The two were always equivalent — both were set by
+ * `StreamSubscribe` and cleared by `StreamUnsubscribe`, and nothing
+ * else touched either. `lastEventMs !== null` is the cheaper
+ * single-field check.
+ */
+export function isStreamSubscribed(state: AgentPaneState): boolean {
+    return state.lastEventMs !== null;
+}
 
 /** Selector — `true` iff the pane has finished its initial history load. */
 export function isInitReady(state: AgentPaneState): boolean {
@@ -198,9 +232,9 @@ export function isInitReady(state: AgentPaneState): boolean {
  * Returns true ⇔ `state.turnPhase.kind ∈ {Submitting, Streaming, Interrupting}`.
  * Idle / Done / Disconnected are all "not working".
  *
- * Spec: SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §7. PR A exports this
- * for downstream consumers; the view migration in PR B will rebind the
- * footer's working indicator to this selector.
+ * Spec: SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §7. Since PR G this
+ * is the only "working" predicate — the legacy `turnActive || stopping`
+ * combination has been removed.
  */
 export function isWorking(state: AgentPaneState): boolean {
     return workingFromPhase(state.turnPhase);
@@ -269,8 +303,8 @@ export type AgentPaneCommand =
     /**
      * Stream produced session_end (or fallback timer fired). Final
      * stats merged with current turn-tokens. Clears currentTool,
-     * turnTokens, turnActive, AND stopping (the latter cascades to
-     * "stop applied" without a separate command).
+     * turnTokens, and transitions the phase to Done (interrupting →
+     * Done.stopped, otherwise Done.completed).
      */
     | { type: "TurnEnd"; stats: SessionStats | null }
     /**

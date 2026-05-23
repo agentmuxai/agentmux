@@ -14,8 +14,9 @@ import { createEffect, onCleanup, onMount } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import type { PendingMessage, SignalPair } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
-import type { DocumentNode, SessionStats, StreamingState, TurnTokens, UserMessageNode } from "./types";
+import type { DocumentNode, SessionStats, UserMessageNode } from "./types";
 import { recordTurn } from "@/store/token-usage";
+import type { TurnPhase } from "@/app/store/agent-pane-state/types";
 import {
     dispatch as dispatchDoc,
     dispatchIfRegistered as dispatchDocIfRegistered,
@@ -24,6 +25,7 @@ import {
 import {
     dispatch as dispatchPane,
     dispatchIfRegistered as dispatchPaneIfRegistered,
+    snapshot as paneSnapshot,
 } from "@/app/store/agent-pane-state-store";
 
 const OutputFileName = "output";
@@ -40,19 +42,15 @@ interface UseAgentStreamOpts {
     blockId: string;
     outputFormat: string;
     documentAtom: SignalPair<DocumentNode[]>;
-    streamingStateAtom: SignalPair<StreamingState>;
-    sessionStatsAtom: SignalPair<SessionStats | null>;
-    currentToolAtom: SignalPair<string | null>;
-    turnTokensAtom: SignalPair<TurnTokens | null>;
-    turnActiveAtom: SignalPair<boolean>;
     /**
-     * True while a user-initiated stop (Esc → SIGINT) is pending. When
-     * session_end arrives and this is true, the hook appends an
-     * "⏹ Interrupted by user" markdown node so the user has durable
-     * visual confirmation that the stop landed. Always cleared on
-     * session_end regardless of whether the row was appended.
+     * The reducer's turn-phase signal — read by the hook to detect
+     * "was this a user-initiated stop?" at session_end so the
+     * "⏹ Interrupted by user" markdown row can be appended for
+     * durable visual confirmation. Replaces the legacy
+     * `turnActiveAtom` / `stoppingAtom` props dropped in PR G; the
+     * predicate is `turnPhase.kind === "Interrupting"`.
      */
-    stoppingAtom?: SignalPair<boolean>;
+    turnPhaseAtom: SignalPair<TurnPhase>;
     /**
      * Pending queue shared with the composer's `sendMessage` path. On
      * `agent-message-accepted` events, the hook removes the matching
@@ -78,12 +76,7 @@ export function useAgentStream({
     blockId,
     outputFormat,
     documentAtom,
-    streamingStateAtom,
-    sessionStatsAtom,
-    currentToolAtom,
-    turnTokensAtom,
-    turnActiveAtom,
-    stoppingAtom,
+    turnPhaseAtom,
     pendingMessagesAtom,
     enabled,
     provider,
@@ -93,8 +86,13 @@ export function useAgentStream({
     // reducer-routed and why `recordDispatch` is a sufficient tap for
     // session-replay fixtures. See docs/analysis/AGENT_PANE_REDUCER_
     // AUDIT_2026_05_12.md.
-    const [getTurnTokens] = turnTokensAtom;
-    const getStopping = stoppingAtom?.[0];
+    //
+    // PR G: turnTokens is fetched directly from the reducer snapshot
+    // at finalize time (paneSnapshot) instead of being threaded through
+    // a dedicated accessor — fewer props, same content. Similarly, the
+    // user-initiated-stop check reads `turnPhase.kind === "Interrupting"`
+    // from the turnPhaseAtom that the agent-view registered.
+    const [getTurnPhase] = turnPhaseAtom;
 
     // Mutable state that doesn't trigger re-renders
     let lineBuffer = "";
@@ -199,10 +197,10 @@ export function useAgentStream({
          * fallback timer armed when the user presses Esc (killing the
          * subprocess prevents it from emitting its own result event).
          *
-         * If `getStopping()` is true when this runs, the ending was user-
-         * initiated — append a visible "⏹ Interrupted by user" row to
-         * the document so the user has durable confirmation that the
-         * stop landed.
+         * If `turnPhase.kind === "Interrupting"` when this runs, the
+         * ending was user-initiated — append a visible "⏹ Interrupted
+         * by user" row to the document so the user has durable
+         * confirmation that the stop landed.
          */
         const finalizeTurn = (stats: SessionStats | null) => {
             parser.flushPending();
@@ -211,7 +209,11 @@ export function useAgentStream({
             // (since turnTokens is cleared on session_end); without this
             // merge the headline tokens-in-Worked feature shows nothing.
             // Per PR #549 reagent/codex P1.
-            const tokens = getTurnTokens();
+            //
+            // PR G: turn-tokens are read from the reducer snapshot
+            // instead of a dedicated signal accessor — same source of
+            // truth, fewer props threaded into the hook.
+            const tokens = paneSnapshot(blockId)?.turnTokens ?? null;
             // Aggregate the completed turn's tokens into the global
             // session-local token-usage store so the status bar's
             // indicator + breakdown popover stay up to date. Guarded
@@ -220,11 +222,15 @@ export function useAgentStream({
             if (provider && tokens) {
                 recordTurn(provider, tokens);
             }
+            // Detect user-initiated stop via the reducer's turn phase.
+            // PR G: replaces the legacy `stoppingAtom` getter — the
+            // predicate is exactly `turnPhase.kind === "Interrupting"`
+            // since RequestStop is the only command that enters
+            // Interrupting and TurnEnd is the next transition out.
             // The reducer's TurnEnd handler does the cross-atom cleanup
-            // in one shot: merges live tokens into stats, clears tool/
-            // tokens/turnActive, AND clears stopping (the latter cascade
-            // replaces the explicit setStopping(false) below).
-            const wasStopping = getStopping?.() === true;
+            // in one shot: merges live tokens into stats, clears
+            // tool/tokens, and transitions the phase to Done.
+            const wasStopping = getTurnPhase().kind === "Interrupting";
             dispatchPaneIfRegistered(blockId, { type: "TurnEnd", stats });
             if (wasStopping) {
                 const interruptedNode: DocumentNode = {
@@ -245,28 +251,33 @@ export function useAgentStream({
         // emit `session_end` within 1.5s (normal for a killed subprocess
         // — TerminateProcess skips any final output), run the same
         // finalization locally so the UI doesn't hang on "Stopping…".
+        //
+        // PR G: previously gated on `getStopping()` (legacy boolean);
+        // now gated on `turnPhase.kind === "Interrupting"`. Same edge
+        // semantics — the reducer transitions into Interrupting on
+        // RequestStop and out on TurnEnd / disconnect.
         let stopFallbackTimer: number | null = null;
-        if (getStopping) {
-            createEffect(() => {
-                const stopping = getStopping();
-                if (stopFallbackTimer != null) {
-                    clearTimeout(stopFallbackTimer);
+        createEffect(() => {
+            const stopping = getTurnPhase().kind === "Interrupting";
+            if (stopFallbackTimer != null) {
+                clearTimeout(stopFallbackTimer);
+                stopFallbackTimer = null;
+            }
+            if (stopping) {
+                stopFallbackTimer = window.setTimeout(() => {
                     stopFallbackTimer = null;
-                }
-                if (stopping) {
-                    stopFallbackTimer = window.setTimeout(() => {
-                        stopFallbackTimer = null;
-                        if (getStopping()) finalizeTurn(null);
-                    }, 1500);
-                }
-            });
-            onCleanup(() => {
-                if (stopFallbackTimer != null) {
-                    clearTimeout(stopFallbackTimer);
-                    stopFallbackTimer = null;
-                }
-            });
-        }
+                    if (getTurnPhase().kind === "Interrupting") {
+                        finalizeTurn(null);
+                    }
+                }, 1500);
+            }
+        });
+        onCleanup(() => {
+            if (stopFallbackTimer != null) {
+                clearTimeout(stopFallbackTimer);
+                stopFallbackTimer = null;
+            }
+        });
 
         // Subscribe to `agent-message-accepted`: when the backend picks
         // up a queued message, promote the matching entry out of the
@@ -296,12 +307,13 @@ export function useAgentStream({
                         id: messageId,
                     });
                     // A new turn is now running (either the first one,
-                    // which already flipped turnActive via handleSendMessage,
-                    // or one drained from the queue — in that case
-                    // turnActive went false on the *previous* session_end
-                    // and nothing else flips it back, leaving the status
-                    // line stuck on "Worked" with no running animation
-                    // even though the CLI is processing the next message).
+                    // which already entered Submitting via the TurnStart
+                    // in handleSendMessage, or one drained from the
+                    // queue — in that case the previous session_end
+                    // dropped the phase to Done and nothing else flips
+                    // it back, leaving the status line stuck on "Worked"
+                    // with no running animation even though the CLI is
+                    // processing the next message).
                     dispatchPaneIfRegistered(blockId, { type: "TurnStart", at: Date.now() });
                     // Append as a normal user_message so it joins the
                     // conversation stream. Keeps the same id so the new
@@ -373,8 +385,8 @@ export function useAgentStream({
                 translator.reset();
                 parser.reset();
                 nodeIdSet = new Set();
-                // Reducer clears sessionStats/currentTool/turnTokens/
-                // turnActive/stopping in one shot.
+                // Reducer clears sessionStats/currentTool/turnTokens
+                // and transitions turnPhase to Idle in one shot.
                 dispatchPaneIfRegistered(blockId, { type: "TurnReset" });
                 return;
             }
@@ -523,8 +535,9 @@ export function useAgentStream({
             subscription.unsubscribe();
             // Tear down the per-block tool_chunk subscription.
             try { blockChunkUnsub(); } catch { /* ignore */ }
-            // StreamUnsubscribe also force-clears turnActive (so a crash
-            // or exit without session_end doesn't leave "Working…" stuck).
+            // StreamUnsubscribe transitions a working turn into the
+            // Disconnected phase (so a crash or exit without
+            // session_end doesn't leave "Working…" stuck).
             const at = Date.now();
             dispatchPaneIfRegistered(blockId, { type: "StreamUnsubscribe", at });
             dispatchDocIfRegistered(blockId, { type: "SessionEnd", at });
