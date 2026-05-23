@@ -86,28 +86,33 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // the final output line before the panel collapses.
     // (SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md §Change 3)
     const [postCompletionHold, setPostCompletionHold] = createSignal(false);
-    // Reagent + codex P1 on #988: the prior implementation read
-    // `postCompletionHold()` inside this effect AND wrote to it, which
-    // made the effect a subscriber of its own write. The synchronous
-    // re-run disposed the previous owner — running the just-registered
-    // `onCleanup(() => clearTimeout(t))` BEFORE the 1s timer could fire.
-    // Net effect: the panel stayed auto-expanded forever after the first
-    // completion, the OPPOSITE of the intended 1s-hold-then-collapse.
+    // Gate the post-completion hold on a real active → inactive
+    // TRANSITION (not on a status-value snapshot). The earlier draft
+    // simply checked `s !== "running" && ...` which fired on mount
+    // for already-completed tools — loaded transcripts would briefly
+    // auto-expand every completed tool row for 1s on initial render
+    // (codex P1 round 2 on #988).
     //
-    // Fix: drop the early-exit read. The effect now tracks ONLY
-    // `props.node.status` as its trigger. Each transition into a
-    // non-active state arms a hold; if status flips back to running
-    // before the timer fires, the next effect run's onCleanup cancels
-    // the in-flight timer (intended behaviour). `postCompletionHold`
-    // is read only by `autoExpanded` — this effect no longer subscribes
-    // to its own writes.
+    // Background on the older self-loop bug (round 1): reading
+    // `postCompletionHold()` inside the same effect that wrote to it
+    // made the effect a subscriber of its own write; the synchronous
+    // re-run disposed the previous owner and ran the just-registered
+    // `onCleanup(() => clearTimeout(t))` BEFORE the timer could fire,
+    // leaving the panel auto-expanded forever after the first
+    // completion. Both bugs are fixed here: track only
+    // `props.node.status`, and gate on a transition by comparing
+    // against `prevStatus` captured outside the reactive scope.
+    let prevStatus: string = props.node.status;
+    const isActive = (s: string): boolean =>
+        s === "running" || s === "pending_approval" || s === "failed";
     createEffect(() => {
         const s = props.node.status;
-        if (s !== "running" && s !== "pending_approval" && s !== "failed") {
+        if (isActive(prevStatus) && !isActive(s)) {
             setPostCompletionHold(true);
             const t = setTimeout(() => setPostCompletionHold(false), 1000);
             onCleanup(() => clearTimeout(t));
         }
+        prevStatus = s;
     });
 
     // Auto-expand while the tool is actively running (or awaiting approval,
