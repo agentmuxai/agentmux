@@ -225,6 +225,16 @@ export type AgentPaneCommand =
     | { type: "RequestStop"; at: number }
     /** Stop RPC failed — bail on the stopping state. */
     | { type: "StopFailed" }
+    /**
+     * Interrupt timeout watchdog fired (caller-scheduled setTimeout — see
+     * `ScheduleInterruptTimeout` event). Bounded `Interrupting → Done`
+     * force-transition: if the agent never acks the SIGINT (backend died,
+     * stream dropped, etc.) the pane was previously stuck in Interrupting
+     * forever and the working animation would never settle. This command
+     * is a no-op if the phase has already moved off Interrupting
+     * (e.g. agent acked first, user already resumed). Spec §8.
+     */
+    | { type: "InterruptTimeoutElapsed"; at: number }
 
     // ── Pending message queue (composer side) ─────────────────────
     | { type: "PendingMessageQueued"; id: string; text: string; at: number }
@@ -272,6 +282,26 @@ export type AgentPaneEvent =
     | { type: "tokens-updated"; input: number | null; output: number | null }
     | { type: "stop-requested"; at: number }
     | { type: "stop-failed" }
+    /**
+     * Reducer signal: a turn has just entered Interrupting. The
+     * dispatch layer (view / saga) is expected to start a setTimeout
+     * for `INTERRUPT_TIMEOUT_MS` and fire `InterruptTimeoutElapsed`
+     * when it expires — gated by a shared cancel flag (analogous to
+     * `Arc<AtomicBool>`) so a later `RequestStop` doesn't double-fire.
+     * `deadlineMs` is `at + INTERRUPT_TIMEOUT_MS` so the caller can
+     * compute the remaining slice deterministically. Spec §8.
+     */
+    | {
+          type: "schedule-interrupt-timeout";
+          deadlineMs: number;
+      }
+    /**
+     * Reducer signal: the bounded `Interrupting → Done.{interrupted}`
+     * force-transition fired because no graceful ack arrived within
+     * `INTERRUPT_TIMEOUT_MS`. The view can surface this as
+     * "interrupt timed out — assuming dead" if needed. Spec §8.
+     */
+    | { type: "interrupt-timed-out"; at: number }
     | { type: "pending-queued"; id: string }
     | { type: "pending-accepted"; id: string; wasPresent: boolean }
     | { type: "pending-rejected"; id: string; wasPresent: boolean }
@@ -297,3 +327,19 @@ export interface ReducerResult {
  * positives. Issue #728 gap 3.
  */
 export const STUCK_THRESHOLD_MS = 45_000;
+
+/**
+ * Bounded `Interrupting → Done.{interrupted}` window. After `RequestStop`
+ * fires SIGINT, if neither `TurnEnd` nor `StreamUnsubscribe` lands within
+ * this many ms the reducer force-transitions to Done.interrupted on
+ * receipt of `InterruptTimeoutElapsed`. 5 s is generous compared to the
+ * typical sub-second SIGINT-ack on a healthy agent but tight enough that
+ * a dead agent doesn't keep the working animation pinned forever.
+ *
+ * Spec: SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §8 — the spec doc
+ * suggests 3_000 but the implementation lands at 5_000 to leave more
+ * headroom for slow Windows PTY teardowns and remote agents on flaky
+ * networks. Tune in a follow-up if telemetry shows the watchdog firing
+ * on live agents.
+ */
+export const INTERRUPT_TIMEOUT_MS = 5_000;
