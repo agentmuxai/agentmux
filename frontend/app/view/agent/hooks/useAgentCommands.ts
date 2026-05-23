@@ -239,15 +239,15 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
 
         // Init guard (issue #728 gap 1, codex P2 on PR #742). The
         // reducer's TurnStart handler already suppresses turnActive
-        // while initPhase === "loading", but that only stops the local
-        // UI state — without this check, the message still gets queued
-        // into pending AND sent over AgentInputCommand. If the backend
-        // accepts before InitReady fires, the accepted-event TurnStart
-        // is also suppressed, leaving the UI showing no active turn
-        // while the agent IS processing. Bail early here so neither
+        // while initPhase.kind === "InitPending", but that only stops the
+        // local UI state — without this check, the message still gets
+        // queued into pending AND sent over AgentInputCommand. If the
+        // backend accepts before InitReady fires, the accepted-event
+        // TurnStart is also suppressed, leaving the UI showing no active
+        // turn while the agent IS processing. Bail early here so neither
         // happens.
         const ps = paneSnapshot(opts.blockId);
-        if (ps?.initPhase === "loading") {
+        if (ps?.initPhase.kind === "InitPending") {
             opts.log("send", "send blocked: history still loading", "warn");
             return;
         }
