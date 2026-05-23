@@ -20,10 +20,15 @@
 //! frontend (PR B) can integrate against the real shape.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::backend::providers::get_provider;
 use crate::backend::rpc::engine::WshRpcEngine;
+use crate::backend::storage::wstore::{IdentityAccount, SecretRef, WaveStore};
+use crate::backend::wps::Broker;
 
 use super::AppState;
 
@@ -113,10 +118,14 @@ struct AckResp {
 
 pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mgr = state.auth_session_manager.clone();
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_AUTH_START,
         Box::new(move |data, _ctx| {
             let mgr = mgr.clone();
+            let wstore = wstore.clone();
+            let broker = broker.clone();
             Box::pin(async move {
                 let req: StartProviderAuthReq = serde_json::from_value(data)
                     .map_err(|e| format!("auth.start: {e}"))?;
@@ -126,15 +135,44 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                     into_bundle_id = ?req.into_bundle_id,
                     "auth.start"
                 );
-                let r = mgr.start_session(req.provider_id.clone(), req.into_bundle_id);
+                // OAuth Bundles PR C invariant — when an OAuth flow runs
+                // against a bundle, the CLI's OAuth tokens land INSIDE the
+                // bundle's per-provider config dir, NOT ambient at
+                // `~/.claude/`. Compute the dir from the registry
+                // (single source of truth — `auth_dir_name` per provider)
+                // and the per-bundle root from `DataPaths::identity_dir`.
+                // Mirror the dir into `auth_env` under the provider's
+                // `auth_config_dir_env_var` (e.g. `CLAUDE_CONFIG_DIR`).
+                // This overrides whatever the frontend computed via the
+                // legacy ambient `ensureAuthDir` path so a bundle-bound
+                // launch never accidentally writes to the global dir.
+                //
+                // When `into_bundle_id` is empty (ambient launch — no
+                // bundle context), keep the legacy `auth_env` exactly so
+                // the existing ambient flow keeps working.
+                //
+                // Errors (path resolve, mkdir) log + fall back to the
+                // legacy env — never abort `auth.start` over a per-bundle
+                // dir issue. Mirrors the `inject_identity_env` pattern.
+                let mut auth_env = req.auth_env;
+                let bundle_dir = compute_and_ensure_bundle_dir(
+                    req.into_bundle_id.as_deref(),
+                    &req.provider_id,
+                    &mut auth_env,
+                );
+                let r = mgr.start_session(req.provider_id.clone(), req.into_bundle_id.clone());
                 spawn_auth_cli(
                     mgr,
+                    wstore,
+                    broker,
                     r.session_id.clone(),
                     req.provider_id,
+                    req.into_bundle_id,
+                    bundle_dir,
                     req.cli_path,
                     req.auth_login_args,
                     req.auth_check_args,
-                    req.auth_env,
+                    auth_env,
                     req.requires_tty,
                 );
                 Ok(Some(serde_json::to_value(&r).unwrap_or_default()))
@@ -240,10 +278,29 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
 /// `AuthSessionManager::record_line`; on a login-success pattern OR
 /// child exit, runs the provider's authCheckCommand to confirm and
 /// transitions to Success or Failed.
+///
+/// On the success path (CLI exited cleanly + authCheckCommand passed),
+/// when `into_bundle_id` AND `bundle_dir` are both set, the function
+/// persists the OAuth binding into the bundle: a `SecretRef::OAuthConfigDir`
+/// account is upserted (status `valid`) and bound via
+/// `bundle_identity_bind`. This is the §4.5 OAuth-success invariant —
+/// after this point, future launches of any agent against the bundle
+/// resolve through `inject_identity_env`'s oauth-class dispatch (PR B)
+/// and reuse the same CLI-managed tokens inside `bundle_dir`.
+///
+/// On failure or when `into_bundle_id` is empty (ambient launch), the
+/// per-bundle binding step is skipped. The bundle row (if any was
+/// auto-created by the New Identity modal) stays — the user's next
+/// attempt reuses it.
+#[allow(clippy::too_many_arguments)]
 fn spawn_auth_cli(
     mgr: Arc<crate::identity::auth_session::AuthSessionManager>,
+    wstore: Arc<WaveStore>,
+    broker: Arc<Broker>,
     session_id: String,
     provider_id: String,
+    into_bundle_id: Option<String>,
+    bundle_dir: Option<String>,
     cli_path: String,
     auth_login_args: Vec<String>,
     auth_check_args: Vec<String>,
@@ -268,8 +325,12 @@ fn spawn_auth_cli(
     if requires_tty {
         spawn_auth_cli_pty(
             mgr,
+            wstore,
+            broker,
             session_id,
             provider_id,
+            into_bundle_id,
+            bundle_dir,
             cli_path,
             auth_login_args,
             auth_check_args,
@@ -285,6 +346,11 @@ fn spawn_auth_cli(
     let cli_path_for_check = cli_path.clone();
     let auth_check_args_for_check = auth_check_args.clone();
     let auth_env_for_check = auth_env.clone();
+    let wstore_for_task = wstore.clone();
+    let broker_for_task = broker.clone();
+    let into_bundle_id_for_task = into_bundle_id.clone();
+    let bundle_dir_for_task = bundle_dir.clone();
+    let provider_id_for_task = provider_id.clone();
 
     let handle = tokio::spawn(async move {
         tracing::info!(
@@ -365,9 +431,23 @@ fn spawn_auth_cli(
         let cli_path_stdout = cli_path_for_check.clone();
         let check_args_stdout = auth_check_args_for_check.clone();
         let check_env_stdout = auth_env_for_check.clone();
+        let wstore_stdout = wstore_for_task.clone();
+        let broker_stdout = broker_for_task.clone();
+        let into_bundle_id_stdout = into_bundle_id_for_task.clone();
+        let bundle_dir_stdout = bundle_dir_for_task.clone();
+        let provider_id_stdout = provider_id_for_task.clone();
+        // Shared between drain + post-exit. The drain sets it after
+        // persisting on a LoginSuccess match; the post-exit transition
+        // block (below) checks it and skips its entire success path if
+        // already transitioned — without this guard the drain's
+        // persist + post-exit's persist both ran on every successful
+        // OAuth, producing orphan IdentityAccount rows (each `Uuid::new_v4`)
+        // and duplicate `identitybundlebindings:changed:<id>` publishes.
+        // Reagent P1 on #981.
+        let success_transitioned = Arc::new(AtomicBool::new(false));
+        let success_transitioned_drain = Arc::clone(&success_transitioned);
         let stdout_drain = tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
-            let mut success_transitioned = false;
             while let Ok(Some(line)) = lines.next_line().await {
                 // NOT logging the raw line — OAuth providers print
                 // auth URLs / callback codes / device codes on stdout
@@ -376,7 +456,7 @@ fn spawn_auth_cli(
                 // CLI emitted something" diagnostics. Reagent P2 on #847.
                 tracing::debug!(session_id = %sid_stdout, bytes = line.len(), "auth.spawn: stdout line");
                 let m = mgr_stdout.record_line(&sid_stdout, &line);
-                if !success_transitioned
+                if !success_transitioned_drain.load(Ordering::Acquire)
                     && matches!(
                         m,
                         Some(crate::identity::auth_patterns::AuthPatternMatch::LoginSuccess { .. })
@@ -389,15 +469,27 @@ fn spawn_auth_cli(
                     )
                     .await
                     {
-                        // PR A: synthetic bundle id — PR C wires real
-                        // wstore-backed persistence. The frontend can
-                        // detect this placeholder (prefix
-                        // "pending-bundle-for-") and surface "saving…"
-                        // UI in the interim.
-                        let bundle_id =
-                            format!("pending-bundle-for-{}", sid_stdout);
+                        // Persist the OAuthConfigDir binding into the
+                        // bundle. When `into_bundle_id` is empty (no
+                        // bundle context, e.g. ambient continuation) or
+                        // `bundle_dir` failed to resolve at spawn, the
+                        // helper skips persistence and the session still
+                        // succeeds — the user just won't get bundle-
+                        // backed token reuse next launch. Bundle id
+                        // returned to the frontend is the real bundle id
+                        // when persistence happened, or a synthetic
+                        // placeholder otherwise so existing UI keeps
+                        // its filter-on-prefix behaviour.
+                        let bundle_id = persist_oauth_binding_or_synthetic(
+                            &wstore_stdout,
+                            &broker_stdout,
+                            into_bundle_id_stdout.as_deref(),
+                            &provider_id_stdout,
+                            bundle_dir_stdout.as_deref(),
+                            &sid_stdout,
+                        );
                         mgr_stdout.finish_success(&sid_stdout, bundle_id);
-                        success_transitioned = true;
+                        success_transitioned_drain.store(true, Ordering::Release);
                     }
                 }
             }
@@ -433,36 +525,53 @@ fn spawn_auth_cli(
         // Final transition if we haven't already hit Success on the
         // login-pattern path. Re-run authCheck because some CLIs exit
         // cleanly without printing a "logged in as" line.
-        match exit {
-            Ok(s) if s.success() => {
-                if confirm_authenticated(
-                    &cli_path_for_check,
-                    &auth_check_args_for_check,
-                    &auth_env_for_check,
-                )
-                .await
-                {
-                    let bundle_id =
-                        format!("pending-bundle-for-{}", session_id_for_task);
-                    mgr_for_task.finish_success(&session_id_for_task, bundle_id);
-                } else {
+        //
+        // Skip the entire block when the drain has already transitioned
+        // (LoginSuccess pattern matched + confirm_authenticated + persist
+        // ran). Without this guard, persist_oauth_binding_or_synthetic
+        // would fire a second time on every successful OAuth — a fresh
+        // IdentityAccount UUID would be upserted, `bundle_identity_bind`
+        // would repoint to the new account (orphaning the first), and
+        // the broker would re-publish the bindings-changed event.
+        // Reagent P1 on #981.
+        if !success_transitioned.load(Ordering::Acquire) {
+            match exit {
+                Ok(s) if s.success() => {
+                    if confirm_authenticated(
+                        &cli_path_for_check,
+                        &auth_check_args_for_check,
+                        &auth_env_for_check,
+                    )
+                    .await
+                    {
+                        let bundle_id = persist_oauth_binding_or_synthetic(
+                            &wstore_for_task,
+                            &broker_for_task,
+                            into_bundle_id_for_task.as_deref(),
+                            &provider_id_for_task,
+                            bundle_dir_for_task.as_deref(),
+                            &session_id_for_task,
+                        );
+                        mgr_for_task.finish_success(&session_id_for_task, bundle_id);
+                    } else {
+                        mgr_for_task.finish_failure(
+                            &session_id_for_task,
+                            "CLI exited 0 but authentication check failed".to_string(),
+                        );
+                    }
+                }
+                Ok(s) => {
                     mgr_for_task.finish_failure(
                         &session_id_for_task,
-                        "CLI exited 0 but authentication check failed".to_string(),
+                        format!("CLI exited with status {s}"),
                     );
                 }
-            }
-            Ok(s) => {
-                mgr_for_task.finish_failure(
-                    &session_id_for_task,
-                    format!("CLI exited with status {s}"),
-                );
-            }
-            Err(e) => {
-                mgr_for_task.finish_failure(
-                    &session_id_for_task,
-                    format!("wait error: {e}"),
-                );
+                Err(e) => {
+                    mgr_for_task.finish_failure(
+                        &session_id_for_task,
+                        format!("wait error: {e}"),
+                    );
+                }
             }
         }
 
@@ -477,10 +586,20 @@ fn spawn_auth_cli(
 /// pipes path's lifecycle: spawn → drain → confirm → finish_success or
 /// finish_failure → detach. Stdout+stderr are merged on the PTY side;
 /// `record_line` doesn't care which stream a line came from.
+///
+/// Same OAuth-success invariant as the pipes path — when
+/// `into_bundle_id` and `bundle_dir` are both set and `confirm_authenticated`
+/// returns true, persists `SecretRef::OAuthConfigDir` + binding before
+/// `finish_success`.
+#[allow(clippy::too_many_arguments)]
 fn spawn_auth_cli_pty(
     mgr: Arc<crate::identity::auth_session::AuthSessionManager>,
+    wstore: Arc<WaveStore>,
+    broker: Arc<Broker>,
     session_id: String,
     provider_id: String,
+    into_bundle_id: Option<String>,
+    bundle_dir: Option<String>,
     cli_path: String,
     auth_login_args: Vec<String>,
     auth_check_args: Vec<String>,
@@ -495,6 +614,11 @@ fn spawn_auth_cli_pty(
     let cli_path_for_check = cli_path.clone();
     let auth_check_args_for_check = auth_check_args.clone();
     let auth_env_for_check = auth_env.clone();
+    let wstore_for_task = wstore.clone();
+    let broker_for_task = broker.clone();
+    let into_bundle_id_for_task = into_bundle_id.clone();
+    let bundle_dir_for_task = bundle_dir.clone();
+    let provider_id_for_task = provider_id.clone();
 
     tracing::info!(
         session_id = %session_id,
@@ -622,11 +746,33 @@ fn spawn_auth_cli_pty(
         let cli_path_drain = cli_path_for_check.clone();
         let check_args_drain = auth_check_args_for_check.clone();
         let check_env_drain = auth_env_for_check.clone();
+        let wstore_drain = wstore_for_task.clone();
+        let broker_drain = broker_for_task.clone();
+        let into_bundle_id_drain = into_bundle_id_for_task.clone();
+        let bundle_dir_drain = bundle_dir_for_task.clone();
+        let provider_id_drain = provider_id_for_task.clone();
+        // Shared with the post-exit fallback block below — same pattern
+        // as the pipes path. Drain's detached `Handle::current().spawn`
+        // task does the persist + finish_success; the drain sets this
+        // atomic BEFORE returning so the outer's check sees it. The
+        // detached task may still be in flight when the outer checks
+        // (PTY drain returns on EOF, the persist task runs async) — that
+        // is fine because the OUTER would only re-persist if the atomic
+        // is false, which it never is once the drain matched the
+        // LoginSuccess pattern. Reagent P1 on #981.
+        let success_transitioned = Arc::new(AtomicBool::new(false));
+        let success_transitioned_drain = Arc::clone(&success_transitioned);
         let drain_handle = tokio::task::spawn_blocking(move || {
             use std::io::BufRead;
             let mut reader = std::io::BufReader::new(reader);
-            let mut success_transitioned = false;
             let mut line = String::new();
+            // The detached confirm/persist task's JoinHandle, populated
+            // when the drain matches LoginSuccess. Returned to outer so
+            // it can await completion before its post-exit check —
+            // without that wait, outer would race the detached and
+            // either skip too soon (if it sets the atomic eagerly) or
+            // double-persist. Reagent P1 follow-up on #981.
+            let mut maybe_detached: Option<tokio::task::JoinHandle<()>> = None;
             loop {
                 line.clear();
                 match reader.read_line(&mut line) {
@@ -636,30 +782,64 @@ fn spawn_auth_cli_pty(
                         // OAuth URLs / codes can be in here.
                         tracing::debug!(session_id = %sid_drain, bytes = line.len(), "auth.spawn (PTY): line");
                         let m = mgr_drain.record_line(&sid_drain, &line);
-                        if !success_transitioned
+                        if maybe_detached.is_none()
                             && matches!(
                                 m,
                                 Some(crate::identity::auth_patterns::AuthPatternMatch::LoginSuccess { .. })
                             )
                         {
                             // Hand off to async to call confirm_authenticated.
+                            // The detached task OWNS the transition —
+                            // it calls finish_success on confirm-OK and
+                            // finish_failure on confirm-NOT-OK, AND
+                            // sets the shared atomic in BOTH cases. The
+                            // drain only captures the JoinHandle here
+                            // and returns it; outer awaits both drain
+                            // and the inner handle before its check, so
+                            // the atomic is correctly settled by then.
                             let cli = cli_path_drain.clone();
                             let args = check_args_drain.clone();
                             let env = check_env_drain.clone();
                             let mgr2 = mgr_drain.clone();
                             let sid2 = sid_drain.clone();
-                            tokio::runtime::Handle::current().spawn(async move {
+                            let wstore2 = wstore_drain.clone();
+                            let broker2 = broker_drain.clone();
+                            let into_bundle_id2 = into_bundle_id_drain.clone();
+                            let bundle_dir2 = bundle_dir_drain.clone();
+                            let provider_id2 = provider_id_drain.clone();
+                            let success_for_detached = Arc::clone(&success_transitioned_drain);
+                            let handle = tokio::runtime::Handle::current().spawn(async move {
                                 if confirm_authenticated(&cli, &args, &env).await {
-                                    let bundle_id = format!("pending-bundle-for-{}", sid2);
+                                    let bundle_id = persist_oauth_binding_or_synthetic(
+                                        &wstore2,
+                                        &broker2,
+                                        into_bundle_id2.as_deref(),
+                                        &provider_id2,
+                                        bundle_dir2.as_deref(),
+                                        &sid2,
+                                    );
                                     mgr2.finish_success(&sid2, bundle_id);
+                                    // Atomic set ONLY on confirm-success
+                                    // — mirrors the pipes path. On
+                                    // confirm-miss the detached does
+                                    // nothing (atomic stays false),
+                                    // outer's post-exit fallback gets
+                                    // another shot at confirm by the
+                                    // time creds are fully written.
+                                    // Outer awaits this handle first,
+                                    // so the atomic is correctly
+                                    // reflected by the time it checks.
+                                    // codex P1 follow-up on #981.
+                                    success_for_detached.store(true, Ordering::Release);
                                 }
                             });
-                            success_transitioned = true;
+                            maybe_detached = Some(handle);
                         }
                     }
                     Err(_) => break,
                 }
             }
+            maybe_detached
         });
 
         // Wait for the child in a blocking task. pair (master + slave)
@@ -675,46 +855,68 @@ fn spawn_auth_cli_pty(
         let exit = wait_handle.await;
         tracing::info!(session_id = %session_id_for_task, exit = ?exit, "auth.spawn (PTY): child exited");
 
-        let _ = drain_handle.await;
+        // Await the drain itself, THEN its optional detached
+        // confirm/persist task. Both have to complete before the
+        // post-exit check — otherwise outer might see atomic=false
+        // (detached still confirming), run its fallback persist, AND
+        // the detached's persist also runs → the original double-
+        // persist race re-opens. Reagent P1 follow-up on #981.
+        let detached = drain_handle.await.ok().flatten();
+        if let Some(h) = detached {
+            let _ = h.await;
+        }
         stdin_writer_handle.abort();
 
         // Final transition fallback — some CLIs exit cleanly without
         // emitting a login-success line that record_line recognizes.
-        match exit {
-            Ok(Ok(s)) if s.success() => {
-                if confirm_authenticated(
-                    &cli_path_for_check,
-                    &auth_check_args_for_check,
-                    &auth_env_for_check,
-                )
-                .await
-                {
-                    let bundle_id = format!("pending-bundle-for-{}", session_id_for_task);
-                    mgr_for_task.finish_success(&session_id_for_task, bundle_id);
-                } else {
+        //
+        // Skip the whole block when the drain already transitioned —
+        // same double-persist guard as the pipes path. Reagent P1 on
+        // #981.
+        if !success_transitioned.load(Ordering::Acquire) {
+            match exit {
+                Ok(Ok(s)) if s.success() => {
+                    if confirm_authenticated(
+                        &cli_path_for_check,
+                        &auth_check_args_for_check,
+                        &auth_env_for_check,
+                    )
+                    .await
+                    {
+                        let bundle_id = persist_oauth_binding_or_synthetic(
+                            &wstore_for_task,
+                            &broker_for_task,
+                            into_bundle_id_for_task.as_deref(),
+                            &provider_id_for_task,
+                            bundle_dir_for_task.as_deref(),
+                            &session_id_for_task,
+                        );
+                        mgr_for_task.finish_success(&session_id_for_task, bundle_id);
+                    } else {
+                        mgr_for_task.finish_failure(
+                            &session_id_for_task,
+                            "CLI exited cleanly but auth-check still failed".to_string(),
+                        );
+                    }
+                }
+                Ok(Ok(s)) => {
                     mgr_for_task.finish_failure(
                         &session_id_for_task,
-                        "CLI exited cleanly but auth-check still failed".to_string(),
+                        format!("CLI exited with code {:?}", s.exit_code()),
                     );
                 }
-            }
-            Ok(Ok(s)) => {
-                mgr_for_task.finish_failure(
-                    &session_id_for_task,
-                    format!("CLI exited with code {:?}", s.exit_code()),
-                );
-            }
-            Ok(Err(e)) => {
-                mgr_for_task.finish_failure(
-                    &session_id_for_task,
-                    format!("PTY wait error: {e}"),
-                );
-            }
-            Err(e) => {
-                mgr_for_task.finish_failure(
-                    &session_id_for_task,
-                    format!("PTY wait task join error: {e}"),
-                );
+                Ok(Err(e)) => {
+                    mgr_for_task.finish_failure(
+                        &session_id_for_task,
+                        format!("PTY wait error: {e}"),
+                    );
+                }
+                Err(e) => {
+                    mgr_for_task.finish_failure(
+                        &session_id_for_task,
+                        format!("PTY wait task join error: {e}"),
+                    );
+                }
             }
         }
 
@@ -722,6 +924,247 @@ fn spawn_auth_cli_pty(
     });
 
     mgr.attach_process(&session_id, handle, stdin_tx);
+}
+
+/// Compute the per-bundle OAuth config dir + ensure it exists +
+/// override the provider's `auth_config_dir_env_var` entry in `auth_env`.
+///
+/// Returns `Some(<absolute path string>)` when:
+///   - `into_bundle_id` is `Some` and non-empty AND
+///   - the provider is registered in the CLI provider registry AND
+///   - the provider declares an `auth_config_dir_env_var` (oauth-class
+///     providers — claude / codex / openclaw — per spec §4.3) AND
+///   - `DataPaths::from_env()` resolves AND
+///   - `create_dir_all` succeeds.
+///
+/// Otherwise returns `None` and leaves `auth_env` untouched. Callers
+/// must continue without per-bundle isolation (legacy ambient path,
+/// or skip the binding-persist step) — never abort the OAuth start.
+///
+/// Per `SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md` §4.5: the dir
+/// (and the env-var key) come from the CLI provider registry
+/// (`backend::providers::get_provider(id)`) so the resolver / spawn
+/// path / OAuth-start handler never drift on which env var redirects
+/// each CLI's config home. The single source of truth lives in
+/// `agentmux-srv/src/backend/providers.rs`.
+fn compute_and_ensure_bundle_dir(
+    into_bundle_id: Option<&str>,
+    provider_id: &str,
+    auth_env: &mut std::collections::HashMap<String, String>,
+) -> Option<String> {
+    let bundle_id = into_bundle_id.filter(|s| !s.is_empty())?;
+    // Gate on provider_class so api-key-class providers (which have a
+    // registry entry with a non-empty `auth_config_dir_env_var` —
+    // e.g. kimi's `KIMI_SHARE_DIR`) never go through the per-bundle
+    // OAuth-dir path. Only claude / codex / openclaw — the spec §4.3
+    // oauth-class providers — get the per-bundle override.
+    match crate::identity::resolver::provider_class(provider_id) {
+        Some(crate::identity::resolver::ProviderClass::OAuth { .. }) => {}
+        _ => return None,
+    }
+    let provider = match get_provider(provider_id) {
+        Some(p) => p,
+        None => {
+            // OAuth-class per provider_class but missing from the CLI
+            // registry — should be impossible (resolver reads the env
+            // var from the registry itself), but treat as a soft fail.
+            tracing::warn!(
+                target: "identity",
+                provider_id,
+                "auth.start: oauth-class provider not in registry — skipping per-bundle dir override"
+            );
+            return None;
+        }
+    };
+    // Empty env-var name → no isolation possible (oauth-class providers
+    // should never have this empty per spec, but belt-and-braces).
+    if provider.auth_config_dir_env_var.is_empty() {
+        return None;
+    }
+    let paths = match agentmux_common::DataPaths::from_env() {
+        Some(p) => p,
+        None => {
+            tracing::warn!(
+                target: "identity",
+                provider_id,
+                bundle_id,
+                "auth.start: DataPaths::from_env() returned None — skipping per-bundle dir override"
+            );
+            return None;
+        }
+    };
+    // identity_dir rejects unsafe path segments (empty / `.` / `..` /
+    // segment with `/`, `\`, drive-letter, …). bundle_id comes from
+    // the auth.start request body, so this guard prevents a crafted
+    // id from escaping the identities root.
+    let bundle_root = match paths.identity_dir(bundle_id) {
+        Some(p) => p,
+        None => {
+            tracing::warn!(
+                target: "identity",
+                provider_id,
+                bundle_id,
+                "auth.start: bundle_id is not a safe path segment — skipping per-bundle dir override"
+            );
+            return None;
+        }
+    };
+    let dir = bundle_root.join(provider.auth_dir_name);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        tracing::warn!(
+            target: "identity",
+            provider_id,
+            bundle_id,
+            error = %e,
+            path = %dir.display(),
+            "auth.start: failed to create per-bundle config dir — skipping override"
+        );
+        return None;
+    }
+    let dir_str = dir.to_string_lossy().to_string();
+    // Override (or insert) the provider's config-dir env var. The
+    // frontend may have computed the legacy ambient dir via
+    // `ensureAuthDir(providerId)` and put it here under the same key;
+    // we replace it with the per-bundle dir so the OAuth CLI writes
+    // its tokens inside the bundle, not in the ambient version-config
+    // dir.
+    auth_env.insert(
+        provider.auth_config_dir_env_var.to_string(),
+        dir_str.clone(),
+    );
+    tracing::info!(
+        target: "identity",
+        provider_id,
+        bundle_id,
+        env_var = provider.auth_config_dir_env_var,
+        dir = %dir.display(),
+        "auth.start: per-bundle OAuth config dir wired"
+    );
+    Some(dir_str)
+}
+
+/// On a successful OAuth handshake (CLI exited 0 + authCheckCommand
+/// confirmed), persist the OAuth binding into the bundle and return
+/// the real bundle id to use in the `Success` wire status.
+///
+/// "Persist the binding" =
+///   1. Upsert an `IdentityAccount` with:
+///        - provider = `<provider_id>`
+///        - kind = "oauth"
+///        - secret_ref = `SecretRef::OAuthConfigDir { dir }`
+///        - status = "valid"
+///   2. Bind it via `bundle_identity_bind(bundle_id, provider, account_id)`.
+///   3. Publish `identitybundlebindings:changed:<bundle_id>` so the
+///      Launch modal (and any other open Identity pane) re-fetches
+///      the new binding and the launch button enables without a
+///      manual refresh.
+///
+/// Per-binding errors (account upsert, bind, broker publish) are
+/// logged + downgraded — the success transition still fires with the
+/// real bundle id when possible, and falls back to the legacy
+/// `pending-bundle-for-<sid>` synthetic when not. The OAuth CLI's
+/// tokens are already on disk inside `bundle_dir` either way; the
+/// resolver layer (PR B) just won't find a binding to point at them.
+/// Same shape as `inject_identity_env`'s "log + skip, never abort".
+///
+/// When `into_bundle_id` is empty or `bundle_dir` is `None`, returns
+/// the synthetic placeholder unchanged — the legacy ambient path
+/// (PR A behaviour) is preserved.
+fn persist_oauth_binding_or_synthetic(
+    wstore: &Arc<WaveStore>,
+    broker: &Arc<Broker>,
+    into_bundle_id: Option<&str>,
+    provider_id: &str,
+    bundle_dir: Option<&str>,
+    session_id: &str,
+) -> String {
+    let synthetic = || format!("pending-bundle-for-{session_id}");
+    let bundle_id = match into_bundle_id.filter(|s| !s.is_empty()) {
+        Some(b) => b,
+        None => return synthetic(),
+    };
+    let dir = match bundle_dir.filter(|s| !s.is_empty()) {
+        Some(d) => d,
+        None => {
+            tracing::warn!(
+                target: "identity",
+                bundle_id,
+                provider_id,
+                "auth success: bundle_dir unresolved — skipping binding persist"
+            );
+            return synthetic();
+        }
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    // Re-OAuth (token expiry / Reconnect): load any existing binding
+    // for this (bundle, provider) and reuse its `account_id` so the
+    // upsert UPDATES the prior IdentityAccount in place instead of
+    // creating a fresh UUID + orphaning the old row in
+    // `db_identity_accounts`. Fresh UUID only on first bind. codex
+    // P2 follow-up on #981.
+    let account_id = wstore
+        .bundle_identity_bindings(bundle_id)
+        .ok()
+        .into_iter()
+        .flatten()
+        .find(|b| b.provider == provider_id)
+        .map(|b| b.account_id)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let account = IdentityAccount {
+        id: account_id.clone(),
+        name: format!("{provider_id}-oauth"),
+        provider: provider_id.to_string(),
+        kind: "oauth".to_string(),
+        display_name: String::new(),
+        secret_ref: SecretRef::OAuthConfigDir { dir: dir.to_string() },
+        context: serde_json::json!({}),
+        status: "valid".to_string(),
+        created_at: now,
+        updated_at: now,
+    };
+    if let Err(e) = wstore.identity_upsert(&account) {
+        tracing::warn!(
+            target: "identity",
+            bundle_id,
+            provider_id,
+            error = %e,
+            "auth success: identity_upsert failed — falling back to synthetic bundle id"
+        );
+        return synthetic();
+    }
+    if let Err(e) = wstore.bundle_identity_bind(bundle_id, provider_id, &account_id) {
+        tracing::warn!(
+            target: "identity",
+            bundle_id,
+            provider_id,
+            account_id,
+            error = %e,
+            "auth success: bundle_identity_bind failed — account row persisted but no binding"
+        );
+        return synthetic();
+    }
+    // Broker push so the frontend's `identitybundlebindings:changed:<id>`
+    // listener (AgentLaunchModal createEffect) refetches bindings and
+    // flips `hasMatchingBinding` → true without a manual reload.
+    broker.publish(crate::backend::wps::WaveEvent {
+        event: format!("identitybundlebindings:changed:{bundle_id}"),
+        scopes: vec![],
+        sender: String::new(),
+        persist: 0,
+        data: None,
+    });
+    tracing::info!(
+        target: "identity",
+        bundle_id,
+        provider_id,
+        account_id,
+        dir,
+        "auth success: OAuth binding persisted"
+    );
+    bundle_id.to_string()
 }
 
 /// Run the provider's auth-check subcommand and return true if it
@@ -754,6 +1197,7 @@ async fn confirm_authenticated(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::storage::wstore::Identity;
 
     // Request shape parsing tests — verify the wire contract matches
     // what the frontend (PR B) will send. The end-to-end RPC-engine
@@ -838,5 +1282,224 @@ mod tests {
         let r = AckResp { success: false, error: Some("boom".into()) };
         let v = serde_json::to_value(&r).unwrap();
         assert_eq!(v, serde_json::json!({ "success": false, "error": "boom" }));
+    }
+
+    // ── OAuth Bundles PR C invariant ──────────────────────────────
+    //
+    // Round-trip: spawn-dir computation → persist OAuth binding →
+    // bundle row carries a `SecretRef::OAuthConfigDir` pointing at
+    // exactly that dir, with status = "valid".
+
+    #[test]
+    fn persist_oauth_binding_round_trip() {
+        // Per spec §4.5: on auth success against bundle <id> for
+        // provider <P>, the handler must
+        //   1. compute the dir = DataPaths::identity_dir(<id>).join(P.auth_dir_name)
+        //   2. set the provider's auth_config_dir_env_var to that dir
+        //      in the spawn env (so the CLI writes tokens there, not
+        //      at ~/.<P>/),
+        //   3. on confirm, upsert an `IdentityAccount` whose
+        //      `secret_ref` is `SecretRef::OAuthConfigDir { dir }`
+        //      and `status = "valid"`,
+        //   4. bind it via `bundle_identity_bind`.
+        //
+        // Together those three facts let the next launch's
+        // `inject_identity_env` find the OAuth account, read its
+        // OAuthConfigDir pointer, and inject CLAUDE_CONFIG_DIR with
+        // the same path — closing the bundle loop.
+
+        // Use a tempdir as the agentmux home so DataPaths resolves
+        // without depending on the user's real ~/.agentmux. Local
+        // mutex so two env-var-touching tests in this module can't
+        // race (agentmux-common's TEST_ENV_LOCK is `pub(crate)`,
+        // not reachable from here).
+        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        // DataPaths::from_env() wants every AGENTMUX_*_DIR — easiest
+        // to compute paths once and export them.
+        let paths = agentmux_common::DataPaths::resolve(
+            "0.0.0-test",
+            &agentmux_common::RuntimeMode::Installed,
+        )
+        .unwrap();
+        paths.ensure_dirs().unwrap();
+        for (k, v) in paths.to_env_vars() {
+            std::env::set_var(k, v);
+        }
+
+        let wstore = Arc::new(WaveStore::open_in_memory().unwrap());
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+
+        // Seed the bundle that the OAuth flow targets (PR 1 #969
+        // creates this row up-front when the user names the new
+        // identity; we mirror that here).
+        let bundle_id = "id-oauth-pr-c";
+        let identity = Identity {
+            id: bundle_id.to_string(),
+            name: "Work".to_string(),
+            description: String::new(),
+            is_blank: false,
+            created_at: 0,
+            updated_at: 0,
+        };
+        wstore.bundle_identity_upsert(&identity).unwrap();
+
+        // Step 1+2: compute and ensure dir, inject env var.
+        let mut auth_env: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        // Simulate the frontend's legacy `ensureAuthDir` putting an
+        // ambient dir in the env first — the function MUST override
+        // it with the per-bundle dir.
+        auth_env.insert("CLAUDE_CONFIG_DIR".to_string(), "/legacy/ambient/claude".to_string());
+        let dir = compute_and_ensure_bundle_dir(
+            Some(bundle_id),
+            "claude",
+            &mut auth_env,
+        )
+        .expect("oauth-class provider with bundle id must yield a dir");
+
+        // Dir is `DataPaths::identity_dir(<id>).join(<auth_dir_name>)`
+        // — claude's `auth_dir_name` is "claude" per the registry.
+        let expected = paths
+            .identity_dir(bundle_id)
+            .expect("test bundle_id is a safe segment")
+            .join("claude");
+        assert_eq!(
+            std::path::Path::new(&dir),
+            expected,
+            "per-bundle dir must equal DataPaths::identity_dir(id).join(auth_dir_name)"
+        );
+        // create_dir_all happened.
+        assert!(expected.is_dir(), "dir should be created idempotently");
+        // Env var was OVERRIDDEN with the per-bundle dir — registry-
+        // sourced key (CLAUDE_CONFIG_DIR for claude).
+        assert_eq!(
+            auth_env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+            Some(dir.as_str()),
+            "auth_config_dir_env_var must point at the per-bundle dir, NOT the legacy ambient one",
+        );
+
+        // Step 3+4: simulate the post-confirm_authenticated() success
+        // path. The function returns the REAL bundle id (not the
+        // synthetic placeholder) and persists the account + binding.
+        let returned = persist_oauth_binding_or_synthetic(
+            &wstore,
+            &broker,
+            Some(bundle_id),
+            "claude",
+            Some(&dir),
+            "auth-sess-test",
+        );
+        assert_eq!(
+            returned, bundle_id,
+            "success path must return the bundle id, not the synthetic placeholder"
+        );
+
+        // Binding row exists for (bundle, claude).
+        let bindings = wstore.bundle_identity_bindings(bundle_id).unwrap();
+        assert_eq!(bindings.len(), 1, "exactly one binding after one auth success");
+        assert_eq!(bindings[0].identity_id, bundle_id);
+        assert_eq!(bindings[0].provider, "claude");
+
+        // Account row carries SecretRef::OAuthConfigDir { dir } —
+        // the same dir we passed at spawn — and status = "valid".
+        let acct = wstore
+            .identity_get(&bindings[0].account_id)
+            .unwrap()
+            .expect("account row exists");
+        assert_eq!(acct.provider, "claude");
+        assert_eq!(acct.kind, "oauth");
+        assert_eq!(acct.status, "valid");
+        match acct.secret_ref {
+            SecretRef::OAuthConfigDir { dir: persisted_dir } => {
+                assert_eq!(
+                    persisted_dir, dir,
+                    "persisted OAuthConfigDir.dir must equal the spawn dir"
+                );
+            }
+            other => panic!("expected OAuthConfigDir, got {other:?}"),
+        }
+
+        // Cleanup env so other tests don't inherit our overrides.
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        for (k, _) in paths.to_env_vars() {
+            std::env::remove_var(k);
+        }
+    }
+
+    #[test]
+    fn compute_dir_skipped_for_empty_bundle_id() {
+        // Ambient launch (empty into_bundle_id) — no per-bundle dir
+        // override, legacy auth_env left intact.
+        let mut env = std::collections::HashMap::new();
+        env.insert("CLAUDE_CONFIG_DIR".to_string(), "/legacy/ambient".to_string());
+        let dir = compute_and_ensure_bundle_dir(None, "claude", &mut env);
+        assert!(dir.is_none());
+        assert_eq!(
+            env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+            Some("/legacy/ambient"),
+            "legacy ambient env must survive when no bundle id"
+        );
+
+        let mut env = std::collections::HashMap::new();
+        let dir = compute_and_ensure_bundle_dir(Some(""), "claude", &mut env);
+        assert!(dir.is_none(), "empty string bundle id is the same as None");
+        assert!(env.is_empty());
+    }
+
+    #[test]
+    fn compute_dir_skipped_for_api_key_provider() {
+        // Api-key-class providers must NOT go through the OAuth
+        // per-bundle dir override even when their registry entry
+        // declares an `auth_config_dir_env_var` (kimi has
+        // `KIMI_SHARE_DIR` so the registry test alone isn't enough —
+        // the gate has to be provider_class).
+        let mut env = std::collections::HashMap::new();
+        let dir = compute_and_ensure_bundle_dir(Some("id-1"), "kimi", &mut env);
+        assert!(dir.is_none(), "api-key provider class must skip the OAuth dir path");
+        assert!(
+            env.get("KIMI_SHARE_DIR").is_none(),
+            "api-key providers must NEVER get their config-dir env var set by the OAuth-start path"
+        );
+        // Same for github (no registry entry at all).
+        let mut env = std::collections::HashMap::new();
+        let dir = compute_and_ensure_bundle_dir(Some("id-1"), "github", &mut env);
+        assert!(dir.is_none());
+        assert!(env.get("GITHUB_TOKEN").is_none());
+    }
+
+    #[test]
+    fn persist_returns_synthetic_when_no_bundle_id() {
+        let wstore = Arc::new(WaveStore::open_in_memory().unwrap());
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let r = persist_oauth_binding_or_synthetic(
+            &wstore,
+            &broker,
+            None,
+            "claude",
+            Some("/some/dir"),
+            "sess-x",
+        );
+        assert_eq!(r, "pending-bundle-for-sess-x");
+    }
+
+    #[test]
+    fn persist_returns_synthetic_when_no_bundle_dir() {
+        let wstore = Arc::new(WaveStore::open_in_memory().unwrap());
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let r = persist_oauth_binding_or_synthetic(
+            &wstore,
+            &broker,
+            Some("id-1"),
+            "claude",
+            None,
+            "sess-y",
+        );
+        assert_eq!(
+            r, "pending-bundle-for-sess-y",
+            "no bundle dir → no persistence → synthetic id"
+        );
     }
 }
