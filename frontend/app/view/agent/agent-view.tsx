@@ -17,6 +17,7 @@ import {
     registerPane as registerAgentPaneStatePane,
     unregisterPane as unregisterAgentPaneStatePane,
 } from "@/app/store/agent-pane-state-store";
+import { workingFromPhase } from "@/app/store/agent-pane-state/types";
 import type { SubagentLinkNode } from "./types";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { useAgentStream } from "./useAgentStream";
@@ -116,6 +117,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // currentTool/turnTokens/turnActive/stopping/pending atoms behind a
     // single reducer with cross-atom invariants. Same synchronous-register
     // rule as the agent-document slot.
+    //
+    // `turnPhase` is the PR A / PR B addition — the reducer dual-writes
+    // it alongside the legacy `turnActive` / `stopping` / `streaming.active`
+    // booleans, and the view (see the AgentStatusLine binding below)
+    // reads it via `isWorking(...)`. PR G drops the legacy fields.
     {
         const a = agentAtoms();
         registerAgentPaneStatePane(model.blockId, agentId, {
@@ -127,6 +133,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             stopping: a.stoppingAtom[1],
             pending: a.pendingMessagesAtom[1],
             initPhase: a.initPhaseAtom[1],
+            turnPhase: a.turnPhaseAtom[1],
         });
         onCleanup(() => unregisterAgentPaneStatePane(model.blockId));
     }
@@ -705,7 +712,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             <PendingMessagesPanel
                 pendingMessages={pendingMessagesAtom[0]}
                 showSendNow={() =>
-                    agentAtoms().turnActiveAtom[0]() &&
+                    // PR B: view migrated off legacy `turnActive` —
+                    // "send now" appears whenever the agent is working
+                    // (Submitting / Streaming / Interrupting) and the
+                    // user has at least one queued message. The reducer
+                    // still dual-writes `turnActiveAtom`; PR G drops it.
+                    workingFromPhase(agentAtoms().turnPhaseAtom[0]()) &&
                     pendingMessagesAtom[0]().length > 0
                 }
                 onSendImmediately={() => {
@@ -717,10 +729,21 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 doing about the queue above". Used to live inside the
                 composer region right above the input; moved here so the
                 activity log doesn't push it off-screen during long
-                agent output. */}
+                agent output.
+
+                PR B (Turn-phase migration): the "working" animation
+                binding now reads `workingFromPhase(turnPhase)` instead
+                of `turnActive || stopping`. The "Stopping…" label still
+                wins over "Working…" via the dedicated `stopping` prop —
+                that maps to `turnPhase.kind === "Interrupting"` so the
+                view no longer touches the legacy boolean. Reducer keeps
+                dual-writing both until PR G. */}
             <AgentStatusLine
-                loading={status.isLoading() || agentAtoms().turnActiveAtom[0]() || stoppingAtom[0]()}
-                stopping={stoppingAtom[0]()}
+                loading={
+                    status.isLoading()
+                    || workingFromPhase(agentAtoms().turnPhaseAtom[0]())
+                }
+                stopping={agentAtoms().turnPhaseAtom[0]().kind === "Interrupting"}
                 currentTool={agentAtoms().currentToolAtom[0]()}
                 sessionStats={agentAtoms().sessionStatsAtom[0]()}
                 turnTokens={agentAtoms().turnTokensAtom[0]()}
