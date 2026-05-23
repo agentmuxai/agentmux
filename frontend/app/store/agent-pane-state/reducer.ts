@@ -20,8 +20,11 @@
 import {
     AgentPaneCommand,
     AgentPaneState,
+    KindBeforeDisconnect,
     ReducerResult,
     STUCK_THRESHOLD_MS,
+    TurnOutcome,
+    TurnPhase,
 } from "./types";
 
 export function update(
@@ -61,7 +64,20 @@ export function update(
         }
 
         // ── Stream lifecycle ───────────────────────────────────────
-        case "StreamSubscribe":
+        case "StreamSubscribe": {
+            // Dual-write: if a turn was Submitting, the subscription is
+            // its expected hand-off to Streaming. Otherwise the phase
+            // stays as-is (subscribing without a pending send isn't
+            // "working"; Idle/Done/Disconnected/Streaming stay put).
+            const nextPhase: TurnPhase =
+                state.turnPhase.kind === "Submitting"
+                    ? {
+                          kind: "Streaming",
+                          bufferSize: state.streaming.bufferSize,
+                          toolsActive: 0,
+                          lastEventMs: command.at,
+                      }
+                    : state.turnPhase;
             return {
                 state: {
                     ...state,
@@ -71,11 +87,26 @@ export function update(
                         lastEventTime: command.at,
                     },
                     lastEventMs: command.at,
+                    turnPhase: nextPhase,
                 },
                 events: [{ type: "stream-subscribed", at: command.at }],
             };
+        }
 
-        case "StreamUnsubscribe":
+        case "StreamUnsubscribe": {
+            // Dual-write: if we were working (Submitting/Streaming/
+            // Interrupting), surface a Disconnected phase so the view
+            // can show re-attach UX. Otherwise → Idle.
+            const k = state.turnPhase.kind;
+            const wasWorking =
+                k === "Submitting" || k === "Streaming" || k === "Interrupting";
+            const nextPhase: TurnPhase = wasWorking
+                ? {
+                      kind: "Disconnected",
+                      lastKind: k as KindBeforeDisconnect,
+                      reason: "stream-unsubscribed",
+                  }
+                : { kind: "Idle" };
             return {
                 state: {
                     ...state,
@@ -83,23 +114,39 @@ export function update(
                     // Defensive: subscription gone → no turn can be active.
                     turnActive: false,
                     lastEventMs: null,
+                    turnPhase: nextPhase,
                 },
                 events: [{ type: "stream-unsubscribed", at: command.at }],
             };
+        }
 
         case "StreamFlushObserved": {
             if (!state.streaming.active) {
                 return { state, events: [] };
             }
+            const newBuf = state.streaming.bufferSize + command.addedCount;
+            // Dual-write: while Streaming, mirror bufferSize + lastEventMs
+            // onto the phase. Other phases (Idle/Submitting/etc.) keep
+            // their shape — flushes outside a Streaming phase are
+            // ambient and shouldn't promote phase.
+            const nextPhase: TurnPhase =
+                state.turnPhase.kind === "Streaming"
+                    ? {
+                          ...state.turnPhase,
+                          bufferSize: newBuf,
+                          lastEventMs: command.at,
+                      }
+                    : state.turnPhase;
             return {
                 state: {
                     ...state,
                     streaming: {
                         ...state.streaming,
-                        bufferSize: state.streaming.bufferSize + command.addedCount,
+                        bufferSize: newBuf,
                         lastEventTime: command.at,
                     },
                     lastEventMs: command.at,
+                    turnPhase: nextPhase,
                 },
                 events: [
                     { type: "stream-flush-observed", addedCount: command.addedCount },
@@ -162,6 +209,15 @@ export function update(
                     turnActive: true,
                     sessionStats: null, // clear stale stats from prior turn
                     lastEventMs: command.at,
+                    // Dual-write: Submitting until first stream event /
+                    // subscribe transitions us to Streaming. PR A doesn't
+                    // know the pendingContent (TurnStart payload doesn't
+                    // carry it); a later PR can thread that through.
+                    turnPhase: {
+                        kind: "Submitting",
+                        submittedAt: command.at,
+                        pendingContent: "",
+                    },
                 },
                 events: [{ type: "turn-started", at: command.at }],
             };
@@ -172,6 +228,10 @@ export function update(
             // Merge stats with live turn-tokens (mirrors prior finalizeTurn
             // logic — see PR #549 reagent/codex P1 reference).
             const merged = mergeStats(command.stats, state.turnTokens);
+            // Dual-write outcome: stop-in-flight → "stopped"; otherwise
+            // "completed". "interrupted" / "errored" are reserved for
+            // future-PR commands (StreamStalled, Disconnected, etc.).
+            const outcome: TurnOutcome = stoppingWasSet ? "stopped" : "completed";
             return {
                 state: {
                     ...state,
@@ -180,6 +240,11 @@ export function update(
                     turnTokens: null,
                     turnActive: false,
                     stopping: false,
+                    turnPhase: {
+                        kind: "Done",
+                        outcome,
+                        finishedAt: nowMs,
+                    },
                 },
                 events: [
                     {
@@ -201,19 +266,29 @@ export function update(
                     turnActive: false,
                     // stopping is part of turn state — clear it too.
                     stopping: false,
+                    // Dual-write: TurnReset is a wholesale clear → Idle.
+                    turnPhase: { kind: "Idle" },
                 },
                 events: [{ type: "turn-reset" }],
             };
 
         case "ToolStart":
             return {
-                state: bumpEvent({ ...state, currentTool: command.name }, nowMs),
+                state: bumpEvent(
+                    { ...state, currentTool: command.name },
+                    nowMs,
+                    /* toolsDelta */ +1,
+                ),
                 events: [{ type: "tool-started", name: command.name }],
             };
 
         case "ToolEnd":
             return {
-                state: bumpEvent({ ...state, currentTool: null }, nowMs),
+                state: bumpEvent(
+                    { ...state, currentTool: null },
+                    nowMs,
+                    /* toolsDelta */ -1,
+                ),
                 events: [{ type: "tool-ended" }],
             };
 
@@ -223,7 +298,7 @@ export function update(
                 output: state.turnTokens?.output ?? 0,
             };
             return {
-                state: bumpEvent({ ...state, turnTokens: next }, nowMs),
+                state: bumpEvent({ ...state, turnTokens: next }, nowMs, 0),
                 events: [{ type: "tokens-updated", input: command.input, output: null }],
             };
         }
@@ -234,22 +309,55 @@ export function update(
                 output: command.output,
             };
             return {
-                state: bumpEvent({ ...state, turnTokens: next }, nowMs),
+                state: bumpEvent({ ...state, turnTokens: next }, nowMs, 0),
                 events: [{ type: "tokens-updated", input: null, output: command.output }],
             };
         }
 
-        case "RequestStop":
+        case "RequestStop": {
+            // Dual-write: if a turn is in flight, surface Interrupting;
+            // otherwise keep the phase as-is (stopping is set but there
+            // is no real working state — the legacy boolean alone is
+            // enough until the view migrates in PR B).
+            const k = state.turnPhase.kind;
+            const isWorking =
+                k === "Submitting" || k === "Streaming" || k === "Interrupting";
+            const nextPhase: TurnPhase = isWorking
+                ? {
+                      kind: "Interrupting",
+                      reason: "user",
+                      sigintSentAt: command.at,
+                  }
+                : state.turnPhase;
             return {
-                state: { ...state, stopping: true },
+                state: { ...state, stopping: true, turnPhase: nextPhase },
                 events: [{ type: "stop-requested", at: command.at }],
             };
+        }
 
-        case "StopFailed":
+        case "StopFailed": {
+            // Dual-write: rollback Interrupting → previous working kind
+            // best-effort. We don't track the prior kind on Interrupting,
+            // so use the stream's liveness as the deterministic signal:
+            //   streaming.active  → Streaming (the most common case)
+            //   else              → Idle (no longer in a turn)
+            const k = state.turnPhase.kind;
+            const nextPhase: TurnPhase =
+                k === "Interrupting"
+                    ? state.streaming.active
+                        ? {
+                              kind: "Streaming",
+                              bufferSize: state.streaming.bufferSize,
+                              toolsActive: 0,
+                              lastEventMs: state.lastEventMs ?? nowMs,
+                          }
+                        : { kind: "Idle" }
+                    : state.turnPhase;
             return {
-                state: { ...state, stopping: false },
+                state: { ...state, stopping: false, turnPhase: nextPhase },
                 events: [{ type: "stop-failed" }],
             };
+        }
 
         case "PendingMessageQueued":
             return {
@@ -337,10 +445,25 @@ export function update(
  * by tool/token transitions which are observable stream activity. Skip
  * the bump when streaming is inactive — those would correspond to stale
  * commands and shouldn't reset the watchdog clock.
+ *
+ * PR A dual-write: if the phase is Streaming, also update its
+ * `lastEventMs` and apply `toolsDelta` to `toolsActive` (clamped ≥ 0).
  */
-function bumpEvent(state: AgentPaneState, nowMs: number): AgentPaneState {
+function bumpEvent(
+    state: AgentPaneState,
+    nowMs: number,
+    toolsDelta: number,
+): AgentPaneState {
     if (!state.streaming.active) return state;
-    return { ...state, lastEventMs: nowMs };
+    const next: AgentPaneState = { ...state, lastEventMs: nowMs };
+    if (next.turnPhase.kind === "Streaming") {
+        next.turnPhase = {
+            ...next.turnPhase,
+            lastEventMs: nowMs,
+            toolsActive: Math.max(0, next.turnPhase.toolsActive + toolsDelta),
+        };
+    }
+    return next;
 }
 
 /**
