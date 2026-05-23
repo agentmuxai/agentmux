@@ -25,6 +25,74 @@ import type {
 /** Init lifecycle — covers the "history still loading" gap. */
 export type InitPhase = "loading" | "ready" | "error";
 
+// ─────────────────────────────────────────────────────────────────────────
+// TurnPhase discriminated union (PR A — dual-write phase)
+//
+// SPEC: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §5.
+// This union replaces the scattered { turnActive, stopping, streaming.active }
+// booleans with a single explicit phase. PR A is ADDITIVE: the legacy
+// booleans stay and the reducer dual-writes both. View migration is PR B;
+// the legacy fields are removed in PR G.
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Why the turn entered Interrupting. */
+export type InterruptReason =
+    /** User pressed Esc / clicked Stop. */
+    | "user"
+    /** Caller-initiated (auto-stop, watchdog, etc.). */
+    | "system";
+
+/** Why the turn finished (kind: "Done"). */
+export type TurnOutcome =
+    /** Backend emitted session_end normally. */
+    | "completed"
+    /** Stop was requested before completion (user or system). */
+    | "stopped"
+    /** Stream torn down mid-turn — no graceful end. */
+    | "interrupted"
+    /** A non-zero turn ended without backend output (RPC fail, etc.). */
+    | "errored";
+
+/** The working-kind we were in before the stream dropped. */
+export type KindBeforeDisconnect =
+    | "Submitting"
+    | "Streaming"
+    | "Interrupting";
+
+/**
+ * Single source of truth for the turn lifecycle. PR A introduces this
+ * alongside the legacy booleans — both are written by the reducer.
+ *
+ *   Idle          : no turn in flight.
+ *   Submitting    : user pressed send; awaiting `StreamSubscribe` / first
+ *                   stream event.
+ *   Streaming     : stream is actively producing events.
+ *   Interrupting  : stop requested; awaiting graceful TurnEnd or unsub.
+ *   Done          : turn finished (with outcome).
+ *   Disconnected  : stream dropped while a turn was in-flight; remembers
+ *                   the kind we lost so the view can show a re-attach UI.
+ */
+export type TurnPhase =
+    | { kind: "Idle" }
+    | { kind: "Submitting"; submittedAt: number; pendingContent: string }
+    | {
+          kind: "Streaming";
+          bufferSize: number;
+          toolsActive: number;
+          lastEventMs: number;
+      }
+    | {
+          kind: "Interrupting";
+          reason: InterruptReason;
+          sigintSentAt: number;
+      }
+    | { kind: "Done"; outcome: TurnOutcome; finishedAt: number }
+    | {
+          kind: "Disconnected";
+          lastKind: KindBeforeDisconnect;
+          reason: string;
+      };
+
 /**
  * The reducer's state. Each field maps 1:1 to a Solid signal that the
  * agent pane projects from. The reducer enforces invariants ACROSS
@@ -48,6 +116,14 @@ export interface AgentPaneState {
      * when no stream is active.
      */
     lastEventMs: number | null;
+    /**
+     * PR A (dual-write): the single-source-of-truth turn phase. The
+     * reducer writes BOTH this and the legacy {turnActive, stopping,
+     * streaming.active} fields on every command. Subsequent PRs (B
+     * onward) migrate view code off the legacy booleans onto this
+     * field; PR G removes the booleans.
+     */
+    turnPhase: TurnPhase;
 }
 
 export const initialState = (agentId: string): AgentPaneState => ({
@@ -61,7 +137,23 @@ export const initialState = (agentId: string): AgentPaneState => ({
     initPhase: "loading",
     initError: null,
     lastEventMs: null,
+    turnPhase: { kind: "Idle" },
 });
+
+/**
+ * Selector — true while the agent is processing a user request.
+ *
+ * Returns true ⇔ `state.turnPhase.kind ∈ {Submitting, Streaming, Interrupting}`.
+ * Idle / Done / Disconnected are all "not working".
+ *
+ * Spec: SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §7. PR A exports this
+ * for downstream consumers; the view migration in PR B will rebind the
+ * footer's working indicator to this selector.
+ */
+export function isWorking(state: AgentPaneState): boolean {
+    const k = state.turnPhase.kind;
+    return k === "Submitting" || k === "Streaming" || k === "Interrupting";
+}
 
 export type AgentPaneCommand =
     // ── Init lifecycle (gap 1) ─────────────────────────────────────
