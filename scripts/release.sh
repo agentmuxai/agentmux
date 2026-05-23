@@ -123,8 +123,57 @@ git rm -q -- "${CHANGESETS[@]}"
 # versions across package.json + package-lock.json. Reagent P1 on #865.
 git add -- "$HISTORY" package-lock.json
 
+# ── Verify the release files agree (retro 2026-05-22 action item) ─────────
+#
+# bump-cli has been known to silently skip a target file (e.g. when the
+# description is too long). When that happens, only some of
+# {package.json, Cargo.toml, lockfiles} get bumped — VERSION_HISTORY still
+# advances — and the release commit ships an inconsistent set. The next
+# `task release` then proposes a regressed version, and reviewers have no
+# automatic signal to refuse it. This guard re-reads every version
+# location on disk and fails loudly if they don't all agree.
+#
+# See docs/retro/retro-release-version-desync-2026-05-22.md.
+INCONSISTENCIES=()
+
+PKG_V="$(node -p "require('./package.json').version" 2>/dev/null || echo '<unreadable>')"
+[[ "$PKG_V" == "$NEW_VERSION" ]] || \
+    INCONSISTENCIES+=("package.json version=$PKG_V")
+
+CARGO_V="$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^version *= *"\(.*\)"$/\1/p}' Cargo.toml | head -1)"
+[[ "$CARGO_V" == "$NEW_VERSION" ]] || \
+    INCONSISTENCIES+=("Cargo.toml [workspace.package].version=$CARGO_V")
+
+PL_V="$(node -p "require('./package-lock.json').version" 2>/dev/null || echo '<unreadable>')"
+[[ "$PL_V" == "$NEW_VERSION" ]] || \
+    INCONSISTENCIES+=("package-lock.json version=$PL_V")
+
+CL_V="$(sed -n '/^name = "agentmux-cef"$/{n;s/^version = "\(.*\)"$/\1/p;q}' Cargo.lock)"
+[[ "$CL_V" == "$NEW_VERSION" ]] || \
+    INCONSISTENCIES+=("Cargo.lock agentmux-cef version=$CL_V")
+
+VH_V="$(awk '/^## /{print $2; exit}' "$HISTORY")"
+[[ "$VH_V" == "$NEW_VERSION" ]] || \
+    INCONSISTENCIES+=("VERSION_HISTORY.md top=$VH_V")
+
+if (( ${#INCONSISTENCIES[@]} > 0 )); then
+    echo "" >&2
+    echo "ERROR: release-consistency check failed." >&2
+    echo "Expected every version location to equal '$NEW_VERSION', but found:" >&2
+    for e in "${INCONSISTENCIES[@]}"; do
+        echo "  - $e" >&2
+    done
+    echo "" >&2
+    echo "This usually means bump-cli silently skipped a file. Inspect:" >&2
+    echo "  git diff --staged" >&2
+    echo "Then fix the mismatched files before committing." >&2
+    echo "" >&2
+    echo "See docs/retro/retro-release-version-desync-2026-05-22.md." >&2
+    exit 1
+fi
+
 echo >&2
-echo "Release prepared (NOT committed). Review with: git diff --staged" >&2
+echo "Release prepared (NOT committed) — all 5 version locations agree at $NEW_VERSION. Review with: git diff --staged" >&2
 echo "Then commit and push:" >&2
 echo "  git commit -m 'chore: release v$NEW_VERSION'" >&2
 echo "  git push -u origin <branch>" >&2
