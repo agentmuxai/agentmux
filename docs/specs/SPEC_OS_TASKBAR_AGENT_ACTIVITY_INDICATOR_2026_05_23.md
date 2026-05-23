@@ -45,9 +45,20 @@ AgentMux already has the data we need; it just isn't aggregated globally.
 
 ### 2.1 Per-pane busy signal (today)
 
-`frontend/app/view/agent/state.ts:51` defines `turnActiveAtom: SignalPair<boolean>` — "true from the moment the user sends a message until `session_end` arrives." This is the canonical per-agent busy flag, driven by WebSocket events from `agentmux-srv` (`session_start` / `turn_start` set it true; `session_end` sets it false). Per-pane signals are instance-scoped (`state.ts:6-9` comment: "to prevent state bleeding between multiple agent widgets").
+`frontend/app/store/agent-pane-state/types.ts:118` defines `TurnPhase` — a discriminated union `{ Idle | Submitting | Streaming | Interrupting | Done | Disconnected }`. Since PR G this is the **sole** working-state encoding; the legacy `turnActiveAtom` / `stoppingAtom` / `streaming.active` booleans were removed. Per pane, `frontend/app/view/agent/state.ts:83` exposes `turnPhaseAtom: SignalPair<TurnPhase>`, populated by the agent-pane-state reducer (driven by WebSocket events from `agentmux-srv`).
 
-The same module exposes `streamingStateAtom` (state.ts:46, types.ts:452-457) — a finer-grained `{ active, agentId, bufferSize, lastEventTime }` for token streaming. We do **not** use `streamingStateAtom` for the OS indicator — `turnActiveAtom` is the right granularity (whole-turn semantics, not byte-level streaming).
+The canonical "is this agent busy" selector is `workingFromPhase(phase)` (`agent-pane-state/types.ts:250-253`):
+
+```ts
+export function workingFromPhase(phase: TurnPhase): boolean {
+    const k = phase.kind;
+    return k === "Submitting" || k === "Streaming" || k === "Interrupting";
+}
+```
+
+`Idle | Done | Disconnected` are all "not working." The view layer already uses this selector for the per-pane "working" animation and "Stopping…" label (`agent-view.tsx:723, 772`).
+
+Per-pane signals are instance-scoped (`state.ts:6-9` comment: "to prevent state bleeding between multiple agent widgets"), so a global aggregator must subscribe to every pane's `turnPhaseAtom[0]` accessor individually.
 
 ### 2.2 What is missing — a global "any busy" derivation
 
@@ -120,17 +131,23 @@ Plus a `Query` method on the same object path returning the current state, so la
 New module: `frontend/app/store/agentActivity.ts`.
 
 ```ts
-// Subscribes to every agent pane's turnActiveAtom and emits aggregate state.
-export const agentActivityStore = {
-    busyCount: createSignal(0),  // SolidJS signal
-    anyBusy: createMemo(() => agentActivityStore.busyCount[0]() > 0),
-};
+// Subscribes to every agent pane's turnPhaseAtom and aggregates state.
+export const busyCount: Accessor<number>;   // SolidJS accessor
+export const anyBusy: Accessor<boolean>;    // derived from busyCount
 
-// Register/unregister called by each agent pane on mount/unmount.
-export function registerAgentPane(turnActiveAtom: SignalPair<boolean>): () => void { ... }
+// Per-pane registration. The internal createEffect is owned by the
+// calling component, so it auto-disposes on unmount.
+export function registerActivity(
+    blockId: string,
+    turnPhase: Accessor<TurnPhase>,
+): void;
+
+export function unregisterActivity(blockId: string): void;
 ```
 
-Each agent pane (`frontend/app/view/agent/agent-view.tsx`) calls `registerAgentPane(model.turnActiveAtom)` on mount and the returned cleanup on unmount. The store maintains a `Set<SignalPair>` and a derived count via a single `createEffect` per registration.
+Each agent pane (`frontend/app/view/agent/agent-view.tsx`) calls `registerActivity(model.blockId, a.turnPhaseAtom[0])` immediately after the existing `registerAgentPane` block (component-body execution, before any hook's `onMount`), and `unregisterActivity(model.blockId)` in the paired `onCleanup`. Internally the store keeps a `Set<blockId>` of currently-working panes and updates it inside a `createEffect` that reads `workingFromPhase(turnPhase())`.
+
+Names are deliberately `registerActivity` / `unregisterActivity` (not `registerAgentPane`) to avoid clashing with the existing `agent-pane-registration` import that the same file uses.
 
 A second effect debounces the count signal (200 ms, trailing edge) and pushes changes to the host via the IPC defined in §5.2. Debouncing avoids flicker when a fast tool call completes between two queued turns.
 
@@ -270,8 +287,10 @@ Each step is independently revertible. Steps 4 and 5 can land in either order; s
 
 ### Codebase
 
-- `frontend/app/view/agent/state.ts:46-51` — `turnActiveAtom`, `streamingStateAtom`.
-- `frontend/app/view/agent/types.ts:452-457` — `streamingStateAtom` shape.
+- `frontend/app/store/agent-pane-state/types.ts:118-152` — `TurnPhase` union.
+- `frontend/app/store/agent-pane-state/types.ts:239-253` — `isWorking` / `workingFromPhase` selectors.
+- `frontend/app/view/agent/state.ts:83` — `turnPhaseAtom` projection.
+- `frontend/app/store/agent-pane-registration.ts:122` — atomic dual-store pane registration (the pattern `agentActivity.ts` registers alongside).
 - `agentmux-cef/src/window/window.rs:16-100` — existing IPC command pattern (`zoom_factor`, `close_window`).
 - `agentmux-cef/src/window/window.rs:92` — `BrowserHost::window_handle()` (HWND source).
 - `agentmux-cef/Cargo.toml:54-82` — `windows` crate features already include `Win32_UI_Shell`, `Win32_System_Com`.
