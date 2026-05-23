@@ -31,6 +31,25 @@ s = s.replace(/\barea54\b/g, "<redacted-user>");
 s = s.replace(/~\/AppData\/Local\/Temp\//g, "~/<tmp>/");
 s = s.replace(/~[\\]+AppData[\\]+Local[\\]+Temp[\\]+/g, "~/<tmp>/");
 
+// 6) Normalize Windows path separators to forward slash — and CRITICALLY,
+//    break any `\<hex>` sequence that tailwind v4's CSS-escape regex
+//    would interpret as a code point.
+//
+//    Background: tailwind v4 scans .md (and other) files looking for CSS
+//    custom-property usages. Its regex `/\\([\dA-Fa-f]{1,6}…/` greedily
+//    matches a backslash followed by 1-6 hex digits and passes the parse
+//    to `String.fromCodePoint`. A path fragment like
+//    `\d85077b2-8fd6-4397-…` (a UUID after a Windows path separator)
+//    captures `\d85077` → 0xD85077 → invalid code point → THE WHOLE
+//    PRODUCTION BUILD FAILS with "Invalid code point 14176375". Hit on
+//    2026-05-23 — the Maks transcript brought down `task build:frontend`
+//    (and every other agent's build) until this normalization landed.
+//
+//    Fix: replace single backslashes with forward slashes everywhere in
+//    transcript text. Paths stay legible; the CSS-escape pattern is
+//    structurally impossible afterwards.
+s = s.replace(/\\(?!\\)/g, "/");
+
 writeFileSync(file, s);
 const after = s.length;
 console.log(`redacted ${file}: ${before} -> ${after} bytes`);
