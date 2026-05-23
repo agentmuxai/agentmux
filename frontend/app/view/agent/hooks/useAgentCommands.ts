@@ -73,13 +73,6 @@ export interface UseAgentCommandsOptions {
      */
     onSent?: () => void;
     /**
-     * Flips true when `stopAgent` fires (user pressed Esc on an empty
-     * composer) and back to false when the subsequent `session_end`
-     * arrives. Drives the "Stopping…" status label and the
-     * "⏹ Interrupted by user" chat row appended by `useAgentStream`.
-     */
-    stoppingAtom?: SignalPair<boolean>;
-    /**
      * Queue of messages sent to the backend but not yet accepted.
      * `sendMessage` appends here (instead of directly to the document)
      * and `useAgentStream` removes entries on `agent-message-accepted`,
@@ -238,14 +231,14 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         }
 
         // Init guard (issue #728 gap 1, codex P2 on PR #742). The
-        // reducer's TurnStart handler already suppresses turnActive
-        // while initPhase.kind === "InitPending", but that only stops the
-        // local UI state — without this check, the message still gets
-        // queued into pending AND sent over AgentInputCommand. If the
-        // backend accepts before InitReady fires, the accepted-event
-        // TurnStart is also suppressed, leaving the UI showing no active
-        // turn while the agent IS processing. Bail early here so neither
-        // happens.
+        // reducer's TurnStart handler already suppresses the
+        // Submitting transition while initPhase.kind === "InitPending",
+        // but that only stops the local UI state — without this
+        // check, the message still gets queued into pending AND sent
+        // over AgentInputCommand. If the backend accepts before
+        // InitReady fires, the accepted-event TurnStart is also
+        // suppressed, leaving the UI showing no active turn while the
+        // agent IS processing. Bail early here so neither happens.
         const ps = paneSnapshot(opts.blockId);
         if (ps?.initPhase.kind === "InitPending") {
             opts.log("send", "send blocked: history still loading", "warn");
@@ -346,12 +339,15 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     };
 
     const stopAgent = (): void => {
-        // Flip stopping → status line renders "Stopping…" immediately.
-        // `useAgentStream` owns the finalization: when `session_end`
-        // arrives it clears stopping + appends the "⏹ Interrupted" row,
-        // and it also runs a fallback timer that does the same cleanup
-        // if `session_end` never arrives (killing a subprocess prevents
-        // the CLI from emitting its own terminating result event).
+        // Transition turnPhase → Interrupting; the status line renders
+        // "Stopping…" immediately (via the turnPhase.kind ===
+        // "Interrupting" binding in agent-view.tsx). `useAgentStream`
+        // owns the finalization: when `session_end` arrives it
+        // dispatches TurnEnd (moving phase to Done.stopped) and
+        // appends the "⏹ Interrupted" row, and it also runs a fallback
+        // timer that does the same cleanup if `session_end` never
+        // arrives (killing a subprocess prevents the CLI from emitting
+        // its own terminating result event).
         // Soft variant — cascade-during-dispatch could dispose the pane
         // before this fires; retro 2026-05-23 (agent-pane cascade →
         // replaceChild quick-win).

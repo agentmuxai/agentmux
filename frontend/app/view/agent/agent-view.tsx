@@ -115,14 +115,16 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     onCleanup(() => unregisterAgentDocPane(model.blockId));
 
     // Slice #4 — agent-pane-state slot: bundles streaming/sessionStats/
-    // currentTool/turnTokens/turnActive/stopping/pending atoms behind a
-    // single reducer with cross-atom invariants. Same synchronous-register
-    // rule as the agent-document slot.
+    // currentTool/turnTokens/pending atoms behind a single reducer with
+    // cross-atom invariants. Same synchronous-register rule as the
+    // agent-document slot.
     //
-    // `turnPhase` is the PR A / PR B addition — the reducer dual-writes
-    // it alongside the legacy `turnActive` / `stopping` / `streaming.active`
-    // booleans, and the view (see the AgentStatusLine binding below)
-    // reads it via `isWorking(...)`. PR G drops the legacy fields.
+    // `turnPhase` is the single-source-of-truth working/stopping signal
+    // since PR G — the legacy `turnActive` / `stopping` /
+    // `streaming.active` fields and their projection setters have been
+    // removed. The view binds the working animation to
+    // `workingFromPhase(turnPhase)` and the "Stopping…" label to
+    // `turnPhase.kind === "Interrupting"` (see AgentStatusLine below).
     {
         const a = agentAtoms();
         registerAgentPaneStatePane(model.blockId, agentId, {
@@ -130,8 +132,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             sessionStats: a.sessionStatsAtom[1],
             currentTool: a.currentToolAtom[1],
             turnTokens: a.turnTokensAtom[1],
-            turnActive: a.turnActiveAtom[1],
-            stopping: a.stoppingAtom[1],
             pending: a.pendingMessagesAtom[1],
             initPhase: a.initPhaseAtom[1],
             turnPhase: a.turnPhaseAtom[1],
@@ -400,18 +400,16 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // Mutations dispatch through agent-document-store; the reducer there
     // owns dedup against in-flight history loads and the truncate-suppress
     // invariant that prevents the mid-session wipe bug.
-    const stoppingAtom = agentAtoms().stoppingAtom;
     const pendingMessagesAtom = agentAtoms().pendingMessagesAtom;
     useAgentStream({
         blockId: model.blockId,
         outputFormat: outputFormat(),
         documentAtom: agentAtoms().documentAtom,
-        streamingStateAtom: agentAtoms().streamingStateAtom,
-        sessionStatsAtom: agentAtoms().sessionStatsAtom,
-        currentToolAtom: agentAtoms().currentToolAtom,
-        turnTokensAtom: agentAtoms().turnTokensAtom,
-        turnActiveAtom: agentAtoms().turnActiveAtom,
-        stoppingAtom,
+        // turnPhase is the SoT for "is a stop in flight" — replaces the
+        // legacy `stoppingAtom` dropped in PR G. useAgentStream needs
+        // it to detect user-initiated stops and append the
+        // "⏹ Interrupted by user" row when session_end lands.
+        turnPhaseAtom: agentAtoms().turnPhaseAtom,
         pendingMessagesAtom,
         enabled: true,
         // Provider id (lowercase catalog key) attributes completed-turn
@@ -442,7 +440,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // defers this to the next animation frame so the mounted node is
         // included in scrollHeight. See SPEC_AGENT_PANE_FOLLOWUPS item #1.
         onSent: () => scrollToBottomFn?.(),
-        stoppingAtom,
         pendingMessagesAtom,
     });
 
@@ -713,11 +710,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             <PendingMessagesPanel
                 pendingMessages={pendingMessagesAtom[0]}
                 showSendNow={() =>
-                    // PR B: view migrated off legacy `turnActive` —
-                    // "send now" appears whenever the agent is working
+                    // "Send now" appears whenever the agent is working
                     // (Submitting / Streaming / Interrupting) and the
-                    // user has at least one queued message. The reducer
-                    // still dual-writes `turnActiveAtom`; PR G drops it.
+                    // user has at least one queued message. PR G removed
+                    // the legacy `turnActive` boolean — the working set
+                    // is now defined purely by `turnPhase`.
                     workingFromPhase(agentAtoms().turnPhaseAtom[0]()) &&
                     pendingMessagesAtom[0]().length > 0
                 }
@@ -758,13 +755,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 activity log doesn't push it off-screen during long
                 agent output.
 
-                PR B (Turn-phase migration): the "working" animation
-                binding now reads `workingFromPhase(turnPhase)` instead
-                of `turnActive || stopping`. The "Stopping…" label still
-                wins over "Working…" via the dedicated `stopping` prop —
-                that maps to `turnPhase.kind === "Interrupting"` so the
-                view no longer touches the legacy boolean. Reducer keeps
-                dual-writing both until PR G. */}
+                Since PR G the working animation reads
+                `workingFromPhase(turnPhase)` (PR B migration) and the
+                "Stopping…" label binding reads `turnPhase.kind ===
+                "Interrupting"`. The legacy `turnActive` / `stopping`
+                booleans were dropped in PR G — turnPhase is the only
+                source. */}
             <AgentStatusLine
                 loading={
                     status.isLoading()
