@@ -343,12 +343,12 @@ function outcomeFor(
     providerId: string | undefined,
     hasMatchingBinding: boolean,
 ): SelectionOutcome {
-    // Phase α for openclaw: bundle persistence isn't wired yet, so an
-    // already-selected identity can't be trusted as authenticated. Force
-    // a fresh OAuth on every launch so AgentLaunchModal's openclaw
-    // override actually gates Launch. Lift once Phase δ wires real
-    // bundle storage.
-    if (providerId === "openclaw") return "needs-bundle";
+    // (Historical note: openclaw previously short-circuited to
+    //  `needs-bundle` here as a Phase α stub because identity bundles
+    //  didn't store openclaw auth. PRs A–E of
+    //  SPEC_OAUTH_IDENTITY_BUNDLES gave openclaw real per-bundle
+    //  credential dirs + bindings, so the standard binding-driven
+    //  outcome path handles it now. PR F cleanup, 2026-05-22.)
     if (!identityId) return "needs-bundle";
     // Reagent + codex P1 on PR #910 round 3 — a non-blank bundle
     // without a binding for the agent's provider can't supply creds

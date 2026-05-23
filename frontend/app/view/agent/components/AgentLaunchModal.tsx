@@ -533,10 +533,6 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // provider. That's true when:
     //
     // - `blank`/empty is selected — ambient creds, OAuth flow runs once.
-    // - OpenClaw provider — until identity bundles include openclaw
-    //   auth profiles, gate ALWAYS (Phase α addition, 2026-05-17).
-    //   Lifts once identity-bundles-include-openclaw lands (planned
-    //   with Phase δ persistence work).
     // - A non-blank bundle without a matching provider binding —
     //   e.g. "+ New" just created an empty "Work" bundle. Reagent +
     //   codex P1 on PR #910 round 3.
@@ -547,15 +543,22 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     //   `auth.submitapikey` persists bundles (PR C-2), the gate would
     //   deadlock. Their existing `launch-flow.ts` Phase 2 prompts for
     //   the key in-line. Reagent + codex P1 on #847.
+    //
     // Hard auth-blockers: launch CANNOT proceed without the user
     // completing OAuth. Drives both the panel mount AND the launch
-    // gate. (Pre-PR-D `authRequired` was this exact set.)
+    // gate.
+    //
+    // (Historical note: PRs A–E of SPEC_OAUTH_IDENTITY_BUNDLES wired
+    //  oauth-class providers — including openclaw — through real
+    //  per-bundle credential dirs, so the previous `provider.id ===
+    //  "openclaw"` always-gate is no longer needed. The standard
+    //  `hasMatchingBinding` path handles every oauth provider.
+    //  PR F cleanup, 2026-05-22.)
     const authBlocksLaunch = () =>
         !isContinue()
         && provider()?.authType === "oauth"
         && (
             identityId() === ""
-            || provider()?.id === "openclaw"
             || !bundleHasMatchingBinding()
         );
     // Soft nudges: show the Connect CTA (with status-aware wording)
