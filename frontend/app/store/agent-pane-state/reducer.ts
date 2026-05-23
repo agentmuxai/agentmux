@@ -36,6 +36,7 @@ import {
     TurnOutcome,
     TurnPhase,
 } from "./types";
+import type { DisconnectReason } from "./types";
 
 /**
  * If `phase` is `Streaming`, return the `schedule-stream-watchdog` event
@@ -110,7 +111,13 @@ export function update(
             // deadline is in the future. (P1 on #995 from reagent +
             // codex: stale `lastEventMs` could schedule a deadline in
             // the past, firing `StreamStalled` immediately on a freshly-
-            // resubscribed turn.) Idle/Done/Disconnected stay put.
+            // resubscribed turn.)
+            //
+            // PR F: a subscribe from `Disconnected` clears the
+            // disconnect — we land in `Idle` (not back in the working
+            // set; the lost turn is gone, the next `TurnStart` promotes
+            // to Submitting). Done stays Done (terminal). Idle stays
+            // Idle (no-op).
             const nextPhase: TurnPhase =
                 state.turnPhase.kind === "Submitting"
                     ? {
@@ -124,7 +131,9 @@ export function update(
                               ...state.turnPhase,
                               lastEventMs: command.at,
                           }
-                        : state.turnPhase;
+                        : state.turnPhase.kind === "Disconnected"
+                            ? { kind: "Idle" }
+                            : state.turnPhase;
             const events: AgentPaneEvent[] = [
                 { type: "stream-subscribed", at: command.at },
             ];
@@ -152,27 +161,53 @@ export function update(
         case "StreamUnsubscribe": {
             // Dual-write: if we were working (Submitting/Streaming/
             // Interrupting), surface a Disconnected phase so the view
-            // can show re-attach UX. Otherwise → Idle.
+            // can show re-attach UX. Otherwise (Idle / Done / already
+            // Disconnected) the unsubscribe is idempotent — return the
+            // same state ref so reactive consumers don't see a phantom
+            // tick. Spec §6.4 / PR F.
             const k = state.turnPhase.kind;
             const wasWorking =
                 k === "Submitting" || k === "Streaming" || k === "Interrupting";
-            const nextPhase: TurnPhase = wasWorking
-                ? {
-                      kind: "Disconnected",
-                      lastKind: k as KindBeforeDisconnect,
-                      reason: "stream-unsubscribed",
-                  }
-                : { kind: "Idle" };
+            if (!wasWorking) {
+                // Same-ref no-op for Idle / Done / Disconnected. The
+                // legacy fields are already in the cleared shape there
+                // (no in-flight turn), so there's nothing to scrub. No
+                // event either — the unsubscribe is non-news.
+                return { state, events: [] };
+            }
+            const reason: DisconnectReason = "stream-unsubscribed";
+            const lastKind = k as KindBeforeDisconnect;
+            const nextPhase: TurnPhase = {
+                kind: "Disconnected",
+                lastKind,
+                lastConnectedAt: command.at,
+                reason,
+            };
             return {
                 state: {
                     ...state,
                     streaming: { ...state.streaming, active: false },
-                    // Defensive: subscription gone → no turn can be active.
+                    // Legacy cleanup mirrors the bounded force-transition
+                    // arms (InterruptTimeoutElapsed / SubmitTimeoutElapsed /
+                    // StreamStalled): a forced exit from a working state
+                    // settles the animation and clears per-turn sidecars
+                    // so the header doesn't show ghost tool / token chips.
                     turnActive: false,
+                    stopping: false,
+                    currentTool: null,
+                    turnTokens: null,
                     lastEventMs: null,
                     turnPhase: nextPhase,
                 },
-                events: [{ type: "stream-unsubscribed", at: command.at }],
+                events: [
+                    { type: "stream-unsubscribed", at: command.at },
+                    {
+                        type: "stream-disconnected",
+                        at: command.at,
+                        lastKind,
+                        reason,
+                    },
+                ],
             };
         }
 
@@ -323,17 +358,35 @@ export function update(
             // First-done-wins: if we're already in `Done`, preserve the
             // existing outcome and only refresh the stats sidecar. The
             // late ack is confirmatory, not authoritative.
-            const alreadyDone = state.turnPhase.kind === "Done";
+            //
+            // PR F extends the guard to `Disconnected` as well — Option A
+            // from the PR F spec: a late TurnEnd that arrives after the
+            // stream has already torn down (e.g. backend pushed a final
+            // session_end into a buffer right before the PTY died, then
+            // the buffered ack drains) must NOT overwrite the disconnect
+            // with a synthetic Done. The disconnect is the authoritative
+            // outcome; the late ack is informational. Same-ref no-op
+            // preserves both the phase and the cleared legacy fields.
+            if (state.turnPhase.kind === "Disconnected") {
+                return { state, events: [] };
+            }
             // Dual-write outcome: stop-in-flight → "stopped"; otherwise
             // "completed". "interrupted" / "errored" are reserved for
-            // future-PR commands (StreamStalled, Disconnected, etc.).
-            const outcome: TurnOutcome = alreadyDone
-                ? state.turnPhase.outcome
+            // bounded force-transition arms (InterruptTimeoutElapsed,
+            // SubmitTimeoutElapsed, StreamStalled).
+            //
+            // TS narrowing: read the phase via a local so the
+            // `.kind === "Done"` ternary below narrows `outcome` /
+            // `finishedAt` accesses (a `const alreadyDone = …` boolean
+            // wouldn't carry the narrow into the ternary branches).
+            const phase = state.turnPhase;
+            const outcome: TurnOutcome = phase.kind === "Done"
+                ? phase.outcome
                 : stoppingWasSet
                     ? "stopped"
                     : "completed";
-            const finishedAt = alreadyDone
-                ? state.turnPhase.finishedAt
+            const finishedAt = phase.kind === "Done"
+                ? phase.finishedAt
                 : nowMs;
             return {
                 state: {

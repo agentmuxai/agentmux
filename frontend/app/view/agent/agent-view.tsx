@@ -37,6 +37,7 @@ import { useAgentCommands } from "./hooks/useAgentCommands";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { ActivityLogPanel } from "./components/ActivityLogPanel";
 import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
+import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentStatusLine } from "./components/AgentFooter";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
@@ -722,6 +723,32 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 }
                 onSendImmediately={() => {
                     commands.stopAgent();
+                }}
+            />
+
+            {/* PR F — Disconnected banner. Visible when the stream
+                tore down while a turn was in flight (kind=Disconnected).
+                Sits above the status line so the working spinner (which
+                is already suppressed because `isWorking(Disconnected) =
+                false`) doesn't overlay the disconnect message. The
+                Reconnect button re-subscribes; the reducer's
+                `StreamSubscribe` arm clears the phase to Idle. Spec
+                docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md
+                §6.4. */}
+            <AgentDisconnectedBanner
+                phase={agentAtoms().turnPhaseAtom[0]}
+                onReconnect={() => {
+                    // Standard stream-reconnect path: dispatch
+                    // `StreamSubscribe` against the live pane. If the
+                    // backend has auto-reconnected between render and
+                    // click, the second subscribe is harmless — the
+                    // reducer's Disconnected→Idle transition is the
+                    // same regardless of who calls it.
+                    dispatchPane(
+                        model.blockId,
+                        { type: "StreamSubscribe", at: Date.now() },
+                        "user",
+                    );
                 }}
             />
 
