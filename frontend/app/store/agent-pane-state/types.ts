@@ -22,8 +22,24 @@ import type {
     TurnTokens,
 } from "../../view/agent/types";
 
-/** Init lifecycle — covers the "history still loading" gap. */
-export type InitPhase = "loading" | "ready" | "error";
+/**
+ * Init lifecycle — covers the "history still loading" gap (issue #728 gap 1).
+ *
+ * Discriminated union. The pane starts in `InitPending`; the history
+ * load resolves into either `InitReady` (success) or `InitFailed`
+ * (error, with diagnostic reason). Transitions are one-way: once a
+ * pane has reached a terminal state (`InitReady` / `InitFailed`),
+ * `InitStart` is a no-op. Re-mount creates a new pane slot whose state
+ * resets to `InitPending`.
+ *
+ * Each terminal variant carries the wall-clock ms it was entered. The
+ * timestamp is intentionally part of the variant payload (not a
+ * separate field) so a transition is one atomic write.
+ */
+export type InitPhase =
+    | { kind: "InitPending" }
+    | { kind: "InitReady"; at: number }
+    | { kind: "InitFailed"; at: number; reason: string };
 
 // ─────────────────────────────────────────────────────────────────────────
 // TurnPhase discriminated union (PR A — dual-write phase)
@@ -106,10 +122,12 @@ export interface AgentPaneState {
     turnActive: boolean;
     stopping: boolean;
     pending: PendingMessage[];
-    /** Init phase — `loading` until history fetch completes (or fails). */
+    /**
+     * Init phase — `InitPending` until history fetch resolves (or fails).
+     * Discriminated union; failure reason lives in the `InitFailed`
+     * variant's `reason` payload — no separate `initError` field.
+     */
     initPhase: InitPhase;
-    /** Reason captured on InitFailed; null otherwise. */
-    initError: string | null;
     /**
      * Wall-clock ms of the last observable stream activity (subscribe,
      * flush, tool, tokens). Drives the stuck-stream watchdog. null
@@ -134,11 +152,15 @@ export const initialState = (agentId: string): AgentPaneState => ({
     turnActive: false,
     stopping: false,
     pending: [],
-    initPhase: "loading",
-    initError: null,
+    initPhase: { kind: "InitPending" },
     lastEventMs: null,
     turnPhase: { kind: "Idle" },
 });
+
+/** Selector — `true` iff the pane has finished its initial history load. */
+export function isInitReady(state: AgentPaneState): boolean {
+    return state.initPhase.kind === "InitReady";
+}
 
 /**
  * Selector — true while the agent is processing a user request.
@@ -168,12 +190,16 @@ export function workingFromPhase(phase: TurnPhase): boolean {
 
 export type AgentPaneCommand =
     // ── Init lifecycle (gap 1) ─────────────────────────────────────
-    /** Caller signal: history fetch began. */
+    /**
+     * Caller signal: history fetch began. Idempotent — if the pane is
+     * already in any terminal state (`InitReady` / `InitFailed`),
+     * `InitStart` is a no-op (we don't reset back to pending).
+     */
     | { type: "InitStart" }
     /** Caller signal: history fetch resolved successfully. */
-    | { type: "InitReady" }
+    | { type: "InitReady"; at: number }
     /** Caller signal: history fetch failed; reason surfaced for diagnostics. */
-    | { type: "InitFailed"; reason: string }
+    | { type: "InitFailed"; at: number; reason: string }
 
     // ── Stream lifecycle ───────────────────────────────────────────
     /** Hook signal: subscription is up. */
@@ -251,7 +277,6 @@ export type AgentPaneCommand =
     | { type: "PendingMessageExpired"; id: string };
 
 export type AgentPaneEvent =
-    | { type: "init-started" }
     | { type: "init-ready" }
     | { type: "init-failed"; reason: string }
     | { type: "stream-subscribed"; at: number }
@@ -272,7 +297,7 @@ export type AgentPaneEvent =
     | {
           /**
            * Invariant fire: TurnStart while streaming inactive OR
-           * initPhase !== "ready" — dropped.
+           * initPhase.kind === "InitPending" — dropped.
            */
           type: "turn-start-suppressed";
           reason: string;
