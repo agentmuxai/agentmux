@@ -239,10 +239,26 @@ export function update(
             // Merge stats with live turn-tokens (mirrors prior finalizeTurn
             // logic — see PR #549 reagent/codex P1 reference).
             const merged = mergeStats(command.stats, state.turnTokens);
+            // Codex P1 on #991: when an `InterruptTimeoutElapsed` has
+            // already forced us to `Done.interrupted` (clearing `stopping`
+            // in the process), a late backend `TurnEnd` ack would see
+            // `stoppingWasSet === false` and classify the outcome as
+            // "completed", overwriting the forced interrupted state.
+            // First-done-wins: if we're already in `Done`, preserve the
+            // existing outcome and only refresh the stats sidecar. The
+            // late ack is confirmatory, not authoritative.
+            const alreadyDone = state.turnPhase.kind === "Done";
             // Dual-write outcome: stop-in-flight → "stopped"; otherwise
             // "completed". "interrupted" / "errored" are reserved for
             // future-PR commands (StreamStalled, Disconnected, etc.).
-            const outcome: TurnOutcome = stoppingWasSet ? "stopped" : "completed";
+            const outcome: TurnOutcome = alreadyDone
+                ? state.turnPhase.outcome
+                : stoppingWasSet
+                    ? "stopped"
+                    : "completed";
+            const finishedAt = alreadyDone
+                ? state.turnPhase.finishedAt
+                : nowMs;
             return {
                 state: {
                     ...state,
@@ -254,7 +270,7 @@ export function update(
                     turnPhase: {
                         kind: "Done",
                         outcome,
-                        finishedAt: nowMs,
+                        finishedAt,
                     },
                 },
                 events: [
