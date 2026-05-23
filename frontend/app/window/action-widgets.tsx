@@ -20,7 +20,7 @@ import { atoms, createBlock, getApi } from "@/store/global";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import { invokeCommand } from "@/app/platform/ipc";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
-import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import "./action-widgets.scss";
 
@@ -210,9 +210,24 @@ const ActionWidgets = (): JSX.Element => {
     const fullConfig = atoms.fullConfigAtom;
     const settings = (): Record<string, any> => fullConfig()?.settings ?? {};
     const wmap = (): Record<string, WidgetConfigType> => fullConfig()?.widgets ?? {};
-    const iconOnly = (): boolean => settings()["widget:icononly"] ?? true;
+    const iconOnly = (): boolean => settings()["widget:icononly"] ?? false;
     const pinnedWidgets = () => getPinnedWidgets(settings(), wmap());
     const moreWidgets = () => getMoreWidgets(settings(), wmap());
+
+    // ── Responsive labels ─────────────────────────────────────────────────────
+    // Labels collapse to icons when the title bar is too narrow to fit the
+    // labeled bar while leaving the tab bar a usable strip. `tooNarrow` is
+    // derived from a hidden always-labeled mirror (rendered below), so the
+    // decision never depends on the visible bar's own collapsed state — there
+    // is no measure→collapse→re-expand oscillation.
+    const [tooNarrow, setTooNarrow] = createSignal(false);
+    const effectiveIconOnly = (): boolean => iconOnly() || tooNarrow();
+    let mirrorRef: HTMLDivElement | undefined;
+
+    // Header width always reserved for the tab bar before widget labels are
+    // dropped. The collapse point still auto-tracks the widget count via the
+    // mirror's measured width; this only floors the tab bar's share.
+    const MIN_TAB_WIDTH = 120;
 
     // More dropdown state
     const [moreOpen, setMoreOpen] = createSignal(false);
@@ -252,6 +267,28 @@ const ActionWidgets = (): JSX.Element => {
     let draggingKeyRef: string | null = null;
     let dropIndexRef: number | null = null;
     let dragStartRef: { x: number; y: number; key: string } | null = null;
+
+    // Re-evaluate `tooNarrow` whenever the window header resizes or the mirror's
+    // labeled width changes (e.g. a widget is pinned/unpinned).
+    onMount(() => {
+        const header = containerRef?.closest(".window-header") as HTMLElement | null;
+        if (!header || !mirrorRef) return;
+        const buttons = containerRef?.parentElement?.querySelector(
+            ".window-action-buttons"
+        ) as HTMLElement | null;
+        const measure = () => {
+            const labeledW = mirrorRef?.offsetWidth ?? 0;
+            const headerW = header.clientWidth;
+            if (labeledW === 0 || headerW === 0) return;
+            const buttonsW = buttons?.offsetWidth ?? 0;
+            setTooNarrow(labeledW + buttonsW + MIN_TAB_WIDTH > headerW);
+        };
+        const ro = new ResizeObserver(measure);
+        ro.observe(header);
+        ro.observe(mirrorRef);
+        measure();
+        onCleanup(() => ro.disconnect());
+    });
 
     const handlePointerDown = (key: string, e: PointerEvent) => {
         dragStartRef = { x: e.clientX, y: e.clientY, key };
@@ -406,7 +443,7 @@ const ActionWidgets = (): JSX.Element => {
                             >
                                 <ActionWidget
                                     widget={widget}
-                                    iconOnly={iconOnly()}
+                                    iconOnly={effectiveIconOnly()}
                                     onContextMenu={(e) => handlePinnedContextMenu(e, key)}
                                 />
                             </div>
@@ -425,12 +462,32 @@ const ActionWidgets = (): JSX.Element => {
                         onClick={openMore}
                     >
                         <i class="fa-solid fa-ellipsis" />
-                        <Show when={!iconOnly()}>
+                        <Show when={!effectiveIconOnly()}>
                             <span class="action-widget-more-label">more</span>
                         </Show>
                         <i
                             class={`fa-solid ${moreOpen() ? "fa-chevron-up" : "fa-chevron-down"} action-widget-more-chevron`}
                         />
+                    </div>
+                </Show>
+            </div>
+
+            {/* Hidden always-labeled mirror. Measured to decide whether the
+                labeled bar fits; absolutely positioned so it never affects the
+                visible bar's layout, and inert (invisible, no pointer events). */}
+            <div ref={mirrorRef} class="action-widgets action-widgets--measure" aria-hidden="true">
+                <For each={pinnedWidgets()}>
+                    {({ widget }) => (
+                        <div class="action-widget-slot">
+                            <ActionWidget widget={widget} iconOnly={false} />
+                        </div>
+                    )}
+                </For>
+                <Show when={moreWidgets().length > 0}>
+                    <div class="action-widget-more-btn">
+                        <i class="fa-solid fa-ellipsis" />
+                        <span class="action-widget-more-label">more</span>
+                        <i class="fa-solid fa-chevron-down action-widget-more-chevron" />
                     </div>
                 </Show>
             </div>
