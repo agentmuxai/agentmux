@@ -40,7 +40,14 @@ function safeStringify(value: unknown): string {
     if (value === undefined) return "undefined";
     if (typeof value === "string") return value;
     try {
-        return JSON.stringify(value);
+        // Codex P2 on #989: JSON.stringify returns `undefined` (NOT a
+        // string) for certain values without throwing — symbols, plain
+        // functions, and any value whose `.toJSON()` returns undefined.
+        // The previous implementation forwarded that `undefined` to the
+        // host log. Coerce via String() in that case to preserve a
+        // useful diagnostic shape.
+        const out = JSON.stringify(value);
+        return typeof out === "string" ? out : String(value);
     } catch {
         return String(value);
     }
