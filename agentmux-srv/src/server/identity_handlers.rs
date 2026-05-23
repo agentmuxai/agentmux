@@ -766,6 +766,13 @@ fn spawn_auth_cli_pty(
             use std::io::BufRead;
             let mut reader = std::io::BufReader::new(reader);
             let mut line = String::new();
+            // The detached confirm/persist task's JoinHandle, populated
+            // when the drain matches LoginSuccess. Returned to outer so
+            // it can await completion before its post-exit check —
+            // without that wait, outer would race the detached and
+            // either skip too soon (if it sets the atomic eagerly) or
+            // double-persist. Reagent P1 follow-up on #981.
+            let mut maybe_detached: Option<tokio::task::JoinHandle<()>> = None;
             loop {
                 line.clear();
                 match reader.read_line(&mut line) {
@@ -775,13 +782,21 @@ fn spawn_auth_cli_pty(
                         // OAuth URLs / codes can be in here.
                         tracing::debug!(session_id = %sid_drain, bytes = line.len(), "auth.spawn (PTY): line");
                         let m = mgr_drain.record_line(&sid_drain, &line);
-                        if !success_transitioned_drain.load(Ordering::Acquire)
+                        if maybe_detached.is_none()
                             && matches!(
                                 m,
                                 Some(crate::identity::auth_patterns::AuthPatternMatch::LoginSuccess { .. })
                             )
                         {
                             // Hand off to async to call confirm_authenticated.
+                            // The detached task OWNS the transition —
+                            // it calls finish_success on confirm-OK and
+                            // finish_failure on confirm-NOT-OK, AND
+                            // sets the shared atomic in BOTH cases. The
+                            // drain only captures the JoinHandle here
+                            // and returns it; outer awaits both drain
+                            // and the inner handle before its check, so
+                            // the atomic is correctly settled by then.
                             let cli = cli_path_drain.clone();
                             let args = check_args_drain.clone();
                             let env = check_env_drain.clone();
@@ -792,7 +807,8 @@ fn spawn_auth_cli_pty(
                             let into_bundle_id2 = into_bundle_id_drain.clone();
                             let bundle_dir2 = bundle_dir_drain.clone();
                             let provider_id2 = provider_id_drain.clone();
-                            tokio::runtime::Handle::current().spawn(async move {
+                            let success_for_detached = Arc::clone(&success_transitioned_drain);
+                            let handle = tokio::runtime::Handle::current().spawn(async move {
                                 if confirm_authenticated(&cli, &args, &env).await {
                                     let bundle_id = persist_oauth_binding_or_synthetic(
                                         &wstore2,
@@ -803,19 +819,30 @@ fn spawn_auth_cli_pty(
                                         &sid2,
                                     );
                                     mgr2.finish_success(&sid2, bundle_id);
+                                } else {
+                                    // Confirm failed AFTER LoginSuccess
+                                    // pattern matched. Pre-fix the
+                                    // session would stay in InProgress
+                                    // forever (drain skipped outer
+                                    // fallback, detached did nothing).
+                                    // Reagent P1 follow-up on #981.
+                                    mgr2.finish_failure(
+                                        &sid2,
+                                        "CLI auth-check failed after login pattern match".to_string(),
+                                    );
                                 }
+                                // Atomic set AFTER the transition lands
+                                // — outer awaits this handle before
+                                // checking, so this is visible.
+                                success_for_detached.store(true, Ordering::Release);
                             });
-                            // Atomic set BEFORE the detached spawn's
-                            // body runs — but the outer only awaits
-                            // `drain_handle`, so it'll see this set
-                            // before its own post-exit check. The
-                            // detached persist runs once, unraced.
-                            success_transitioned_drain.store(true, Ordering::Release);
+                            maybe_detached = Some(handle);
                         }
                     }
                     Err(_) => break,
                 }
             }
+            maybe_detached
         });
 
         // Wait for the child in a blocking task. pair (master + slave)
@@ -831,7 +858,16 @@ fn spawn_auth_cli_pty(
         let exit = wait_handle.await;
         tracing::info!(session_id = %session_id_for_task, exit = ?exit, "auth.spawn (PTY): child exited");
 
-        let _ = drain_handle.await;
+        // Await the drain itself, THEN its optional detached
+        // confirm/persist task. Both have to complete before the
+        // post-exit check — otherwise outer might see atomic=false
+        // (detached still confirming), run its fallback persist, AND
+        // the detached's persist also runs → the original double-
+        // persist race re-opens. Reagent P1 follow-up on #981.
+        let detached = drain_handle.await.ok().flatten();
+        if let Some(h) = detached {
+            let _ = h.await;
+        }
         stdin_writer_handle.abort();
 
         // Final transition fallback — some CLIs exit cleanly without
