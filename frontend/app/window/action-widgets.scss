@@ -12,6 +12,19 @@
     user-select: none;
 }
 
+// Hidden measuring mirror — see action-widgets.tsx. Always rendered in the
+// labeled state; its width is the labeled natural width used to decide when
+// the visible bar must collapse to icons. Absolutely positioned so it never
+// affects the real bar's layout; invisible and inert.
+.action-widgets--measure {
+    position: absolute;
+    top: 0;
+    left: 0;
+    visibility: hidden;
+    pointer-events: none;
+    white-space: nowrap;
+}
+
 .action-widget-slot {
     -webkit-app-region: no-drag;
     display: flex;
