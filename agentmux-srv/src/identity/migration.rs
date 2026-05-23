@@ -320,10 +320,23 @@ pub fn run_default_bundle_migration(
     }
 
     // Back-fill the empty / "blank" identity_id rows on
-    // db_agent_instances → Default bundle id. Gated on
-    // `default_ready` so we never write a non-existent FK on the
-    // no-ambient path. Per spec §5 step 4.
-    if default_ready.is_some() {
+    // db_agent_instances → Default bundle id. Per spec §5 step 4.
+    //
+    // Gate: the Default bundle must exist (FK target). It exists if
+    // EITHER we seeded a provider in THIS run (`default_ready`) OR a
+    // previous run already seeded it. The latter case matters because
+    // a legacy row (`identity_id == ""` / `"blank"`) created between
+    // restarts — by a code path that still produces them — would
+    // otherwise never get repaired: subsequent startups would
+    // `providers_skipped_existing` and skip the back-fill too. codex
+    // P2 on #983.
+    let default_bundle_exists = default_ready.is_some()
+        || wstore
+            .bundle_identity_list()
+            .ok()
+            .map(|bs| bs.iter().any(|b| b.id == DEFAULT_BUNDLE_ID))
+            .unwrap_or(false);
+    if default_bundle_exists {
         match wstore.instance_backfill_identity_id(DEFAULT_BUNDLE_ID) {
             Ok(rows) => {
                 stats.instances_backfilled = rows;
@@ -718,6 +731,84 @@ mod tests {
         // The non-empty row stays put.
         let after_set = store.instance_get("inst-set").unwrap().unwrap();
         assert_eq!(after_set.identity_id, "some-existing-bundle");
+    }
+
+    #[test]
+    fn backfills_legacy_rows_added_between_runs() {
+        // Subsequent-startup self-heal — codex P2 on #983: if a
+        // legacy row (`identity_id == ""` / `"blank"`) gets created
+        // AFTER the first migration seeded Default, the next startup
+        // would normally `providers_skipped_existing` for everything
+        // and skip the back-fill too. The back-fill gate must check
+        // "Default bundle exists" (whether seeded this run OR a prior
+        // run), not "did we seed in this run", so the new legacy row
+        // gets repaired.
+        let store = make_store();
+        let tmp = tempfile::tempdir().unwrap();
+        plant_ambient_claude_creds(tmp.path());
+
+        // Agent def + initial run that creates Default.
+        let mut def = crate::backend::storage::wstore::AgentDefinition {
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+        };
+        store.agent_def_insert(&mut def).unwrap();
+
+        let s1 = run_default_bundle_migration(&store, None, Some(tmp.path().to_path_buf()));
+        assert!(s1.default_bundle_created);
+        assert_eq!(s1.instances_backfilled, 0); // no legacy rows yet
+
+        // Between runs: a code path adds a legacy row with empty
+        // identity_id (simulates an older spawn path lingering).
+        let inst_late = crate::backend::storage::wstore::AgentInstance {
+            id: "inst-late".to_string(),
+            definition_id: "def-1".to_string(),
+            parent_instance_id: String::new(),
+            block_id: "block-late".to_string(),
+            session_id: String::new(),
+            status: "running".to_string(),
+            github_context: String::new(),
+            started_at: 0,
+            ended_at: 0,
+            created_at: 0,
+            identity_id: String::new(),
+            memory_id: String::new(),
+            instance_name: String::new(),
+            working_directory: String::new(),
+            display_hidden: false,
+        };
+        store.instance_create(&inst_late).unwrap();
+
+        // Second run: claude is `providers_skipped_existing`, so
+        // `default_ready` stays None — but Default exists from run 1,
+        // so the back-fill MUST still run.
+        let s2 = run_default_bundle_migration(&store, None, Some(tmp.path().to_path_buf()));
+        assert!(!s2.default_bundle_created); // already there
+        assert_eq!(
+            s2.instances_backfilled, 1,
+            "subsequent-run back-fill must repair newly-added legacy rows"
+        );
+        let after = store.instance_get("inst-late").unwrap().unwrap();
+        assert_eq!(after.identity_id, DEFAULT_BUNDLE_ID);
     }
 
     #[test]
