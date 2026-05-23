@@ -34,8 +34,7 @@
 import { createSignal, onCleanup, onMount, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { dispatchIfRegistered as dispatchDocIfRegistered } from "@/app/store/agent-document-store";
-import { dispatchIfRegistered as dispatchPaneIfRegistered } from "@/app/store/agent-pane-state-store";
+import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { parseHistoryLines } from "../parseHistoryLines";
 
 import type { LogFn } from "../types";
@@ -43,6 +42,16 @@ export type { LogFn };
 
 export interface UseHistoryPaginationOptions {
     blockId: string;
+    /**
+     * Per-pane model handle returned by `registerPane`. Threaded in so
+     * the hook's dispatch sites are default-safe against post-unmount
+     * races. PR-4 of the cascade follow-up sequence. See
+     * `agent-pane-model.ts`. Replaces both the previous
+     * `dispatchDocIfRegistered` / `dispatchPaneIfRegistered` imports
+     * AND the local `mounted` closure flag — the model's disposed
+     * flag now owns the post-unmount drop.
+     */
+    model: AgentPaneModel;
     /**
      * Accessor for the document's stream-event format, e.g.
      * "claude-stream-json", "codex-json", etc. Passed reactively because
@@ -97,7 +106,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
 
             const newNodes = parseHistoryLines(resp.lines ?? [], opts.outputFormat());
             if (newNodes.length > 0) {
-                dispatchDocIfRegistered(opts.blockId, { type: "HistoryLoaded", nodes: newNodes });
+                opts.model.dispatchDoc({ type: "HistoryLoaded", nodes: newNodes });
             }
 
             setHistoryOffset(newOffset);
@@ -135,7 +144,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
         // Soft variant — cascade-during-dispatch could dispose the pane
         // before this fires; retro 2026-05-23 (agent-pane cascade →
         // replaceChild quick-win).
-        dispatchPaneIfRegistered(opts.blockId, { type: "InitStart" });
+        opts.model.dispatchPane({ type: "InitStart" });
         (async () => {
             // Fast path: try the reducer-state snapshot first. If it exists
             // and the schema version matches, restore wholesale and skip
@@ -150,7 +159,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 if (stateResp.content) {
                     const snapshot = JSON.parse(stateResp.content);
                     if (snapshot && snapshot.schemaVersion === SNAPSHOT_SCHEMA_VERSION && Array.isArray(snapshot.nodes)) {
-                        dispatchDocIfRegistered(opts.blockId, { type: "HistoryRestored", fromSnapshot: true, nodes: snapshot.nodes });
+                        opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes: snapshot.nodes });
 
                         const offset = typeof snapshot.historyOffset === "number" && snapshot.historyOffset >= 0
                             ? snapshot.historyOffset
@@ -162,7 +171,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                             `restored ${snapshot.nodes.length} nodes from snapshot ` +
                                 `(savedAt=${snapshot.savedAt ?? "unknown"}, loadOlder offset=${offset})`,
                         );
-                        dispatchPaneIfRegistered(opts.blockId, {
+                        opts.model.dispatchPane({
                             type: "InitReady",
                             at: Date.now(),
                         });
@@ -192,7 +201,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
 
                 const total = countResp?.count ?? 0;
                 if (total === 0) {
-                    dispatchPaneIfRegistered(opts.blockId, {
+                    opts.model.dispatchPane({
                         type: "InitReady",
                         at: Date.now(),
                     });
@@ -212,7 +221,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
 
                 const nodes = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat());
                 if (nodes.length > 0) {
-                    dispatchDocIfRegistered(opts.blockId, { type: "HistoryLoaded", nodes });
+                    opts.model.dispatchDoc({ type: "HistoryLoaded", nodes });
                 }
 
                 // `resp.total` from the backend is the actual available
@@ -225,7 +234,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 setHistoryTotal(available);
 
                 opts.log("history", `loaded ${nodes.length} of ${available} previous messages`);
-                dispatchPaneIfRegistered(opts.blockId, {
+                opts.model.dispatchPane({
                     type: "InitReady",
                     at: Date.now(),
                 });
@@ -241,7 +250,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 // TurnStart guard treats `InitFailed` as fail-open (only
                 // `InitPending` blocks sends), so no follow-up InitReady
                 // is needed — the user can still send.
-                dispatchPaneIfRegistered(opts.blockId, {
+                opts.model.dispatchPane({
                     type: "InitFailed",
                     at: Date.now(),
                     reason,

@@ -16,6 +16,7 @@ import {
 import {
     registerPane as registerAgentPane,
     unregisterPane as unregisterAgentPane,
+    type AgentPaneModel,
 } from "@/app/store/agent-pane-registration";
 import { workingFromPhase } from "@/app/store/agent-pane-state/types";
 import type { SubagentLinkNode } from "./types";
@@ -126,9 +127,17 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // removed. The view binds the working animation to
     // `workingFromPhase(turnPhase)` and the "Stopping…" label to
     // `turnPhase.kind === "Interrupting"` (see AgentStatusLine below).
+    // Capture the model returned by registerPane (PR-4 of the cascade
+    // follow-up) — passed into hooks/views so their dispatch callsites
+    // are default-safe against post-unmount races. The disposed flag on
+    // the model flips synchronously inside `unregisterAgentPane` BEFORE
+    // either store unregisters, so any deferred dispatcher landing in
+    // the cleanup window observes disposed=true and silently drops.
+    // See agent-pane-model.ts for the rationale.
+    let paneModel: AgentPaneModel;
     {
         const a = agentAtoms();
-        registerAgentPane(model.blockId, {
+        paneModel = registerAgentPane(model.blockId, {
             agentId,
             documentSetter: a.documentAtom[1],
             projections: {
@@ -160,6 +169,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // for the trailing 200 lines on mount + each user-triggered loadOlder.
     const history = useHistoryPagination({
         blockId: model.blockId,
+        // PR-4 — see useAgentStream above; same rationale.
+        model: paneModel,
         outputFormat,
         log,
     });
@@ -408,6 +419,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const pendingMessagesAtom = agentAtoms().pendingMessagesAtom;
     useAgentStream({
         blockId: model.blockId,
+        // PR-4 — pass the per-pane model so the hook's dispatch sites
+        // are default-safe against post-unmount races. Without the
+        // model, the hook had to import / remember the soft variant
+        // (`dispatchIfRegistered`) per call site; with the model the
+        // disposed-flag check is centralized.
+        model: paneModel,
         outputFormat: outputFormat(),
         documentAtom: agentAtoms().documentAtom,
         // turnPhase is the SoT for "is a stop in flight" — replaces the
@@ -435,6 +452,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // See hooks/useAgentCommands.ts.
     const commands = useAgentCommands({
         blockId: model.blockId,
+        // PR-4 — see useAgentStream above; same rationale.
+        model: paneModel,
         block,
         provider,
         documentAtom: agentAtoms().documentAtom,
