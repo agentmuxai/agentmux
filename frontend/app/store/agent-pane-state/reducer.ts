@@ -8,13 +8,19 @@
  *
  * Invariants enforced:
  *   1. turnActive cannot be set while streaming inactive (suppressed).
- *   2. turnActive cannot be set while initPhase !== "ready" (suppressed).
+ *   2. turnActive cannot be set while initPhase.kind === "InitPending"
+ *      (suppressed). After `InitFailed` we fail open — see the
+ *      `TurnStart` arm.
  *   3. stopping clears automatically on TurnEnd / TurnReset.
  *   4. currentTool and turnTokens clear on TurnEnd / TurnReset.
  *   5. pending FIFO; accepting/rejecting/expiring unknown ids is no-op.
  *   6. StreamFlushObserved is a no-op when streaming inactive.
  *   7. StreamWatchdogTick is a no-op when streaming inactive or
  *      lastEventMs is null (no events seen yet).
+ *   8. Init lifecycle transitions are one-way: InitStart / InitReady /
+ *      InitFailed are no-ops once the pane has reached a terminal init
+ *      state (InitReady / InitFailed). Re-entering pending requires a
+ *      fresh pane slot.
  */
 
 import {
@@ -43,24 +49,35 @@ export function update(
     switch (command.type) {
         // ── Init lifecycle (gap 1) ─────────────────────────────────
         case "InitStart": {
-            if (state.initPhase === "loading") return { state, events: [] };
-            return {
-                state: { ...state, initPhase: "loading", initError: null },
-                events: [{ type: "init-started" }],
-            };
+            // Idempotent: only emits when first entering pending. Already
+            // in pending → no-op (same ref). Already terminal → no-op
+            // (we don't reset back from InitReady/InitFailed).
+            return { state, events: [] };
         }
 
         case "InitReady": {
-            if (state.initPhase === "ready") return { state, events: [] };
+            if (state.initPhase.kind !== "InitPending") {
+                // Already terminal — no-op. Out-of-order InitReady after
+                // an earlier InitFailed (or a duplicate InitReady) is
+                // silently dropped to keep transitions one-way.
+                return { state, events: [] };
+            }
             return {
-                state: { ...state, initPhase: "ready", initError: null },
+                state: { ...state, initPhase: { kind: "InitReady", at: command.at } },
                 events: [{ type: "init-ready" }],
             };
         }
 
         case "InitFailed": {
+            if (state.initPhase.kind !== "InitPending") {
+                // Same one-way rule as InitReady — once terminal, stay.
+                return { state, events: [] };
+            }
             return {
-                state: { ...state, initPhase: "error", initError: command.reason },
+                state: {
+                    ...state,
+                    initPhase: { kind: "InitFailed", at: command.at, reason: command.reason },
+                },
                 events: [{ type: "init-failed", reason: command.reason }],
             };
         }
@@ -203,7 +220,7 @@ export function update(
             // After init failure we fail open — the live stream may still
             // work even if history fetch hung, and blocking the user
             // would be worse than silently dropping a stale send.
-            if (state.initPhase === "loading") {
+            if (state.initPhase.kind === "InitPending") {
                 return {
                     state,
                     events: [

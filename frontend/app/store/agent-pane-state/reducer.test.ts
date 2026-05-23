@@ -7,6 +7,7 @@ import {
     AgentPaneState,
     initialState,
     INTERRUPT_TIMEOUT_MS,
+    isInitReady,
     isWorking,
     STUCK_THRESHOLD_MS,
     TurnPhase,
@@ -19,7 +20,7 @@ const mk = () => initialState("test-agent");
  * gate, so subscribing alone no longer permits `TurnStart`.
  */
 const ready = (atMs = 100) => {
-    const s0 = update(mk(), { type: "InitReady" }).state;
+    const s0 = update(mk(), { type: "InitReady", at: atMs }).state;
     return update(s0, { type: "StreamSubscribe", at: atMs }).state;
 };
 
@@ -237,36 +238,114 @@ describe("agent-pane-state reducer", () => {
     });
 
     describe("Init phase (gap 1)", () => {
-        it("starts in 'loading'", () => {
-            expect(mk().initPhase).toBe("loading");
-            expect(mk().initError).toBe(null);
+        it("starts in InitPending", () => {
+            const s = mk();
+            expect(s.initPhase).toEqual({ kind: "InitPending" });
+            expect(isInitReady(s)).toBe(false);
         });
 
-        it("InitReady advances to ready and clears error", () => {
-            const s0 = update(mk(), { type: "InitFailed", reason: "boom" }).state;
-            expect(s0.initPhase).toBe("error");
-            expect(s0.initError).toBe("boom");
-            const r = update(s0, { type: "InitReady" });
-            expect(r.state.initPhase).toBe("ready");
-            expect(r.state.initError).toBe(null);
+        it("InitReady advances InitPending → InitReady with timestamp", () => {
+            const r = update(mk(), { type: "InitReady", at: 500 });
+            expect(r.state.initPhase).toEqual({ kind: "InitReady", at: 500 });
+            expect(isInitReady(r.state)).toBe(true);
             expect(r.events[0]).toMatchObject({ type: "init-ready" });
         });
 
-        it("InitFailed captures reason", () => {
-            const r = update(mk(), { type: "InitFailed", reason: "RPC timeout" });
-            expect(r.state.initPhase).toBe("error");
-            expect(r.state.initError).toBe("RPC timeout");
+        it("InitFailed advances InitPending → InitFailed with timestamp + reason", () => {
+            const r = update(mk(), { type: "InitFailed", at: 750, reason: "RPC timeout" });
+            expect(r.state.initPhase).toEqual({
+                kind: "InitFailed",
+                at: 750,
+                reason: "RPC timeout",
+            });
+            expect(isInitReady(r.state)).toBe(false);
             expect(r.events[0]).toMatchObject({ type: "init-failed", reason: "RPC timeout" });
         });
 
-        it("InitStart while already loading is a no-op (same ref)", () => {
+        it("InitStart in InitPending is a no-op (same ref, no events)", () => {
             const start = mk();
             const r = update(start, { type: "InitStart" });
             expect(r.state).toBe(start);
             expect(r.events).toEqual([]);
         });
 
-        it("TurnStart suppressed while initPhase === 'loading'", () => {
+        it("InitStart after InitReady is a no-op (one-way; same ref)", () => {
+            const readyState = update(mk(), { type: "InitReady", at: 100 }).state;
+            const r = update(readyState, { type: "InitStart" });
+            expect(r.state).toBe(readyState);
+            expect(r.events).toEqual([]);
+        });
+
+        it("InitStart after InitFailed is a no-op (one-way; same ref)", () => {
+            const failed = update(mk(), {
+                type: "InitFailed",
+                at: 100,
+                reason: "boom",
+            }).state;
+            const r = update(failed, { type: "InitStart" });
+            expect(r.state).toBe(failed);
+            expect(r.events).toEqual([]);
+        });
+
+        it("InitReady after InitReady is a no-op (idempotent)", () => {
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
+            const r = update(s0, { type: "InitReady", at: 200 });
+            expect(r.state).toBe(s0);
+            // Original timestamp is preserved — re-firing doesn't bump it.
+            expect(r.state.initPhase).toEqual({ kind: "InitReady", at: 100 });
+            expect(r.events).toEqual([]);
+        });
+
+        it("InitReady after InitFailed is dropped (one-way; same ref)", () => {
+            const failed = update(mk(), {
+                type: "InitFailed",
+                at: 100,
+                reason: "load broke",
+            }).state;
+            const r = update(failed, { type: "InitReady", at: 200 });
+            expect(r.state).toBe(failed);
+            // Stays in InitFailed — reason preserved.
+            expect(r.state.initPhase).toEqual({
+                kind: "InitFailed",
+                at: 100,
+                reason: "load broke",
+            });
+            expect(r.events).toEqual([]);
+        });
+
+        it("InitFailed after InitReady is dropped (one-way; same ref)", () => {
+            const readyState = update(mk(), { type: "InitReady", at: 100 }).state;
+            const r = update(readyState, {
+                type: "InitFailed",
+                at: 200,
+                reason: "late",
+            });
+            expect(r.state).toBe(readyState);
+            expect(r.state.initPhase).toEqual({ kind: "InitReady", at: 100 });
+            expect(r.events).toEqual([]);
+        });
+
+        it("InitFailed after InitFailed is a no-op (preserves first reason + timestamp)", () => {
+            const first = update(mk(), {
+                type: "InitFailed",
+                at: 100,
+                reason: "first failure",
+            }).state;
+            const r = update(first, {
+                type: "InitFailed",
+                at: 200,
+                reason: "second failure",
+            });
+            expect(r.state).toBe(first);
+            expect(r.state.initPhase).toEqual({
+                kind: "InitFailed",
+                at: 100,
+                reason: "first failure",
+            });
+            expect(r.events).toEqual([]);
+        });
+
+        it("TurnStart suppressed while in InitPending", () => {
             // Subscribed but not InitReady — gap 1 invariant.
             const s0 = update(mk(), { type: "StreamSubscribe", at: 100 }).state;
             const r = update(s0, { type: "TurnStart", at: 110 });
@@ -277,11 +356,27 @@ describe("agent-pane-state reducer", () => {
             });
         });
 
-        it("TurnStart permitted on init error (fail-open)", () => {
-            const s0 = update(mk(), { type: "InitFailed", reason: "load failed" }).state;
+        it("TurnStart permitted on InitFailed (fail-open)", () => {
+            const s0 = update(mk(), {
+                type: "InitFailed",
+                at: 100,
+                reason: "load failed",
+            }).state;
             const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
             const r = update(s1, { type: "TurnStart", at: 110 });
             expect(r.state.turnActive).toBe(true);
+        });
+
+        it("isInitReady selector tracks InitReady only", () => {
+            expect(isInitReady(mk())).toBe(false);
+            const failed = update(mk(), {
+                type: "InitFailed",
+                at: 100,
+                reason: "x",
+            }).state;
+            expect(isInitReady(failed)).toBe(false);
+            const readyState = update(mk(), { type: "InitReady", at: 100 }).state;
+            expect(isInitReady(readyState)).toBe(true);
         });
     });
 
@@ -431,7 +526,7 @@ describe("agent-pane-state reducer", () => {
             // Manual sequence: Submitting then a fresh subscribe (e.g.
             // after reconnect). The subscribe should hand off to
             // Streaming.
-            const s0 = update(mk(), { type: "InitReady" }).state;
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
             const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
             const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
             expect(s2.turnPhase.kind).toBe("Submitting");
@@ -448,14 +543,14 @@ describe("agent-pane-state reducer", () => {
         });
 
         it("StreamSubscribe from Idle keeps phase Idle (no spontaneous promotion)", () => {
-            const s0 = update(mk(), { type: "InitReady" }).state;
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
             const r = update(s0, { type: "StreamSubscribe", at: 100 });
             expect(r.state.streaming.active).toBe(true);
             expect(r.state.turnPhase.kind).toBe("Idle");
         });
 
         it("StreamFlushObserved while Streaming mirrors bufferSize + lastEventMs onto phase", () => {
-            const s0 = update(mk(), { type: "InitReady" }).state;
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
             const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
             const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
             const s3 = update(s2, { type: "StreamSubscribe", at: 120 }).state;
@@ -538,7 +633,7 @@ describe("agent-pane-state reducer", () => {
         it("StopFailed while Interrupting rolls back to Streaming AND clears stopping", () => {
             // Build up: ready → submit → re-subscribe to Streaming →
             // stop → stop-rpc-fails.
-            const s0 = update(mk(), { type: "InitReady" }).state;
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
             const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
             const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
             const s3 = update(s2, { type: "StreamSubscribe", at: 120 }).state;
@@ -579,7 +674,7 @@ describe("agent-pane-state reducer", () => {
         });
 
         it("StreamUnsubscribe while Idle returns to Idle (no Disconnected)", () => {
-            const s0 = update(mk(), { type: "InitReady" }).state;
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
             const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
             // Phase is still Idle (subscribe alone doesn't promote).
             expect(s1.turnPhase.kind).toBe("Idle");
@@ -593,7 +688,7 @@ describe("agent-pane-state reducer", () => {
             // user message dispatches TurnStart. Submitting → Streaming
             // must promote on the first chunk arrival, NOT depend on a
             // re-subscribe that never fires in practice.
-            const s0 = update(mk(), { type: "InitReady" }).state;
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
             const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
             // (no second subscribe — that was the synthetic test crutch)
             const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
@@ -612,7 +707,7 @@ describe("agent-pane-state reducer", () => {
         });
 
         it("ToolStart while Submitting promotes phase to Streaming with toolsActive=1", () => {
-            const s0 = update(mk(), { type: "InitReady" }).state;
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
             const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
             const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
             expect(s2.turnPhase.kind).toBe("Submitting");
@@ -625,7 +720,7 @@ describe("agent-pane-state reducer", () => {
         });
 
         it("TokensIn while Submitting promotes phase to Streaming", () => {
-            const s0 = update(mk(), { type: "InitReady" }).state;
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
             const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
             const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
             expect(s2.turnPhase.kind).toBe("Submitting");
@@ -638,7 +733,7 @@ describe("agent-pane-state reducer", () => {
         });
 
         it("ToolStart while Streaming increments toolsActive on the phase", () => {
-            const s0 = update(mk(), { type: "InitReady" }).state;
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
             const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
             const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
             const s3 = update(s2, { type: "StreamSubscribe", at: 120 }).state;
@@ -663,7 +758,7 @@ describe("agent-pane-state reducer", () => {
 
         it("ToolEnd clamps toolsActive at 0 (never goes negative)", () => {
             // Defensive: out-of-order ToolEnd while toolsActive is 0.
-            const s0 = update(mk(), { type: "InitReady" }).state;
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
             const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
             const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
             const s3 = update(s2, { type: "StreamSubscribe", at: 120 }).state;
@@ -675,7 +770,7 @@ describe("agent-pane-state reducer", () => {
         });
 
         it("TokensIn / TokensOut while Streaming bump lastEventMs on the phase", () => {
-            const s0 = update(mk(), { type: "InitReady" }).state;
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
             const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
             const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
             const s3 = update(s2, { type: "StreamSubscribe", at: 120 }).state;
@@ -724,9 +819,12 @@ describe("agent-pane-state reducer", () => {
             // initPhase and turnPhase are orthogonal axes.
             const s0 = update(mk(), { type: "InitStart" }).state;
             expect(s0.turnPhase.kind).toBe("Idle");
-            const s1 = update(s0, { type: "InitReady" }).state;
+            const s1 = update(s0, { type: "InitReady", at: 100 }).state;
             expect(s1.turnPhase.kind).toBe("Idle");
-            const s2 = update(s1, { type: "InitFailed", reason: "boom" }).state;
+            // s1 is already InitReady (terminal); InitFailed becomes a
+            // no-op there. We just need to assert turnPhase stays Idle
+            // either way — the orthogonality assertion still holds.
+            const s2 = update(s1, { type: "InitFailed", at: 200, reason: "boom" }).state;
             expect(s2.turnPhase.kind).toBe("Idle");
         });
 

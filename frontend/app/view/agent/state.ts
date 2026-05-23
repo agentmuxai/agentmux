@@ -67,9 +67,10 @@ export interface AgentAtoms {
      */
     pendingMessagesAtom: SignalPair<PendingMessage[]>;
     /**
-     * Init lifecycle — `loading` until the initial history fetch resolves
-     * (or fails). Drives a "Loading history…" hint and gates `TurnStart`.
-     * Issue #728 gap 1.
+     * Init lifecycle — `InitPending` until the initial history fetch
+     * resolves into `InitReady` (success) or `InitFailed` (error).
+     * Drives a "Loading history…" hint and gates `TurnStart`. Issue
+     * #728 gap 1; discriminated-union shape.
      */
     initPhaseAtom: SignalPair<InitPhase>;
     /**
@@ -127,7 +128,9 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         turnActiveAtom: createSignal<boolean>(false),
         stoppingAtom: createSignal<boolean>(false),
         pendingMessagesAtom: createSignal<PendingMessage[]>([]),
-        initPhaseAtom: createSignal<InitPhase>("loading"),
+        // gap1 (#993) reshaped InitPhase from string union to discriminated
+        // union; turnPhase from PR B stays alongside.
+        initPhaseAtom: createSignal<InitPhase>({ kind: "InitPending" }),
         turnPhaseAtom: createSignal<TurnPhase>({ kind: "Idle" }),
     };
 }
