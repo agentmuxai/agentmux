@@ -86,10 +86,24 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // the final output line before the panel collapses.
     // (SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md §Change 3)
     const [postCompletionHold, setPostCompletionHold] = createSignal(false);
+    // Reagent + codex P1 on #988: the prior implementation read
+    // `postCompletionHold()` inside this effect AND wrote to it, which
+    // made the effect a subscriber of its own write. The synchronous
+    // re-run disposed the previous owner — running the just-registered
+    // `onCleanup(() => clearTimeout(t))` BEFORE the 1s timer could fire.
+    // Net effect: the panel stayed auto-expanded forever after the first
+    // completion, the OPPOSITE of the intended 1s-hold-then-collapse.
+    //
+    // Fix: drop the early-exit read. The effect now tracks ONLY
+    // `props.node.status` as its trigger. Each transition into a
+    // non-active state arms a hold; if status flips back to running
+    // before the timer fires, the next effect run's onCleanup cancels
+    // the in-flight timer (intended behaviour). `postCompletionHold`
+    // is read only by `autoExpanded` — this effect no longer subscribes
+    // to its own writes.
     createEffect(() => {
         const s = props.node.status;
         if (s !== "running" && s !== "pending_approval" && s !== "failed") {
-            if (postCompletionHold()) return;
             setPostCompletionHold(true);
             const t = setTimeout(() => setPostCompletionHold(false), 1000);
             onCleanup(() => clearTimeout(t));
@@ -182,6 +196,15 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 (SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md §Change 2) */}
             <div
                 class={clsx("agent-tool-panel", { "agent-tool-panel--hidden": !expanded() })}
+                // Codex P2 on #988: with the always-rendered markup, the
+                // collapsed panel was visually hidden via max-height /
+                // opacity but still in the focusable + a11y tree, so
+                // keyboard users could tab into action buttons that
+                // aren't visible. `inert` removes the entire subtree
+                // from focus + accessibility while collapsed (Chrome 102+,
+                // supported in the bundled CEF runtime).
+                inert={!expanded()}
+                aria-hidden={!expanded()}
                 onClick={(e) => e.stopPropagation()}
                 onMouseEnter={handleMouseEnter}
                 onMouseLeave={handleMouseLeave}
