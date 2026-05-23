@@ -190,8 +190,23 @@
             padding: 6px 8px;
             max-height: 50vh;
             min-height: 0;
+            overflow: hidden;
             font-family: var(--fixed-font, monospace);
             font-size: 12px;
+            // No transition here — open is instant (after the hover delay).
+            // The --hidden modifier carries the collapse transition so it only
+            // fires on the way out. (SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md §Change 2)
+
+            &--hidden {
+                max-height: 0 !important;
+                padding-top: 0 !important;
+                padding-bottom: 0 !important;
+                margin-top: 0 !important;
+                margin-bottom: 0 !important;
+                opacity: 0;
+                transition: max-height 200ms ease-out, opacity 150ms ease-out,
+                            padding 200ms ease-out, margin 200ms ease-out;
+            }
         }
 
         .agent-tool-loading {

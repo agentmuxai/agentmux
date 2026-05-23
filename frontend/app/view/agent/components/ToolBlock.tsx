@@ -34,7 +34,7 @@
  */
 
 import clsx from "clsx";
-import { Show, createSignal, type JSX } from "solid-js";
+import { Show, createEffect, createSignal, onCleanup, type JSX } from "solid-js";
 import { createBlock } from "@/store/global";
 import type { ToolNode } from "../types";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
@@ -62,20 +62,39 @@ const STATUS_ICON: Record<ToolNode["status"], string> = {
     denied: "⊘",
 };
 
-// Hover is instant under the inline-panel layout. The portal overlay
-// needed 150ms enter / 300ms leave because it floated outside the
-// row's hover boundary — the user had to "travel" through dead space
-// to reach the overlay content. With the inline panel
-// (SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md), both the summary row
-// and the panel sit inside the same .agent-tool-block element, so
-// mouseleave only fires when the cursor truly exits the whole block.
-// No dead space, no grace window. See feedback_no_timers_or_delays.md.
+// 150ms enter delay prevents accidental expansions while scrolling past
+// tool rows. Leave is instant — the inline panel is inside the same
+// .agent-tool-block bounding box, so mouseleave only fires when the cursor
+// truly exits the whole block. No dead space, no grace window needed on leave.
+// (SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md §Change 1)
+
+const HOVER_ENTER_DELAY_MS = 150;
 
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
-    // Hover-expand state. Instant on enter, instant on leave.
     const [hovering, setHovering] = createSignal(false);
-    const handleMouseEnter = () => setHovering(true);
-    const handleMouseLeave = () => setHovering(false);
+    let enterTimer: ReturnType<typeof setTimeout> | undefined;
+    const handleMouseEnter = () => {
+        enterTimer = setTimeout(() => setHovering(true), HOVER_ENTER_DELAY_MS);
+    };
+    const handleMouseLeave = () => {
+        clearTimeout(enterTimer);
+        setHovering(false);
+    };
+    onCleanup(() => clearTimeout(enterTimer));
+
+    // Stays true for 1s after a running tool completes so the user can read
+    // the final output line before the panel collapses.
+    // (SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md §Change 3)
+    const [postCompletionHold, setPostCompletionHold] = createSignal(false);
+    createEffect(() => {
+        const s = props.node.status;
+        if (s !== "running" && s !== "pending_approval" && s !== "failed") {
+            if (postCompletionHold()) return;
+            setPostCompletionHold(true);
+            const t = setTimeout(() => setPostCompletionHold(false), 1000);
+            onCleanup(() => clearTimeout(t));
+        }
+    });
 
     // Auto-expand while the tool is actively running (or awaiting approval,
     // or in a terminal-failure state where the user almost certainly wants
@@ -91,7 +110,8 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // already expanded.
     const autoExpanded = (): boolean => {
         const s = props.node.status;
-        return s === "running" || s === "pending_approval" || s === "failed";
+        return s === "running" || s === "pending_approval" || s === "failed"
+            || postCompletionHold();
     };
     const expanded = () => props.pinned || autoExpanded() || hovering();
 
@@ -156,27 +176,23 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
             </div>
             {/* Phase A: inline panel — replaces the Portal-to-document.body
                 positioning hack. The panel renders in normal document
-                flow underneath the summary row, so its lifecycle is
-                tied to the tool's `expanded()` state (and, in Phase B,
-                to the tool's running status). Mouse enter/leave on the
-                panel keeps the hover state alive so the user can
-                interact with the content. See
-                docs/specs/SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md §4. */}
-            <Show when={expanded()}>
-                <div
-                    class="agent-tool-panel"
-                    onClick={(e) => e.stopPropagation()}
-                    onMouseEnter={handleMouseEnter}
-                    onMouseLeave={handleMouseLeave}
-                >
-                    <ToolBlockOverlay
-                        node={props.node}
-                        isBookmarked={props.isBookmarked}
-                        onBookmark={props.onBookmark}
-                        onOpenInPane={props.onOpenInPane}
-                    />
-                </div>
-            </Show>
+                flow underneath the summary row. Always in DOM so CSS can
+                animate the collapse transition; visibility is controlled by
+                the agent-tool-panel--hidden modifier class.
+                (SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md §Change 2) */}
+            <div
+                class={clsx("agent-tool-panel", { "agent-tool-panel--hidden": !expanded() })}
+                onClick={(e) => e.stopPropagation()}
+                onMouseEnter={handleMouseEnter}
+                onMouseLeave={handleMouseLeave}
+            >
+                <ToolBlockOverlay
+                    node={props.node}
+                    isBookmarked={props.isBookmarked}
+                    onBookmark={props.onBookmark}
+                    onOpenInPane={props.onOpenInPane}
+                />
+            </div>
         </div>
     );
 };

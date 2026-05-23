@@ -174,7 +174,7 @@ function ToolOverlayResult(props: { node: ToolNode }): JSX.Element {
             when={props.node.status !== "running"}
             fallback={
                 <div class="agent-tool-loading">
-                    <span class="agent-tool-spinner">⏳</span> Running...
+                    <span class="agent-tool-spinner">⏳</span> Thinking...
                 </div>
             }
         >
