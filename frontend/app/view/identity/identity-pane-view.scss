@@ -155,6 +155,57 @@
         }
     }
 
+    // ── Status badge in the bindings table (PR D — spec §4.4) ─────
+    .identity-pane-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--main-text-color);
+    }
+
+    .identity-pane-status-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--tertiary-text-color, rgba(255, 255, 255, 0.4));
+        flex: 0 0 auto;
+
+        &.is-valid {
+            background: #4ade80; // green-400
+        }
+        &.is-expired {
+            background: #fbbf24; // amber-400
+        }
+        &.is-needs_reauth {
+            background: #f87171; // red-400
+        }
+        &.is-unknown {
+            background: var(--tertiary-text-color, rgba(255, 255, 255, 0.4));
+        }
+    }
+
+    .identity-pane-status-label {
+        white-space: nowrap;
+    }
+
+    .identity-pane-reconnect-btn {
+        margin-left: 8px;
+        padding: 2px 8px;
+        font-size: 11px;
+        background: transparent;
+        color: var(--accent-color);
+        border: 1px solid var(--accent-color);
+        border-radius: 3px;
+        cursor: pointer;
+
+        &:hover {
+            background: var(--accent-color);
+            color: var(--accent-text-color, #fff);
+        }
+    }
+
     .identity-pane-actions {
         display: flex;
         gap: 8px;

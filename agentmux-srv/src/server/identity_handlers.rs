@@ -1121,7 +1121,11 @@ fn persist_oauth_binding_or_synthetic(
         display_name: String::new(),
         secret_ref: SecretRef::OAuthConfigDir { dir: dir.to_string() },
         context: serde_json::json!({}),
-        status: "valid".to_string(),
+        // Per spec §4.4: a binding the user JUST OAuth'd into is `valid`
+        // by definition — the token file was written within the past
+        // few seconds. The resolver's expiry probe (PR D) refines this
+        // on every spawn.
+        status: crate::identity::resolver::oauth_status::VALID.to_string(),
         created_at: now,
         updated_at: now,
     };

@@ -58,6 +58,23 @@ export interface PreLaunchAuthPanelProps {
      *  loading), the panel routes to `needs-bundle` so the user goes
      *  through the OAuth flow before Launch enables. */
     hasMatchingBinding: Accessor<boolean>;
+    /** Status of the bound account for this (bundle, provider) pair,
+     *  or `null` when there's no matching binding. Per spec §4.4 the
+     *  oauth-class canonical values are `"valid" | "expired" |
+     *  "needs_reauth" | "unknown"`. When the panel sees `"expired"` /
+     *  `"needs_reauth"` together with `hasMatchingBinding=true`, the
+     *  Connect CTA's wording shifts from "Connect to <Provider>" to
+     *  "<Provider> credentials need reconnecting" — same OAuth flow,
+     *  just a clearer nudge. Optional: callers that don't surface
+     *  account status fall through to the generic wording.
+     *
+     *  Note: this does NOT change the launch-gate. A non-blank bundle
+     *  with a matching binding still counts toward `hasMatchingBinding`
+     *  even if its status is `expired` / `needs_reauth`; the agent CLI
+     *  will trigger its own OAuth refresh on first call. The wording
+     *  exists to surface the situation so the user can act proactively
+     *  via the Reconnect button in the bundle manager. */
+    bindingStatus?: Accessor<string | null>;
     /** Auth flow controller — owned by the Launch modal so its
      *  lifetime spans the whole modal, not just the panel's
      *  conditional mount. Lifting fixed the "memory change forgot
@@ -232,6 +249,34 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     return (
         <div class="pre-launch-auth-panel">
             <Switch>
+                {/* A bound binding that the backend's expiry probe
+                    flagged stale (`needs_reauth` / `expired`) lands the
+                    controller in `ready` because outcomeFor() only
+                    looks at "has a binding?". Without this arm the
+                    panel would render <ReadyBanner /> and the
+                    reconnect wording in ConnectCta would never be
+                    seen — the user would have no signal their
+                    credentials need refreshing. Match BEFORE the
+                    generic ready arm so the reconnect CTA wins.
+                    Clicking Connect re-runs OAuth into the SAME
+                    bundle dir (PR C invariant), refreshing the
+                    token in place. codex P1 on #982. */}
+                <Match
+                    when={
+                        controller.state().kind === "ready" &&
+                        (props.bindingStatus?.() === "needs_reauth" ||
+                            props.bindingStatus?.() === "expired")
+                    }
+                >
+                    <ConnectCta
+                        provider={props.provider}
+                        state={controller.state()}
+                        bindingStatus={props.bindingStatus?.() ?? null}
+                        hasBinding={props.hasMatchingBinding()}
+                        onConnect={() => handleConnect()}
+                        disabled={props.disabled ?? false}
+                    />
+                </Match>
                 <Match when={controller.state().kind === "ready"}>
                     <ReadyBanner />
                 </Match>
@@ -277,6 +322,8 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
                     <ConnectCta
                         provider={props.provider}
                         state={controller.state()}
+                        bindingStatus={props.bindingStatus?.() ?? null}
+                        hasBinding={props.hasMatchingBinding()}
                         onConnect={() => handleConnect()}
                         disabled={props.disabled ?? false}
                     />
@@ -400,6 +447,16 @@ async function startConnect(
 const ConnectCta = (p: {
     provider: ProviderDefinition | undefined;
     state: AuthState;
+    /** `IdentityAccount.status` of the bound row for this (bundle,
+     *  provider) pair, or `null` when no binding exists yet. Drives
+     *  the spec §4.4 status-aware wording when the user has a
+     *  binding but its tokens are `expired` / `needs_reauth`. */
+    bindingStatus: string | null;
+    /** True when `hasMatchingBinding(state, provider)` is true — gates
+     *  the reconnect-wording branch so it only triggers when there IS
+     *  a binding to refresh (the no-binding case keeps the generic
+     *  Connect CTA wording the user already knows). */
+    hasBinding: boolean;
     onConnect: () => void;
     disabled: boolean;
 }): JSX.Element => {
@@ -407,12 +464,23 @@ const ConnectCta = (p: {
         p.provider ? getCliCatalogEntry(p.provider.id) : undefined;
     const providerLabel = () => p.provider?.displayName ?? "this provider";
     const isExpired = () => p.state.kind === "expired";
+    // Spec §4.4 — when the user has a binding for this provider but
+    // its account status flags a reconnect (expired / needs_reauth),
+    // shift to the "credentials need reconnecting" wording. Same
+    // Connect button, same OAuth flow underneath; just a clearer nudge
+    // so the user understands they're refreshing a known login rather
+    // than starting fresh.
+    const needsReconnect = () =>
+        p.hasBinding &&
+        (p.bindingStatus === "needs_reauth" || p.bindingStatus === "expired");
     return (
         <div class="pre-launch-auth-panel-cta">
             <div class="pre-launch-auth-panel-warning">
-                {isExpired()
-                    ? `⚠ Your ${providerLabel()} session is expired. Re-authenticate before launching.`
-                    : `⚠ ${providerLabel()} requires an OAuth login before launch.`}
+                {needsReconnect()
+                    ? `⚠ Your ${providerLabel()} credentials need reconnecting.`
+                    : isExpired()
+                        ? `⚠ Your ${providerLabel()} session is expired. Re-authenticate before launching.`
+                        : `⚠ ${providerLabel()} requires an OAuth login before launch.`}
             </div>
             <Button
                 onClick={() => p.onConnect()}
@@ -423,13 +491,19 @@ const ConnectCta = (p: {
                     {catalog()?.icon ?? "🔐"}
                 </span>
                 <span class="pre-launch-auth-panel-connect-label">
-                    {isExpired() ? "Re-authenticate" : `Connect to ${providerLabel()}`}
+                    {needsReconnect()
+                        ? `Reconnect ${providerLabel()}`
+                        : isExpired()
+                            ? "Re-authenticate"
+                            : `Connect to ${providerLabel()}`}
                 </span>
             </Button>
             <div class="pre-launch-auth-panel-hint">
-                Opens browser → {providerLabel()} login → returns to AgentMux.
-                Tokens get saved into a new Identity bundle so the next
-                agent doesn't have to re-authenticate.
+                {needsReconnect()
+                    ? `Re-runs OAuth into your existing Identity bundle. Launch stays available — your CLI will refresh on first call.`
+                    : `Opens browser → ${providerLabel()} login → returns to AgentMux.
+                    Tokens get saved into a new Identity bundle so the next
+                    agent doesn't have to re-authenticate.`}
             </div>
         </div>
     );
