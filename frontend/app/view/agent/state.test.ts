@@ -89,7 +89,8 @@ describe("createAgentAtoms", () => {
         setPhase({
             kind: "Disconnected",
             lastKind: "Streaming",
-            reason: "x",
+            lastConnectedAt: 1,
+            reason: "stream-unsubscribed",
         });
         expect(workingFromPhase(getPhase())).toBe(false);
     });

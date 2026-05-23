@@ -7,6 +7,7 @@ import {
     AgentPaneState,
     initialState,
     INTERRUPT_TIMEOUT_MS,
+    isDisconnected,
     isInitReady,
     isWorking,
     STREAMING_IDLE_TIMEOUT_MS,
@@ -658,7 +659,7 @@ describe("agent-pane-state reducer", () => {
             expect(r.state.turnPhase.kind).toBe("Idle");
         });
 
-        it("StreamUnsubscribe while working surfaces Disconnected.{lastKind}", () => {
+        it("StreamUnsubscribe while working surfaces Disconnected.{lastKind, lastConnectedAt}", () => {
             const s0 = ready(100);
             const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
             // Phase is Submitting (legacy turnActive=true).
@@ -667,22 +668,33 @@ describe("agent-pane-state reducer", () => {
             // Legacy: stream + turnActive cleared.
             expect(r.state.streaming.active).toBe(false);
             expect(r.state.turnActive).toBe(false);
-            // New: Disconnected, with Submitting as the lost kind.
+            // New (PR F): Disconnected with Submitting as the lost kind,
+            // lastConnectedAt = command.at, and a literal reason.
             expect(r.state.turnPhase.kind).toBe("Disconnected");
             if (r.state.turnPhase.kind === "Disconnected") {
                 expect(r.state.turnPhase.lastKind).toBe("Submitting");
                 expect(r.state.turnPhase.reason).toBe("stream-unsubscribed");
+                expect(r.state.turnPhase.lastConnectedAt).toBe(200);
             }
         });
 
-        it("StreamUnsubscribe while Idle returns to Idle (no Disconnected)", () => {
+        it("StreamUnsubscribe while Idle is a same-ref no-op (PR F)", () => {
+            // PR F tightened the contract: an unsubscribe from a non-
+            // working phase (Idle / Done / Disconnected) is idempotent
+            // and returns the same state reference. The pre-PR-F
+            // behaviour also cleared `streaming.active` here, but that
+            // was a side-effect of the dual-write era — the legacy
+            // boolean leaves with PR G and the new no-op shape is the
+            // canonical one. The view does not observe a phantom
+            // disconnect (no event emitted).
             const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
             const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
             // Phase is still Idle (subscribe alone doesn't promote).
             expect(s1.turnPhase.kind).toBe("Idle");
             const r = update(s1, { type: "StreamUnsubscribe", at: 200 });
-            expect(r.state.turnPhase.kind).toBe("Idle");
-            expect(r.state.streaming.active).toBe(false);
+            // Same reference — no spurious tick to reactive consumers.
+            expect(r.state).toBe(s1);
+            expect(r.events).toEqual([]);
         });
 
         it("StreamFlushObserved while Submitting promotes phase to Streaming (codex P1 on #987)", () => {
@@ -904,6 +916,7 @@ describe("agent-pane-state reducer", () => {
                 {
                     kind: "Disconnected",
                     lastKind: "Streaming",
+                    lastConnectedAt: 0,
                     reason: "stream-unsubscribed",
                 },
                 false,
@@ -1758,6 +1771,243 @@ describe("agent-pane-state reducer", () => {
             });
             expect(r.state).toBe(start);
             expect(r.events).toEqual([]);
+        });
+    });
+
+    // ─────────────────────────────────────────────────────────────────
+    // PR F — `Disconnected` phase + banner contract.
+    //
+    // Spec: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §6.4.
+    // StreamUnsubscribe from a working phase (Submitting / Streaming /
+    // Interrupting) transitions to Disconnected — carrying `lastKind`,
+    // `lastConnectedAt`, and a finite literal `reason`. Non-working
+    // phases (Idle / Done / Disconnected) make StreamUnsubscribe a
+    // same-ref no-op. StreamSubscribe from Disconnected resets to
+    // Idle. A late TurnEnd while Disconnected is preserved (the
+    // disconnect is the authoritative outcome).
+    // ─────────────────────────────────────────────────────────────────
+    describe("Disconnected phase (PR F)", () => {
+        it("StreamUnsubscribe while Streaming → Disconnected; legacy cleared; isWorking=false; emits stream-disconnected", () => {
+            // Reach Streaming via the realistic path (subscribe once,
+            // then TurnStart, then a flush promotes).
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
+            const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
+            const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
+            const s3 = update(s2, {
+                type: "StreamFlushObserved",
+                addedCount: 1,
+                at: 200,
+            }).state;
+            expect(s3.turnPhase.kind).toBe("Streaming");
+            // Tool + tokens so we can verify they're cleared on
+            // disconnect (legacy cleanup mirrors the bounded force-
+            // transition arms — see reducer.ts §StreamUnsubscribe).
+            const s4 = update(s3, { type: "ToolStart", name: "Read" }, 210)
+                .state;
+            const s5 = update(s4, { type: "TokensIn", input: 42 }, 220)
+                .state;
+            expect(s5.currentTool).toBe("Read");
+            expect(s5.turnTokens?.input).toBe(42);
+
+            const r = update(s5, { type: "StreamUnsubscribe", at: 300 });
+            // Phase transitions to Disconnected with lastKind = Streaming.
+            expect(r.state.turnPhase.kind).toBe("Disconnected");
+            if (r.state.turnPhase.kind === "Disconnected") {
+                expect(r.state.turnPhase.lastKind).toBe("Streaming");
+                expect(r.state.turnPhase.lastConnectedAt).toBe(300);
+                expect(r.state.turnPhase.reason).toBe("stream-unsubscribed");
+            }
+            // Legacy cleanup.
+            expect(r.state.streaming.active).toBe(false);
+            expect(r.state.turnActive).toBe(false);
+            expect(r.state.stopping).toBe(false);
+            expect(r.state.currentTool).toBe(null);
+            expect(r.state.turnTokens).toBe(null);
+            // Animation invariant: isWorking false; isDisconnected true.
+            expect(isWorking(r.state)).toBe(false);
+            expect(isDisconnected(r.state)).toBe(true);
+            // Two events: stream-unsubscribed (always) + stream-disconnected.
+            expect(r.events).toHaveLength(2);
+            expect(r.events[0]).toMatchObject({
+                type: "stream-unsubscribed",
+                at: 300,
+            });
+            expect(r.events[1]).toMatchObject({
+                type: "stream-disconnected",
+                at: 300,
+                lastKind: "Streaming",
+                reason: "stream-unsubscribed",
+            });
+        });
+
+        it("StreamUnsubscribe while Submitting → Disconnected.{lastKind=Submitting}", () => {
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            expect(s1.turnPhase.kind).toBe("Submitting");
+            const r = update(s1, { type: "StreamUnsubscribe", at: 200 });
+            expect(r.state.turnPhase.kind).toBe("Disconnected");
+            if (r.state.turnPhase.kind === "Disconnected") {
+                expect(r.state.turnPhase.lastKind).toBe("Submitting");
+                expect(r.state.turnPhase.lastConnectedAt).toBe(200);
+                expect(r.state.turnPhase.reason).toBe("stream-unsubscribed");
+            }
+            expect(isDisconnected(r.state)).toBe(true);
+            // stream-disconnected event surfaces the lost kind.
+            expect(r.events[1]).toMatchObject({
+                type: "stream-disconnected",
+                lastKind: "Submitting",
+            });
+        });
+
+        it("StreamUnsubscribe while Interrupting → Disconnected.{lastKind=Interrupting}", () => {
+            // Reach Interrupting via the standard path.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "StreamSubscribe", at: 120 }).state;
+            const s3 = update(s2, { type: "RequestStop", at: 200 }).state;
+            expect(s3.turnPhase.kind).toBe("Interrupting");
+            const r = update(s3, { type: "StreamUnsubscribe", at: 300 });
+            expect(r.state.turnPhase.kind).toBe("Disconnected");
+            if (r.state.turnPhase.kind === "Disconnected") {
+                expect(r.state.turnPhase.lastKind).toBe("Interrupting");
+                expect(r.state.turnPhase.lastConnectedAt).toBe(300);
+            }
+            // stopping was set when we entered Interrupting — must clear.
+            expect(r.state.stopping).toBe(false);
+            expect(isWorking(r.state)).toBe(false);
+            expect(isDisconnected(r.state)).toBe(true);
+        });
+
+        it("StreamUnsubscribe while Idle is a same-ref no-op", () => {
+            // Already in Idle (no working state to disconnect from).
+            // The unsubscribe is non-news; no event, no state churn.
+            const s0 = ready(100); // Idle + streaming.active=true
+            expect(s0.turnPhase.kind).toBe("Idle");
+            const r = update(s0, { type: "StreamUnsubscribe", at: 200 });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([]);
+        });
+
+        it("StreamUnsubscribe while Done is a same-ref no-op", () => {
+            // Graceful TurnEnd landed → Done. A later teardown
+            // (component unmount, etc.) must not corrupt the outcome.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "TurnEnd", stats: null }, 200).state;
+            expect(s2.turnPhase.kind).toBe("Done");
+            const r = update(s2, { type: "StreamUnsubscribe", at: 300 });
+            expect(r.state).toBe(s2);
+            expect(r.events).toEqual([]);
+            // Outcome preserved.
+            if (r.state.turnPhase.kind === "Done") {
+                expect(r.state.turnPhase.outcome).toBe("completed");
+            }
+        });
+
+        it("StreamUnsubscribe while Disconnected is a same-ref no-op", () => {
+            // Idempotent: a duplicate unsubscribe (e.g. socket teardown
+            // fires twice during cleanup) must not synthesise a fresh
+            // Disconnected with a newer `lastConnectedAt` — the original
+            // disconnect timestamp is the authoritative one.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "StreamUnsubscribe", at: 200 })
+                .state;
+            expect(s2.turnPhase.kind).toBe("Disconnected");
+            const r = update(s2, { type: "StreamUnsubscribe", at: 300 });
+            expect(r.state).toBe(s2);
+            expect(r.events).toEqual([]);
+            // lastConnectedAt pinned to the original disconnect.
+            if (r.state.turnPhase.kind === "Disconnected") {
+                expect(r.state.turnPhase.lastConnectedAt).toBe(200);
+            }
+        });
+
+        it("StreamSubscribe from Disconnected → Idle (does NOT auto-resume Streaming)", () => {
+            // Spec §6.4: a fresh subscribe after disconnect resets the
+            // working state. The lost turn is gone; the user must press
+            // send again to start a new one (next TurnStart promotes
+            // back to Submitting).
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, {
+                type: "StreamFlushObserved",
+                addedCount: 1,
+                at: 200,
+            }).state;
+            expect(s2.turnPhase.kind).toBe("Streaming");
+            const s3 = update(s2, { type: "StreamUnsubscribe", at: 300 })
+                .state;
+            expect(s3.turnPhase.kind).toBe("Disconnected");
+            // Now the dispatcher (or the reconnect button) re-subscribes.
+            const r = update(s3, { type: "StreamSubscribe", at: 400 });
+            expect(r.state.turnPhase.kind).toBe("Idle");
+            // streaming.active true again so a fresh TurnStart can fire.
+            expect(r.state.streaming.active).toBe(true);
+            // No working state → no watchdog re-arm event. Just the
+            // standard `stream-subscribed` event.
+            expect(r.events).toHaveLength(1);
+            expect(r.events[0]).toMatchObject({
+                type: "stream-subscribed",
+                at: 400,
+            });
+        });
+
+        it("Late TurnEnd while Disconnected preserves the disconnect (Option A; first-done-wins)", () => {
+            // PR F spec §4 Option A: the disconnect IS the outcome.
+            // A late TurnEnd from the backend (e.g. a final session_end
+            // that was buffered just before the PTY died, then drained
+            // post-mortem) must NOT overwrite Disconnected with Done.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, {
+                type: "StreamFlushObserved",
+                addedCount: 1,
+                at: 200,
+            }).state;
+            const s3 = update(s2, { type: "StreamUnsubscribe", at: 300 })
+                .state;
+            expect(s3.turnPhase.kind).toBe("Disconnected");
+            // Late ack arrives.
+            const r = update(
+                s3,
+                {
+                    type: "TurnEnd",
+                    stats: { input_tokens: 5, output_tokens: 10 } as any,
+                },
+                400,
+            );
+            // Same reference — Disconnected preserved entirely.
+            expect(r.state).toBe(s3);
+            expect(r.events).toEqual([]);
+            // Phase + payload intact.
+            expect(r.state.turnPhase.kind).toBe("Disconnected");
+            if (r.state.turnPhase.kind === "Disconnected") {
+                expect(r.state.turnPhase.lastConnectedAt).toBe(300);
+                expect(r.state.turnPhase.lastKind).toBe("Streaming");
+            }
+        });
+
+        it("isDisconnected selector matches the phase kind", () => {
+            // Cross-product sanity — `isDisconnected(state)` is a pure
+            // projection of `turnPhase.kind === "Disconnected"`. Wired
+            // separately from `isWorking` so a single mistaken edit can
+            // be caught.
+            const idle = ready(100);
+            expect(isDisconnected(idle)).toBe(false);
+            const submitting = update(idle, { type: "TurnStart", at: 110 })
+                .state;
+            expect(isDisconnected(submitting)).toBe(false);
+            const disc = update(submitting, {
+                type: "StreamUnsubscribe",
+                at: 200,
+            }).state;
+            expect(isDisconnected(disc)).toBe(true);
+            const done = update(idle, { type: "TurnEnd", stats: null }, 300)
+                .state;
+            // (Done from Idle path: TurnEnd from Idle promotes to Done
+            // via the same arm — see existing tests.)
+            expect(isDisconnected(done)).toBe(false);
         });
     });
 });
