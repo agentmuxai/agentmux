@@ -21,6 +21,19 @@ export default mergeConfig(
                 "**/node_modules/**",
                 "**/dist/**",
                 "**/infra/cdk/**", // CDK has its own testing setup with aws-cdk-lib
+                // Leftover git worktrees from prior agent sessions
+                // live under `.claude/worktrees/agent-*/`. Each carries
+                // a full clone of the project (including test files),
+                // so without an exclusion vitest discovers and runs
+                // them all — inflating runtime ~6× and showing each
+                // real failure under N duplicate paths.
+                //
+                // `**/.claude/**` is the precise rule for the current
+                // layout; `**/worktrees/**` is a defensive second net
+                // in case the location moves.
+                // Spec: docs/specs/SPEC_FRONTEND_TEST_HEALTH_2026_05_24.md §1.
+                "**/.claude/**",
+                "**/worktrees/**",
             ],
             coverage: {
                 provider: "istanbul",
