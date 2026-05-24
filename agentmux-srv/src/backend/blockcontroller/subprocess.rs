@@ -65,6 +65,22 @@ pub struct SubprocessSpawnConfig {
     /// queued → running so the frontend can pair the event with a
     /// pending `PendingMessage`. None means no feedback is emitted.
     pub message_id: Option<String>,
+    /// Session id to hydrate `inner.session_id` with BEFORE the first
+    /// turn — used by the picker "My Agents" reattach path. The
+    /// caller reads this from `block.meta["agent:sessionid"]` which
+    /// the frontend pre-populates from the prior block's session id
+    /// when launching with `continueOfInstanceId`. Without this
+    /// hydration `spawn_turn` would only see the captured session id
+    /// AFTER the first turn — meaning the first turn always launches
+    /// the CLI fresh (no `--resume <sid>`) and starts a new
+    /// conversation that re-injects the startup context.
+    ///
+    /// Empty / `None` means "no prior session" (greenfield launch).
+    /// If `inner.session_id` is already set on the controller (e.g. a
+    /// subsequent turn within the same process lifetime captured it
+    /// from CLI stdout), this field is ignored — the in-memory
+    /// captured id always wins.
+    pub session_id: Option<String>,
 }
 
 /// Inner state protected by mutex.
@@ -230,6 +246,41 @@ impl SubprocessController {
         self.inner.lock().unwrap().session_id.clone()
     }
 
+    /// Hydrate `inner.session_id` from a config-supplied id when the
+    /// controller hasn't captured one of its own yet.
+    ///
+    /// Picker reattach path: a fresh `SubprocessController` is
+    /// registered for the new block, so its `inner.session_id` is
+    /// `None`. The frontend persisted the prior block's session id
+    /// into `agent:sessionid` meta, the websocket / app_api caller
+    /// read it into `SubprocessSpawnConfig::session_id`, and this
+    /// method copies it to inner so the spawn_turn args-builder
+    /// appends `--resume <sid>` on the FIRST turn.
+    ///
+    /// Captured-id-wins: if `inner.session_id` is already `Some`
+    /// (captured from CLI stdout on an earlier turn within this same
+    /// process lifetime), the config value is ignored. The captured
+    /// id reflects what the CLI is actually using; honouring a stale
+    /// config value here would force `--resume` against a wrong id
+    /// and the CLI would start a fresh conversation again. Empty
+    /// `&str` is treated as "no value" so the caller can use it
+    /// unconditionally without filtering.
+    pub(crate) fn hydrate_session_id_from_config(&self, config_sid: Option<&str>) {
+        let Some(sid) = config_sid.filter(|s| !s.is_empty()) else {
+            return;
+        };
+        let mut inner = self.inner.lock().unwrap();
+        if inner.session_id.is_some() {
+            return;
+        }
+        tracing::info!(
+            block_id = %self.block_id,
+            session_id = %sid,
+            "hydrated session_id from config (picker reattach)"
+        );
+        inner.session_id = Some(sid.to_string());
+    }
+
     /// Spawn a single turn of the agent CLI.
     ///
     /// This is the core method — it spawns `claude -p`, writes the user message to stdin,
@@ -254,6 +305,11 @@ impl SubprocessController {
         // drain-from-queue path (in process_waiter) emits the same
         // event just before calling spawn_turn recursively.
         self.emit_message_accepted(&config);
+
+        // Hydrate inner.session_id from the config-supplied id if the
+        // controller hasn't captured one yet. See
+        // `hydrate_session_id_from_config` for the full rationale.
+        self.hydrate_session_id_from_config(config.session_id.as_deref());
 
         // Build CLI args, appending resume flag + session_id if we have one and the provider supports it
         let mut args = config.cli_args.clone();
@@ -929,6 +985,7 @@ mod tests {
             resume_flag: String::new(),
             session_id_field: "session_id".to_string(),
             message_id: None,
+            session_id: None,
         };
 
         let result = ctrl.spawn_turn(config);
@@ -943,5 +1000,122 @@ mod tests {
 
         // Release lock
         ctrl.run_lock.store(false, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn hydrate_session_id_populates_inner_when_none() {
+        // Regression test for the 2026-05-24 "clicking My Agents
+        // re-inserts the startup context" report. A fresh
+        // SubprocessController is created for the reattached block;
+        // its inner.session_id starts as None. The picker reattach
+        // flow persists the prior block's session id into
+        // `agent:sessionid` meta, the caller plumbs it into
+        // `SubprocessSpawnConfig::session_id`, and spawn_turn calls
+        // `hydrate_session_id_from_config` before building args.
+        // After hydration, the existing args-builder appends
+        // `--resume <sid>` on this very first turn — no
+        // re-injected startup context.
+        let ctrl = SubprocessController::new(
+            "tab-1".to_string(),
+            "block-reattach".to_string(),
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(ctrl.inner.lock().unwrap().session_id.is_none());
+
+        ctrl.hydrate_session_id_from_config(Some("prior-sid-from-meta"));
+        assert_eq!(
+            ctrl.inner.lock().unwrap().session_id.as_deref(),
+            Some("prior-sid-from-meta")
+        );
+    }
+
+    #[test]
+    fn hydrate_session_id_keeps_captured_over_config_value() {
+        // Captured-id-wins invariant: once a turn has captured a
+        // session id from CLI stdout, hydration on a subsequent turn
+        // must NOT overwrite it with a stale config value. The
+        // captured id reflects what the CLI is actually using;
+        // forcing --resume against a different value would start a
+        // NEW conversation again.
+        let ctrl = SubprocessController::new(
+            "tab-1".to_string(),
+            "block-resume".to_string(),
+            None,
+            None,
+            None,
+            None,
+        );
+        ctrl.inner.lock().unwrap().session_id = Some("captured-sid".to_string());
+
+        ctrl.hydrate_session_id_from_config(Some("stale-config-sid"));
+        assert_eq!(
+            ctrl.inner.lock().unwrap().session_id.as_deref(),
+            Some("captured-sid")
+        );
+    }
+
+    #[test]
+    fn hydrate_session_id_ignores_empty_and_none() {
+        // Greenfield launches pass `None` (or `Some("")` if the
+        // caller didn't filter) — hydration must be a no-op in
+        // either case so inner.session_id stays None until the CLI
+        // captures its own.
+        let ctrl = SubprocessController::new(
+            "tab-1".to_string(),
+            "block-greenfield".to_string(),
+            None,
+            None,
+            None,
+            None,
+        );
+        ctrl.hydrate_session_id_from_config(None);
+        assert!(ctrl.inner.lock().unwrap().session_id.is_none());
+
+        ctrl.hydrate_session_id_from_config(Some(""));
+        assert!(ctrl.inner.lock().unwrap().session_id.is_none());
+    }
+
+    #[test]
+    fn spawn_turn_preserves_session_id_in_queued_config() {
+        // When the controller is busy, spawn_turn queues the config
+        // for the drain-from-queue path. The hydration ONLY runs on
+        // the direct-spawn path (after try_lock_run), so the queued
+        // config must carry session_id through unchanged for the
+        // drain path's recursive call to see it.
+        let ctrl = SubprocessController::new(
+            "tab-1".to_string(),
+            "block-queued".to_string(),
+            None,
+            None,
+            None,
+            None,
+        );
+        ctrl.run_lock.store(true, Ordering::SeqCst);
+
+        let config = SubprocessSpawnConfig {
+            cli_command: "claude".to_string(),
+            cli_args: vec!["-p".to_string()],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            message: "hi".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id_field: "session_id".to_string(),
+            message_id: None,
+            session_id: Some("prior-sid".to_string()),
+        };
+        let _ = ctrl.spawn_turn(config);
+
+        let inner = ctrl.inner.lock().unwrap();
+        assert_eq!(inner.pending_messages.len(), 1);
+        assert_eq!(
+            inner.pending_messages[0].session_id.as_deref(),
+            Some("prior-sid"),
+        );
+        // Hydration didn't run yet — direct-spawn path was bypassed
+        // by the busy lock; the drain will hydrate when it dequeues.
+        assert!(inner.session_id.is_none());
     }
 }

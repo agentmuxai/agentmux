@@ -1822,6 +1822,12 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         memory_id: inst.memory_id,
                         memory_name,
                         block_id_hint: inst.block_id,
+                        // Surface the CLI-captured session id so the
+                        // picker reattach can `--resume <sid>` on the
+                        // FIRST turn of the new block. Without this
+                        // the new subprocess starts a fresh session
+                        // and the CLI re-injects the startup context.
+                        session_id: inst.session_id,
                         preview,
                         node_count,
                         last_active_at,
