@@ -21,7 +21,8 @@ import { MarkdownBlock } from "../components/MarkdownBlock";
 import { NodeHoverStrip } from "../components/NodeHoverStrip";
 import { SubagentLinkBlock } from "../components/SubagentLinkBlock";
 import { ToolBlock } from "../components/ToolBlock";
-import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
+import { UserMessageBlock } from "../components/UserMessageBlock";
+import type { DocumentNode, DocumentState, SubagentLinkNode, UserMessageNode } from "../types";
 import { markRowMount } from "./perf-probe";
 
 export interface DocumentRowProps {
@@ -247,17 +248,11 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 />
             </Show>
             <Show when={props.node() && props.node().type === "user_message"}>
-                <div
-                    class="agent-user-message"
-                    classList={{
-                        "agent-user-message--collapsed":
-                            props.documentState().collapsedNodes.has(props.node().id),
-                    }}
-                >
-                    <div class="agent-user-message-content">
-                        <pre>{(props.node() as Extract<DocumentNode, { type: "user_message" }>).message}</pre>
-                    </div>
-                </div>
+                <UserMessageBlock
+                    node={props.node() as UserMessageNode}
+                    pinned={props.documentState().pinnedNodes.has(props.node().id)}
+                    onTogglePin={() => props.onTogglePin(props.node().id)}
+                />
             </Show>
             <Show when={props.node() && props.node().type === "subagent_link"}>
                 <SubagentLinkBlock
