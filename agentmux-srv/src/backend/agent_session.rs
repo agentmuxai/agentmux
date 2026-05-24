@@ -634,7 +634,16 @@ pub fn migrate_block_zones_v1(
 // ---------------------------------------------------------------------------
 
 /// Marker file name for the Phase 1 two-tier-picker migration.
-/// One-shot per data dir; deleting it forces a re-run on next startup.
+///
+/// **Vestigial.** Originally gated `migrate_promote_template_sessions_v1`
+/// as a one-shot. The 2026-05-24 self-idempotency rework moved gating
+/// to the data invariant ("no seeded def has a session zone"), so the
+/// migration runs on every startup and is a no-op when the invariant
+/// already holds. The constant + `data_dir` parameter on the migration
+/// function are kept for API/import compatibility and so the legacy
+/// marker file (if present from an earlier portable run) isn't
+/// resurrected. Operators may delete the file; the migration ignores
+/// it either way.
 pub const TEMPLATE_PROMOTE_MARKER_V1: &str = "migration_template_promote_v1.flag";
 
 /// Stats from `migrate_promote_template_sessions_v1`. Logged at INFO.
@@ -684,24 +693,29 @@ pub struct TemplatePromoteStats {
 /// 5. Repoint every `db_agent_instances` row that referenced the old
 ///    defId to point at the new defId (preserves the
 ///    `continueOfInstanceId` reattach flow).
-/// 6. Marker-file gated — second start is a no-op.
+///
+/// Idempotency: the migration is **self-gated on the data invariant**
+/// ("no seeded def has a session zone"). It runs on every startup;
+/// when the invariant already holds the inner loop has zero
+/// iterations and returns the default stats in sub-ms. There used to
+/// be a marker-file gate (`TEMPLATE_PROMOTE_MARKER_V1`), but it
+/// produced an "early-marker" failure mode: a portable launched at v
+/// N had no seeded-def zones, set the marker, and on v N+1 startups
+/// (when seeded-def zones DID exist from prior real use) the marker
+/// caused the migration to skip. The 2026-05-24 rework dropped the
+/// marker check; this is safe because the seeded-def-with-zone
+/// invariant is detectable per-startup at constant cost. `data_dir`
+/// is retained for API compatibility.
 ///
 /// Failure mode: per-template errors are logged + counted; we DO NOT
-/// abort startup. The marker is written even on partial failure so we
-/// don't retry indefinitely (operators can delete the marker to retry).
+/// abort startup. Errors that prevent a template from being promoted
+/// leave its zones in place; the next startup retries (no marker
+/// gate to block retry).
 pub fn migrate_promote_template_sessions_v1(
     wstore: &Arc<WaveStore>,
     filestore: &Arc<FileStore>,
-    data_dir: &Path,
+    _data_dir: &Path,
 ) -> TemplatePromoteStats {
-    let marker_path = data_dir.join(TEMPLATE_PROMOTE_MARKER_V1);
-    if marker_path.exists() {
-        tracing::debug!(
-            marker = %marker_path.display(),
-            "template_promote migration: marker present, skipping"
-        );
-        return TemplatePromoteStats::default();
-    }
 
     let mut stats = TemplatePromoteStats::default();
 
@@ -806,43 +820,98 @@ pub fn migrate_promote_template_sessions_v1(
             }
         };
 
-        // Clone the template into a new user-owned definition.
-        // Mirrors `agent_def_create_from_template`'s field-copy
-        // contract — keep these in sync.
-        let now = now_ms() as i64;
-        let mut new_def = crate::backend::storage::wstore::AgentDefinition {
-            id: uuid::Uuid::new_v4().to_string(),
-            slug: String::new(),
-            name: new_name.clone(),
-            icon: template.icon.clone(),
-            provider: template.provider.clone(),
-            description: template.description.clone(),
-            working_directory: String::new(),
-            shell: template.shell.clone(),
-            provider_flags: template.provider_flags.clone(),
-            auto_start: 0,
-            restart_on_crash: template.restart_on_crash,
-            idle_timeout_minutes: template.idle_timeout_minutes,
-            created_at: now,
-            agent_type: template.agent_type.clone(),
-            environment: template.environment.clone(),
-            agent_bus_id: String::new(),
-            is_seeded: 0,
-            accounts: String::new(),
-            parent_id: template.id.clone(),
-            branch_label: String::new(),
-            updated_at: now,
-            user_hidden: 0,
+        // Idempotency: the migration uses a DETERMINISTIC clone id
+        // (`template-promote-v1-<template_id>`) so every retry of
+        // every partial-failure scenario targets the same clone.
+        // Successful prior steps (zone moves, instance repoints)
+        // are reused; failed steps re-attempt against the same
+        // destination. There is no way to "fork" the migration
+        // into a different clone id, so the unbounded-duplicate
+        // failure modes from codex P1 rounds 1+2 cannot recur:
+        //
+        //   1. Insert def: idempotent via `SELECT WHERE id = ?1`
+        //      first; new row only on absence. PK uniqueness on
+        //      the deterministic id catches any race.
+        //   2. move_zone: write-then-delete; replay copies the
+        //      same content to the same destination (no-op when
+        //      already moved), retries the source delete.
+        //   3. instance_repoint_definition: UPDATE on rows whose
+        //      definition_id = old; rows already at new are a
+        //      no-op SET.
+        //
+        // The deterministic id also distinguishes the migration's
+        // own clone from any user-created "+ New from template"
+        // clone (which lives under a fresh UUID), so we never
+        // clobber a user's live session.
+        let promote_target_id =
+            format!("template-promote-v1-{}", template.id);
+        debug_assert!(
+            is_valid_definition_id(&promote_target_id),
+            "deterministic promote-target id must satisfy the zone-id charset"
+        );
+
+        let existing_target = match wstore.agent_def_get(&promote_target_id) {
+            Ok(Some(def)) => Some(def),
+            Ok(None) => None,
+            Err(e) => {
+                tracing::warn!(
+                    template_id = %old_def_id,
+                    promote_target_id = %promote_target_id,
+                    error = %e,
+                    "template_promote migration: agent_def_get failed; aborting this template"
+                );
+                stats.failures += 1;
+                continue;
+            }
         };
-        if let Err(e) = wstore.agent_def_insert(&mut new_def) {
-            tracing::warn!(
+        let new_def = if let Some(existing) = existing_target {
+            tracing::info!(
                 template_id = %old_def_id,
-                error = %e,
-                "template_promote migration: agent_def_insert failed; skipping this template"
+                promote_target_id = %promote_target_id,
+                "template_promote migration: reusing prior promote-target clone (idempotent retry)"
             );
-            stats.failures += 1;
-            continue;
-        }
+            existing
+        } else {
+            // Clone the template into a new user-owned definition
+            // at the deterministic id. Field copies mirror
+            // `agent_def_create_from_template`.
+            let now = now_ms() as i64;
+            let mut new_def = crate::backend::storage::wstore::AgentDefinition {
+                id: promote_target_id.clone(),
+                slug: String::new(),
+                name: new_name.clone(),
+                icon: template.icon.clone(),
+                provider: template.provider.clone(),
+                description: template.description.clone(),
+                working_directory: String::new(),
+                shell: template.shell.clone(),
+                provider_flags: template.provider_flags.clone(),
+                auto_start: 0,
+                restart_on_crash: template.restart_on_crash,
+                idle_timeout_minutes: template.idle_timeout_minutes,
+                created_at: now,
+                agent_type: template.agent_type.clone(),
+                environment: template.environment.clone(),
+                agent_bus_id: String::new(),
+                is_seeded: 0,
+                accounts: String::new(),
+                parent_id: template.id.clone(),
+                branch_label: String::new(),
+                updated_at: now,
+                user_hidden: 0,
+            };
+            if let Err(e) = wstore.agent_def_insert(&mut new_def) {
+                tracing::warn!(
+                    template_id = %old_def_id,
+                    promote_target_id = %promote_target_id,
+                    error = %e,
+                    "template_promote migration: agent_def_insert failed; skipping this template"
+                );
+                stats.failures += 1;
+                continue;
+            }
+            new_def
+        };
 
         // Move every matching zone (current + archives) onto the new
         // definition id. Per-zone failures are logged but don't abort
@@ -906,14 +975,10 @@ pub fn migrate_promote_template_sessions_v1(
         );
     }
 
-    // Write marker — even on partial failure (see doc comment).
-    if let Err(e) = std::fs::write(&marker_path, b"v1\n") {
-        tracing::warn!(
-            marker = %marker_path.display(),
-            error = %e,
-            "template_promote migration: marker write failed; migration may re-run on next startup"
-        );
-    }
+    // Marker write removed in the 2026-05-24 self-idempotency rework
+    // (see doc comment above). The invariant "no seeded def carries a
+    // session zone" is checked on every startup; when it already holds
+    // this function is a sub-ms no-op.
 
     tracing::info!(
         templates_scanned = stats.templates_scanned,
@@ -925,6 +990,24 @@ pub fn migrate_promote_template_sessions_v1(
     );
 
     stats
+}
+
+/// Per-file decision inside `move_zone`'s retry-aware loop. See the
+/// doc comment in `move_zone` for which round each variant addresses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CopyAction {
+    /// Destination missing the file (R5 partial-copy fill).
+    Copy,
+    /// Source strictly newer than destination (R6 newer-source promotion).
+    Overwrite,
+    /// Destination strictly newer than source (R4 user-continuation
+    /// on destination clone) — or equal-modts + equal bytes.
+    Preserve,
+    /// Equal modts; need to read both sides and compare bytes.
+    TieBreakByBytes,
+    /// Equal modts but bytes differ — neither side is canonical
+    /// (R7 same-ms conflict). Preserve destination, leave source.
+    Conflict,
 }
 
 /// Move every file in `old_zone` to `new_zone`, preserving names + bytes.
@@ -942,14 +1025,167 @@ fn move_zone(
     if files.is_empty() {
         return Ok(());
     }
+    // Per-file recency-aware copy (codex P1 rounds 4 + 5 + 6 on
+    // PR #1017). Three retry shapes need to coexist on the same
+    // retry path:
+    //
+    //   R4 — partial-failure, user continued on the destination
+    //        clone (`:current` of the new def). Destination has
+    //        NEWER bytes than source. Keep destination; drop
+    //        source.
+    //   R5 — partial-failure, prior `move_zone` wrote SOME of the
+    //        destination files before crashing. Destination has
+    //        only some files; the missing ones must be copied
+    //        from source. Don't drop source until every source
+    //        file has a counterpart at the destination.
+    //   R6 — partial-failure, `instance_repoint_definition` was
+    //        the step that failed. Instances still point at the
+    //        seeded def, user continued — SOURCE bytes are newer
+    //        than destination's stale copy. Source must NOT be
+    //        dropped without first promoting its newer content
+    //        to the destination.
+    //
+    // Resolve all three via a per-file recency-aware copy:
+    //   - destination missing the file → COPY (R5).
+    //   - destination has the file, src.modts ≤ dest.modts → keep
+    //     destination, no copy (R4).
+    //   - destination has the file, src.modts > dest.modts → copy
+    //     source over destination (R6).
+    // After the loop, every source file has a counterpart at the
+    // destination; source can be safely deleted.
+    //
+    // `modts` ties (or zero on either side) are resolved in favor
+    // of keeping the destination, matching the R4 semantics — the
+    // common case for a clean first-time retry where both sides
+    // hold identical bytes.
+    let dest_meta: std::collections::HashMap<String, crate::backend::storage::filestore::WaveFile> = filestore
+        .list_files(new_zone)
+        .map_err(|e| format!("list_files (new): {e}"))?
+        .into_iter()
+        .map(|f| (f.name.clone(), f))
+        .collect();
+    let mut copied = 0usize;
+    let mut overwritten = 0usize;
+    let mut preserved = 0usize;
+    let mut conflicts = 0usize;
     for f in &files {
-        let bytes = filestore
-            .read_file(old_zone, &f.name)
-            .map_err(|e| format!("read_file {}: {e}", f.name))?
-            .unwrap_or_default();
-        // write_zone_file creates the file when missing, replaces it
-        // otherwise (matches archive_session's write semantics).
-        write_zone_file(filestore, new_zone, &f.name, &bytes)?;
+        let dest = dest_meta.get(&f.name);
+        let action = match dest {
+            None => CopyAction::Copy, // R5: destination missing
+            Some(d) if f.modts > d.modts => CopyAction::Overwrite, // R6
+            Some(d) if d.modts > f.modts => CopyAction::Preserve, // R4
+            Some(_) => CopyAction::TieBreakByBytes, // R7: equal modts
+        };
+        let resolved = match action {
+            CopyAction::Copy | CopyAction::Overwrite => action,
+            CopyAction::Preserve => action,
+            CopyAction::Conflict => action, // unreachable from the matcher above; explicit for exhaustiveness
+            CopyAction::TieBreakByBytes => {
+                // R7 — equal modts (millisecond-granular filestore
+                // can write source + destination within the same
+                // ms on a real retry). Read both sides and
+                // disambiguate by bytes.
+                let src_bytes = filestore
+                    .read_file(old_zone, &f.name)
+                    .map_err(|e| format!("read_file {}: {e}", f.name))?
+                    .unwrap_or_default();
+                let dest_bytes = filestore
+                    .read_file(new_zone, &f.name)
+                    .map_err(|e| format!("read_file (dest) {}: {e}", f.name))?
+                    .unwrap_or_default();
+                if src_bytes == dest_bytes {
+                    CopyAction::Preserve
+                } else {
+                    // Conflict: can't tell which side is canonical.
+                    // Preserve destination (matches the round-4
+                    // semantics — keep what the user might be
+                    // looking at), but refuse to delete source so
+                    // the operator (or a future GC pass that can
+                    // compare timestamps at a higher resolution)
+                    // can resolve. The post-loop missing-files
+                    // check would still pass, so we signal the
+                    // conflict via a separate counter.
+                    CopyAction::Conflict
+                }
+            }
+        };
+        match resolved {
+            CopyAction::Copy => {
+                let bytes = filestore
+                    .read_file(old_zone, &f.name)
+                    .map_err(|e| format!("read_file {}: {e}", f.name))?
+                    .unwrap_or_default();
+                write_zone_file(filestore, new_zone, &f.name, &bytes)?;
+                copied += 1;
+            }
+            CopyAction::Overwrite => {
+                let bytes = filestore
+                    .read_file(old_zone, &f.name)
+                    .map_err(|e| format!("read_file {}: {e}", f.name))?
+                    .unwrap_or_default();
+                write_zone_file(filestore, new_zone, &f.name, &bytes)?;
+                overwritten += 1;
+            }
+            CopyAction::Preserve => {
+                preserved += 1;
+            }
+            CopyAction::Conflict => {
+                conflicts += 1;
+                tracing::warn!(
+                    old_zone = %old_zone,
+                    new_zone = %new_zone,
+                    file = %f.name,
+                    modts = f.modts,
+                    "template_promote migration: same-ms conflict — bytes differ at equal modts; preserving destination + leaving source for manual recovery"
+                );
+            }
+            CopyAction::TieBreakByBytes => unreachable!("resolved above"),
+        }
+    }
+    if preserved > 0 || overwritten > 0 || conflicts > 0 {
+        tracing::info!(
+            old_zone = %old_zone,
+            new_zone = %new_zone,
+            copied,
+            overwritten,
+            preserved,
+            conflicts,
+            "template_promote migration: per-file move (R4 user-continuation, R5 partial-copy fill, R6 newer-source promotion, R7 same-ms conflict)"
+        );
+    }
+    if conflicts > 0 {
+        // R7: an equal-modts byte-diff was detected. We don't know
+        // which side is canonical, so we preserve both: destination
+        // keeps its content, source is left in place for operator
+        // / GC recovery. Migration converges next run only if the
+        // operator resolves the conflict externally.
+        return Ok(());
+    }
+    // Verify every source file has a counterpart at the
+    // destination before dropping source — protects against the
+    // R5 partial-write case where write_zone_file silently leaves
+    // a file absent at the destination despite returning Ok (no
+    // current call path does so, but defending the invariant here
+    // is cheap and future-proofs the helper).
+    let post_dest: std::collections::HashSet<String> = filestore
+        .list_files(new_zone)
+        .map_err(|e| format!("list_files (new, post): {e}"))?
+        .into_iter()
+        .map(|f| f.name)
+        .collect();
+    let missing: Vec<&str> = files
+        .iter()
+        .map(|f| f.name.as_str())
+        .filter(|n| !post_dest.contains(*n))
+        .collect();
+    if !missing.is_empty() {
+        tracing::warn!(
+            old_zone = %old_zone,
+            new_zone = %new_zone,
+            missing = ?missing,
+            "template_promote migration: destination missing files post-copy; leaving source in place for retry"
+        );
+        return Ok(());
     }
     // Delete the source files only after every write has succeeded.
     // delete_zone wipes the whole zone in one transaction.
@@ -1434,8 +1670,11 @@ mod tests {
         let still_seeded = all.iter().find(|d| d.id == template.id).unwrap();
         assert_eq!(still_seeded.is_seeded, 1);
 
-        // Marker file is written.
-        assert!(dir.path().join(TEMPLATE_PROMOTE_MARKER_V1).exists());
+        // Marker file is intentionally NOT written under the
+        // self-idempotency model (constant still exists for legacy
+        // file compatibility — see the doc comment on
+        // `TEMPLATE_PROMOTE_MARKER_V1`).
+        assert!(!dir.path().join(TEMPLATE_PROMOTE_MARKER_V1).exists());
     }
 
     #[test]
@@ -1455,6 +1694,597 @@ mod tests {
         assert_eq!(second.templates_promoted, 0);
         assert_eq!(second.archives_moved, 0);
         assert_eq!(second.instances_repointed, 0);
+    }
+
+    #[test]
+    fn template_promote_runs_when_seeded_def_grows_zone_after_first_run() {
+        // Regression test for the 2026-05-24 "Maks not under My Agents"
+        // failure mode. Under the old marker-file gate, this scenario
+        // played out:
+        //
+        //   1. Portable v N starts: no seeded defs have session zones
+        //      (fresh data dir). Migration runs, no-ops, writes marker.
+        //   2. User clicks "Claude Code" template, has a real
+        //      conversation. Session zone now lives at
+        //      `agent:tpl-claude:current` (a seeded def carrying a
+        //      session — invariant violation).
+        //   3. Portable v N+1 starts. Marker present → migration
+        //      skips. Seeded def keeps its session zone forever; the
+        //      picker can't show the user's agent under My Agents
+        //      because there is no user-clone definition.
+        //
+        // The self-idempotency rework dropped the marker gate and
+        // re-runs the migration on every startup. This test simulates
+        // that exact sequence and asserts the second run DOES promote.
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        // First startup: a seeded template with no session zone yet.
+        // Migration finds nothing to do (templates_scanned == 0).
+        let template = insert_template(&wstore, "tpl-claude", "Claude Code", "claude");
+        let first = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(first.templates_scanned, 0);
+        assert_eq!(first.templates_promoted, 0);
+        // (Under the old marker-gated model the marker was written here.)
+        assert!(!dir.path().join(TEMPLATE_PROMOTE_MARKER_V1).exists());
+
+        // Between startups: user opens a conversation on the seeded
+        // template — invariant now violated.
+        write_session_state(&filestore, &template.id, br#"{"nodes":[]}"#).unwrap();
+
+        // Second startup: under the OLD gate this would be a no-op
+        // (marker still present). Under the new self-idempotent model
+        // it MUST detect the invariant violation and promote.
+        let second = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(second.templates_scanned, 1);
+        assert_eq!(second.templates_promoted, 1);
+        assert_eq!(second.failures, 0);
+
+        // User-owned definition exists post-promotion.
+        let all = wstore.agent_def_list().unwrap();
+        assert!(
+            all.iter().any(|d| d.is_seeded == 0 && d.parent_id == template.id),
+            "second-run promotion should create a user-owned def"
+        );
+
+        // Third startup: invariant restored, migration no-ops cleanly.
+        let third = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(third.templates_scanned, 0);
+        assert_eq!(third.templates_promoted, 0);
+    }
+
+    #[test]
+    fn template_promote_does_not_reuse_clone_with_active_zone() {
+        // Codex P1 round 2 on PR #1017: the reuse path must not
+        // pick a user-clone whose own `agent:<clone_id>:current`
+        // zone is populated — that clone was created by the user
+        // through "+ New from template" and has a real conversation
+        // in it. Reusing it would let `move_zone` overwrite the
+        // user's live session with the seeded template's session.
+        // The reuse target must be an empty-zone clone (partial-
+        // failure shape) only.
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        let template = insert_template(&wstore, "tpl-claude", "Claude Code", "claude");
+        // A pre-existing user-clone created via "+ New from
+        // template" — it has its OWN active conversation in its
+        // own zone.
+        let now = now_ms() as i64;
+        let mut user_clone = crate::backend::storage::wstore::AgentDefinition {
+            id: "user-made-clone".to_string(),
+            slug: String::new(),
+            name: "MyAgent".to_string(),
+            icon: template.icon.clone(),
+            provider: template.provider.clone(),
+            description: template.description.clone(),
+            working_directory: String::new(),
+            shell: template.shell.clone(),
+            provider_flags: template.provider_flags.clone(),
+            auto_start: 0,
+            restart_on_crash: template.restart_on_crash,
+            idle_timeout_minutes: template.idle_timeout_minutes,
+            created_at: now - 2_000,
+            agent_type: template.agent_type.clone(),
+            environment: template.environment.clone(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: template.id.clone(),
+            branch_label: String::new(),
+            updated_at: now - 2_000,
+            user_hidden: 0,
+        };
+        wstore.agent_def_insert(&mut user_clone).unwrap();
+        // The user's clone has its OWN active conversation.
+        write_session_state(
+            &filestore,
+            &user_clone.id,
+            br#"{"nodes":[{"type":"user_message","message":"mine"}]}"#,
+        )
+        .unwrap();
+
+        // Seeded template ALSO has a session zone (the invariant
+        // violation we're recovering from).
+        write_session_state(
+            &filestore,
+            &template.id,
+            br#"{"nodes":[{"type":"user_message","message":"theirs"}]}"#,
+        )
+        .unwrap();
+
+        let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(stats.templates_promoted, 1);
+
+        // The user's clone must NOT have been used as the promote
+        // target — a fresh clone with a new id must have been
+        // created instead, with its OWN promoted zone.
+        let user_zone_files = filestore
+            .list_files(&agent_current_zone(&user_clone.id))
+            .unwrap();
+        let user_snapshot = user_zone_files
+            .iter()
+            .find(|f| f.name == SNAPSHOT_FILE)
+            .expect("user-clone's own zone snapshot must still exist");
+        let user_bytes = filestore
+            .read_file(&agent_current_zone(&user_clone.id), &user_snapshot.name)
+            .unwrap()
+            .unwrap_or_default();
+        assert!(
+            std::str::from_utf8(&user_bytes).unwrap().contains("mine"),
+            "user-clone's existing conversation must NOT be overwritten by the seeded session"
+        );
+
+        // A NEW clone (id != user-made-clone) must own the promoted
+        // seeded session.
+        let all = wstore.agent_def_list().unwrap();
+        let new_clone = all
+            .iter()
+            .find(|d| d.is_seeded == 0 && d.parent_id == template.id && d.id != "user-made-clone")
+            .expect("a NEW clone must have been created (not reusing the user's clone)");
+        let new_zone_bytes = filestore
+            .read_file(&agent_current_zone(&new_clone.id), SNAPSHOT_FILE)
+            .unwrap()
+            .unwrap_or_default();
+        assert!(
+            std::str::from_utf8(&new_zone_bytes).unwrap().contains("theirs"),
+            "promoted session must land under the fresh clone's id"
+        );
+    }
+
+    #[test]
+    fn template_promote_preserves_user_continuation_on_clone() {
+        // Codex P1 round 4 on PR #1017: data-loss scenario.
+        // Sequence:
+        //   1. Run 1 copies seeded `:current` → clone `:current`
+        //      OK, but `delete_zone` on the seeded source fails.
+        //   2. User opens the clone, continues the conversation —
+        //      the clone's `:current` now has NEWER content.
+        //   3. Run 2 sees the invariant still violated and would
+        //      re-copy the (older) seeded bytes onto the clone,
+        //      rolling back the user's continuation.
+        // The fix: `move_zone` detects a non-empty destination and
+        // drops the stale source instead of copying.
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        let template = insert_template(&wstore, "tpl-claude", "Claude Code", "claude");
+        // Prior partial run: deterministic-id clone def already
+        // exists.
+        let promote_target_id = format!("template-promote-v1-{}", template.id);
+        let now = now_ms() as i64;
+        let mut prior_target = crate::backend::storage::wstore::AgentDefinition {
+            id: promote_target_id.clone(),
+            slug: String::new(),
+            name: "Claude Code".to_string(),
+            icon: template.icon.clone(),
+            provider: template.provider.clone(),
+            description: template.description.clone(),
+            working_directory: String::new(),
+            shell: template.shell.clone(),
+            provider_flags: template.provider_flags.clone(),
+            auto_start: 0,
+            restart_on_crash: template.restart_on_crash,
+            idle_timeout_minutes: template.idle_timeout_minutes,
+            created_at: now - 1_000,
+            agent_type: template.agent_type.clone(),
+            environment: template.environment.clone(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: template.id.clone(),
+            branch_label: String::new(),
+            updated_at: now - 1_000,
+            user_hidden: 0,
+        };
+        wstore.agent_def_insert(&mut prior_target).unwrap();
+        // Seeded `:current` has the OLDER stale snapshot the prior
+        // run's `delete_zone` failed to remove. Write it FIRST so
+        // its modts is earlier than the clone's continuation.
+        write_session_state(
+            &filestore,
+            &template.id,
+            br#"{"nodes":[{"type":"user_message","message":"old-stale-seeded"}]}"#,
+        )
+        .unwrap();
+        // Force a modts gap so the modts-aware copy rule picks
+        // destination (R4 user-continuation). 10ms is reliable on
+        // every platform we ship to.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        // Clone's `:current` has the user's NEWER continuation.
+        write_session_state(
+            &filestore,
+            &promote_target_id,
+            br#"{"nodes":[{"type":"user_message","message":"my-newer-message"}]}"#,
+        )
+        .unwrap();
+
+        let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(stats.templates_promoted, 1);
+
+        // The user's newer content is INTACT on the clone.
+        let clone_bytes = filestore
+            .read_file(&agent_current_zone(&promote_target_id), SNAPSHOT_FILE)
+            .unwrap()
+            .unwrap_or_default();
+        let clone_str = std::str::from_utf8(&clone_bytes).unwrap();
+        assert!(
+            clone_str.contains("my-newer-message"),
+            "user's newer continuation must survive the partial-failure retry; got: {clone_str}"
+        );
+        assert!(
+            !clone_str.contains("old-stale-seeded"),
+            "stale seeded content must NOT overwrite user's newer continuation"
+        );
+
+        // The seeded current zone is drained (source deleted).
+        let seeded_files = filestore
+            .list_files(&agent_current_zone(&template.id))
+            .unwrap();
+        assert!(
+            seeded_files.is_empty(),
+            "seeded current zone must be drained after the retry's safety drop"
+        );
+    }
+
+    #[test]
+    fn template_promote_recovers_partial_copy_at_zone() {
+        // Codex P1 round 5 on PR #1017: a prior `move_zone` that
+        // wrote SOME destination files but failed before the rest
+        // must not be mistaken for "fully migrated" — dropping the
+        // source there would lose the unwritten files forever.
+        //
+        // Setup: seeded `:current` has both files (snapshot +
+        // output stream); the clone's `:current` has only the
+        // snapshot (the prior copy crashed before the second
+        // file). After retry: clone has BOTH files; seeded zone
+        // is drained.
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        let template = insert_template(&wstore, "tpl-claude", "Claude Code", "claude");
+        // Prior partial run already created the deterministic-id
+        // clone def.
+        let promote_target_id = format!("template-promote-v1-{}", template.id);
+        let now = now_ms() as i64;
+        let mut prior_target = crate::backend::storage::wstore::AgentDefinition {
+            id: promote_target_id.clone(),
+            slug: String::new(),
+            name: "Claude Code".to_string(),
+            icon: template.icon.clone(),
+            provider: template.provider.clone(),
+            description: template.description.clone(),
+            working_directory: String::new(),
+            shell: template.shell.clone(),
+            provider_flags: template.provider_flags.clone(),
+            auto_start: 0,
+            restart_on_crash: template.restart_on_crash,
+            idle_timeout_minutes: template.idle_timeout_minutes,
+            created_at: now - 1_000,
+            agent_type: template.agent_type.clone(),
+            environment: template.environment.clone(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: template.id.clone(),
+            branch_label: String::new(),
+            updated_at: now - 1_000,
+            user_hidden: 0,
+        };
+        wstore.agent_def_insert(&mut prior_target).unwrap();
+
+        // Seeded `:current` has BOTH files.
+        let seeded_current = agent_current_zone(&template.id);
+        write_zone_file(&filestore, &seeded_current, SNAPSHOT_FILE, b"seeded-snapshot").unwrap();
+        write_zone_file(&filestore, &seeded_current, OUTPUT_FILE, b"seeded-output-stream").unwrap();
+
+        // Clone `:current` already has ONLY the snapshot (prior
+        // copy got that far, then failed on OUTPUT_FILE).
+        write_zone_file(
+            &filestore,
+            &agent_current_zone(&promote_target_id),
+            SNAPSHOT_FILE,
+            b"seeded-snapshot",
+        )
+        .unwrap();
+
+        let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(stats.templates_promoted, 1);
+
+        // Clone now has BOTH files (snapshot preserved, output
+        // copied over from the source).
+        let clone_zone = agent_current_zone(&promote_target_id);
+        let clone_files = filestore.list_files(&clone_zone).unwrap();
+        let clone_names: std::collections::HashSet<String> =
+            clone_files.iter().map(|f| f.name.clone()).collect();
+        assert!(
+            clone_names.contains(SNAPSHOT_FILE),
+            "snapshot file must remain at destination"
+        );
+        assert!(
+            clone_names.contains(OUTPUT_FILE),
+            "output file must be copied over from source on retry (codex R5)"
+        );
+        let output_bytes = filestore
+            .read_file(&clone_zone, OUTPUT_FILE)
+            .unwrap()
+            .unwrap_or_default();
+        assert_eq!(
+            output_bytes, b"seeded-output-stream",
+            "the unwritten file from the partial copy must arrive intact"
+        );
+
+        // Source is drained — every source file has a destination
+        // counterpart now.
+        let seeded_files = filestore.list_files(&seeded_current).unwrap();
+        assert!(
+            seeded_files.is_empty(),
+            "seeded current zone must be drained after the complete copy"
+        );
+    }
+
+    #[test]
+    fn template_promote_promotes_newer_source_over_stale_destination() {
+        // Codex P1 round 6 on PR #1017: the inverse of R4. If the
+        // prior run's `instance_repoint_definition` failed,
+        // instances stay pointed at the SEEDED def — the user's
+        // continuation lands in the SEEDED zone, not the clone.
+        // On retry, the SEEDED side has newer bytes. The fix
+        // promotes the newer source over the stale destination
+        // (and resolves R4 the other way when destination is
+        // newer instead).
+        //
+        // Test setup: write destination FIRST (older modts), then
+        // source SECOND (newer modts). After retry: destination
+        // has the source's bytes; source drained.
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        let template = insert_template(&wstore, "tpl-claude", "Claude Code", "claude");
+        let promote_target_id = format!("template-promote-v1-{}", template.id);
+        let now = now_ms() as i64;
+        let mut prior_target = crate::backend::storage::wstore::AgentDefinition {
+            id: promote_target_id.clone(),
+            slug: String::new(),
+            name: "Claude Code".to_string(),
+            icon: template.icon.clone(),
+            provider: template.provider.clone(),
+            description: template.description.clone(),
+            working_directory: String::new(),
+            shell: template.shell.clone(),
+            provider_flags: template.provider_flags.clone(),
+            auto_start: 0,
+            restart_on_crash: template.restart_on_crash,
+            idle_timeout_minutes: template.idle_timeout_minutes,
+            created_at: now - 1_000,
+            agent_type: template.agent_type.clone(),
+            environment: template.environment.clone(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: template.id.clone(),
+            branch_label: String::new(),
+            updated_at: now - 1_000,
+            user_hidden: 0,
+        };
+        wstore.agent_def_insert(&mut prior_target).unwrap();
+
+        // Destination has the prior copy (will become OLDER).
+        let clone_zone = agent_current_zone(&promote_target_id);
+        write_zone_file(&filestore, &clone_zone, SNAPSHOT_FILE, b"stale-old-copy").unwrap();
+        // Sleep just long enough to push modts forward.
+        // filestore's modts comes from system time; 10ms is enough
+        // on every platform we ship to.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        // Seeded source has the user's newer continuation (the
+        // instance_repoint failed in the prior run, so user kept
+        // typing at the seeded def).
+        let seeded_zone = agent_current_zone(&template.id);
+        write_zone_file(&filestore, &seeded_zone, SNAPSHOT_FILE, b"user-newer-continuation").unwrap();
+
+        let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(stats.templates_promoted, 1);
+
+        // Destination now carries the SOURCE's newer bytes.
+        let clone_bytes = filestore
+            .read_file(&clone_zone, SNAPSHOT_FILE)
+            .unwrap()
+            .unwrap_or_default();
+        let clone_str = std::str::from_utf8(&clone_bytes).unwrap();
+        assert!(
+            clone_str.contains("user-newer-continuation"),
+            "user's newer continuation must be promoted from seeded source to clone; got: {clone_str}"
+        );
+        assert!(
+            !clone_str.contains("stale-old-copy"),
+            "stale older destination bytes must be replaced by the newer source"
+        );
+
+        // Source drained.
+        let seeded_files = filestore.list_files(&seeded_zone).unwrap();
+        assert!(seeded_files.is_empty(), "seeded zone drained after promotion");
+    }
+
+    #[test]
+    fn template_promote_uses_deterministic_clone_id() {
+        // Every run of `migrate_promote_template_sessions_v1` for
+        // the same template MUST produce a clone at the same
+        // deterministic id (`template-promote-v1-<template_id>`).
+        // This is the convergence invariant that makes retries
+        // safe under any partial-failure mode without ever
+        // splitting one logical agent across multiple clone ids.
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        let template = insert_template(&wstore, "tpl-claude", "Claude Code", "claude");
+        write_session_state(
+            &filestore,
+            &template.id,
+            br#"{"nodes":[{"type":"user_message","message":"hi"}]}"#,
+        )
+        .unwrap();
+
+        let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(stats.templates_promoted, 1);
+
+        let expected_id = format!("template-promote-v1-{}", template.id);
+        let clone = wstore.agent_def_get(&expected_id).unwrap();
+        assert!(clone.is_some(), "promote target must be created at the deterministic id");
+        assert_eq!(clone.unwrap().parent_id, template.id);
+    }
+
+    #[test]
+    fn template_promote_idempotent_under_partial_failure_at_archive_move() {
+        // Codex P1 round 3 on PR #1017: when a prior run copies
+        // the seeded `:current` zone successfully but leaves at
+        // least one seeded zone behind (e.g. `move_zone` succeeds
+        // for `:current` but the source delete fails OR a later
+        // `:archive:*` move fails), the next startup re-enters
+        // migration for that template. The deterministic clone id
+        // means the retry hits the SAME clone — never splitting
+        // history across clone ids. Reuses the existing clone def,
+        // re-runs move_zone (idempotent: write replaces if newer,
+        // delete is best-effort), and converges.
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        let template = insert_template(&wstore, "tpl-claude", "Claude Code", "claude");
+        insert_named_instance(&wstore, "inst-maks", &template.id, "Maks", 1_700_000_100_000);
+
+        // Simulate the partial-failure state: prior run created
+        // the deterministic-id clone, moved :current successfully
+        // (clone has data), but failed to remove the seeded
+        // :archive:* zone (still on the seeded id).
+        let promote_target_id = format!("template-promote-v1-{}", template.id);
+        let now = now_ms() as i64;
+        let mut prior_target = crate::backend::storage::wstore::AgentDefinition {
+            id: promote_target_id.clone(),
+            slug: String::new(),
+            name: "Maks".to_string(),
+            icon: template.icon.clone(),
+            provider: template.provider.clone(),
+            description: template.description.clone(),
+            working_directory: String::new(),
+            shell: template.shell.clone(),
+            provider_flags: template.provider_flags.clone(),
+            auto_start: 0,
+            restart_on_crash: template.restart_on_crash,
+            idle_timeout_minutes: template.idle_timeout_minutes,
+            created_at: now - 1_000,
+            agent_type: template.agent_type.clone(),
+            environment: template.environment.clone(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: template.id.clone(),
+            branch_label: String::new(),
+            updated_at: now - 1_000,
+            user_hidden: 0,
+        };
+        wstore.agent_def_insert(&mut prior_target).unwrap();
+        // Realistic partial-failure shape: run 1 copied :current
+        // successfully (dest and source have IDENTICAL bytes from
+        // that copy), and run 1's archive-move failed (archive
+        // still on the seeded side, never copied to the clone).
+        // Use identical bytes for :current so the modts-aware
+        // copy gate treats it as no-op (no conflict).
+        let snapshot_bytes = b"snapshot-from-prior-run".as_slice();
+        write_zone_file(&filestore, &agent_current_zone(&promote_target_id), SNAPSHOT_FILE, snapshot_bytes).unwrap();
+        write_zone_file(&filestore, &agent_current_zone(&template.id), SNAPSHOT_FILE, snapshot_bytes).unwrap();
+        let stale_archive = agent_archive_zone(&template.id, 1_699_000_000_000);
+        write_zone_file(&filestore, &stale_archive, SNAPSHOT_FILE, b"old archive").unwrap();
+
+        // Pre-condition: exactly one user-clone DEF (the
+        // deterministic-id one). Use the dedicated
+        // `db_agent_definitions` scan (not `agent_def_list`, which
+        // reads `db_agents` and surfaces template-instance
+        // projection rows).
+        let clones_pre = wstore.user_clone_defs_for_template(&template.id).unwrap();
+        assert_eq!(clones_pre.len(), 1, "test setup: one prior clone at deterministic id");
+        assert_eq!(clones_pre[0].id, promote_target_id);
+
+        let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(stats.templates_scanned, 1);
+        assert_eq!(stats.templates_promoted, 1);
+
+        // Still exactly one user-clone def — the retry reused the
+        // deterministic-id clone instead of inserting another.
+        let clones_post = wstore.user_clone_defs_for_template(&template.id).unwrap();
+        assert_eq!(
+            clones_post.len(),
+            1,
+            "deterministic-id reuse must not create a duplicate clone on partial-failure retry"
+        );
+        assert_eq!(clones_post[0].id, promote_target_id);
+
+        // Both seeded zones are now drained onto the clone.
+        let seeded_current = filestore
+            .list_files(&agent_current_zone(&template.id))
+            .unwrap();
+        assert!(
+            seeded_current.is_empty(),
+            "seeded current zone should be empty after the retry's successful move"
+        );
+        let seeded_archive_files = filestore.list_files(&stale_archive).unwrap();
+        assert!(
+            seeded_archive_files.is_empty(),
+            "seeded archive zone should be empty after the retry's successful move"
+        );
+
+        // Re-run after convergence — pure no-op.
+        let stats2 = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(stats2.templates_scanned, 0);
+        assert_eq!(stats2.templates_promoted, 0);
+    }
+
+    #[test]
+    fn template_promote_ignores_legacy_marker_file() {
+        // Backward-compat: an existing v1 marker file from a portable
+        // running pre-self-idempotency code must NOT prevent the
+        // migration from running. The 2026-05-24 rework leaves any
+        // existing marker file in place but doesn't read it.
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        // Place a vestigial marker as if a prior startup wrote one.
+        std::fs::write(dir.path().join(TEMPLATE_PROMOTE_MARKER_V1), b"v1\n").unwrap();
+
+        // Now set up an invariant violation.
+        let template = insert_template(&wstore, "tpl-claude", "Claude Code", "claude");
+        write_session_state(&filestore, &template.id, br#"{"nodes":[]}"#).unwrap();
+
+        let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        // Must NOT skip — the legacy marker is ignored.
+        assert_eq!(stats.templates_scanned, 1);
+        assert_eq!(stats.templates_promoted, 1);
     }
 
     #[test]
