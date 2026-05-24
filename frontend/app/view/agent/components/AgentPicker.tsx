@@ -438,12 +438,23 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 // pipeline via SQL; we don't need every column here.)
                 setLaunching(newDefId);
                 try {
+                    // Reagent P1 on #1011 round 2: the previous stub
+                    // spread `template` directly, which leaked the
+                    // template's `slug` and `working_directory` into
+                    // the launch path. Backend `agentdefcreatefromtemplate`
+                    // deliberately initialises those fields empty on
+                    // the new row so per-agent values are derived
+                    // server-side; the stub MUST match that contract,
+                    // otherwise the new agent inherits template-scoped
+                    // state (e.g. shared `GH_CONFIG_DIR`, cwd path).
                     const stubAgent: AgentDefinition = {
                         ...template,
                         id: newDefId,
                         name,
                         is_seeded: 0,
                         parent_id: template.id,
+                        slug: "",
+                        working_directory: "",
                     };
                     await props.model.launchAgentDefinition(stubAgent, {
                         instanceName: name,
@@ -502,7 +513,14 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             if (missing.length > 0) {
                 const proceedWithFlow = () => {
                     if (installed === false) {
-                        tabModal.replace(buildInstallRequest(agent));
+                        // Reagent P1 round 2: do NOT use the generic
+                        // `buildInstallRequest` here — its `onInstalled`
+                        // routes to `buildLaunchRequest(agent)` which
+                        // launches the seeded template directly,
+                        // defeating the template-clone migration. Open
+                        // the same template-aware install request the
+                        // non-prereq branch (line ~545) uses.
+                        tabModal.replace(buildTemplateInstallRequest(agent));
                     } else {
                         openCreateFromTemplateModal(agent);
                     }
@@ -537,35 +555,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             }
 
             if (installed === false) {
-                // Reuse the install flow, but route success into the
-                // template-create modal instead of the standard launch
-                // modal. Build a one-off install request rather than
-                // reusing `buildInstallRequest` (which routes back to
-                // openLaunchModal).
-                tabModal.open({
-                    kind: "install-agent",
-                    agent,
-                    originBlockId: props.model.blockId,
-                    onInstalled: (continueToLaunch: boolean) => {
-                        const canonical = getProvider(agent.provider)?.id ?? agent.provider;
-                        setInstallState((s) => {
-                            const next = { ...s };
-                            for (const a of agents()) {
-                                if ((getProvider(a.provider)?.id ?? a.provider) === canonical) {
-                                    next[a.id] = true;
-                                }
-                            }
-                            return next;
-                        });
-                        if (continueToLaunch) {
-                            // Crossfade install → create-from-template
-                            // (same modal shell; no backdrop flicker).
-                            openCreateFromTemplateModal(agent);
-                        } else {
-                            tabModal.close();
-                        }
-                    },
-                });
+                tabModal.open(buildTemplateInstallRequest(agent));
                 return;
             }
 
@@ -574,6 +564,35 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             pendingSelect.delete(agent.id);
         }
     };
+
+    // Template-aware install request. The generic `buildInstallRequest`
+    // routes `onInstalled → buildLaunchRequest(agent)` which launches
+    // the seeded template directly — defeats the template-clone
+    // migration. This variant routes the success path into
+    // `openCreateFromTemplateModal` so the install→create-clone→launch
+    // chain stays correct (reagent P1 on #1011 round 2).
+    const buildTemplateInstallRequest = (agent: AgentDefinition) => ({
+        kind: "install-agent" as const,
+        agent,
+        originBlockId: props.model.blockId,
+        onInstalled: (continueToLaunch: boolean) => {
+            const canonical = getProvider(agent.provider)?.id ?? agent.provider;
+            setInstallState((s) => {
+                const next = { ...s };
+                for (const a of agents()) {
+                    if ((getProvider(a.provider)?.id ?? a.provider) === canonical) {
+                        next[a.id] = true;
+                    }
+                }
+                return next;
+            });
+            if (continueToLaunch) {
+                openCreateFromTemplateModal(agent);
+            } else {
+                tabModal.close();
+            }
+        },
+    });
 
     // Note: the legacy `handleSelect` (Option E PR-2 default-click
     // handler) was removed in the Phase 1 cleanup. Every rendered
