@@ -618,6 +618,42 @@ impl WaveStore {
     /// legacy semantics (def.parent_id for user-clones, template id for
     /// instance projections), so existing handlers that look up the parent
     /// template by id continue to work.
+    /// Find user-clone definitions for a given seeded template (i.e.
+    /// rows in `db_agent_definitions` with `is_seeded = 0` and
+    /// `parent_id = <template.id>`). Returns the most-recent-first.
+    ///
+    /// Used by the `template_promote` migration's idempotency guard
+    /// to detect a clone left over from a prior partial-failure run
+    /// and avoid inserting a duplicate. Reads `db_agent_definitions`
+    /// directly — not `db_agents` — because the consolidated table
+    /// surfaces template-instance projections (rows whose `id` is
+    /// an `inst.id`) with the same `is_template = 0 AND
+    /// parent_template_id` shape as user-clone defs, and we MUST
+    /// NOT confuse those for clones to reuse.
+    pub fn user_clone_defs_for_template(
+        &self,
+        template_id: &str,
+    ) -> Result<Vec<AgentDefinition>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, slug, name, icon, provider, description,
+                    working_directory, shell, provider_flags, auto_start,
+                    restart_on_crash, idle_timeout_minutes, created_at,
+                    agent_type, environment, agent_bus_id, is_seeded,
+                    accounts, parent_id, branch_label, updated_at,
+                    user_hidden
+             FROM db_agent_definitions
+             WHERE is_seeded = 0 AND parent_id = ?1
+             ORDER BY updated_at DESC, created_at DESC",
+        )?;
+        let rows = stmt.query_map(params![template_id], map_agent_definition_row)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     pub fn agent_def_list(&self) -> Result<Vec<AgentDefinition>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(

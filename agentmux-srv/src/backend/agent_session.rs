@@ -811,43 +811,87 @@ pub fn migrate_promote_template_sessions_v1(
             }
         };
 
-        // Clone the template into a new user-owned definition.
-        // Mirrors `agent_def_create_from_template`'s field-copy
-        // contract — keep these in sync.
-        let now = now_ms() as i64;
-        let mut new_def = crate::backend::storage::wstore::AgentDefinition {
-            id: uuid::Uuid::new_v4().to_string(),
-            slug: String::new(),
-            name: new_name.clone(),
-            icon: template.icon.clone(),
-            provider: template.provider.clone(),
-            description: template.description.clone(),
-            working_directory: String::new(),
-            shell: template.shell.clone(),
-            provider_flags: template.provider_flags.clone(),
-            auto_start: 0,
-            restart_on_crash: template.restart_on_crash,
-            idle_timeout_minutes: template.idle_timeout_minutes,
-            created_at: now,
-            agent_type: template.agent_type.clone(),
-            environment: template.environment.clone(),
-            agent_bus_id: String::new(),
-            is_seeded: 0,
-            accounts: String::new(),
-            parent_id: template.id.clone(),
-            branch_label: String::new(),
-            updated_at: now,
-            user_hidden: 0,
+        // Idempotency guard: if a prior partial-failure run already
+        // created a user-clone def for this template (insert
+        // succeeded, then zone moves or instance repoint failed and
+        // left the seeded zones in place), REUSE that clone instead
+        // of creating another. Without this guard, every retry
+        // creates yet another user-clone def — codex P1 on the
+        // first cut of this PR: "unbounded duplicate agents until
+        // cleanup succeeds".
+        //
+        // Uses `user_clone_defs_for_template` (queries
+        // `db_agent_definitions` directly), NOT the cached `defs`
+        // we filled from `agent_def_list` above. `agent_def_list`
+        // reads `db_agents` post-Phase-3b, which surfaces
+        // template-instance projection rows under the same
+        // `is_template = 0 AND parent_template_id = <tpl>` shape as
+        // real user-clone defs — and using such a projection's id
+        // as `new_def.id` would mis-target zones and instance
+        // repoints (the migration's first cut hit exactly that:
+        // it picked `inst-maks` as the "existing clone" and the
+        // subsequent `instance_repoint_definition` updated zero
+        // rows).
+        let existing_clone = match wstore.user_clone_defs_for_template(&template.id) {
+            Ok(clones) => clones.into_iter().next(),
+            Err(e) => {
+                tracing::warn!(
+                    template_id = %old_def_id,
+                    error = %e,
+                    "template_promote migration: user_clone_defs_for_template failed; \
+                     proceeding to insert a fresh clone (may duplicate on prior partial-failure)"
+                );
+                None
+            }
         };
-        if let Err(e) = wstore.agent_def_insert(&mut new_def) {
-            tracing::warn!(
+        let new_def = if let Some(existing) = existing_clone {
+            tracing::info!(
                 template_id = %old_def_id,
-                error = %e,
-                "template_promote migration: agent_def_insert failed; skipping this template"
+                existing_clone_id = %existing.id,
+                existing_clone_name = %existing.name,
+                "template_promote migration: reusing existing user-clone from prior partial run"
             );
-            stats.failures += 1;
-            continue;
-        }
+            existing
+        } else {
+            // Clone the template into a new user-owned definition.
+            // Mirrors `agent_def_create_from_template`'s field-copy
+            // contract — keep these in sync.
+            let now = now_ms() as i64;
+            let mut new_def = crate::backend::storage::wstore::AgentDefinition {
+                id: uuid::Uuid::new_v4().to_string(),
+                slug: String::new(),
+                name: new_name.clone(),
+                icon: template.icon.clone(),
+                provider: template.provider.clone(),
+                description: template.description.clone(),
+                working_directory: String::new(),
+                shell: template.shell.clone(),
+                provider_flags: template.provider_flags.clone(),
+                auto_start: 0,
+                restart_on_crash: template.restart_on_crash,
+                idle_timeout_minutes: template.idle_timeout_minutes,
+                created_at: now,
+                agent_type: template.agent_type.clone(),
+                environment: template.environment.clone(),
+                agent_bus_id: String::new(),
+                is_seeded: 0,
+                accounts: String::new(),
+                parent_id: template.id.clone(),
+                branch_label: String::new(),
+                updated_at: now,
+                user_hidden: 0,
+            };
+            if let Err(e) = wstore.agent_def_insert(&mut new_def) {
+                tracing::warn!(
+                    template_id = %old_def_id,
+                    error = %e,
+                    "template_promote migration: agent_def_insert failed; skipping this template"
+                );
+                stats.failures += 1;
+                continue;
+            }
+            new_def
+        };
 
         // Move every matching zone (current + archives) onto the new
         // definition id. Per-zone failures are logged but don't abort
@@ -1517,6 +1561,116 @@ mod tests {
         let third = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
         assert_eq!(third.templates_scanned, 0);
         assert_eq!(third.templates_promoted, 0);
+    }
+
+    #[test]
+    fn template_promote_reuses_existing_user_clone_on_retry() {
+        // Codex P1 on the first cut of this PR: now that the
+        // migration runs on every startup (no marker gate), a
+        // partial-failure run that succeeded `agent_def_insert` but
+        // failed `move_zone` would leave the seeded def's zones in
+        // place. Next startup: invariant still violated → migration
+        // re-fires → ANOTHER `agent_def_insert` → unbounded
+        // duplicate user-clone defs until the move succeeds.
+        //
+        // Fix: the migration checks for an existing user-clone def
+        // (`is_seeded = 0 AND parent_id = template.id`) BEFORE
+        // inserting a new one. If found, the existing clone is
+        // reused — zone moves and instance repoints target it
+        // idempotently. This test simulates the "prior partial run
+        // left a clone" state and asserts the next migration run
+        // reuses it instead of inserting a duplicate.
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        let template = insert_template(&wstore, "tpl-claude", "Claude Code", "claude");
+        // Simulate prior-partial state: a user-clone def already
+        // exists for this template (from an earlier run whose
+        // insert succeeded), but the seeded zones are still in
+        // place (move failed).
+        let now = now_ms() as i64;
+        let mut prior_clone = crate::backend::storage::wstore::AgentDefinition {
+            id: "prior-clone-id".to_string(),
+            slug: String::new(),
+            name: "Maks".to_string(),
+            icon: template.icon.clone(),
+            provider: template.provider.clone(),
+            description: template.description.clone(),
+            working_directory: String::new(),
+            shell: template.shell.clone(),
+            provider_flags: template.provider_flags.clone(),
+            auto_start: 0,
+            restart_on_crash: template.restart_on_crash,
+            idle_timeout_minutes: template.idle_timeout_minutes,
+            created_at: now - 1_000,
+            agent_type: template.agent_type.clone(),
+            environment: template.environment.clone(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: template.id.clone(),
+            branch_label: String::new(),
+            updated_at: now - 1_000,
+            user_hidden: 0,
+        };
+        wstore.agent_def_insert(&mut prior_clone).unwrap();
+        // Seeded zone still in place (the failure we're recovering
+        // from).
+        write_session_state(
+            &filestore,
+            &template.id,
+            br#"{"nodes":[{"type":"user_message","message":"hi"}]}"#,
+        )
+        .unwrap();
+
+        // Pre-condition: exactly one user-clone def for this template.
+        let defs_before = wstore.agent_def_list().unwrap();
+        let clones_before: Vec<_> = defs_before
+            .iter()
+            .filter(|d| d.is_seeded == 0 && d.parent_id == template.id)
+            .collect();
+        assert_eq!(clones_before.len(), 1, "test setup: one prior clone");
+
+        // Run migration. It MUST reuse `prior-clone-id` rather than
+        // inserting a second clone.
+        let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(stats.templates_scanned, 1);
+        assert_eq!(stats.templates_promoted, 1);
+
+        let defs_after = wstore.agent_def_list().unwrap();
+        let clones_after: Vec<_> = defs_after
+            .iter()
+            .filter(|d| d.is_seeded == 0 && d.parent_id == template.id)
+            .collect();
+        assert_eq!(
+            clones_after.len(),
+            1,
+            "migration must reuse the existing clone, not insert a duplicate"
+        );
+        assert_eq!(clones_after[0].id, "prior-clone-id");
+        assert_eq!(clones_after[0].name, "Maks");
+
+        // Zones successfully moved to the reused clone's id.
+        let new_current = agent_current_zone("prior-clone-id");
+        let new_files = filestore.list_files(&new_current).unwrap();
+        assert!(
+            new_files.iter().any(|f| f.name == SNAPSHOT_FILE),
+            "the moved current zone must live under the reused clone's id"
+        );
+
+        // Run AGAIN — invariant now restored, so this should be a
+        // pure no-op (no new clones, no errors).
+        let stats2 = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(stats2.templates_scanned, 0);
+        assert_eq!(stats2.templates_promoted, 0);
+        let final_clones = wstore
+            .agent_def_list()
+            .unwrap()
+            .into_iter()
+            .filter(|d| d.is_seeded == 0 && d.parent_id == template.id)
+            .count();
+        assert_eq!(final_clones, 1, "still exactly one clone after the second pass");
     }
 
     #[test]
