@@ -454,6 +454,20 @@ async fn main() {
     // Runs on every startup to catch any corruption from prior sessions.
     heal_all_layouts(&wstore);
 
+    // Option E (PR 1 of 2) — one-shot migration of per-block agent
+    // session zones into per-agent zones. Gated by a marker file under
+    // the data dir; a second startup is a no-op. Failures on
+    // individual blocks are logged but do not abort startup; the
+    // marker file is written even on partial failure so we don't
+    // retry indefinitely (operators can delete the marker to force a
+    // re-run). See
+    // docs/specs/SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23.md.
+    let _agent_zones_migration_stats = backend::agent_session::migrate_block_zones_v1(
+        &wstore,
+        &filestore,
+        &base::get_wave_data_dir(),
+    );
+
     // Session recovery (Phase 4.2): scan for agent blocks that still have
     // `session:active_pid` from a previous run — those sessions were killed
     // by a crash/reboot. Transfer to `session:was_interrupted` so the
