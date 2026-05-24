@@ -596,10 +596,23 @@
     }
 
     // === User Message ===
+    // High-contrast user-input styling per
+    // `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`.
+    // Uses --user-input-color (distinct from --accent-color) so typed
+    // input pops independently of the accent re-theming surface.
+    //
+    // Regular user input NEVER soft-wraps — newlines are honored
+    // verbatim and long lines scroll horizontally inside the message.
+    // The user controls wrapping by inserting their own \n.
+    //
+    // The startup-injection variant (`--startup`) gets a single-line
+    // summary that expands on hover and pins on click — mirroring
+    // the ToolBlock pattern in `tool-collapse.md`. See
+    // `components/UserMessageBlock.tsx` for the JSX side.
     .agent-user-message {
         padding: 3px var(--space-1);
-        background: color-mix(in srgb, var(--accent-color) 5%, transparent);
-        border-left: 2px solid var(--accent-color);
+        background: color-mix(in srgb, var(--user-input-color) 14%, transparent);
+        border-left: 3px solid var(--user-input-color);
         border-radius: 2px;
         user-select: text;
         cursor: text;
@@ -607,19 +620,62 @@
         .agent-user-message-content {
             pre {
                 margin: 0;
-                white-space: pre-wrap;
-                overflow-wrap: anywhere;
+                // pre = honor newlines, no soft-wrap. Long lines
+                // scroll horizontally inside the bubble; word-break
+                // rules removed so URLs / paths stay intact.
+                white-space: pre;
+                overflow-x: auto;
+                overflow-y: hidden;
             }
         }
 
-        // Collapsed state: show only the first line (ellipsis-truncated).
-        // Driven by AgentDocumentView auto-collapse for large user messages
-        // like the startup session-context payload. The hover strip's expand
-        // button toggles this off.
-        &--collapsed .agent-user-message-content pre {
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+        // ─── Startup-injection variant ────────────────────────────
+        // Long Markdown payload the frontend sends as the opening
+        // turn (see SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md). It
+        // shouldn't dominate the pane. Collapsed-by-default with
+        // hover-expand + click-to-pin.
+        &--startup {
+            cursor: pointer;
+
+            .agent-user-message-summary {
+                display: flex;
+                align-items: center;
+                gap: var(--space-1);
+                padding: var(--space-0-5) var(--space-1);
+                white-space: nowrap;
+                overflow: hidden;
+                min-width: 0;
+                user-select: none;
+
+                .agent-user-message-icon {
+                    color: var(--user-input-color);
+                    flex-shrink: 0;
+                }
+                .agent-user-message-label {
+                    font-weight: 500;
+                    color: var(--user-input-color);
+                    flex-shrink: 0;
+                }
+                .agent-user-message-hint {
+                    color: var(--secondary-text-color);
+                    font-size: 0.85em;
+                    opacity: 0.75;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+            }
+        }
+
+        // Hover-while-collapsed (startup expanded transiently) gets
+        // a slightly deeper background so the user knows this is a
+        // hover-preview, not a permanent expansion.
+        &--expanded.agent-user-message--startup {
+            background: color-mix(in srgb, var(--user-input-color) 18%, transparent);
+        }
+
+        // Pinned state — thicker left border mirrors ToolBlock.pinned.
+        &--pinned {
+            border-left-width: 4px;
         }
     }
 
