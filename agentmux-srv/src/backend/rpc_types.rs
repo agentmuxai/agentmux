@@ -351,6 +351,25 @@ pub const COMMAND_FORK_AGENT_DEFINITION: &str = "forkagentdefinition";
 /// launch. Rejects non-template ids + duplicate user-agent names.
 pub const COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE: &str = "agentdefcreatefromtemplate";
 
+/// Two-tier picker (Phase 2 — SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md
+/// Q2 Decision Y). Set the `user_hidden` flag on a seeded template so
+/// it disappears from the default `+ New from template` list. Idempotent;
+/// rejects user-owned (`is_seeded = 0`) definitions — those use
+/// `deleteagent` instead. Manifest re-sync resets `user_hidden = 0` for
+/// any newly-added template id so fresh templates always surface once.
+pub const COMMAND_AGENT_DEF_HIDE: &str = "agentdefhide";
+/// Two-tier picker (Phase 2). Inverse of `agentdefhide` — set
+/// `user_hidden = 0` so a previously-hidden template reappears in the
+/// picker's templates tier. Powers the settings "Hidden templates"
+/// unhide affordance. Same validation as hide.
+pub const COMMAND_AGENT_DEF_UNHIDE: &str = "agentdefunhide";
+/// Two-tier picker (Phase 2). Return only the hidden templates
+/// (`is_seeded = 1 AND user_hidden = 1`). Backs the settings UI's
+/// list of templates the user can unhide. The picker proper never
+/// calls this — it uses `listagents` (which excludes hidden rows
+/// by default).
+pub const COMMAND_AGENT_DEF_LIST_HIDDEN_TEMPLATES: &str = "agentdeflisthiddentemplates";
+
 // Drone pane (v8 — issue #753 Phase 1)
 pub const COMMAND_LIST_DRONES: &str = "listdrones";
 pub const COMMAND_GET_DRONE: &str = "getdrone";
@@ -1306,10 +1325,19 @@ fn is_zero_usize(v: &usize) -> bool {
 /// Absent / `None` = no filter — backward-compatible with callers
 /// that pass `{}` or `null`. Phase 1 of the two-tier picker
 /// (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
+///
+/// `include_hidden` (Phase 2 — Q2 Decision Y): when `false` (default),
+/// templates with `user_hidden = 1` are filtered out. The settings
+/// "Hidden templates" surface passes `true` so it can render rows for
+/// unhiding; the picker proper omits the flag and gets the filtered
+/// default. `include_hidden` only affects templates — user-owned rows
+/// never set `user_hidden`, so the flag is a no-op for them.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CommandListAgentDefinitionsData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_seeded: Option<i64>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub include_hidden: bool,
 }
 
 /// Request for `agentdefcreatefromtemplate`. Clones a seeded template
@@ -1345,6 +1373,25 @@ pub struct AgentDefCreateFromTemplateResult {
     /// re-thread these — they flow through to the launch overrides.
     pub identity_id: String,
     pub memory_id: String,
+}
+
+/// Request for `agentdefhide` / `agentdefunhide`. Phase 2 of the
+/// two-tier picker (Q2 Decision Y). The two RPCs share the same shape
+/// — the action is encoded in the command name, not the payload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandAgentDefHideData {
+    /// id of a seeded definition (must have `is_seeded = 1`).
+    pub definition_id: String,
+}
+
+/// Response for `agentdefhide` / `agentdefunhide`. `ok = true` when a
+/// row was updated; `false` when the id didn't match any row. (A row
+/// that exists but isn't a template returns an RPC-level error, not
+/// `ok: false` — the caller should never have been able to send that
+/// id from the picker UI.)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentDefHideResult {
+    pub ok: bool,
 }
 
 /// Input for createagent

@@ -489,12 +489,56 @@ class RpcApiType {
     // Optional `is_seeded` filter: 1 = templates only, 0 = user-owned
     // only, undefined = no filter (backward-compat: every existing
     // caller passes nothing). Backend treats `null` / `{}` as no-filter.
+    //
+    // Phase 2 (Q2 Decision Y — hide templates): by default the backend
+    // excludes templates with `user_hidden = 1`. Pass `include_hidden:
+    // true` to opt back in — only the settings panel's unhide UI needs
+    // to do this. Hide filter never applies to user-owned rows.
     ListAgentDefinitionsCommand(
         client: RpcClient,
-        data?: { is_seeded?: 0 | 1 },
+        data?: { is_seeded?: 0 | 1; include_hidden?: boolean },
         opts?: RpcOpts,
     ): Promise<AgentDefinition[]> {
         return client.rpcCall("listagents", data ?? {}, opts);
+    }
+
+    // command "agentdefhide" [call]
+    //
+    // Two-tier picker — Phase 2 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md
+    // Q2 Decision Y). Set `user_hidden = 1` on a seeded template so it
+    // disappears from the default `+ New from template` tier. Idempotent;
+    // rejects user-owned definitions (they have their own delete path).
+    AgentDefHideCommand(
+        client: RpcClient,
+        data: { definition_id: string },
+        opts?: RpcOpts,
+    ): Promise<{ ok: boolean }> {
+        return client.rpcCall("agentdefhide", data, opts);
+    }
+
+    // command "agentdefunhide" [call]
+    //
+    // Two-tier picker — Phase 2. Inverse of `agentdefhide`. Used by the
+    // settings panel's "Hidden templates" unhide affordance.
+    AgentDefUnhideCommand(
+        client: RpcClient,
+        data: { definition_id: string },
+        opts?: RpcOpts,
+    ): Promise<{ ok: boolean }> {
+        return client.rpcCall("agentdefunhide", data, opts);
+    }
+
+    // command "agentdeflisthiddentemplates" [call]
+    //
+    // Two-tier picker — Phase 2. Return only templates the user has
+    // hidden (`is_seeded = 1 AND user_hidden = 1`). The picker itself
+    // never calls this — it uses `listagents` with the default-filter-
+    // out behaviour; this is for the settings "Hidden templates" list.
+    AgentDefListHiddenTemplatesCommand(
+        client: RpcClient,
+        opts?: RpcOpts,
+    ): Promise<AgentDefinition[]> {
+        return client.rpcCall("agentdeflisthiddentemplates", {}, opts);
     }
 
     // command "agentdefcreatefromtemplate" [call]

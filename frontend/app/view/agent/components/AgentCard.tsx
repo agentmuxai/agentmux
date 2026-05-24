@@ -50,6 +50,13 @@ interface AgentCardProps {
     /** Option E: invoked when the user clicks the "+ New" affordance.
      *  Parent archives the current zone then opens the launch modal. */
     onNewSession?: (agent: AgentDefinition) => void;
+    /**
+     * Phase 2 (Q2 Decision Y — hide templates): right-click handler.
+     * Currently only the templates tier wires this up so the user can
+     * hide a template. My-agent rows leave it undefined and the card
+     * falls back to the browser default context menu.
+     */
+    onContextMenu?: (agent: AgentDefinition, evt: MouseEvent) => void;
     /** When true this card is the picker's default choice (the
      *  most-recently-used agent) — focus it on mount so Enter launches
      *  it and the focus ring marks it as the default. */
@@ -86,6 +93,15 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
         props.onNewSession?.(props.agent);
     };
 
+    const handleContextMenu = (e: MouseEvent) => {
+        // Only intercept if a handler is wired. Otherwise let the
+        // browser show its default menu (useful for "Inspect" in
+        // dev). The handler is responsible for preventDefault.
+        if (props.onContextMenu) {
+            props.onContextMenu(props.agent, e);
+        }
+    };
+
     return (
         <div
             ref={cardEl}
@@ -95,6 +111,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
                 "agent-card--needs-install": props.installed === false,
             }}
             onClick={handleCardClick}
+            onContextMenu={handleContextMenu}
             onKeyDown={handleKeyDown}
             role="button"
             tabIndex={props.disabled ? -1 : 0}

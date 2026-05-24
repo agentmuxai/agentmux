@@ -33,6 +33,7 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { ContextMenuModel } from "@/app/store/contextmenu";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { useTabModal, type LaunchFormStateWire } from "@/app/tab/tab-modal";
 import { getPlatform } from "@/util/platformutil";
@@ -40,6 +41,7 @@ import type { AgentViewModel } from "../agent-model";
 import { getProvider } from "../providers";
 import { AgentCard } from "./AgentCard";
 import { AgentActionBar } from "./AgentActionBar";
+import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
 import type { LaunchOverrides } from "./AgentLaunchModal";
 import { MyAgentsList } from "./MyAgentsList";
 
@@ -602,6 +604,51 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // `handleTemplateSelect` directly. Don't resurrect a single shared
     // `handleSelect` — fan out per tier (reagent P2 on #1011).
 
+    // Phase 2 (Q2 Decision Y — hide templates): right-click on a
+    // template card opens a context menu with "Hide template". The
+    // card disappears from the picker the next render after the RPC
+    // resolves — `listagents` filters by `user_hidden` server-side,
+    // and `agents:changed` (broadcast by the backend after hide)
+    // refetches the list.
+    //
+    // Only seeded templates get this context menu — user-owned rows
+    // belong to `MyAgentsList`, which has its own affordances and
+    // never funnels through this handler.
+    const handleTemplateContextMenu = (
+        agent: AgentDefinition,
+        evt: MouseEvent,
+    ) => {
+        evt.preventDefault();
+        const caption = agent.name || agent.slug || agent.id;
+        ContextMenuModel.showContextMenu(
+            [
+                {
+                    label: `Hide template "${caption}"`,
+                    click: () => {
+                        void (async () => {
+                            try {
+                                await RpcApi.AgentDefHideCommand(TabRpcClient, {
+                                    definition_id: agent.id,
+                                });
+                            } catch (err) {
+                                // Backend rejects only when the row
+                                // isn't a template — should be
+                                // unreachable from this menu, but log
+                                // to muxlog if it ever fires.
+                                // eslint-disable-next-line no-console
+                                console.warn(
+                                    `agentdefhide failed for ${agent.id}:`,
+                                    err,
+                                );
+                            }
+                        })();
+                    },
+                },
+            ],
+            evt,
+        );
+    };
+
     const busy = () => launching() !== null;
 
     // Phase 1 two-tier picker: partition the agent list into the
@@ -677,6 +724,13 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                                         disabled={busy()}
                                         installed={installState()[agent.id]}
                                         onLaunch={handleTemplateSelect}
+                                        // Phase 2: right-click → Hide
+                                        // template (Q2 Decision Y). Only
+                                        // attached for template cards;
+                                        // my-agent rows live in
+                                        // MyAgentsList and have a
+                                        // different action surface.
+                                        onContextMenu={handleTemplateContextMenu}
                                         // Templates by invariant have
                                         // no session zone — suppress
                                         // the "+ New" pill (no
@@ -688,6 +742,17 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                                 )}
                             </For>
                         </div>
+                        {/* Phase 2 (Q2 Decision Y): collapsible
+                            "Hidden templates" section, lazy-loaded so
+                            it doesn't add work when no templates are
+                            hidden. Sits under the templates tier so
+                            hide + unhide live in the same surface
+                            (CLAUDE.md notes that the hamburger
+                            Settings menu just opens settings.json,
+                            so there's no separate settings panel to
+                            host this in). */}
+                        <HiddenTemplatesSection />
+
                         <Show when={nodejsError()}>
                             <div class="agent-nodejs-notice">
                                 <div class="nodejs-notice-icon">

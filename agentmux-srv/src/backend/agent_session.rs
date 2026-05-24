@@ -823,6 +823,7 @@ pub fn migrate_promote_template_sessions_v1(
             parent_id: template.id.clone(),
             branch_label: String::new(),
             updated_at: now,
+            user_hidden: 0,
         };
         if let Err(e) = wstore.agent_def_insert(&mut new_def) {
             tracing::warn!(
@@ -1320,6 +1321,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 1_700_000_000_000,
+            user_hidden: 0,
         };
         wstore.agent_def_insert(&mut def).unwrap();
         def
@@ -1498,6 +1500,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 1_700_000_000_000,
+            user_hidden: 0,
         };
         wstore.agent_def_insert(&mut user_def).unwrap();
         write_session_state(&filestore, &user_def.id, br#"{"nodes":[]}"#).unwrap();
