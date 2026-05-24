@@ -1532,8 +1532,22 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // ONCE so enrichment doesn't issue N+1 queries.
                         // Indexed by instance_id; rows that aren't in
                         // current SQLite fall through to sentinels.
+                        // Registry enrichment: keep head-of-chain
+                        // only. The registry mirror itself excludes
+                        // continuations (see
+                        // `registry_upsert_if_named`), so the SQLite
+                        // side must match — else under the `limit`
+                        // truncation continuation rows displace
+                        // registry-head rows and the merge-by-id
+                        // enrichment misses, silently downgrading
+                        // running-state badges and block_id_hints to
+                        // "available" / empty.
                         let sqlite_rows: Vec<AgentInstance> = wstore
-                            .instance_list_named(records.len().max(1), cmd.definition_id.as_deref())
+                            .instance_list_named(
+                                records.len().max(1),
+                                cmd.definition_id.as_deref(),
+                                /* include_continuations */ false,
+                            )
                             .unwrap_or_default();
                         let sqlite_by_id: std::collections::HashMap<&str, &AgentInstance> =
                             sqlite_rows.iter().map(|i| (i.id.as_str(), i)).collect();
@@ -1612,8 +1626,16 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             .collect()
                     }
                     None => {
+                        // No-registry fallback: drives the launch
+                        // modal's "Continue agent" dropdown directly.
+                        // One entry per chain root, mirroring the
+                        // registry path's semantics.
                         let instances = wstore
-                            .instance_list_named(limit, cmd.definition_id.as_deref())
+                            .instance_list_named(
+                                limit,
+                                cmd.definition_id.as_deref(),
+                                /* include_continuations */ false,
+                            )
                             .map_err(|e| format!("listnamedagents: {e}"))?;
                         instances
                             .into_iter()
@@ -1732,7 +1754,11 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // instance_list_named.
                 let raw_limit = (limit * 10).max(50).min(500);
                 let instances = wstore
-                    .instance_list_named(raw_limit, None)
+                    // Picker "My Agents": include continuations.
+                    // Under Option E a continuation row is the most-
+                    // recent named instance of an agent the user
+                    // actively used — exactly what we want surfaced.
+                    .instance_list_named(raw_limit, None, /* include_continuations */ true)
                     .map_err(|e| format!("listrecentsessions: {e}"))?;
 
                 let defs = wstore
