@@ -18,6 +18,7 @@ import {
     estimateSection,
     estimateSubagentLink,
     estimateTextHeight,
+    estimateUnwrappedTextHeight,
     estimateTool,
     estimateUserMessage,
     STREAMING_CAPABLE,
@@ -60,6 +61,37 @@ describe("estimateTextHeight", () => {
 
     it("respects custom chars/lineHeight params", () => {
         expect(estimateTextHeight("a".repeat(40), 20, 30)).toBe(60); // 2 lines × 30 = 60
+    });
+});
+
+describe("estimateUnwrappedTextHeight", () => {
+    it("returns the minimum height for empty content", () => {
+        expect(estimateUnwrappedTextHeight("")).toBe(32);
+    });
+
+    it("estimates one line for any content without newlines (no soft wrap)", () => {
+        // Codex P2 round 4: a 300-char URL on one line must NOT be
+        // estimated as 4 wrapped lines like estimateTextHeight would.
+        expect(estimateUnwrappedTextHeight("short")).toBe(32);
+        expect(estimateUnwrappedTextHeight("a".repeat(80))).toBe(32);
+        expect(estimateUnwrappedTextHeight("a".repeat(300))).toBe(32);
+        expect(estimateUnwrappedTextHeight("https://example.com/very/long/path/" + "x".repeat(500))).toBe(32);
+    });
+
+    it("counts explicit newlines", () => {
+        expect(estimateUnwrappedTextHeight("line1\nline2")).toBe(48); // 2 lines × 24
+        expect(estimateUnwrappedTextHeight("a\nb\nc")).toBe(72); // 3 lines × 24
+    });
+
+    it("ignores per-line character count entirely", () => {
+        // Long-line + multiline: counted by newlines only.
+        const longLines = "a".repeat(500) + "\n" + "b".repeat(500);
+        expect(estimateUnwrappedTextHeight(longLines)).toBe(48); // exactly 2 lines
+    });
+
+    it("caps at the max estimate", () => {
+        const manyLines = "x\n".repeat(100); // 101 lines × 24 = 2424
+        expect(estimateUnwrappedTextHeight(manyLines)).toBe(320);
     });
 });
 
@@ -122,8 +154,29 @@ describe("per-kind estimators", () => {
             type: "user_message", id: "um1", message: "hi", timestamp: 0,
         };
 
-        it("uses text-height estimate for a regular user message", () => {
+        it("uses unwrapped (newline-based) estimate for a regular user message", () => {
             expect(estimateUserMessage(node, baseDocState())).toBe(32); // short → MIN
+        });
+
+        it("does NOT inflate height for long single-line input (no soft wrap)", () => {
+            // Codex P2 round 4: user input has white-space: pre,
+            // long lines scroll horizontally. The estimator must
+            // not over-allocate vertical space for them.
+            const longUrl: UserMessageNode = {
+                ...node,
+                id: "um-url",
+                message: "https://example.com/" + "x".repeat(500),
+            };
+            expect(estimateUserMessage(longUrl, baseDocState())).toBe(32); // 1 visual line
+        });
+
+        it("scales with explicit newline count", () => {
+            const multiline: UserMessageNode = {
+                ...node,
+                id: "um-multi",
+                message: "a\nb\nc",
+            };
+            expect(estimateUserMessage(multiline, baseDocState())).toBe(72); // 3 × 24
         });
 
         it("returns the collapsed-summary size for an unpinned startup row", () => {
