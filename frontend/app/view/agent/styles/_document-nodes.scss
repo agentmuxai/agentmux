@@ -761,9 +761,26 @@
             //   - .agent-user-message-unpin shows ✕ when pinned,
             //     so the user can collapse without hunting.
             // Both share styling.
-            .agent-user-message-content {
+            //
+            // Anchoring (codex P1 round 3 on PR #1021):
+            //   - Overlay variants are `position: absolute` —
+            //     they serve as the containing block for the
+            //     absolute-positioned buttons themselves, no
+            //     explicit `position: relative` needed (and
+            //     applying `relative` here would lose at equal
+            //     specificity to the overlay rule, dropping the
+            //     overlay back into flow and breaking the whole
+            //     anchor design).
+            //   - The flow variant (pinned, or non-startup
+            //     regular input) needs an explicit
+            //     `position: relative` to serve as containing
+            //     block for the buttons. Scoped via the
+            //     `--flow` modifier so it can't accidentally
+            //     override the overlay rules.
+            .agent-user-message-content--flow {
                 position: relative;
-
+            }
+            .agent-user-message-content {
                 .agent-user-message-pin,
                 .agent-user-message-unpin {
                     position: absolute;
