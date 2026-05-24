@@ -756,9 +756,14 @@ impl WaveStore {
         snapshot.updated_at = stamped_updated_at;
         // Phase 3a dual-write: mirror to db_agents (failure logs + continues).
         self.agents_dual_write_definition_upsert(&snapshot);
-        // Reflect the persisted updated_at on the caller's struct so
-        // downstream RPC responses see the fresh value.
-        agent.updated_at = stamped_updated_at;
+        // Reagent P1 on #1013 round 2: do NOT mutate the caller's
+        // `&mut AgentDefinition` here. The PR is supposed to be
+        // zero-behaviour-change; the previous version reflected
+        // `stamped_updated_at` back onto the caller, which is an
+        // observable mutation downstream callers may rely on remaining
+        // untouched. Callers that need the freshly-stamped value can
+        // re-fetch the row via the normal read path.
+        let _ = stamped_updated_at;
         Ok(())
     }
 
@@ -2282,9 +2287,13 @@ impl WaveStore {
     /// definitions.
     pub(crate) fn agents_dual_write_definition_delete(&self, def_id: &str) {
         let conn = self.conn.lock().unwrap();
+        // Reagent P2 on #1013 round 2: `id` is the PK so the prior
+        // subquery `... AND id NOT IN (SELECT id FROM db_agents
+        // WHERE is_template = 0 AND id = ?1)` could never match two
+        // different rows. Simplified to a direct PK delete; the
+        // template-vs-user-clone guard below handles the dispatch.
         if let Err(e) = conn.execute(
-            "DELETE FROM db_agents WHERE id = ?1 AND is_template = 1
-             AND id NOT IN (SELECT id FROM db_agents WHERE is_template = 0 AND id = ?1)",
+            "DELETE FROM db_agents WHERE id = ?1 AND is_template = 1",
             params![def_id],
         ) {
             tracing::warn!(
@@ -2365,65 +2374,100 @@ impl WaveStore {
         } else {
             inst.instance_name.clone()
         };
-        let res = conn.execute(
-            "INSERT INTO db_agents (
-                id, name, icon, description,
-                is_template, parent_template_id,
-                provider, provider_flags, shell, environment,
-                agent_type, agent_bus_id, accounts,
-                auto_start, restart_on_crash, idle_timeout_minutes,
-                slug, branch_label,
-                identity_id, memory_id, working_directory, github_context,
-                instance_name,
-                created_at, updated_at, is_seeded, user_hidden
-             ) VALUES (
-                ?1, ?2, ?3, ?4,
-                0, ?5,
-                ?6, ?7, ?8, ?9,
-                ?10, ?11, ?12,
-                ?13, ?14, ?15,
-                ?16, ?17,
-                ?18, ?19, ?20, ?21,
-                ?22,
-                ?23, ?24, 0, ?25
-             )
-             ON CONFLICT(id) DO UPDATE SET
-                name = excluded.name,
-                identity_id = excluded.identity_id,
-                memory_id = excluded.memory_id,
-                working_directory = excluded.working_directory,
-                github_context = excluded.github_context,
-                instance_name = excluded.instance_name,
-                updated_at = excluded.updated_at,
-                user_hidden = excluded.user_hidden",
-            params![
-                inst.id,
-                name,
-                def.icon,
-                def.description,
-                def.id,                  // parent_template_id = definition_id
-                def.provider,
-                def.provider_flags,
-                def.shell,
-                def.environment,
-                def.agent_type,
-                def.agent_bus_id,
-                def.accounts,
-                def.auto_start,
-                def.restart_on_crash,
-                def.idle_timeout_minutes,
-                def.slug,
-                def.branch_label,
-                inst.identity_id,
-                inst.memory_id,
-                inst.working_directory,
-                inst.github_context,
-                inst.instance_name,
-                inst.created_at,
-                inst.created_at,          // updated_at = created_at on insert
-                if inst.display_hidden { 1_i64 } else { 0_i64 },
-            ],
-        );
+        // Reagent P1 on #1013 round 2: match the backfill rule
+        // (`agents_consolidate.rs::backfill_instances`) exactly. When the
+        // parent def is a user-clone (`is_seeded = 0`), the existing
+        // `db_agents` row keyed by `def.id` already represents this
+        // agent — FOLD the instance's bindings into it instead of
+        // inserting a new row keyed by `inst.id` with
+        // `parent_template_id = def.id` (which would point at a
+        // non-template row and produce a shape inconsistent with what
+        // backfill produced for identical data).
+        let res = if def.is_seeded == 0 {
+            conn.execute(
+                "UPDATE db_agents SET
+                    name = ?2,
+                    identity_id = ?3,
+                    memory_id = ?4,
+                    working_directory = ?5,
+                    github_context = ?6,
+                    instance_name = ?7,
+                    updated_at = ?8,
+                    user_hidden = ?9
+                 WHERE id = ?1",
+                params![
+                    def.id,
+                    name,
+                    inst.identity_id,
+                    inst.memory_id,
+                    inst.working_directory,
+                    inst.github_context,
+                    inst.instance_name,
+                    inst.created_at,
+                    if inst.display_hidden { 1_i64 } else { 0_i64 },
+                ],
+            )
+        } else {
+            conn.execute(
+                "INSERT INTO db_agents (
+                    id, name, icon, description,
+                    is_template, parent_template_id,
+                    provider, provider_flags, shell, environment,
+                    agent_type, agent_bus_id, accounts,
+                    auto_start, restart_on_crash, idle_timeout_minutes,
+                    slug, branch_label,
+                    identity_id, memory_id, working_directory, github_context,
+                    instance_name,
+                    created_at, updated_at, is_seeded, user_hidden
+                 ) VALUES (
+                    ?1, ?2, ?3, ?4,
+                    0, ?5,
+                    ?6, ?7, ?8, ?9,
+                    ?10, ?11, ?12,
+                    ?13, ?14, ?15,
+                    ?16, ?17,
+                    ?18, ?19, ?20, ?21,
+                    ?22,
+                    ?23, ?24, 0, ?25
+                 )
+                 ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    identity_id = excluded.identity_id,
+                    memory_id = excluded.memory_id,
+                    working_directory = excluded.working_directory,
+                    github_context = excluded.github_context,
+                    instance_name = excluded.instance_name,
+                    updated_at = excluded.updated_at,
+                    user_hidden = excluded.user_hidden",
+                params![
+                    inst.id,
+                    name,
+                    def.icon,
+                    def.description,
+                    def.id,                  // parent_template_id = definition_id
+                    def.provider,
+                    def.provider_flags,
+                    def.shell,
+                    def.environment,
+                    def.agent_type,
+                    def.agent_bus_id,
+                    def.accounts,
+                    def.auto_start,
+                    def.restart_on_crash,
+                    def.idle_timeout_minutes,
+                    def.slug,
+                    def.branch_label,
+                    inst.identity_id,
+                    inst.memory_id,
+                    inst.working_directory,
+                    inst.github_context,
+                    inst.instance_name,
+                    inst.created_at,
+                    inst.created_at,          // updated_at = created_at on insert
+                    if inst.display_hidden { 1_i64 } else { 0_i64 },
+                ],
+            )
+        };
         if let Err(e) = res {
             tracing::warn!(
                 instance_id = %inst.id,
@@ -2552,7 +2596,8 @@ impl WaveStore {
                     working_directory, shell, provider_flags, auto_start,
                     restart_on_crash, idle_timeout_minutes, created_at,
                     agent_type, environment, agent_bus_id, is_seeded,
-                    accounts, parent_id, branch_label, updated_at
+                    accounts, parent_id, branch_label, updated_at,
+                    user_hidden
              FROM db_agent_definitions WHERE id = ?1",
         )?;
         let result = stmt.query_row(params![id], |row| {
@@ -2578,6 +2623,7 @@ impl WaveStore {
                 parent_id: row.get(18)?,
                 branch_label: row.get(19)?,
                 updated_at: row.get(20)?,
+                user_hidden: row.get(21)?,
             })
         });
         match result {
@@ -4038,6 +4084,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 1000,
+            user_hidden: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
         // db_agents row exists, projected as template.
@@ -4073,6 +4120,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 1000,
+            user_hidden: 0,
         };
         store.agent_def_insert(&mut tpl).unwrap();
         // User-cloned def has is_seeded=0 + parent_id pointing at template.
@@ -4114,6 +4162,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 1000,
+            user_hidden: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
         def.name = "New Name".to_string();
@@ -4149,6 +4198,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 1000,
+            user_hidden: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
         assert_eq!(count_agents(&store, "id = 'tpl-del'"), 1);
@@ -4182,6 +4232,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 1000,
+            user_hidden: 0,
         };
         store.agent_def_insert(&mut tpl).unwrap();
 
@@ -4224,6 +4275,97 @@ mod tests {
         assert_eq!(count_agents(&store, "id = 'inst-cont'"), 0);
     }
 
+    /// Reagent P1 + P2 on #1013 round 2 — pins the user-cloned-def
+    /// branch of `agents_dual_write_instance_create` so it matches
+    /// the backfill rule (`agents_consolidate.rs::backfill_instances`
+    /// folds the instance's bindings into the EXISTING `db_agents`
+    /// row keyed by `def.id`, NOT a fresh row keyed by `inst.id`).
+    /// Round-1 test only covered the seeded-template branch.
+    #[test]
+    fn dual_write_instance_create_folds_into_user_clone_def() {
+        let store = make_store();
+        // Seed a template.
+        let mut tpl = AgentDefinition {
+            id: "tpl-folded".to_string(),
+            slug: String::new(),
+            name: "Coder".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: "desc".to_string(),
+            working_directory: String::new(),
+            shell: "bash".to_string(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1000,
+            agent_type: "standalone".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 1,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1000,
+            user_hidden: 0,
+        };
+        store.agent_def_insert(&mut tpl).unwrap();
+
+        // User-clone of the template (is_seeded = 0, parent_id = tpl id).
+        let mut clone = AgentDefinition {
+            id: "user-clone-1".to_string(),
+            slug: String::new(),
+            name: "Maks".to_string(),
+            is_seeded: 0,
+            parent_id: "tpl-folded".to_string(),
+            created_at: 1500,
+            updated_at: 1500,
+            ..tpl.clone()
+        };
+        store.agent_def_insert(&mut clone).unwrap();
+        // The user-clone projection in db_agents starts with empty bindings.
+        assert_eq!(read_agent_field(&store, "user-clone-1", "identity_id"), Some(String::new()));
+        assert_eq!(read_agent_field(&store, "user-clone-1", "memory_id"), Some(String::new()));
+
+        // Create an instance ON the user-clone def. Per backfill rule,
+        // this must FOLD the instance's bindings into the existing
+        // user-clone-1 row — NOT create a separate inst-fold-1 row
+        // with parent_template_id pointing at a non-template row.
+        let inst = AgentInstance {
+            id: "inst-fold-1".to_string(),
+            definition_id: "user-clone-1".to_string(),
+            parent_instance_id: String::new(),
+            block_id: String::new(),
+            session_id: String::new(),
+            status: "running".to_string(),
+            github_context: "gh-ctx-A".to_string(),
+            started_at: 2000,
+            ended_at: 0,
+            created_at: 2000,
+            identity_id: "id-folded".to_string(),
+            memory_id: "mem-folded".to_string(),
+            instance_name: "Maks v2".to_string(),
+            working_directory: "/wd/folded".to_string(),
+            display_hidden: false,
+        };
+        store.instance_create(&inst).unwrap();
+
+        // No new row keyed by inst.id — backfill never creates one for
+        // user-clone-def instances, and dual-write must match.
+        assert_eq!(count_agents(&store, "id = 'inst-fold-1'"), 0);
+
+        // Bindings folded onto the user-clone-1 row.
+        assert_eq!(read_agent_field(&store, "user-clone-1", "identity_id"), Some("id-folded".to_string()));
+        assert_eq!(read_agent_field(&store, "user-clone-1", "memory_id"), Some("mem-folded".to_string()));
+        assert_eq!(read_agent_field(&store, "user-clone-1", "working_directory"), Some("/wd/folded".to_string()));
+        assert_eq!(read_agent_field(&store, "user-clone-1", "github_context"), Some("gh-ctx-A".to_string()));
+        assert_eq!(read_agent_field(&store, "user-clone-1", "instance_name"), Some("Maks v2".to_string()));
+        assert_eq!(read_agent_field(&store, "user-clone-1", "name"), Some("Maks v2".to_string()));
+        // is_template stays 0, parent_template_id untouched (still empty
+        // since user-clone insert leaves it blank).
+        assert_eq!(read_agent_int(&store, "user-clone-1", "is_template"), Some(0));
+    }
+
     #[test]
     fn dual_write_instance_set_hidden_flips_user_hidden_bit() {
         let store = make_store();
@@ -4249,6 +4391,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 1000,
+            user_hidden: 0,
         };
         store.agent_def_insert(&mut tpl).unwrap();
         let inst = AgentInstance {
@@ -4301,6 +4444,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 1000,
+            user_hidden: 0,
         };
         store.agent_def_insert(&mut tpl).unwrap();
         let inst = AgentInstance {
@@ -4351,6 +4495,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 1000,
+            user_hidden: 0,
         };
         store.agent_def_insert(&mut tpl_a).unwrap();
         let mut tpl_b = tpl_a.clone();
@@ -4413,6 +4558,7 @@ mod tests {
                 parent_id: String::new(),
                 branch_label: String::new(),
                 updated_at: 1000,
+                user_hidden: 0,
             };
             store.agent_def_insert(&mut d).unwrap();
         }
