@@ -71,6 +71,24 @@ pub fn remove_contexts_for_block(block_id: &str) {
 pub static ALLOW_BROWSER_PANE_FOCUS_ONCE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+/// Last child HWND that received *intentional* keyboard focus — set by the
+/// pane subclass when an allowed-through `WM_SETFOCUS` lands, and by the
+/// main reclaim path (`ui_tasks::MainFocusReclaimTask`) after its
+/// `SetFocus` on the main render widget. Programmatic pane focus that
+/// the redirect intercepts is NOT recorded — only paths the user
+/// actually intends.
+///
+/// Read on top-level `WM_ACTIVATE` to redirect keyboard focus back to
+/// whichever child the user was last typing in, closing the
+/// alt-tab-back-and-input-drops bug
+/// (`docs/specs/SPEC_WINDOW_REACTIVATE_FOCUS_RESTORE_2026_05_23.md` §5.1).
+///
+/// `0` means "no child HWND tracked yet". `Relaxed` ordering is fine: a
+/// single-word write with no companion fences, and the activate handler
+/// re-validates via `IsWindow` before calling `SetFocus`.
+pub static LAST_FOCUSED_CHILD: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
 /// Last-redirect timestamp per root HWND, used by
 /// `should_redirect_pane_focus_to_root` to rate-limit programmatic focus
 /// storms (setInterval-driven `window.focus()`, OAuth redirector pages,
@@ -251,6 +269,8 @@ pub unsafe fn install_browser_pane_focus_redirect(
             // once, then revert to redirect-mode for subsequent events.
             if ALLOW_BROWSER_PANE_FOCUS_ONCE.swap(false, Ordering::Relaxed) {
                 tracing::info!("[pane-wndproc] WM_SETFOCUS allowed (intentional)");
+                LAST_FOCUSED_CHILD.store(hwnd as usize, Ordering::Relaxed);
+                tracing::info!("[focus-track] LAST_FOCUSED_CHILD <= pane hwnd={:p}", hwnd);
                 // Fall through to the original WndProc.
             } else {
                 // Programmatic focus (page load, JS window.focus()): redirect

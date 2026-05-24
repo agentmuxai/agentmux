@@ -574,12 +574,15 @@ wrap_task! {
                         let render = find_main_render_widget(top_hwnd, &pane_outer_hwnds);
                         let target = render.unwrap_or(top_hwnd);
                         windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(target as _);
+                        crate::browser_pane::hwnd::LAST_FOCUSED_CHILD
+                            .store(target as usize, std::sync::atomic::Ordering::Relaxed);
                         tracing::info!(
                             "[main-focus-reclaim] Win32 SetFocus target={:p} render_found={} panes_excluded={}",
                             target,
                             render.is_some(),
                             pane_outer_hwnds.len(),
                         );
+                        tracing::info!("[focus-track] LAST_FOCUSED_CHILD <= main hwnd={:p}", target);
                     },
                     None => {
                         tracing::warn!(
