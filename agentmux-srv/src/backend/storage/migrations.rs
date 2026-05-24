@@ -28,7 +28,9 @@ use super::error::StoreError;
 ///   v2 — db_agent_definitions.updated_at
 ///   v3 — db_agent_definitions.user_hidden (Phase 2 hide templates,
 ///        SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md Q2 Decision Y)
-pub const OBJECT_SCHEMA_VERSION: i64 = 3;
+///   v4 — db_agents consolidation table (Phase 3a; dual-write only,
+///        reads still on db_agent_definitions / db_agent_instances)
+pub const OBJECT_SCHEMA_VERSION: i64 = 4;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -267,6 +269,64 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         CREATE INDEX IF NOT EXISTS idx_agent_instances_name_recent
             ON db_agent_instances(instance_name, started_at DESC)
             WHERE display_hidden = 0 AND instance_name != '';
+
+        -- Phase 3a consolidation: `db_agents` collapses `db_agent_definitions`
+        -- + `db_agent_instances` into one table per
+        -- `docs/specs/SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md`.
+        -- WRITE-ONLY in 3a: every old-table mutation dual-writes here, but
+        -- every read still hits the old tables. Phase 3b migrates readers,
+        -- Phase 3c drops the old tables. Column names align with the live
+        -- `db_agent_definitions` shape (provider, working_directory, …) —
+        -- NOT the inline draft in the spec (provider_id, cmd, cmd_args, …) —
+        -- because the existing storage layer never grew the cmd-template
+        -- columns the spec sketched; carrying the names we actually have
+        -- avoids inventing data we don't store. See the PR body for the
+        -- field-by-field mapping.
+        CREATE TABLE IF NOT EXISTS db_agents (
+            id                   TEXT PRIMARY KEY,
+            name                 TEXT NOT NULL,
+            icon                 TEXT NOT NULL DEFAULT '',
+            description          TEXT NOT NULL DEFAULT '',
+
+            -- Template vs user agent
+            is_template          INTEGER NOT NULL DEFAULT 0,
+            parent_template_id   TEXT NOT NULL DEFAULT '',
+
+            -- Provider/cmd config (was on definition; named to match the
+            -- live `db_agent_definitions` columns).
+            provider             TEXT NOT NULL,
+            provider_flags       TEXT NOT NULL DEFAULT '',
+            shell                TEXT NOT NULL DEFAULT '',
+            environment          TEXT NOT NULL DEFAULT '',
+            agent_type           TEXT NOT NULL DEFAULT 'standalone',
+            agent_bus_id         TEXT NOT NULL DEFAULT '',
+            accounts             TEXT NOT NULL DEFAULT '',
+            auto_start           INTEGER NOT NULL DEFAULT 0,
+            restart_on_crash     INTEGER NOT NULL DEFAULT 0,
+            idle_timeout_minutes INTEGER NOT NULL DEFAULT 0,
+            slug                 TEXT NOT NULL DEFAULT '',
+            branch_label         TEXT NOT NULL DEFAULT '',
+
+            -- Bindings (was on instance — only meaningful when is_template=0).
+            -- For template rows these stay empty.
+            identity_id          TEXT NOT NULL DEFAULT '',
+            memory_id            TEXT NOT NULL DEFAULT '',
+            working_directory    TEXT NOT NULL DEFAULT '',
+            github_context       TEXT NOT NULL DEFAULT '',
+            instance_name        TEXT NOT NULL DEFAULT '',
+
+            -- Provenance
+            created_at           INTEGER NOT NULL DEFAULT 0,
+            updated_at           INTEGER NOT NULL DEFAULT 0,
+            is_seeded            INTEGER NOT NULL DEFAULT 0,
+            user_hidden          INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_agents_is_template
+            ON db_agents(is_template);
+        CREATE INDEX IF NOT EXISTS idx_agents_parent_template_id
+            ON db_agents(parent_template_id);
+        CREATE INDEX IF NOT EXISTS idx_agents_is_seeded
+            ON db_agents(is_seeded);
 
         CREATE TABLE IF NOT EXISTS db_drone_definitions (
             id          TEXT PRIMARY KEY,
@@ -513,6 +573,7 @@ mod tests {
         "db_identity_bindings",
         "db_memory_bundles",
         "db_agent_instances",
+        "db_agents",
         "db_drone_definitions",
         "db_drone_runs",
     ];
@@ -559,6 +620,9 @@ mod tests {
             "idx_memory_bundles_is_blank",
             "idx_agent_instances_definition",
             "idx_agent_instances_name_recent",
+            "idx_agents_is_template",
+            "idx_agents_parent_template_id",
+            "idx_agents_is_seeded",
             "idx_drone_definitions_updated",
             "idx_drone_runs_status",
         ] {
