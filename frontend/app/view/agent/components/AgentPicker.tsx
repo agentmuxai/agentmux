@@ -78,6 +78,26 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     //   false     = needs install — card shows the bottom-right ribbon
     const [installState, setInstallState] = createSignal<Record<string, boolean | undefined>>({});
 
+    // Option E (PR 2 of 2): per-agent "has a current session" cache,
+    // keyed by agent.id.
+    //   undefined = not yet probed
+    //   true      = `agent:<defId>:current` has content → default
+    //               click auto-continues; "+ New" button surfaces
+    //   false     = no session yet → default click opens launch modal
+    const [sessionState, setSessionState] = createSignal<Record<string, boolean | undefined>>({});
+
+    const checkHasSession = async (agent: AgentDefinition) => {
+        try {
+            const r = await RpcApi.AgentSessionReadCommand(TabRpcClient, {
+                definition_id: agent.id,
+            });
+            setSessionState((s) => ({ ...s, [agent.id]: !!(r.content && r.content.length > 0) }));
+        } catch {
+            // Non-fatal — treat as no session (default click → modal).
+            setSessionState((s) => ({ ...s, [agent.id]: false }));
+        }
+    };
+
     const checkInstalled = async (agent: AgentDefinition) => {
         const prov = getProvider(agent.provider);
         // Non-npm providers (kimi via pip, system-PATH CLIs) don't go
@@ -329,12 +349,109 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             }));
     };
 
+    // Option E (PR 2 of 2): when an agent has an in-progress session
+    // zone (`agent:<defId>:current`), a plain click on the card
+    // auto-continues into that session — no launch-modal round-trip.
+    // Modifier keys (Shift / Ctrl / Alt / Cmd) are the escape hatch:
+    // they force the launch modal even when a session exists, so the
+    // user can still pick a different identity / memory / runtime.
+    // The "+ New" button on the card archives the current zone and
+    // routes through `openLaunchModal` for a fresh start.
+    const autoContinue = async (agent: AgentDefinition) => {
+        setLaunching(agent.id);
+        try {
+            // Identity / memory are launch-time picks that aren't
+            // stored on the AgentDefinition itself — they live on the
+            // last NamedAgentRow for this definition. We auto-continue
+            // by reusing the most-recent instance's pair so the spawn
+            // resolves credentials the same way as the previous run.
+            // Empty strings are fine: the backend resolver treats them
+            // as "use ambient credentials" (matches the blank bundle).
+            let identityId = "";
+            let memoryId = "";
+            try {
+                const rows = await RpcApi.ListNamedAgentsCommand(TabRpcClient, {
+                    definition_id: agent.id,
+                }) ?? [];
+                const mostRecent = [...rows].sort(
+                    (a, b) => (b.started_at ?? 0) - (a.started_at ?? 0),
+                )[0];
+                if (mostRecent) {
+                    identityId = mostRecent.identity_id && mostRecent.identity_id !== "blank"
+                        ? mostRecent.identity_id : "";
+                    memoryId = mostRecent.memory_id && mostRecent.memory_id !== "blank"
+                        ? mostRecent.memory_id : "";
+                }
+            } catch {
+                // best-effort — fall through with empty bundles.
+            }
+            await props.model.launchAgentDefinition(agent, {
+                instanceName: agent.name,
+                agentType: (agent.agent_type as "host" | "container") || "host",
+                environment: agent.agent_type === "container" ? "docker" : "local",
+                identityId,
+                memoryId,
+                // No `continueOfInstanceId` — the agent's session
+                // zone IS continuous now (E1, PR #1007). The new pane
+                // reads from `agent:<defId>:current` on mount.
+            });
+            if (props.model.nodejsError) {
+                setNodejsError(props.model.nodejsError);
+                props.model.nodejsError = null;
+            }
+        } finally {
+            setLaunching(null);
+        }
+    };
+
+    const handleNewSession = async (agent: AgentDefinition) => {
+        // Archive the current zone so the next launch starts fresh.
+        // RPC failure is non-fatal — fall through to the launch modal
+        // either way so the user isn't stuck.
+        try {
+            await RpcApi.AgentSessionArchiveCommand(TabRpcClient, {
+                definition_id: agent.id,
+            });
+        } catch {
+            // best-effort
+        }
+        setSessionState((s) => ({ ...s, [agent.id]: false }));
+        openLaunchModal(agent);
+    };
+
     const pendingSelect = new Set<string>();
-    const handleSelect = async (agent: AgentDefinition) => {
+    const handleSelect = async (
+        agent: AgentDefinition,
+        evt?: MouseEvent | KeyboardEvent,
+    ) => {
         if (pendingSelect.has(agent.id)) return;
         pendingSelect.add(agent.id);
         try {
             setNodejsError(null);
+
+            // Option E default-continue: when the agent has a current
+            // session and no modifier key forces the modal, auto-launch
+            // and skip every prereq / install / modal step. The session
+            // zone is per-definition, so the bindings the previous pane
+            // used are still on the AgentDefinition — no picker needed.
+            const forceModal = !!(
+                evt && (
+                    ("shiftKey" in evt && evt.shiftKey) ||
+                    ("ctrlKey" in evt && evt.ctrlKey) ||
+                    ("altKey" in evt && evt.altKey) ||
+                    ("metaKey" in evt && (evt as MouseEvent).metaKey)
+                )
+            );
+            if (!forceModal && sessionState()[agent.id] === true) {
+                // Still gate on install: an agent with a current
+                // session can still need the CLI binary installed
+                // (e.g. user wiped per-version cache).
+                if (installState()[agent.id] !== false) {
+                    await autoContinue(agent);
+                    return;
+                }
+            }
+
             let installed = installState()[agent.id];
 
             // If the bg check hasn't populated state yet (initial render
@@ -451,6 +568,12 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             if (!(agent.id in installState())) {
                 void checkInstalled(agent);
             }
+            // Option E: probe the session zone for every agent on
+            // first sight so we know whether to default-continue or
+            // open the modal when the user clicks.
+            if (!(agent.id in sessionState())) {
+                void checkHasSession(agent);
+            }
         }
     });
 
@@ -503,6 +626,11 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                                         disabled={busy()}
                                         installed={installState()[agent.id]}
                                         onLaunch={handleSelect}
+                                        // Option E: surface "+ New" affordance
+                                        // when this agent has a current session
+                                        // zone (default click auto-continues).
+                                        hasCurrentSession={sessionState()[agent.id] === true}
+                                        onNewSession={handleNewSession}
                                         // agent_def_list returns most-recently-used
                                         // first, so index 0 is the default choice.
                                         defaultFocus={index() === 0}

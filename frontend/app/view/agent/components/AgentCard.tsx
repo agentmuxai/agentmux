@@ -31,8 +31,25 @@ interface AgentCardProps {
      *  true = CLI present in the per-version cache.
      *  false = needs install — render the bottom-right ribbon. */
     installed: boolean | undefined;
-    /** Opens the AgentLaunchModal (or Install modal) for this definition. */
-    onLaunch: (agent: AgentDefinition) => void;
+    /**
+     * Opens the AgentLaunchModal (or Install modal) for this definition.
+     * The synthetic `MouseEvent` is forwarded so the parent can read
+     * modifier keys (Shift/Ctrl/Alt) — used by Option E to force the
+     * launch modal even when the agent has an in-progress session
+     * (default click would auto-continue otherwise).
+     */
+    onLaunch: (agent: AgentDefinition, evt?: MouseEvent | KeyboardEvent) => void;
+    /**
+     * Option E (PR 2 of 2): when true, this card's agent has a
+     * non-empty session zone (`agent:<defId>:current`) — i.e. the
+     * default click will auto-continue rather than open the launch
+     * modal. Renders a small "+ New" secondary button that archives
+     * the current zone and opens the launch modal for a fresh start.
+     */
+    hasCurrentSession?: boolean;
+    /** Option E: invoked when the user clicks the "+ New" affordance.
+     *  Parent archives the current zone then opens the launch modal. */
+    onNewSession?: (agent: AgentDefinition) => void;
     /** When true this card is the picker's default choice (the
      *  most-recently-used agent) — focus it on mount so Enter launches
      *  it and the focus ring marks it as the default. */
@@ -49,16 +66,24 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
         if (props.defaultFocus && !props.disabled) cardEl?.focus();
     });
 
-    const handleCardClick = () => {
-        if (!props.disabled) props.onLaunch(props.agent);
+    const handleCardClick = (e: MouseEvent) => {
+        if (!props.disabled) props.onLaunch(props.agent, e);
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
         if (props.disabled) return;
         if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            props.onLaunch(props.agent);
+            props.onLaunch(props.agent, e);
         }
+    };
+
+    const handleNewClick = (e: MouseEvent) => {
+        // Don't bubble up — outer card click would auto-continue and
+        // race the archive RPC we're about to fire.
+        e.stopPropagation();
+        if (props.disabled) return;
+        props.onNewSession?.(props.agent);
     };
 
     return (
@@ -85,6 +110,24 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
                 <span class="agent-card-install-ribbon" aria-hidden="true">
                     Click to install
                 </span>
+            </Show>
+            {/* Option E (PR #1008): "+ New" affordance — visible only
+                when the agent has an in-progress session. Outer card
+                click auto-continues by default; this button archives
+                the current zone and opens the launch modal so the
+                user can start fresh. Hidden during install ribbon
+                state to avoid double-CTA overlap. */}
+            <Show when={props.hasCurrentSession && props.installed !== false && !props.launching}>
+                <button
+                    type="button"
+                    class="agent-card-new-session-btn"
+                    onClick={handleNewClick}
+                    title="Archive current session and start a new one"
+                    aria-label={`Start a new session for ${caption()} (archives the current one)`}
+                    tabIndex={props.disabled ? -1 : 0}
+                >
+                    {"+ New"}
+                </button>
             </Show>
             <Show when={props.launching}>
                 <span class="agent-card-spinner" />

@@ -24,7 +24,7 @@ import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-
 import { useAgentStream } from "./useAgentStream";
 import { useActivityLog } from "./hooks/useActivityLog";
 import { useSessionDigest } from "./hooks/useSessionDigest";
-import { useHistoryPagination, SNAPSHOT_FILENAME, SNAPSHOT_SCHEMA_VERSION } from "./hooks/useHistoryPagination";
+import { useHistoryPagination, SNAPSHOT_SCHEMA_VERSION } from "./hooks/useHistoryPagination";
 import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
 import { useInSessionSearch } from "./hooks/useInSessionSearch";
 import { useBookmarks } from "./hooks/useBookmarks";
@@ -167,11 +167,25 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // History pagination: dispatches HistoryLoaded into the agent-document-store
     // for the trailing 200 lines on mount + each user-triggered loadOlder.
+    //
+    // Option E (PR #1007 backend, this PR frontend): pass the agent
+    // definition id so the snapshot fast-path reads from the
+    // agent-anchored zone (`agent:<defId>:current`) rather than the
+    // per-block zone. `agentId` here is the AgentDefinition slug/UUID —
+    // a non-empty string is guaranteed at this point by the `Show
+    // when={agentId()}` gate in AgentViewWrapper above.
     const history = useHistoryPagination({
         blockId: model.blockId,
         // PR-4 — see useAgentStream above; same rationale.
         model: paneModel,
         outputFormat,
+        definitionId: agentId,
+        // Option E: snapshot read returns the modts of the previous
+        // owner's last write; project into the model so `viewText`
+        // renders a "· continued Xm ago" title-bar chip when the gap
+        // is >30s. Setter is a no-op if the pane unmounts before
+        // restore.
+        onContinuationModts: (ms) => model.continuedFromMsAtom._set(ms),
         log,
     });
 
@@ -220,9 +234,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 historyOffset: capturedOffset,
                 nodes,
             };
-            await RpcApi.BlockfileWriteStateCommand(TabRpcClient, {
-                block_id: model.blockId,
-                filename: SNAPSHOT_FILENAME,
+            // Option E (PR #1007 backend, this PR frontend): write
+            // the snapshot to the agent-anchored zone
+            // `agent:<defId>:current` so the next pane that opens for
+            // this AgentDefinition picks up where this one left off.
+            // `agentId` is the definition slug/UUID from block meta —
+            // non-empty here by the AgentViewWrapper `Show when=...`
+            // gate above.
+            await RpcApi.AgentSessionWriteStateCommand(TabRpcClient, {
+                definition_id: agentId,
                 content: JSON.stringify(snapshot),
             }, { timeout: 10000 });
         }).catch((e) => {

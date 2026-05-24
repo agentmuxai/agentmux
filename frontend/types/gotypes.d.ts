@@ -2021,6 +2021,74 @@ declare global {
         bytes_written: number;
     };
 
+    // wshrpc.CommandAgentSessionReadData — Option E (agent-anchored
+    // session zones). Reads `output.state.json` from
+    // `agent:<definition_id>:current`.
+    type CommandAgentSessionReadData = {
+        definition_id: string;
+    };
+
+    // wshrpc.AgentSessionReadResult — `content === null` (or undefined)
+    // means no zone / snapshot exists for this definition (fresh
+    // agent), NOT an error.
+    type AgentSessionReadResult = {
+        content?: string | null;
+        modts?: number | null;
+    };
+
+    // wshrpc.CommandAgentSessionWriteStateData — writes
+    // `output.state.json` into `agent:<definition_id>:current`
+    // (creates the zone if missing).
+    type CommandAgentSessionWriteStateData = {
+        definition_id: string;
+        content: string;
+    };
+
+    // wshrpc.AgentSessionWriteStateResult
+    type AgentSessionWriteStateResult = {
+        bytes_written: number;
+    };
+
+    // wshrpc.CommandAgentSessionAppendOutputData — appends a single
+    // NDJSON line to `output` in `agent:<definition_id>:current`.
+    type CommandAgentSessionAppendOutputData = {
+        definition_id: string;
+        line: string;
+    };
+
+    // wshrpc.AgentSessionAppendOutputResult
+    type AgentSessionAppendOutputResult = {
+        bytes_written: number;
+    };
+
+    // wshrpc.CommandAgentSessionArchiveData — snapshots
+    // `agent:<defId>:current` into `agent:<defId>:archive:<now_ms>`
+    // then clears the current zone.
+    type CommandAgentSessionArchiveData = {
+        definition_id: string;
+    };
+
+    // wshrpc.AgentSessionArchiveResult — empty `archive_zoneid` when
+    // nothing was archived (current zone was empty).
+    type AgentSessionArchiveResult = {
+        archive_zoneid: string;
+        archived_at_ms: number;
+    };
+
+    // wshrpc.CommandAgentSessionListArchivesData
+    type CommandAgentSessionListArchivesData = {
+        definition_id: string;
+        limit?: number;
+    };
+
+    // wshrpc.AgentArchiveRow — one row of the agent's archive list.
+    type AgentArchiveRow = {
+        archive_zoneid: string;
+        archived_at_ms: number;
+        preview: string;
+        node_count: number;
+    };
+
     // wshrpc.CommandSessionDigestData
     type CommandSessionDigestData = {
         block_id: string;
