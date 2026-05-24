@@ -998,6 +998,39 @@ fn move_zone(
     if files.is_empty() {
         return Ok(());
     }
+    // Destination-non-empty guard (codex P1 round 4 on PR #1017):
+    // if the source `delete_zone` failed on a prior run and the
+    // user then continued their conversation on the destination
+    // clone, a naive copy here would clobber the user's newer
+    // bytes with the older seeded bytes. When the destination
+    // already has content, treat the source as a stale leftover
+    // and drop it without copying. Safe under all retry paths:
+    //
+    //   - First successful run: dest empty → copy + delete source.
+    //   - Partial-failure retry, user untouched: dest matches
+    //     source (same bytes from prior successful copy) → drop
+    //     source (idempotent).
+    //   - Partial-failure retry, user continued: dest has NEWER
+    //     bytes → drop source; user's history is preserved. The
+    //     migration logs that the source was dropped, not copied.
+    let new_files = filestore
+        .list_files(new_zone)
+        .map_err(|e| format!("list_files (new): {e}"))?;
+    if !new_files.is_empty() {
+        tracing::info!(
+            old_zone = %old_zone,
+            new_zone = %new_zone,
+            "template_promote migration: destination non-empty; dropping stale source instead of copying (preserves user's continuation)"
+        );
+        if let Err(e) = filestore.delete_zone(old_zone) {
+            tracing::warn!(
+                old_zone = %old_zone,
+                error = %e,
+                "template_promote migration: delete_zone failed (destination already had content)"
+            );
+        }
+        return Ok(());
+    }
     for f in &files {
         let bytes = filestore
             .read_file(old_zone, &f.name)
@@ -1671,6 +1704,97 @@ mod tests {
         assert!(
             std::str::from_utf8(&new_zone_bytes).unwrap().contains("theirs"),
             "promoted session must land under the fresh clone's id"
+        );
+    }
+
+    #[test]
+    fn template_promote_preserves_user_continuation_on_clone() {
+        // Codex P1 round 4 on PR #1017: data-loss scenario.
+        // Sequence:
+        //   1. Run 1 copies seeded `:current` → clone `:current`
+        //      OK, but `delete_zone` on the seeded source fails.
+        //   2. User opens the clone, continues the conversation —
+        //      the clone's `:current` now has NEWER content.
+        //   3. Run 2 sees the invariant still violated and would
+        //      re-copy the (older) seeded bytes onto the clone,
+        //      rolling back the user's continuation.
+        // The fix: `move_zone` detects a non-empty destination and
+        // drops the stale source instead of copying.
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        let template = insert_template(&wstore, "tpl-claude", "Claude Code", "claude");
+        // Prior partial run: deterministic-id clone def already
+        // exists.
+        let promote_target_id = format!("template-promote-v1-{}", template.id);
+        let now = now_ms() as i64;
+        let mut prior_target = crate::backend::storage::wstore::AgentDefinition {
+            id: promote_target_id.clone(),
+            slug: String::new(),
+            name: "Claude Code".to_string(),
+            icon: template.icon.clone(),
+            provider: template.provider.clone(),
+            description: template.description.clone(),
+            working_directory: String::new(),
+            shell: template.shell.clone(),
+            provider_flags: template.provider_flags.clone(),
+            auto_start: 0,
+            restart_on_crash: template.restart_on_crash,
+            idle_timeout_minutes: template.idle_timeout_minutes,
+            created_at: now - 1_000,
+            agent_type: template.agent_type.clone(),
+            environment: template.environment.clone(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: template.id.clone(),
+            branch_label: String::new(),
+            updated_at: now - 1_000,
+            user_hidden: 0,
+        };
+        wstore.agent_def_insert(&mut prior_target).unwrap();
+        // Clone's `:current` has the user's NEWER continuation.
+        write_session_state(
+            &filestore,
+            &promote_target_id,
+            br#"{"nodes":[{"type":"user_message","message":"my-newer-message"}]}"#,
+        )
+        .unwrap();
+        // Seeded `:current` still has the OLDER stale snapshot the
+        // prior run's `delete_zone` failed to remove.
+        write_session_state(
+            &filestore,
+            &template.id,
+            br#"{"nodes":[{"type":"user_message","message":"old-stale-seeded"}]}"#,
+        )
+        .unwrap();
+
+        let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(stats.templates_promoted, 1);
+
+        // The user's newer content is INTACT on the clone.
+        let clone_bytes = filestore
+            .read_file(&agent_current_zone(&promote_target_id), SNAPSHOT_FILE)
+            .unwrap()
+            .unwrap_or_default();
+        let clone_str = std::str::from_utf8(&clone_bytes).unwrap();
+        assert!(
+            clone_str.contains("my-newer-message"),
+            "user's newer continuation must survive the partial-failure retry; got: {clone_str}"
+        );
+        assert!(
+            !clone_str.contains("old-stale-seeded"),
+            "stale seeded content must NOT overwrite user's newer continuation"
+        );
+
+        // The seeded current zone is drained (source deleted).
+        let seeded_files = filestore
+            .list_files(&agent_current_zone(&template.id))
+            .unwrap();
+        assert!(
+            seeded_files.is_empty(),
+            "seeded current zone must be drained after the retry's safety drop"
         );
     }
 
