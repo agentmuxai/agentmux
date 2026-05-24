@@ -8,11 +8,18 @@ import type { ProviderDefinition } from "./index";
 // Providers split into two classes by how they talk to the backend:
 //   - OAuth CLIs (raw stream): claude, codex, gemini — authType "oauth",
 //     outputFormat "raw", no defaultArgs.
-//   - ACP providers:           openclaw, pi — authType "api-key",
-//     outputFormat "acp".
+//   - ACP providers:           openclaw (OAuth via subcommand —
+//     SPEC_OPENCLAW_AGENT_2026_05_17.md §4), pi (api-key). Both
+//     `outputFormat: "acp"`.
 const OAUTH_CLI_IDS = ["claude", "codex", "gemini"] as const;
 const API_KEY_CLI_IDS = ["kimi"] as const;
 const ACP_IDS = ["openclaw", "pi"] as const;
+// ACP sub-partition by auth type. Kept separate from the unified
+// `ACP_IDS` so the "ACP providers use the ACP output format"
+// assertion can stay in one loop while the auth assertions live
+// in their own loops below.
+const ACP_OAUTH_IDS = ["openclaw"] as const;
+const ACP_API_KEY_IDS = ["pi"] as const;
 
 describe("PROVIDERS", () => {
     test("includes the OAuth CLI trio and the ACP providers", () => {
@@ -58,11 +65,29 @@ describe("PROVIDERS", () => {
         }
     });
 
-    test("ACP providers use the ACP output format and api-key auth", () => {
+    test("ACP providers use the ACP output format", () => {
+        // The output-format invariant is uniform across ACP
+        // providers — they all speak ACP regardless of how they
+        // authenticate.
         for (const id of ACP_IDS) {
-            const provider = PROVIDERS[id];
-            expect(provider.outputFormat).toBe("acp");
-            expect(provider.authType).toBe("api-key");
+            expect(PROVIDERS[id].outputFormat).toBe("acp");
+        }
+    });
+
+    test("ACP+OAuth providers use OAuth auth (e.g. openclaw — OAuth via subcommand)", () => {
+        // SPEC_OPENCLAW_AGENT_2026_05_17.md §4: openclaw runs an
+        // OAuth flow via `models auth login --provider …` to
+        // borrow another CLI's credentials (currently OpenAI
+        // Codex), so its `authType` is "oauth" despite being an
+        // ACP provider.
+        for (const id of ACP_OAUTH_IDS) {
+            expect(PROVIDERS[id].authType).toBe("oauth");
+        }
+    });
+
+    test("ACP+api-key providers use api-key auth (e.g. pi)", () => {
+        for (const id of ACP_API_KEY_IDS) {
+            expect(PROVIDERS[id].authType).toBe("api-key");
         }
     });
 });

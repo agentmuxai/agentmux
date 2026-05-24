@@ -61,9 +61,14 @@ describe("browser-pane-state-store (slice #9 Phase 4)", () => {
         expect(proj.calls.faviconUrl).toEqual([
             "https://example.com/favicon.ico",
         ]);
-        // Cells that didn't change shouldn't be projected.
+        // Navigate also seeds the title with a hostname-based
+        // placeholder so the header doesn't show the previous
+        // page's title during the load
+        // (SPEC_BROWSER_PANE_OPTIMISTIC_HEADER_2026_05_18). The
+        // real title overrides this when CEF emits TitleChanged.
+        expect(proj.calls.title).toEqual(["example.com"]);
+        // closed didn't change (still false) — not projected.
         expect(proj.calls.closed).toEqual([]);
-        expect(proj.calls.title).toEqual([]);
     });
 
     it("does NOT project cells that didn't change between dispatches", () => {
