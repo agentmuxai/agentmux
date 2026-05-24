@@ -6,7 +6,7 @@ import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, getApi, WOS } from "@/app/store/global";
-import { SignalAtom } from "@/util/util";
+import { createSignalAtom, SignalAtom } from "@/util/util";
 import { AgentViewWrapper } from "./agent-view";
 import { buildAgentPaneIcon } from "./components/AgentPaneIcon";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
@@ -15,6 +15,20 @@ import { buildInstanceSlug } from "./defaults/instance-slug";
 import type { LaunchOverrides } from "./components/AgentLaunchModal";
 
 export type OverlayTab = "agent" | "identity";
+
+/**
+ * Compact relative-time label for the title-bar continuation chip.
+ *
+ * Mirrors the wording of `formatRelative` in `RecentSessionsList.tsx`
+ * (same "Xm ago" / "Xh ago" / "Xd ago" buckets) but lives here so the
+ * model file has no UI-only dependency cycle. Exported for unit tests.
+ */
+export function formatContinuationAgo(deltaMs: number): string {
+    if (deltaMs < 60_000) return "just now";
+    if (deltaMs < 3_600_000) return `${Math.floor(deltaMs / 60_000)}m ago`;
+    if (deltaMs < 86_400_000) return `${Math.floor(deltaMs / 3_600_000)}h ago`;
+    return `${Math.floor(deltaMs / 86_400_000)}d ago`;
+}
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -43,6 +57,16 @@ export class AgentViewModel implements ViewModel {
     // `voiceHandle` accessor below delegates to whatever's current —
     // before AgentFooter mounts (or after it unmounts) it's a no-op.
     voiceTargetRef: { current: PaneVoiceHandle | null } = { current: null };
+
+    // Option E (PR #1007 backend, this PR frontend): when this pane
+    // mounted on an agent-anchored session zone (`agent:<defId>:current`)
+    // that already contained a snapshot, this holds the `modts` of that
+    // snapshot — the timestamp the previous owner pane last wrote.
+    // `viewText` projects it into a "· continued from Xm ago" chip in
+    // the pane title bar. Zero means "no continuation" (fresh agent or
+    // currently-active pane wrote it just now). useHistoryPagination
+    // sets this on snapshot restore.
+    continuedFromMsAtom: SignalAtom<number> = createSignalAtom(0);
 
     voiceHandle = (): PaneVoiceHandle => ({
         appendFinal: (text: string) => this.voiceTargetRef.current?.appendFinal(text),
@@ -84,7 +108,25 @@ export class AgentViewModel implements ViewModel {
             if (typeof name === "string" && name.length > 0) return name;
             return "Agent";
         };
-        this.viewText = () => [] as HeaderElem[];
+        this.viewText = (): HeaderElem[] => {
+            // Option E: render a "· continued from Xm ago" chip when
+            // the pane mounted on a non-empty agent session zone whose
+            // last write was more than ~30s ago (i.e. NOT the
+            // currently-active pane's own recent save). Threshold
+            // matches the 30s snapshot interval so the chip never
+            // shows for the live pane's own writes.
+            const continuedFromMs = this.continuedFromMsAtom();
+            if (!continuedFromMs) return [];
+            const now = Date.now();
+            const delta = Math.max(0, now - continuedFromMs);
+            if (delta < 30_000) return []; // brief gap — same pane / hot reload
+            const ago = formatContinuationAgo(delta);
+            return [{
+                elemtype: "text",
+                text: `· continued ${ago}`,
+                className: "agent-pane-continuation-chip",
+            }];
+        };
         this.noPadding = () => true;
         this.setViewName = async (name: string) => {
             if (!name.trim()) return;

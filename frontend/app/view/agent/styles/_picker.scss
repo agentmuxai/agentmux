@@ -109,6 +109,44 @@
             transform: scale(1.06);
         }
 
+        // Option E (PR #1008): "+ New" affordance — visible only when
+        // the agent has a current session and the default click would
+        // auto-continue. Anchored bottom-right (where the install
+        // ribbon would otherwise sit). Subtle by default; reveal on
+        // card hover so the primary "Continue" affordance reads as
+        // the dominant action.
+        .agent-card-new-session-btn {
+            position: absolute;
+            right: var(--space-1);
+            bottom: var(--space-1);
+            padding: 2px 8px;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            color: var(--secondary-text-color);
+            background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+            border: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+            border-radius: 3px;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.12s ease-out, background 0.12s, color 0.12s, border-color 0.12s;
+            pointer-events: none;
+            z-index: 1;
+            user-select: none;
+        }
+
+        &:hover .agent-card-new-session-btn,
+        &:focus-within .agent-card-new-session-btn {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .agent-card-new-session-btn:hover {
+            color: var(--main-text-color);
+            background: color-mix(in srgb, var(--main-text-color) 12%, transparent);
+            border-color: var(--accent-color);
+        }
+
         &.agent-card--needs-install {
             // Subtle accent on the card border to reinforce the
             // ribbon's "needs action" signal.
