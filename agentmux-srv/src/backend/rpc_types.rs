@@ -1897,6 +1897,17 @@ pub struct RecentSessionRow {
     /// the block_id (cross-version registry rows). Reattach falls
     /// back to the working-directory continuation path in that case.
     pub block_id_hint: String,
+    /// The CLI-emitted session id (`session_id` for Claude/Gemini,
+    /// `thread_id` for Codex) captured during the prior run. Empty
+    /// when the row predates the capture, the CLI didn't emit a
+    /// session id, or the instance was created via a path that
+    /// doesn't go through the spawn that captures it. Used by the
+    /// picker reattach flow to populate `agent:sessionid` on the new
+    /// block's meta so the spawned subprocess gets a real
+    /// `--resume <sid>` on the FIRST turn instead of starting a
+    /// fresh conversation that re-injects the startup context.
+    #[serde(default)]
+    pub session_id: String,
     /// Snapshot of the first user message in the conversation (up to
     /// 240 chars, newlines collapsed). Empty when the snapshot doesn't
     /// exist or doesn't contain a user_message node yet.

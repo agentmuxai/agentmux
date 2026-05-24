@@ -518,6 +518,14 @@ declare global {
         memory_id: string;
         memory_name: string;
         block_id_hint: string;
+        /**
+         * CLI-emitted session id captured during the prior run. Empty
+         * when the row predates the capture or the CLI didn't emit a
+         * session id. Used by the picker reattach to populate
+         * `agent:sessionid` on the new block's meta so the spawned
+         * subprocess gets a real `--resume <sid>` on the FIRST turn.
+         */
+        session_id?: string;
         preview: string;
         node_count: number;
         last_active_at: number;

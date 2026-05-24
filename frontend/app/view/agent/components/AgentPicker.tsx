@@ -271,6 +271,12 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 memoryId: row.memory_id,
                 continueOfInstanceId: row.instance_id,
                 workDirOverride: row.working_directory,
+                // Carry the CLI-emitted session id forward so the new
+                // block's spawn sees `--resume <sid>` on the FIRST
+                // turn — otherwise the CLI starts a fresh session
+                // and re-injects the startup context (the 2026-05-24
+                // "click Maks → startup context replayed" report).
+                continueSessionId: row.session_id ?? "",
             });
         } finally {
             setLaunching(null);

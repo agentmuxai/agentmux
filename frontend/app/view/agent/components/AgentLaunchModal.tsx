@@ -65,6 +65,13 @@ export interface LaunchOverrides {
      *  `allocate_agent_workdir`. Reuses the prior agent's files,
      *  configs, and conversation context. */
     workDirOverride?: string;
+    /** Two-tier picker (2026-05-24) — CLI-emitted session id of the
+     *  prior instance. When non-empty, written to the new block's
+     *  `agent:sessionid` meta so the spawned subprocess can pass
+     *  `--resume <sid>` on its FIRST turn. Without this the
+     *  reattached pane starts a fresh CLI session and re-injects the
+     *  startup context. */
+    continueSessionId?: string;
 }
 
 interface AgentLaunchModalPanelProps {

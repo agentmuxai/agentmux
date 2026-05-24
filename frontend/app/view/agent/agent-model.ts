@@ -486,23 +486,52 @@ export class AgentViewModel implements ViewModel {
 
             // Store CLI config in block metadata using the (possibly
             // collision-resolved) finalWorkDir.
+            //
+            // Two-tier picker reattach (2026-05-24): the new block's
+            // `agent:sessionid` MUST mirror the launch intent
+            // exactly. SetMetaCommand merges meta (it doesn't
+            // replace), so an empty/omitted key on a REUSED block
+            // would leave any prior block's `agent:sessionid` in
+            // place — and the backend would then append
+            // `--resume <stale>` on a greenfield launch, resuming
+            // the wrong conversation (codex P1 round 2 on PR
+            // #1018).
+            //
+            // Set the key UNCONDITIONALLY:
+            //   - continueSessionId non-empty → set to that id;
+            //     spawn_turn hydrates inner.session_id and appends
+            //     `--resume <sid>` on the FIRST turn.
+            //   - continueSessionId empty (greenfield) → set to ""
+            //     to clear any stale residue. The backend
+            //     (`meta_get_string` with default "") already
+            //     treats "" as "no value" and sets
+            //     SubprocessSpawnConfig::session_id = None, so no
+            //     resume flag is appended.
+            //
+            // The captured-id-wins invariant in the controller
+            // ensures any session id the CLI later emits on stdout
+            // overrides whatever value lands here on subsequent
+            // turns.
+            const continueSid = overrides?.continueSessionId?.trim() ?? "";
+            const meta: Record<string, unknown> = {
+                agentId: agent.id,
+                agentProvider: agent.provider,
+                agentOutputFormat: provider.styledOutputFormat,
+                agentName: instanceName,
+                agentIcon: agent.icon,
+                agentMode: overrides?.agentType ?? agent.agent_type ?? "host",
+                controller: isPersistent ? "persistent" : "subprocess",
+                cmd: cliBin,
+                "cmd:args": cliArgs,
+                "cmd:cwd": finalWorkDir,
+                "cmd:env": envVars,
+                "agent:resume_flag": provider.resumeFlag ?? "",
+                "agent:session_id_field": provider.sessionIdField,
+                "agent:sessionid": continueSid,
+            };
             await RpcApi.SetMetaCommand(TabRpcClient, {
                 oref,
-                meta: {
-                    agentId: agent.id,
-                    agentProvider: agent.provider,
-                    agentOutputFormat: provider.styledOutputFormat,
-                    agentName: instanceName,
-                    agentIcon: agent.icon,
-                    agentMode: overrides?.agentType ?? agent.agent_type ?? "host",
-                    controller: isPersistent ? "persistent" : "subprocess",
-                    cmd: cliBin,
-                    "cmd:args": cliArgs,
-                    "cmd:cwd": finalWorkDir,
-                    "cmd:env": envVars,
-                    "agent:resume_flag": provider.resumeFlag ?? "",
-                    "agent:session_id_field": provider.sessionIdField,
-                },
+                meta,
             });
 
             // Create SubprocessController (no-op start — waits for first message)
