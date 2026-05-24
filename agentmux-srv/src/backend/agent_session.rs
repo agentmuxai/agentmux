@@ -816,24 +816,42 @@ pub fn migrate_promote_template_sessions_v1(
         // succeeded, then zone moves or instance repoint failed and
         // left the seeded zones in place), REUSE that clone instead
         // of creating another. Without this guard, every retry
-        // creates yet another user-clone def — codex P1 on the
-        // first cut of this PR: "unbounded duplicate agents until
-        // cleanup succeeds".
+        // creates yet another user-clone def — codex P1 round 1:
+        // "unbounded duplicate agents until cleanup succeeds".
+        //
+        // Narrow target: ONLY reuse a clone whose own
+        // `agent:<clone_id>:current` zone is EMPTY. A partial-
+        // failure clone has no zone yet (failure happened BEFORE
+        // move_zone ran). A clone the user CREATED via "+ New from
+        // template" with an active conversation has a populated
+        // zone — reusing it would let move_zone overwrite the
+        // user's live session with the seeded template's session.
+        // Codex P1 round 2: "Avoid reusing arbitrary existing clone
+        // as promotion target".
         //
         // Uses `user_clone_defs_for_template` (queries
         // `db_agent_definitions` directly), NOT the cached `defs`
-        // we filled from `agent_def_list` above. `agent_def_list`
-        // reads `db_agents` post-Phase-3b, which surfaces
+        // from `agent_def_list` — `db_agents` post-Phase-3b surfaces
         // template-instance projection rows under the same
         // `is_template = 0 AND parent_template_id = <tpl>` shape as
-        // real user-clone defs — and using such a projection's id
-        // as `new_def.id` would mis-target zones and instance
-        // repoints (the migration's first cut hit exactly that:
-        // it picked `inst-maks` as the "existing clone" and the
-        // subsequent `instance_repoint_definition` updated zero
-        // rows).
+        // real user-clone defs, and reusing a projection's id would
+        // mis-target zones and instance repoints.
         let existing_clone = match wstore.user_clone_defs_for_template(&template.id) {
-            Ok(clones) => clones.into_iter().next(),
+            Ok(clones) => clones.into_iter().find(|clone| {
+                let zone = agent_current_zone(&clone.id);
+                let zone_empty = filestore
+                    .list_files(&zone)
+                    .map(|files| files.is_empty())
+                    .unwrap_or(false); // be defensive: list error → treat as populated, don't reuse
+                if !zone_empty {
+                    tracing::debug!(
+                        template_id = %old_def_id,
+                        clone_id = %clone.id,
+                        "template_promote migration: skipping existing clone — its zone is non-empty"
+                    );
+                }
+                zone_empty
+            }),
             Err(e) => {
                 tracing::warn!(
                     template_id = %old_def_id,
@@ -1561,6 +1579,106 @@ mod tests {
         let third = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
         assert_eq!(third.templates_scanned, 0);
         assert_eq!(third.templates_promoted, 0);
+    }
+
+    #[test]
+    fn template_promote_does_not_reuse_clone_with_active_zone() {
+        // Codex P1 round 2 on PR #1017: the reuse path must not
+        // pick a user-clone whose own `agent:<clone_id>:current`
+        // zone is populated — that clone was created by the user
+        // through "+ New from template" and has a real conversation
+        // in it. Reusing it would let `move_zone` overwrite the
+        // user's live session with the seeded template's session.
+        // The reuse target must be an empty-zone clone (partial-
+        // failure shape) only.
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        let template = insert_template(&wstore, "tpl-claude", "Claude Code", "claude");
+        // A pre-existing user-clone created via "+ New from
+        // template" — it has its OWN active conversation in its
+        // own zone.
+        let now = now_ms() as i64;
+        let mut user_clone = crate::backend::storage::wstore::AgentDefinition {
+            id: "user-made-clone".to_string(),
+            slug: String::new(),
+            name: "MyAgent".to_string(),
+            icon: template.icon.clone(),
+            provider: template.provider.clone(),
+            description: template.description.clone(),
+            working_directory: String::new(),
+            shell: template.shell.clone(),
+            provider_flags: template.provider_flags.clone(),
+            auto_start: 0,
+            restart_on_crash: template.restart_on_crash,
+            idle_timeout_minutes: template.idle_timeout_minutes,
+            created_at: now - 2_000,
+            agent_type: template.agent_type.clone(),
+            environment: template.environment.clone(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: template.id.clone(),
+            branch_label: String::new(),
+            updated_at: now - 2_000,
+            user_hidden: 0,
+        };
+        wstore.agent_def_insert(&mut user_clone).unwrap();
+        // The user's clone has its OWN active conversation.
+        write_session_state(
+            &filestore,
+            &user_clone.id,
+            br#"{"nodes":[{"type":"user_message","message":"mine"}]}"#,
+        )
+        .unwrap();
+
+        // Seeded template ALSO has a session zone (the invariant
+        // violation we're recovering from).
+        write_session_state(
+            &filestore,
+            &template.id,
+            br#"{"nodes":[{"type":"user_message","message":"theirs"}]}"#,
+        )
+        .unwrap();
+
+        let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(stats.templates_promoted, 1);
+
+        // The user's clone must NOT have been used as the promote
+        // target — a fresh clone with a new id must have been
+        // created instead, with its OWN promoted zone.
+        let user_zone_files = filestore
+            .list_files(&agent_current_zone(&user_clone.id))
+            .unwrap();
+        let user_snapshot = user_zone_files
+            .iter()
+            .find(|f| f.name == SNAPSHOT_FILE)
+            .expect("user-clone's own zone snapshot must still exist");
+        let user_bytes = filestore
+            .read_file(&agent_current_zone(&user_clone.id), &user_snapshot.name)
+            .unwrap()
+            .unwrap_or_default();
+        assert!(
+            std::str::from_utf8(&user_bytes).unwrap().contains("mine"),
+            "user-clone's existing conversation must NOT be overwritten by the seeded session"
+        );
+
+        // A NEW clone (id != user-made-clone) must own the promoted
+        // seeded session.
+        let all = wstore.agent_def_list().unwrap();
+        let new_clone = all
+            .iter()
+            .find(|d| d.is_seeded == 0 && d.parent_id == template.id && d.id != "user-made-clone")
+            .expect("a NEW clone must have been created (not reusing the user's clone)");
+        let new_zone_bytes = filestore
+            .read_file(&agent_current_zone(&new_clone.id), SNAPSHOT_FILE)
+            .unwrap()
+            .unwrap_or_default();
+        assert!(
+            std::str::from_utf8(&new_zone_bytes).unwrap().contains("theirs"),
+            "promoted session must land under the fresh clone's id"
+        );
     }
 
     #[test]
