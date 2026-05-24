@@ -185,4 +185,31 @@ describe("UserMessageBlock — startup injection", () => {
             vi.useRealTimers();
         }
     });
+
+    it("collapsed summary is a real <button> with aria-expanded", () => {
+        // Codex P2 round 2: the summary must be keyboard-operable.
+        // Rendering as <button> gives Tab focus + Space/Enter
+        // activation for free. aria-expanded mirrors the pin state.
+        const { container } = render(() => (
+            <UserMessageBlock node={startupNode} pinned={false} onTogglePin={() => {}} />
+        ));
+        const summary = container.querySelector(".agent-user-message-summary");
+        expect(summary).not.toBeNull();
+        expect(summary!.tagName).toBe("BUTTON");
+        expect(summary!.getAttribute("type")).toBe("button");
+        expect(summary!.getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it("button.click() on the summary fires onTogglePin (Space/Enter contract)", () => {
+        // Native <button> dispatches click on Space/Enter. Driving
+        // .click() directly matches the keyboard-activation path that
+        // jsdom would route through HTMLButtonElement.
+        const togglePin = vi.fn();
+        const { container } = render(() => (
+            <UserMessageBlock node={startupNode} pinned={false} onTogglePin={togglePin} />
+        ));
+        const summary = container.querySelector(".agent-user-message-summary") as HTMLButtonElement;
+        summary.click();
+        expect(togglePin).toHaveBeenCalledTimes(1);
+    });
 });

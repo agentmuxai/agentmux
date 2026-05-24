@@ -13,7 +13,7 @@ import { base64ToArray } from "@/util/util";
 import { createEffect, onCleanup, onMount } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import type { PendingMessage, SignalPair } from "./state";
-import { ClaudeCodeStreamParser } from "./stream-parser";
+import { ClaudeCodeStreamParser, STARTUP_HEADING_RE } from "./stream-parser";
 import type { DocumentNode, SessionStats, UserMessageNode } from "./types";
 import { recordTurn } from "@/store/token-usage";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
@@ -326,14 +326,21 @@ export function useAgentStream({
                     // Append as a normal user_message so it joins the
                     // conversation stream. Keeps the same id so the new
                     // node ties back to the pending entry 1:1.
+                    // The optimistic-acceptance path goes through the
+                    // same `handleSendMessage` pipeline as the startup
+                    // injection (see agent-view.tsx `onReadyFn`). Apply
+                    // the same heuristic here as in the stream-parser
+                    // so the startup payload is flagged on first
+                    // render — otherwise UserMessageBlock would render
+                    // it as a regular user message (the full Markdown
+                    // wall, not the collapsed summary).
+                    // Codex P1 round 2 on PR #1020.
                     const node: UserMessageNode = {
                         type: "user_message",
                         id: pending.id,
                         message: pending.text,
                         timestamp: Date.now(),
-                        // No `isStartup` — locally-dispatched pending
-                        // messages are typed user input, never the
-                        // auto-generated startup payload.
+                        isStartup: STARTUP_HEADING_RE.test(pending.text),
                     };
                     if (!nodeIdSet.has(node.id)) {
                         nodeIdSet.add(node.id);

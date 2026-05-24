@@ -79,21 +79,31 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
             onMouseLeave={collapsible() ? handleMouseLeave : undefined}
         >
             <Show when={collapsible() && !expanded()}>
-                {/* Click-to-pin is bound HERE, on the summary row only.
-                 *  Binding it on the outer block would let clicks inside
-                 *  the expanded <pre> (e.g. placing the caret, selecting
-                 *  text to copy) toggle pin and immediately collapse the
-                 *  message — codex P2 on PR #1020 first cut. */}
-                <div
+                {/* Click-to-pin is bound HERE, on the summary row
+                 *  only. Binding it on the outer block would let
+                 *  clicks inside the expanded <pre> (e.g. placing
+                 *  the caret, selecting text to copy) toggle pin and
+                 *  immediately collapse the message — codex P2
+                 *  round 1 on PR #1020.
+                 *
+                 *  Rendered as a real <button> so keyboard users get
+                 *  Tab focus + Space/Enter activation for free. The
+                 *  default button-chrome is reset in SCSS via the
+                 *  shared `.agent-user-message-summary` rule.
+                 *  Codex P2 round 2 on PR #1020. */}
+                <button
+                    type="button"
                     class="agent-user-message-summary"
                     onClick={props.onTogglePin}
+                    aria-expanded={props.pinned}
+                    aria-label="Session context — click to expand and pin"
                 >
                     <span class="agent-user-message-icon">⓵</span>
                     <span class="agent-user-message-label">Session context</span>
                     <span class="agent-user-message-hint">
                         (hover to peek · click to pin)
                     </span>
-                </div>
+                </button>
             </Show>
             <Show when={!collapsible() || expanded()}>
                 <div class="agent-user-message-content">
