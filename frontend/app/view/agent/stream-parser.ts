@@ -262,7 +262,14 @@ export class ClaudeCodeStreamParser {
             status: event.status,
             duration: event.duration,
             result: event.result,
-            collapsed: event.status === "success", // Collapse successes, expand failures
+            // Collapse on EVERY terminal state (success or failure).
+            // The ✗ icon + red border-left in ToolBlock signal
+            // failure at a glance; the user's feedback was that
+            // failed-tool panels staying open forever cluttered the
+            // pane. They get the same 5s post-completion hold as
+            // successes — long enough to read the last lines, then
+            // collapse to the single-line ✗ row with hover-to-peek.
+            collapsed: true,
             summary,
         };
     }
