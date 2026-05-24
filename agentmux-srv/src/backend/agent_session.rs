@@ -983,6 +983,24 @@ pub fn migrate_promote_template_sessions_v1(
     stats
 }
 
+/// Per-file decision inside `move_zone`'s retry-aware loop. See the
+/// doc comment in `move_zone` for which round each variant addresses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CopyAction {
+    /// Destination missing the file (R5 partial-copy fill).
+    Copy,
+    /// Source strictly newer than destination (R6 newer-source promotion).
+    Overwrite,
+    /// Destination strictly newer than source (R4 user-continuation
+    /// on destination clone) — or equal-modts + equal bytes.
+    Preserve,
+    /// Equal modts; need to read both sides and compare bytes.
+    TieBreakByBytes,
+    /// Equal modts but bytes differ — neither side is canonical
+    /// (R7 same-ms conflict). Preserve destination, leave source.
+    Conflict,
+}
+
 /// Move every file in `old_zone` to `new_zone`, preserving names + bytes.
 /// Implemented as read-write-delete because FileStore doesn't expose a
 /// native rename; the cost is bounded by the per-zone file count (1-2
@@ -1040,41 +1058,99 @@ fn move_zone(
     let mut copied = 0usize;
     let mut overwritten = 0usize;
     let mut preserved = 0usize;
+    let mut conflicts = 0usize;
     for f in &files {
-        let need_copy = match dest_meta.get(&f.name) {
-            None => true, // R5: destination missing
-            Some(dest) => {
-                // R6: source strictly newer overrides destination.
-                // R4: destination ≥ source preserves destination.
-                f.modts > dest.modts
+        let dest = dest_meta.get(&f.name);
+        let action = match dest {
+            None => CopyAction::Copy, // R5: destination missing
+            Some(d) if f.modts > d.modts => CopyAction::Overwrite, // R6
+            Some(d) if d.modts > f.modts => CopyAction::Preserve, // R4
+            Some(_) => CopyAction::TieBreakByBytes, // R7: equal modts
+        };
+        let resolved = match action {
+            CopyAction::Copy | CopyAction::Overwrite => action,
+            CopyAction::Preserve => action,
+            CopyAction::Conflict => action, // unreachable from the matcher above; explicit for exhaustiveness
+            CopyAction::TieBreakByBytes => {
+                // R7 — equal modts (millisecond-granular filestore
+                // can write source + destination within the same
+                // ms on a real retry). Read both sides and
+                // disambiguate by bytes.
+                let src_bytes = filestore
+                    .read_file(old_zone, &f.name)
+                    .map_err(|e| format!("read_file {}: {e}", f.name))?
+                    .unwrap_or_default();
+                let dest_bytes = filestore
+                    .read_file(new_zone, &f.name)
+                    .map_err(|e| format!("read_file (dest) {}: {e}", f.name))?
+                    .unwrap_or_default();
+                if src_bytes == dest_bytes {
+                    CopyAction::Preserve
+                } else {
+                    // Conflict: can't tell which side is canonical.
+                    // Preserve destination (matches the round-4
+                    // semantics — keep what the user might be
+                    // looking at), but refuse to delete source so
+                    // the operator (or a future GC pass that can
+                    // compare timestamps at a higher resolution)
+                    // can resolve. The post-loop missing-files
+                    // check would still pass, so we signal the
+                    // conflict via a separate counter.
+                    CopyAction::Conflict
+                }
             }
         };
-        if !need_copy {
-            preserved += 1;
-            continue;
-        }
-        let bytes = filestore
-            .read_file(old_zone, &f.name)
-            .map_err(|e| format!("read_file {}: {e}", f.name))?
-            .unwrap_or_default();
-        // write_zone_file creates the file when missing, replaces
-        // it otherwise (matches archive_session's write semantics).
-        write_zone_file(filestore, new_zone, &f.name, &bytes)?;
-        if dest_meta.contains_key(&f.name) {
-            overwritten += 1;
-        } else {
-            copied += 1;
+        match resolved {
+            CopyAction::Copy => {
+                let bytes = filestore
+                    .read_file(old_zone, &f.name)
+                    .map_err(|e| format!("read_file {}: {e}", f.name))?
+                    .unwrap_or_default();
+                write_zone_file(filestore, new_zone, &f.name, &bytes)?;
+                copied += 1;
+            }
+            CopyAction::Overwrite => {
+                let bytes = filestore
+                    .read_file(old_zone, &f.name)
+                    .map_err(|e| format!("read_file {}: {e}", f.name))?
+                    .unwrap_or_default();
+                write_zone_file(filestore, new_zone, &f.name, &bytes)?;
+                overwritten += 1;
+            }
+            CopyAction::Preserve => {
+                preserved += 1;
+            }
+            CopyAction::Conflict => {
+                conflicts += 1;
+                tracing::warn!(
+                    old_zone = %old_zone,
+                    new_zone = %new_zone,
+                    file = %f.name,
+                    modts = f.modts,
+                    "template_promote migration: same-ms conflict — bytes differ at equal modts; preserving destination + leaving source for manual recovery"
+                );
+            }
+            CopyAction::TieBreakByBytes => unreachable!("resolved above"),
         }
     }
-    if preserved > 0 || overwritten > 0 {
+    if preserved > 0 || overwritten > 0 || conflicts > 0 {
         tracing::info!(
             old_zone = %old_zone,
             new_zone = %new_zone,
             copied,
             overwritten,
             preserved,
-            "template_promote migration: per-file move (R4 user-continuation, R5 partial-copy fill, R6 newer-source promotion)"
+            conflicts,
+            "template_promote migration: per-file move (R4 user-continuation, R5 partial-copy fill, R6 newer-source promotion, R7 same-ms conflict)"
         );
+    }
+    if conflicts > 0 {
+        // R7: an equal-modts byte-diff was detected. We don't know
+        // which side is canonical, so we preserve both: destination
+        // keeps its content, source is left in place for operator
+        // / GC recovery. Migration converges next run only if the
+        // operator resolves the conflict externally.
+        return Ok(());
     }
     // Verify every source file has a counterpart at the
     // destination before dropping source — protects against the
@@ -1816,19 +1892,24 @@ mod tests {
             user_hidden: 0,
         };
         wstore.agent_def_insert(&mut prior_target).unwrap();
+        // Seeded `:current` has the OLDER stale snapshot the prior
+        // run's `delete_zone` failed to remove. Write it FIRST so
+        // its modts is earlier than the clone's continuation.
+        write_session_state(
+            &filestore,
+            &template.id,
+            br#"{"nodes":[{"type":"user_message","message":"old-stale-seeded"}]}"#,
+        )
+        .unwrap();
+        // Force a modts gap so the modts-aware copy rule picks
+        // destination (R4 user-continuation). 10ms is reliable on
+        // every platform we ship to.
+        std::thread::sleep(std::time::Duration::from_millis(10));
         // Clone's `:current` has the user's NEWER continuation.
         write_session_state(
             &filestore,
             &promote_target_id,
             br#"{"nodes":[{"type":"user_message","message":"my-newer-message"}]}"#,
-        )
-        .unwrap();
-        // Seeded `:current` still has the OLDER stale snapshot the
-        // prior run's `delete_zone` failed to remove.
-        write_session_state(
-            &filestore,
-            &template.id,
-            br#"{"nodes":[{"type":"user_message","message":"old-stale-seeded"}]}"#,
         )
         .unwrap();
 
@@ -2119,11 +2200,15 @@ mod tests {
             user_hidden: 0,
         };
         wstore.agent_def_insert(&mut prior_target).unwrap();
-        // Clone already has the moved current.
-        write_session_state(&filestore, &promote_target_id, b"partially-moved").unwrap();
-        // Seeded def still has BOTH :current (a partial move could
-        // leave the source) AND a :archive zone (the failed move).
-        write_session_state(&filestore, &template.id, b"still-on-seed").unwrap();
+        // Realistic partial-failure shape: run 1 copied :current
+        // successfully (dest and source have IDENTICAL bytes from
+        // that copy), and run 1's archive-move failed (archive
+        // still on the seeded side, never copied to the clone).
+        // Use identical bytes for :current so the modts-aware
+        // copy gate treats it as no-op (no conflict).
+        let snapshot_bytes = b"snapshot-from-prior-run".as_slice();
+        write_zone_file(&filestore, &agent_current_zone(&promote_target_id), SNAPSHOT_FILE, snapshot_bytes).unwrap();
+        write_zone_file(&filestore, &agent_current_zone(&template.id), SNAPSHOT_FILE, snapshot_bytes).unwrap();
         let stale_archive = agent_archive_zone(&template.id, 1_699_000_000_000);
         write_zone_file(&filestore, &stale_archive, SNAPSHOT_FILE, b"old archive").unwrap();
 
