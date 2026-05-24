@@ -77,10 +77,17 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
             })}
             onMouseEnter={collapsible() ? handleMouseEnter : undefined}
             onMouseLeave={collapsible() ? handleMouseLeave : undefined}
-            onClick={collapsible() ? props.onTogglePin : undefined}
         >
             <Show when={collapsible() && !expanded()}>
-                <div class="agent-user-message-summary">
+                {/* Click-to-pin is bound HERE, on the summary row only.
+                 *  Binding it on the outer block would let clicks inside
+                 *  the expanded <pre> (e.g. placing the caret, selecting
+                 *  text to copy) toggle pin and immediately collapse the
+                 *  message — codex P2 on PR #1020 first cut. */}
+                <div
+                    class="agent-user-message-summary"
+                    onClick={props.onTogglePin}
+                >
                     <span class="agent-user-message-icon">⓵</span>
                     <span class="agent-user-message-label">Session context</span>
                     <span class="agent-user-message-hint">
@@ -90,6 +97,28 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
             </Show>
             <Show when={!collapsible() || expanded()}>
                 <div class="agent-user-message-content">
+                    {/* For pinned startup rows, expose a small "unpin"
+                     *  affordance in the corner so users can collapse
+                     *  without hunting for the trick. Hidden when not
+                     *  pinned (mouseleave already collapses transient
+                     *  hover-expansions). */}
+                    <Show when={collapsible() && props.pinned}>
+                        <button
+                            type="button"
+                            class="agent-user-message-unpin"
+                            title="Collapse session context"
+                            onClick={(e) => {
+                                // Stop propagation so the click doesn't
+                                // bubble — though no outer handler is
+                                // bound after the codex P2 fix, future
+                                // outer handlers won't fire either.
+                                e.stopPropagation();
+                                props.onTogglePin();
+                            }}
+                        >
+                            ✕
+                        </button>
+                    </Show>
                     <pre>{props.node.message}</pre>
                 </div>
             </Show>

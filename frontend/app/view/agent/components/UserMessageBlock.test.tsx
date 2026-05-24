@@ -26,8 +26,6 @@ const baseNode: UserMessageNode = {
     id: "user_0",
     message: "Can you run the tests?",
     timestamp: 0,
-    collapsed: false,
-    summary: "👤 User Message",
 };
 
 const startupNode: UserMessageNode = {
@@ -89,9 +87,41 @@ describe("UserMessageBlock — startup injection", () => {
         const { container } = render(() => (
             <UserMessageBlock node={startupNode} pinned={false} onTogglePin={togglePin} />
         ));
-        const root = container.querySelector(".agent-user-message")!;
-        fireEvent.click(root);
+        const summary = container.querySelector(".agent-user-message-summary")!;
+        fireEvent.click(summary);
         expect(togglePin).toHaveBeenCalledTimes(1);
+    });
+
+    it("click on expanded <pre> body does NOT fire onTogglePin", () => {
+        // Codex P2 on PR #1020 first cut: clicking inside the
+        // expanded body (to place the caret or select text for
+        // copying) must not unpin the row. Click handler is
+        // scoped to the summary, not the outer block.
+        const togglePin = vi.fn();
+        const { container } = render(() => (
+            <UserMessageBlock node={startupNode} pinned={true} onTogglePin={togglePin} />
+        ));
+        const pre = container.querySelector(".agent-user-message-content pre")!;
+        fireEvent.click(pre);
+        expect(togglePin).not.toHaveBeenCalled();
+    });
+
+    it("explicit unpin button on pinned row fires onTogglePin", () => {
+        const togglePin = vi.fn();
+        const { container } = render(() => (
+            <UserMessageBlock node={startupNode} pinned={true} onTogglePin={togglePin} />
+        ));
+        const unpin = container.querySelector(".agent-user-message-unpin");
+        expect(unpin).not.toBeNull();
+        fireEvent.click(unpin!);
+        expect(togglePin).toHaveBeenCalledTimes(1);
+    });
+
+    it("unpin button is absent when not pinned", () => {
+        const { container } = render(() => (
+            <UserMessageBlock node={startupNode} pinned={false} onTogglePin={() => {}} />
+        ));
+        expect(container.querySelector(".agent-user-message-unpin")).toBeNull();
     });
 
     it("pinned=true renders expanded (full markdown body visible)", () => {

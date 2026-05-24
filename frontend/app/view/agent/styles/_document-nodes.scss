@@ -633,10 +633,9 @@
         // Long Markdown payload the frontend sends as the opening
         // turn (see SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md). It
         // shouldn't dominate the pane. Collapsed-by-default with
-        // hover-expand + click-to-pin.
+        // hover-expand + click-to-pin (on the summary row only —
+        // see UserMessageBlock for the rationale).
         &--startup {
-            cursor: pointer;
-
             .agent-user-message-summary {
                 display: flex;
                 align-items: center;
@@ -646,6 +645,7 @@
                 overflow: hidden;
                 min-width: 0;
                 user-select: none;
+                cursor: pointer;
 
                 .agent-user-message-icon {
                     color: var(--user-input-color);
@@ -662,6 +662,32 @@
                     opacity: 0.75;
                     overflow: hidden;
                     text-overflow: ellipsis;
+                }
+            }
+
+            // Unpin button only appears when the startup row is
+            // pinned open. Top-right corner of the content area.
+            .agent-user-message-content {
+                position: relative;
+
+                .agent-user-message-unpin {
+                    position: absolute;
+                    top: var(--space-0-5);
+                    right: var(--space-0-5);
+                    background: transparent;
+                    border: none;
+                    color: var(--user-input-color);
+                    font-size: 0.9em;
+                    line-height: 1;
+                    padding: 2px 6px;
+                    border-radius: 3px;
+                    cursor: pointer;
+                    opacity: 0.6;
+
+                    &:hover {
+                        opacity: 1;
+                        background: color-mix(in srgb, var(--user-input-color) 15%, transparent);
+                    }
                 }
             }
         }

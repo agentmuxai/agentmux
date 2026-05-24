@@ -120,16 +120,39 @@ describe("per-kind estimators", () => {
     describe("estimateUserMessage", () => {
         const node: UserMessageNode = {
             type: "user_message", id: "um1", message: "hi", timestamp: 0,
-            collapsed: false, summary: "User",
         };
 
-        it("uses text-height estimate when not collapsed", () => {
+        it("uses text-height estimate for a regular user message", () => {
             expect(estimateUserMessage(node, baseDocState())).toBe(32); // short → MIN
         });
 
-        it("returns the collapsed size when in collapsedNodes", () => {
+        it("returns the collapsed-summary size for an unpinned startup row", () => {
+            // Post-SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24:
+            // user messages collapse on isStartup + pinnedNodes, NOT on
+            // collapsedNodes (renderer ignores collapsedNodes for
+            // user_message). Mirror estimateTool.
+            const startup: UserMessageNode = { ...node, id: "um-start", isStartup: true };
+            expect(estimateUserMessage(startup, baseDocState())).toBe(32); // collapsed
+        });
+
+        it("returns the full text-height estimate for a pinned startup row", () => {
+            const startup: UserMessageNode = { ...node, id: "um-pin", isStartup: true };
+            const state = baseDocState();
+            state.pinnedNodes.add("um-pin");
+            // "hi" is still short → min height, but the path is different
+            // (the function takes the not-collapsed branch). The
+            // assertion below pins the expected behavior; a longer
+            // multi-line startup would yield a bigger number via
+            // estimateTextHeight.
+            expect(estimateUserMessage(startup, state)).toBe(32);
+        });
+
+        it("ignores collapsedNodes for user_message (no longer wired)", () => {
             const state = baseDocState();
             state.collapsedNodes.add("um1");
+            // Regular user message, collapsedNodes set but not pinned —
+            // estimate is still the text-height fall-through, not the
+            // collapsed-summary height.
             expect(estimateUserMessage(node, state)).toBe(32);
         });
     });
@@ -164,7 +187,6 @@ describe("estimateNode dispatch", () => {
         };
         const um: UserMessageNode = {
             type: "user_message", id: "um", message: "hi", timestamp: 0,
-            collapsed: false, summary: "S",
         };
         const sl: SubagentLinkNode = {
             type: "subagent_link", id: "sl", subagentId: "x", slug: "y",

@@ -114,7 +114,16 @@ export function estimateAgentMessage(node: AgentMessageNode, state: DocumentStat
 }
 
 export function estimateUserMessage(node: UserMessageNode, state: DocumentState): number {
-    if (state.collapsedNodes.has(node.id)) return COLLAPSED_MESSAGE_PX;
+    // Per SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md,
+    // user messages collapse on `isStartup` + `pinnedNodes`, NOT
+    // `collapsedNodes` (which is unused for user_message nodes
+    // post-PR-#1020). Mirror the rule in `estimateTool`: startup
+    // payload is the one-line summary unless pinned; regular user
+    // input is its full text height (no soft-wrap means line count
+    // ≈ newline count).
+    if (node.isStartup && !state.pinnedNodes.has(node.id)) {
+        return COLLAPSED_MESSAGE_PX;
+    }
     return estimateTextHeight(node.message);
 }
 

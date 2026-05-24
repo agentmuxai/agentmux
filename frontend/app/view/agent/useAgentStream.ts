@@ -331,8 +331,9 @@ export function useAgentStream({
                         id: pending.id,
                         message: pending.text,
                         timestamp: Date.now(),
-                        collapsed: false,
-                        summary: "",
+                        // No `isStartup` — locally-dispatched pending
+                        // messages are typed user input, never the
+                        // auto-generated startup payload.
                     };
                     if (!nodeIdSet.has(node.id)) {
                         nodeIdSet.add(node.id);

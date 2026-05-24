@@ -351,8 +351,6 @@ export class ClaudeCodeStreamParser {
             id: `user_${this.nodeIdCounter++}`,
             message: event.message,
             timestamp: event.timestamp || Date.now(),
-            collapsed: false, // UserMessageBlock owns the collapse state now
-            summary: "👤 User Message",
             isStartup,
         };
     }

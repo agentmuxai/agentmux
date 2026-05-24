@@ -236,15 +236,20 @@ export interface AgentMessageNode {
 }
 
 /**
- * User message to agent
+ * User message to agent.
+ *
+ * `collapsed` + `summary` fields were retired in PR #1020 — the
+ * renderer (`UserMessageBlock`) keys its render shape off
+ * `isStartup` + `documentState.pinnedNodes`, not per-node mutable
+ * state. The agent-message variant still carries `collapsed` /
+ * `summary` because its toggle UI lives on the document-level
+ * `collapsedNodes` set; user messages have their own pin model.
  */
 export interface UserMessageNode {
     type: "user_message";
     id: string;
     message: string;
     timestamp: number;
-    collapsed: boolean;
-    summary: string; // "👤 User Message"
     /** True when this row is the auto-generated startup context
      * payload (see `buildStartupPayload.ts` + onReadyFn in
      * `agent-view.tsx`). The renderer surfaces these
