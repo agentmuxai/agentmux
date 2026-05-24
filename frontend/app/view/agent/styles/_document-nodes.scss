@@ -685,11 +685,20 @@
                 }
             }
 
-            // Unpin button only appears when the startup row is
-            // pinned open. Top-right corner of the content area.
+            // Top-right action button on the expanded body.
+            //   - .agent-user-message-pin   shows 📌 when the row
+            //     is hover-expanded but not pinned, so the user
+            //     can pin from inside the body (codex P2 round 3
+            //     on PR #1020 — without it, the only "pin"
+            //     affordance was on the summary button that's
+            //     no longer present once hover-expansion kicks in).
+            //   - .agent-user-message-unpin shows ✕ when pinned,
+            //     so the user can collapse without hunting.
+            // Both share styling.
             .agent-user-message-content {
                 position: relative;
 
+                .agent-user-message-pin,
                 .agent-user-message-unpin {
                     position: absolute;
                     top: var(--space-0-5);
@@ -707,6 +716,11 @@
                     &:hover {
                         opacity: 1;
                         background: color-mix(in srgb, var(--user-input-color) 15%, transparent);
+                    }
+                    &:focus-visible {
+                        outline: 2px solid var(--user-input-color);
+                        outline-offset: 1px;
+                        opacity: 1;
                     }
                 }
             }

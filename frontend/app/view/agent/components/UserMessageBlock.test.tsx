@@ -117,11 +117,47 @@ describe("UserMessageBlock — startup injection", () => {
         expect(togglePin).toHaveBeenCalledTimes(1);
     });
 
-    it("unpin button is absent when not pinned", () => {
+    it("unpin button is absent when not pinned (pin button takes its place)", () => {
+        // Codex P2 round 3: when the row is expanded but not pinned
+        // (e.g. via hover), the user must still be able to pin from
+        // inside the body. The button slot is shared:
+        //   pinned → ✕ unpin
+        //   !pinned → 📌 pin
+        // Both call onTogglePin.
         const { container } = render(() => (
             <UserMessageBlock node={startupNode} pinned={false} onTogglePin={() => {}} />
         ));
+        // Not pinned + collapsed-by-default → button slot is hidden
+        // because the body itself isn't rendered yet.
+        expect(container.querySelector(".agent-user-message-pin")).toBeNull();
         expect(container.querySelector(".agent-user-message-unpin")).toBeNull();
+    });
+
+    it("pin button is visible during hover-expansion and fires onTogglePin", async () => {
+        // Drives the codex round-3 flow: hover to expand the body,
+        // then click 📌 to pin. Without this affordance, the user
+        // would have to leave + re-enter the collapsed summary
+        // before the 150ms enter-delay restarted — defeating the
+        // "hover to peek · click to pin" hint.
+        vi.useFakeTimers();
+        try {
+            const togglePin = vi.fn();
+            const { container } = render(() => (
+                <UserMessageBlock node={startupNode} pinned={false} onTogglePin={togglePin} />
+            ));
+            const root = container.querySelector(".agent-user-message") as HTMLElement;
+            fireEvent.mouseEnter(root);
+            vi.advanceTimersByTime(200);
+            // Hover-expanded — pin button now present.
+            const pin = container.querySelector(".agent-user-message-pin");
+            expect(pin).not.toBeNull();
+            expect((pin as HTMLElement).getAttribute("aria-label")).toContain("Pin");
+            // Click it.
+            (pin as HTMLButtonElement).click();
+            expect(togglePin).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("pinned=true renders expanded (full markdown body visible)", () => {

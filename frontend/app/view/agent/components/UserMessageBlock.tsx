@@ -107,26 +107,45 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
             </Show>
             <Show when={!collapsible() || expanded()}>
                 <div class="agent-user-message-content">
-                    {/* For pinned startup rows, expose a small "unpin"
-                     *  affordance in the corner so users can collapse
-                     *  without hunting for the trick. Hidden when not
-                     *  pinned (mouseleave already collapses transient
-                     *  hover-expansions). */}
-                    <Show when={collapsible() && props.pinned}>
+                    {/* Top-right action button — has two modes:
+                     *
+                     *   - Hover-expanded but not pinned: shows 📌
+                     *     so the user can pin without racing the
+                     *     150ms enter-delay. (Codex P2 round 3:
+                     *     "Keep click-to-pin available while
+                     *      startup preview is expanded.")
+                     *   - Pinned: shows ✕ to collapse.
+                     *
+                     * Both call `onTogglePin` — the parent reducer
+                     * flips the boolean and the conditional below
+                     * picks the right glyph for the new state. */}
+                    <Show when={collapsible()}>
                         <button
                             type="button"
-                            class="agent-user-message-unpin"
-                            title="Collapse session context"
+                            class={clsx({
+                                "agent-user-message-unpin": props.pinned,
+                                "agent-user-message-pin": !props.pinned,
+                            })}
+                            title={
+                                props.pinned
+                                    ? "Collapse session context"
+                                    : "Pin session context open"
+                            }
+                            aria-label={
+                                props.pinned
+                                    ? "Collapse session context"
+                                    : "Pin session context open"
+                            }
                             onClick={(e) => {
                                 // Stop propagation so the click doesn't
-                                // bubble — though no outer handler is
-                                // bound after the codex P2 fix, future
-                                // outer handlers won't fire either.
+                                // bubble to the outer block (where no
+                                // handler is bound today, but future
+                                // outer handlers won't fire either).
                                 e.stopPropagation();
                                 props.onTogglePin();
                             }}
                         >
-                            ✕
+                            {props.pinned ? "✕" : "📌"}
                         </button>
                     </Show>
                     <pre>{props.node.message}</pre>
