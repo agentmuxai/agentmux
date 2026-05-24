@@ -2,31 +2,44 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for the Option E default-continue UX on `AgentPicker`
- * (PR #1008 frontend follow-up to PR #1007 backend).
+ * Tests for the two-tier AgentPicker layout
+ * (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md — Phase 1).
  *
- * The agent picker should:
- *   1. Auto-continue (no modal) when the agent has a non-empty
- *      session zone (`agent:<defId>:current`).
- *   2. Open the launch modal when the agent has no session yet.
- *   3. Force the launch modal regardless of session content when the
- *      user clicks with Shift/Ctrl/Alt held (escape hatch).
- *
- * Spec: SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23.md.
+ * Covered:
+ *  - the card grid (the "+ New from template" tier) only renders
+ *    definitions with `is_seeded === 1` — user-owned agents go to the
+ *    `MyAgentsList` sibling above the grid (mocked in this file).
+ *  - clicking a template card opens the `create-from-template` modal
+ *    request via the tab-modal API, not the `launch-agent` request.
+ *  - the modal's `onCreatedAndLaunch` hook eventually fires
+ *    `launchAgentDefinition` with the picked bindings.
  */
 
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/store/rpc-api", () => {
     const RpcApi = {
-        ListAgentDefinitionsCommand: vi.fn(),
-        ListRecentSessionsCommand: vi.fn(),
-        ListNamedAgentsCommand: vi.fn(),
-        InstallCheckCommand: vi.fn(),
-        ResolvePrereqsCommand: vi.fn(),
-        AgentSessionReadCommand: vi.fn(),
-        AgentSessionArchiveCommand: vi.fn(),
+        // Default resolved values keep the picker's mount-time RPC
+        // calls from hanging when an individual test forgets to set
+        // a fresh `.mockResolvedValue`. Tests override the
+        // ListAgentDefinitions stub in `beforeEach`.
+        ListAgentDefinitionsCommand: vi.fn().mockResolvedValue([]),
+        ListRecentSessionsCommand: vi.fn().mockResolvedValue([]),
+        ListNamedAgentsCommand: vi.fn().mockResolvedValue([]),
+        InstallCheckCommand: vi.fn().mockResolvedValue({ installed: true }),
+        ResolvePrereqsCommand: vi.fn().mockResolvedValue({ results: [] }),
+        AgentSessionReadCommand: vi
+            .fn()
+            .mockResolvedValue({ content: null, modts: null }),
+        AgentSessionArchiveCommand: vi.fn().mockResolvedValue({}),
+        AgentDefCreateFromTemplateCommand: vi.fn().mockResolvedValue({
+            definition_id: "new-def",
+            identity_id: "",
+            memory_id: "",
+        }),
+        ListIdentityBundlesCommand: vi.fn().mockResolvedValue([]),
+        ListMemoriesCommand: vi.fn().mockResolvedValue([]),
     };
     return { RpcApi };
 });
@@ -36,11 +49,14 @@ vi.mock("@/app/store/wps", () => ({
     waveEventSubscribe: vi.fn(() => () => {}),
 }));
 
+const tabModalOpen = vi.fn();
+const tabModalReplace = vi.fn();
+const tabModalClose = vi.fn();
 vi.mock("@/app/tab/tab-modal", () => ({
     useTabModal: () => ({
-        open: vi.fn(),
-        replace: vi.fn(),
-        close: vi.fn(),
+        open: tabModalOpen,
+        replace: tabModalReplace,
+        close: tabModalClose,
     }),
 }));
 
@@ -64,19 +80,10 @@ vi.mock("./AgentCard", () => ({
     AgentCard: (props: any) => (
         <button
             data-testid={`agent-card-${props.agent.id}`}
+            data-is-template={String(props.agent.is_seeded === 1)}
             data-has-session={String(!!props.hasCurrentSession)}
             data-launching={String(!!props.launching)}
             onClick={(e) => props.onLaunch(props.agent, e)}
-            onContextMenu={(e) => {
-                // tests use right-click to simulate Shift+click since
-                // jsdom MouseEvent ctor wires shiftKey deterministically
-                e.preventDefault();
-                const fake = new MouseEvent("click", {
-                    shiftKey: true,
-                    bubbles: true,
-                });
-                props.onLaunch(props.agent, fake);
-            }}
         >
             {props.agent.name}
         </button>
@@ -87,8 +94,8 @@ vi.mock("./AgentActionBar", () => ({
     AgentActionBar: () => null,
 }));
 
-vi.mock("./RecentSessionsList", () => ({
-    RecentSessionsList: () => null,
+vi.mock("./MyAgentsList", () => ({
+    MyAgentsList: () => null,
 }));
 
 import { AgentPicker } from "./AgentPicker";
@@ -97,25 +104,41 @@ let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
 
 const ts = () => 1_700_000_000_000;
 
-const claudeAgent = {
-    id: "agent-claude",
+const baseDef = (over: Partial<AgentDefinition>): AgentDefinition =>
+    ({
+        id: "agent-x",
+        slug: "x",
+        name: "X",
+        icon: "",
+        provider: "claude",
+        description: "",
+        working_directory: "",
+        shell: "",
+        provider_flags: "",
+        auto_start: 0,
+        restart_on_crash: 0,
+        idle_timeout_minutes: 0,
+        created_at: ts(),
+        agent_type: "host",
+        environment: "local",
+        agent_bus_id: "",
+        is_seeded: 0,
+        ...over,
+    }) as AgentDefinition;
+
+const claudeTemplate = baseDef({
+    id: "tpl-claude",
     slug: "claude",
     name: "Claude Code",
-    icon: "",
-    provider: "claude",
-    description: "",
-    working_directory: "",
-    shell: "",
-    provider_flags: "",
-    auto_start: 0,
-    restart_on_crash: 0,
-    idle_timeout_minutes: 0,
-    created_at: ts(),
-    agent_type: "host",
-    environment: "local",
-    agent_bus_id: "",
+    is_seeded: 1,
+});
+
+const userAgent = baseDef({
+    id: "user-maks",
+    slug: "maks",
+    name: "Maks",
     is_seeded: 0,
-} as AgentDefinition;
+});
 
 const makeMockModel = () => ({
     blockId: "blk-1",
@@ -126,96 +149,85 @@ const makeMockModel = () => ({
 
 beforeEach(async () => {
     vi.clearAllMocks();
+    tabModalOpen.mockClear();
+    tabModalReplace.mockClear();
+    tabModalClose.mockClear();
     ({ RpcApi } = await import("@/app/store/rpc-api"));
-    vi.mocked(RpcApi.ListAgentDefinitionsCommand).mockResolvedValue([claudeAgent]);
-    vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([]);
-    vi.mocked(RpcApi.ListNamedAgentsCommand).mockResolvedValue([]);
+    vi.mocked(RpcApi.ListAgentDefinitionsCommand).mockResolvedValue([
+        claudeTemplate,
+        userAgent,
+    ]);
 });
 
 afterEach(() => {
     cleanup();
 });
 
-const flush = () => new Promise<void>((r) => setTimeout(r, 0));
-
-describe("AgentPicker — default-continue UX (Option E)", () => {
-    it("auto-continues without opening the modal when the agent has a current session", async () => {
-        // Agent has a session in its zone.
-        vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({
-            content: '{"schemaVersion":1,"nodes":[]}',
-            modts: ts(),
-        });
+describe("AgentPicker — two-tier layout (Phase 1)", () => {
+    it("renders templates section only with is_seeded === 1 cards", async () => {
         const model = makeMockModel();
         render(() => <AgentPicker model={model as any} />);
-
-        // Wait for definitions to load + session probe.
-        await flush();
-        await flush();
-        await flush();
-
-        const card = await screen.findByTestId("agent-card-agent-claude");
-        expect(card.getAttribute("data-has-session")).toBe("true");
-
-        fireEvent.click(card);
-        await flush();
-        await flush();
-
-        // launchAgentDefinition called → no modal.
-        expect(model.launchAgentDefinition).toHaveBeenCalledTimes(1);
-        const [, overrides] = model.launchAgentDefinition.mock.calls[0];
-        // Default-continue does NOT set continueOfInstanceId — the
-        // agent zone is structurally continuous.
-        expect(overrides.continueOfInstanceId).toBeUndefined();
-        expect(overrides.instanceName).toBe("Claude Code");
+        await waitFor(() => {
+            expect(screen.queryByTestId("agent-card-tpl-claude")).not.toBeNull();
+        });
+        // Only the template renders as a card. User agents go to
+        // MyAgentsList (mocked).
+        expect(screen.queryByTestId("agent-card-user-maks")).toBeNull();
     });
 
-    it("opens the launch modal when the agent has no current session", async () => {
-        vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({
-            content: null,
-            modts: null,
-        });
+    it("renders the '+ New from template' section header", async () => {
         const model = makeMockModel();
         render(() => <AgentPicker model={model as any} />);
+        const header = await screen.findByTestId("agent-templates-header");
+        expect(header).toHaveTextContent("New from template");
+    });
 
-        await flush();
-        await flush();
-        await flush();
+    it("clicks on a template open the create-from-template modal", async () => {
+        const model = makeMockModel();
+        render(() => <AgentPicker model={model as any} />);
+        const card = await screen.findByTestId("agent-card-tpl-claude");
+        fireEvent.click(card);
+        await waitFor(() => expect(tabModalOpen).toHaveBeenCalled());
 
-        const card = await screen.findByTestId("agent-card-agent-claude");
+        const req = tabModalOpen.mock.calls[0][0];
+        expect(req.kind).toBe("create-from-template");
+        expect(req.template.id).toBe("tpl-claude");
+        // Template clicks never go through launchAgentDefinition
+        // directly — the modal's onCreatedAndLaunch handles that after
+        // the create RPC.
+        expect(model.launchAgentDefinition).not.toHaveBeenCalled();
+    });
+
+    it("template card suppresses the '+ New session' pill", async () => {
+        const model = makeMockModel();
+        render(() => <AgentPicker model={model as any} />);
+        const card = await screen.findByTestId("agent-card-tpl-claude");
         expect(card.getAttribute("data-has-session")).toBe("false");
-
-        fireEvent.click(card);
-        await flush();
-        await flush();
-
-        // No auto-continue — would have set launching state via modal.
-        expect(model.launchAgentDefinition).not.toHaveBeenCalled();
     });
 
-    it("forces the launch modal even with a current session when Shift is held", async () => {
-        vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({
-            content: '{"schemaVersion":1,"nodes":[]}',
-            modts: ts(),
-        });
+    it("modal onCreatedAndLaunch fires launchAgentDefinition with the picked bindings", async () => {
         const model = makeMockModel();
         render(() => <AgentPicker model={model as any} />);
+        const card = await screen.findByTestId("agent-card-tpl-claude");
+        fireEvent.click(card);
+        await waitFor(() => expect(tabModalOpen).toHaveBeenCalled());
 
-        await flush();
-        await flush();
-        await flush();
-
-        const card = await screen.findByTestId("agent-card-agent-claude");
-        expect(card.getAttribute("data-has-session")).toBe("true");
-
-        // Simulate shift+click via our mock card's contextmenu handler
-        // (the mock invokes onLaunch with a synthetic shiftKey=true
-        // MouseEvent — see vi.mock("./AgentCard") above).
-        fireEvent.contextMenu(card);
-        await flush();
-        await flush();
-
-        // Shift forces the modal path; launchAgentDefinition NOT called
-        // directly (the modal would call it after the user submits).
-        expect(model.launchAgentDefinition).not.toHaveBeenCalled();
+        const req = tabModalOpen.mock.calls[0][0];
+        await req.onCreatedAndLaunch(
+            "new-def-id",
+            "id-work",
+            "mem-notes",
+            "Mary",
+        );
+        expect(model.launchAgentDefinition).toHaveBeenCalledTimes(1);
+        const [stubAgent, overrides] = model.launchAgentDefinition.mock.calls[0];
+        expect(stubAgent.id).toBe("new-def-id");
+        expect(stubAgent.name).toBe("Mary");
+        expect(stubAgent.is_seeded).toBe(0);
+        expect(stubAgent.parent_id).toBe("tpl-claude");
+        expect(overrides.identityId).toBe("id-work");
+        expect(overrides.memoryId).toBe("mem-notes");
+        expect(overrides.instanceName).toBe("Mary");
+        expect(overrides.continueOfInstanceId).toBeUndefined();
     });
 });

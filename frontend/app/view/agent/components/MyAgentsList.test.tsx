@@ -2,14 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Render tests for `RecentSessionsList` — the AgentPicker's "Recent
- * sessions" surface (cascade follow-up 2026-05-23). Covers the three
- * UX states the parent relies on:
- *   1. empty (no filter) → generic copy
- *   2. empty (identity filter) → "for this identity" copy
- *   3. populated → row count + preview + provider icon + click handler
- *
- * Plus a unit test for `formatRelative` to pin the "Xm ago" wording.
+ * Render tests for `MyAgentsList` — the top tier of the two-tier
+ * AgentPicker (Phase 1 of SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
+ * Formerly RecentSessionsList; tests carry over to lock the row UX
+ * after the rename.
  */
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
@@ -21,8 +17,8 @@ import {
     EMPTY_FILTERED,
     EMPTY_GLOBAL,
     formatRelative,
-    RecentSessionsList,
-} from "./RecentSessionsList";
+    MyAgentsList,
+} from "./MyAgentsList";
 
 vi.mock("@/app/store/rpc-api", () => {
     const RpcApi = {
@@ -69,32 +65,32 @@ const makeRow = (overrides: Partial<RecentSessionRow> = {}): RecentSessionRow =>
     ...overrides,
 });
 
-describe("RecentSessionsList — empty state", () => {
+describe("MyAgentsList — empty state", () => {
     it("renders the generic empty copy when no filter is applied", async () => {
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([]);
-        render(() => <RecentSessionsList onReattach={() => {}} />);
-        const empty = await screen.findByTestId("agent-recent-sessions-empty");
+        render(() => <MyAgentsList onReattach={() => {}} />);
+        const empty = await screen.findByTestId("agent-my-agents-empty");
         expect(empty).toHaveTextContent(EMPTY_GLOBAL);
         // No row entries rendered.
-        expect(screen.queryByTestId("agent-recent-sessions-entry")).toBeNull();
+        expect(screen.queryByTestId("agent-my-agents-entry")).toBeNull();
     });
 
     it("renders the identity-specific empty copy when filtered", async () => {
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([]);
         const [identityId] = createSignal<string>("id-work");
         render(() => (
-            <RecentSessionsList
+            <MyAgentsList
                 identityId={identityId}
                 onReattach={() => {}}
             />
         ));
-        const empty = await screen.findByTestId("agent-recent-sessions-empty");
+        const empty = await screen.findByTestId("agent-my-agents-empty");
         expect(empty).toHaveTextContent(EMPTY_FILTERED);
     });
 });
 
-describe("RecentSessionsList — populated", () => {
-    it("renders one row per session with preview + node count", async () => {
+describe("MyAgentsList — populated", () => {
+    it("renders one row per agent with preview + node count", async () => {
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([
             makeRow({ instance_id: "a", instance_name: "Maks", preview: "fix the live-feed" }),
             makeRow({
@@ -104,9 +100,9 @@ describe("RecentSessionsList — populated", () => {
                 node_count: 1,
             }),
         ]);
-        render(() => <RecentSessionsList onReattach={() => {}} />);
+        render(() => <MyAgentsList onReattach={() => {}} />);
         // Wait for resource to settle.
-        const entries = await screen.findAllByTestId("agent-recent-sessions-entry");
+        const entries = await screen.findAllByTestId("agent-my-agents-entry");
         expect(entries).toHaveLength(2);
 
         // Previews render verbatim.
@@ -122,8 +118,8 @@ describe("RecentSessionsList — populated", () => {
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([
             makeRow({ preview: "", has_snapshot: true, node_count: 0 }),
         ]);
-        render(() => <RecentSessionsList onReattach={() => {}} />);
-        await screen.findByTestId("agent-recent-sessions-entry");
+        render(() => <MyAgentsList onReattach={() => {}} />);
+        await screen.findByTestId("agent-my-agents-entry");
         expect(
             screen.getByText("(no user message yet)"),
         ).toBeInTheDocument();
@@ -133,8 +129,8 @@ describe("RecentSessionsList — populated", () => {
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([
             makeRow({ preview: "", has_snapshot: false, node_count: 0 }),
         ]);
-        render(() => <RecentSessionsList onReattach={() => {}} />);
-        await screen.findByTestId("agent-recent-sessions-entry");
+        render(() => <MyAgentsList onReattach={() => {}} />);
+        await screen.findByTestId("agent-my-agents-entry");
         expect(
             screen.getByText("(no conversation snapshot)"),
         ).toBeInTheDocument();
@@ -144,8 +140,8 @@ describe("RecentSessionsList — populated", () => {
         const onReattach = vi.fn();
         const row = makeRow({ instance_id: "click-me" });
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([row]);
-        render(() => <RecentSessionsList onReattach={onReattach} />);
-        const entry = await screen.findByTestId("agent-recent-sessions-entry");
+        render(() => <MyAgentsList onReattach={onReattach} />);
+        const entry = await screen.findByTestId("agent-my-agents-entry");
         await userEvent.click(entry);
         expect(onReattach).toHaveBeenCalledTimes(1);
         expect(onReattach.mock.calls[0][0].instance_id).toBe("click-me");
@@ -155,12 +151,12 @@ describe("RecentSessionsList — populated", () => {
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([]);
         const [identityId] = createSignal<string>("id-work");
         render(() => (
-            <RecentSessionsList
+            <MyAgentsList
                 identityId={identityId}
                 onReattach={() => {}}
             />
         ));
-        await screen.findByTestId("agent-recent-sessions-empty");
+        await screen.findByTestId("agent-my-agents-empty");
         expect(RpcApi.ListRecentSessionsCommand).toHaveBeenCalledWith(
             expect.anything(),
             expect.objectContaining({ identity_id: "id-work" }),
@@ -169,12 +165,19 @@ describe("RecentSessionsList — populated", () => {
 
     it("treats null / undefined identityId as no-filter (empty string sent)", async () => {
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([]);
-        render(() => <RecentSessionsList onReattach={() => {}} />);
-        await screen.findByTestId("agent-recent-sessions-empty");
+        render(() => <MyAgentsList onReattach={() => {}} />);
+        await screen.findByTestId("agent-my-agents-empty");
         expect(RpcApi.ListRecentSessionsCommand).toHaveBeenCalledWith(
             expect.anything(),
             expect.objectContaining({ identity_id: "" }),
         );
+    });
+
+    it("renders the 'My Agents' section title", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue([makeRow()]);
+        render(() => <MyAgentsList onReattach={() => {}} />);
+        await screen.findByTestId("agent-my-agents-entry");
+        expect(screen.getByText("My Agents")).toBeInTheDocument();
     });
 });
 

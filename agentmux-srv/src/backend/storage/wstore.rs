@@ -1877,6 +1877,30 @@ impl WaveStore {
         Ok(rows > 0)
     }
 
+    /// Repoint every instance currently referencing `old_def_id` to
+    /// `new_def_id`. Used by the Phase 1 two-tier-picker migration
+    /// (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md): when a seeded
+    /// template has been used directly (carries an `agent:<id>:current`
+    /// zone), the migration clones the template into a user agent and
+    /// repoints any instances so the existing reattach flow
+    /// (`continueOfInstanceId`) keeps working against the new
+    /// definition_id. Returns the number of rows updated.
+    ///
+    /// `definition_id` is declared immutable post-insert on the normal
+    /// `instance_update` path. This is the migration escape hatch.
+    pub fn instance_repoint_definition(
+        &self,
+        old_def_id: &str,
+        new_def_id: &str,
+    ) -> Result<usize, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "UPDATE db_agent_instances SET definition_id = ?1 WHERE definition_id = ?2",
+            params![new_def_id, old_def_id],
+        )?;
+        Ok(rows)
+    }
+
     pub fn instance_delete(&self, id: &str) -> Result<bool, StoreError> {
         let rows = {
             let conn = self.conn.lock().unwrap();

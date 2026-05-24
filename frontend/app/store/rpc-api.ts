@@ -484,8 +484,37 @@ class RpcApiType {
     }
 
     // command "listagents" [call]
-    ListAgentDefinitionsCommand(client: RpcClient, opts?: RpcOpts): Promise<AgentDefinition[]> {
-        return client.rpcCall("listagents", {}, opts);
+    //
+    // Two-tier picker — Phase 1 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
+    // Optional `is_seeded` filter: 1 = templates only, 0 = user-owned
+    // only, undefined = no filter (backward-compat: every existing
+    // caller passes nothing). Backend treats `null` / `{}` as no-filter.
+    ListAgentDefinitionsCommand(
+        client: RpcClient,
+        data?: { is_seeded?: 0 | 1 },
+        opts?: RpcOpts,
+    ): Promise<AgentDefinition[]> {
+        return client.rpcCall("listagents", data ?? {}, opts);
+    }
+
+    // command "agentdefcreatefromtemplate" [call]
+    //
+    // Two-tier picker — Phase 1 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
+    // Clone a seeded template into a new user-owned agent. The
+    // template stays pristine. Validates: template must exist + have
+    // `is_seeded = 1`; name must be non-empty, ≤200 chars, and not
+    // collide with another user-owned agent.
+    AgentDefCreateFromTemplateCommand(
+        client: RpcClient,
+        data: {
+            template_id: string;
+            name: string;
+            identity_id?: string;
+            memory_id?: string;
+        },
+        opts?: RpcOpts,
+    ): Promise<{ definition_id: string; identity_id: string; memory_id: string }> {
+        return client.rpcCall("agentdefcreatefromtemplate", data, opts);
     }
 
     // command "createagent" [call]

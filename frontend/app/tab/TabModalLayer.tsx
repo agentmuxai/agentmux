@@ -49,6 +49,7 @@ import { AgentInstallModalPanel } from "@/app/view/agent/components/AgentInstall
 import { AgentPrereqModalPanel } from "@/app/view/agent/components/AgentPrereqModal";
 import { AgentNewIdentityModalPanel } from "@/app/view/agent/components/AgentNewIdentityModal";
 import { AgentNewMemoryModalPanel } from "@/app/view/agent/components/AgentNewMemoryModal";
+import { AgentCreateFromTemplateModalPanel } from "@/app/view/agent/components/AgentCreateFromTemplateModal";
 import { BrowserAuthModalPanel } from "@/app/view/browser/components/BrowserAuthModal";
 import "@/app/view/agent/components/AgentPrereqModal.scss";
 import "@/app/view/agent/components/AgentNewBundleModal.scss";
@@ -164,6 +165,8 @@ function requestLabel(req: TabModalRequest): string {
             return `Install required tools for ${req.agent.name}`;
         case "install-agent":
             return `Install ${req.agent.name}`;
+        case "create-from-template":
+            return `Create new agent from ${req.template.name}`;
         case "browser-auth":
             return req.isProxy ? "Proxy authentication required" : "Authentication required";
     }
@@ -330,6 +333,45 @@ function renderRequest(
                             // path. SPEC_MODAL_TRANSITIONS_2026_05_18.md.
                             req.onInstalled(continueToLaunch);
                         }}
+                    />
+                ),
+            };
+        case "create-from-template":
+            return {
+                label: requestLabel(req),
+                panel: (
+                    <AgentCreateFromTemplateModalPanel
+                        template={req.template}
+                        // The layer owns the create-then-launch chain
+                        // (spec note on CreateFromTemplateRequest) so
+                        // `submitting()` covers both RPC steps and ESC
+                        // / backdrop dismiss stay blocked end-to-end.
+                        onSubmit={async ({ name, identityId, memoryId }) => {
+                            setSubmitting(true);
+                            try {
+                                const resp = await RpcApi.AgentDefCreateFromTemplateCommand(
+                                    TabRpcClient,
+                                    {
+                                        template_id: req.template.id,
+                                        name,
+                                        identity_id: identityId,
+                                        memory_id: memoryId,
+                                    },
+                                );
+                                await req.onCreatedAndLaunch(
+                                    resp.definition_id,
+                                    resp.identity_id,
+                                    resp.memory_id,
+                                    name,
+                                );
+                                setSubmitting(false);
+                                api.close();
+                            } catch (e) {
+                                setSubmitting(false);
+                                throw e;
+                            }
+                        }}
+                        onCancel={api.close}
                     />
                 ),
             };
