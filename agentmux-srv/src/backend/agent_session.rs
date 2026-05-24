@@ -780,7 +780,16 @@ pub fn migrate_promote_template_sessions_v1(
         // `instance_list_named` already filters to non-hidden + named
         // rows + sorts by `started_at DESC`, so the first row is the
         // pick.
-        let new_name = match wstore.instance_list_named(1, Some(&old_def_id)) {
+        // Include continuations: a user who clicked Maks today and
+        // resumed three times has only continuation rows for that
+        // definition; the head row is whatever they originally
+        // named the agent. Picking the most-recent continuation
+        // surfaces the same `instance_name` they used last.
+        let new_name = match wstore.instance_list_named(
+            1,
+            Some(&old_def_id),
+            /* include_continuations */ true,
+        ) {
             Ok(rows) => rows
                 .into_iter()
                 .next()

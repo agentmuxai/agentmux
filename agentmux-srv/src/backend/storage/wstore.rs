@@ -1904,10 +1904,11 @@ impl WaveStore {
         Ok(rows > 0 || registry_acted)
     }
 
-    /// List all instances that the launch modal's "Continue agent"
-    /// dropdown should surface: have a non-empty `instance_name`, not
-    /// hidden, sorted by most-recent start. Capped to keep the
-    /// dropdown's wire payload bounded.
+    /// List named instances for the launch-modal "Continue agent"
+    /// dropdown (`include_continuations = false`) or the picker
+    /// "My Agents" surface (`include_continuations = true`). Filters
+    /// to non-hidden + named rows, sorted by `started_at DESC`,
+    /// capped by `limit`.
     ///
     /// `definition_id`, when provided, restricts the result to
     /// instances of that definition. Server-side filtering is
@@ -1915,37 +1916,69 @@ impl WaveStore {
     /// user with 200+ named agents across many definitions could
     /// have the current definition's older instances cut off by a
     /// purely global limit otherwise.
+    ///
+    /// `include_continuations` controls whether rows with
+    /// `parent_instance_id != ''` (continuation chains) are
+    /// returned:
+    ///
+    /// - **`false`** (legacy "head-of-chain only"). Pre-Option-E
+    ///   semantics: hides continuation rows so the launch-modal
+    ///   dropdown shows one entry per chain root. `listnamedagents`
+    ///   ALSO uses this mode for its same-version SQLite enrichment
+    ///   of registry-sourced rows — the registry mirror filter at
+    ///   `registry_upsert_if_named` excludes continuations
+    ///   symmetrically, and breaking that symmetry under a `limit`
+    ///   truncation would let continuation rows displace
+    ///   registry-head rows in the top-N and miss the
+    ///   merge-by-id enrichment. (Codex P1 on PR #1016 first cut:
+    ///   regresses running-state badges and focus-existing-pane
+    ///   hints for any user whose latest instance is a continuation.)
+    ///
+    /// - **`true`** (Option-E "include continuations"). For the
+    ///   picker's `listrecentsessions` flow and the
+    ///   `template_promote` migration's instance-name lookup. Under
+    ///   Option E the session zone is anchored on `definition_id`,
+    ///   so a continuation row is simply the most-recent named
+    ///   instance of an agent the user actively used — exactly
+    ///   what those callers want visible. Excluding them hides
+    ///   real agents (the original 2026-05-24 "Maks doesn't appear
+    ///   under My Agents" report) and makes `template_promote`'s
+    ///   name lookup miss the real `instance_name`, falling back
+    ///   to the template name.
     pub fn instance_list_named(
         &self,
         limit: usize,
         definition_id: Option<&str>,
+        include_continuations: bool,
     ) -> Result<Vec<AgentInstance>, StoreError> {
         let conn = self.conn.lock().unwrap();
-        let sql = if definition_id.is_some() {
+        // Build SQL in pieces so the (definition_id × continuations)
+        // matrix doesn't produce four copy-paste strings. Parameters
+        // are positional: `?1` is definition_id when present, `?N`
+        // is the limit (N = 2 if def filter present, else 1).
+        let mut sql = String::from(
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
                     status, github_context, started_at, ended_at, created_at,
                     identity_id, memory_id, instance_name, working_directory,
                     display_hidden
              FROM db_agent_instances
              WHERE display_hidden = 0
-               AND instance_name <> ''
-               AND parent_instance_id = ''
-               AND definition_id = ?1
-             ORDER BY started_at DESC
-             LIMIT ?2"
+               AND instance_name <> ''",
+        );
+        if !include_continuations {
+            sql.push_str("\n               AND parent_instance_id = ''");
+        }
+        let limit_param_idx = if definition_id.is_some() {
+            sql.push_str("\n               AND definition_id = ?1");
+            2
         } else {
-            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
-                    status, github_context, started_at, ended_at, created_at,
-                    identity_id, memory_id, instance_name, working_directory,
-                    display_hidden
-             FROM db_agent_instances
-             WHERE display_hidden = 0
-               AND instance_name <> ''
-               AND parent_instance_id = ''
-             ORDER BY started_at DESC
-             LIMIT ?1"
+            1
         };
-        let mut stmt = conn.prepare(sql)?;
+        sql.push_str(&format!(
+            "\n             ORDER BY started_at DESC\n             LIMIT ?{}",
+            limit_param_idx
+        ));
+        let mut stmt = conn.prepare(&sql)?;
         let iter = match definition_id {
             Some(def) => stmt.query_map(params![def, limit as i64], map_instance_row)?,
             None => stmt.query_map(params![limit as i64], map_instance_row)?,
@@ -2135,13 +2168,19 @@ impl WaveStore {
     /// Failures are logged, never propagated: SQLite remains
     /// authoritative.
     fn registry_upsert_if_named(&self, inst: &AgentInstance) {
-        // Mirror filter must match SQLite's dropdown filter
-        // (instance_list_named): non-empty instance_name AND
-        // parent_instance_id == ''. Continuation rows (created when
-        // the user resumes an existing named agent) carry the prior
-        // row in parent_instance_id and would otherwise produce a
-        // duplicate registry entry that the registry-sourced read
-        // path would surface as a separate dropdown row.
+        // Mirror filter: only registers named rows. Pre-Option-E this
+        // also excluded continuation rows (parent_instance_id != '')
+        // so the registry-sourced read path wouldn't surface chained
+        // resumes as duplicate dropdown rows. Under Option E, the
+        // session zone is anchored on definition_id, so a continuation
+        // row IS the most-recent named instance — exactly what we want
+        // visible. `instance_list_named` (the SQLite-sourced read
+        // path) dropped its parent_instance_id filter in the
+        // 2026-05-24 picker-visibility fix; the registry mirror keeps
+        // its filter here for now since the registry-sourced read path
+        // doesn't have the dedup-by-(definition_id, instance_name)
+        // affordance the SQLite ORDER BY/LIMIT provides. Follow-up
+        // PR will land cross-version dedup so this filter can drop too.
         if inst.instance_name.is_empty() || !inst.parent_instance_id.is_empty() {
             return;
         }
@@ -4069,9 +4108,14 @@ mod tests {
 
     #[test]
     fn instance_create_continuation_row_does_not_mirror() {
-        // SQLite's dropdown filter excludes rows where
-        // parent_instance_id != ''. The mirror must agree, otherwise
-        // continuation rows duplicate their parent in the registry.
+        // Registry mirror filter (per the doc comment in
+        // registry_upsert_if_named) intentionally lags the SQLite
+        // dropdown filter: continuation rows are NOT mirrored to
+        // registry, even though `instance_list_named` does return
+        // them under Option E. Cross-version dedup is the planned
+        // follow-up; until then the registry-sourced read path
+        // doesn't have the SQLite ORDER BY/LIMIT affordance and so
+        // continues to gate on parent_instance_id == ''.
         let (tmp, store, reg) = store_with_registry();
         let agents_root = tmp.path().join("agents");
         let parent = make_named_inst("inst-parent", "demoP", &agents_root);
@@ -4085,6 +4129,86 @@ mod tests {
         let recs = reg.list_active().unwrap();
         assert_eq!(recs.len(), 1);
         assert_eq!(recs[0].data.instance_id, "inst-parent");
+    }
+
+    #[test]
+    fn instance_list_named_picker_mode_includes_continuations() {
+        // Regression test for the 2026-05-24 "Maks not under My
+        // Agents" report. Pre-Option-E `instance_list_named` always
+        // filtered `parent_instance_id = ''`, hiding every
+        // continuation row. Under Option E the session zone is
+        // anchored on definition_id, so a continuation row IS the
+        // most-recent named instance — exactly what the picker
+        // needs to surface. The function now has two modes:
+        // `include_continuations = true` (picker path) returns
+        // everything; `include_continuations = false` (legacy
+        // launch-modal / registry-enrichment path) keeps the head-
+        // of-chain semantics.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let mut head = make_named_inst("inst-head", "Maks", &agents_root);
+        head.started_at = 100;
+        store.instance_create(&head).unwrap();
+
+        let mut cont = make_named_inst("inst-cont", "Maks", &agents_root);
+        cont.parent_instance_id = "inst-head".to_string();
+        cont.started_at = 200;
+        store.instance_create(&cont).unwrap();
+
+        // Picker mode — both rows surface, most-recent-first.
+        let picker_rows = store.instance_list_named(10, None, true).unwrap();
+        assert_eq!(picker_rows.len(), 2);
+        assert_eq!(picker_rows[0].id, "inst-cont");
+        assert_eq!(picker_rows[1].id, "inst-head");
+        // Continuation row preserves its parent linkage (just not
+        // used as an exclusion gate in picker mode).
+        assert_eq!(picker_rows[0].parent_instance_id, "inst-head");
+        assert_eq!(picker_rows[1].parent_instance_id, "");
+
+        // Definition-scoped picker mode — same rows.
+        let scoped_picker = store
+            .instance_list_named(10, Some("def-mirror"), true)
+            .unwrap();
+        assert_eq!(scoped_picker.len(), 2);
+        assert_eq!(scoped_picker[0].id, "inst-cont");
+    }
+
+    #[test]
+    fn instance_list_named_dropdown_mode_excludes_continuations() {
+        // Launch-modal "Continue agent" dropdown / `listnamedagents`
+        // registry-enrichment path: `include_continuations = false`.
+        // Symmetric with `registry_upsert_if_named`'s mirror filter —
+        // a chain shows up as ONE entry (the head), not N entries
+        // for every resume. Codex P1 on PR #1016 first cut: when the
+        // enrichment path lost this filter, continuation rows could
+        // displace registry-head rows under the `limit` truncation
+        // and miss the merge-by-id enrichment.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let mut head = make_named_inst("inst-head", "Maks", &agents_root);
+        head.started_at = 100;
+        store.instance_create(&head).unwrap();
+        let mut cont = make_named_inst("inst-cont", "Maks", &agents_root);
+        cont.parent_instance_id = "inst-head".to_string();
+        cont.started_at = 200;
+        store.instance_create(&cont).unwrap();
+
+        let dropdown_rows = store.instance_list_named(10, None, false).unwrap();
+        assert_eq!(
+            dropdown_rows.len(),
+            1,
+            "legacy dropdown mode must drop continuation rows"
+        );
+        assert_eq!(dropdown_rows[0].id, "inst-head");
+
+        // Definition-scoped dropdown mode — head only.
+        let scoped_dropdown = store
+            .instance_list_named(10, Some("def-mirror"), false)
+            .unwrap();
+        assert_eq!(scoped_dropdown.len(), 1);
+        assert_eq!(scoped_dropdown[0].id, "inst-head");
     }
 
     #[test]
