@@ -1156,6 +1156,34 @@ class RpcApiType {
         return client.rpcCall("blockfile:write_state", data, opts);
     }
 
+    // command "agent:session:read" [call] — Option E (PR #1007). Reads
+    // `output.state.json` from `agent:<definition_id>:current`.
+    AgentSessionReadCommand(client: RpcClient, data: CommandAgentSessionReadData, opts?: RpcOpts): Promise<AgentSessionReadResult> {
+        return client.rpcCall("agent:session:read", data, opts);
+    }
+
+    // command "agent:session:write_state" [call] — Option E. Writes
+    // `output.state.json` into `agent:<definition_id>:current`.
+    AgentSessionWriteStateCommand(client: RpcClient, data: CommandAgentSessionWriteStateData, opts?: RpcOpts): Promise<AgentSessionWriteStateResult> {
+        return client.rpcCall("agent:session:write_state", data, opts);
+    }
+
+    // command "agent:session:append_output" [call] — Option E.
+    AgentSessionAppendOutputCommand(client: RpcClient, data: CommandAgentSessionAppendOutputData, opts?: RpcOpts): Promise<AgentSessionAppendOutputResult> {
+        return client.rpcCall("agent:session:append_output", data, opts);
+    }
+
+    // command "agent:session:archive" [call] — Option E. Snapshots
+    // `:current` into `:archive:<ts>` then clears `:current`.
+    AgentSessionArchiveCommand(client: RpcClient, data: CommandAgentSessionArchiveData, opts?: RpcOpts): Promise<AgentSessionArchiveResult> {
+        return client.rpcCall("agent:session:archive", data, opts);
+    }
+
+    // command "agent:session:list_archives" [call] — Option E.
+    AgentSessionListArchivesCommand(client: RpcClient, data: CommandAgentSessionListArchivesData, opts?: RpcOpts): Promise<AgentArchiveRow[]> {
+        return client.rpcCall("agent:session:list_archives", data, opts);
+    }
+
     // command "session:digest" [call]
     SessionDigestCommand(client: RpcClient, data: CommandSessionDigestData, opts?: RpcOpts): Promise<SessionDigestResult> {
         return client.rpcCall("session:digest", data, opts);

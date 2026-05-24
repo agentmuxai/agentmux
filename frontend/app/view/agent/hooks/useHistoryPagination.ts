@@ -59,6 +59,23 @@ export interface UseHistoryPaginationOptions {
      * loads asynchronously).
      */
     outputFormat: Accessor<string>;
+    /**
+     * Option E (PR #1007 backend / this PR frontend): agent definition
+     * id, used to read the snapshot from the agent-anchored session
+     * zone `agent:<definitionId>:current` instead of the per-block
+     * `<blockId>/output.state.json`. When unset (legacy callers, picker
+     * screen), the snapshot fast-path is skipped and the hook falls
+     * straight through to the NDJSON ring-buffer replay.
+     */
+    definitionId?: string;
+    /**
+     * Option E: called with the `modts` (Unix ms) returned by
+     * `agent:session:read` when the pane successfully restores from a
+     * pre-existing snapshot. The view model projects this into the
+     * "· continued Xm ago" chip in the title bar. Called with 0 when
+     * the read returned no snapshot (fresh agent).
+     */
+    onContinuationModts?: (modts: number) => void;
     log: LogFn;
 }
 
@@ -150,10 +167,22 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
             // and the schema version matches, restore wholesale and skip
             // the lossy 200-line NDJSON replay. Spec
             // docs/specs/SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md §4.4.
-            try {
-                const stateResp = await RpcApi.BlockfileReadStateCommand(TabRpcClient, {
-                    block_id: opts.blockId,
-                    filename: SNAPSHOT_FILENAME,
+            //
+            // Option E (PR #1007 backend, this PR frontend): when a
+            // `definitionId` is available, read from the agent-anchored
+            // session zone (`agent:<defId>:current`) so continuation is
+            // structural — any new pane for the same agent definition
+            // picks up where the last one left off. When the caller
+            // didn't pass `definitionId` (legacy / picker), skip the
+            // fast path and fall straight through to the NDJSON replay.
+            // P2 fix on #1008 reagent: prior version threw an exception
+            // purely for control flow into the catch arm — clean code
+            // path but emitted a stack on every legacy mount. Use an
+            // explicit early-skip instead.
+            if (opts.definitionId) {
+              try {
+                const stateResp = await RpcApi.AgentSessionReadCommand(TabRpcClient, {
+                    definition_id: opts.definitionId,
                 }, { timeout: 5000 });
                 if (!mounted) return;
                 if (stateResp.content) {
@@ -166,6 +195,13 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                             : 0;
                         setHistoryOffset(offset);
                         setHistoryTotal(typeof snapshot.highWaterMark === "number" ? snapshot.highWaterMark : snapshot.nodes.length);
+                        // Option E: surface the snapshot's modts so the
+                        // view model can render the "· continued from
+                        // Xm ago" chip in the title bar. The chip
+                        // suppresses itself when the gap is <30s (same
+                        // pane's own fresh write).
+                        const modts = typeof stateResp.modts === "number" ? stateResp.modts : 0;
+                        opts.onContinuationModts?.(modts);
                         opts.log(
                             "history",
                             `restored ${snapshot.nodes.length} nodes from snapshot ` +
@@ -183,7 +219,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         "warn",
                     );
                 }
-            } catch (err: any) {
+              } catch (err: any) {
                 // Most common: snapshot doesn't exist yet — silent fall-through.
                 // Anything else logs but still falls through to NDJSON.
                 const reason = err?.message ?? String(err);
@@ -191,7 +227,8 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     opts.log("history", `snapshot read failed: ${reason}; falling back to NDJSON replay`, "warn");
                 }
                 if (!mounted) return;
-            }
+              }
+            }  // end if (opts.definitionId)
             try {
                 const countResp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
                     block_id: opts.blockId,
