@@ -3,11 +3,31 @@
 
 /**
  * AgentPicker — shown when an agent pane has no agentId in block meta.
- * Lists available agent definitions as cards; clicking a card opens
- * the Launch modal (name + runtime), which submits back through
- * `AgentViewModel.launchAgentDefinition(agent, overrides)`.
  *
- * See docs/specs/SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23.md.
+ * Two-tier layout (Phase 1 — SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md):
+ *  - **My Agents** (top): user-owned agents (`is_seeded = 0`). Each
+ *    row shows the agent's current Option E session state (preview,
+ *    node count, last-active timestamp). Click = reattach via the
+ *    existing `continueOfInstanceId + workDirOverride` flow.
+ *  - **+ New from template** (bottom): seeded templates
+ *    (`is_seeded = 1`). Click = open the create-from-template modal,
+ *    which clones the template into a new user agent + immediately
+ *    launches it.
+ *
+ * Templates by Phase 1 invariant carry NO session zone (the startup
+ * migration `migrate_promote_template_sessions_v1` evicts any
+ * pre-existing template-session into a user agent). The template
+ * cards therefore never show the "+ New" pill or auto-continue.
+ *
+ * Pre-existing flows kept intact:
+ *  - Modifier-key force-modal on a My Agents row (Shift / Ctrl / Alt /
+ *    Cmd) bypasses auto-continue.
+ *  - Install + prereq modals layered on top of template-create flow
+ *    (templates with un-installed CLIs still go through their install
+ *    modal before the create-from-template modal opens).
+ *
+ * See docs/specs/SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23.md (legacy)
+ * and docs/specs/SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md (current).
  */
 
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -21,7 +41,7 @@ import { getProvider } from "../providers";
 import { AgentCard } from "./AgentCard";
 import { AgentActionBar } from "./AgentActionBar";
 import type { LaunchOverrides } from "./AgentLaunchModal";
-import { RecentSessionsList } from "./RecentSessionsList";
+import { MyAgentsList } from "./MyAgentsList";
 
 // ── useAgentDefinitions hook ───────────────────────────────────────────────────────
 
@@ -78,25 +98,14 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     //   false     = needs install — card shows the bottom-right ribbon
     const [installState, setInstallState] = createSignal<Record<string, boolean | undefined>>({});
 
-    // Option E (PR 2 of 2): per-agent "has a current session" cache,
-    // keyed by agent.id.
-    //   undefined = not yet probed
-    //   true      = `agent:<defId>:current` has content → default
-    //               click auto-continues; "+ New" button surfaces
-    //   false     = no session yet → default click opens launch modal
-    const [sessionState, setSessionState] = createSignal<Record<string, boolean | undefined>>({});
-
-    const checkHasSession = async (agent: AgentDefinition) => {
-        try {
-            const r = await RpcApi.AgentSessionReadCommand(TabRpcClient, {
-                definition_id: agent.id,
-            });
-            setSessionState((s) => ({ ...s, [agent.id]: !!(r.content && r.content.length > 0) }));
-        } catch {
-            // Non-fatal — treat as no session (default click → modal).
-            setSessionState((s) => ({ ...s, [agent.id]: false }));
-        }
-    };
+    // Phase 1 two-tier picker (reagent P2 on #1011): the auto-continue
+    // session-state cache + probe lived here for the Option E PR-2
+    // default-click path. After the two-tier rewrite, templates carry
+    // `hasCurrentSession={false}` by invariant and `handleSelect` is
+    // unreachable from any card render, so the cache + probe + the
+    // entire session-state branch became dead. Deleted. If a future
+    // tier needs per-agent session probing, re-introduce the cache
+    // there scoped to that tier's data source — not here.
 
     const checkInstalled = async (agent: AgentDefinition) => {
         const prov = getProvider(agent.provider);
@@ -234,7 +243,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // definition for this row no longer exists (rare, but possible if
     // the user deleted it), fall back to the launch modal for the
     // first matching definition so the user can pick a substitute.
-    // See: RecentSessionsList.tsx file header for the full mechanism
+    // See: MyAgentsList.tsx file header for the full mechanism
     // discussion.
     const handleReattach = async (row: RecentSessionRow) => {
         const def = agents().find((a) => a.id === row.definition_id);
@@ -404,68 +413,93 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         }
     };
 
-    const handleNewSession = async (agent: AgentDefinition) => {
-        // Archive the current zone so the next launch starts fresh.
-        // RPC failure is non-fatal — fall through to the launch modal
-        // either way so the user isn't stuck.
-        try {
-            await RpcApi.AgentSessionArchiveCommand(TabRpcClient, {
-                definition_id: agent.id,
-            });
-        } catch {
-            // best-effort
-        }
-        setSessionState((s) => ({ ...s, [agent.id]: false }));
-        openLaunchModal(agent);
+    // (`handleNewSession` removed in same cleanup as `handleSelect` —
+    // templates can't show "+ New session" pills under Phase 1
+    // invariant `hasCurrentSession={false}`, so the callback was
+    // unreachable. Re-introduce when a tier renders my-agent rows
+    // with the pill.)
+
+    // Phase 1 two-tier picker: clicking a template card opens the
+    // "Create new agent from {Template}" modal. The layer chains
+    // `agentdefcreatefromtemplate` → `launchAgentDefinition` so both
+    // RPCs are covered by a single `submitting()` gate (ESC + backdrop
+    // dismiss stay blocked until the new agent is fully launched).
+    const openCreateFromTemplateModal = (template: AgentDefinition) => {
+        tabModal.open({
+            kind: "create-from-template" as const,
+            template,
+            originBlockId: props.model.blockId,
+            onCreatedAndLaunch: async (newDefId, identityIdSel, memoryIdSel, name) => {
+                // The new definition is user-owned and carries the
+                // template's provider + cmd config. Build an
+                // AgentDefinition stub good enough for the launch flow
+                // — it only reads `id`, `name`, `agent_type`. (The
+                // canonical row will be re-fetched by the launch
+                // pipeline via SQL; we don't need every column here.)
+                setLaunching(newDefId);
+                try {
+                    // Reagent P1 on #1011 round 2: the previous stub
+                    // spread `template` directly, which leaked the
+                    // template's `slug` and `working_directory` into
+                    // the launch path. Backend `agentdefcreatefromtemplate`
+                    // deliberately initialises those fields empty on
+                    // the new row so per-agent values are derived
+                    // server-side; the stub MUST match that contract,
+                    // otherwise the new agent inherits template-scoped
+                    // state (e.g. shared `GH_CONFIG_DIR`, cwd path).
+                    const stubAgent: AgentDefinition = {
+                        ...template,
+                        id: newDefId,
+                        name,
+                        is_seeded: 0,
+                        parent_id: template.id,
+                        slug: "",
+                        working_directory: "",
+                    };
+                    await props.model.launchAgentDefinition(stubAgent, {
+                        instanceName: name,
+                        agentType: (template.agent_type as "host" | "container") || "host",
+                        environment:
+                            template.agent_type === "container" ? "docker" : "local",
+                        identityId: identityIdSel,
+                        memoryId: memoryIdSel,
+                        // No `continueOfInstanceId` — the new definition
+                        // has no prior session; its agent-anchored zone
+                        // is empty and the pane will start fresh.
+                    });
+                    if (props.model.nodejsError) {
+                        setNodejsError(props.model.nodejsError);
+                        props.model.nodejsError = null;
+                    }
+                } finally {
+                    setLaunching(null);
+                }
+            },
+        });
     };
 
+    // Cross-tier re-entry guard. Both `handleSelect` (My Agents) and
+    // `handleTemplateSelect` (Templates) check + insert into this set
+    // so a rapid double-click across tiers can't spawn two parallel
+    // install/launch flows for the same definition.
     const pendingSelect = new Set<string>();
-    const handleSelect = async (
+
+    // Phase 1 two-tier picker: template-card click path. Mirrors
+    // `handleSelect` for the install + prereq gates (a template's CLI
+    // can still need installing) but drops the auto-continue branch —
+    // templates carry no session zone post-migration. On success it
+    // hands off to `openCreateFromTemplateModal` instead of
+    // `openLaunchModal`.
+    const handleTemplateSelect = async (
         agent: AgentDefinition,
-        evt?: MouseEvent | KeyboardEvent,
+        _evt?: MouseEvent | KeyboardEvent,
     ) => {
         if (pendingSelect.has(agent.id)) return;
         pendingSelect.add(agent.id);
         try {
             setNodejsError(null);
 
-            // Option E default-continue: when the agent has a current
-            // session and no modifier key forces the modal, auto-launch
-            // and skip every prereq / install / modal step. The session
-            // zone is per-definition, so the bindings the previous pane
-            // used are still on the AgentDefinition — no picker needed.
-            // P2 fix: KeyboardEvent also has metaKey, so the MouseEvent
-            // cast was misleading. Both event types are valid here, so
-            // widen the type narrowly instead of asserting one shape.
-            const modKeyed = (evt && (
-                ("shiftKey" in evt && (evt as MouseEvent | KeyboardEvent).shiftKey) ||
-                ("ctrlKey" in evt && (evt as MouseEvent | KeyboardEvent).ctrlKey) ||
-                ("altKey" in evt && (evt as MouseEvent | KeyboardEvent).altKey) ||
-                ("metaKey" in evt && (evt as MouseEvent | KeyboardEvent).metaKey)
-            )) || false;
-            const forceModal = !!modKeyed;
-            // P1 fix: require installState === true (strict), not !== false.
-            // The probe is async; `undefined` means "probe not done yet" and
-            // must NOT be treated as installed — that would race-launch a
-            // missing-CLI agent past the install flow. Falling through to
-            // the slower path below blocks-on-probe correctly.
-            if (
-                !forceModal
-                && sessionState()[agent.id] === true
-                && installState()[agent.id] === true
-            ) {
-                await autoContinue(agent);
-                return;
-            }
-
             let installed = installState()[agent.id];
-
-            // If the bg check hasn't populated state yet (initial render
-            // race, slow IPC, freshly added definition), block on a sync
-            // probe for npm-backed providers before deciding the path.
-            // Without this, an unchecked npm agent would fall through to
-            // openLaunchModal and the launch would write a per-version
-            // `.bin` path that doesn't exist on disk.
             if (installed === undefined) {
                 const prov = getProvider(agent.provider);
                 const isNpmInstallable = !!prov?.npmPackage && prov.npmPackage.length > 0;
@@ -475,23 +509,22 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 }
             }
 
-            // System-tool prereq check (e.g. Claude Code requires git
-            // — anthropics/claude-code#29898). If any are missing, open
-            // the prereq modal first; user can install + refresh or
-            // override via Launch anyway.
             const missing = await probeMissingPrereqs(agent);
             if (missing.length > 0) {
                 const proceedWithFlow = () => {
                     if (installed === false) {
-                        tabModal.replace(buildInstallRequest(agent));
+                        // Reagent P1 round 2: do NOT use the generic
+                        // `buildInstallRequest` here — its `onInstalled`
+                        // routes to `buildLaunchRequest(agent)` which
+                        // launches the seeded template directly,
+                        // defeating the template-clone migration. Open
+                        // the same template-aware install request the
+                        // non-prereq branch (line ~545) uses.
+                        tabModal.replace(buildTemplateInstallRequest(agent));
                     } else {
-                        tabModal.replace(buildLaunchRequest(agent));
+                        openCreateFromTemplateModal(agent);
                     }
                 };
-                // Recursive opener so the Refresh handler on every
-                // rendered modal (including the replacement after a
-                // failed re-probe) gets a working re-probe wired up.
-                // Reagent + codex P1/P2 on PR #908.
                 const openPrereqModal = (
                     currentMissing: typeof missing,
                     op: "open" | "replace",
@@ -512,7 +545,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         missing: currentMissing,
                         onRefresh: () => void refresh(),
                         onProceed: proceedWithFlow,
-                        onCancel: () => { /* layer closes */ },
+                        onCancel: () => {},
                     };
                     if (op === "open") tabModal.open(req);
                     else tabModal.replace(req);
@@ -522,63 +555,73 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             }
 
             if (installed === false) {
-                tabModal.open({
-                    kind: "install-agent",
-                    agent,
-                    originBlockId: props.model.blockId,
-                    onInstalled: (continueToLaunch: boolean) => {
-                        // install.start runs at provider scope, so every
-                        // AgentDefinition definition that resolves to the same
-                        // canonical provider is now installed — not just
-                        // the one the user clicked. Mark all of them so
-                        // sibling cards drop their ribbon too. This flip
-                        // runs whether the user chose Continue or Close
-                        // — codex caught the bug on PR #895 where Close
-                        // left the state stale.
-                        const canonical = getProvider(agent.provider)?.id ?? agent.provider;
-                        setInstallState((s) => {
-                            const next = { ...s };
-                            for (const a of agents()) {
-                                if ((getProvider(a.provider)?.id ?? a.provider) === canonical) {
-                                    next[a.id] = true;
-                                }
-                            }
-                            return next;
-                        });
-                        if (continueToLaunch) {
-                            // Crossfade install → launch (same shell;
-                            // no backdrop flicker). See
-                            // SPEC_MODAL_TRANSITIONS_2026_05_18.md.
-                            tabModal.replace(buildLaunchRequest(agent));
-                        } else {
-                            // User clicked Close (or ESC/backdrop) on
-                            // the success screen — state has been
-                            // flipped above; just tear down the modal.
-                            tabModal.close();
-                        }
-                    },
-                });
+                tabModal.open(buildTemplateInstallRequest(agent));
                 return;
             }
-            openLaunchModal(agent);
+
+            openCreateFromTemplateModal(agent);
         } finally {
             pendingSelect.delete(agent.id);
         }
     };
 
+    // Template-aware install request. The generic `buildInstallRequest`
+    // routes `onInstalled → buildLaunchRequest(agent)` which launches
+    // the seeded template directly — defeats the template-clone
+    // migration. This variant routes the success path into
+    // `openCreateFromTemplateModal` so the install→create-clone→launch
+    // chain stays correct (reagent P1 on #1011 round 2).
+    const buildTemplateInstallRequest = (agent: AgentDefinition) => ({
+        kind: "install-agent" as const,
+        agent,
+        originBlockId: props.model.blockId,
+        onInstalled: (continueToLaunch: boolean) => {
+            const canonical = getProvider(agent.provider)?.id ?? agent.provider;
+            setInstallState((s) => {
+                const next = { ...s };
+                for (const a of agents()) {
+                    if ((getProvider(a.provider)?.id ?? a.provider) === canonical) {
+                        next[a.id] = true;
+                    }
+                }
+                return next;
+            });
+            if (continueToLaunch) {
+                openCreateFromTemplateModal(agent);
+            } else {
+                tabModal.close();
+            }
+        },
+    });
+
+    // Note: the legacy `handleSelect` (Option E PR-2 default-click
+    // handler) was removed in the Phase 1 cleanup. Every rendered
+    // card now goes through `handleTemplateSelect`; my-agent rows are
+    // handled by `MyAgentsList`'s own `handleReattach` callback. The
+    // install/prereq gates that `handleSelect` owned now live inside
+    // `handleTemplateSelect` directly. Don't resurrect a single shared
+    // `handleSelect` — fan out per tier (reagent P2 on #1011).
+
     const busy = () => launching() !== null;
 
+    // Phase 1 two-tier picker: partition the agent list into the
+    // "+ New from template" tier (seeded templates) and the section
+    // implicitly handled by `MyAgentsList` (user-owned, surfaced as
+    // recent sessions via `ListRecentSessionsCommand`). The card grid
+    // below the My Agents list renders only the templates tier.
+    const templates = createMemo(() =>
+        agents().filter((a) => a.is_seeded === 1),
+    );
+
     // Refresh install state whenever the agent list changes.
+    // Session-zone probes were removed in the Phase 1 cleanup
+    // (reagent P2 on #1011) — templates carry `hasCurrentSession={false}`
+    // by invariant and my-agent rows source from `MyAgentsList` which
+    // doesn't need per-row session probes.
     createEffect(() => {
         for (const agent of agents()) {
             if (!(agent.id in installState())) {
                 void checkInstalled(agent);
-            }
-            // Option E: probe the session zone for every agent on
-            // first sight so we know whether to default-continue or
-            // open the modal when the user clicks.
-            if (!(agent.id in sessionState())) {
-                void checkHasSession(agent);
             }
         }
     });
@@ -614,31 +657,32 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             >
                 <div class="agent-view" style={{ zoom: zoomFactor() }}>
                     <div class="agent-picker">
-                        {/* Cascade follow-up (2026-05-23) — recent
-                            sessions appear ABOVE the agent cards so
-                            users see "continue what you were doing"
-                            before they see "start something new". This
-                            makes orphaned conversations recoverable
-                            from normal UI. Picker is generic (no
-                            identity filter) — the modal-level
-                            Continue dropdown handles per-identity. */}
-                        <RecentSessionsList onReattach={handleReattach} />
-                        <div class="agent-picker-list">
-                            <For each={agents()}>
+                        {/* Two-tier picker — Phase 1
+                            (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
+                            Top: user-owned agents from
+                            `ListRecentSessionsCommand` with their
+                            current Option E session state.
+                            Bottom: seeded templates, click = open the
+                            create-from-template modal. */}
+                        <MyAgentsList onReattach={handleReattach} />
+                        <div class="agent-picker-templates-header" data-testid="agent-templates-header">
+                            <span>+ New from template</span>
+                        </div>
+                        <div class="agent-picker-list" data-testid="agent-templates-list">
+                            <For each={templates()}>
                                 {(agent, index) => (
                                     <AgentCard
                                         agent={agent}
                                         launching={launching() === agent.id}
                                         disabled={busy()}
                                         installed={installState()[agent.id]}
-                                        onLaunch={handleSelect}
-                                        // Option E: surface "+ New" affordance
-                                        // when this agent has a current session
-                                        // zone (default click auto-continues).
-                                        hasCurrentSession={sessionState()[agent.id] === true}
-                                        onNewSession={handleNewSession}
-                                        // agent_def_list returns most-recently-used
-                                        // first, so index 0 is the default choice.
+                                        onLaunch={handleTemplateSelect}
+                                        // Templates by invariant have
+                                        // no session zone — suppress
+                                        // the "+ New" pill (no
+                                        // `onNewSession` needed; the
+                                        // pill never appears).
+                                        hasCurrentSession={false}
                                         defaultFocus={index() === 0}
                                     />
                                 )}

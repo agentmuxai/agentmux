@@ -2,30 +2,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * RecentSessionsList — the AgentPicker's "Recent sessions" surface.
+ * MyAgentsList — the top section of the two-tier AgentPicker
+ * (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md, Phase 1). Lists the user's
+ * own agents (Maks, AgentY, etc.) — formerly known as "Recent sessions"
+ * before the rename. Templates (Claude Code, Codex CLI, …) live in the
+ * sibling Templates section below this one and are not surfaced here.
  *
- * Cascade follow-up (2026-05-23) — see
- * `docs/recovery/MAKS_CONVERSATION_2026_05_23.md` and
- * `docs/retro/retro-agent-pane-cascade-replacechild-2026-05-23.md`.
- * Before this surface, a renderer crash that killed an agent pane left
- * the conversation file orphaned in filestore with no UI path back —
- * the user had to know the blockId and force a remount. With this
- * list, the user picks the session from the picker and the existing
- * continuation flow (PR #977's continueOfInstanceId + workDirOverride)
- * brings the working directory + identity + memory back; the prior
- * conversation history reloads from filestore on the new pane's first
- * paint via the standard `useHistoryPagination` snapshot path.
+ * Why "Recent sessions" became "My Agents" — under Option E session
+ * zones are anchored to the agent definition, so a user agent has
+ * exactly one "current" session by construction. The list is really
+ * "your agents, with their current state", not "sessions across all
+ * agents". Naming follows the new model.
  *
- * Reattach mechanism: this surface **does NOT mint a new "ghost"
- * block referring to the original blockId.** Each entry triggers a
- * normal definition launch through `AgentViewModel.launchAgentDefinition`
- * with `continueOfInstanceId` + `workDirOverride` set from the row.
- * The new pane spawns the CLI in the prior working directory, so
- * Claude's `--continue` (and equivalents on other CLIs) resumes the
- * session and the new pane's `output.state.json` snapshot path
- * picks up the conversation history on render. Per spec — using the
- * existing continueOfId plumbing keeps surface area small and reuses
- * the audited launch flow.
+ * Renamed from RecentSessionsList.tsx (the cascade follow-up file
+ * shipped in PR #977 + #1008). The reattach mechanism, data source, and
+ * row UI are unchanged from that file — only the labels move. The data
+ * source stays `ListRecentSessionsCommand` because the row UI uses
+ * per-instance preview + node_count + last_active_at, which are only on
+ * `RecentSessionRow` (NamedAgentRow doesn't carry them). Switching the
+ * RPC would require backend changes and is out of Phase 1 scope.
+ *
+ * Reattach mechanism (unchanged): each entry triggers a normal
+ * definition launch through `AgentViewModel.launchAgentDefinition` with
+ * `continueOfInstanceId` + `workDirOverride` set from the row. The new
+ * pane spawns the CLI in the prior working directory, so Claude's
+ * `--continue` (and equivalents) resumes the session and the new pane's
+ * `output.state.json` snapshot path picks up the conversation history
+ * on render.
  */
 
 import {
@@ -56,10 +59,11 @@ export function formatRelative(now: number, ms: number): string {
 
 /** Empty-state copy varies based on whether an identity filter was
  * applied — surfaced so the integration test can match it. */
-export const EMPTY_GLOBAL = "No recent sessions yet";
-export const EMPTY_FILTERED = "No recent sessions for this identity";
+export const EMPTY_GLOBAL =
+    "No agents yet — pick a template below to create your first one.";
+export const EMPTY_FILTERED = "No agents for this identity yet.";
 
-export interface RecentSessionsListProps {
+export interface MyAgentsListProps {
     /** Optional reactive accessor for the identity filter. `null` /
      *  undefined / empty string = no filter (show every identity). */
     identityId?: Accessor<string | null | undefined>;
@@ -71,7 +75,7 @@ export interface RecentSessionsListProps {
     onReattach: (row: RecentSessionRow) => void;
 }
 
-export const RecentSessionsList = (props: RecentSessionsListProps): JSX.Element => {
+export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     const filterId = createMemo(() => {
         const raw = props.identityId?.();
         if (raw === null || raw === undefined) return "";
@@ -120,9 +124,9 @@ export const RecentSessionsList = (props: RecentSessionsListProps): JSX.Element 
     const isEmpty = () => !isLoading() && (rows() ?? []).length === 0;
 
     return (
-        <div class="agent-recent-sessions" data-testid="agent-recent-sessions">
+        <div class="agent-recent-sessions" data-testid="agent-my-agents-list">
             <div class="agent-recent-sessions-header">
-                <span class="agent-recent-sessions-title">Recent sessions</span>
+                <span class="agent-recent-sessions-title">My Agents</span>
                 <Show when={!isLoading() && (rows() ?? []).length > 0}>
                     <span class="agent-recent-sessions-count">
                         {(rows() ?? []).length}
@@ -134,7 +138,7 @@ export const RecentSessionsList = (props: RecentSessionsListProps): JSX.Element 
                 fallback={
                     <div
                         class="agent-recent-sessions-empty"
-                        data-testid="agent-recent-sessions-empty"
+                        data-testid="agent-my-agents-empty"
                     >
                         {filterId() ? EMPTY_FILTERED : EMPTY_GLOBAL}
                     </div>
@@ -148,8 +152,8 @@ export const RecentSessionsList = (props: RecentSessionsListProps): JSX.Element 
                                     type="button"
                                     class="agent-recent-sessions-entry"
                                     onClick={() => props.onReattach(row)}
-                                    aria-label={`Reattach to ${row.instance_name}`}
-                                    data-testid="agent-recent-sessions-entry"
+                                    aria-label={`Continue ${row.instance_name}`}
+                                    data-testid="agent-my-agents-entry"
                                 >
                                     <ProviderLogo
                                         provider={row.provider}
@@ -203,4 +207,4 @@ export const RecentSessionsList = (props: RecentSessionsListProps): JSX.Element 
     );
 };
 
-RecentSessionsList.displayName = "RecentSessionsList";
+MyAgentsList.displayName = "MyAgentsList";

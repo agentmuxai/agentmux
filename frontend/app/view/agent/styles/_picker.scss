@@ -13,6 +13,23 @@
         gap: var(--space-3);
     }
 
+    // Two-tier picker (Phase 1 — SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md):
+    // the "+ New from template" section header sits between the My
+    // Agents list and the templates card grid. Tuned to match the
+    // recent-sessions title visual weight so the two sections feel
+    // like peers, not a heading + a free-floating grid.
+    .agent-picker-templates-header {
+        max-width: 520px;
+        width: 100%;
+        align-self: center;
+        font-size: var(--text-sm, 0.875rem);
+        font-weight: 600;
+        color: color-mix(in srgb, var(--main-text-color) 70%, transparent);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-top: var(--space-3);
+    }
+
     .agent-picker-list {
         display: flex;
         flex-direction: column;
