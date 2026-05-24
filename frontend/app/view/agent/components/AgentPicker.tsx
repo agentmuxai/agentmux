@@ -98,25 +98,14 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     //   false     = needs install — card shows the bottom-right ribbon
     const [installState, setInstallState] = createSignal<Record<string, boolean | undefined>>({});
 
-    // Option E (PR 2 of 2): per-agent "has a current session" cache,
-    // keyed by agent.id.
-    //   undefined = not yet probed
-    //   true      = `agent:<defId>:current` has content → default
-    //               click auto-continues; "+ New" button surfaces
-    //   false     = no session yet → default click opens launch modal
-    const [sessionState, setSessionState] = createSignal<Record<string, boolean | undefined>>({});
-
-    const checkHasSession = async (agent: AgentDefinition) => {
-        try {
-            const r = await RpcApi.AgentSessionReadCommand(TabRpcClient, {
-                definition_id: agent.id,
-            });
-            setSessionState((s) => ({ ...s, [agent.id]: !!(r.content && r.content.length > 0) }));
-        } catch {
-            // Non-fatal — treat as no session (default click → modal).
-            setSessionState((s) => ({ ...s, [agent.id]: false }));
-        }
-    };
+    // Phase 1 two-tier picker (reagent P2 on #1011): the auto-continue
+    // session-state cache + probe lived here for the Option E PR-2
+    // default-click path. After the two-tier rewrite, templates carry
+    // `hasCurrentSession={false}` by invariant and `handleSelect` is
+    // unreachable from any card render, so the cache + probe + the
+    // entire session-state branch became dead. Deleted. If a future
+    // tier needs per-agent session probing, re-introduce the cache
+    // there scoped to that tier's data source — not here.
 
     const checkInstalled = async (agent: AgentDefinition) => {
         const prov = getProvider(agent.provider);
@@ -424,20 +413,11 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         }
     };
 
-    const handleNewSession = async (agent: AgentDefinition) => {
-        // Archive the current zone so the next launch starts fresh.
-        // RPC failure is non-fatal — fall through to the launch modal
-        // either way so the user isn't stuck.
-        try {
-            await RpcApi.AgentSessionArchiveCommand(TabRpcClient, {
-                definition_id: agent.id,
-            });
-        } catch {
-            // best-effort
-        }
-        setSessionState((s) => ({ ...s, [agent.id]: false }));
-        openLaunchModal(agent);
-    };
+    // (`handleNewSession` removed in same cleanup as `handleSelect` —
+    // templates can't show "+ New session" pills under Phase 1
+    // invariant `hasCurrentSession={false}`, so the callback was
+    // unreachable. Re-introduce when a tier renders my-agent rows
+    // with the pill.)
 
     // Phase 1 two-tier picker: clicking a template card opens the
     // "Create new agent from {Template}" modal. The layer chains
@@ -595,151 +575,13 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         }
     };
 
-    const handleSelect = async (
-        agent: AgentDefinition,
-        evt?: MouseEvent | KeyboardEvent,
-    ) => {
-        if (pendingSelect.has(agent.id)) return;
-        pendingSelect.add(agent.id);
-        try {
-            setNodejsError(null);
-
-            // Option E default-continue: when the agent has a current
-            // session and no modifier key forces the modal, auto-launch
-            // and skip every prereq / install / modal step. The session
-            // zone is per-definition, so the bindings the previous pane
-            // used are still on the AgentDefinition — no picker needed.
-            // P2 fix: KeyboardEvent also has metaKey, so the MouseEvent
-            // cast was misleading. Both event types are valid here, so
-            // widen the type narrowly instead of asserting one shape.
-            const modKeyed = (evt && (
-                ("shiftKey" in evt && (evt as MouseEvent | KeyboardEvent).shiftKey) ||
-                ("ctrlKey" in evt && (evt as MouseEvent | KeyboardEvent).ctrlKey) ||
-                ("altKey" in evt && (evt as MouseEvent | KeyboardEvent).altKey) ||
-                ("metaKey" in evt && (evt as MouseEvent | KeyboardEvent).metaKey)
-            )) || false;
-            const forceModal = !!modKeyed;
-            // P1 fix: require installState === true (strict), not !== false.
-            // The probe is async; `undefined` means "probe not done yet" and
-            // must NOT be treated as installed — that would race-launch a
-            // missing-CLI agent past the install flow. Falling through to
-            // the slower path below blocks-on-probe correctly.
-            if (
-                !forceModal
-                && sessionState()[agent.id] === true
-                && installState()[agent.id] === true
-            ) {
-                await autoContinue(agent);
-                return;
-            }
-
-            let installed = installState()[agent.id];
-
-            // If the bg check hasn't populated state yet (initial render
-            // race, slow IPC, freshly added definition), block on a sync
-            // probe for npm-backed providers before deciding the path.
-            // Without this, an unchecked npm agent would fall through to
-            // openLaunchModal and the launch would write a per-version
-            // `.bin` path that doesn't exist on disk.
-            if (installed === undefined) {
-                const prov = getProvider(agent.provider);
-                const isNpmInstallable = !!prov?.npmPackage && prov.npmPackage.length > 0;
-                if (isNpmInstallable) {
-                    await checkInstalled(agent);
-                    installed = installState()[agent.id];
-                }
-            }
-
-            // System-tool prereq check (e.g. Claude Code requires git
-            // — anthropics/claude-code#29898). If any are missing, open
-            // the prereq modal first; user can install + refresh or
-            // override via Launch anyway.
-            const missing = await probeMissingPrereqs(agent);
-            if (missing.length > 0) {
-                const proceedWithFlow = () => {
-                    if (installed === false) {
-                        tabModal.replace(buildInstallRequest(agent));
-                    } else {
-                        tabModal.replace(buildLaunchRequest(agent));
-                    }
-                };
-                // Recursive opener so the Refresh handler on every
-                // rendered modal (including the replacement after a
-                // failed re-probe) gets a working re-probe wired up.
-                // Reagent + codex P1/P2 on PR #908.
-                const openPrereqModal = (
-                    currentMissing: typeof missing,
-                    op: "open" | "replace",
-                ): void => {
-                    const refresh = async () => {
-                        for (const m of currentMissing) prereqCache.delete(m.tool);
-                        const fresh = await probeMissingPrereqs(agent);
-                        if (fresh.length === 0) {
-                            proceedWithFlow();
-                        } else {
-                            openPrereqModal(fresh, "replace");
-                        }
-                    };
-                    const req = {
-                        kind: "agent-prereqs" as const,
-                        agent,
-                        originBlockId: props.model.blockId,
-                        missing: currentMissing,
-                        onRefresh: () => void refresh(),
-                        onProceed: proceedWithFlow,
-                        onCancel: () => { /* layer closes */ },
-                    };
-                    if (op === "open") tabModal.open(req);
-                    else tabModal.replace(req);
-                };
-                openPrereqModal(missing, "open");
-                return;
-            }
-
-            if (installed === false) {
-                tabModal.open({
-                    kind: "install-agent",
-                    agent,
-                    originBlockId: props.model.blockId,
-                    onInstalled: (continueToLaunch: boolean) => {
-                        // install.start runs at provider scope, so every
-                        // AgentDefinition definition that resolves to the same
-                        // canonical provider is now installed — not just
-                        // the one the user clicked. Mark all of them so
-                        // sibling cards drop their ribbon too. This flip
-                        // runs whether the user chose Continue or Close
-                        // — codex caught the bug on PR #895 where Close
-                        // left the state stale.
-                        const canonical = getProvider(agent.provider)?.id ?? agent.provider;
-                        setInstallState((s) => {
-                            const next = { ...s };
-                            for (const a of agents()) {
-                                if ((getProvider(a.provider)?.id ?? a.provider) === canonical) {
-                                    next[a.id] = true;
-                                }
-                            }
-                            return next;
-                        });
-                        if (continueToLaunch) {
-                            // Crossfade install → launch (same shell;
-                            // no backdrop flicker). See
-                            // SPEC_MODAL_TRANSITIONS_2026_05_18.md.
-                            tabModal.replace(buildLaunchRequest(agent));
-                        } else {
-                            // User clicked Close (or ESC/backdrop) on
-                            // the success screen — state has been
-                            // flipped above; just tear down the modal.
-                            tabModal.close();
-                        }
-                    },
-                });
-                return;
-            }
-            openLaunchModal(agent);
-        } finally {
-            pendingSelect.delete(agent.id);
-        }
-    };
+    // Note: the legacy `handleSelect` (Option E PR-2 default-click
+    // handler) was removed in the Phase 1 cleanup. Every rendered
+    // card now goes through `handleTemplateSelect`; my-agent rows are
+    // handled by `MyAgentsList`'s own `handleReattach` callback. The
+    // install/prereq gates that `handleSelect` owned now live inside
+    // `handleTemplateSelect` directly. Don't resurrect a single shared
+    // `handleSelect` — fan out per tier (reagent P2 on #1011).
 
     const busy = () => launching() !== null;
 
@@ -753,17 +595,14 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     );
 
     // Refresh install state whenever the agent list changes.
-    // Session-zone probes (`checkHasSession`) are limited to
-    // user-owned agents — by Phase 1 invariant a template carries no
-    // session zone, so probing one would always return `false` and
-    // waste an RPC per template per picker mount.
+    // Session-zone probes were removed in the Phase 1 cleanup
+    // (reagent P2 on #1011) — templates carry `hasCurrentSession={false}`
+    // by invariant and my-agent rows source from `MyAgentsList` which
+    // doesn't need per-row session probes.
     createEffect(() => {
         for (const agent of agents()) {
             if (!(agent.id in installState())) {
                 void checkInstalled(agent);
-            }
-            if (agent.is_seeded !== 1 && !(agent.id in sessionState())) {
-                void checkHasSession(agent);
             }
         }
     });
@@ -821,10 +660,10 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                                         onLaunch={handleTemplateSelect}
                                         // Templates by invariant have
                                         // no session zone — suppress
-                                        // the "+ New" pill and skip
-                                        // the per-card session probe.
+                                        // the "+ New" pill (no
+                                        // `onNewSession` needed; the
+                                        // pill never appears).
                                         hasCurrentSession={false}
-                                        onNewSession={handleNewSession}
                                         defaultFocus={index() === 0}
                                     />
                                 )}
