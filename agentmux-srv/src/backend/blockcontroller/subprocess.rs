@@ -76,10 +76,14 @@ pub struct SubprocessSpawnConfig {
     /// conversation that re-injects the startup context.
     ///
     /// Empty / `None` means "no prior session" (greenfield launch).
-    /// If `inner.session_id` is already set on the controller (e.g. a
-    /// subsequent turn within the same process lifetime captured it
-    /// from CLI stdout), this field is ignored — the in-memory
-    /// captured id always wins.
+    ///
+    /// Best-effort, not authoritative: if the hydrated id is stale,
+    /// the CLI's stdout-emitted session id always overwrites it at
+    /// capture time (see `spawn_turn`'s stdout-reader block). The
+    /// reattach turn passes the (possibly stale) hydrated id via
+    /// `--resume`; the CLI either accepts it or starts a new
+    /// session and emits its own id, which then becomes the in-
+    /// memory authority for every subsequent turn.
     pub session_id: Option<String>,
 }
 
@@ -246,8 +250,48 @@ impl SubprocessController {
         self.inner.lock().unwrap().session_id.clone()
     }
 
+    /// Record an authoritative session id captured from the CLI's
+    /// stdout init/`thread.started` event. The CLI is the source of
+    /// truth for which session is live, so this ALWAYS overwrites
+    /// any prior value of `inner.session_id` — including values
+    /// previously hydrated from config on a picker reattach (which
+    /// may be stale by the time the CLI speaks).
+    ///
+    /// Free-function form (taking `&Arc<Mutex<…Inner>>` instead of
+    /// `&self`) so the spawn_turn stdout-reader tokio task can call
+    /// it without holding an `Arc<Self>` reference. The
+    /// `&SubprocessController` method below just delegates.
+    ///
+    /// Returns `true` when the value changed (caller should
+    /// broadcast the meta update + persist to block meta). Returns
+    /// `false` when the new id matches the current one — common
+    /// when the CLI emits the same `session_id` on every NDJSON
+    /// frame within a single turn.
+    pub(crate) fn record_captured_session_id_inner(
+        inner: &Mutex<SubprocessControllerInner>,
+        sid: &str,
+    ) -> bool {
+        if sid.is_empty() {
+            return false;
+        }
+        let mut guard = inner.lock().unwrap();
+        let differs = guard.session_id.as_deref() != Some(sid);
+        if differs {
+            guard.session_id = Some(sid.to_string());
+        }
+        differs
+    }
+
+    /// `&self` convenience wrapper around
+    /// `record_captured_session_id_inner` — used by tests that
+    /// already hold a `SubprocessController`.
+    #[cfg(test)]
+    pub(crate) fn record_captured_session_id(&self, sid: &str) -> bool {
+        Self::record_captured_session_id_inner(&self.inner, sid)
+    }
+
     /// Hydrate `inner.session_id` from a config-supplied id when the
-    /// controller hasn't captured one of its own yet.
+    /// controller hasn't seen a value yet.
     ///
     /// Picker reattach path: a fresh `SubprocessController` is
     /// registered for the new block, so its `inner.session_id` is
@@ -257,14 +301,24 @@ impl SubprocessController {
     /// method copies it to inner so the spawn_turn args-builder
     /// appends `--resume <sid>` on the FIRST turn.
     ///
-    /// Captured-id-wins: if `inner.session_id` is already `Some`
-    /// (captured from CLI stdout on an earlier turn within this same
-    /// process lifetime), the config value is ignored. The captured
-    /// id reflects what the CLI is actually using; honouring a stale
-    /// config value here would force `--resume` against a wrong id
-    /// and the CLI would start a fresh conversation again. Empty
-    /// `&str` is treated as "no value" so the caller can use it
-    /// unconditionally without filtering.
+    /// **Hydration is best-effort, not authoritative.** If
+    /// `inner.session_id` is already `Some` we no-op (don't overwrite
+    /// a value already in place — could be a captured-from-stdout
+    /// id from an earlier turn, or a prior hydration on the same
+    /// reattach). Critically, the **CLI's stdout-emitted session id
+    /// is authoritative** and overwrites any prior value at capture
+    /// time (see the stdout-reader block in `spawn_turn`). So if the
+    /// hydrated value is stale, the FIRST turn passes the stale id
+    /// via `--resume` (likely accepted as a no-op or rejected with a
+    /// "no such session" error from the CLI), the CLI then emits its
+    /// own session id in the init event, and `inner.session_id` is
+    /// overwritten with that authoritative value for subsequent
+    /// turns. Without the capture overwrite, a stale hydrated id
+    /// would be re-used forever — that was the bug codex flagged on
+    /// PR #1018 first cut.
+    ///
+    /// Empty `&str` is treated as "no value" so the caller can use
+    /// it unconditionally without filtering.
     pub(crate) fn hydrate_session_id_from_config(&self, config_sid: Option<&str>) {
         let Some(sid) = config_sid.filter(|s| !s.is_empty()) else {
             return;
@@ -538,19 +592,25 @@ impl SubprocessController {
                         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
                             if let Some(sid) = parsed.get(&session_id_field).and_then(|v| v.as_str()) {
                                 let sid_string = sid.to_string();
-                                // Only capture once (first occurrence in the output)
-                                let already_captured = inner_read.lock().unwrap().session_id.is_some();
-                                if !already_captured {
+                                // Authoritative CLI capture —
+                                // overwrites any prior value
+                                // (including stale hydrated ids
+                                // from picker reattach). De-dups
+                                // when the same id repeats across
+                                // turns. See
+                                // `record_captured_session_id_inner`
+                                // for the unit-tested form.
+                                let changed = SubprocessController::record_captured_session_id_inner(
+                                    &inner_read,
+                                    &sid_string,
+                                );
+                                if changed {
                                     tracing::info!(
                                         block_id = %block_id_read,
                                         field = %session_id_field,
                                         session_id = %sid_string,
                                         "captured session id"
                                     );
-                                    {
-                                        let mut inner = inner_read.lock().unwrap();
-                                        inner.session_id = Some(sid_string.clone());
-                                    }
 
                                     // Persist session_id to block metadata
                                     if let Some(ref store) = wstore_read {
@@ -1033,13 +1093,14 @@ mod tests {
     }
 
     #[test]
-    fn hydrate_session_id_keeps_captured_over_config_value() {
-        // Captured-id-wins invariant: once a turn has captured a
-        // session id from CLI stdout, hydration on a subsequent turn
-        // must NOT overwrite it with a stale config value. The
-        // captured id reflects what the CLI is actually using;
-        // forcing --resume against a different value would start a
-        // NEW conversation again.
+    fn hydrate_session_id_is_noop_when_value_already_present() {
+        // Hydration is best-effort, not authoritative — it only
+        // sets `inner.session_id` when None. The reason isn't
+        // captured-id-wins (that's enforced at CAPTURE time below);
+        // it's just to avoid re-hydrating on every spawn_turn call
+        // within a controller lifetime. A stale value here is fine
+        // because the next CLI emit at `record_captured_session_id_inner`
+        // will overwrite.
         let ctrl = SubprocessController::new(
             "tab-1".to_string(),
             "block-resume".to_string(),
@@ -1050,11 +1111,83 @@ mod tests {
         );
         ctrl.inner.lock().unwrap().session_id = Some("captured-sid".to_string());
 
-        ctrl.hydrate_session_id_from_config(Some("stale-config-sid"));
+        ctrl.hydrate_session_id_from_config(Some("different-config-sid"));
         assert_eq!(
             ctrl.inner.lock().unwrap().session_id.as_deref(),
-            Some("captured-sid")
+            Some("captured-sid"),
+            "hydration must not overwrite an existing value"
         );
+    }
+
+    #[test]
+    fn record_captured_overwrites_hydrated_value() {
+        // The CLI is authoritative for session id once it speaks.
+        // Codex P1 on PR #1018 first cut: my original
+        // `if !already_captured` guard in the stdout reader meant
+        // that a hydrated (possibly stale) session id would lock
+        // out every subsequent CLI-emitted value, so a wrong
+        // `--resume <stale>` would be passed forever. The fix
+        // (`record_captured_session_id_inner`) always overwrites
+        // and returns whether the value changed.
+        let ctrl = SubprocessController::new(
+            "tab-1".to_string(),
+            "block-overwrite".to_string(),
+            None,
+            None,
+            None,
+            None,
+        );
+        ctrl.hydrate_session_id_from_config(Some("stale-hydrated-sid"));
+        assert_eq!(
+            ctrl.session_id().as_deref(),
+            Some("stale-hydrated-sid")
+        );
+
+        let changed = ctrl.record_captured_session_id("authoritative-sid");
+        assert!(changed, "value differs from hydrated; must report changed");
+        assert_eq!(
+            ctrl.session_id().as_deref(),
+            Some("authoritative-sid"),
+            "CLI-emitted id must overwrite hydrated value"
+        );
+    }
+
+    #[test]
+    fn record_captured_dedups_same_value() {
+        // Real CLI streams emit `session_id` on every NDJSON frame,
+        // not just the first. The dedup is a perf knob (skips the
+        // meta-update broadcast on repeats), not a correctness
+        // gate — captured-id is still authoritative on first emit.
+        let ctrl = SubprocessController::new(
+            "tab-1".to_string(),
+            "block-dedup".to_string(),
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(ctrl.record_captured_session_id("sid-1"));
+        assert!(!ctrl.record_captured_session_id("sid-1"),
+            "second call with same value must return false (no broadcast)");
+        assert_eq!(ctrl.session_id().as_deref(), Some("sid-1"));
+    }
+
+    #[test]
+    fn record_captured_ignores_empty() {
+        // Defensive: empty string from a malformed CLI emit must
+        // not clear a valid prior value.
+        let ctrl = SubprocessController::new(
+            "tab-1".to_string(),
+            "block-empty".to_string(),
+            None,
+            None,
+            None,
+            None,
+        );
+        ctrl.record_captured_session_id("real-sid");
+        assert!(!ctrl.record_captured_session_id(""),
+            "empty CLI emit must be ignored");
+        assert_eq!(ctrl.session_id().as_deref(), Some("real-sid"));
     }
 
     #[test]
