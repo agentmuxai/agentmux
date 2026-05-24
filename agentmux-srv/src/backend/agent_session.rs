@@ -998,47 +998,80 @@ fn move_zone(
     if files.is_empty() {
         return Ok(());
     }
-    // Destination-non-empty guard (codex P1 round 4 on PR #1017):
-    // if the source `delete_zone` failed on a prior run and the
-    // user then continued their conversation on the destination
-    // clone, a naive copy here would clobber the user's newer
-    // bytes with the older seeded bytes. When the destination
-    // already has content, treat the source as a stale leftover
-    // and drop it without copying. Safe under all retry paths:
+    // Per-file copy gate (codex P1 rounds 4 + 5 on PR #1017).
+    // The two failure modes pull in opposite directions:
     //
-    //   - First successful run: dest empty → copy + delete source.
-    //   - Partial-failure retry, user untouched: dest matches
-    //     source (same bytes from prior successful copy) → drop
-    //     source (idempotent).
-    //   - Partial-failure retry, user continued: dest has NEWER
-    //     bytes → drop source; user's history is preserved. The
-    //     migration logs that the source was dropped, not copied.
-    let new_files = filestore
+    //   R4: partial-failure retry, user has continued on the
+    //       destination → must NOT overwrite the destination's
+    //       newer content with stale seeded source bytes.
+    //   R5: partial-failure retry, the prior `move_zone` wrote
+    //       some destination files but not others → must NOT
+    //       drop the source until every source file is also
+    //       present at the destination (else the unwritten ones
+    //       are lost forever).
+    //
+    // Resolve both: file-by-file, only copy when the destination
+    // is MISSING that file. Files already present at the
+    // destination are preserved verbatim (whether they're the
+    // user's continuation or a successful prior copy). The source
+    // is only deleted once every source file has a counterpart at
+    // the destination — partial state retries on the next run.
+    let new_files_set: std::collections::HashSet<String> = filestore
         .list_files(new_zone)
-        .map_err(|e| format!("list_files (new): {e}"))?;
-    if !new_files.is_empty() {
-        tracing::info!(
-            old_zone = %old_zone,
-            new_zone = %new_zone,
-            "template_promote migration: destination non-empty; dropping stale source instead of copying (preserves user's continuation)"
-        );
-        if let Err(e) = filestore.delete_zone(old_zone) {
-            tracing::warn!(
-                old_zone = %old_zone,
-                error = %e,
-                "template_promote migration: delete_zone failed (destination already had content)"
-            );
-        }
-        return Ok(());
-    }
+        .map_err(|e| format!("list_files (new): {e}"))?
+        .into_iter()
+        .map(|f| f.name)
+        .collect();
+    let mut copied = 0usize;
+    let mut preserved = 0usize;
     for f in &files {
+        if new_files_set.contains(&f.name) {
+            preserved += 1;
+            continue;
+        }
         let bytes = filestore
             .read_file(old_zone, &f.name)
             .map_err(|e| format!("read_file {}: {e}", f.name))?
             .unwrap_or_default();
-        // write_zone_file creates the file when missing, replaces it
-        // otherwise (matches archive_session's write semantics).
+        // write_zone_file creates the file when missing, replaces
+        // it otherwise (matches archive_session's write semantics).
         write_zone_file(filestore, new_zone, &f.name, &bytes)?;
+        copied += 1;
+    }
+    if preserved > 0 {
+        tracing::info!(
+            old_zone = %old_zone,
+            new_zone = %new_zone,
+            copied,
+            preserved,
+            "template_promote migration: copied missing files; preserved existing destination files (R4 user-continuation / R5 partial-copy)"
+        );
+    }
+    // Verify every source file has a counterpart at the
+    // destination before dropping source — protects against the
+    // R5 partial-write case where write_zone_file silently leaves
+    // a file absent at the destination despite returning Ok (no
+    // current call path does so, but defending the invariant here
+    // is cheap and future-proofs the helper).
+    let post_dest: std::collections::HashSet<String> = filestore
+        .list_files(new_zone)
+        .map_err(|e| format!("list_files (new, post): {e}"))?
+        .into_iter()
+        .map(|f| f.name)
+        .collect();
+    let missing: Vec<&str> = files
+        .iter()
+        .map(|f| f.name.as_str())
+        .filter(|n| !post_dest.contains(*n))
+        .collect();
+    if !missing.is_empty() {
+        tracing::warn!(
+            old_zone = %old_zone,
+            new_zone = %new_zone,
+            missing = ?missing,
+            "template_promote migration: destination missing files post-copy; leaving source in place for retry"
+        );
+        return Ok(());
     }
     // Delete the source files only after every write has succeeded.
     // delete_zone wipes the whole zone in one transaction.
@@ -1795,6 +1828,103 @@ mod tests {
         assert!(
             seeded_files.is_empty(),
             "seeded current zone must be drained after the retry's safety drop"
+        );
+    }
+
+    #[test]
+    fn template_promote_recovers_partial_copy_at_zone() {
+        // Codex P1 round 5 on PR #1017: a prior `move_zone` that
+        // wrote SOME destination files but failed before the rest
+        // must not be mistaken for "fully migrated" — dropping the
+        // source there would lose the unwritten files forever.
+        //
+        // Setup: seeded `:current` has both files (snapshot +
+        // output stream); the clone's `:current` has only the
+        // snapshot (the prior copy crashed before the second
+        // file). After retry: clone has BOTH files; seeded zone
+        // is drained.
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        let template = insert_template(&wstore, "tpl-claude", "Claude Code", "claude");
+        // Prior partial run already created the deterministic-id
+        // clone def.
+        let promote_target_id = format!("template-promote-v1-{}", template.id);
+        let now = now_ms() as i64;
+        let mut prior_target = crate::backend::storage::wstore::AgentDefinition {
+            id: promote_target_id.clone(),
+            slug: String::new(),
+            name: "Claude Code".to_string(),
+            icon: template.icon.clone(),
+            provider: template.provider.clone(),
+            description: template.description.clone(),
+            working_directory: String::new(),
+            shell: template.shell.clone(),
+            provider_flags: template.provider_flags.clone(),
+            auto_start: 0,
+            restart_on_crash: template.restart_on_crash,
+            idle_timeout_minutes: template.idle_timeout_minutes,
+            created_at: now - 1_000,
+            agent_type: template.agent_type.clone(),
+            environment: template.environment.clone(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: template.id.clone(),
+            branch_label: String::new(),
+            updated_at: now - 1_000,
+            user_hidden: 0,
+        };
+        wstore.agent_def_insert(&mut prior_target).unwrap();
+
+        // Seeded `:current` has BOTH files.
+        let seeded_current = agent_current_zone(&template.id);
+        write_zone_file(&filestore, &seeded_current, SNAPSHOT_FILE, b"seeded-snapshot").unwrap();
+        write_zone_file(&filestore, &seeded_current, OUTPUT_FILE, b"seeded-output-stream").unwrap();
+
+        // Clone `:current` already has ONLY the snapshot (prior
+        // copy got that far, then failed on OUTPUT_FILE).
+        write_zone_file(
+            &filestore,
+            &agent_current_zone(&promote_target_id),
+            SNAPSHOT_FILE,
+            b"seeded-snapshot",
+        )
+        .unwrap();
+
+        let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(stats.templates_promoted, 1);
+
+        // Clone now has BOTH files (snapshot preserved, output
+        // copied over from the source).
+        let clone_zone = agent_current_zone(&promote_target_id);
+        let clone_files = filestore.list_files(&clone_zone).unwrap();
+        let clone_names: std::collections::HashSet<String> =
+            clone_files.iter().map(|f| f.name.clone()).collect();
+        assert!(
+            clone_names.contains(SNAPSHOT_FILE),
+            "snapshot file must remain at destination"
+        );
+        assert!(
+            clone_names.contains(OUTPUT_FILE),
+            "output file must be copied over from source on retry (codex R5)"
+        );
+        let output_bytes = filestore
+            .read_file(&clone_zone, OUTPUT_FILE)
+            .unwrap()
+            .unwrap_or_default();
+        assert_eq!(
+            output_bytes, b"seeded-output-stream",
+            "the unwritten file from the partial copy must arrive intact"
+        );
+
+        // Source is drained — every source file has a destination
+        // counterpart now.
+        let seeded_files = filestore.list_files(&seeded_current).unwrap();
+        assert!(
+            seeded_files.is_empty(),
+            "seeded current zone must be drained after the complete copy"
         );
     }
 
