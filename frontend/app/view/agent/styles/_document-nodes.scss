@@ -672,10 +672,12 @@
             left: 0;
             right: 0;
             z-index: 10;
-            // Cap height to keep the overlay inside the viewport
-            // (with a 40px breathing room at both edges). Body
-            // gets its own scrollbar if it doesn't fit.
-            max-height: calc(100vh - 80px);
+            // max-height is set inline by UserMessageBlock from the
+            // chosen-side container space — keeps `overflow-y: auto`
+            // operating INSIDE the scroll container's bounds rather
+            // than relying on `calc(100vh - …)`, which clipped the
+            // overlay's tail when the agent pane is in a sub-region
+            // of the window (codex P2 round 2 on PR #1021).
             overflow-y: auto;
             // Solid background so the overlay reads as a discrete
             // surface against the rows it covers. Slightly deeper

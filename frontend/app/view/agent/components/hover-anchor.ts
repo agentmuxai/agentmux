@@ -122,3 +122,29 @@ export function findScrollContainerRect(el: HTMLElement): VerticalRect {
     // No scroll container found — overlay can use the whole viewport.
     return { top: 0, bottom: window.innerHeight };
 }
+
+/**
+ * The pixel height the overlay should be capped at, given the
+ * chosen direction and the clipping container's bounds. The
+ * caller applies this as an inline `max-height` on the overlay
+ * so that — for the "fits-neither" case — the overlay's own
+ * `overflow-y: auto` activates inside the container's bounds
+ * (instead of the overlay being clipped by the container and
+ * the hidden tail being unreachable). Codex P2 round 2 on
+ * PR #1021.
+ *
+ * `margin` is reserved space at the container edge so the
+ * overlay doesn't sit flush against the pane border. 4px is
+ * enough breathing room without compromising readable area.
+ */
+export function maxOverlayHeight(
+    summaryRect: VerticalRect,
+    containerRect: VerticalRect,
+    direction: ExpandDirection,
+    margin = 4,
+): number {
+    if (direction === "below") {
+        return Math.max(0, containerRect.bottom - summaryRect.bottom - margin);
+    }
+    return Math.max(0, summaryRect.top - containerRect.top - margin);
+}

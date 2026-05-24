@@ -309,6 +309,39 @@ describe("UserMessageBlock — startup injection", () => {
             expect(body).not.toBeNull();
             expect(body!.classList.contains("agent-user-message-content--flow")).toBe(true);
         });
+
+        it("hover-expanded body has an inline max-height (per-hover cap)", () => {
+            // Codex P2 round 2: the overlay's max-height is computed
+            // per hover from the chosen-side container space, set
+            // inline. We can't assert a specific px value (jsdom's
+            // getBoundingClientRect returns zeros, plus
+            // window.innerHeight defaults), but we CAN assert that
+            // the style attribute carries a `max-height` rule —
+            // proving the inline path fired.
+            vi.useFakeTimers();
+            try {
+                const { container } = render(() => (
+                    <UserMessageBlock node={startupNode} pinned={false} onTogglePin={() => {}} />
+                ));
+                const root = container.querySelector(".agent-user-message") as HTMLElement;
+                fireEvent.mouseEnter(root);
+                vi.advanceTimersByTime(200);
+                const body = container.querySelector(".agent-user-message-content") as HTMLElement;
+                expect(body).not.toBeNull();
+                expect(body.style.maxHeight).toMatch(/^\d+px$/);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("pinned body has no inline max-height (in-flow, no cap)", () => {
+            const { container } = render(() => (
+                <UserMessageBlock node={startupNode} pinned={true} onTogglePin={() => {}} />
+            ));
+            const body = container.querySelector(".agent-user-message-content") as HTMLElement;
+            expect(body).not.toBeNull();
+            expect(body.style.maxHeight).toBe("");
+        });
     });
 
     describe("aria-expanded", () => {

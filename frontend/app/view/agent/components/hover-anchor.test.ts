@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { pickExpandDirection } from "./hover-anchor";
+import { maxOverlayHeight, pickExpandDirection } from "./hover-anchor";
 
 describe("pickExpandDirection", () => {
     // Container occupying the whole viewport (no clipping).
@@ -108,5 +108,78 @@ describe("pickExpandDirection", () => {
             const middlePane = { top: 200, bottom: 700 };
             expect(pickExpandDirection(rect, middlePane, 300)).toBe("below");
         });
+    });
+});
+
+describe("maxOverlayHeight", () => {
+    it("'below' returns the container space below the summary, minus margin", () => {
+        // 200px below summary (1000 - 800), minus 4px margin = 196.
+        expect(
+            maxOverlayHeight(
+                { top: 700, bottom: 800 },
+                { top: 0, bottom: 1000 },
+                "below",
+            ),
+        ).toBe(196);
+    });
+
+    it("'above' returns the container space above the summary, minus margin", () => {
+        // 700px above summary (700 - 0), minus 4px margin = 696.
+        expect(
+            maxOverlayHeight(
+                { top: 700, bottom: 800 },
+                { top: 0, bottom: 1000 },
+                "above",
+            ),
+        ).toBe(696);
+    });
+
+    it("respects a non-zero container top (header offset)", () => {
+        // Summary at 600-700, pane is 200-1000. Below = 1000-700-4=296.
+        expect(
+            maxOverlayHeight(
+                { top: 600, bottom: 700 },
+                { top: 200, bottom: 1000 },
+                "below",
+            ),
+        ).toBe(296);
+        // Above = 600-200-4 = 396.
+        expect(
+            maxOverlayHeight(
+                { top: 600, bottom: 700 },
+                { top: 200, bottom: 1000 },
+                "above",
+            ),
+        ).toBe(396);
+    });
+
+    it("clamps to 0 for a degenerate case (summary outside container)", () => {
+        // Summary above pane top — 'above' space is negative → 0.
+        expect(
+            maxOverlayHeight(
+                { top: 50, bottom: 100 },
+                { top: 200, bottom: 1000 },
+                "above",
+            ),
+        ).toBe(0);
+    });
+
+    it("accepts a custom margin", () => {
+        expect(
+            maxOverlayHeight(
+                { top: 0, bottom: 50 },
+                { top: 0, bottom: 1000 },
+                "below",
+                0,
+            ),
+        ).toBe(950);
+        expect(
+            maxOverlayHeight(
+                { top: 0, bottom: 50 },
+                { top: 0, bottom: 1000 },
+                "below",
+                20,
+            ),
+        ).toBe(930);
     });
 });

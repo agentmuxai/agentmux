@@ -48,6 +48,7 @@ import { Show, createSignal, onCleanup, type JSX } from "solid-js";
 import type { UserMessageNode } from "../types";
 import {
     findScrollContainerRect,
+    maxOverlayHeight,
     pickExpandDirection,
     type ExpandDirection,
 } from "./hover-anchor";
@@ -78,6 +79,12 @@ const STARTUP_BODY_ESTIMATE_PX = 400;
 export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
     const [hovering, setHovering] = createSignal(false);
     const [expandDirection, setExpandDirection] = createSignal<ExpandDirection>("below");
+    // Pixel cap on the overlay's height, computed per hover from
+    // the chosen-side container space so the overlay's own
+    // `overflow-y: auto` activates inside the pane bounds even when
+    // the body is taller than either side. `null` means no cap
+    // applied (greenfield or non-overlay render).
+    const [overlayMaxHeight, setOverlayMaxHeight] = createSignal<number | null>(null);
     let enterTimer: ReturnType<typeof setTimeout> | undefined;
     let rootEl: HTMLDivElement | undefined;
 
@@ -102,13 +109,19 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
                 if (summaryEl) {
                     const rect = summaryEl.getBoundingClientRect();
                     const container = findScrollContainerRect(summaryEl);
-                    setExpandDirection(
-                        pickExpandDirection(
-                            { top: rect.top, bottom: rect.bottom },
-                            container,
-                            STARTUP_BODY_ESTIMATE_PX,
-                        ),
+                    const summaryV = { top: rect.top, bottom: rect.bottom };
+                    const dir = pickExpandDirection(
+                        summaryV,
+                        container,
+                        STARTUP_BODY_ESTIMATE_PX,
                     );
+                    setExpandDirection(dir);
+                    // Cap the overlay's height to the chosen side's
+                    // container space so its own `overflow-y: auto`
+                    // activates inside the pane (vs the pane
+                    // clipping the overlay and the tail being
+                    // unreachable). Codex P2 round 2 on PR #1021.
+                    setOverlayMaxHeight(maxOverlayHeight(summaryV, container, dir));
                 }
             }
             setHovering(true);
@@ -117,6 +130,10 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
     const handleMouseLeave = () => {
         clearTimeout(enterTimer);
         setHovering(false);
+        // Clear cap so the next hover recomputes from a fresh
+        // measurement; stale values would matter if the pane has
+        // resized between hovers.
+        setOverlayMaxHeight(null);
     };
     onCleanup(() => clearTimeout(enterTimer));
 
@@ -186,6 +203,11 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
                         "agent-user-message-content--overlay-above":
                             bodyMode() === "overlay" && expandDirection() === "above",
                     })}
+                    style={
+                        bodyMode() === "overlay" && overlayMaxHeight() !== null
+                            ? { "max-height": `${overlayMaxHeight()}px` }
+                            : undefined
+                    }
                 >
                     {/* Top-right action button. Two glyphs:
                      *    📌 — pin (hovered, not yet pinned).
