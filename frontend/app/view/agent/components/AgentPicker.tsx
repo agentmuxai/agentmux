@@ -434,22 +434,28 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             // and skip every prereq / install / modal step. The session
             // zone is per-definition, so the bindings the previous pane
             // used are still on the AgentDefinition — no picker needed.
-            const forceModal = !!(
-                evt && (
-                    ("shiftKey" in evt && evt.shiftKey) ||
-                    ("ctrlKey" in evt && evt.ctrlKey) ||
-                    ("altKey" in evt && evt.altKey) ||
-                    ("metaKey" in evt && (evt as MouseEvent).metaKey)
-                )
-            );
-            if (!forceModal && sessionState()[agent.id] === true) {
-                // Still gate on install: an agent with a current
-                // session can still need the CLI binary installed
-                // (e.g. user wiped per-version cache).
-                if (installState()[agent.id] !== false) {
-                    await autoContinue(agent);
-                    return;
-                }
+            // P2 fix: KeyboardEvent also has metaKey, so the MouseEvent
+            // cast was misleading. Both event types are valid here, so
+            // widen the type narrowly instead of asserting one shape.
+            const modKeyed = (evt && (
+                ("shiftKey" in evt && (evt as MouseEvent | KeyboardEvent).shiftKey) ||
+                ("ctrlKey" in evt && (evt as MouseEvent | KeyboardEvent).ctrlKey) ||
+                ("altKey" in evt && (evt as MouseEvent | KeyboardEvent).altKey) ||
+                ("metaKey" in evt && (evt as MouseEvent | KeyboardEvent).metaKey)
+            )) || false;
+            const forceModal = !!modKeyed;
+            // P1 fix: require installState === true (strict), not !== false.
+            // The probe is async; `undefined` means "probe not done yet" and
+            // must NOT be treated as installed — that would race-launch a
+            // missing-CLI agent past the install flow. Falling through to
+            // the slower path below blocks-on-probe correctly.
+            if (
+                !forceModal
+                && sessionState()[agent.id] === true
+                && installState()[agent.id] === true
+            ) {
+                await autoContinue(agent);
+                return;
             }
 
             let installed = installState()[agent.id];
