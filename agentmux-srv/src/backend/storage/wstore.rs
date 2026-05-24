@@ -1915,6 +1915,17 @@ impl WaveStore {
     /// user with 200+ named agents across many definitions could
     /// have the current definition's older instances cut off by a
     /// purely global limit otherwise.
+    ///
+    /// Pre-Option-E this filter also required `parent_instance_id =
+    /// ''` to hide continuation rows (chained instances that were
+    /// vestigial side-effects of the old per-block session model). Under
+    /// Option E the session zone is anchored on `definition_id`, so a
+    /// continuation row is just the most-recent instance of an agent
+    /// the user actively used — exactly the row we WANT visible in the
+    /// picker. Excluding them hides real agents (root cause of the
+    /// 2026-05-24 "Maks doesn't appear under My Agents" report) and
+    /// also makes `template_promote` migration's name lookup miss the
+    /// real `instance_name`, falling back to the template name.
     pub fn instance_list_named(
         &self,
         limit: usize,
@@ -1929,7 +1940,6 @@ impl WaveStore {
              FROM db_agent_instances
              WHERE display_hidden = 0
                AND instance_name <> ''
-               AND parent_instance_id = ''
                AND definition_id = ?1
              ORDER BY started_at DESC
              LIMIT ?2"
@@ -1941,7 +1951,6 @@ impl WaveStore {
              FROM db_agent_instances
              WHERE display_hidden = 0
                AND instance_name <> ''
-               AND parent_instance_id = ''
              ORDER BY started_at DESC
              LIMIT ?1"
         };
@@ -2135,13 +2144,19 @@ impl WaveStore {
     /// Failures are logged, never propagated: SQLite remains
     /// authoritative.
     fn registry_upsert_if_named(&self, inst: &AgentInstance) {
-        // Mirror filter must match SQLite's dropdown filter
-        // (instance_list_named): non-empty instance_name AND
-        // parent_instance_id == ''. Continuation rows (created when
-        // the user resumes an existing named agent) carry the prior
-        // row in parent_instance_id and would otherwise produce a
-        // duplicate registry entry that the registry-sourced read
-        // path would surface as a separate dropdown row.
+        // Mirror filter: only registers named rows. Pre-Option-E this
+        // also excluded continuation rows (parent_instance_id != '')
+        // so the registry-sourced read path wouldn't surface chained
+        // resumes as duplicate dropdown rows. Under Option E, the
+        // session zone is anchored on definition_id, so a continuation
+        // row IS the most-recent named instance — exactly what we want
+        // visible. `instance_list_named` (the SQLite-sourced read
+        // path) dropped its parent_instance_id filter in the
+        // 2026-05-24 picker-visibility fix; the registry mirror keeps
+        // its filter here for now since the registry-sourced read path
+        // doesn't have the dedup-by-(definition_id, instance_name)
+        // affordance the SQLite ORDER BY/LIMIT provides. Follow-up
+        // PR will land cross-version dedup so this filter can drop too.
         if inst.instance_name.is_empty() || !inst.parent_instance_id.is_empty() {
             return;
         }
@@ -4069,9 +4084,14 @@ mod tests {
 
     #[test]
     fn instance_create_continuation_row_does_not_mirror() {
-        // SQLite's dropdown filter excludes rows where
-        // parent_instance_id != ''. The mirror must agree, otherwise
-        // continuation rows duplicate their parent in the registry.
+        // Registry mirror filter (per the doc comment in
+        // registry_upsert_if_named) intentionally lags the SQLite
+        // dropdown filter: continuation rows are NOT mirrored to
+        // registry, even though `instance_list_named` does return
+        // them under Option E. Cross-version dedup is the planned
+        // follow-up; until then the registry-sourced read path
+        // doesn't have the SQLite ORDER BY/LIMIT affordance and so
+        // continues to gate on parent_instance_id == ''.
         let (tmp, store, reg) = store_with_registry();
         let agents_root = tmp.path().join("agents");
         let parent = make_named_inst("inst-parent", "demoP", &agents_root);
@@ -4085,6 +4105,51 @@ mod tests {
         let recs = reg.list_active().unwrap();
         assert_eq!(recs.len(), 1);
         assert_eq!(recs[0].data.instance_id, "inst-parent");
+    }
+
+    #[test]
+    fn instance_list_named_includes_continuation_rows() {
+        // Regression test for the 2026-05-24 "Maks not under My Agents"
+        // report. Pre-Option-E `instance_list_named` filtered
+        // `parent_instance_id = ''`, hiding every continuation row.
+        // Under Option E the session zone is anchored on definition_id,
+        // so a continuation row IS the most-recent named instance —
+        // exactly what the picker needs to surface. This test asserts
+        // both head-of-chain AND continuation rows come back, sorted
+        // most-recent-first. The registry mirror still excludes
+        // continuations (see sibling test
+        // `instance_create_continuation_row_does_not_mirror`), but
+        // `instance_list_named` reads SQLite directly so the picker
+        // path is unaffected by the registry filter.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let mut head = make_named_inst("inst-head", "Maks", &agents_root);
+        head.started_at = 100;
+        store.instance_create(&head).unwrap();
+
+        let mut cont = make_named_inst("inst-cont", "Maks", &agents_root);
+        cont.parent_instance_id = "inst-head".to_string();
+        cont.started_at = 200;
+        store.instance_create(&cont).unwrap();
+
+        let rows = store.instance_list_named(10, None).unwrap();
+        // Both rows are returned (filter dropped).
+        assert_eq!(rows.len(), 2, "continuation rows must be visible to the picker");
+        // ORDER BY started_at DESC — most recent first.
+        assert_eq!(rows[0].id, "inst-cont");
+        assert_eq!(rows[1].id, "inst-head");
+        // Continuation row preserves its parent linkage in the
+        // returned struct (just not used as an exclusion gate).
+        assert_eq!(rows[0].parent_instance_id, "inst-head");
+        assert_eq!(rows[1].parent_instance_id, "");
+
+        // Definition-scoped variant returns the same rows.
+        let scoped = store
+            .instance_list_named(10, Some("def-mirror"))
+            .unwrap();
+        assert_eq!(scoped.len(), 2);
+        assert_eq!(scoped[0].id, "inst-cont");
     }
 
     #[test]
