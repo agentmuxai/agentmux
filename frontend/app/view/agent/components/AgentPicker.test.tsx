@@ -38,12 +38,28 @@ vi.mock("@/app/store/rpc-api", () => {
             identity_id: "",
             memory_id: "",
         }),
+        // Phase 2 (Q2 Decision Y) — hide templates.
+        AgentDefHideCommand: vi.fn().mockResolvedValue({ ok: true }),
+        AgentDefUnhideCommand: vi.fn().mockResolvedValue({ ok: true }),
+        AgentDefListHiddenTemplatesCommand: vi.fn().mockResolvedValue([]),
         ListIdentityBundlesCommand: vi.fn().mockResolvedValue([]),
         ListMemoriesCommand: vi.fn().mockResolvedValue([]),
     };
     return { RpcApi };
 });
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+
+// Phase 2: the ContextMenu helper shows a native menu via CEF IPC.
+// In jsdom there's no host bridge; we capture the menu spec the
+// picker requests so tests can fire the "Hide template" item's click
+// handler directly. Defined inline inside the factory so vi.mock's
+// top-of-file hoisting doesn't read `contextMenuShow` before the
+// const declaration runs.
+vi.mock("@/app/store/contextmenu", () => ({
+    ContextMenuModel: {
+        showContextMenu: vi.fn(),
+    },
+}));
 
 vi.mock("@/app/store/wps", () => ({
     waveEventSubscribe: vi.fn(() => () => {}),
@@ -83,11 +99,19 @@ vi.mock("./AgentCard", () => ({
             data-is-template={String(props.agent.is_seeded === 1)}
             data-has-session={String(!!props.hasCurrentSession)}
             data-launching={String(!!props.launching)}
+            data-has-ctx-menu={String(typeof props.onContextMenu === "function")}
             onClick={(e) => props.onLaunch(props.agent, e)}
+            onContextMenu={(e) => {
+                props.onContextMenu?.(props.agent, e);
+            }}
         >
             {props.agent.name}
         </button>
     ),
+}));
+
+vi.mock("./HiddenTemplatesSection", () => ({
+    HiddenTemplatesSection: () => null,
 }));
 
 vi.mock("./AgentActionBar", () => ({
@@ -99,8 +123,10 @@ vi.mock("./MyAgentsList", () => ({
 }));
 
 import { AgentPicker } from "./AgentPicker";
+import { ContextMenuModel } from "@/app/store/contextmenu";
 
 let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
+const contextMenuShow = vi.mocked(ContextMenuModel.showContextMenu);
 
 const ts = () => 1_700_000_000_000;
 
@@ -152,6 +178,7 @@ beforeEach(async () => {
     tabModalOpen.mockClear();
     tabModalReplace.mockClear();
     tabModalClose.mockClear();
+    contextMenuShow.mockClear();
     ({ RpcApi } = await import("@/app/store/rpc-api"));
     vi.mocked(RpcApi.ListAgentDefinitionsCommand).mockResolvedValue([
         claudeTemplate,
@@ -203,6 +230,80 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         render(() => <AgentPicker model={model as any} />);
         const card = await screen.findByTestId("agent-card-tpl-claude");
         expect(card.getAttribute("data-has-session")).toBe("false");
+    });
+
+    // Phase 2 (Q2 Decision Y — hide templates).
+    it("right-click on a template card opens the Hide context menu", async () => {
+        const model = makeMockModel();
+        render(() => <AgentPicker model={model as any} />);
+        const card = await screen.findByTestId("agent-card-tpl-claude");
+        // The mock card forwards the onContextMenu down so the
+        // picker sees the right-click and asks ContextMenuModel to
+        // render the menu.
+        expect(card.getAttribute("data-has-ctx-menu")).toBe("true");
+        fireEvent.contextMenu(card);
+        await waitFor(() => expect(contextMenuShow).toHaveBeenCalled());
+
+        const [menu, evt] = contextMenuShow.mock.calls[0];
+        expect(Array.isArray(menu)).toBe(true);
+        expect(menu.length).toBe(1);
+        expect(menu[0].label).toContain("Hide template");
+        expect(menu[0].label).toContain("Claude Code");
+        // Sanity: the event we forwarded carries the synthetic MouseEvent
+        // shape ContextMenuModel.showContextMenu expects (clientX/Y reads
+        // on the production CEF path).
+        expect(evt).toBeTruthy();
+    });
+
+    it("Hide menu click fires AgentDefHideCommand with the template id", async () => {
+        const model = makeMockModel();
+        render(() => <AgentPicker model={model as any} />);
+        const card = await screen.findByTestId("agent-card-tpl-claude");
+        fireEvent.contextMenu(card);
+        await waitFor(() => expect(contextMenuShow).toHaveBeenCalled());
+
+        const [menu] = contextMenuShow.mock.calls[0];
+        // Invoke the menu item's click handler directly — this is
+        // what the CEF bridge does after the user picks the row.
+        menu[0].click();
+        await waitFor(() =>
+            expect(RpcApi.AgentDefHideCommand).toHaveBeenCalledTimes(1),
+        );
+        const call = vi.mocked(RpcApi.AgentDefHideCommand).mock.calls[0];
+        expect(call[1]).toEqual({ definition_id: "tpl-claude" });
+    });
+
+    it("templates tier never renders hidden templates (filter happens server-side)", async () => {
+        const model = makeMockModel();
+        // Backend filters out hidden rows by default — simulate by
+        // returning only the visible template.
+        vi.mocked(RpcApi.ListAgentDefinitionsCommand).mockResolvedValue([
+            // Hidden template absent — server already excluded it.
+            userAgent,
+        ]);
+        render(() => <AgentPicker model={model as any} />);
+        await waitFor(() => {
+            // No template card renders because no template was
+            // returned by ListAgents.
+            expect(screen.queryByTestId("agent-card-tpl-claude")).toBeNull();
+        });
+    });
+
+    it("user-owned agents never get a Hide context menu (they go to MyAgentsList)", async () => {
+        const model = makeMockModel();
+        // Only user-owned in the templates tier shouldn't happen by
+        // design — the picker partitions on is_seeded === 1. But
+        // assert the negative case: only template cards expose the
+        // ctx-menu handler. (User-owned rows are mocked out via
+        // MyAgentsList.)
+        render(() => <AgentPicker model={model as any} />);
+        await waitFor(() => {
+            expect(screen.queryByTestId("agent-card-tpl-claude")).not.toBeNull();
+        });
+        // user-maks isn't in the templates tier — its card never
+        // renders here, so the contextMenu would have no surface to
+        // attach to.
+        expect(screen.queryByTestId("agent-card-user-maks")).toBeNull();
     });
 
     it("modal onCreatedAndLaunch fires launchAgentDefinition with the picked bindings", async () => {
