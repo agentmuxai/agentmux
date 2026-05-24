@@ -667,12 +667,33 @@ impl WaveStore {
 
     /// Delete all seeded agents (is_seeded=1). Used by reseed to clear built-in agents.
     pub fn agent_def_delete_seeded(&self) -> Result<usize, StoreError> {
-        let rows = {
+        // Reagent P1 round 4 on #1013: capture the cascaded instance ids
+        // BEFORE the FK cascade fires. The bulk delete on
+        // `db_agent_definitions` triggers `ON DELETE CASCADE` on
+        // `db_agent_instances` for every instance keyed off those
+        // templates; once the cascade runs, we can't query them anymore,
+        // and `db_agents` would be left holding orphaned instance
+        // projections. Capture → delete → drop projections.
+        let (rows, cascaded_inst_ids) = {
             let conn = self.conn.lock().unwrap();
-            conn.execute("DELETE FROM db_agent_definitions WHERE is_seeded=1", [])?
+            let mut stmt = conn.prepare(
+                "SELECT i.id FROM db_agent_instances i
+                 INNER JOIN db_agent_definitions d ON i.definition_id = d.id
+                 WHERE d.is_seeded = 1",
+            )?;
+            let ids: Vec<String> = stmt
+                .query_map([], |r| r.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(stmt);
+            let rows = conn.execute("DELETE FROM db_agent_definitions WHERE is_seeded=1", [])?;
+            (rows, ids)
         };
-        // Phase 3a dual-write: drop the template projection from db_agents.
-        self.agents_dual_write_seeded_delete();
+        // Phase 3a dual-write: drop template projections AND any
+        // cascaded instance projections. User-clone DEFINITION
+        // projections (`is_template = 0`, `id` is a def_id) are NOT
+        // touched here — those persist as long as the underlying
+        // user-clone def row in `db_agent_definitions` does.
+        self.agents_dual_write_seeded_delete(&cascaded_inst_ids);
         Ok(rows)
     }
 
@@ -2305,28 +2326,45 @@ impl WaveStore {
         }
     }
 
-    /// Bulk dual-write: mirror `agent_def_delete_seeded`. Deletes
-    /// every `is_template = 1` row AND any user-clone projections
-    /// (`is_template = 0`) whose `parent_template_id` points at one of
-    /// those templates — those rows are orphaned in `db_agents` once
-    /// the FK cascade removes the underlying `db_agent_instances`
-    /// rows. Single statement: the subquery is evaluated against the
-    /// pre-delete snapshot in SQLite, so the orphan set is captured
-    /// before the templates disappear. Reagent P1 round 3 on #1013.
-    /// Idempotent.
-    pub(crate) fn agents_dual_write_seeded_delete(&self) {
+    /// Bulk dual-write: mirror `agent_def_delete_seeded`. Deletes:
+    ///   1. every `is_template = 1` row (the template projections), AND
+    ///   2. every `db_agents` row whose `id` is in the
+    ///      `cascaded_inst_ids` set (template-instance projections that
+    ///      were just removed by the FK cascade on `db_agent_instances`).
+    ///
+    /// User-clone DEFINITION projections (`is_template = 0`, `id` is a
+    /// def_id in `db_agent_definitions`) are NOT touched — those rows
+    /// represent persistent user agents and live or die with their
+    /// `db_agent_definitions` row, not with the seeded-template bulk
+    /// delete. Reagent P1 round 4 on #1013: the previous version
+    /// scoped by `parent_template_id` and over-deleted user-clone DEF
+    /// projections too. Idempotent.
+    pub(crate) fn agents_dual_write_seeded_delete(&self, cascaded_inst_ids: &[String]) {
         let conn = self.conn.lock().unwrap();
         if let Err(e) = conn.execute(
-            "DELETE FROM db_agents
-             WHERE is_template = 1
-                OR (is_template = 0
-                    AND parent_template_id IN (SELECT id FROM db_agents WHERE is_template = 1))",
+            "DELETE FROM db_agents WHERE is_template = 1",
             [],
         ) {
             tracing::warn!(
                 error = %e,
-                "db_agents dual-write: seeded bulk delete failed",
+                "db_agents dual-write: seeded template bulk delete failed",
             );
+        }
+        // Delete cascaded instance projections one by one. Could batch
+        // via `id IN (?1, ?2, ...)` but the seeded delete is rare and
+        // the typical set is small (< 100); per-id loop keeps the SQL
+        // simple and avoids dynamic-parameter expansion.
+        for inst_id in cascaded_inst_ids {
+            if let Err(e) = conn.execute(
+                "DELETE FROM db_agents WHERE id = ?1 AND is_template = 0",
+                params![inst_id],
+            ) {
+                tracing::warn!(
+                    inst_id = %inst_id,
+                    error = %e,
+                    "db_agents dual-write: cascaded instance projection delete failed",
+                );
+            }
         }
     }
 
@@ -2498,6 +2536,15 @@ impl WaveStore {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as i64;
+        // Reagent P1 round 4 on #1013: route by projection key so the
+        // UPDATE actually hits the folded user-clone-def row when this
+        // instance was folded at create. The previous version keyed by
+        // `inst.id` always and silently no-op'd on every folded
+        // instance's lifecycle event.
+        let key = match Self::agents_projection_key_for_inst(&conn, &inst.id) {
+            Some((k, _)) => k,
+            None => return,
+        };
         // `instance_update` only touches block_id/session_id/status/
         // github_context/ended_at. Of those, only `github_context` lands
         // on db_agents (block/session/status/ended_at are not modelled
@@ -2509,7 +2556,7 @@ impl WaveStore {
                 github_context = ?1,
                 updated_at = ?2
              WHERE id = ?3 AND is_template = 0",
-            params![inst.github_context, now, inst.id],
+            params![inst.github_context, now, key],
         ) {
             tracing::warn!(
                 instance_id = %inst.id,
@@ -2522,9 +2569,15 @@ impl WaveStore {
     /// Mirror `instance_set_hidden` into `db_agents.user_hidden`.
     pub(crate) fn agents_dual_write_instance_set_hidden(&self, id: &str, hidden: bool) {
         let conn = self.conn.lock().unwrap();
+        // Reagent P1 round 4 on #1013: route by projection key (see
+        // `agents_dual_write_instance_update` for context).
+        let key = match Self::agents_projection_key_for_inst(&conn, id) {
+            Some((k, _)) => k,
+            None => return,
+        };
         if let Err(e) = conn.execute(
             "UPDATE db_agents SET user_hidden = ?1 WHERE id = ?2 AND is_template = 0",
-            params![if hidden { 1_i64 } else { 0_i64 }, id],
+            params![if hidden { 1_i64 } else { 0_i64 }, key],
         ) {
             tracing::warn!(
                 instance_id = %id,
@@ -2574,9 +2627,32 @@ impl WaveStore {
     /// Mirror `instance_delete` into `db_agents`.
     pub(crate) fn agents_dual_write_instance_delete(&self, id: &str) {
         let conn = self.conn.lock().unwrap();
+        // Reagent P1 round 4 on #1013: route by projection key. For a
+        // template-instance projection (`is_folded = false`), the row
+        // lives at `id` and goes when the instance goes. For a
+        // user-clone-def fold (`is_folded = true`), the projection at
+        // `def.id` represents the DEF — the def persists when its
+        // instance ends, so NO-OP. `agents_dual_write_definition_delete`
+        // is the right entry point to remove that row.
+        //
+        // Race fallback: `instance_delete` runs the DELETE on
+        // `db_agent_instances` BEFORE calling this helper, so by now
+        // the instance row is gone and `agents_projection_key_for_inst`
+        // returns None. Fall back to checking `db_agents` directly: if
+        // there's a row at `id` with `is_template = 0`, that's a
+        // non-folded projection — delete it. (Folded projections live
+        // at `def.id`, never at `inst.id`, so this is safe.)
+        let key_info = Self::agents_projection_key_for_inst(&conn, id);
+        let (key, is_folded) = match key_info {
+            Some(info) => info,
+            None => (id.to_string(), false),
+        };
+        if is_folded {
+            return;
+        }
         if let Err(e) = conn.execute(
             "DELETE FROM db_agents WHERE id = ?1 AND is_template = 0",
-            params![id],
+            params![key],
         ) {
             tracing::warn!(
                 instance_id = %id,
@@ -2602,6 +2678,39 @@ impl WaveStore {
                 "db_agents dual-write: identity backfill failed",
             );
         }
+    }
+
+    /// Reagent P1 round 4 on #1013 — fold-aware projection key lookup.
+    /// Resolves "for an instance with this id, which `db_agents` row
+    /// represents it post-create?". Returns `Some((key, is_folded))`:
+    ///   - `is_folded = true`  → key is the parent definition id
+    ///                            (the user-clone-def projection absorbs
+    ///                            the instance's bindings).
+    ///   - `is_folded = false` → key is the instance id (template-instance
+    ///                            projection is its own row).
+    /// Returns `None` if the instance no longer exists in
+    /// `db_agent_instances` (e.g. already deleted by FK cascade).
+    fn agents_projection_key_for_inst(
+        conn: &Connection,
+        inst_id: &str,
+    ) -> Option<(String, bool)> {
+        conn.query_row(
+            "SELECT i.id, i.definition_id, COALESCE(d.is_seeded, 1) AS is_seeded
+             FROM db_agent_instances i
+             LEFT JOIN db_agent_definitions d ON i.definition_id = d.id
+             WHERE i.id = ?1",
+            params![inst_id],
+            |row| {
+                let id: String = row.get(0)?;
+                let def_id: String = row.get(1)?;
+                let is_seeded: i64 = row.get(2)?;
+                Ok(if is_seeded == 0 {
+                    (def_id, true)  // folded into def-projection
+                } else {
+                    (id, false)     // instance-projection in its own row
+                })
+            },
+        ).ok()
     }
 
     /// Helper: re-read a definition row from inside an active connection
@@ -4585,5 +4694,169 @@ mod tests {
         assert_eq!(count_agents(&store, "is_template = 1"), 3);
         store.agent_def_delete_seeded().unwrap();
         assert_eq!(count_agents(&store, "is_template = 1"), 0);
+    }
+
+    /// Reagent P2 round 4 on #1013 — pins the seeded-bulk-delete
+    /// scope: templates + cascaded INSTANCE projections go;
+    /// user-clone DEF projections survive.
+    #[test]
+    fn dual_write_seeded_delete_preserves_user_clone_def_projections() {
+        let store = make_store();
+        // Seeded template.
+        let mut tpl = AgentDefinition {
+            id: "tpl-keep-check".to_string(),
+            slug: String::new(),
+            name: "TplCheck".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: "bash".to_string(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1000,
+            agent_type: "standalone".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 1,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1000,
+            user_hidden: 0,
+        };
+        store.agent_def_insert(&mut tpl).unwrap();
+        // User-clone DEF of that template (Phase 1 created this).
+        let mut clone = AgentDefinition {
+            id: "user-clone-keep".to_string(),
+            slug: String::new(),
+            name: "MaksKeeper".to_string(),
+            is_seeded: 0,
+            parent_id: "tpl-keep-check".to_string(),
+            created_at: 1500,
+            updated_at: 1500,
+            ..tpl.clone()
+        };
+        store.agent_def_insert(&mut clone).unwrap();
+        // Instance ON the seeded template (cascaded instance projection).
+        let inst_on_tpl = AgentInstance {
+            id: "inst-on-tpl-keep".to_string(),
+            definition_id: "tpl-keep-check".to_string(),
+            parent_instance_id: String::new(),
+            block_id: String::new(),
+            session_id: String::new(),
+            status: "running".to_string(),
+            github_context: String::new(),
+            started_at: 2000,
+            ended_at: 0,
+            created_at: 2000,
+            identity_id: String::new(),
+            memory_id: String::new(),
+            instance_name: String::new(),
+            working_directory: String::new(),
+            display_hidden: false,
+        };
+        store.instance_create(&inst_on_tpl).unwrap();
+        // Now delete seeded → template + cascaded instance go, user-clone survives.
+        store.agent_def_delete_seeded().unwrap();
+        assert_eq!(count_agents(&store, "id = 'tpl-keep-check'"), 0, "template projection gone");
+        assert_eq!(count_agents(&store, "id = 'inst-on-tpl-keep'"), 0, "cascaded instance projection gone");
+        assert_eq!(count_agents(&store, "id = 'user-clone-keep'"), 1, "user-clone def projection survives");
+    }
+
+    /// Reagent P2 round 4 on #1013 — pins instance_update/hide/delete
+    /// routing through the projection key. The previous version keyed
+    /// everything on `inst.id` and silently no-op'd on folded rows.
+    #[test]
+    fn dual_write_instance_lifecycle_on_user_clone_def_routes_to_folded_row() {
+        let store = make_store();
+        // Template, user-clone def of it, instance on the user-clone.
+        let mut tpl = AgentDefinition {
+            id: "tpl-rt".to_string(),
+            slug: String::new(),
+            name: "Tpl".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: "bash".to_string(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1000,
+            agent_type: "standalone".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 1,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1000,
+            user_hidden: 0,
+        };
+        store.agent_def_insert(&mut tpl).unwrap();
+        let mut clone = AgentDefinition {
+            id: "user-rt".to_string(),
+            slug: String::new(),
+            name: "Maks".to_string(),
+            is_seeded: 0,
+            parent_id: "tpl-rt".to_string(),
+            created_at: 1500,
+            updated_at: 1500,
+            ..tpl.clone()
+        };
+        store.agent_def_insert(&mut clone).unwrap();
+        let inst = AgentInstance {
+            id: "inst-rt".to_string(),
+            definition_id: "user-rt".to_string(),
+            parent_instance_id: String::new(),
+            block_id: String::new(),
+            session_id: String::new(),
+            status: "running".to_string(),
+            github_context: "gh-initial".to_string(),
+            started_at: 2000,
+            ended_at: 0,
+            created_at: 2000,
+            identity_id: "id-init".to_string(),
+            memory_id: "mem-init".to_string(),
+            instance_name: "Maks v1".to_string(),
+            working_directory: "/wd".to_string(),
+            display_hidden: false,
+        };
+        store.instance_create(&inst).unwrap();
+        // Sanity: no inst-rt row (folded).
+        assert_eq!(count_agents(&store, "id = 'inst-rt'"), 0);
+        assert_eq!(read_agent_field(&store, "user-rt", "github_context"), Some("gh-initial".to_string()));
+
+        // instance_update: github_context flows through to the folded row.
+        let updated = AgentInstance {
+            github_context: "gh-updated".to_string(),
+            ..inst.clone()
+        };
+        store.instance_update(&updated).unwrap();
+        assert_eq!(
+            read_agent_field(&store, "user-rt", "github_context"),
+            Some("gh-updated".to_string()),
+            "instance_update on user-clone-def routes to folded row",
+        );
+
+        // instance_set_hidden: flips user_hidden on the folded row.
+        store.instance_set_hidden("inst-rt", true).unwrap();
+        assert_eq!(
+            read_agent_int(&store, "user-rt", "user_hidden"),
+            Some(1),
+            "instance_set_hidden routes to folded row",
+        );
+
+        // instance_delete: NO-OP on folded row (the def projection persists).
+        store.instance_delete("inst-rt").unwrap();
+        assert_eq!(
+            count_agents(&store, "id = 'user-rt'"),
+            1,
+            "instance_delete on user-clone-def is a no-op (def projection persists)",
+        );
     }
 }
