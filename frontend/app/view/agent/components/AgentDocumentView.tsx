@@ -19,7 +19,7 @@
  * `agentmux-ai/AGENT_PANE_ACTIVITY_LOG_SPEC.md`.
  */
 
-import { createEffect, createSignal, Show, type Accessor, type JSX } from "solid-js";
+import { createSignal, Show, type Accessor, type JSX } from "solid-js";
 import type { SignalPair } from "../state";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
@@ -65,32 +65,13 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
     // scroll state is per-pane-mount, not per-agent-session.
     const viewState = createAgentViewState(props.documentAtom);
 
-    // Auto-collapse large user_messages on first arrival. The startup
-    // session-context payload that `buildStartupPayload` sends is a huge
-    // JSON block that visually dominates the pane; short user turns
-    // (one-line prompts) fit unchanged. Tracked per-node via `seenIds`
-    // so we don't re-collapse after the user has explicitly expanded.
-    const seenUserMessageIds = new Set<string>();
-    createEffect(() => {
-        const doc = viewState.nodes();
-        const toCollapse: string[] = [];
-        for (const n of doc) {
-            if (n.type !== "user_message") continue;
-            if (seenUserMessageIds.has(n.id)) continue;
-            seenUserMessageIds.add(n.id);
-            const msg = (n as { message?: string }).message ?? "";
-            if (msg.length > 200 || msg.includes("\n")) {
-                toCollapse.push(n.id);
-            }
-        }
-        if (toCollapse.length > 0) {
-            setDocumentState((prev) => {
-                const next = new Set(prev.collapsedNodes);
-                for (const id of toCollapse) next.add(id);
-                return { ...prev, collapsedNodes: next };
-            });
-        }
-    });
+    // Auto-collapse-on-size for user messages was retired in PR #1020
+    // — `UserMessageBlock` keys collapse off `node.isStartup` and
+    // `documentState.pinnedNodes`, not `collapsedNodes`. Writing to
+    // `collapsedNodes` here would be dead state from the renderer's
+    // perspective. See
+    // `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`
+    // §D.
 
     // Toggle collapsed state for collapsible nodes (agent messages, sections, user messages).
     const toggleCollapse = (nodeId: string): void => {
