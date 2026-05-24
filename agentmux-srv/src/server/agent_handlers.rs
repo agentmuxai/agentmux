@@ -38,6 +38,15 @@ use crate::backend::rpc_types::{
     NamedAgentRow,
     COMMAND_LIST_RECENT_SESSIONS, CommandListRecentSessionsData,
     RecentSessionRow,
+    // Option E (PR 1 of 2) — agent-anchored session zones.
+    COMMAND_AGENT_SESSION_READ, COMMAND_AGENT_SESSION_WRITE_STATE,
+    COMMAND_AGENT_SESSION_APPEND_OUTPUT, COMMAND_AGENT_SESSION_ARCHIVE,
+    COMMAND_AGENT_SESSION_LIST_ARCHIVES,
+    CommandAgentSessionReadData, AgentSessionReadResult,
+    CommandAgentSessionWriteStateData, AgentSessionWriteStateResult,
+    CommandAgentSessionAppendOutputData, AgentSessionAppendOutputResult,
+    CommandAgentSessionArchiveData, AgentSessionArchiveResult,
+    CommandAgentSessionListArchivesData, AgentArchiveRow,
     COMMAND_FORK_AGENT_DEFINITION,
     CommandListIdentityAccountsData, CommandGetIdentityAccountData,
     CommandDeleteIdentityAccountData,
@@ -1051,6 +1060,42 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 wstore
                     .instance_create(&inst)
                     .map_err(|e| format!("createagentinstance: {e}"))?;
+
+                // Option E (PR 1 of 2) — stamp the agent-anchored
+                // session zone reference onto the block meta. Every
+                // block of this agent definition reads/writes through
+                // `agent:<defId>:current`. Continuation is now
+                // structural (same zone, different block) rather than
+                // parametric (per-block snapshot copy + --continue).
+                // See docs/specs/SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23.md.
+                if !inst.block_id.is_empty()
+                    && crate::backend::agent_session::is_valid_definition_id(&inst.definition_id)
+                {
+                    let zone = crate::backend::agent_session::agent_current_zone(
+                        &inst.definition_id,
+                    );
+                    let mut meta_update = crate::backend::obj::MetaMapType::new();
+                    meta_update.insert(
+                        "agent:sessionZone".to_string(),
+                        serde_json::json!(zone),
+                    );
+                    let oref_str = format!("block:{}", inst.block_id);
+                    if let Err(e) = crate::server::service::update_object_meta(
+                        &wstore, &oref_str, &meta_update,
+                    ) {
+                        // Non-fatal — the instance row is the source
+                        // of truth, the meta stamp is a frontend
+                        // convenience. Log + continue so the launch
+                        // doesn't abort mid-flow.
+                        tracing::warn!(
+                            block_id = %inst.block_id,
+                            definition_id = %inst.definition_id,
+                            error = %e,
+                            "createagentinstance: failed to stamp agent:sessionZone"
+                        );
+                    }
+                }
+
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: format!("agentinstances:changed:{}", inst.definition_id),
                     scopes: vec![],
@@ -1633,7 +1678,140 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
+    register_agent_session_handlers(engine, state);
     register_v7_handlers(engine, state);
+}
+
+/// Option E (PR 1 of 2) — agent-anchored session zone RPCs.
+///
+/// These commands read/write the per-agent FileStore zone
+/// `agent:<definition_id>:current` and the per-archive zones
+/// `agent:<definition_id>:archive:<ts_ms>`. Session is bound to the
+/// agent definition, NOT the identity bundle — see the spec.
+fn register_agent_session_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    // ---- agent:session:read ----
+    let filestore = state.filestore.clone();
+    engine.register_handler(
+        COMMAND_AGENT_SESSION_READ,
+        Box::new(move |data, _ctx| {
+            let filestore = filestore.clone();
+            Box::pin(async move {
+                let cmd: CommandAgentSessionReadData = serde_json::from_value(data)
+                    .map_err(|e| format!("agent:session:read: {e}"))?;
+                let (content, modts) =
+                    crate::backend::agent_session::read_session_state(&filestore, &cmd.definition_id)
+                        .map_err(|e| format!("agent:session:read: {e}"))?;
+                Ok(Some(
+                    serde_json::to_value(&AgentSessionReadResult { content, modts })
+                        .unwrap_or_default(),
+                ))
+            })
+        }),
+    );
+
+    // ---- agent:session:write_state ----
+    let filestore = state.filestore.clone();
+    engine.register_handler(
+        COMMAND_AGENT_SESSION_WRITE_STATE,
+        Box::new(move |data, _ctx| {
+            let filestore = filestore.clone();
+            Box::pin(async move {
+                let cmd: CommandAgentSessionWriteStateData = serde_json::from_value(data)
+                    .map_err(|e| format!("agent:session:write_state: {e}"))?;
+                let bytes = cmd.content.as_bytes();
+                let bytes_written = bytes.len() as u64;
+                crate::backend::agent_session::write_session_state(
+                    &filestore,
+                    &cmd.definition_id,
+                    bytes,
+                )
+                .map_err(|e| format!("agent:session:write_state: {e}"))?;
+                Ok(Some(
+                    serde_json::to_value(&AgentSessionWriteStateResult { bytes_written })
+                        .unwrap_or_default(),
+                ))
+            })
+        }),
+    );
+
+    // ---- agent:session:append_output ----
+    let filestore = state.filestore.clone();
+    engine.register_handler(
+        COMMAND_AGENT_SESSION_APPEND_OUTPUT,
+        Box::new(move |data, _ctx| {
+            let filestore = filestore.clone();
+            Box::pin(async move {
+                let cmd: CommandAgentSessionAppendOutputData = serde_json::from_value(data)
+                    .map_err(|e| format!("agent:session:append_output: {e}"))?;
+                let bytes_written = crate::backend::agent_session::append_session_output(
+                    &filestore,
+                    &cmd.definition_id,
+                    &cmd.line,
+                )
+                .map_err(|e| format!("agent:session:append_output: {e}"))?;
+                Ok(Some(
+                    serde_json::to_value(&AgentSessionAppendOutputResult { bytes_written })
+                        .unwrap_or_default(),
+                ))
+            })
+        }),
+    );
+
+    // ---- agent:session:archive ----
+    let filestore = state.filestore.clone();
+    engine.register_handler(
+        COMMAND_AGENT_SESSION_ARCHIVE,
+        Box::new(move |data, _ctx| {
+            let filestore = filestore.clone();
+            Box::pin(async move {
+                let cmd: CommandAgentSessionArchiveData = serde_json::from_value(data)
+                    .map_err(|e| format!("agent:session:archive: {e}"))?;
+                let result =
+                    crate::backend::agent_session::archive_session(&filestore, &cmd.definition_id)
+                        .map_err(|e| format!("agent:session:archive: {e}"))?;
+                let (archive_zoneid, archived_at_ms) = match result {
+                    Some((z, ts)) => (z, ts),
+                    None => (String::new(), 0),
+                };
+                Ok(Some(
+                    serde_json::to_value(&AgentSessionArchiveResult {
+                        archive_zoneid,
+                        archived_at_ms,
+                    })
+                    .unwrap_or_default(),
+                ))
+            })
+        }),
+    );
+
+    // ---- agent:session:list_archives ----
+    let filestore = state.filestore.clone();
+    engine.register_handler(
+        COMMAND_AGENT_SESSION_LIST_ARCHIVES,
+        Box::new(move |data, _ctx| {
+            let filestore = filestore.clone();
+            Box::pin(async move {
+                let cmd: CommandAgentSessionListArchivesData =
+                    serde_json::from_value(data).unwrap_or_default();
+                let summaries = crate::backend::agent_session::list_archives(
+                    &filestore,
+                    &cmd.definition_id,
+                    cmd.limit,
+                )
+                .map_err(|e| format!("agent:session:list_archives: {e}"))?;
+                let rows: Vec<AgentArchiveRow> = summaries
+                    .into_iter()
+                    .map(|s| AgentArchiveRow {
+                        archive_zoneid: s.archive_zoneid,
+                        archived_at_ms: s.archived_at_ms,
+                        preview: s.preview,
+                        node_count: s.node_count,
+                    })
+                    .collect();
+                Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
+            })
+        }),
+    );
 }
 
 /// v7 handlers — Identity bundles (named credential bundles) + Memory bundles.
