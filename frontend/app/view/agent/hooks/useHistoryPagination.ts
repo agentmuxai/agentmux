@@ -175,10 +175,12 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
             // picks up where the last one left off. When the caller
             // didn't pass `definitionId` (legacy / picker), skip the
             // fast path and fall straight through to the NDJSON replay.
-            try {
-                if (!opts.definitionId) {
-                    throw new Error("no definitionId — fall through to NDJSON");
-                }
+            // P2 fix on #1008 reagent: prior version threw an exception
+            // purely for control flow into the catch arm — clean code
+            // path but emitted a stack on every legacy mount. Use an
+            // explicit early-skip instead.
+            if (opts.definitionId) {
+              try {
                 const stateResp = await RpcApi.AgentSessionReadCommand(TabRpcClient, {
                     definition_id: opts.definitionId,
                 }, { timeout: 5000 });
@@ -217,7 +219,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         "warn",
                     );
                 }
-            } catch (err: any) {
+              } catch (err: any) {
                 // Most common: snapshot doesn't exist yet — silent fall-through.
                 // Anything else logs but still falls through to NDJSON.
                 const reason = err?.message ?? String(err);
@@ -225,7 +227,8 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     opts.log("history", `snapshot read failed: ${reason}; falling back to NDJSON replay`, "warn");
                 }
                 if (!mounted) return;
-            }
+              }
+            }  // end if (opts.definitionId)
             try {
                 const countResp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
                     block_id: opts.blockId,
