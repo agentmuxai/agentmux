@@ -618,18 +618,22 @@ impl WaveStore {
     /// legacy semantics (def.parent_id for user-clones, template id for
     /// instance projections), so existing handlers that look up the parent
     /// template by id continue to work.
-    /// Find user-clone definitions for a given seeded template (i.e.
-    /// rows in `db_agent_definitions` with `is_seeded = 0` and
+    /// Find user-clone definitions for a given seeded template (rows
+    /// in `db_agent_definitions` with `is_seeded = 0` and
     /// `parent_id = <template.id>`). Returns the most-recent-first.
     ///
-    /// Used by the `template_promote` migration's idempotency guard
-    /// to detect a clone left over from a prior partial-failure run
-    /// and avoid inserting a duplicate. Reads `db_agent_definitions`
-    /// directly — not `db_agents` — because the consolidated table
-    /// surfaces template-instance projections (rows whose `id` is
-    /// an `inst.id`) with the same `is_template = 0 AND
-    /// parent_template_id` shape as user-clone defs, and we MUST
-    /// NOT confuse those for clones to reuse.
+    /// Reads `db_agent_definitions` directly — NOT the `db_agents`
+    /// consolidated view — because the latter surfaces template-
+    /// instance projection rows under the same
+    /// `is_template = 0 AND parent_template_id = <tpl>` shape as
+    /// user-clone defs, which would conflate two distinct things.
+    ///
+    /// Sole production caller today is the `template_promote`
+    /// migration's "did the user delete the deterministic-id
+    /// clone?" diagnostic logging and its tests. Kept public so
+    /// follow-up callers (e.g. a cleanup pass that GCs orphaned
+    /// pre-deterministic-id clones from earlier migration code)
+    /// can use it without re-deriving the schema.
     pub fn user_clone_defs_for_template(
         &self,
         template_id: &str,
@@ -652,6 +656,36 @@ impl WaveStore {
             out.push(r?);
         }
         Ok(out)
+    }
+
+    /// Fetch a single agent definition by primary key. Reads
+    /// `db_agent_definitions` directly (not the `db_agents`
+    /// consolidated view that `agent_def_list` reads), so it
+    /// returns user-clone definitions and seeded templates, never
+    /// template-instance projection rows.
+    ///
+    /// Used by the `template_promote` migration's deterministic-id
+    /// idempotency check (see
+    /// `migrate_promote_template_sessions_v1`): every retry asks
+    /// "does the promote-target clone for this template already
+    /// exist?" and either reuses it or inserts it.
+    pub fn agent_def_get(&self, id: &str) -> Result<Option<AgentDefinition>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, slug, name, icon, provider, description,
+                    working_directory, shell, provider_flags, auto_start,
+                    restart_on_crash, idle_timeout_minutes, created_at,
+                    agent_type, environment, agent_bus_id, is_seeded,
+                    accounts, parent_id, branch_label, updated_at,
+                    user_hidden
+             FROM db_agent_definitions
+             WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![id], map_agent_definition_row)?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
     }
 
     pub fn agent_def_list(&self) -> Result<Vec<AgentDefinition>, StoreError> {
