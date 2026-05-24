@@ -774,6 +774,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     resume_flag: "--resume".to_string(),
                     session_id_field: "session_id".to_string(),
                     message_id: None,
+                    // Direct-spawn legacy command — caller doesn't
+                    // carry a reattach context. Greenfield session id
+                    // is None; spawn_turn captures it from CLI stdout
+                    // on the first turn as before.
+                    session_id: None,
                 };
                 subprocess_ctrl.spawn_turn(config)?;
                 Ok(None)
@@ -926,6 +931,14 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     let resume_flag = crate::backend::obj::meta_get_string(
                         &block.meta, "agent:resume_flag", "--resume",
                     );
+                    // Picker reattach: the frontend writes the prior
+                    // block's session id here when launching with
+                    // `continueOfInstanceId`. spawn_turn hydrates its
+                    // inner.session_id from this on the first turn so
+                    // --resume <sid> lands on the very first launch.
+                    let persisted_session_id = crate::backend::obj::meta_get_string(
+                        &block.meta, "agent:sessionid", "",
+                    );
                     let config = blockcontroller::subprocess::SubprocessSpawnConfig {
                         cli_command,
                         cli_args,
@@ -935,6 +948,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         resume_flag,
                         session_id_field,
                         message_id: cmd.message_id,
+                        session_id: if persisted_session_id.is_empty() {
+                            None
+                        } else {
+                            Some(persisted_session_id)
+                        },
                     };
                     subprocess_ctrl.spawn_turn(config)?;
                 } else {

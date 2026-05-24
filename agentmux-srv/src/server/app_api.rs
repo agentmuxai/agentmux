@@ -506,6 +506,13 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     let resume_flag = obj::meta_get_string(
                         &block.meta, "agent:resume_flag", "--resume",
                     );
+                    // Picker reattach (parallel of the websocket-path
+                    // logic): hydrate the persisted session id from
+                    // block meta so spawn_turn appends --resume <sid>
+                    // on the FIRST turn after reattach.
+                    let persisted_session_id = obj::meta_get_string(
+                        &block.meta, "agent:sessionid", "",
+                    );
                     let config = blockcontroller::subprocess::SubprocessSpawnConfig {
                         cli_command,
                         cli_args,
@@ -515,6 +522,11 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         resume_flag,
                         session_id_field,
                         message_id: None,
+                        session_id: if persisted_session_id.is_empty() {
+                            None
+                        } else {
+                            Some(persisted_session_id)
+                        },
                     };
                     subprocess_ctrl.spawn_turn(config)?;
                 } else {
