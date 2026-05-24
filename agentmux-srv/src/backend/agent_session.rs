@@ -634,7 +634,16 @@ pub fn migrate_block_zones_v1(
 // ---------------------------------------------------------------------------
 
 /// Marker file name for the Phase 1 two-tier-picker migration.
-/// One-shot per data dir; deleting it forces a re-run on next startup.
+///
+/// **Vestigial.** Originally gated `migrate_promote_template_sessions_v1`
+/// as a one-shot. The 2026-05-24 self-idempotency rework moved gating
+/// to the data invariant ("no seeded def has a session zone"), so the
+/// migration runs on every startup and is a no-op when the invariant
+/// already holds. The constant + `data_dir` parameter on the migration
+/// function are kept for API/import compatibility and so the legacy
+/// marker file (if present from an earlier portable run) isn't
+/// resurrected. Operators may delete the file; the migration ignores
+/// it either way.
 pub const TEMPLATE_PROMOTE_MARKER_V1: &str = "migration_template_promote_v1.flag";
 
 /// Stats from `migrate_promote_template_sessions_v1`. Logged at INFO.
@@ -684,24 +693,29 @@ pub struct TemplatePromoteStats {
 /// 5. Repoint every `db_agent_instances` row that referenced the old
 ///    defId to point at the new defId (preserves the
 ///    `continueOfInstanceId` reattach flow).
-/// 6. Marker-file gated — second start is a no-op.
+///
+/// Idempotency: the migration is **self-gated on the data invariant**
+/// ("no seeded def has a session zone"). It runs on every startup;
+/// when the invariant already holds the inner loop has zero
+/// iterations and returns the default stats in sub-ms. There used to
+/// be a marker-file gate (`TEMPLATE_PROMOTE_MARKER_V1`), but it
+/// produced an "early-marker" failure mode: a portable launched at v
+/// N had no seeded-def zones, set the marker, and on v N+1 startups
+/// (when seeded-def zones DID exist from prior real use) the marker
+/// caused the migration to skip. The 2026-05-24 rework dropped the
+/// marker check; this is safe because the seeded-def-with-zone
+/// invariant is detectable per-startup at constant cost. `data_dir`
+/// is retained for API compatibility.
 ///
 /// Failure mode: per-template errors are logged + counted; we DO NOT
-/// abort startup. The marker is written even on partial failure so we
-/// don't retry indefinitely (operators can delete the marker to retry).
+/// abort startup. Errors that prevent a template from being promoted
+/// leave its zones in place; the next startup retries (no marker
+/// gate to block retry).
 pub fn migrate_promote_template_sessions_v1(
     wstore: &Arc<WaveStore>,
     filestore: &Arc<FileStore>,
-    data_dir: &Path,
+    _data_dir: &Path,
 ) -> TemplatePromoteStats {
-    let marker_path = data_dir.join(TEMPLATE_PROMOTE_MARKER_V1);
-    if marker_path.exists() {
-        tracing::debug!(
-            marker = %marker_path.display(),
-            "template_promote migration: marker present, skipping"
-        );
-        return TemplatePromoteStats::default();
-    }
 
     let mut stats = TemplatePromoteStats::default();
 
@@ -897,14 +911,10 @@ pub fn migrate_promote_template_sessions_v1(
         );
     }
 
-    // Write marker — even on partial failure (see doc comment).
-    if let Err(e) = std::fs::write(&marker_path, b"v1\n") {
-        tracing::warn!(
-            marker = %marker_path.display(),
-            error = %e,
-            "template_promote migration: marker write failed; migration may re-run on next startup"
-        );
-    }
+    // Marker write removed in the 2026-05-24 self-idempotency rework
+    // (see doc comment above). The invariant "no seeded def carries a
+    // session zone" is checked on every startup; when it already holds
+    // this function is a sub-ms no-op.
 
     tracing::info!(
         templates_scanned = stats.templates_scanned,
@@ -1425,8 +1435,11 @@ mod tests {
         let still_seeded = all.iter().find(|d| d.id == template.id).unwrap();
         assert_eq!(still_seeded.is_seeded, 1);
 
-        // Marker file is written.
-        assert!(dir.path().join(TEMPLATE_PROMOTE_MARKER_V1).exists());
+        // Marker file is intentionally NOT written under the
+        // self-idempotency model (constant still exists for legacy
+        // file compatibility — see the doc comment on
+        // `TEMPLATE_PROMOTE_MARKER_V1`).
+        assert!(!dir.path().join(TEMPLATE_PROMOTE_MARKER_V1).exists());
     }
 
     #[test]
@@ -1446,6 +1459,87 @@ mod tests {
         assert_eq!(second.templates_promoted, 0);
         assert_eq!(second.archives_moved, 0);
         assert_eq!(second.instances_repointed, 0);
+    }
+
+    #[test]
+    fn template_promote_runs_when_seeded_def_grows_zone_after_first_run() {
+        // Regression test for the 2026-05-24 "Maks not under My Agents"
+        // failure mode. Under the old marker-file gate, this scenario
+        // played out:
+        //
+        //   1. Portable v N starts: no seeded defs have session zones
+        //      (fresh data dir). Migration runs, no-ops, writes marker.
+        //   2. User clicks "Claude Code" template, has a real
+        //      conversation. Session zone now lives at
+        //      `agent:tpl-claude:current` (a seeded def carrying a
+        //      session — invariant violation).
+        //   3. Portable v N+1 starts. Marker present → migration
+        //      skips. Seeded def keeps its session zone forever; the
+        //      picker can't show the user's agent under My Agents
+        //      because there is no user-clone definition.
+        //
+        // The self-idempotency rework dropped the marker gate and
+        // re-runs the migration on every startup. This test simulates
+        // that exact sequence and asserts the second run DOES promote.
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        // First startup: a seeded template with no session zone yet.
+        // Migration finds nothing to do (templates_scanned == 0).
+        let template = insert_template(&wstore, "tpl-claude", "Claude Code", "claude");
+        let first = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(first.templates_scanned, 0);
+        assert_eq!(first.templates_promoted, 0);
+        // (Under the old marker-gated model the marker was written here.)
+        assert!(!dir.path().join(TEMPLATE_PROMOTE_MARKER_V1).exists());
+
+        // Between startups: user opens a conversation on the seeded
+        // template — invariant now violated.
+        write_session_state(&filestore, &template.id, br#"{"nodes":[]}"#).unwrap();
+
+        // Second startup: under the OLD gate this would be a no-op
+        // (marker still present). Under the new self-idempotent model
+        // it MUST detect the invariant violation and promote.
+        let second = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(second.templates_scanned, 1);
+        assert_eq!(second.templates_promoted, 1);
+        assert_eq!(second.failures, 0);
+
+        // User-owned definition exists post-promotion.
+        let all = wstore.agent_def_list().unwrap();
+        assert!(
+            all.iter().any(|d| d.is_seeded == 0 && d.parent_id == template.id),
+            "second-run promotion should create a user-owned def"
+        );
+
+        // Third startup: invariant restored, migration no-ops cleanly.
+        let third = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(third.templates_scanned, 0);
+        assert_eq!(third.templates_promoted, 0);
+    }
+
+    #[test]
+    fn template_promote_ignores_legacy_marker_file() {
+        // Backward-compat: an existing v1 marker file from a portable
+        // running pre-self-idempotency code must NOT prevent the
+        // migration from running. The 2026-05-24 rework leaves any
+        // existing marker file in place but doesn't read it.
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        // Place a vestigial marker as if a prior startup wrote one.
+        std::fs::write(dir.path().join(TEMPLATE_PROMOTE_MARKER_V1), b"v1\n").unwrap();
+
+        // Now set up an invariant violation.
+        let template = insert_template(&wstore, "tpl-claude", "Claude Code", "claude");
+        write_session_state(&filestore, &template.id, br#"{"nodes":[]}"#).unwrap();
+
+        let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        // Must NOT skip — the legacy marker is ignored.
+        assert_eq!(stats.templates_scanned, 1);
+        assert_eq!(stats.templates_promoted, 1);
     }
 
     #[test]
