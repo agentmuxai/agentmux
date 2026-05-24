@@ -81,6 +81,35 @@ export function estimateTextHeight(
     return Math.min(Math.max(lines * lineHeight, TEXT_MIN_HEIGHT_PX), TEXT_MAX_ESTIMATE_PX);
 }
 
+/**
+ * Height estimate for unwrapped content — rows that render with
+ * `white-space: pre` and horizontal scroll on overflow (no soft
+ * wrap). One visual line per explicit `\n`; long single lines do
+ * NOT bloat the estimate.
+ *
+ * Used by `estimateUserMessage` since PR #1020 — user input
+ * switched to `white-space: pre` in
+ * `_document-nodes.scss`, so the char-count heuristic in
+ * `estimateTextHeight` would over-allocate for long URLs / paths
+ * (300-char URL → 4 estimated lines vs 1 actual line) and cause
+ * blank gaps / scroll jumps in the virtualized list until
+ * measureElement caught up. Codex P2 round 4 on PR #1020.
+ */
+export function estimateUnwrappedTextHeight(
+    content: string,
+    lineHeight = TEXT_LINE_HEIGHT_PX,
+): number {
+    if (!content) return TEXT_MIN_HEIGHT_PX;
+    // Each `\n` introduces a new visual line; content with no
+    // newlines is exactly 1 visual line.
+    let newlines = 0;
+    for (let i = 0; i < content.length; i++) {
+        if (content.charCodeAt(i) === 10 /* '\n' */) newlines++;
+    }
+    const lines = newlines + 1;
+    return Math.min(Math.max(lines * lineHeight, TEXT_MIN_HEIGHT_PX), TEXT_MAX_ESTIMATE_PX);
+}
+
 // Per-kind constants — tuned empirically. Phase 3 perf-probe HUD
 // flags any kind whose p50 actual diverges > 30% from estimate.
 const TOOL_COLLAPSED_PX = 32;
@@ -114,8 +143,19 @@ export function estimateAgentMessage(node: AgentMessageNode, state: DocumentStat
 }
 
 export function estimateUserMessage(node: UserMessageNode, state: DocumentState): number {
-    if (state.collapsedNodes.has(node.id)) return COLLAPSED_MESSAGE_PX;
-    return estimateTextHeight(node.message);
+    // Per SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md,
+    // user messages collapse on `isStartup` + `pinnedNodes`, NOT
+    // `collapsedNodes` (which is unused for user_message nodes
+    // post-PR-#1020). Mirror the rule in `estimateTool`: startup
+    // payload is the one-line summary unless pinned.
+    if (node.isStartup && !state.pinnedNodes.has(node.id)) {
+        return COLLAPSED_MESSAGE_PX;
+    }
+    // Use newline-count estimation — user_message <pre> is
+    // `white-space: pre` (no soft wrap), so line count comes
+    // from explicit `\n`. Char-count heuristic from
+    // `estimateTextHeight` would over-estimate long single lines.
+    return estimateUnwrappedTextHeight(node.message);
 }
 
 export function estimateSubagentLink(_node: SubagentLinkNode): number {

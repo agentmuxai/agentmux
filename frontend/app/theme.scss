@@ -49,6 +49,16 @@
     --fixed-font: normal 12px / normal "Hack", monospace;
     --accent-color: rgb(65, 159, 224);
     --accent-color-rgb: 65, 159, 224;
+
+    // User-input highlight — distinct from --accent-color so that
+    // re-themings of the accent (button highlights, link color, etc.)
+    // don't drag typed-input visibility with them. Default is a
+    // saturated cyan-blue chosen for >4.5:1 contrast on both dark
+    // and light surfaces. Per-theme overrides land in
+    // `frontend/app/themes/*.scss` if a theme wants its own palette.
+    // See `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`.
+    --user-input-color: #00b4d8;
+
     --panel-bg-color: rgba(31, 33, 31, 0.5);
     --highlight-bg-color: rgba(255, 255, 255, 0.2);
     --markdown-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif,

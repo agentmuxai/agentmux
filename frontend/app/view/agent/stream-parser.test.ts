@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, test, expect, beforeEach } from "vitest";
-import { ClaudeCodeStreamParser } from "./stream-parser";
-import type { StreamEvent, MarkdownNode, ToolNode } from "./types";
+import { ClaudeCodeStreamParser, STARTUP_HEADING_RE } from "./stream-parser";
+import { buildStartupPayload } from "./startup/buildStartupPayload";
+import type { StreamEvent, MarkdownNode, ToolNode, UserMessageNode } from "./types";
 
 let parser: ClaudeCodeStreamParser;
 
@@ -314,5 +315,84 @@ describe("reset", () => {
         const node = parser.parseStreamEvent({ type: "text", content: "fresh" });
         expect(node!.id).toBe("node_0");
         expect((node as MarkdownNode).content).toBe("fresh");
+    });
+});
+
+// ── startup-injection detection (SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24) ─
+
+describe("user_message startup-injection detection", () => {
+    test("sets isStartup=true when message starts with '# Session Context'", () => {
+        const node = parser.parseStreamEvent({
+            type: "user_message",
+            message: "# Session Context\n\n## Identity\n- Name: AgentA\n",
+        });
+        expect(node).not.toBeNull();
+        expect(node!.type).toBe("user_message");
+        expect((node as UserMessageNode).isStartup).toBe(true);
+    });
+
+    test("sets isStartup=false for normal typed input", () => {
+        const node = parser.parseStreamEvent({
+            type: "user_message",
+            message: "Can you run the tests?",
+        });
+        expect((node as UserMessageNode).isStartup).toBe(false);
+    });
+
+    test("sets isStartup=false when '# Session Context' is not at the start", () => {
+        // A user replying to an agent's output that quoted the heading
+        // must NOT be misclassified as a startup payload.
+        const node = parser.parseStreamEvent({
+            type: "user_message",
+            message: "I noticed the agent said:\n# Session Context\n— what does that mean?",
+        });
+        expect((node as UserMessageNode).isStartup).toBe(false);
+    });
+
+    test("sets isStartup=false when heading is similar but different", () => {
+        // Word-boundary anchor `\b` after the literal — `# Session Contextual`
+        // is NOT a startup payload.
+        const node = parser.parseStreamEvent({
+            type: "user_message",
+            message: "# Session Contextual notes follow",
+        });
+        expect((node as UserMessageNode).isStartup).toBe(false);
+    });
+
+    test("STARTUP_HEADING_RE pins the literal heading buildStartupPayload emits", () => {
+        // Contract test: any future rename of the heading in
+        // buildStartupPayload.ts must update the regex in
+        // stream-parser.ts in the same commit, or this test fails.
+        const payload = buildStartupPayload({
+            agent: {
+                id: "test-agent",
+                slug: "test",
+                name: "Test",
+                provider: "claude",
+                description: "",
+                icon: "",
+                working_directory: "",
+                provider_flags: "",
+                shell: "",
+                created_at: 0,
+                updated_at: 0,
+                agent_type: "host",
+                environment: "",
+                agent_bus_id: "",
+                accounts: "",
+                is_seeded: 0,
+                parent_id: "",
+                branch_label: "",
+                user_hidden: 0,
+            } as any,
+            providerDisplayName: "Claude",
+            workDir: "/tmp",
+            version: "0.0.0",
+            accounts: [],
+            peerAgents: [],
+            startupContent: null,
+        });
+        expect(payload).not.toBeNull();
+        expect(STARTUP_HEADING_RE.test(payload!)).toBe(true);
     });
 });

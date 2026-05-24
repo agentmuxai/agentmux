@@ -596,10 +596,23 @@
     }
 
     // === User Message ===
+    // High-contrast user-input styling per
+    // `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`.
+    // Uses --user-input-color (distinct from --accent-color) so typed
+    // input pops independently of the accent re-theming surface.
+    //
+    // Regular user input NEVER soft-wraps — newlines are honored
+    // verbatim and long lines scroll horizontally inside the message.
+    // The user controls wrapping by inserting their own \n.
+    //
+    // The startup-injection variant (`--startup`) gets a single-line
+    // summary that expands on hover and pins on click — mirroring
+    // the ToolBlock pattern in `tool-collapse.md`. See
+    // `components/UserMessageBlock.tsx` for the JSX side.
     .agent-user-message {
         padding: 3px var(--space-1);
-        background: color-mix(in srgb, var(--accent-color) 5%, transparent);
-        border-left: 2px solid var(--accent-color);
+        background: color-mix(in srgb, var(--user-input-color) 14%, transparent);
+        border-left: 3px solid var(--user-input-color);
         border-radius: 2px;
         user-select: text;
         cursor: text;
@@ -607,19 +620,122 @@
         .agent-user-message-content {
             pre {
                 margin: 0;
-                white-space: pre-wrap;
-                overflow-wrap: anywhere;
+                // pre = honor newlines, no soft-wrap. Long lines
+                // scroll horizontally inside the bubble; word-break
+                // rules removed so URLs / paths stay intact.
+                white-space: pre;
+                overflow-x: auto;
+                overflow-y: hidden;
             }
         }
 
-        // Collapsed state: show only the first line (ellipsis-truncated).
-        // Driven by AgentDocumentView auto-collapse for large user messages
-        // like the startup session-context payload. The hover strip's expand
-        // button toggles this off.
-        &--collapsed .agent-user-message-content pre {
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+        // ─── Startup-injection variant ────────────────────────────
+        // Long Markdown payload the frontend sends as the opening
+        // turn (see SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md). It
+        // shouldn't dominate the pane. Collapsed-by-default with
+        // hover-expand + click-to-pin (on the summary row only —
+        // see UserMessageBlock for the rationale).
+        &--startup {
+            .agent-user-message-summary {
+                // Rendered as a <button> for keyboard accessibility
+                // (Tab + Space/Enter). Reset the default button
+                // chrome so it lines up visually with the block-
+                // bubble shell — color/background come from the
+                // surrounding `--user-input-color` rules.
+                appearance: none;
+                background: transparent;
+                border: 0;
+                font: inherit;
+                color: inherit;
+                text-align: left;
+                width: 100%;
+
+                display: flex;
+                align-items: center;
+                gap: var(--space-1);
+                padding: var(--space-0-5) var(--space-1);
+                white-space: nowrap;
+                overflow: hidden;
+                min-width: 0;
+                user-select: none;
+                cursor: pointer;
+
+                &:focus-visible {
+                    // Visible focus ring for keyboard users — matches
+                    // the accent treatment used elsewhere for focus.
+                    outline: 2px solid var(--user-input-color);
+                    outline-offset: 1px;
+                }
+
+                .agent-user-message-icon {
+                    color: var(--user-input-color);
+                    flex-shrink: 0;
+                }
+                .agent-user-message-label {
+                    font-weight: 500;
+                    color: var(--user-input-color);
+                    flex-shrink: 0;
+                }
+                .agent-user-message-hint {
+                    color: var(--secondary-text-color);
+                    font-size: 0.85em;
+                    opacity: 0.75;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+            }
+
+            // Top-right action button on the expanded body.
+            //   - .agent-user-message-pin   shows 📌 when the row
+            //     is hover-expanded but not pinned, so the user
+            //     can pin from inside the body (codex P2 round 3
+            //     on PR #1020 — without it, the only "pin"
+            //     affordance was on the summary button that's
+            //     no longer present once hover-expansion kicks in).
+            //   - .agent-user-message-unpin shows ✕ when pinned,
+            //     so the user can collapse without hunting.
+            // Both share styling.
+            .agent-user-message-content {
+                position: relative;
+
+                .agent-user-message-pin,
+                .agent-user-message-unpin {
+                    position: absolute;
+                    top: var(--space-0-5);
+                    right: var(--space-0-5);
+                    background: transparent;
+                    border: none;
+                    color: var(--user-input-color);
+                    font-size: 0.9em;
+                    line-height: 1;
+                    padding: 2px 6px;
+                    border-radius: 3px;
+                    cursor: pointer;
+                    opacity: 0.6;
+
+                    &:hover {
+                        opacity: 1;
+                        background: color-mix(in srgb, var(--user-input-color) 15%, transparent);
+                    }
+                    &:focus-visible {
+                        outline: 2px solid var(--user-input-color);
+                        outline-offset: 1px;
+                        opacity: 1;
+                    }
+                }
+            }
+        }
+
+        // Hover-while-collapsed (startup expanded transiently) gets
+        // a slightly deeper background so the user knows this is a
+        // hover-preview, not a permanent expansion.
+        &--expanded.agent-user-message--startup {
+            background: color-mix(in srgb, var(--user-input-color) 18%, transparent);
+        }
+
+        // Pinned state — thicker left border mirrors ToolBlock.pinned.
+        &--pinned {
+            border-left-width: 4px;
         }
     }
 
