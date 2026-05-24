@@ -998,34 +998,58 @@ fn move_zone(
     if files.is_empty() {
         return Ok(());
     }
-    // Per-file copy gate (codex P1 rounds 4 + 5 on PR #1017).
-    // The two failure modes pull in opposite directions:
+    // Per-file recency-aware copy (codex P1 rounds 4 + 5 + 6 on
+    // PR #1017). Three retry shapes need to coexist on the same
+    // retry path:
     //
-    //   R4: partial-failure retry, user has continued on the
-    //       destination → must NOT overwrite the destination's
-    //       newer content with stale seeded source bytes.
-    //   R5: partial-failure retry, the prior `move_zone` wrote
-    //       some destination files but not others → must NOT
-    //       drop the source until every source file is also
-    //       present at the destination (else the unwritten ones
-    //       are lost forever).
+    //   R4 — partial-failure, user continued on the destination
+    //        clone (`:current` of the new def). Destination has
+    //        NEWER bytes than source. Keep destination; drop
+    //        source.
+    //   R5 — partial-failure, prior `move_zone` wrote SOME of the
+    //        destination files before crashing. Destination has
+    //        only some files; the missing ones must be copied
+    //        from source. Don't drop source until every source
+    //        file has a counterpart at the destination.
+    //   R6 — partial-failure, `instance_repoint_definition` was
+    //        the step that failed. Instances still point at the
+    //        seeded def, user continued — SOURCE bytes are newer
+    //        than destination's stale copy. Source must NOT be
+    //        dropped without first promoting its newer content
+    //        to the destination.
     //
-    // Resolve both: file-by-file, only copy when the destination
-    // is MISSING that file. Files already present at the
-    // destination are preserved verbatim (whether they're the
-    // user's continuation or a successful prior copy). The source
-    // is only deleted once every source file has a counterpart at
-    // the destination — partial state retries on the next run.
-    let new_files_set: std::collections::HashSet<String> = filestore
+    // Resolve all three via a per-file recency-aware copy:
+    //   - destination missing the file → COPY (R5).
+    //   - destination has the file, src.modts ≤ dest.modts → keep
+    //     destination, no copy (R4).
+    //   - destination has the file, src.modts > dest.modts → copy
+    //     source over destination (R6).
+    // After the loop, every source file has a counterpart at the
+    // destination; source can be safely deleted.
+    //
+    // `modts` ties (or zero on either side) are resolved in favor
+    // of keeping the destination, matching the R4 semantics — the
+    // common case for a clean first-time retry where both sides
+    // hold identical bytes.
+    let dest_meta: std::collections::HashMap<String, crate::backend::storage::filestore::WaveFile> = filestore
         .list_files(new_zone)
         .map_err(|e| format!("list_files (new): {e}"))?
         .into_iter()
-        .map(|f| f.name)
+        .map(|f| (f.name.clone(), f))
         .collect();
     let mut copied = 0usize;
+    let mut overwritten = 0usize;
     let mut preserved = 0usize;
     for f in &files {
-        if new_files_set.contains(&f.name) {
+        let need_copy = match dest_meta.get(&f.name) {
+            None => true, // R5: destination missing
+            Some(dest) => {
+                // R6: source strictly newer overrides destination.
+                // R4: destination ≥ source preserves destination.
+                f.modts > dest.modts
+            }
+        };
+        if !need_copy {
             preserved += 1;
             continue;
         }
@@ -1036,15 +1060,20 @@ fn move_zone(
         // write_zone_file creates the file when missing, replaces
         // it otherwise (matches archive_session's write semantics).
         write_zone_file(filestore, new_zone, &f.name, &bytes)?;
-        copied += 1;
+        if dest_meta.contains_key(&f.name) {
+            overwritten += 1;
+        } else {
+            copied += 1;
+        }
     }
-    if preserved > 0 {
+    if preserved > 0 || overwritten > 0 {
         tracing::info!(
             old_zone = %old_zone,
             new_zone = %new_zone,
             copied,
+            overwritten,
             preserved,
-            "template_promote migration: copied missing files; preserved existing destination files (R4 user-continuation / R5 partial-copy)"
+            "template_promote migration: per-file move (R4 user-continuation, R5 partial-copy fill, R6 newer-source promotion)"
         );
     }
     // Verify every source file has a counterpart at the
@@ -1926,6 +1955,89 @@ mod tests {
             seeded_files.is_empty(),
             "seeded current zone must be drained after the complete copy"
         );
+    }
+
+    #[test]
+    fn template_promote_promotes_newer_source_over_stale_destination() {
+        // Codex P1 round 6 on PR #1017: the inverse of R4. If the
+        // prior run's `instance_repoint_definition` failed,
+        // instances stay pointed at the SEEDED def — the user's
+        // continuation lands in the SEEDED zone, not the clone.
+        // On retry, the SEEDED side has newer bytes. The fix
+        // promotes the newer source over the stale destination
+        // (and resolves R4 the other way when destination is
+        // newer instead).
+        //
+        // Test setup: write destination FIRST (older modts), then
+        // source SECOND (newer modts). After retry: destination
+        // has the source's bytes; source drained.
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        let template = insert_template(&wstore, "tpl-claude", "Claude Code", "claude");
+        let promote_target_id = format!("template-promote-v1-{}", template.id);
+        let now = now_ms() as i64;
+        let mut prior_target = crate::backend::storage::wstore::AgentDefinition {
+            id: promote_target_id.clone(),
+            slug: String::new(),
+            name: "Claude Code".to_string(),
+            icon: template.icon.clone(),
+            provider: template.provider.clone(),
+            description: template.description.clone(),
+            working_directory: String::new(),
+            shell: template.shell.clone(),
+            provider_flags: template.provider_flags.clone(),
+            auto_start: 0,
+            restart_on_crash: template.restart_on_crash,
+            idle_timeout_minutes: template.idle_timeout_minutes,
+            created_at: now - 1_000,
+            agent_type: template.agent_type.clone(),
+            environment: template.environment.clone(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: template.id.clone(),
+            branch_label: String::new(),
+            updated_at: now - 1_000,
+            user_hidden: 0,
+        };
+        wstore.agent_def_insert(&mut prior_target).unwrap();
+
+        // Destination has the prior copy (will become OLDER).
+        let clone_zone = agent_current_zone(&promote_target_id);
+        write_zone_file(&filestore, &clone_zone, SNAPSHOT_FILE, b"stale-old-copy").unwrap();
+        // Sleep just long enough to push modts forward.
+        // filestore's modts comes from system time; 10ms is enough
+        // on every platform we ship to.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        // Seeded source has the user's newer continuation (the
+        // instance_repoint failed in the prior run, so user kept
+        // typing at the seeded def).
+        let seeded_zone = agent_current_zone(&template.id);
+        write_zone_file(&filestore, &seeded_zone, SNAPSHOT_FILE, b"user-newer-continuation").unwrap();
+
+        let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(stats.templates_promoted, 1);
+
+        // Destination now carries the SOURCE's newer bytes.
+        let clone_bytes = filestore
+            .read_file(&clone_zone, SNAPSHOT_FILE)
+            .unwrap()
+            .unwrap_or_default();
+        let clone_str = std::str::from_utf8(&clone_bytes).unwrap();
+        assert!(
+            clone_str.contains("user-newer-continuation"),
+            "user's newer continuation must be promoted from seeded source to clone; got: {clone_str}"
+        );
+        assert!(
+            !clone_str.contains("stale-old-copy"),
+            "stale older destination bytes must be replaced by the newer source"
+        );
+
+        // Source drained.
+        let seeded_files = filestore.list_files(&seeded_zone).unwrap();
+        assert!(seeded_files.is_empty(), "seeded zone drained after promotion");
     }
 
     #[test]
