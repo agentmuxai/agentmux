@@ -164,6 +164,11 @@ pub fn seed_agents(wstore: &Arc<WaveStore>) -> Result<SeedReport, StoreError> {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: now,
+            // First seeding always lands templates visible. Phase 2
+            // user_hidden is set by `agent_def_set_hidden` after the
+            // user explicitly hides; new template ids in re-seed are
+            // force-reset to 0 below (see `reseed_if_needed`).
+            user_hidden: 0,
         };
         wstore.agent_def_insert(&mut agent)?;
 
@@ -336,6 +341,13 @@ fn reseed_if_needed(
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: now,
+            // Newly-added template ids start visible (overwritten below
+            // when the row already exists). Phase 2 of the two-tier
+            // picker spec (Q2 Decision Y) requires NEW template ids
+            // surface once even if a same-named template was previously
+            // hidden — the `else` branch below honours that by lining
+            // up against existing ids only.
+            user_hidden: 0,
         };
 
         if let Some(existing_agent) = existing_map.get(agent_def.id.as_str()) {
@@ -354,6 +366,12 @@ fn reseed_if_needed(
             agent.restart_on_crash = existing_agent.restart_on_crash;
             agent.created_at = existing_agent.created_at;
             agent.accounts = existing_agent.accounts.clone();
+            // Phase 2: preserve the user's hide preference across a
+            // manifest re-sync for templates that already exist on disk
+            // (the user may have explicitly hidden this one). The
+            // newly-added branch below keeps user_hidden = 0 so a never-
+            // before-seen template id always surfaces at least once.
+            agent.user_hidden = existing_agent.user_hidden;
             wstore.agent_def_update(&mut agent)?;
             updated += 1;
         } else {
@@ -372,4 +390,121 @@ fn reseed_if_needed(
     }
 
     Ok(Some(ReseedReport { created, updated, removed }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::storage::wstore::{AgentDefinition, WaveStore};
+
+    /// Helper to build a manifest in-memory with a fixed set of agents.
+    /// `reseed_if_needed` reads `manifest.agents`; we construct the
+    /// struct directly so the test doesn't have to round-trip JSON.
+    fn manifest_with(ids_and_descriptions: &[(&str, &str)]) -> SeedManifest {
+        SeedManifest {
+            version: 999,
+            agents: ids_and_descriptions
+                .iter()
+                .map(|(id, desc)| SeedAgent {
+                    id: id.to_string(),
+                    name: id.to_string(),
+                    icon: default_icon(),
+                    provider: default_provider(),
+                    agent_type: default_agent_type(),
+                    environment: default_environment(),
+                    description: desc.to_string(),
+                    working_directory: String::new(),
+                    shell: String::new(),
+                    agent_bus_id: String::new(),
+                    auto_start: false,
+                    restart_on_crash: false,
+                    content: SeedContent::default(),
+                    skills: Vec::new(),
+                })
+                .collect(),
+        }
+    }
+
+    fn insert_tpl(wstore: &Arc<WaveStore>, id: &str, name: &str, hidden: i64) {
+        let mut def = AgentDefinition {
+            id: id.to_string(),
+            slug: id.to_string(),
+            name: name.to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: "v1 desc".to_string(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1_700_000_000_000,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 1,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1_700_000_000_000,
+            user_hidden: hidden,
+        };
+        wstore.agent_def_insert(&mut def).unwrap();
+    }
+
+    #[test]
+    fn reseed_preserves_user_hidden_on_existing_templates() {
+        // The user previously hid `tpl-claude`. A description-only
+        // manifest change triggers a re-seed; the user's hide preference
+        // MUST survive (it's a per-user UI flag, not manifest-managed).
+        let wstore = Arc::new(WaveStore::open_in_memory().unwrap());
+        insert_tpl(&wstore, "tpl-claude", "Claude", 1);
+        // Manifest carries a *different* description so reseed_if_needed
+        // sees a change and runs the upsert path.
+        let manifest = manifest_with(&[("tpl-claude", "v2 desc")]);
+
+        let report = reseed_if_needed(&wstore, &manifest)
+            .expect("reseed succeeds")
+            .expect("reseed runs because description changed");
+        assert_eq!(report.created, 0);
+        assert_eq!(report.updated, 1);
+
+        let after = wstore.agent_def_list().unwrap();
+        let tpl = after.iter().find(|a| a.id == "tpl-claude").unwrap();
+        assert_eq!(tpl.user_hidden, 1, "hide preference must survive reseed");
+        assert_eq!(tpl.description, "v2 desc", "description must update");
+    }
+
+    #[test]
+    fn reseed_resets_user_hidden_on_newly_added_template_id() {
+        // The user previously hid `tpl-claude`. A manifest update
+        // introduces a brand-new id `tpl-codex`. The new id MUST land
+        // with user_hidden = 0 — Phase 2 spec invariant so users always
+        // see new templates at least once.
+        let wstore = Arc::new(WaveStore::open_in_memory().unwrap());
+        insert_tpl(&wstore, "tpl-claude", "Claude", 1);
+        let manifest = manifest_with(&[
+            ("tpl-claude", "v1 desc"), // unchanged — won't fire upsert on its own
+            ("tpl-codex", "Codex CLI"),  // NEW id — forces reseed
+        ]);
+
+        let report = reseed_if_needed(&wstore, &manifest)
+            .expect("reseed succeeds")
+            .expect("reseed runs because tpl-codex is new");
+        assert!(report.created >= 1, "tpl-codex should be inserted");
+
+        let after = wstore.agent_def_list().unwrap();
+        let codex = after
+            .iter()
+            .find(|a| a.id == "tpl-codex")
+            .expect("tpl-codex should now exist");
+        assert_eq!(
+            codex.user_hidden, 0,
+            "newly-added template must start visible (Phase 2 spec invariant)",
+        );
+        // And the previously-hidden one stays hidden.
+        let claude = after.iter().find(|a| a.id == "tpl-claude").unwrap();
+        assert_eq!(claude.user_hidden, 1);
+    }
 }

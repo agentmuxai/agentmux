@@ -21,6 +21,11 @@ use crate::backend::rpc_types::{
     COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
     CommandAgentDefCreateFromTemplateData, AgentDefCreateFromTemplateResult,
     CommandListAgentDefinitionsData,
+    // Two-tier picker — Phase 2 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md
+    // Q2 Decision Y: hide templates).
+    COMMAND_AGENT_DEF_HIDE, COMMAND_AGENT_DEF_UNHIDE,
+    COMMAND_AGENT_DEF_LIST_HIDDEN_TEMPLATES,
+    CommandAgentDefHideData, AgentDefHideResult,
     CommandCreateAgentDefinitionData, CommandUpdateAgentDefinitionData, CommandDeleteAgentDefinitionData,
     CommandGetAgentContentData, CommandSetAgentContentData, CommandGetAllAgentContentData,
     CommandListAgentSkillsData, CommandCreateAgentSkillData, CommandUpdateAgentSkillData,
@@ -86,6 +91,14 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // The two-tier picker (Phase 1) passes `{ is_seeded: 0 }` for the
     // "My Agents" section and `{ is_seeded: 1 }` for the "Templates"
     // section — see SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md.
+    //
+    // Phase 2 (Q2 Decision Y — hide templates): templates with
+    // `user_hidden = 1` are filtered out by default. Callers that want
+    // them back (the settings panel's "Hidden templates" surface) pass
+    // `include_hidden: true`. Hide filter applies ONLY to templates —
+    // user-owned definitions are unaffected (their `user_hidden` is
+    // always 0 by backend invariant; `agent_def_set_hidden` rejects
+    // non-template ids).
     let wstore_lfa = state.wstore.clone();
     engine.register_handler(
         COMMAND_LIST_AGENTS,
@@ -100,10 +113,23 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let cmd: CommandListAgentDefinitionsData =
                     serde_json::from_value(data).unwrap_or_default();
                 let agents = wstore.agent_def_list().map_err(|e| format!("listagents: {e}"))?;
-                let filtered: Vec<_> = match cmd.is_seeded {
-                    Some(flag) => agents.into_iter().filter(|a| a.is_seeded == flag).collect(),
-                    None => agents,
-                };
+                let is_seeded_filter = cmd.is_seeded;
+                let include_hidden = cmd.include_hidden;
+                let filtered: Vec<_> = agents
+                    .into_iter()
+                    .filter(|a| match is_seeded_filter {
+                        Some(flag) => a.is_seeded == flag,
+                        None => true,
+                    })
+                    // Default behaviour: drop hidden templates. The
+                    // settings panel opts back in with include_hidden.
+                    // User-owned rows (is_seeded == 0) are never
+                    // hideable; the conditional below is a no-op for
+                    // them.
+                    .filter(|a| {
+                        include_hidden || a.is_seeded != 1 || a.user_hidden == 0
+                    })
+                    .collect();
                 Ok(Some(serde_json::to_value(&filtered).unwrap_or_default()))
             })
         }),
@@ -150,6 +176,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     parent_id: String::new(),
                     branch_label: String::new(),
                     updated_at: now,
+                    user_hidden: 0,
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
@@ -215,6 +242,12 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // timestamp and writes it back into `agent` below, so
                     // the response body carries the fresh value.
                     updated_at: old.updated_at,
+                    // Preserve user_hidden — updateagent edits the
+                    // definition payload, not the per-user view-state
+                    // flag. Hide/unhide go through their dedicated RPCs
+                    // (`agentdefhide` / `agentdefunhide`). Phase 2 of
+                    // SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md.
+                    user_hidden: old.user_hidden,
                 };
                 let found = wstore.agent_def_update(&mut agent).map_err(|e| format!("updateagent: {e}"))?;
                 if !found {
@@ -350,6 +383,10 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     parent_id: template.id.clone(),
                     branch_label: String::new(),
                     updated_at: now,
+                    // New user-owned agent starts visible. Phase 2
+                    // (Q2 Decision Y) — hide applies only to seeded
+                    // templates, never to user-owned agents.
+                    user_hidden: 0,
                 };
                 wstore
                     .agent_def_insert(&mut new_def)
@@ -375,6 +412,107 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "agentdefcreatefromtemplate: cloned template into user agent"
                 );
                 Ok(Some(serde_json::to_value(&resp).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // agentdefhide → set user_hidden = 1 on a seeded template, so it
+    // disappears from the picker's "+ New from template" tier. Phase 2
+    // (Q2 Decision Y) of SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md.
+    //
+    // Validation:
+    //  - `definition_id` MUST exist. Missing → returns `{ ok: false }`.
+    //  - The row MUST be a seeded template (`is_seeded = 1`). User-owned
+    //    rows reject with a hard error — they have their own delete path
+    //    and a hide flag on them would be misleading.
+    //
+    // Broadcasts `agents:changed` so the picker refetches and the card
+    // disappears (existing list query already excludes hidden by default).
+    let wstore_hide = state.wstore.clone();
+    let broker_hide = state.broker.clone();
+    engine.register_handler(
+        COMMAND_AGENT_DEF_HIDE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_hide.clone();
+            let broker = broker_hide.clone();
+            Box::pin(async move {
+                let cmd: CommandAgentDefHideData = serde_json::from_value(data)
+                    .map_err(|e| format!("agentdefhide: {e}"))?;
+                let ok = wstore
+                    .agent_def_set_hidden(&cmd.definition_id, true)
+                    .map_err(|e| format!("agentdefhide: {e}"))?;
+                if ok {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "agents:changed".to_string(),
+                        scopes: vec![],
+                        sender: String::new(),
+                        persist: 0,
+                        data: None,
+                    });
+                    tracing::info!(
+                        definition_id = %cmd.definition_id,
+                        "agentdefhide: hid template"
+                    );
+                }
+                let resp = AgentDefHideResult { ok };
+                Ok(Some(serde_json::to_value(&resp).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // agentdefunhide → set user_hidden = 0 on a seeded template,
+    // bringing it back into the picker. Same validation + broadcast as
+    // agentdefhide. Phase 2 of the two-tier picker spec.
+    let wstore_unhide = state.wstore.clone();
+    let broker_unhide = state.broker.clone();
+    engine.register_handler(
+        COMMAND_AGENT_DEF_UNHIDE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_unhide.clone();
+            let broker = broker_unhide.clone();
+            Box::pin(async move {
+                let cmd: CommandAgentDefHideData = serde_json::from_value(data)
+                    .map_err(|e| format!("agentdefunhide: {e}"))?;
+                let ok = wstore
+                    .agent_def_set_hidden(&cmd.definition_id, false)
+                    .map_err(|e| format!("agentdefunhide: {e}"))?;
+                if ok {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "agents:changed".to_string(),
+                        scopes: vec![],
+                        sender: String::new(),
+                        persist: 0,
+                        data: None,
+                    });
+                    tracing::info!(
+                        definition_id = %cmd.definition_id,
+                        "agentdefunhide: unhid template"
+                    );
+                }
+                let resp = AgentDefHideResult { ok };
+                Ok(Some(serde_json::to_value(&resp).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // agentdeflisthiddentemplates → templates the user has hidden
+    // (is_seeded = 1 AND user_hidden = 1). Used by the settings panel
+    // to render the unhide list. The picker proper never calls this —
+    // it uses `listagents` with the default-filter-out behaviour.
+    let wstore_lh = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_AGENT_DEF_LIST_HIDDEN_TEMPLATES,
+        Box::new(move |_data, _ctx| {
+            let wstore = wstore_lh.clone();
+            Box::pin(async move {
+                let agents = wstore
+                    .agent_def_list()
+                    .map_err(|e| format!("agentdeflisthiddentemplates: {e}"))?;
+                let hidden: Vec<_> = agents
+                    .into_iter()
+                    .filter(|a| a.is_seeded == 1 && a.user_hidden == 1)
+                    .collect();
+                Ok(Some(serde_json::to_value(&hidden).unwrap_or_default()))
             })
         }),
     );
@@ -690,6 +828,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     parent_id: String::new(),
                     branch_label: String::new(),
                     updated_at: now,
+                    user_hidden: 0,
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
 
@@ -821,6 +960,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         parent_id: String::new(),
                         branch_label: String::new(),
                         updated_at: now,
+                        user_hidden: 0,
                     };
 
                     if let Err(e) = wstore.agent_def_insert(&mut agent) {
@@ -1767,6 +1907,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     parent_id: source.id.clone(),
                     branch_label: cmd.branch_label.clone(),
                     updated_at: now,
+                    user_hidden: 0,
                 };
                 wstore
                     .agent_def_insert(&mut fork)
@@ -2578,6 +2719,7 @@ mod recent_sessions_tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 0,
+            user_hidden: 0,
         };
         let mut def_mut = def.clone();
         wstore.agent_def_insert(&mut def_mut).unwrap();
@@ -2831,6 +2973,7 @@ mod recent_sessions_tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 1_700_000_000_000,
+            user_hidden: 0,
         };
         wstore.agent_def_insert(&mut tpl).unwrap();
 
@@ -2856,6 +2999,7 @@ mod recent_sessions_tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 1_700_000_001_000,
+            user_hidden: 0,
         };
         wstore.agent_def_insert(&mut user_a).unwrap();
 
@@ -3043,5 +3187,196 @@ mod recent_sessions_tests {
         )
         .await;
         assert!(err.contains("non-empty"), "wrong error: {err}");
+    }
+
+    // ---- Two-tier picker Phase 2: hide / unhide templates ----
+    //
+    // SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md Q2 Decision Y.
+
+    #[tokio::test]
+    async fn hide_template_then_listagents_excludes_it_by_default() {
+        let (_state, engine, mut rx) = build_state_with_template_seed();
+
+        // Before hide: template is in the default listagents result.
+        let before: Vec<AgentDefinition> = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_LIST_AGENTS,
+            serde_json::json!({}),
+        )
+        .await;
+        assert!(before.iter().any(|a| a.id == "tpl-claude"));
+
+        // Hide the template.
+        let resp: crate::backend::rpc_types::AgentDefHideResult = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_HIDE,
+            serde_json::json!({ "definition_id": "tpl-claude" }),
+        )
+        .await;
+        assert!(resp.ok);
+
+        // After hide: default listagents no longer surfaces it.
+        let after: Vec<AgentDefinition> = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_LIST_AGENTS,
+            serde_json::json!({}),
+        )
+        .await;
+        assert!(
+            !after.iter().any(|a| a.id == "tpl-claude"),
+            "hidden template should NOT appear by default",
+        );
+
+        // But user-owned rows (is_seeded=0) still appear — hide only
+        // affects templates.
+        assert!(after.iter().any(|a| a.id == "user-a"));
+
+        // include_hidden = true brings it back (settings panel surface).
+        let included: Vec<AgentDefinition> = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_LIST_AGENTS,
+            serde_json::json!({ "include_hidden": true }),
+        )
+        .await;
+        let tpl = included
+            .iter()
+            .find(|a| a.id == "tpl-claude")
+            .expect("hidden template should appear with include_hidden=true");
+        assert_eq!(tpl.user_hidden, 1);
+    }
+
+    #[tokio::test]
+    async fn hide_then_unhide_round_trip() {
+        let (_state, engine, mut rx) = build_state_with_template_seed();
+        let _: crate::backend::rpc_types::AgentDefHideResult = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_HIDE,
+            serde_json::json!({ "definition_id": "tpl-claude" }),
+        )
+        .await;
+        let resp: crate::backend::rpc_types::AgentDefHideResult = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_UNHIDE,
+            serde_json::json!({ "definition_id": "tpl-claude" }),
+        )
+        .await;
+        assert!(resp.ok);
+        // Listagents now shows it again, default-filter included.
+        let agents: Vec<AgentDefinition> = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_LIST_AGENTS,
+            serde_json::json!({}),
+        )
+        .await;
+        let tpl = agents
+            .iter()
+            .find(|a| a.id == "tpl-claude")
+            .expect("unhidden template should appear");
+        assert_eq!(tpl.user_hidden, 0);
+    }
+
+    #[tokio::test]
+    async fn hide_rejects_user_owned_definition() {
+        let (_state, engine, mut rx) = build_state_with_template_seed();
+        // "user-a" is is_seeded=0 — hide must reject.
+        let err = call_rpc_expect_error(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_HIDE,
+            serde_json::json!({ "definition_id": "user-a" }),
+        )
+        .await;
+        assert!(
+            err.contains("not a seeded template"),
+            "wrong error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn hide_unknown_id_returns_ok_false() {
+        let (_state, engine, mut rx) = build_state_with_template_seed();
+        let resp: crate::backend::rpc_types::AgentDefHideResult = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_HIDE,
+            serde_json::json!({ "definition_id": "no-such-id" }),
+        )
+        .await;
+        assert!(!resp.ok);
+    }
+
+    #[tokio::test]
+    async fn list_hidden_templates_returns_only_hidden_templates() {
+        let (_state, engine, mut rx) = build_state_with_template_seed();
+        // Empty initially.
+        let empty: Vec<AgentDefinition> = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_LIST_HIDDEN_TEMPLATES,
+            serde_json::json!({}),
+        )
+        .await;
+        assert!(empty.is_empty());
+
+        // Hide one; expect it to surface.
+        let _: crate::backend::rpc_types::AgentDefHideResult = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_HIDE,
+            serde_json::json!({ "definition_id": "tpl-claude" }),
+        )
+        .await;
+        let hidden: Vec<AgentDefinition> = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_LIST_HIDDEN_TEMPLATES,
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(hidden.len(), 1);
+        assert_eq!(hidden[0].id, "tpl-claude");
+        assert_eq!(hidden[0].is_seeded, 1);
+        assert_eq!(hidden[0].user_hidden, 1);
+    }
+
+    #[tokio::test]
+    async fn listagents_is_seeded_filter_with_include_hidden_combines() {
+        // Templates-only filter + include_hidden = the settings panel's
+        // canonical query if it ever wanted the full template universe.
+        // Without include_hidden + is_seeded=1 the hidden ones drop out.
+        let (_state, engine, mut rx) = build_state_with_template_seed();
+        let _: crate::backend::rpc_types::AgentDefHideResult = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_HIDE,
+            serde_json::json!({ "definition_id": "tpl-claude" }),
+        )
+        .await;
+        let templates_visible: Vec<AgentDefinition> = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_LIST_AGENTS,
+            serde_json::json!({ "is_seeded": 1 }),
+        )
+        .await;
+        assert!(
+            !templates_visible.iter().any(|a| a.id == "tpl-claude"),
+            "hidden template should be excluded from is_seeded=1 default query",
+        );
+        let templates_all: Vec<AgentDefinition> = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_LIST_AGENTS,
+            serde_json::json!({ "is_seeded": 1, "include_hidden": true }),
+        )
+        .await;
+        assert!(templates_all.iter().any(|a| a.id == "tpl-claude"));
     }
 }
