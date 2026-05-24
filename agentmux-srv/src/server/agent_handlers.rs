@@ -17,6 +17,10 @@ use crate::backend::rpc_types::{
     COMMAND_APPEND_AGENT_HISTORY, COMMAND_LIST_AGENT_HISTORY, COMMAND_SEARCH_AGENT_HISTORY,
     COMMAND_IMPORT_AGENT_FROM_CLAW, COMMAND_IMPORT_AGENTS, COMMAND_EXPORT_AGENTS,
     COMMAND_RESEED_AGENTS,
+    // Two-tier picker — Phase 1 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md)
+    COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
+    CommandAgentDefCreateFromTemplateData, AgentDefCreateFromTemplateResult,
+    CommandListAgentDefinitionsData,
     CommandCreateAgentDefinitionData, CommandUpdateAgentDefinitionData, CommandDeleteAgentDefinitionData,
     CommandGetAgentContentData, CommandSetAgentContentData, CommandGetAllAgentContentData,
     CommandListAgentSkillsData, CommandCreateAgentSkillData, CommandUpdateAgentSkillData,
@@ -76,15 +80,31 @@ use crate::backend::storage::wstore::{
 use super::AppState;
 
 pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    // listagents → return all agent definitions
+    // listagents → return all agent definitions, optionally filtered by
+    // `is_seeded`. Filter input is backward-compatible: callers that
+    // pass `null` / `{}` (every existing caller) get the full list.
+    // The two-tier picker (Phase 1) passes `{ is_seeded: 0 }` for the
+    // "My Agents" section and `{ is_seeded: 1 }` for the "Templates"
+    // section — see SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md.
     let wstore_lfa = state.wstore.clone();
     engine.register_handler(
         COMMAND_LIST_AGENTS,
-        Box::new(move |_data, _ctx| {
+        Box::new(move |data, _ctx| {
             let wstore = wstore_lfa.clone();
             Box::pin(async move {
+                // unwrap_or_default — both `null` and `{}` deserialize
+                // to the default (no filter). Anything malformed falls
+                // back to no-filter rather than erroring; older clients
+                // never sent a body for this RPC and we can't know
+                // which JSON shape they're on.
+                let cmd: CommandListAgentDefinitionsData =
+                    serde_json::from_value(data).unwrap_or_default();
                 let agents = wstore.agent_def_list().map_err(|e| format!("listagents: {e}"))?;
-                Ok(Some(serde_json::to_value(&agents).unwrap_or_default()))
+                let filtered: Vec<_> = match cmd.is_seeded {
+                    Some(flag) => agents.into_iter().filter(|a| a.is_seeded == flag).collect(),
+                    None => agents,
+                };
+                Ok(Some(serde_json::to_value(&filtered).unwrap_or_default()))
             })
         }),
     );
@@ -232,6 +252,129 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     data: None,
                 });
                 Ok(None)
+            })
+        }),
+    );
+
+    // agentdefcreatefromtemplate → clone a seeded template into a new
+    // user-owned definition (Phase 1 two-tier picker —
+    // SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md). The template stays
+    // pristine; the new row carries `is_seeded = 0`. Returns the new
+    // definition_id so the frontend can immediately launch.
+    //
+    // Validation rules:
+    //  - `template_id` MUST resolve to a row with `is_seeded = 1`.
+    //    Cloning a user-owned row would be confusing semantics — use
+    //    the existing `forkagentdefinition` RPC for that case.
+    //  - `name` non-empty, ≤200 chars, and not already taken by any
+    //    `is_seeded = 0` row. Avoids collisions in the picker's
+    //    "My Agents" list.
+    let wstore_act = state.wstore.clone();
+    let broker_act = state.broker.clone();
+    engine.register_handler(
+        COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_act.clone();
+            let broker = broker_act.clone();
+            Box::pin(async move {
+                let cmd: CommandAgentDefCreateFromTemplateData = serde_json::from_value(data)
+                    .map_err(|e| format!("agentdefcreatefromtemplate: {e}"))?;
+                let name = cmd.name.trim().to_string();
+                if name.is_empty() {
+                    return Err("agentdefcreatefromtemplate: name must be non-empty".into());
+                }
+                if name.chars().count() > 200 {
+                    return Err(
+                        "agentdefcreatefromtemplate: name must be ≤200 characters".into(),
+                    );
+                }
+
+                let all = wstore
+                    .agent_def_list()
+                    .map_err(|e| format!("agentdefcreatefromtemplate: list: {e}"))?;
+                let template = all
+                    .iter()
+                    .find(|a| a.id == cmd.template_id)
+                    .ok_or_else(|| {
+                        format!(
+                            "agentdefcreatefromtemplate: template {} not found",
+                            cmd.template_id
+                        )
+                    })?;
+                if template.is_seeded != 1 {
+                    return Err(format!(
+                        "agentdefcreatefromtemplate: {} is not a seeded template (is_seeded={})",
+                        cmd.template_id, template.is_seeded
+                    ));
+                }
+                if all
+                    .iter()
+                    .any(|a| a.is_seeded == 0 && a.name.eq_ignore_ascii_case(&name))
+                {
+                    return Err(format!(
+                        "agentdefcreatefromtemplate: an agent named {:?} already exists",
+                        name
+                    ));
+                }
+
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                let mut new_def = AgentDefinition {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    // agent_def_insert derives a unique slug from the
+                    // name when this is empty + collision-resolves.
+                    slug: String::new(),
+                    name: name.clone(),
+                    icon: template.icon.clone(),
+                    provider: template.provider.clone(),
+                    description: template.description.clone(),
+                    // Force re-allocation of the per-agent working
+                    // directory at first launch via the new slug —
+                    // matches forkagentdefinition's behaviour.
+                    working_directory: String::new(),
+                    shell: template.shell.clone(),
+                    provider_flags: template.provider_flags.clone(),
+                    // Users opt in to auto-start explicitly; cloning
+                    // shouldn't carry it over (mirrors fork).
+                    auto_start: 0,
+                    restart_on_crash: template.restart_on_crash,
+                    idle_timeout_minutes: template.idle_timeout_minutes,
+                    created_at: now,
+                    agent_type: template.agent_type.clone(),
+                    environment: template.environment.clone(),
+                    agent_bus_id: String::new(),
+                    is_seeded: 0,
+                    accounts: String::new(),
+                    parent_id: template.id.clone(),
+                    branch_label: String::new(),
+                    updated_at: now,
+                };
+                wstore
+                    .agent_def_insert(&mut new_def)
+                    .map_err(|e| format!("agentdefcreatefromtemplate: insert: {e}"))?;
+
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "agents:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+
+                let resp = AgentDefCreateFromTemplateResult {
+                    definition_id: new_def.id.clone(),
+                    identity_id: cmd.identity_id,
+                    memory_id: cmd.memory_id,
+                };
+                tracing::info!(
+                    template_id = %cmd.template_id,
+                    new_definition_id = %new_def.id,
+                    new_name = %new_def.name,
+                    "agentdefcreatefromtemplate: cloned template into user agent"
+                );
+                Ok(Some(serde_json::to_value(&resp).unwrap_or_default()))
             })
         }),
     );
@@ -2607,5 +2750,298 @@ mod recent_sessions_tests {
         .await;
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].instance_id, "inst-recent");
+    }
+
+    // ---- Two-tier picker Phase 1: create-from-template + listagents filter ----
+    //
+    // SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md.
+
+    /// Same shape as build_state_with_seed but with a seeded template
+    /// and no instances, so the create-from-template path is exercised
+    /// against a known-good template row.
+    fn build_state_with_template_seed() -> (
+        AppState,
+        Arc<WshRpcEngine>,
+        tokio::sync::mpsc::UnboundedReceiver<crate::backend::rpc_types::RpcMessage>,
+    ) {
+        let wstore = Arc::new(WaveStore::open_in_memory().unwrap());
+        let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+        let event_bus = Arc::new(crate::backend::eventbus::EventBus::new());
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let reactive_handler = crate::backend::reactive::get_global_handler();
+        let poller = Arc::new(crate::backend::reactive::Poller::new(
+            crate::backend::reactive::PollerConfig {
+                agentmux_url: None,
+                agentmux_token: None,
+                poll_interval_secs: 30,
+            },
+            reactive_handler,
+        ));
+        crate::backend::wcore::ensure_initial_data(&wstore).unwrap();
+        let config_watcher = Arc::new(crate::backend::wconfig::ConfigWatcher::new());
+        let process_tracker = Arc::new(
+            crate::backend::process_tracker::registry::AgentProcessRegistry::new(Some(broker.clone())),
+        );
+        let state = AppState {
+            auth_key: "test".to_string(),
+            version: "test".to_string(),
+            app_path: String::new(),
+            wstore: wstore.clone(),
+            filestore: filestore.clone(),
+            event_bus: event_bus.clone(),
+            broker,
+            reactive_handler,
+            poller,
+            config_watcher,
+            messagebus: Arc::new(crate::backend::messagebus::MessageBus::new()),
+            http_client: reqwest::Client::new(),
+            local_web_url: String::new(),
+            subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus)),
+            history_service: Arc::new(crate::backend::history::HistoryService::new()),
+            lan_discovery: None,
+            process_tracker,
+            srv_state: Arc::new(tokio::sync::Mutex::new(crate::state::State::default())),
+            srv_events_tx: tokio::sync::broadcast::channel::<agentmux_common::ipc::Event>(64).0,
+            saga_id_alloc: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            saga_log: Arc::new(crate::sagas::log::SagaLog::open_in_memory().unwrap()),
+            auth_session_manager: Arc::new(crate::identity::auth_session::AuthSessionManager::new()),
+            install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
+        };
+
+        // One seeded template + one already-user-owned definition.
+        let mut tpl = AgentDefinition {
+            id: "tpl-claude".to_string(),
+            slug: String::new(),
+            name: "Claude Code".to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: "Anthropic's coding agent".to_string(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: "--model haiku".to_string(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1_700_000_000_000,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 1,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1_700_000_000_000,
+        };
+        wstore.agent_def_insert(&mut tpl).unwrap();
+
+        let mut user_a = AgentDefinition {
+            id: "user-a".to_string(),
+            slug: String::new(),
+            name: "Maks".to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1_700_000_001_000,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1_700_000_001_000,
+        };
+        wstore.agent_def_insert(&mut user_a).unwrap();
+
+        let (engine, rx) = WshRpcEngine::new();
+        super::register_agent_handlers(&engine, &state);
+        (state, engine, rx)
+    }
+
+    #[tokio::test]
+    async fn listagents_no_filter_returns_all() {
+        let (_state, engine, mut rx) = build_state_with_template_seed();
+        let agents: Vec<AgentDefinition> = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_LIST_AGENTS,
+            serde_json::json!({}),
+        )
+        .await;
+        assert!(agents.iter().any(|a| a.id == "tpl-claude"));
+        assert!(agents.iter().any(|a| a.id == "user-a"));
+    }
+
+    #[tokio::test]
+    async fn listagents_filter_templates_only() {
+        let (_state, engine, mut rx) = build_state_with_template_seed();
+        let agents: Vec<AgentDefinition> = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_LIST_AGENTS,
+            serde_json::json!({ "is_seeded": 1 }),
+        )
+        .await;
+        assert!(agents.iter().all(|a| a.is_seeded == 1));
+        assert!(agents.iter().any(|a| a.id == "tpl-claude"));
+        assert!(!agents.iter().any(|a| a.id == "user-a"));
+    }
+
+    #[tokio::test]
+    async fn listagents_filter_user_owned_only() {
+        let (_state, engine, mut rx) = build_state_with_template_seed();
+        let agents: Vec<AgentDefinition> = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_LIST_AGENTS,
+            serde_json::json!({ "is_seeded": 0 }),
+        )
+        .await;
+        assert!(agents.iter().all(|a| a.is_seeded == 0));
+        assert!(agents.iter().any(|a| a.id == "user-a"));
+        assert!(!agents.iter().any(|a| a.id == "tpl-claude"));
+    }
+
+    #[tokio::test]
+    async fn create_from_template_happy_path_clones_and_returns_id() {
+        let (_state, engine, mut rx) = build_state_with_template_seed();
+        let resp: crate::backend::rpc_types::AgentDefCreateFromTemplateResult = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
+            serde_json::json!({
+                "template_id": "tpl-claude",
+                "name": "Asaf",
+                "identity_id": "id-work",
+                "memory_id": "mem-notes",
+            }),
+        )
+        .await;
+        assert!(!resp.definition_id.is_empty());
+        assert_eq!(resp.identity_id, "id-work");
+        assert_eq!(resp.memory_id, "mem-notes");
+
+        // The new row is user-owned, carries provider + flags from template.
+        let agents: Vec<AgentDefinition> = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_LIST_AGENTS,
+            serde_json::json!({}),
+        )
+        .await;
+        let new_def = agents
+            .iter()
+            .find(|a| a.id == resp.definition_id)
+            .expect("new definition should appear in listagents");
+        assert_eq!(new_def.is_seeded, 0);
+        assert_eq!(new_def.name, "Asaf");
+        assert_eq!(new_def.provider, "claude");
+        assert_eq!(new_def.provider_flags, "--model haiku");
+        assert_eq!(new_def.parent_id, "tpl-claude");
+    }
+
+    async fn call_rpc_expect_error(
+        engine: &Arc<WshRpcEngine>,
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::backend::rpc_types::RpcMessage>,
+        command: &str,
+        data: serde_json::Value,
+    ) -> String {
+        let req_id = format!("test-{}", uuid::Uuid::new_v4());
+        let msg = crate::backend::rpc_types::RpcMessage {
+            command: command.to_string(),
+            reqid: req_id.clone(),
+            data: Some(data),
+            ..Default::default()
+        };
+        engine.handle_message(msg);
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("handler timed out")
+            .expect("output channel closed");
+        assert_eq!(resp.resid, req_id);
+        assert!(
+            !resp.error.is_empty(),
+            "expected error, got success payload: {:?}",
+            resp.data
+        );
+        resp.error
+    }
+
+    #[tokio::test]
+    async fn create_from_template_rejects_non_template_id() {
+        let (_state, engine, mut rx) = build_state_with_template_seed();
+        // "user-a" is is_seeded=0 — not a template.
+        let err = call_rpc_expect_error(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
+            serde_json::json!({
+                "template_id": "user-a",
+                "name": "another",
+            }),
+        )
+        .await;
+        assert!(
+            err.contains("not a seeded template"),
+            "wrong error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_from_template_rejects_unknown_template_id() {
+        let (_state, engine, mut rx) = build_state_with_template_seed();
+        let err = call_rpc_expect_error(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
+            serde_json::json!({
+                "template_id": "no-such-id",
+                "name": "x",
+            }),
+        )
+        .await;
+        assert!(err.contains("not found"), "wrong error: {err}");
+    }
+
+    #[tokio::test]
+    async fn create_from_template_rejects_duplicate_user_name() {
+        let (_state, engine, mut rx) = build_state_with_template_seed();
+        // "Maks" already exists as a user-owned agent.
+        let err = call_rpc_expect_error(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
+            serde_json::json!({
+                "template_id": "tpl-claude",
+                "name": "Maks",
+            }),
+        )
+        .await;
+        assert!(
+            err.contains("already exists"),
+            "wrong error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_from_template_rejects_empty_name() {
+        let (_state, engine, mut rx) = build_state_with_template_seed();
+        let err = call_rpc_expect_error(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
+            serde_json::json!({
+                "template_id": "tpl-claude",
+                "name": "   ",
+            }),
+        )
+        .await;
+        assert!(err.contains("non-empty"), "wrong error: {err}");
     }
 }

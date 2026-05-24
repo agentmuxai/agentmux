@@ -25,6 +25,7 @@ export type TabModalRequest =
     | AgentPrereqRequest
     | NewIdentityBundleRequest
     | NewMemoryBundleRequest
+    | CreateFromTemplateRequest
     | BrowserAuthRequest;
 
 export interface LaunchAgentRequest {
@@ -210,6 +211,41 @@ export interface NewMemoryBundleRequest {
     onCreated: (bundleId: string, bundleName: string) => void;
     /** Caller routes (replace vs close). Layer does NOT close. */
     onCancel: () => void;
+}
+
+/**
+ * Two-tier picker — Phase 1 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
+ * Opens when the user clicks a card in the picker's Templates section.
+ * On submit the layer chains:
+ *  1. `agentdefcreatefromtemplate` to clone the template into a new
+ *     user-owned definition,
+ *  2. `launchAgentDefinition` with the picked bindings to spawn the
+ *     new agent immediately.
+ *
+ * Why the layer owns the chain (not the picker): the modal's
+ * `submitting()` gate must track BOTH the create RPC and the launch
+ * await so ESC + backdrop dismiss are blocked across the whole flow.
+ * Splitting them would leave a window where the create succeeded but
+ * the launch hadn't fired, and ESC would lose the user's just-created
+ * agent without launching it.
+ */
+export interface CreateFromTemplateRequest {
+    kind: "create-from-template";
+    /** Seeded template the user clicked. Its `is_seeded` field MUST be
+     *  1; the backend rejects non-template ids defensively. */
+    template: AgentDefinition;
+    /** Block id of the pane that opened the modal. */
+    originBlockId: string;
+    /** Called by the layer after `agentdefcreatefromtemplate` returns.
+     *  The picker uses this to fire `launchAgentDefinition` with the
+     *  freshly-minted user-agent definition. Returns a promise so the
+     *  layer can keep `submitting()` true across the launch await. */
+    onCreatedAndLaunch: (
+        newDefinitionId: string,
+        identityId: string,
+        memoryId: string,
+        name: string,
+    ) => Promise<void>;
 }
 
 /**

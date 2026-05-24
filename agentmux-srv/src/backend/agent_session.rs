@@ -630,6 +630,332 @@ pub fn migrate_block_zones_v1(
 }
 
 // ---------------------------------------------------------------------------
+// Two-tier picker — Phase 1 migration (seeded-def → user-agent promote)
+// ---------------------------------------------------------------------------
+
+/// Marker file name for the Phase 1 two-tier-picker migration.
+/// One-shot per data dir; deleting it forces a re-run on next startup.
+pub const TEMPLATE_PROMOTE_MARKER_V1: &str = "migration_template_promote_v1.flag";
+
+/// Stats from `migrate_promote_template_sessions_v1`. Logged at INFO.
+#[derive(Debug, Clone, Default)]
+pub struct TemplatePromoteStats {
+    pub templates_scanned: usize,
+    pub templates_promoted: usize,
+    /// Total archive zones moved across all promotions.
+    pub archives_moved: usize,
+    /// Total instances repointed via
+    /// `wstore.instance_repoint_definition`.
+    pub instances_repointed: usize,
+    pub failures: usize,
+}
+
+/// Phase 1 two-tier picker migration: promote any seeded template that
+/// carries a session zone into a fresh user-owned definition, then move
+/// its `:current` + `:archive:*` zones onto the new definition_id.
+///
+/// Why this exists (Q1 = Option C in
+/// `docs/specs/SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md`):
+/// after the picker UI split, clicking a "template" card in the
+/// Templates section MUST create a new agent — not silently append to
+/// whatever session the user previously ran against that template
+/// directly (e.g. "Maks's conversation" living at `agent:claude:current`).
+/// Without this migration the template card would either reattach to
+/// the existing session (broken — wrong intent) or be effectively
+/// non-functional. The migration moves any such pre-existing session
+/// out of the template namespace onto a new user-owned definition so
+/// the template is pristine post-migration.
+///
+/// Algorithm:
+/// 1. List zone ids; partition the `agent:<id>:current` and
+///    `agent:<id>:archive:*` zones by definition id.
+/// 2. For each definition id with at least one zone, look up the
+///    matching `db_agent_definitions` row.
+///    - Skip if missing (zone refers to a deleted definition).
+///    - Skip if `is_seeded = 0` (already user-owned — no work).
+///    - Otherwise: clone the template into a new user definition
+///      (mirrors `agent_def_create_from_template` semantics).
+/// 3. Pick the new name: most-recently-active named instance's
+///    `instance_name` if any exists, else fall back to the template's
+///    own `name`.
+/// 4. Move every matching zone (`:current` + every `:archive:*`)
+///    from the old defId to the new defId via FileStore's existing
+///    write-then-delete pattern.
+/// 5. Repoint every `db_agent_instances` row that referenced the old
+///    defId to point at the new defId (preserves the
+///    `continueOfInstanceId` reattach flow).
+/// 6. Marker-file gated — second start is a no-op.
+///
+/// Failure mode: per-template errors are logged + counted; we DO NOT
+/// abort startup. The marker is written even on partial failure so we
+/// don't retry indefinitely (operators can delete the marker to retry).
+pub fn migrate_promote_template_sessions_v1(
+    wstore: &Arc<WaveStore>,
+    filestore: &Arc<FileStore>,
+    data_dir: &Path,
+) -> TemplatePromoteStats {
+    let marker_path = data_dir.join(TEMPLATE_PROMOTE_MARKER_V1);
+    if marker_path.exists() {
+        tracing::debug!(
+            marker = %marker_path.display(),
+            "template_promote migration: marker present, skipping"
+        );
+        return TemplatePromoteStats::default();
+    }
+
+    let mut stats = TemplatePromoteStats::default();
+
+    let all_zones = match filestore.get_all_zone_ids() {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "template_promote migration: get_all_zone_ids failed; aborting (will retry next start)"
+            );
+            return stats;
+        }
+    };
+
+    // Group zone ids by definition id. A zone counts if it matches
+    // `agent:<id>:current` OR `agent:<id>:archive:<ts>`. Anything else
+    // (e.g. legacy per-block zones the prior migration didn't sweep)
+    // is ignored by this migration.
+    let mut per_def_zones: HashMap<String, Vec<String>> = HashMap::new();
+    for zone in &all_zones {
+        let rest = match zone.strip_prefix("agent:") {
+            Some(r) => r,
+            None => continue,
+        };
+        // `<defId>:current` or `<defId>:archive:<ts>`
+        let (def_id, tail) = match rest.split_once(':') {
+            Some(p) => p,
+            None => continue,
+        };
+        if !is_valid_definition_id(def_id) {
+            continue;
+        }
+        let is_current = tail == "current";
+        let is_archive = tail.starts_with("archive:");
+        if !is_current && !is_archive {
+            continue;
+        }
+        per_def_zones
+            .entry(def_id.to_string())
+            .or_default()
+            .push(zone.clone());
+    }
+
+    // Fetch all definitions ONCE so per-template lookups don't re-hit
+    // SQLite in a loop.
+    let defs = match wstore.agent_def_list() {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "template_promote migration: agent_def_list failed; aborting (will retry next start)"
+            );
+            return stats;
+        }
+    };
+
+    for (old_def_id, zones) in per_def_zones {
+        // Look up the definition row this zone is bound to.
+        let template = match defs.iter().find(|d| d.id == old_def_id) {
+            Some(d) => d,
+            None => {
+                // Zone points at a deleted definition — leave it
+                // alone; a future GC pass can clean orphans.
+                continue;
+            }
+        };
+        // Only seeded templates need promotion. User-owned defs are
+        // already on the new model.
+        if template.is_seeded != 1 {
+            continue;
+        }
+        stats.templates_scanned += 1;
+
+        // Pick the new agent name: most-recently-active named instance
+        // for this template, else fall back to the template's own name.
+        // `instance_list_named` already filters to non-hidden + named
+        // rows + sorts by `started_at DESC`, so the first row is the
+        // pick.
+        let new_name = match wstore.instance_list_named(1, Some(&old_def_id)) {
+            Ok(rows) => rows
+                .into_iter()
+                .next()
+                .map(|i| i.instance_name)
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| template.name.clone()),
+            Err(e) => {
+                tracing::warn!(
+                    template_id = %old_def_id,
+                    error = %e,
+                    "template_promote migration: instance_list_named failed; using template name"
+                );
+                template.name.clone()
+            }
+        };
+
+        // Clone the template into a new user-owned definition.
+        // Mirrors `agent_def_create_from_template`'s field-copy
+        // contract — keep these in sync.
+        let now = now_ms() as i64;
+        let mut new_def = crate::backend::storage::wstore::AgentDefinition {
+            id: uuid::Uuid::new_v4().to_string(),
+            slug: String::new(),
+            name: new_name.clone(),
+            icon: template.icon.clone(),
+            provider: template.provider.clone(),
+            description: template.description.clone(),
+            working_directory: String::new(),
+            shell: template.shell.clone(),
+            provider_flags: template.provider_flags.clone(),
+            auto_start: 0,
+            restart_on_crash: template.restart_on_crash,
+            idle_timeout_minutes: template.idle_timeout_minutes,
+            created_at: now,
+            agent_type: template.agent_type.clone(),
+            environment: template.environment.clone(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: template.id.clone(),
+            branch_label: String::new(),
+            updated_at: now,
+        };
+        if let Err(e) = wstore.agent_def_insert(&mut new_def) {
+            tracing::warn!(
+                template_id = %old_def_id,
+                error = %e,
+                "template_promote migration: agent_def_insert failed; skipping this template"
+            );
+            stats.failures += 1;
+            continue;
+        }
+
+        // Move every matching zone (current + archives) onto the new
+        // definition id. Per-zone failures are logged but don't abort
+        // the whole template — best-effort.
+        let mut archives_for_this_def: usize = 0;
+        for old_zone in &zones {
+            // Build the new zone id by swapping the def-id segment.
+            // We know `old_zone` starts with `agent:<old_def_id>:`
+            // (per the bucketing above), so substring-replace is safe.
+            let suffix = match old_zone.strip_prefix(&format!("agent:{}:", old_def_id)) {
+                Some(s) => s,
+                None => continue,
+            };
+            let new_zone = format!("agent:{}:{}", new_def.id, suffix);
+            let is_archive = suffix.starts_with("archive:");
+
+            if let Err(e) = move_zone(filestore, old_zone, &new_zone) {
+                tracing::warn!(
+                    template_id = %old_def_id,
+                    old_zone = %old_zone,
+                    new_zone = %new_zone,
+                    error = %e,
+                    "template_promote migration: move_zone failed"
+                );
+                stats.failures += 1;
+                continue;
+            }
+            if is_archive {
+                archives_for_this_def += 1;
+            }
+        }
+
+        // Repoint any in-DB instances referencing this template at
+        // the new user-owned definition. Without this, the existing
+        // continueOfInstanceId reattach flow would still look up the
+        // template and pass through the un-promoted definition_id.
+        let repointed = match wstore.instance_repoint_definition(&old_def_id, &new_def.id) {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::warn!(
+                    template_id = %old_def_id,
+                    new_definition_id = %new_def.id,
+                    error = %e,
+                    "template_promote migration: instance_repoint_definition failed"
+                );
+                stats.failures += 1;
+                0
+            }
+        };
+        stats.instances_repointed += repointed;
+        stats.archives_moved += archives_for_this_def;
+        stats.templates_promoted += 1;
+        tracing::info!(
+            template_id = %old_def_id,
+            template_name = %template.name,
+            new_definition_id = %new_def.id,
+            new_name = %new_def.name,
+            archives_moved = archives_for_this_def,
+            instances_repointed = repointed,
+            "template_promote migration: promoted template into user agent"
+        );
+    }
+
+    // Write marker — even on partial failure (see doc comment).
+    if let Err(e) = std::fs::write(&marker_path, b"v1\n") {
+        tracing::warn!(
+            marker = %marker_path.display(),
+            error = %e,
+            "template_promote migration: marker write failed; migration may re-run on next startup"
+        );
+    }
+
+    tracing::info!(
+        templates_scanned = stats.templates_scanned,
+        templates_promoted = stats.templates_promoted,
+        archives_moved = stats.archives_moved,
+        instances_repointed = stats.instances_repointed,
+        failures = stats.failures,
+        "template_promote migration: complete"
+    );
+
+    stats
+}
+
+/// Move every file in `old_zone` to `new_zone`, preserving names + bytes.
+/// Implemented as read-write-delete because FileStore doesn't expose a
+/// native rename; the cost is bounded by the per-zone file count (1-2
+/// in practice — `output.state.json` + `output`).
+fn move_zone(
+    filestore: &FileStore,
+    old_zone: &str,
+    new_zone: &str,
+) -> Result<(), String> {
+    let files = filestore
+        .list_files(old_zone)
+        .map_err(|e| format!("list_files: {e}"))?;
+    if files.is_empty() {
+        return Ok(());
+    }
+    for f in &files {
+        let bytes = filestore
+            .read_file(old_zone, &f.name)
+            .map_err(|e| format!("read_file {}: {e}", f.name))?
+            .unwrap_or_default();
+        // write_zone_file creates the file when missing, replaces it
+        // otherwise (matches archive_session's write semantics).
+        write_zone_file(filestore, new_zone, &f.name, &bytes)?;
+    }
+    // Delete the source files only after every write has succeeded.
+    // delete_zone wipes the whole zone in one transaction.
+    if let Err(e) = filestore.delete_zone(old_zone) {
+        // Source delete failure is non-fatal — the new zone has the
+        // data; the old zone is now stale duplicate, GC concern.
+        tracing::warn!(
+            old_zone = %old_zone,
+            error = %e,
+            "template_promote migration: delete_zone failed after copy; source remains"
+        );
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -960,6 +1286,235 @@ mod tests {
         assert_eq!(second.blocks_scanned, 0);
         assert_eq!(second.archives_written, 0);
         assert_eq!(second.current_zones_seeded, 0);
+    }
+
+    // ---- Two-tier picker Phase 1 migration tests ----
+
+    use crate::backend::storage::wstore::{AgentDefinition, AgentInstance, InstanceStatus};
+
+    fn insert_template(
+        wstore: &Arc<WaveStore>,
+        id: &str,
+        name: &str,
+        provider: &str,
+    ) -> AgentDefinition {
+        let mut def = AgentDefinition {
+            id: id.to_string(),
+            slug: String::new(),
+            name: name.to_string(),
+            icon: String::new(),
+            provider: provider.to_string(),
+            description: format!("{name} template"),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1_700_000_000_000,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 1, // template
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1_700_000_000_000,
+        };
+        wstore.agent_def_insert(&mut def).unwrap();
+        def
+    }
+
+    fn insert_named_instance(
+        wstore: &Arc<WaveStore>,
+        id: &str,
+        def_id: &str,
+        instance_name: &str,
+        started_at: i64,
+    ) {
+        let inst = AgentInstance {
+            id: id.to_string(),
+            definition_id: def_id.to_string(),
+            parent_instance_id: String::new(),
+            block_id: String::new(),
+            session_id: String::new(),
+            status: InstanceStatus::Running.as_str().to_string(),
+            github_context: String::new(),
+            started_at,
+            ended_at: 0,
+            created_at: started_at,
+            identity_id: String::new(),
+            memory_id: String::new(),
+            instance_name: instance_name.to_string(),
+            working_directory: String::new(),
+            display_hidden: false,
+        };
+        wstore.instance_create(&inst).unwrap();
+    }
+
+    #[test]
+    fn template_promote_clones_template_and_moves_zones() {
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        // Seeded template "Claude Code" with a current session zone +
+        // one archive zone (the pre-existing "Maks" conversation).
+        let template = insert_template(&wstore, "tpl-claude", "Claude Code", "claude");
+        insert_named_instance(&wstore, "inst-maks", &template.id, "Maks", 1_700_000_100_000);
+        write_session_state(
+            &filestore,
+            &template.id,
+            br#"{"nodes":[{"type":"user_message","message":"hi"}]}"#,
+        )
+        .unwrap();
+        // Pre-existing archive (simulates a prior + New session).
+        let archive_zone = agent_archive_zone(&template.id, 1_699_000_000_000);
+        write_zone_file(&filestore, &archive_zone, SNAPSHOT_FILE, b"archived").unwrap();
+
+        let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(stats.templates_scanned, 1);
+        assert_eq!(stats.templates_promoted, 1);
+        assert_eq!(stats.archives_moved, 1);
+        assert_eq!(stats.instances_repointed, 1);
+        assert_eq!(stats.failures, 0);
+
+        // Template's current zone is gone — no `agent:tpl-claude:current`.
+        let stale_current = agent_current_zone(&template.id);
+        let stale = filestore.list_files(&stale_current).unwrap();
+        assert!(stale.is_empty(), "template current zone should be empty post-promote");
+        // Template's archive zone is gone.
+        let stale_archive = filestore.list_files(&archive_zone).unwrap();
+        assert!(stale_archive.is_empty(), "template archive zone should be empty post-promote");
+
+        // Find the new user-owned definition. Use the most-recent
+        // instance name ("Maks") as the new name per spec.
+        let all = wstore.agent_def_list().unwrap();
+        let new_def = all
+            .iter()
+            .find(|d| d.is_seeded == 0 && d.parent_id == template.id)
+            .expect("a new user-owned definition should exist");
+        assert_eq!(new_def.name, "Maks");
+        assert_eq!(new_def.provider, "claude");
+
+        // Zones present on the NEW defId.
+        let new_current = agent_current_zone(&new_def.id);
+        let new_files = filestore.list_files(&new_current).unwrap();
+        assert!(
+            new_files.iter().any(|f| f.name == SNAPSHOT_FILE),
+            "new current zone should have output.state.json"
+        );
+        let new_archive = agent_archive_zone(&new_def.id, 1_699_000_000_000);
+        let new_archive_files = filestore.list_files(&new_archive).unwrap();
+        assert!(
+            new_archive_files.iter().any(|f| f.name == SNAPSHOT_FILE),
+            "new archive zone should be populated"
+        );
+
+        // Instance is repointed.
+        let inst = wstore.instance_get("inst-maks").unwrap().unwrap();
+        assert_eq!(
+            inst.definition_id, new_def.id,
+            "instance should now reference new user-agent def"
+        );
+
+        // Template definition is still around (still seeded), but the
+        // session it carried is gone.
+        let still_seeded = all.iter().find(|d| d.id == template.id).unwrap();
+        assert_eq!(still_seeded.is_seeded, 1);
+
+        // Marker file is written.
+        assert!(dir.path().join(TEMPLATE_PROMOTE_MARKER_V1).exists());
+    }
+
+    #[test]
+    fn template_promote_is_idempotent_on_second_run() {
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        let template = insert_template(&wstore, "tpl-claude", "Claude Code", "claude");
+        write_session_state(&filestore, &template.id, br#"{"nodes":[]}"#).unwrap();
+
+        let first = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(first.templates_promoted, 1);
+
+        let second = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(second.templates_scanned, 0);
+        assert_eq!(second.templates_promoted, 0);
+        assert_eq!(second.archives_moved, 0);
+        assert_eq!(second.instances_repointed, 0);
+    }
+
+    #[test]
+    fn template_promote_falls_back_to_template_name_when_no_named_instance() {
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        let template = insert_template(&wstore, "tpl-x", "Cursor", "cursor");
+        write_session_state(&filestore, &template.id, br#"{"nodes":[]}"#).unwrap();
+        // NO instances inserted.
+
+        let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(stats.templates_promoted, 1);
+
+        let all = wstore.agent_def_list().unwrap();
+        let new_def = all
+            .iter()
+            .find(|d| d.is_seeded == 0 && d.parent_id == template.id)
+            .expect("should clone the template");
+        // Falls back to template name when no named instance exists.
+        assert_eq!(new_def.name, "Cursor");
+    }
+
+    #[test]
+    fn template_promote_skips_already_user_owned_definitions() {
+        let dir = tempdir().unwrap();
+        let wstore = open_temp_wstore(dir.path());
+        let filestore = fresh_filestore();
+
+        // A user-owned definition (is_seeded = 0) with a session — the
+        // migration should leave it alone.
+        let mut user_def = AgentDefinition {
+            id: "user-abc".to_string(),
+            slug: String::new(),
+            name: "My Agent".to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1_700_000_000_000,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1_700_000_000_000,
+        };
+        wstore.agent_def_insert(&mut user_def).unwrap();
+        write_session_state(&filestore, &user_def.id, br#"{"nodes":[]}"#).unwrap();
+
+        let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+        assert_eq!(stats.templates_scanned, 0);
+        assert_eq!(stats.templates_promoted, 0);
+
+        // Original definition untouched.
+        let all = wstore.agent_def_list().unwrap();
+        let still_there = all.iter().find(|d| d.id == "user-abc").unwrap();
+        assert_eq!(still_there.is_seeded, 0);
+
+        // Session zone still present.
+        let cur = agent_current_zone(&user_def.id);
+        let files = filestore.list_files(&cur).unwrap();
+        assert!(!files.is_empty());
     }
 
     #[test]

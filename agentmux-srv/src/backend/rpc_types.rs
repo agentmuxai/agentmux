@@ -343,6 +343,14 @@ pub const COMMAND_LIST_RECENT_SESSIONS: &str = "listrecentsessions";
 // Agent definition branching
 pub const COMMAND_FORK_AGENT_DEFINITION: &str = "forkagentdefinition";
 
+/// Two-tier picker (Phase 1 — SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
+/// Clone a seeded template into a new user-owned agent definition with
+/// `is_seeded = 0`. Copies provider + cmd + env + auth-config fields
+/// from the template, applies the caller-supplied name + bindings,
+/// returns the new definition_id so the frontend can immediately
+/// launch. Rejects non-template ids + duplicate user-agent names.
+pub const COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE: &str = "agentdefcreatefromtemplate";
+
 // Drone pane (v8 — issue #753 Phase 1)
 pub const COMMAND_LIST_DRONES: &str = "listdrones";
 pub const COMMAND_GET_DRONE: &str = "getdrone";
@@ -1291,6 +1299,53 @@ fn is_zero_usize(v: &usize) -> bool {
 }
 
 // ---- Agent command data types ----
+
+/// Optional filter input for `listagents`. When `is_seeded` is set,
+/// only definitions whose `is_seeded` column matches are returned
+/// (`Some(1)` → templates only; `Some(0)` → user-owned agents only).
+/// Absent / `None` = no filter — backward-compatible with callers
+/// that pass `{}` or `null`. Phase 1 of the two-tier picker
+/// (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CommandListAgentDefinitionsData {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_seeded: Option<i64>,
+}
+
+/// Request for `agentdefcreatefromtemplate`. Clones a seeded template
+/// into a new user-owned definition. Phase 1 of the two-tier picker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandAgentDefCreateFromTemplateData {
+    /// id of a seeded definition (must have `is_seeded = 1`).
+    pub template_id: String,
+    /// User-chosen display name for the new agent. Non-empty, ≤200
+    /// chars, must not collide with another user-owned agent's name.
+    pub name: String,
+    /// Identity bundle id to bind (empty string = ambient creds).
+    /// Stored on the launch-time `db_agent_instances` row by the
+    /// launch flow; the definition itself doesn't hold bindings
+    /// pre-Phase 3, so this is reserved for the frontend to thread
+    /// through to its subsequent `launchAgentDefinition` call. The
+    /// server returns it back in the response for symmetry +
+    /// future-proofing.
+    #[serde(default)]
+    pub identity_id: String,
+    /// Memory bundle id to bind (empty string = vanilla CLI).
+    /// Same semantics as `identity_id` above.
+    #[serde(default)]
+    pub memory_id: String,
+}
+
+/// Response for `agentdefcreatefromtemplate`. The frontend uses
+/// `definition_id` to launch the freshly-created agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentDefCreateFromTemplateResult {
+    pub definition_id: String,
+    /// Echoed back so the caller's launch step doesn't need to
+    /// re-thread these — they flow through to the launch overrides.
+    pub identity_id: String,
+    pub memory_id: String,
+}
 
 /// Input for createagent
 #[derive(Debug, Clone, Serialize, Deserialize)]
