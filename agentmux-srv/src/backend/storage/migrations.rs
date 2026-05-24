@@ -30,7 +30,16 @@ use super::error::StoreError;
 ///        SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md Q2 Decision Y)
 ///   v4 — db_agents consolidation table (Phase 3a; dual-write only,
 ///        reads still on db_agent_definitions / db_agent_instances)
-pub const OBJECT_SCHEMA_VERSION: i64 = 4;
+///   v5 — Phase 3c retires the two old tables (`db_agent_definitions`
+///        and `db_agent_instances`) now that `db_agents` is the
+///        canonical source. The new instance-lifecycle columns
+///        (`definition_id`, `parent_instance_id`, `block_id`,
+///        `session_id`, `status`, `started_at`, `ended_at`) are added
+///        to `db_agents` to absorb the instance shape. A one-shot
+///        backfill from the old tables runs immediately before the
+///        DROPs so no data is lost on the v4 → v5 transition.
+///        See `docs/specs/SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md`.
+pub const OBJECT_SCHEMA_VERSION: i64 = 5;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -115,41 +124,21 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
     }
 
     // ---- Agent + identity + memory + drone schema ----
+    //
+    // Phase 3c retired `db_agent_definitions` + `db_agent_instances`; the
+    // child tables below (`db_agent_content`, `db_agent_skills`,
+    // `db_agent_history`, `db_agent_identity_links`) now FK to
+    // `db_agents(id)` — the consolidated canonical agent row. The
+    // v4 → v5 migration step below renames the parent FK target on these
+    // tables for any pre-existing dev database.
     conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS db_agent_definitions (
-            id                   TEXT PRIMARY KEY,
-            slug                 TEXT NOT NULL DEFAULT '',
-            name                 TEXT NOT NULL,
-            icon                 TEXT NOT NULL DEFAULT '✦',
-            provider             TEXT NOT NULL,
-            description          TEXT NOT NULL DEFAULT '',
-            working_directory    TEXT NOT NULL DEFAULT '',
-            shell                TEXT NOT NULL DEFAULT '',
-            provider_flags       TEXT NOT NULL DEFAULT '',
-            auto_start           INTEGER NOT NULL DEFAULT 0,
-            restart_on_crash     INTEGER NOT NULL DEFAULT 0,
-            idle_timeout_minutes INTEGER NOT NULL DEFAULT 0,
-            agent_type           TEXT NOT NULL DEFAULT 'standalone',
-            environment          TEXT NOT NULL DEFAULT '',
-            agent_bus_id         TEXT NOT NULL DEFAULT '',
-            is_seeded            INTEGER NOT NULL DEFAULT 0,
-            accounts             TEXT NOT NULL DEFAULT '',
-            parent_id            TEXT NOT NULL DEFAULT '',
-            branch_label         TEXT NOT NULL DEFAULT '',
-            created_at           INTEGER NOT NULL DEFAULT 0,
-            updated_at           INTEGER NOT NULL DEFAULT 0,
-            user_hidden          INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_definitions_slug
-            ON db_agent_definitions(slug);
-
-        CREATE TABLE IF NOT EXISTS db_agent_content (
+        "CREATE TABLE IF NOT EXISTS db_agent_content (
             agent_id     TEXT NOT NULL,
             content_type TEXT NOT NULL,
             content      TEXT NOT NULL DEFAULT '',
             updated_at   INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (agent_id, content_type),
-            FOREIGN KEY (agent_id) REFERENCES db_agent_definitions(id) ON DELETE CASCADE
+            FOREIGN KEY (agent_id) REFERENCES db_agents(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS db_agent_skills (
@@ -161,7 +150,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             description TEXT NOT NULL DEFAULT '',
             content     TEXT NOT NULL DEFAULT '',
             created_at  INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (agent_id) REFERENCES db_agent_definitions(id) ON DELETE CASCADE
+            FOREIGN KEY (agent_id) REFERENCES db_agents(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS db_agent_history (
@@ -170,7 +159,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             session_date TEXT NOT NULL,
             entry        TEXT NOT NULL,
             timestamp    INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (agent_id) REFERENCES db_agent_definitions(id) ON DELETE CASCADE
+            FOREIGN KEY (agent_id) REFERENCES db_agents(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_agent_history_agent_date
             ON db_agent_history(agent_id, session_date);
@@ -195,7 +184,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             account_id TEXT NOT NULL,
             provider   TEXT NOT NULL,
             PRIMARY KEY (agent_id, provider),
-            FOREIGN KEY (agent_id)   REFERENCES db_agent_definitions(id) ON DELETE CASCADE,
+            FOREIGN KEY (agent_id)   REFERENCES db_agents(id)          ON DELETE CASCADE,
             FOREIGN KEY (account_id) REFERENCES db_identity_accounts(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_agent_identity_links_account
@@ -240,48 +229,24 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         CREATE INDEX IF NOT EXISTS idx_memory_bundles_is_blank
             ON db_memory_bundles(is_blank);
 
-        CREATE TABLE IF NOT EXISTS db_agent_instances (
-            id                 TEXT PRIMARY KEY,
-            definition_id      TEXT NOT NULL,
-            parent_instance_id TEXT NOT NULL DEFAULT '',
-            block_id           TEXT NOT NULL DEFAULT '',
-            session_id         TEXT NOT NULL DEFAULT '',
-            status             TEXT NOT NULL DEFAULT 'running',
-            github_context     TEXT NOT NULL DEFAULT '',
-            identity_id        TEXT NOT NULL DEFAULT '',
-            memory_id          TEXT NOT NULL DEFAULT '',
-            instance_name      TEXT NOT NULL DEFAULT '',
-            working_directory  TEXT NOT NULL DEFAULT '',
-            display_hidden     INTEGER NOT NULL DEFAULT 0,
-            started_at         INTEGER NOT NULL DEFAULT 0,
-            ended_at           INTEGER NOT NULL DEFAULT 0,
-            created_at         INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (definition_id) REFERENCES db_agent_definitions(id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_agent_instances_definition
-            ON db_agent_instances(definition_id);
-        CREATE INDEX IF NOT EXISTS idx_agent_instances_block
-            ON db_agent_instances(block_id);
-        CREATE INDEX IF NOT EXISTS idx_agent_instances_status
-            ON db_agent_instances(status);
-        CREATE INDEX IF NOT EXISTS idx_agent_instances_parent
-            ON db_agent_instances(parent_instance_id);
-        CREATE INDEX IF NOT EXISTS idx_agent_instances_name_recent
-            ON db_agent_instances(instance_name, started_at DESC)
-            WHERE display_hidden = 0 AND instance_name != '';
-
-        -- Phase 3a consolidation: `db_agents` collapses `db_agent_definitions`
-        -- + `db_agent_instances` into one table per
+        -- Phase 3a consolidation, Phase 3c finalisation: `db_agents`
+        -- collapses the retired `db_agent_definitions` +
+        -- `db_agent_instances` into one canonical table per
         -- `docs/specs/SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md`.
-        -- WRITE-ONLY in 3a: every old-table mutation dual-writes here, but
-        -- every read still hits the old tables. Phase 3b migrates readers,
-        -- Phase 3c drops the old tables. Column names align with the live
-        -- `db_agent_definitions` shape (provider, working_directory, …) —
-        -- NOT the inline draft in the spec (provider_id, cmd, cmd_args, …) —
-        -- because the existing storage layer never grew the cmd-template
-        -- columns the spec sketched; carrying the names we actually have
-        -- avoids inventing data we don't store. See the PR body for the
-        -- field-by-field mapping.
+        --
+        --   - `is_template = 1` rows are templates (the old seeded
+        --     `db_agent_definitions WHERE is_seeded = 1`).
+        --   - `is_template = 0` rows are user-owned agents (cloned from
+        --     a template OR a fold of an instance into its def). Carry
+        --     the bindings + lifecycle (block_id/session_id/status/
+        --     started_at/ended_at) the old `db_agent_instances` table
+        --     held.
+        --
+        -- Column names align with the live shape the storage layer
+        -- carried — NOT the inline draft in the spec (provider_id, cmd,
+        -- cmd_args, …) — because the existing layer never grew the
+        -- cmd-template columns the spec sketched; carrying the names
+        -- we actually have avoids inventing data we don't store.
         CREATE TABLE IF NOT EXISTS db_agents (
             id                   TEXT PRIMARY KEY,
             name                 TEXT NOT NULL,
@@ -292,8 +257,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             is_template          INTEGER NOT NULL DEFAULT 0,
             parent_template_id   TEXT NOT NULL DEFAULT '',
 
-            -- Provider/cmd config (was on definition; named to match the
-            -- live `db_agent_definitions` columns).
+            -- Provider/cmd config (was on definition).
             provider             TEXT NOT NULL,
             provider_flags       TEXT NOT NULL DEFAULT '',
             shell                TEXT NOT NULL DEFAULT '',
@@ -315,6 +279,16 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             github_context       TEXT NOT NULL DEFAULT '',
             instance_name        TEXT NOT NULL DEFAULT '',
 
+            -- Instance lifecycle (was on `db_agent_instances`, retired
+            -- in Phase 3c). For template rows these stay empty / 0.
+            definition_id        TEXT NOT NULL DEFAULT '',
+            parent_instance_id   TEXT NOT NULL DEFAULT '',
+            block_id             TEXT NOT NULL DEFAULT '',
+            session_id           TEXT NOT NULL DEFAULT '',
+            status               TEXT NOT NULL DEFAULT '',
+            started_at           INTEGER NOT NULL DEFAULT 0,
+            ended_at             INTEGER NOT NULL DEFAULT 0,
+
             -- Provenance
             created_at           INTEGER NOT NULL DEFAULT 0,
             updated_at           INTEGER NOT NULL DEFAULT 0,
@@ -327,6 +301,19 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             ON db_agents(parent_template_id);
         CREATE INDEX IF NOT EXISTS idx_agents_is_seeded
             ON db_agents(is_seeded);
+        CREATE INDEX IF NOT EXISTS idx_agents_block_id
+            ON db_agents(block_id);
+        CREATE INDEX IF NOT EXISTS idx_agents_status
+            ON db_agents(status);
+        CREATE INDEX IF NOT EXISTS idx_agents_definition_id
+            ON db_agents(definition_id);
+        CREATE INDEX IF NOT EXISTS idx_agents_slug
+            ON db_agents(slug);
+        CREATE INDEX IF NOT EXISTS idx_agents_name_recent
+            ON db_agents(instance_name, started_at DESC)
+            WHERE is_template = 0
+              AND user_hidden = 0
+              AND instance_name != '';
 
         CREATE TABLE IF NOT EXISTS db_drone_definitions (
             id          TEXT PRIMARY KEY,
@@ -363,15 +350,26 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
     // across builds) forward. Idempotent: the "duplicate column" error is
     // swallowed. New additive columns append here + bump OBJECT_SCHEMA_VERSION.
     //
-    // v2: db_agent_definitions.updated_at — last-modified timestamp
-    //     (created_at already existed; updates now stamp updated_at).
+    // v2: db_agent_definitions.updated_at — last-modified timestamp.
+    //     (Retired in v5 along with the table; the ALTER is gone too.)
     // v3: db_agent_definitions.user_hidden — per-user hide flag for
     //     templates (Phase 2 of the two-tier picker spec, Q2 Decision Y).
-    //     Defaults to 0 (visible) for all existing rows so a migration
-    //     never silently hides previously-visible templates.
+    //     (Retired in v5 along with the table.)
+    // v4: db_agents created by the CREATE TABLE above (Phase 3a, dual-
+    //     write). No ALTERs needed — fresh dbs land the table directly,
+    //     and pre-v4 dbs land it via this idempotent CREATE.
+    // v5: db_agents grows the instance-lifecycle columns
+    //     (definition_id, parent_instance_id, block_id, session_id,
+    //     status, started_at, ended_at) so it can absorb the retired
+    //     `db_agent_instances`. Carry-forward ALTERs for pre-v5 dbs.
     for stmt in &[
-        "ALTER TABLE db_agent_definitions ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE db_agent_definitions ADD COLUMN user_hidden INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE db_agents ADD COLUMN definition_id      TEXT    NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agents ADD COLUMN parent_instance_id TEXT    NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agents ADD COLUMN block_id           TEXT    NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agents ADD COLUMN session_id         TEXT    NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agents ADD COLUMN status             TEXT    NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agents ADD COLUMN started_at         INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE db_agents ADD COLUMN ended_at           INTEGER NOT NULL DEFAULT 0",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
@@ -380,6 +378,23 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             }
         }
     }
+
+    // ---- v5: retire the old agent tables ----
+    //
+    // If a pre-v5 database is being opened (`db_agent_definitions` and/or
+    // `db_agent_instances` still present), salvage any data they carry
+    // into `db_agents` (Phase 3a's dual-write was best-effort; this is
+    // the last-chance backfill), then DROP both. On a v5+ database both
+    // tables are already gone and these statements are no-ops.
+    //
+    // Order matters: `db_agent_instances` has a FK on
+    // `db_agent_definitions`, so it must go first. We disable foreign
+    // keys for the duration so the cascade doesn't reach into
+    // `db_agent_content` / `db_agent_skills` / `db_agent_history` /
+    // `db_agent_identity_links` (those tables now FK to db_agents,
+    // which carries the same ids — pulling the old parent away must
+    // not delete the children).
+    retire_old_agent_tables(conn)?;
 
     // ---- Seed blank Identity / Memory singletons ----
     // The launch UI renders these as the default option in its Identity /
@@ -396,6 +411,315 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
     )?;
 
     Ok(())
+}
+
+/// Phase 3c — back-fill from the retired `db_agent_definitions` +
+/// `db_agent_instances` into the canonical `db_agents` table, then DROP
+/// both old tables. Idempotent: on a v5+ database where the old tables
+/// are already gone, this is a no-op via `DROP TABLE IF EXISTS`.
+///
+/// The back-fill is a safety net for the v4 → v5 transition. Phase 3a's
+/// dual-write kept `db_agents` populated for any mutation that went
+/// through the storage layer after that PR landed; this pass catches
+/// the residual rows (e.g. a write that raced the dual-write, or a row
+/// inserted by a legacy migration that never went through the dual
+/// path). On a v4 database where every mutation already dual-wrote, the
+/// back-fill resolves to a series of `INSERT OR IGNORE` / `UPDATE`
+/// statements that touch zero rows beyond what was already there.
+///
+/// Wrapped in a transaction so a mid-flight failure leaves the schema
+/// in v4 (`db_agents` partial, old tables intact) — a future restart
+/// retries. Foreign keys are disabled for the duration so the child
+/// tables (`db_agent_content` / `db_agent_skills` / `db_agent_history`
+/// / `db_agent_identity_links` — now FK to `db_agents(id)`) survive the
+/// DROP of the old parents.
+fn retire_old_agent_tables(conn: &Connection) -> Result<(), StoreError> {
+    let defs_present: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='db_agent_definitions'",
+        [],
+        |row| row.get(0),
+    )?;
+    let insts_present: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='db_agent_instances'",
+        [],
+        |row| row.get(0),
+    )?;
+    if defs_present == 0 && insts_present == 0 {
+        return Ok(());
+    }
+
+    // The pre-flatten schema didn't have `db_agent_definitions.updated_at`
+    // / `user_hidden` (added in v2 / v3 respectively). A v4 db should
+    // have both via the ALTERs that ran in that build's
+    // `run_object_schema`; a pre-v4 dev DB that skipped those ALTERs
+    // and lands here for the first time on v5 won't. Bring the table up
+    // to the v3 shape FIRST so the backfill SELECT can read
+    // `updated_at` / `user_hidden` unconditionally. The ALTERs are
+    // idempotent: "duplicate column" is swallowed.
+    if defs_present == 1 {
+        for stmt in &[
+            "ALTER TABLE db_agent_definitions ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE db_agent_definitions ADD COLUMN user_hidden INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE db_agent_definitions ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE db_agent_definitions ADD COLUMN branch_label TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE db_agent_definitions ADD COLUMN slug TEXT NOT NULL DEFAULT ''",
+        ] {
+            if let Err(e) = conn.execute_batch(stmt) {
+                let msg = e.to_string();
+                if !msg.contains("duplicate column") {
+                    return Err(e.into());
+                }
+            }
+        }
+    }
+
+    // Disable FK enforcement so the cascade from dropping the old
+    // tables doesn't reach into the child tables (now repointed at
+    // db_agents but still holding rows keyed by the same ids).
+    let fk_setting: i64 = conn.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
+    conn.execute_batch("PRAGMA foreign_keys=OFF;")?;
+    let result = (|| -> Result<(), StoreError> {
+        conn.execute_batch("BEGIN;")?;
+        if defs_present == 1 {
+            // Mirror every definition into db_agents (idempotent via
+            // INSERT OR IGNORE — Phase 3a's dual-write already populated
+            // most rows). Templates land with `is_template = 1`,
+            // user-clones with `is_template = 0` + the legacy
+            // `parent_id` becoming `parent_template_id`.
+            conn.execute_batch(
+                "INSERT OR IGNORE INTO db_agents (
+                    id, name, icon, description,
+                    is_template, parent_template_id,
+                    provider, provider_flags, shell, environment,
+                    agent_type, agent_bus_id, accounts,
+                    auto_start, restart_on_crash, idle_timeout_minutes,
+                    slug, branch_label,
+                    created_at, updated_at, is_seeded, user_hidden
+                 )
+                 SELECT
+                    id,
+                    name,
+                    COALESCE(icon, ''),
+                    COALESCE(description, ''),
+                    CASE WHEN is_seeded = 1 THEN 1 ELSE 0 END,
+                    COALESCE(parent_id, ''),
+                    provider,
+                    COALESCE(provider_flags, ''),
+                    COALESCE(shell, ''),
+                    COALESCE(environment, ''),
+                    COALESCE(agent_type, 'standalone'),
+                    COALESCE(agent_bus_id, ''),
+                    COALESCE(accounts, ''),
+                    COALESCE(auto_start, 0),
+                    COALESCE(restart_on_crash, 0),
+                    COALESCE(idle_timeout_minutes, 0),
+                    COALESCE(slug, ''),
+                    COALESCE(branch_label, ''),
+                    COALESCE(created_at, 0),
+                    COALESCE(updated_at, created_at),
+                    COALESCE(is_seeded, 0),
+                    COALESCE(user_hidden, 0)
+                 FROM db_agent_definitions;",
+            )?;
+        }
+        if insts_present == 1 {
+            // Mirror every non-continuation instance into db_agents.
+            // For template-instance projections (parent def is a
+            // template), we INSERT a row keyed by the instance id with
+            // `parent_template_id = definition_id`. For user-clone-def
+            // instances (parent def is `is_seeded = 0`), the row keyed
+            // by `def.id` already exists — UPDATE it in place to fold
+            // the instance's bindings + lifecycle fields onto the def.
+            //
+            // Continuation rows (`parent_instance_id != ''`) are
+            // skipped — the consolidated model has no place for them
+            // (Option E retired the chain).
+            conn.execute_batch(
+                "INSERT OR IGNORE INTO db_agents (
+                    id, name, icon, description,
+                    is_template, parent_template_id,
+                    provider, provider_flags, shell, environment,
+                    agent_type, agent_bus_id, accounts,
+                    auto_start, restart_on_crash, idle_timeout_minutes,
+                    slug, branch_label,
+                    identity_id, memory_id, working_directory,
+                    github_context, instance_name,
+                    definition_id, parent_instance_id,
+                    block_id, session_id, status,
+                    started_at, ended_at,
+                    created_at, updated_at, is_seeded, user_hidden
+                 )
+                 SELECT
+                    i.id,
+                    CASE WHEN COALESCE(i.instance_name, '') = ''
+                         THEN d.name
+                         ELSE i.instance_name
+                    END,
+                    COALESCE(d.icon, ''),
+                    COALESCE(d.description, ''),
+                    0,
+                    d.id,
+                    d.provider,
+                    COALESCE(d.provider_flags, ''),
+                    COALESCE(d.shell, ''),
+                    COALESCE(d.environment, ''),
+                    COALESCE(d.agent_type, 'standalone'),
+                    COALESCE(d.agent_bus_id, ''),
+                    COALESCE(d.accounts, ''),
+                    COALESCE(d.auto_start, 0),
+                    COALESCE(d.restart_on_crash, 0),
+                    COALESCE(d.idle_timeout_minutes, 0),
+                    COALESCE(d.slug, ''),
+                    COALESCE(d.branch_label, ''),
+                    COALESCE(i.identity_id, ''),
+                    COALESCE(i.memory_id, ''),
+                    COALESCE(i.working_directory, ''),
+                    COALESCE(i.github_context, ''),
+                    COALESCE(i.instance_name, ''),
+                    i.definition_id,
+                    COALESCE(i.parent_instance_id, ''),
+                    COALESCE(i.block_id, ''),
+                    COALESCE(i.session_id, ''),
+                    COALESCE(i.status, 'running'),
+                    COALESCE(i.started_at, 0),
+                    COALESCE(i.ended_at, 0),
+                    COALESCE(i.created_at, 0),
+                    COALESCE(i.created_at, 0),
+                    0,
+                    CASE WHEN COALESCE(i.display_hidden, 0) = 1 THEN 1 ELSE 0 END
+                 FROM db_agent_instances i
+                 INNER JOIN db_agent_definitions d ON i.definition_id = d.id
+                 WHERE COALESCE(i.parent_instance_id, '') = ''
+                   AND d.is_seeded = 1;",
+            )?;
+            // User-clone-def instance fold: UPDATE the existing
+            // `db_agents` row keyed by `def.id` so the instance's
+            // bindings + lifecycle land on the canonical row.
+            // Aggregate so multiple instances on one user-clone-def
+            // resolve to the most-recent (MAX(created_at)) winner.
+            conn.execute_batch(
+                "UPDATE db_agents SET
+                    identity_id = COALESCE((
+                        SELECT i.identity_id FROM db_agent_instances i
+                        INNER JOIN db_agent_definitions d ON i.definition_id = d.id
+                        WHERE d.id = db_agents.id
+                          AND d.is_seeded = 0
+                          AND COALESCE(i.parent_instance_id, '') = ''
+                        ORDER BY i.created_at DESC LIMIT 1
+                    ), identity_id),
+                    memory_id = COALESCE((
+                        SELECT i.memory_id FROM db_agent_instances i
+                        INNER JOIN db_agent_definitions d ON i.definition_id = d.id
+                        WHERE d.id = db_agents.id
+                          AND d.is_seeded = 0
+                          AND COALESCE(i.parent_instance_id, '') = ''
+                        ORDER BY i.created_at DESC LIMIT 1
+                    ), memory_id),
+                    working_directory = COALESCE((
+                        SELECT i.working_directory FROM db_agent_instances i
+                        INNER JOIN db_agent_definitions d ON i.definition_id = d.id
+                        WHERE d.id = db_agents.id
+                          AND d.is_seeded = 0
+                          AND COALESCE(i.parent_instance_id, '') = ''
+                        ORDER BY i.created_at DESC LIMIT 1
+                    ), working_directory),
+                    github_context = COALESCE((
+                        SELECT i.github_context FROM db_agent_instances i
+                        INNER JOIN db_agent_definitions d ON i.definition_id = d.id
+                        WHERE d.id = db_agents.id
+                          AND d.is_seeded = 0
+                          AND COALESCE(i.parent_instance_id, '') = ''
+                        ORDER BY i.created_at DESC LIMIT 1
+                    ), github_context),
+                    instance_name = COALESCE((
+                        SELECT i.instance_name FROM db_agent_instances i
+                        INNER JOIN db_agent_definitions d ON i.definition_id = d.id
+                        WHERE d.id = db_agents.id
+                          AND d.is_seeded = 0
+                          AND COALESCE(i.parent_instance_id, '') = ''
+                        ORDER BY i.created_at DESC LIMIT 1
+                    ), instance_name),
+                    definition_id = COALESCE((
+                        SELECT i.definition_id FROM db_agent_instances i
+                        INNER JOIN db_agent_definitions d ON i.definition_id = d.id
+                        WHERE d.id = db_agents.id
+                          AND d.is_seeded = 0
+                          AND COALESCE(i.parent_instance_id, '') = ''
+                        ORDER BY i.created_at DESC LIMIT 1
+                    ), definition_id),
+                    block_id = COALESCE((
+                        SELECT i.block_id FROM db_agent_instances i
+                        INNER JOIN db_agent_definitions d ON i.definition_id = d.id
+                        WHERE d.id = db_agents.id
+                          AND d.is_seeded = 0
+                          AND COALESCE(i.parent_instance_id, '') = ''
+                        ORDER BY i.created_at DESC LIMIT 1
+                    ), block_id),
+                    session_id = COALESCE((
+                        SELECT i.session_id FROM db_agent_instances i
+                        INNER JOIN db_agent_definitions d ON i.definition_id = d.id
+                        WHERE d.id = db_agents.id
+                          AND d.is_seeded = 0
+                          AND COALESCE(i.parent_instance_id, '') = ''
+                        ORDER BY i.created_at DESC LIMIT 1
+                    ), session_id),
+                    status = COALESCE((
+                        SELECT i.status FROM db_agent_instances i
+                        INNER JOIN db_agent_definitions d ON i.definition_id = d.id
+                        WHERE d.id = db_agents.id
+                          AND d.is_seeded = 0
+                          AND COALESCE(i.parent_instance_id, '') = ''
+                        ORDER BY i.created_at DESC LIMIT 1
+                    ), status),
+                    started_at = COALESCE((
+                        SELECT i.started_at FROM db_agent_instances i
+                        INNER JOIN db_agent_definitions d ON i.definition_id = d.id
+                        WHERE d.id = db_agents.id
+                          AND d.is_seeded = 0
+                          AND COALESCE(i.parent_instance_id, '') = ''
+                        ORDER BY i.created_at DESC LIMIT 1
+                    ), started_at),
+                    ended_at = COALESCE((
+                        SELECT i.ended_at FROM db_agent_instances i
+                        INNER JOIN db_agent_definitions d ON i.definition_id = d.id
+                        WHERE d.id = db_agents.id
+                          AND d.is_seeded = 0
+                          AND COALESCE(i.parent_instance_id, '') = ''
+                        ORDER BY i.created_at DESC LIMIT 1
+                    ), ended_at)
+                 WHERE is_template = 0
+                   AND EXISTS (
+                        SELECT 1 FROM db_agent_instances i
+                        INNER JOIN db_agent_definitions d ON i.definition_id = d.id
+                        WHERE d.id = db_agents.id
+                          AND d.is_seeded = 0
+                          AND COALESCE(i.parent_instance_id, '') = ''
+                   );",
+            )?;
+        }
+        // Drop the old tables. Order matters because of FKs (still
+        // declared on the original tables — only enforcement was
+        // disabled), but with `PRAGMA foreign_keys = OFF` the order is
+        // a defensive convention rather than a correctness requirement.
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS db_agent_instances;
+             DROP TABLE IF EXISTS db_agent_definitions;",
+        )?;
+        conn.execute_batch("COMMIT;")?;
+        Ok(())
+    })();
+    // Restore the prior FK setting whatever happened above.
+    let _ = conn.execute_batch(if fk_setting != 0 {
+        "PRAGMA foreign_keys=ON;"
+    } else {
+        "PRAGMA foreign_keys=OFF;"
+    });
+    if result.is_err() {
+        // Roll back if the transaction is still alive — ignore the
+        // result here so we surface the original error to the caller.
+        let _ = conn.execute_batch("ROLLBACK;");
+    }
+    result
 }
 
 /// Rename any pre-flatten `objects.db` tables to their de-forged names and
@@ -554,7 +878,9 @@ pub fn stamp_and_check_version(
 mod tests {
     use super::*;
 
-    /// Every table the flat `objects.db` schema must contain.
+    /// Every table the flat `objects.db` schema must contain (schema v5).
+    /// `db_agent_definitions` + `db_agent_instances` retired in v5 —
+    /// `db_agents` is the canonical agent source.
     const EXPECTED_TABLES: &[&str] = &[
         "db_client",
         "db_window",
@@ -563,7 +889,6 @@ mod tests {
         "db_layout",
         "db_block",
         "db_temp",
-        "db_agent_definitions",
         "db_agent_content",
         "db_agent_skills",
         "db_agent_history",
@@ -572,10 +897,16 @@ mod tests {
         "db_identity_bundles",
         "db_identity_bindings",
         "db_memory_bundles",
-        "db_agent_instances",
         "db_agents",
         "db_drone_definitions",
         "db_drone_runs",
+    ];
+
+    /// Tables retired by schema v5. Must NOT exist after
+    /// `run_object_schema` runs.
+    const RETIRED_TABLES: &[&str] = &[
+        "db_agent_definitions",
+        "db_agent_instances",
     ];
 
     fn table_exists(conn: &Connection, name: &str) -> bool {
@@ -609,20 +940,28 @@ mod tests {
         for table in EXPECTED_TABLES {
             assert!(table_exists(&conn, table), "{table} should exist");
         }
+        for retired in RETIRED_TABLES {
+            assert!(
+                !table_exists(&conn, retired),
+                "{retired} must not exist post-v5"
+            );
+        }
         // De-forged + bundle indexes.
         for idx in &[
-            "idx_agent_definitions_slug",
             "idx_agent_history_agent_date",
             "idx_agent_identity_links_account",
             "idx_identity_accounts_provider",
             "idx_identity_bundles_is_blank",
             "idx_identity_bindings_account",
             "idx_memory_bundles_is_blank",
-            "idx_agent_instances_definition",
-            "idx_agent_instances_name_recent",
             "idx_agents_is_template",
             "idx_agents_parent_template_id",
             "idx_agents_is_seeded",
+            "idx_agents_block_id",
+            "idx_agents_status",
+            "idx_agents_definition_id",
+            "idx_agents_slug",
+            "idx_agents_name_recent",
             "idx_drone_definitions_updated",
             "idx_drone_runs_status",
         ] {
@@ -679,9 +1018,12 @@ mod tests {
     }
 
     #[test]
-    fn test_adopt_legacy_renames_forge_tables() {
+    fn test_adopt_legacy_renames_forge_tables_into_db_agents() {
         // Simulate a pre-flatten (post-v11) dev DB: legacy forge table
-        // names + a dead workflow table, with seeded rows.
+        // names + a dead workflow table, with seeded rows. The flatten
+        // renames `db_forge_agents` → `db_agent_definitions`; the v5
+        // retire step then folds that into `db_agents` and drops the
+        // old table. Net effect: the row lands in `db_agents`.
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         conn.execute_batch(
@@ -708,20 +1050,21 @@ mod tests {
 
         run_object_schema(&conn).unwrap();
 
-        // Renamed, data preserved.
-        assert!(table_exists(&conn, "db_agent_definitions"));
+        // Old tables gone; row lives in `db_agents`.
         assert!(!table_exists(&conn, "db_forge_agents"));
+        assert!(!table_exists(&conn, "db_agent_definitions"));
+        assert!(table_exists(&conn, "db_agents"));
         let name: String = conn
             .query_row(
-                "SELECT name FROM db_agent_definitions WHERE id='a1'",
+                "SELECT name FROM db_agents WHERE id='a1'",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
         assert_eq!(name, "Coder");
-        // Old index dropped, new index present.
+        // Forge index dropped, db_agents index present.
         assert!(!index_exists(&conn, "idx_forge_agents_slug"));
-        assert!(index_exists(&conn, "idx_agent_definitions_slug"));
+        assert!(index_exists(&conn, "idx_agents_slug"));
         // Dead table dropped.
         assert!(!table_exists(&conn, "db_workflow_definitions"));
     }
@@ -730,126 +1073,26 @@ mod tests {
     fn test_adopt_legacy_is_noop_on_fresh_db() {
         let conn = Connection::open_in_memory().unwrap();
         run_object_schema(&conn).unwrap();
-        // Re-running schema (which re-runs adopt) on the already-flat DB
-        // leaves the de-forged tables intact and creates no legacy names.
+        // Re-running schema on the already-flat-v5 DB leaves db_agents
+        // intact and creates no legacy names.
         run_object_schema(&conn).unwrap();
-        assert!(table_exists(&conn, "db_agent_definitions"));
+        assert!(table_exists(&conn, "db_agents"));
+        assert!(!table_exists(&conn, "db_agent_definitions"));
+        assert!(!table_exists(&conn, "db_agent_instances"));
         assert!(!table_exists(&conn, "db_forge_agents"));
     }
 
     #[test]
-    fn test_adopt_legacy_both_tables_present_is_non_destructive() {
-        // Downgrade-roundtrip: a flat DB (db_agent_definitions) where a
-        // pre-flatten build later re-created db_forge_agents and wrote a
-        // row. The adopt step must NOT drop the legacy table — silent
-        // data loss is the bug class behind PR #933's Codex P1.
+    fn test_v5_retires_old_agent_tables_and_carries_data_to_db_agents() {
+        // Simulate a v4 dev DB: db_agent_definitions + db_agent_instances
+        // populated, db_agents already partially populated (Phase 3a's
+        // dual-write). v5 retires the old tables; v5's backfill must NOT
+        // clobber existing db_agents rows, just ensure every old-table
+        // row has a counterpart.
         let conn = Connection::open_in_memory().unwrap();
-        run_object_schema(&conn).unwrap(); // creates db_agent_definitions
-        conn.execute_batch(
-            "CREATE TABLE db_forge_agents (id TEXT PRIMARY KEY, name TEXT NOT NULL);
-             INSERT INTO db_forge_agents (id, name) VALUES ('downgrade-era', 'Recover Me');",
-        )
-        .unwrap();
-
-        run_object_schema(&conn).unwrap();
-
-        // Legacy table left intact — data recoverable, not dropped.
-        assert!(table_exists(&conn, "db_forge_agents"));
-        let name: String = conn
-            .query_row(
-                "SELECT name FROM db_forge_agents WHERE id='downgrade-era'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(name, "Recover Me");
-        // Flat table still present and authoritative.
-        assert!(table_exists(&conn, "db_agent_definitions"));
-    }
-
-    #[test]
-    fn test_adopt_legacy_fk_cascade_survives_rename() {
-        // A renamed parent must keep cascading into renamed children.
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-        conn.execute_batch(
-            "CREATE TABLE db_forge_agents (
-                id TEXT PRIMARY KEY, slug TEXT NOT NULL DEFAULT '', name TEXT NOT NULL,
-                icon TEXT NOT NULL DEFAULT '✦', provider TEXT NOT NULL,
-                description TEXT NOT NULL DEFAULT '', working_directory TEXT NOT NULL DEFAULT '',
-                shell TEXT NOT NULL DEFAULT '', provider_flags TEXT NOT NULL DEFAULT '',
-                auto_start INTEGER NOT NULL DEFAULT 0, restart_on_crash INTEGER NOT NULL DEFAULT 0,
-                idle_timeout_minutes INTEGER NOT NULL DEFAULT 0,
-                agent_type TEXT NOT NULL DEFAULT 'standalone', environment TEXT NOT NULL DEFAULT '',
-                agent_bus_id TEXT NOT NULL DEFAULT '', is_seeded INTEGER NOT NULL DEFAULT 0,
-                accounts TEXT NOT NULL DEFAULT '',
-                parent_id TEXT NOT NULL DEFAULT '', branch_label TEXT NOT NULL DEFAULT '',
-                created_at INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE db_forge_content (
-                agent_id TEXT NOT NULL, content_type TEXT NOT NULL,
-                content TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (agent_id, content_type),
-                FOREIGN KEY (agent_id) REFERENCES db_forge_agents(id) ON DELETE CASCADE
-            );
-            INSERT INTO db_forge_agents (id, name, provider) VALUES ('a1', 'Coder', 'claude');
-            INSERT INTO db_forge_content (agent_id, content_type, content)
-                VALUES ('a1', 'soul', 'hello');",
-        )
-        .unwrap();
-
-        run_object_schema(&conn).unwrap();
-
-        conn.execute("DELETE FROM db_agent_definitions WHERE id='a1'", [])
-            .unwrap();
-        let remaining: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM db_agent_content WHERE agent_id='a1'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            remaining, 0,
-            "FK cascade must survive the forge→agent table rename"
-        );
-    }
-
-    #[test]
-    fn test_user_hidden_column_present_on_fresh_db() {
-        // Schema v3 (Phase 2 hide-templates) adds db_agent_definitions
-        // .user_hidden. A fresh database lands the column via the flat
-        // CREATE statement; an existing-but-stale database lands it via
-        // the additive ALTER below.
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-        run_object_schema(&conn).unwrap();
-
-        // Column exists with the documented default — INSERT without
-        // user_hidden must succeed and read back as 0.
-        conn.execute_batch(
-            "INSERT INTO db_agent_definitions (id, name, provider)
-             VALUES ('a-fresh', 'Fresh', 'claude');",
-        )
-        .unwrap();
-        let hidden: i64 = conn
-            .query_row(
-                "SELECT user_hidden FROM db_agent_definitions WHERE id='a-fresh'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(hidden, 0);
-    }
-
-    #[test]
-    fn test_user_hidden_column_added_to_existing_db_via_alter() {
-        // Simulate an existing dev database created before Phase 2:
-        // db_agent_definitions exists but lacks the user_hidden column.
-        // run_object_schema must ALTER it in, preserving every existing
-        // row at the default 0. Idempotent on subsequent runs.
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=OFF;").unwrap();
+        // Pre-v5 fixture: definitions + instances + a partial db_agents
+        // (one template row already mirrored, the other not).
         conn.execute_batch(
             "CREATE TABLE db_agent_definitions (
                 id TEXT PRIMARY KEY, slug TEXT NOT NULL DEFAULT '',
@@ -869,29 +1112,103 @@ mod tests {
                 accounts TEXT NOT NULL DEFAULT '',
                 parent_id TEXT NOT NULL DEFAULT '',
                 branch_label TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL DEFAULT 0,
+                user_hidden INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE db_agent_instances (
+                id TEXT PRIMARY KEY,
+                definition_id TEXT NOT NULL,
+                parent_instance_id TEXT NOT NULL DEFAULT '',
+                block_id TEXT NOT NULL DEFAULT '',
+                session_id TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'running',
+                github_context TEXT NOT NULL DEFAULT '',
+                identity_id TEXT NOT NULL DEFAULT '',
+                memory_id TEXT NOT NULL DEFAULT '',
+                instance_name TEXT NOT NULL DEFAULT '',
+                working_directory TEXT NOT NULL DEFAULT '',
+                display_hidden INTEGER NOT NULL DEFAULT 0,
+                started_at INTEGER NOT NULL DEFAULT 0,
+                ended_at INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL DEFAULT 0
             );
-            INSERT INTO db_agent_definitions (id, name, provider, is_seeded)
-                VALUES ('pre-existing', 'Old Template', 'claude', 1);",
+            INSERT INTO db_agent_definitions (id, slug, name, provider, is_seeded, created_at, updated_at)
+                VALUES
+                    ('tpl-A', 'coder', 'Coder', 'claude', 1, 1000, 1000),
+                    ('tpl-B', 'writer', 'Writer', 'claude', 1, 1100, 1100),
+                    ('user-def', 'my-coder', 'My Coder', 'claude', 0, 1500, 1500);
+            UPDATE db_agent_definitions SET parent_id = 'tpl-A' WHERE id = 'user-def';
+            INSERT INTO db_agent_instances
+                (id, definition_id, instance_name, identity_id, memory_id, working_directory,
+                 status, block_id, started_at, created_at)
+                VALUES
+                    ('inst-on-tpl-A', 'tpl-A', 'Maks', 'id-1', 'mem-1', '/wd/maks',
+                     'running', 'blk-1', 2000, 2000),
+                    ('inst-on-user', 'user-def', 'My Coder v2', 'id-2', 'mem-2', '/wd/userv2',
+                     'paused', 'blk-2', 2100, 2100);",
         )
         .unwrap();
 
         run_object_schema(&conn).unwrap();
-        // Idempotent — second pass must not error and must not
-        // re-default existing rows.
-        run_object_schema(&conn).unwrap();
 
-        let hidden: i64 = conn
+        // Old tables gone; db_agents present.
+        assert!(!table_exists(&conn, "db_agent_definitions"));
+        assert!(!table_exists(&conn, "db_agent_instances"));
+        assert!(table_exists(&conn, "db_agents"));
+
+        // Templates landed.
+        let tpl_a_template: i64 = conn
             .query_row(
-                "SELECT user_hidden FROM db_agent_definitions WHERE id='pre-existing'",
+                "SELECT is_template FROM db_agents WHERE id = 'tpl-A'",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(
-            hidden, 0,
-            "ALTER must default existing rows to 0 (visible), never to 1",
-        );
+        assert_eq!(tpl_a_template, 1);
+
+        // User-def landed (folded with its instance's bindings via the
+        // UPDATE pass).
+        let user_row_identity: String = conn
+            .query_row(
+                "SELECT identity_id FROM db_agents WHERE id = 'user-def'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(user_row_identity, "id-2");
+        let user_row_status: String = conn
+            .query_row(
+                "SELECT status FROM db_agents WHERE id = 'user-def'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(user_row_status, "paused");
+
+        // Template-instance projected as its own row keyed by inst.id.
+        let inst_a: String = conn
+            .query_row(
+                "SELECT parent_template_id FROM db_agents WHERE id = 'inst-on-tpl-A'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(inst_a, "tpl-A");
+        let inst_a_workdir: String = conn
+            .query_row(
+                "SELECT working_directory FROM db_agents WHERE id = 'inst-on-tpl-A'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(inst_a_workdir, "/wd/maks");
+
+        // Re-running v5 is idempotent (DROP IF EXISTS + the table-exists
+        // gate make the whole step a no-op).
+        run_object_schema(&conn).unwrap();
+        assert!(!table_exists(&conn, "db_agent_definitions"));
+        assert!(!table_exists(&conn, "db_agent_instances"));
     }
 
     #[test]

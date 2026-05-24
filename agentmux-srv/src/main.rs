@@ -499,36 +499,12 @@ async fn main() {
     // Auto-seed agent definitions on first launch (or empty DB)
     backend::agent_seed::auto_seed_on_startup(&wstore);
 
-    // Phase 3a — `db_agents` consolidation backfill. Marker-file gated
-    // under the data dir; idempotent across restarts. WRITE-ONLY in
-    // Phase 3a: dual-write keeps `db_agents` fresh; reads still hit
-    // `db_agent_definitions` / `db_agent_instances`. Phase 3b will
-    // flip readers over. Failures here are logged + tolerated — the
-    // old tables remain authoritative; a future startup retries.
-    // See docs/specs/SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md.
-    match wstore.run_agents_consolidate(Some(&base::get_wave_data_dir())) {
-        Ok(stats) if stats.already_done => {
-            tracing::debug!("agents_consolidate: marker present; backfill already done");
-        }
-        Ok(stats) => {
-            tracing::info!(
-                templates_inserted = stats.templates_inserted,
-                user_defs_inserted = stats.user_defs_inserted,
-                instances_as_clone_inserted = stats.instances_as_clone_inserted,
-                instances_folded_into_def = stats.instances_folded_into_def,
-                instances_skipped_continuation = stats.instances_skipped_continuation,
-                instances_skipped_no_definition = stats.instances_skipped_no_definition,
-                instances_collision_warned = stats.instances_collision_warned,
-                "agents_consolidate: Phase 3a backfill done",
-            );
-        }
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                "agents_consolidate: backfill failed; old tables remain authoritative",
-            );
-        }
-    }
+    // Phase 3c retired the dedicated `run_agents_consolidate` startup
+    // hook: the schema migration in `run_object_schema` now performs
+    // the v4 → v5 backfill in-place under the connection lock and
+    // drops the retired `db_agent_definitions` / `db_agent_instances`
+    // tables. See `agentmux-srv/src/backend/storage/migrations.rs`
+    // (`retire_old_agent_tables`).
 
     // Event infrastructure
     let event_bus = Arc::new(EventBus::new());

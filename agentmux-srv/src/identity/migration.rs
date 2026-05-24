@@ -624,13 +624,18 @@ mod tests {
     #[test]
     fn backfills_empty_identity_id_rows_after_seed() {
         // The Default bundle exists after seeding → empty /
-        // "blank" identity_id rows on db_agent_instances get
-        // back-filled to point at it.
+        // "blank" identity_id rows on the consolidated `db_agents`
+        // table get back-filled to point at it.
+        //
+        // Phase 3c note: parent is a TEMPLATE so each instance_create
+        // lands its own template-instance projection row in db_agents
+        // (rather than folding into the def — which would have only
+        // one row's worth of bindings to back-fill).
         let store = make_store();
         let tmp = tempfile::tempdir().unwrap();
         plant_ambient_claude_creds(tmp.path());
 
-        // Need an agent definition for the FK on db_agent_instances.
+        // Agent template (parent for the three instances below).
         let mut def = crate::backend::storage::wstore::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),
@@ -648,7 +653,7 @@ mod tests {
             agent_type: String::new(),
             environment: String::new(),
             agent_bus_id: String::new(),
-            is_seeded: 0,
+            is_seeded: 1,
             accounts: String::new(),
             parent_id: String::new(),
             branch_label: String::new(),
@@ -748,7 +753,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         plant_ambient_claude_creds(tmp.path());
 
-        // Agent def + initial run that creates Default.
+        // Agent template (parent for the late-added instance below).
+        // Phase 3c: template parent so the instance gets its own
+        // projection row (rather than folding into the def).
         let mut def = crate::backend::storage::wstore::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),
@@ -766,7 +773,7 @@ mod tests {
             agent_type: String::new(),
             environment: String::new(),
             agent_bus_id: String::new(),
-            is_seeded: 0,
+            is_seeded: 1,
             accounts: String::new(),
             parent_id: String::new(),
             branch_label: String::new(),
@@ -822,7 +829,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         // NO `plant_ambient_claude_creds` — empty home.
 
-        // Plant a row with empty identity_id.
+        // Phase 3c: template parent so the instance lands its own
+        // template-instance projection row (not a fold).
         let mut def = crate::backend::storage::wstore::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),
@@ -840,7 +848,7 @@ mod tests {
             agent_type: String::new(),
             environment: String::new(),
             agent_bus_id: String::new(),
-            is_seeded: 0,
+            is_seeded: 1,
             accounts: String::new(),
             parent_id: String::new(),
             branch_label: String::new(),
