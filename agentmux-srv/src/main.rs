@@ -468,6 +468,21 @@ async fn main() {
         &base::get_wave_data_dir(),
     );
 
+    // Two-tier picker — Phase 1 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
+    // Mandatory companion to the picker UI split: any seeded template
+    // that currently carries a session zone (e.g. `agent:claude:current`
+    // with Maks's conversation) is promoted to a new user-owned
+    // definition with a sensible default name, and its zones +
+    // referencing instances are moved over. Without this step the
+    // freshly-introduced "Templates" section of the picker would
+    // silently reattach into pre-existing user sessions. Marker-file
+    // gated; second start is a no-op.
+    let _template_promote_stats = backend::agent_session::migrate_promote_template_sessions_v1(
+        &wstore,
+        &filestore,
+        &base::get_wave_data_dir(),
+    );
+
     // Session recovery (Phase 4.2): scan for agent blocks that still have
     // `session:active_pid` from a previous run — those sessions were killed
     // by a crash/reboot. Transfer to `session:was_interrupted` so the

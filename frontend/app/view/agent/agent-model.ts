@@ -19,7 +19,7 @@ export type OverlayTab = "agent" | "identity";
 /**
  * Compact relative-time label for the title-bar continuation chip.
  *
- * Mirrors the wording of `formatRelative` in `RecentSessionsList.tsx`
+ * Mirrors the wording of `formatRelative` in `MyAgentsList.tsx`
  * (same "Xm ago" / "Xh ago" / "Xd ago" buckets) but lives here so the
  * model file has no UI-only dependency cycle. Exported for unit tests.
  */
