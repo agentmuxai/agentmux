@@ -393,6 +393,18 @@ pub const COMMAND_SESSION_EXPORT: &str = "session:export";
 // Session digest
 pub const COMMAND_SESSION_DIGEST: &str = "session:digest";
 
+// Option E (PR 1 of 2) — agent-anchored session zones.
+// A session zone is bound to the *agent definition* (`definition_id`),
+// not the identity bundle. Every block of the same agent reads/writes
+// through `agent:<defId>:current`; archiving snapshots to
+// `agent:<defId>:archive:<ts_ms>`. See
+// docs/specs/SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23.md.
+pub const COMMAND_AGENT_SESSION_READ: &str = "agent:session:read";
+pub const COMMAND_AGENT_SESSION_WRITE_STATE: &str = "agent:session:write_state";
+pub const COMMAND_AGENT_SESSION_APPEND_OUTPUT: &str = "agent:session:append_output";
+pub const COMMAND_AGENT_SESSION_ARCHIVE: &str = "agent:session:archive";
+pub const COMMAND_AGENT_SESSION_LIST_ARCHIVES: &str = "agent:session:list_archives";
+
 // ---- Client type constants ----
 
 pub const CLIENT_TYPE_CONN_SERVER: &str = "connserver";
@@ -1827,6 +1839,92 @@ pub struct CommandForkAgentDefinitionData {
     pub source_id: String,
     #[serde(default)]
     pub branch_label: String,
+}
+
+// ====================================================================
+// Option E — agent-anchored session zones (PR 1 of 2)
+// See docs/specs/SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23.md.
+// ====================================================================
+
+/// Request for `agent:session:read`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandAgentSessionReadData {
+    pub definition_id: String,
+}
+
+/// Response for `agent:session:read`. `content == None` means no zone /
+/// snapshot exists for this definition (NOT an error — fresh agent).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSessionReadResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    /// `modts` of the `output.state.json` file in the agent's
+    /// `:current` zone, if it exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modts: Option<i64>,
+}
+
+/// Request for `agent:session:write_state`. Writes `output.state.json`
+/// into `agent:<definition_id>:current` (creates the zone if missing).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandAgentSessionWriteStateData {
+    pub definition_id: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSessionWriteStateResult {
+    pub bytes_written: u64,
+}
+
+/// Request for `agent:session:append_output`. Appends a single
+/// NDJSON line to `output` in `agent:<definition_id>:current`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandAgentSessionAppendOutputData {
+    pub definition_id: String,
+    pub line: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSessionAppendOutputResult {
+    pub bytes_written: u64,
+}
+
+/// Request for `agent:session:archive`. Snapshots `agent:<defId>:current`
+/// into `agent:<defId>:archive:<now_ms>` then clears the current zone.
+/// Returns the archive zoneid (empty if no-op).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandAgentSessionArchiveData {
+    pub definition_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSessionArchiveResult {
+    /// Empty string when nothing was archived (current zone was empty).
+    pub archive_zoneid: String,
+    pub archived_at_ms: i64,
+}
+
+/// Request for `agent:session:list_archives`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CommandAgentSessionListArchivesData {
+    pub definition_id: String,
+    #[serde(default)]
+    pub limit: usize,
+}
+
+/// One row of the agent's archive list. Mirrors `RecentSessionRow`
+/// preview shape so the frontend can reuse the same row component.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentArchiveRow {
+    pub archive_zoneid: String,
+    pub archived_at_ms: i64,
+    /// First user_message in the archived `output.state.json` (up to
+    /// 240 chars, newlines collapsed). Empty when unreadable.
+    pub preview: String,
+    /// Total `nodes.length` from the archived snapshot. 0 when
+    /// unreadable / missing.
+    pub node_count: usize,
 }
 
 // ====================================================================
