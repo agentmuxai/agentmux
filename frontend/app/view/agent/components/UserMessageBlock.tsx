@@ -46,7 +46,11 @@
 import clsx from "clsx";
 import { Show, createSignal, onCleanup, type JSX } from "solid-js";
 import type { UserMessageNode } from "../types";
-import { pickExpandDirection, type ExpandDirection } from "./hover-anchor";
+import {
+    findScrollContainerRect,
+    pickExpandDirection,
+    type ExpandDirection,
+} from "./hover-anchor";
 
 interface UserMessageBlockProps {
     node: UserMessageNode;
@@ -80,21 +84,28 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
     const handleMouseEnter = () => {
         clearTimeout(enterTimer);
         enterTimer = setTimeout(() => {
-            // Capture the summary's position and the viewport size
-            // ONCE at expand-time. Direction stays fixed for the
-            // duration of this hover (no resize listener, no
-            // re-evaluation — per spec §5.2). Re-evaluated on the
-            // next mouseenter.
+            // Capture the summary's position and the nearest scroll
+            // container's bounds ONCE at expand-time. Direction
+            // stays fixed for the duration of this hover (no resize
+            // listener, no re-evaluation — per spec §5.2). Next
+            // mouseenter re-evaluates.
+            //
+            // Using the scroll container's rect (not
+            // `window.innerHeight`) is essential when the agent
+            // pane lives in a clipped region — a summary near the
+            // pane's bottom can be far from the window's bottom
+            // (codex P1 round 2 on PR #1021).
             if (rootEl) {
                 const summaryEl = rootEl.querySelector<HTMLElement>(
                     ".agent-user-message-summary",
                 );
                 if (summaryEl) {
                     const rect = summaryEl.getBoundingClientRect();
+                    const container = findScrollContainerRect(summaryEl);
                     setExpandDirection(
                         pickExpandDirection(
                             { top: rect.top, bottom: rect.bottom },
-                            window.innerHeight,
+                            container,
                             STARTUP_BODY_ESTIMATE_PX,
                         ),
                     );

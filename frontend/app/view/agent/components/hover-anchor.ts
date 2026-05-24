@@ -30,49 +30,59 @@
 
 export type ExpandDirection = "above" | "below";
 
-export interface SummaryRect {
-    /** Distance from viewport top to summary's top edge, in px. */
+export interface VerticalRect {
+    /** Distance from viewport top to top edge, in px. */
     readonly top: number;
-    /** Distance from viewport top to summary's bottom edge, in px. */
+    /** Distance from viewport top to bottom edge, in px. */
     readonly bottom: number;
 }
+
+// Backwards-compat alias — public API name from PR #1021 first cut.
+// Both rects use the same shape (top + bottom in viewport coords).
+export type SummaryRect = VerticalRect;
 
 /**
  * Pick the side on which the floating body should render.
  *
  * Decision tree:
- *   1. If body fits below the summary inside the viewport → "below".
- *   2. Else if body fits above the summary inside the viewport → "above".
+ *   1. If body fits below the summary inside the clipping
+ *      container → "below".
+ *   2. Else if body fits above → "above".
  *   3. Else pick whichever side has more room → "below" on a tie.
  *
- * Step 2 catches the "near-bottom" case — the canonical reason the
- * user asked for the direction-flip in the first place. Step 3
- * gracefully handles the (rare) case where the body is taller than
- * either side of the viewport; the body will need a scrollbar
- * regardless, but we pick the side that minimizes the scroll
- * surface.
+ * Step 2 catches the "near-bottom" case — the canonical reason
+ * the user asked for the direction-flip in the first place.
  *
  * The function is pure; pass exact values for unit testing. In
- * production the caller wires `summaryEl.getBoundingClientRect()`,
- * `window.innerHeight`, and the body's estimated height.
+ * production the caller wires `summaryEl.getBoundingClientRect()`
+ * and the nearest scrollable ancestor's rect (or
+ * `{top: 0, bottom: window.innerHeight}` when no scroll
+ * container exists).
+ *
+ * Why the container rect and not `window.innerHeight`: the agent
+ * pane lives inside a scrollable `.agent-document` region. A
+ * summary near the bottom of that pane can still be 200px above
+ * the window's bottom — `window.innerHeight` would think there's
+ * plenty of room and pick `below`, but the overlay would render
+ * clipped or off the bottom of the pane. Codex P1 round 2 on
+ * PR #1021.
  *
  * @param summaryRect  the summary's bounding rect in viewport
- *   coordinates (call sites use `getBoundingClientRect()`).
- * @param viewportHeight  the viewport height in CSS pixels
- *   (`window.innerHeight`).
+ *   coordinates.
+ * @param containerRect  the nearest clipping ancestor's bounding
+ *   rect, also in viewport coordinates. For the document body
+ *   (no clipping), pass `{ top: 0, bottom: window.innerHeight }`.
  * @param bodyEstimate  the estimated rendered height of the body
- *   in CSS pixels. Caller derives this from
- *   `estimateUnwrappedTextHeight` or a constant for the startup
- *   payload. Conservative over-estimates are safe (they just
- *   push toward step 3's tie-break).
+ *   in CSS pixels. Conservative over-estimates are safe (they
+ *   just push toward step 3's tie-break).
  */
 export function pickExpandDirection(
-    summaryRect: SummaryRect,
-    viewportHeight: number,
+    summaryRect: VerticalRect,
+    containerRect: VerticalRect,
     bodyEstimate: number,
 ): ExpandDirection {
-    const spaceBelow = Math.max(0, viewportHeight - summaryRect.bottom);
-    const spaceAbove = Math.max(0, summaryRect.top);
+    const spaceBelow = Math.max(0, containerRect.bottom - summaryRect.bottom);
+    const spaceAbove = Math.max(0, summaryRect.top - containerRect.top);
 
     // Step 1: body fits below — preferred direction.
     if (bodyEstimate <= spaceBelow) {
@@ -86,4 +96,29 @@ export function pickExpandDirection(
     // wins on tie (and on the no-room-anywhere edge case where
     // both `spaceAbove` and `spaceBelow` are 0).
     return spaceBelow >= spaceAbove ? "below" : "above";
+}
+
+/**
+ * Find the nearest scrolling ancestor of `el` (the element whose
+ * computed `overflow-y` is `auto`, `scroll`, or `hidden`). Returns
+ * its viewport-coordinate rect, or a viewport-wide fallback if
+ * no such ancestor exists.
+ *
+ * Used by `UserMessageBlock` to feed `pickExpandDirection` the
+ * right clipping bounds — typically `.agent-document` (the
+ * agent-pane's scroll container).
+ */
+export function findScrollContainerRect(el: HTMLElement): VerticalRect {
+    let current: HTMLElement | null = el.parentElement;
+    while (current && current !== document.body) {
+        const cs = window.getComputedStyle(current);
+        const oy = cs.overflowY;
+        if (oy === "auto" || oy === "scroll" || oy === "hidden") {
+            const r = current.getBoundingClientRect();
+            return { top: r.top, bottom: r.bottom };
+        }
+        current = current.parentElement;
+    }
+    // No scroll container found — overlay can use the whole viewport.
+    return { top: 0, bottom: window.innerHeight };
 }
