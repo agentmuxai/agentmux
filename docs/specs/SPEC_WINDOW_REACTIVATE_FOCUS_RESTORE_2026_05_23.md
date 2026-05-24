@@ -97,25 +97,117 @@ This is a Windows focus-chain side effect, not a designed recovery path. We must
 
 ---
 
+## 4.5 What step 1 instrumentation revealed (added 2026-05-24)
+
+Step 1 (commit `04a736bd`) shipped the recording layer using a single process-wide `LAST_FOCUSED_CHILD: AtomicUsize`. Within minutes of running `task dev`, the host log showed **two distinct main render-widget HWNDs** being written to the same slot in quick succession:
+
+```
+[focus-track] LAST_FOCUSED_CHILD <= main hwnd=0x180f2a     # label "main"
+[focus-track] LAST_FOCUSED_CHILD <= main hwnd=0x13710c4    # label "window-beb57746..."
+```
+
+AgentMux runs **multiple top-level windows in one process** — the primary `"main"` plus pool / sub-windows (see `agentmux-cef/src/state.rs` `list_browsers`, which exposes `"window-..."` labels alongside `"main"`). Each top-level has its own HWND, its own CEF browser, and its own keyboard-focus child. A single global slot overwrites whichever was written last, so a `WM_ACTIVATE` on window A would read window B's child and `SetFocus` the wrong one — exactly the inverse of the fix.
+
+The storage layer must therefore be **per-top-level-window**, keyed by the root HWND. §5.1 below reflects this; the test matrix in §7 grew multi-window cases (L1.4-5, L3.5).
+
+The empirical lesson: a one-line atomic looked sufficient on paper because the spec was written from the single-window mental model. Step 1's instrumentation surfaced the second window before any behavioural code shipped — exactly what the "instrumentation first" delivery order is for.
+
+---
+
 ## 5. The fix
 
 Two coordinated fixes, in order of robustness:
 
-### 5.1 Rust host: top-level `WM_ACTIVATE` → delegate focus to last-active pane (primary)
+### 5.1 Rust host: top-level `WM_ACTIVATE` → delegate focus to the last-active child of *that window* (primary)
 
-Track the **last-focused CEF child HWND** at the host level. On top-level activation, call `SetFocus` on it and `browser_host->SetFocus(true)` on the matching CEF browser.
+Track the last-focused CEF child HWND **per top-level window**. On `WM_ACTIVATE` of a given top-level HWND, look up the child for *that* window only, then call `SetFocus` on it and `browser_host->SetFocus(true)` on the matching CEF browser.
 
-**Track last-focused child:**
-- Extend the existing focus-redirect subclass at `agentmux-cef/src/browser_pane/hwnd.rs:141-310` to also handle **`WM_SETFOCUS`** (record `hwnd` as `LAST_FOCUSED_CHILD: AtomicUsize`) and **`WM_KILLFOCUS`** (no-op record-keeping is sufficient — do not clear).
-- Add the same recording to the main browser's render-widget HWND. The main browser does not currently have a subclass; install one in the same module, scoped to `Chrome_RenderWidgetHostHWND`. Both paths feed the same `LAST_FOCUSED_CHILD` slot.
+#### 5.1.1 Storage — per-root map
 
-**Install a top-level activate handler:**
-- Subclass the top-level host HWND in `agentmux-cef/src/window/...` (the module that owns the host window's WndProc) to handle `WM_ACTIVATE`:
-  - On `wParam != WA_INACTIVE`: read `LAST_FOCUSED_CHILD`. If non-null and `IsWindow(target)`, set the one-shot `ALLOW_BROWSER_PANE_FOCUS_ONCE` flag (so the existing pane redirect does not bounce focus back to `GA_ROOT`) and call `SetFocus(target)`.
-  - Find the CEF browser that owns `target` via the existing pane registry (`agentmux-cef/src/browser_pane/registry.rs` — same one `MainFocusReclaimTask` uses) and call `browser.host().set_focus(1)` on it.
-  - Schedule a follow-up `PostMessage` to the frontend (`OnWindowReactivate`) so the frontend can complete the DOM-layer half (§5.2).
+Replace the single `LAST_FOCUSED_CHILD: AtomicUsize` from step 1 (commit `04a736bd`) with a map keyed by root HWND:
 
-**Why this is the primary fix:** It restores focus at the Win32 + CEF layers, which is where the chain is actually broken. The frontend half (§5.2) cannot fix a missing `SetFocus(child_hwnd)` — it can only `.focus()` a DOM element *after* Chromium believes its browser has keyboard focus.
+```rust
+// agentmux-cef/src/browser_pane/hwnd.rs
+//
+// Per-top-level-window record of the last child HWND to receive
+// intentional keyboard focus. Keyed by GetAncestor(child, GA_ROOT).
+// Mutex (not RwLock): writes are rare (per intentional focus event),
+// reads rarer still (per WM_ACTIVATE), contention is negligible.
+pub static LAST_FOCUSED_BY_ROOT: LazyLock<Mutex<HashMap<usize, usize>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+```
+
+Motivation: §4.5.
+
+#### 5.1.2 Write path — single helper, both call sites
+
+Both the pane subclass (`hwnd.rs` `wndproc_hook`, WM_SETFOCUS allowed-through branch) and the main reclaim (`ui_tasks.rs` `MainFocusReclaimTask`) call one helper:
+
+```rust
+unsafe fn record_intentional_focus(child: *mut std::ffi::c_void) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
+    let root = GetAncestor(child, GA_ROOT);
+    if root.is_null() { return; }
+    if let Ok(mut map) = LAST_FOCUSED_BY_ROOT.lock() {
+        map.insert(root as usize, child as usize);
+        tracing::info!(
+            "[focus-track] LAST_FOCUSED_BY_ROOT[root={:p}] <= child={:p}",
+            root, child,
+        );
+    }
+}
+```
+
+`WM_KILLFOCUS` is still a no-op — entries persist after focus leaves the child so the next `WM_ACTIVATE` on that root has a target to restore.
+
+#### 5.1.3 Read path — top-level `WM_ACTIVATE` handler
+
+Subclass each top-level host HWND in the module that owns its `WndProc` (`agentmux-cef/src/window/...`). Handle `WM_ACTIVATE`:
+
+```rust
+const WA_INACTIVE: u32 = 0;
+
+if msg == WM_ACTIVATE {
+    let activation_state = (wparam & 0xFFFF) as u32;
+    if activation_state != WA_INACTIVE {
+        // `hwnd` here IS the top-level being activated, so it's its own root.
+        let child = LAST_FOCUSED_BY_ROOT
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&(hwnd as usize)).copied())
+            .unwrap_or(0);
+        if child != 0 {
+            let child_hwnd = child as *mut std::ffi::c_void;
+            if IsWindow(child_hwnd) != 0 {
+                ALLOW_BROWSER_PANE_FOCUS_ONCE.store(true, Ordering::Relaxed);
+                SetFocus(child_hwnd);
+                // If `child` belongs to a CEF browser, sync Chromium's
+                // internal focus tracker too. Look up via state.list_browsers,
+                // mirroring MainFocusReclaimTask's pattern.
+                if let Some(browser) = find_browser_owning_child(&state, child_hwnd) {
+                    if let Some(host) = browser.host() {
+                        host.set_focus(1);
+                    }
+                }
+                tracing::info!(
+                    "[focus-restore] WM_ACTIVATE on root={:p} -> SetFocus child={:p}",
+                    hwnd, child_hwnd,
+                );
+            }
+        }
+    }
+}
+```
+
+A `PostMessage` follow-up notifies the frontend so it can complete the DOM half (§5.2). The post is *fire and forget*; if the frontend never sees it (e.g. main browser still loading), §5.2's `window`-focus listener fires anyway via Chromium's own focus event.
+
+#### 5.1.4 Cleanup
+
+Stale entries (child HWND destroyed) are self-healing: the `IsWindow` guard on activate turns a dead child into a no-op. Map growth is bounded by the number of top-level windows the process has ever owned — small. Optional follow-up: drop the entry on the top-level's `WM_NCDESTROY`. Not required for correctness.
+
+#### 5.1.5 Why this is the primary fix
+
+It restores focus at the Win32 + CEF layers, which is where the chain is actually broken. The frontend half (§5.2) cannot fix a missing `SetFocus(child_hwnd)` — it can only `.focus()` a DOM element *after* Chromium believes its browser has keyboard focus.
 
 ### 5.2 Frontend: `window` focus listener → `giveFocus()` on active pane (belt-and-braces)
 
@@ -165,10 +257,12 @@ The two fixes target two distinct levels. Neither alone is sufficient.
 
 ### L1 — Rust unit (`agentmux-cef/src/window/...`)
 
-- `LAST_FOCUSED_CHILD` is updated on `WM_SETFOCUS` from any subclassed child HWND.
-- `WM_ACTIVATE(WA_ACTIVE)` with a valid `LAST_FOCUSED_CHILD` calls `SetFocus` on it (mock `SetFocus`, assert call).
-- `WM_ACTIVATE(WA_ACTIVE)` with `LAST_FOCUSED_CHILD == 0` is a no-op (no `SetFocus`).
-- `WM_ACTIVATE(WA_INACTIVE)` does not clear `LAST_FOCUSED_CHILD`.
+- **L1.1** `record_intentional_focus(child)` inserts `(GetAncestor(child, GA_ROOT), child)` into `LAST_FOCUSED_BY_ROOT`. Mock `GetAncestor`, assert the entry.
+- **L1.2** `WM_ACTIVATE(WA_ACTIVE)` on a root with a valid map entry calls `SetFocus` on that child (mock `SetFocus`, assert the argument is the child not the root).
+- **L1.3** `WM_ACTIVATE(WA_ACTIVE)` on a root with no entry is a no-op.
+- **L1.4** Two roots, two entries: `WM_ACTIVATE` on root A reads child A; on root B reads child B. Critical regression guard against the §4.5 finding — a single-slot impl fails this.
+- **L1.5** Entry whose child fails `IsWindow` causes activate to no-op (mock `IsWindow` to return 0). Stale entries are tolerated.
+- **L1.6** `WM_ACTIVATE(WA_INACTIVE)` does not mutate the map.
 
 ### L2 — Frontend unit
 
@@ -182,7 +276,7 @@ The two fixes target two distinct levels. Neither alone is sufficient.
 - Alt+Tab to another app, Alt+Tab back, type — works (today: intermittently fails).
 - Repeat 20× with random delays — should be 20/20.
 - Click taskbar to switch away, click taskbar to return, type — works.
-- Open two AgentMux windows, use the same Alt+Tab sequence on each independently — both work, no cross-window dependency.
+- **L3.5 (multi-window, critical)** Open the primary window + a sub/pool window. Focus a terminal in window A; focus a terminal in window B. Alt+Tab away, Alt+Tab back to A → typing reaches A's terminal, NOT B's. Repeat in the other direction. Cross-window focus must never leak — direct test of the §4.5 finding.
 - Active pane is an **agent** pane (input is a `contenteditable`, not xterm) — focus lands on it.
 - Active pane is an **editor** pane — focus lands on the editor.
 
@@ -192,13 +286,13 @@ The two fixes target two distinct levels. Neither alone is sufficient.
 
 One commit per step, on a feature branch (`agentx/window-reactivate-focus-restore`):
 
-1. Add `LAST_FOCUSED_CHILD` recording to the existing browser-pane subclass; add the same recording to the main browser's render-widget HWND via a parallel subclass. No behavior change — pure instrumentation. Verify by logging.
-2. Install the top-level `WM_ACTIVATE` handler, calling `SetFocus(LAST_FOCUSED_CHILD)` + `browser_host.set_focus(1)`. This alone should resolve most occurrences.
-3. Replace the disabled `AppFocusHandler` stub at `frontend/app/app.tsx:195-230` with an active `window` focus listener that calls `giveFocus()` on the active pane.
-4. Add the test matrix (§7 L1 + L2).
-5. Manual L3 verification on the dev build; ship behind no flag — this is pure recovery code, additive, with no negative path.
+1. **Shipped (`04a736bd`).** Add `LAST_FOCUSED_CHILD: AtomicUsize` recording to the existing browser-pane subclass and to `MainFocusReclaimTask`. No behaviour change — pure instrumentation. Step 1 surfaced the multi-window evidence in §4.5.
+2. **Step 1.5 (new — added after the §4.5 finding).** Refactor storage to per-root `LAST_FOCUSED_BY_ROOT: HashMap<root_hwnd, child_hwnd>` (§5.1.1). Both write sites route through the `record_intentional_focus` helper (§5.1.2). Still no behavioural change; logs gain a `root=` field. Lands L1.1.
+3. Install the top-level `WM_ACTIVATE` handler (§5.1.3), reading from the per-root map. `SetFocus(child)` + `browser_host.set_focus(1)`. Resolves most occurrences. Lands L1.2-L1.6.
+4. Replace the disabled `AppFocusHandler` stub at `frontend/app/app.tsx:195-230` with an active `window` focus listener that calls `giveFocus()` on the active pane (§5.2). Lands L2 tests.
+5. Manual L3 verification on the dev build, including the L3.5 multi-window case. Ship behind no flag — this is pure recovery code, additive, with no negative path.
 
-Each commit is independently revertible; revert order is 5 → 1 if needed.
+Each commit is independently revertible; revert order is 5 → 1 if needed. Step 2 (1.5) MUST land before step 3 — the activate handler depends on the per-root map.
 
 ---
 
