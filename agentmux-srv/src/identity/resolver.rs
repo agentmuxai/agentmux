@@ -733,6 +733,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 0,
+            user_hidden: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -805,6 +806,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 0,
+            user_hidden: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -890,6 +892,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 0,
+            user_hidden: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -930,6 +933,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 0,
+            user_hidden: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1014,6 +1018,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 0,
+            user_hidden: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1093,6 +1098,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 0,
+            user_hidden: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1256,6 +1262,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 0,
+            user_hidden: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1340,6 +1347,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 0,
+            user_hidden: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
 

@@ -26,7 +26,9 @@ use super::error::StoreError;
 /// `user_version`, so legacy files read 0). Bumped per additive migration:
 ///   v1 — flat schema baseline
 ///   v2 — db_agent_definitions.updated_at
-pub const OBJECT_SCHEMA_VERSION: i64 = 2;
+///   v3 — db_agent_definitions.user_hidden (Phase 2 hide templates,
+///        SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md Q2 Decision Y)
+pub const OBJECT_SCHEMA_VERSION: i64 = 3;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -133,7 +135,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             parent_id            TEXT NOT NULL DEFAULT '',
             branch_label         TEXT NOT NULL DEFAULT '',
             created_at           INTEGER NOT NULL DEFAULT 0,
-            updated_at           INTEGER NOT NULL DEFAULT 0
+            updated_at           INTEGER NOT NULL DEFAULT 0,
+            user_hidden          INTEGER NOT NULL DEFAULT 0
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_definitions_slug
             ON db_agent_definitions(slug);
@@ -302,8 +305,13 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
     //
     // v2: db_agent_definitions.updated_at — last-modified timestamp
     //     (created_at already existed; updates now stamp updated_at).
+    // v3: db_agent_definitions.user_hidden — per-user hide flag for
+    //     templates (Phase 2 of the two-tier picker spec, Q2 Decision Y).
+    //     Defaults to 0 (visible) for all existing rows so a migration
+    //     never silently hides previously-visible templates.
     for stmt in &[
         "ALTER TABLE db_agent_definitions ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE db_agent_definitions ADD COLUMN user_hidden INTEGER NOT NULL DEFAULT 0",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
@@ -740,6 +748,85 @@ mod tests {
         assert_eq!(
             remaining, 0,
             "FK cascade must survive the forge→agent table rename"
+        );
+    }
+
+    #[test]
+    fn test_user_hidden_column_present_on_fresh_db() {
+        // Schema v3 (Phase 2 hide-templates) adds db_agent_definitions
+        // .user_hidden. A fresh database lands the column via the flat
+        // CREATE statement; an existing-but-stale database lands it via
+        // the additive ALTER below.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        run_object_schema(&conn).unwrap();
+
+        // Column exists with the documented default — INSERT without
+        // user_hidden must succeed and read back as 0.
+        conn.execute_batch(
+            "INSERT INTO db_agent_definitions (id, name, provider)
+             VALUES ('a-fresh', 'Fresh', 'claude');",
+        )
+        .unwrap();
+        let hidden: i64 = conn
+            .query_row(
+                "SELECT user_hidden FROM db_agent_definitions WHERE id='a-fresh'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hidden, 0);
+    }
+
+    #[test]
+    fn test_user_hidden_column_added_to_existing_db_via_alter() {
+        // Simulate an existing dev database created before Phase 2:
+        // db_agent_definitions exists but lacks the user_hidden column.
+        // run_object_schema must ALTER it in, preserving every existing
+        // row at the default 0. Idempotent on subsequent runs.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        conn.execute_batch(
+            "CREATE TABLE db_agent_definitions (
+                id TEXT PRIMARY KEY, slug TEXT NOT NULL DEFAULT '',
+                name TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '✦',
+                provider TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                working_directory TEXT NOT NULL DEFAULT '',
+                shell TEXT NOT NULL DEFAULT '',
+                provider_flags TEXT NOT NULL DEFAULT '',
+                auto_start INTEGER NOT NULL DEFAULT 0,
+                restart_on_crash INTEGER NOT NULL DEFAULT 0,
+                idle_timeout_minutes INTEGER NOT NULL DEFAULT 0,
+                agent_type TEXT NOT NULL DEFAULT 'standalone',
+                environment TEXT NOT NULL DEFAULT '',
+                agent_bus_id TEXT NOT NULL DEFAULT '',
+                is_seeded INTEGER NOT NULL DEFAULT 0,
+                accounts TEXT NOT NULL DEFAULT '',
+                parent_id TEXT NOT NULL DEFAULT '',
+                branch_label TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO db_agent_definitions (id, name, provider, is_seeded)
+                VALUES ('pre-existing', 'Old Template', 'claude', 1);",
+        )
+        .unwrap();
+
+        run_object_schema(&conn).unwrap();
+        // Idempotent — second pass must not error and must not
+        // re-default existing rows.
+        run_object_schema(&conn).unwrap();
+
+        let hidden: i64 = conn
+            .query_row(
+                "SELECT user_hidden FROM db_agent_definitions WHERE id='pre-existing'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            hidden, 0,
+            "ALTER must default existing rows to 0 (visible), never to 1",
         );
     }
 

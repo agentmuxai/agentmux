@@ -47,6 +47,96 @@
         align-self: center;
     }
 
+    // Two-tier picker (Phase 2 — Q2 Decision Y: hide templates).
+    // Collapsible "Hidden templates (N)" surface that lives directly
+    // under the templates tier, hidden entirely when no templates are
+    // hidden (zero footprint by default).
+    .agent-picker-hidden-templates {
+        max-width: 520px;
+        width: 100%;
+        align-self: center;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        margin-top: var(--space-2);
+    }
+
+    .agent-picker-hidden-templates-header {
+        all: unset;
+        cursor: pointer;
+        font-size: var(--text-sm, 0.875rem);
+        font-weight: 600;
+        color: color-mix(in srgb, var(--main-text-color) 60%, transparent);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-1) 0;
+
+        &:hover,
+        &:focus-visible {
+            color: var(--main-text-color);
+        }
+    }
+
+    .agent-picker-hidden-templates-caret {
+        display: inline-block;
+        width: 1ch;
+        font-size: 0.85em;
+    }
+
+    .agent-picker-hidden-templates-body {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        padding-left: var(--space-3);
+    }
+
+    .agent-picker-hidden-templates-empty,
+    .agent-picker-hidden-templates-loading {
+        font-size: var(--text-sm, 0.875rem);
+        color: var(--secondary-text-color);
+        padding: var(--space-2) 0;
+    }
+
+    .agent-picker-hidden-template-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-2) var(--space-3);
+        border-radius: 4px;
+        background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+
+        &:hover {
+            background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+        }
+    }
+
+    .agent-picker-hidden-template-name {
+        flex: 1;
+        font-size: var(--text-sm, 0.875rem);
+        color: var(--main-text-color);
+    }
+
+    .agent-picker-hidden-template-unhide-btn {
+        all: unset;
+        cursor: pointer;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: var(--text-xs, 0.75rem);
+        font-weight: 500;
+        color: var(--accent-color);
+        border: 1px solid var(--accent-color);
+        background: transparent;
+        transition: background 0.15s;
+
+        &:hover,
+        &:focus-visible {
+            background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+        }
+    }
+
     .agent-card {
         position: relative;                // anchor for absolutely-positioned actions
         display: flex;

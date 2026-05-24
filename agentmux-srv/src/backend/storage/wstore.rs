@@ -504,6 +504,18 @@ pub struct AgentDefinition {
     /// rows written before v2 (until next update).
     #[serde(default)]
     pub updated_at: i64,
+    /// Per-user hide flag for seeded templates. `1` = the user clicked
+    /// "Hide template" on the picker's `+ New from template` tier; the
+    /// row stays on disk (templates are manifest-managed; deletion would
+    /// fight re-seed) but the default `listagents` view filters it out.
+    /// Reset to `0` by the agent-seed re-sync flow for any NEW template
+    /// id newly added to the manifest, so a fresh template surfaces once
+    /// even if a same-named one was previously hidden. Schema v3 (Phase
+    /// 2 of `SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md` — Q2 Decision Y).
+    /// User-owned rows (`is_seeded = 0`) MUST stay at `0` here; their
+    /// removal path is `deleteagent`, not hide.
+    #[serde(default)]
+    pub user_hidden: i64,
 }
 
 /// Derive a filesystem-safe slug from a display name. Lowercase,
@@ -588,7 +600,8 @@ impl WaveStore {
                     d.working_directory, d.shell, d.provider_flags, d.auto_start,
                     d.restart_on_crash, d.idle_timeout_minutes, d.created_at,
                     d.agent_type, d.environment, d.agent_bus_id, d.is_seeded,
-                    d.accounts, d.parent_id, d.branch_label, d.updated_at
+                    d.accounts, d.parent_id, d.branch_label, d.updated_at,
+                    d.user_hidden
              FROM db_agent_definitions d
              LEFT JOIN (
                  SELECT definition_id, MAX(started_at) AS last_used
@@ -620,6 +633,7 @@ impl WaveStore {
                 parent_id: row.get(18)?,
                 branch_label: row.get(19)?,
                 updated_at: row.get(20)?,
+                user_hidden: row.get(21)?,
             })
         })?;
         let mut agents = Vec::new();
@@ -684,9 +698,9 @@ impl WaveStore {
             "INSERT INTO db_agent_definitions (id, slug, name, icon, provider, description,
              working_directory, shell, provider_flags, auto_start, restart_on_crash,
              idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
-             is_seeded, accounts, parent_id, branch_label, updated_at)
+             is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19, ?20, ?21)",
+                     ?17, ?18, ?19, ?20, ?21, ?22)",
             params![
                 agent.id,
                 agent.slug,
@@ -710,9 +724,52 @@ impl WaveStore {
                 agent.branch_label,
                 // New definitions: updated_at == created_at.
                 agent.created_at,
+                // Phase 2 (hide templates): new rows start visible. The
+                // user only hides via the explicit `agent_def_hide` RPC,
+                // and the agent-seed re-sync forces user_hidden = 0 on
+                // any newly-added template id anyway, so honouring the
+                // caller-supplied value here is safe even when a stray
+                // 1 sneaks through.
+                agent.user_hidden,
             ],
         )?;
         Ok(())
+    }
+
+    /// Set the `user_hidden` flag on a single agent definition. Phase 2
+    /// of the two-tier picker (Q2 Decision Y). Returns:
+    ///   `Ok(true)`  — row updated.
+    ///   `Ok(false)` — no row with that id exists.
+    ///   `Err(...)`  — the row exists but is NOT a seeded template
+    ///                 (`is_seeded != 1`). User-owned definitions go
+    ///                 through `agent_def_delete`, not hide.
+    ///
+    /// Does NOT bump `updated_at`: hide is a per-user view-state flag,
+    /// not a definition-content edit. Keeps `updated_at` faithful to the
+    /// agent's payload (the manifest re-sync compares `description` etc.
+    /// against the canonical row).
+    pub fn agent_def_set_hidden(&self, id: &str, hidden: bool) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let is_seeded: i64 = match conn.query_row(
+            "SELECT is_seeded FROM db_agent_definitions WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        ) {
+            Ok(v) => v,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(false),
+            Err(e) => return Err(StoreError::Sqlite(e)),
+        };
+        if is_seeded != 1 {
+            return Err(StoreError::Other(format!(
+                "agent_def_set_hidden: {id} is not a seeded template (is_seeded={is_seeded}); \
+                 user-owned definitions must use delete/archive paths, not hide"
+            )));
+        }
+        let rows = conn.execute(
+            "UPDATE db_agent_definitions SET user_hidden = ?1 WHERE id = ?2",
+            params![if hidden { 1_i64 } else { 0_i64 }, id],
+        )?;
+        Ok(rows > 0)
     }
 
     /// Update an existing agent definition (all fields except id, created_at, is_seeded).
@@ -2652,6 +2709,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 0,
+            user_hidden: 0,
         };
         store.agent_def_insert(&mut a1).unwrap();
         // "Agent X" → "agent-x"
@@ -2714,6 +2772,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 0,
+            user_hidden: 0,
         };
         store.agent_def_insert(&mut a1).unwrap();
         assert_eq!(a1.slug, "explicit");
@@ -2771,6 +2830,7 @@ mod tests {
             parent_id: String::new(),
             branch_label: String::new(),
             updated_at: 0,
+            user_hidden: 0,
         }
     }
 

@@ -251,6 +251,14 @@ declare global {
          * before v2.
          */
         updated_at?: number;
+        /**
+         * Per-user hide flag for seeded templates (0 = visible, 1 = hidden).
+         * Schema v3. Set via AgentDefHideCommand / AgentDefUnhideCommand
+         * — Phase 2 of SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md.
+         * `listagents` excludes hidden templates by default; only the
+         * settings unhide UI passes `include_hidden: true` to see them.
+         */
+        user_hidden?: number;
     };
 
     // ── v6: identity, instance, junction ────────────────────────────────────
