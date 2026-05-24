@@ -2696,7 +2696,18 @@ mod recent_sessions_tests {
             install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
         };
 
-        // Seed: 1 definition, 1 identity bundle, 1 memory bundle.
+        // Seed: 1 SEEDED definition (template), 1 identity bundle, 1
+        // memory bundle. Phase 3b note: seeded as a template so that
+        // each instance projection in `db_agents` lands on its own row
+        // (`is_template = 0`, `id = inst.id`, `parent_template_id =
+        // def.id`) rather than folding into the def-projection and
+        // clobbering its name. The handler resolves `definition_name`
+        // via `defs.iter().find(|d| d.id == inst.definition_id)`, which
+        // hits the template row and returns "Claude Code". Under the
+        // pre-Phase 3b reader, def name was always preserved because
+        // `agent_def_list` queried `db_agent_definitions` directly;
+        // db_agents fold semantics require the seed shape to avoid
+        // the collision.
         let def = AgentDefinition {
             id: "def-claude".to_string(),
             slug: "claude-code".to_string(),
@@ -2714,7 +2725,7 @@ mod recent_sessions_tests {
             agent_type: "host".to_string(),
             environment: String::new(),
             agent_bus_id: String::new(),
-            is_seeded: 0,
+            is_seeded: 1,
             accounts: String::new(),
             parent_id: String::new(),
             branch_label: String::new(),
@@ -2779,7 +2790,24 @@ mod recent_sessions_tests {
             wstore.instance_create(&inst).unwrap();
         }
 
-        // Snapshots for the two with snapshots.
+        // Snapshots for the two with snapshots. Write the OLDER one
+        // first so its filestore-stamped modts is strictly less than the
+        // recent one — the handler sorts snapshot-bearing rows by modts
+        // desc, so writing blk-older second would invert the assertions.
+        // (Pre-Phase 3b this ordering was fragile because the dual-write
+        // chain ran fewer SQL statements between successive inserts, so
+        // adjacent writes landed in the same millisecond and the stable
+        // sort preserved instance_list_named's started_at order; now the
+        // additional db_agents UPDATE per instance widens the gap and
+        // distinct modts dominate the stable sort.)
+        let snap_older = serde_json::json!({
+            "schemaVersion": 1,
+            "nodes": [
+                {"type": "user_message", "id": "u0",
+                 "message": "earlier conversation"}
+            ]
+        });
+        write_snapshot(&filestore, "blk-older", &snap_older.to_string());
         let snap_recent = serde_json::json!({
             "schemaVersion": 1,
             "nodes": [
@@ -2791,14 +2819,6 @@ mod recent_sessions_tests {
             ]
         });
         write_snapshot(&filestore, "blk-recent", &snap_recent.to_string());
-        let snap_older = serde_json::json!({
-            "schemaVersion": 1,
-            "nodes": [
-                {"type": "user_message", "id": "u0",
-                 "message": "earlier conversation"}
-            ]
-        });
-        write_snapshot(&filestore, "blk-older", &snap_older.to_string());
 
         let (engine, rx) = WshRpcEngine::new();
         super::register_agent_handlers(&engine, &state);
