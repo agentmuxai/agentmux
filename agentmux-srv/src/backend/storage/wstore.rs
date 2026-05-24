@@ -53,26 +53,14 @@ impl WaveStore {
         &self.conn
     }
 
-    /// Run the Phase 3a `db_agents` consolidation backfill under the
-    /// wstore's exclusive connection lock. Idempotent — gated by a
-    /// marker file in `data_dir` (skip with `None` for tests).
-    pub fn run_agents_consolidate(
-        &self,
-        data_dir: Option<&Path>,
-    ) -> Result<super::agents_consolidate::ConsolidateStats, StoreError> {
-        let mut conn = self.conn.lock().unwrap();
-        super::agents_consolidate::run_consolidate_migration(&mut conn, data_dir)
-    }
-
     fn configure_and_migrate(conn: Connection) -> Result<Self, StoreError> {
         conn.execute_batch(
             // `foreign_keys=ON` is per-connection and defaults to OFF in
-            // SQLite. The v6 schema (`db_agent_identity_links`,
-            // `db_agent_instances`) relies on `ON DELETE CASCADE` to clean
-            // up junction rows and instances when a parent agent or
-            // identity is removed. Without this pragma on the production
-            // connection, cascades silently no-op; migration tests set it
-            // explicitly, which would have masked the gap.
+            // SQLite. The schema (`db_agent_identity_links` etc.) relies
+            // on `ON DELETE CASCADE` to clean up junction rows when a
+            // parent agent is removed. Without this pragma on the
+            // production connection, cascades silently no-op; migration
+            // tests set it explicitly, which would have masked the gap.
             "PRAGMA journal_mode=WAL;
              PRAGMA busy_timeout=5000;
              PRAGMA foreign_keys=ON;
@@ -91,7 +79,7 @@ impl WaveStore {
 
     /// Attach a shared cross-version agent registry. Called once on
     /// srv startup after `WaveStore::open` and before the store is
-    /// wrapped in `Arc`. Mutations to `db_agent_instances` will then
+    /// wrapped in `Arc`. Mutations to named agent rows will then
     /// parallel-write to the registry; the SQLite table remains the
     /// authoritative read path for PR A.
     pub fn set_registry(&self, registry: Arc<Registry>) {
@@ -656,34 +644,58 @@ impl WaveStore {
     }
 
     /// Delete all seeded agents (is_seeded=1). Used by reseed to clear built-in agents.
+    ///
+    /// Phase 3c: writes directly to `db_agents`. The deletion targets:
+    ///   1. Every template row (`is_template = 1`) — the canonical
+    ///      seeded templates.
+    ///   2. Every template-instance projection row keyed off a template
+    ///      that was just removed (i.e. `is_template = 0` rows whose
+    ///      `parent_template_id` matched one of the templates we
+    ///      deleted). Under the old schema the FK cascade on
+    ///      `db_agent_instances.definition_id` did this automatically;
+    ///      with `db_agents` having no parent FK on
+    ///      `parent_template_id`, we drop those rows explicitly.
+    ///
+    /// User-clone DEFINITION rows (created via "+ New from template" —
+    /// `is_template = 0`, id NOT in `db_agent_instances`) are NOT
+    /// touched: those persist as long as the underlying def row does.
     pub fn agent_def_delete_seeded(&self) -> Result<usize, StoreError> {
-        // Reagent P1 round 4 on #1013: capture the cascaded instance ids
-        // BEFORE the FK cascade fires. The bulk delete on
-        // `db_agent_definitions` triggers `ON DELETE CASCADE` on
-        // `db_agent_instances` for every instance keyed off those
-        // templates; once the cascade runs, we can't query them anymore,
-        // and `db_agents` would be left holding orphaned instance
-        // projections. Capture → delete → drop projections.
-        let (rows, cascaded_inst_ids) = {
-            let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap();
+        // Capture the template ids BEFORE the delete so we can scope
+        // the cascaded-instance cleanup. The instance projections to
+        // drop are exactly those rows whose `parent_template_id`
+        // matched one of the just-deleted templates AND whose `id`
+        // was an actual instance id (i.e. has a non-empty
+        // `definition_id` field; user-clone DEF rows leave
+        // definition_id empty).
+        let template_ids: Vec<String> = {
             let mut stmt = conn.prepare(
-                "SELECT i.id FROM db_agent_instances i
-                 INNER JOIN db_agent_definitions d ON i.definition_id = d.id
-                 WHERE d.is_seeded = 1",
+                "SELECT id FROM db_agents WHERE is_template = 1",
             )?;
-            let ids: Vec<String> = stmt
+            let ids = stmt
                 .query_map([], |r| r.get::<_, String>(0))?
                 .collect::<Result<Vec<_>, _>>()?;
             drop(stmt);
-            let rows = conn.execute("DELETE FROM db_agent_definitions WHERE is_seeded=1", [])?;
-            (rows, ids)
+            ids
         };
-        // Phase 3a dual-write (Phase 3b: errors propagate): drop template
-        // projections AND any cascaded instance projections. User-clone
-        // DEFINITION projections (`is_template = 0`, `id` is a def_id)
-        // are NOT touched here — those persist as long as the underlying
-        // user-clone def row in `db_agent_definitions` does.
-        self.agents_dual_write_seeded_delete(&cascaded_inst_ids)?;
+        // Drop the cascaded template-instance projections first, while
+        // we still have the parent ids. An instance row in db_agents
+        // carries `definition_id` (the runtime field — non-empty for
+        // instances, empty for user-clone DEF rows).
+        for tpl_id in &template_ids {
+            conn.execute(
+                "DELETE FROM db_agents
+                 WHERE is_template = 0
+                   AND parent_template_id = ?1
+                   AND definition_id <> ''",
+                params![tpl_id],
+            )?;
+        }
+        // Drop the templates themselves.
+        let rows = conn.execute(
+            "DELETE FROM db_agents WHERE is_template = 1",
+            [],
+        )?;
         Ok(rows)
     }
 
@@ -696,6 +708,11 @@ impl WaveStore {
     /// The collision check + insert run under a single mutex lock,
     /// so this is race-safe against concurrent inserts on the same
     /// connection.
+    ///
+    /// Phase 3c: writes directly to the consolidated `db_agents` table.
+    /// Templates (`is_seeded = 1`) land with `is_template = 1` and
+    /// empty bindings; user-clone definitions land with `is_template
+    /// = 0` + `parent_template_id = parent_id`.
     pub fn agent_def_insert(&self, agent: &mut AgentDefinition) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         let base = if agent.slug.is_empty() {
@@ -703,13 +720,10 @@ impl WaveStore {
         } else {
             agent.slug.clone()
         };
-        // Collision-resolve: scan for existing slugs matching base or
-        // base-N. Phase 3b reads slug uniqueness from `db_agents` — the
-        // dual-write keeps every definition's slug mirrored there, and
-        // the consolidated table also surfaces template-instance
-        // projections, so a slug collision against an instance-derived
-        // row is caught now too (under the legacy schema, instances
-        // didn't have slugs at all, so this is a strict superset).
+        // Collision-resolve against `db_agents.slug`. The consolidated
+        // table surfaces template-instance projections too (which under
+        // the old schema didn't have slugs), so this is a strict
+        // superset of the legacy uniqueness check.
         let mut candidate = base.clone();
         let mut n: u32 = 2;
         loop {
@@ -725,62 +739,61 @@ impl WaveStore {
             n += 1;
         }
         agent.slug = candidate;
+        let is_template = if agent.is_seeded == 1 { 1_i64 } else { 0_i64 };
+        let parent_template_id = if agent.is_seeded == 1 {
+            String::new()
+        } else {
+            agent.parent_id.clone()
+        };
         conn.execute(
-            "INSERT INTO db_agent_definitions (id, slug, name, icon, provider, description,
-             working_directory, shell, provider_flags, auto_start, restart_on_crash,
-             idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
-             is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19, ?20, ?21, ?22)",
+            "INSERT INTO db_agents (
+                id, name, icon, description,
+                is_template, parent_template_id,
+                provider, provider_flags, shell, environment,
+                agent_type, agent_bus_id, accounts,
+                auto_start, restart_on_crash, idle_timeout_minutes,
+                slug, branch_label,
+                created_at, updated_at, is_seeded, user_hidden
+             ) VALUES (
+                ?1, ?2, ?3, ?4,
+                ?5, ?6,
+                ?7, ?8, ?9, ?10,
+                ?11, ?12, ?13,
+                ?14, ?15, ?16,
+                ?17, ?18,
+                ?19, ?20, ?21, ?22
+             )",
             params![
                 agent.id,
-                agent.slug,
                 agent.name,
                 agent.icon,
-                agent.provider,
                 agent.description,
-                agent.working_directory,
-                agent.shell,
+                is_template,
+                parent_template_id,
+                agent.provider,
                 agent.provider_flags,
+                agent.shell,
+                agent.environment,
+                agent.agent_type,
+                agent.agent_bus_id,
+                agent.accounts,
                 agent.auto_start,
                 agent.restart_on_crash,
                 agent.idle_timeout_minutes,
-                agent.created_at,
-                agent.agent_type,
-                agent.environment,
-                agent.agent_bus_id,
-                agent.is_seeded,
-                agent.accounts,
-                agent.parent_id,
+                agent.slug,
                 agent.branch_label,
-                // New definitions: updated_at == created_at.
                 agent.created_at,
-                // Phase 2 (hide templates): new rows start visible. The
-                // user only hides via the explicit `agent_def_hide` RPC,
-                // and the agent-seed re-sync forces user_hidden = 0 on
-                // any newly-added template id anyway, so honouring the
-                // caller-supplied value here is safe even when a stray
-                // 1 sneaks through.
+                // New rows: updated_at == created_at.
+                agent.created_at,
+                agent.is_seeded,
+                // Phase 2 (hide templates): new rows start visible.
+                // The agent-seed re-sync forces user_hidden = 0 on any
+                // newly-added template id, so honouring the caller-
+                // supplied value here is safe even when a stray 1
+                // sneaks through.
                 agent.user_hidden,
             ],
         )?;
-        // Persist the stamped updated_at before we leave the lock so the
-        // dual-write helper sees the same value the SQL row carries.
-        let stamped_updated_at = agent.created_at;
-        drop(conn);
-        let mut snapshot = agent.clone();
-        snapshot.updated_at = stamped_updated_at;
-        // Phase 3a dual-write (Phase 3b: errors propagate): mirror to
-        // db_agents so readers see the new row immediately.
-        self.agents_dual_write_definition_upsert(&snapshot)?;
-        // Reagent P1 on #1013 round 2: do NOT mutate the caller's
-        // `&mut AgentDefinition` here. The PR is supposed to be
-        // zero-behaviour-change; the previous version reflected
-        // `stamped_updated_at` back onto the caller, which is an
-        // observable mutation downstream callers may rely on remaining
-        // untouched. Callers that need the freshly-stamped value can
-        // re-fetch the row via the normal read path.
-        let _ = stamped_updated_at;
         Ok(())
     }
 
@@ -798,10 +811,10 @@ impl WaveStore {
     /// against the canonical row).
     pub fn agent_def_set_hidden(&self, id: &str, hidden: bool) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
-        // Phase 3b: precondition check reads `is_template` from `db_agents`.
-        // Templates carry `is_template = 1` and are the only rows allowed
-        // to flip the hide flag; folded user-clone-def projections and
-        // template-instance projections (both `is_template = 0`) reject.
+        // Phase 3c: read + write both target `db_agents`. Templates
+        // carry `is_template = 1` and are the only rows allowed to
+        // flip the hide flag; user-owned rows (`is_template = 0`)
+        // reject — their removal path is `agent_def_delete`, not hide.
         let is_template: i64 = match conn.query_row(
             "SELECT is_template FROM db_agents WHERE id = ?1",
             params![id],
@@ -817,29 +830,10 @@ impl WaveStore {
                  user-owned definitions must use delete/archive paths, not hide"
             )));
         }
-        // The hide flag is per-row; the write must still hit the legacy
-        // table (cascade source) — dual-write mirrors into `db_agents`
-        // for the next read.
         let rows = conn.execute(
-            "UPDATE db_agent_definitions SET user_hidden = ?1 WHERE id = ?2",
+            "UPDATE db_agents SET user_hidden = ?1 WHERE id = ?2 AND is_template = 1",
             params![if hidden { 1_i64 } else { 0_i64 }, id],
         )?;
-        if rows > 0 {
-            // Mirror the flag into `db_agents` so the next read of the
-            // template projection sees the update without waiting for a
-            // round-trip through definition_upsert.
-            if let Err(e) = conn.execute(
-                "UPDATE db_agents SET user_hidden = ?1 WHERE id = ?2 AND is_template = 1",
-                params![if hidden { 1_i64 } else { 0_i64 }, id],
-            ) {
-                tracing::error!(
-                    id = %id,
-                    hidden,
-                    error = %e,
-                    "db_agents dual-write: template hide flag mirror failed",
-                );
-            }
-        }
         Ok(rows > 0)
     }
 
@@ -858,12 +852,29 @@ impl WaveStore {
             .as_millis() as i64;
         let rows = {
             let conn = self.conn.lock().unwrap();
+            // Phase 3c: writes the consolidated `db_agents` row in
+            // place. `working_directory` is preserved on the agent row
+            // (it was tracked on `db_agent_instances` previously, but
+            // we keep it on db_agents for user-owned rows so the
+            // existing AgentDefinition wire shape stays intact).
             conn.execute(
-                "UPDATE db_agent_definitions SET name=?1, icon=?2, provider=?3, description=?4,
-                 working_directory=?5, shell=?6, provider_flags=?7, auto_start=?8,
-                 restart_on_crash=?9, idle_timeout_minutes=?10,
-                 agent_type=?11, environment=?12, agent_bus_id=?13, accounts=?14, updated_at=?15
-                 WHERE id=?16",
+                "UPDATE db_agents
+                 SET name = ?1,
+                     icon = ?2,
+                     provider = ?3,
+                     description = ?4,
+                     working_directory = ?5,
+                     shell = ?6,
+                     provider_flags = ?7,
+                     auto_start = ?8,
+                     restart_on_crash = ?9,
+                     idle_timeout_minutes = ?10,
+                     agent_type = ?11,
+                     environment = ?12,
+                     agent_bus_id = ?13,
+                     accounts = ?14,
+                     updated_at = ?15
+                 WHERE id = ?16",
                 params![
                     agent.name,
                     agent.icon,
@@ -880,45 +891,61 @@ impl WaveStore {
                     agent.agent_bus_id,
                     agent.accounts,
                     now,
-                    agent.id
+                    agent.id,
                 ],
             )?
         };
         // Reflect the persisted timestamp back to the caller's struct so an
         // RPC response carries the fresh value, not the pre-update one.
         agent.updated_at = now;
-        // Phase 3a dual-write (Phase 3b: errors propagate): mirror to
-        // db_agents so the next read sees the new name/payload.
-        if rows > 0 {
-            self.agents_dual_write_definition_upsert(agent)?;
-        }
         Ok(rows > 0)
     }
 
-    /// Delete a agent definition by id. Returns true if a row was deleted.
+    /// Delete an agent by id. Returns true if a row was deleted.
+    ///
+    /// Phase 3c: writes directly to `db_agents`. Cascades through any
+    /// template-instance projection rows whose `parent_template_id`
+    /// matches `id` (the old FK on `db_agent_instances.definition_id`
+    /// did this automatically). The cross-version registry mirror is
+    /// kept in sync: any registry record whose `definition_id` field
+    /// references this agent is removed too, so "Forget agent"
+    /// cascades correctly even for folded instances (whose db_agents
+    /// row already merged into the def and so doesn't appear in the
+    /// cascade SELECT).
     pub fn agent_def_delete(&self, id: &str) -> Result<bool, StoreError> {
-        // Snapshot cascaded instance ids AND issue the parent DELETE
-        // under one lock acquisition so no thread can `instance_create`
-        // a new row for this definition between the two steps. The
-        // SQL DELETE's FK cascade fires inside SQLite while we hold
-        // the mutex, so the snapshot exactly matches the rows that
-        // got removed by the cascade.
         let (cascaded_instance_ids, rows) = {
             let conn = self.conn.lock().unwrap();
+            // Collect template-instance projection ids so we can drop
+            // them + their registry tombstones in one pass.
             let cascaded_instance_ids: Vec<String> = {
-                let mut stmt = conn
-                    .prepare("SELECT id FROM db_agent_instances WHERE definition_id = ?1")?;
+                let mut stmt = conn.prepare(
+                    "SELECT id FROM db_agents
+                     WHERE is_template = 0
+                       AND parent_template_id = ?1
+                       AND id <> ?1",
+                )?;
                 let iter = stmt.query_map(params![id], |row| row.get::<_, String>(0))?;
-                iter.collect::<Result<Vec<_>, _>>()?
+                let v = iter.collect::<Result<Vec<_>, _>>()?;
+                drop(stmt);
+                v
             };
+            // Drop the cascaded template-instance projection rows.
+            for instance_id in &cascaded_instance_ids {
+                conn.execute(
+                    "DELETE FROM db_agents WHERE id = ?1",
+                    params![instance_id],
+                )?;
+            }
+            // Drop the agent row itself.
             let rows = conn.execute(
-                "DELETE FROM db_agent_definitions WHERE id=?1",
+                "DELETE FROM db_agents WHERE id = ?1",
                 params![id],
             )?;
             (cascaded_instance_ids, rows)
         };
         if rows > 0 {
             if let Some(reg) = self.registry() {
+                // Cascade explicit template-instance ids.
                 for instance_id in &cascaded_instance_ids {
                     if let Err(e) = reg.hard_delete(instance_id) {
                         tracing::warn!(
@@ -929,13 +956,24 @@ impl WaveStore {
                         );
                     }
                 }
-            }
-            // Phase 3a dual-write (Phase 3b: errors propagate): drop
-            // the definition's projection + every cascaded user-clone
-            // (instance) projection.
-            self.agents_dual_write_definition_delete(id)?;
-            for instance_id in &cascaded_instance_ids {
-                self.agents_dual_write_instance_delete(instance_id)?;
+                // Cascade any registry record whose `definition_id`
+                // points at this agent — covers the folded-instance
+                // case (where the inst.id never had a separate
+                // db_agents row, so the SELECT above didn't see it).
+                if let Ok(records) = reg.list_active() {
+                    for rec in records {
+                        if rec.data.definition_id == id {
+                            if let Err(e) = reg.hard_delete(&rec.data.instance_id) {
+                                tracing::warn!(
+                                    instance_id = %rec.data.instance_id,
+                                    agent_def_id = %id,
+                                    error = %e,
+                                    "registry: failed to mirror agent_def_delete cascade (folded)"
+                                );
+                            }
+                        }
+                    }
+                }
             }
         }
         Ok(rows > 0)
@@ -1754,6 +1792,20 @@ impl WaveStore {
     }
 
     // ---- Agent instance CRUD ----
+    //
+    // Phase 3c retired `db_agent_instances`. Every "instance" is now a
+    // row in `db_agents` with `is_template = 0` and a non-empty
+    // `definition_id` (set when `instance_create` runs against the
+    // agent row — empty for user-clone DEF rows that never spawned).
+    //
+    // Two row shapes carry instance semantics:
+    //   - Template-instance projection: id = old instance.id,
+    //     parent_template_id = template id, definition_id = template id.
+    //   - User-clone-def fold: id = def.id, parent_template_id = the
+    //     template the user cloned from, definition_id = def.id.
+    // Both shape resolve to `is_template = 0`. Callers that need to
+    // distinguish "has run before" from "fresh user-clone" check
+    // `definition_id <> ''`.
 
     /// List instances. Both filters are optional — pass `None` to scan all
     /// instances. Ordered by `created_at` descending (most recent first).
@@ -1769,8 +1821,10 @@ impl WaveStore {
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
                     status, github_context, started_at, ended_at, created_at,
                     identity_id, memory_id, instance_name, working_directory,
-                    display_hidden
-             FROM db_agent_instances",
+                    user_hidden
+             FROM db_agents
+             WHERE is_template = 0
+               AND definition_id <> ''",
         );
         let mut clauses: Vec<&str> = Vec::new();
         if definition_id.is_some() {
@@ -1780,15 +1834,13 @@ impl WaveStore {
             clauses.push("status = ?");
         }
         if !clauses.is_empty() {
-            sql.push_str(" WHERE ");
+            sql.push_str(" AND ");
             sql.push_str(&clauses.join(" AND "));
         }
         sql.push_str(" ORDER BY created_at DESC");
 
         let mut stmt = conn.prepare(&sql)?;
         // Build a Vec<String> so parameter lifetimes outlive the query call.
-        // Borrowing the `&str` args directly caused E0597 because they're
-        // bound to the match arms, not the outer scope.
         let mut param_vals: Vec<String> = Vec::new();
         if let Some(d) = definition_id {
             param_vals.push(d.to_string());
@@ -1810,8 +1862,9 @@ impl WaveStore {
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
                     status, github_context, started_at, ended_at, created_at,
                     identity_id, memory_id, instance_name, working_directory,
-                    display_hidden
-             FROM db_agent_instances WHERE id = ?1",
+                    user_hidden
+             FROM db_agents
+             WHERE id = ?1 AND is_template = 0 AND definition_id <> ''",
         )?;
         let result = stmt.query_row(params![id], map_instance_row);
         match result {
@@ -1821,41 +1874,197 @@ impl WaveStore {
         }
     }
 
-    /// Insert a new instance row. Caller is responsible for the id (UUID).
+    /// Create a new instance row on the consolidated `db_agents`.
+    /// Caller is responsible for the id (UUID).
+    ///
+    /// Phase 3c routing:
+    ///   - If the parent definition row in `db_agents` is a user-clone
+    ///     DEF (`is_template = 0`, `definition_id = ''`), FOLD the
+    ///     instance's bindings + lifecycle into that row in place
+    ///     (no new row).
+    ///   - Otherwise (template parent), INSERT a new template-instance
+    ///     projection row keyed by `inst.id`.
+    ///   - Continuation rows (`parent_instance_id` non-empty) are a
+    ///     pre-Option-E concept the consolidation retires: they don't
+    ///     get their own db_agents row.
     pub fn instance_create(&self, inst: &AgentInstance) -> Result<(), StoreError> {
+        if !inst.parent_instance_id.is_empty() {
+            // Continuation row — no db_agents projection. Registry
+            // mirror is intentionally skipped too (matches the legacy
+            // `registry_upsert_if_named` filter: continuation rows
+            // would otherwise duplicate the dropdown entry).
+            return Ok(());
+        }
         {
             let conn = self.conn.lock().unwrap();
-            conn.execute(
-                "INSERT INTO db_agent_instances
-                    (id, definition_id, parent_instance_id, block_id, session_id, status,
-                     github_context, started_at, ended_at, created_at,
-                     identity_id, memory_id,
-                     instance_name, working_directory, display_hidden)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                         ?13, ?14, ?15)",
-                params![
-                    inst.id,
-                    inst.definition_id,
-                    inst.parent_instance_id,
-                    inst.block_id,
-                    inst.session_id,
-                    inst.status,
-                    inst.github_context,
-                    inst.started_at,
-                    inst.ended_at,
-                    inst.created_at,
-                    inst.identity_id,
-                    inst.memory_id,
-                    inst.instance_name,
-                    inst.working_directory,
-                    if inst.display_hidden { 1_i64 } else { 0_i64 },
-                ],
-            )?;
+            // Pull the parent agent row (the "definition" the instance
+            // is being created against).
+            let parent = match Self::load_agent_row_for_instance(&conn, &inst.definition_id)? {
+                Some(p) => p,
+                None => {
+                    // Orphan instance — no matching agent row in
+                    // db_agents. Log and skip; the legacy schema
+                    // tolerated this case (no FK enforcement on test
+                    // stores).
+                    tracing::error!(
+                        instance_id = %inst.id,
+                        definition_id = %inst.definition_id,
+                        "instance_create: parent agent row missing; skipping projection",
+                    );
+                    return Ok(());
+                }
+            };
+
+            let name = if inst.instance_name.is_empty() {
+                parent.name.clone()
+            } else {
+                inst.instance_name.clone()
+            };
+
+            // Compute a monotonic updated_at past the table-wide max
+            // so successive fast-fire creates produce a strict total
+            // order on the sort key. SQLite millisecond resolution on
+            // Windows collides under fast test loops.
+            let wall_now: i64 = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(inst.created_at);
+            let global_prior: i64 = conn
+                .query_row(
+                    "SELECT COALESCE(MAX(updated_at), 0) FROM db_agents",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0);
+            let now_ms = std::cmp::max(wall_now, global_prior.saturating_add(1));
+
+            if parent.is_seeded == 0 {
+                // User-clone DEF parent — fold the instance into the
+                // def row. This preserves the consolidation rule (one
+                // agent row per user agent) even on subsequent launch
+                // events.
+                conn.execute(
+                    "UPDATE db_agents SET
+                        name = ?2,
+                        identity_id = ?3,
+                        memory_id = ?4,
+                        working_directory = ?5,
+                        github_context = ?6,
+                        instance_name = ?7,
+                        definition_id = ?8,
+                        parent_instance_id = ?9,
+                        block_id = ?10,
+                        session_id = ?11,
+                        status = ?12,
+                        started_at = ?13,
+                        ended_at = ?14,
+                        updated_at = ?15,
+                        user_hidden = ?16
+                     WHERE id = ?1",
+                    params![
+                        parent.id,
+                        name,
+                        inst.identity_id,
+                        inst.memory_id,
+                        inst.working_directory,
+                        inst.github_context,
+                        inst.instance_name,
+                        inst.definition_id,
+                        inst.parent_instance_id,
+                        inst.block_id,
+                        inst.session_id,
+                        inst.status,
+                        inst.started_at,
+                        inst.ended_at,
+                        now_ms,
+                        if inst.display_hidden { 1_i64 } else { 0_i64 },
+                    ],
+                )?;
+            } else {
+                // Template parent — fresh template-instance projection
+                // row keyed by `inst.id`. Copy provider/cmd config from
+                // the parent so the row is self-describing.
+                conn.execute(
+                    "INSERT INTO db_agents (
+                        id, name, icon, description,
+                        is_template, parent_template_id,
+                        provider, provider_flags, shell, environment,
+                        agent_type, agent_bus_id, accounts,
+                        auto_start, restart_on_crash, idle_timeout_minutes,
+                        slug, branch_label,
+                        identity_id, memory_id, working_directory, github_context,
+                        instance_name,
+                        definition_id, parent_instance_id,
+                        block_id, session_id, status,
+                        started_at, ended_at,
+                        created_at, updated_at, is_seeded, user_hidden
+                     ) VALUES (
+                        ?1, ?2, ?3, ?4,
+                        0, ?5,
+                        ?6, ?7, ?8, ?9,
+                        ?10, ?11, ?12,
+                        ?13, ?14, ?15,
+                        ?16, ?17,
+                        ?18, ?19, ?20, ?21,
+                        ?22,
+                        ?23, ?24,
+                        ?25, ?26, ?27,
+                        ?28, ?29,
+                        ?30, ?31, 0, ?32
+                     )
+                     ON CONFLICT(id) DO UPDATE SET
+                        name = excluded.name,
+                        identity_id = excluded.identity_id,
+                        memory_id = excluded.memory_id,
+                        working_directory = excluded.working_directory,
+                        github_context = excluded.github_context,
+                        instance_name = excluded.instance_name,
+                        definition_id = excluded.definition_id,
+                        block_id = excluded.block_id,
+                        session_id = excluded.session_id,
+                        status = excluded.status,
+                        started_at = excluded.started_at,
+                        ended_at = excluded.ended_at,
+                        updated_at = excluded.updated_at,
+                        user_hidden = excluded.user_hidden",
+                    params![
+                        inst.id,
+                        name,
+                        parent.icon,
+                        parent.description,
+                        parent.id, // parent_template_id = template def id
+                        parent.provider,
+                        parent.provider_flags,
+                        parent.shell,
+                        parent.environment,
+                        parent.agent_type,
+                        parent.agent_bus_id,
+                        parent.accounts,
+                        parent.auto_start,
+                        parent.restart_on_crash,
+                        parent.idle_timeout_minutes,
+                        parent.slug, // slug carried for completeness; collision-protected by index
+                        parent.branch_label,
+                        inst.identity_id,
+                        inst.memory_id,
+                        inst.working_directory,
+                        inst.github_context,
+                        inst.instance_name,
+                        inst.definition_id,
+                        inst.parent_instance_id,
+                        inst.block_id,
+                        inst.session_id,
+                        inst.status,
+                        inst.started_at,
+                        inst.ended_at,
+                        inst.created_at,
+                        now_ms,
+                        if inst.display_hidden { 1_i64 } else { 0_i64 },
+                    ],
+                )?;
+            }
         }
         self.registry_upsert_if_named(inst);
-        // Phase 3a dual-write (Phase 3b: errors propagate): mirror to
-        // db_agents so the next read sees the new instance.
-        self.agents_dual_write_instance_create(inst)?;
         Ok(())
     }
 
@@ -1868,11 +2077,35 @@ impl WaveStore {
     /// version's SQLite. The UPDATE returns 0 rows, but the registry
     /// still needs to flip — otherwise "Forget agent" silently no-ops
     /// on cross-version entries. Returns `true` if either side acted.
+    ///
+    /// Phase 3c: routes by the projection key so a folded user-clone-def
+    /// instance flips the bit on its def row.
     pub fn instance_set_hidden(&self, id: &str, hidden: bool) -> Result<bool, StoreError> {
         let rows = {
             let conn = self.conn.lock().unwrap();
+            // Locate the row this instance projects onto. A
+            // template-instance projection lives at `id`; a folded
+            // user-clone-def projection lives at `def.id` but the
+            // instance's `definition_id` column carries that key —
+            // and since folds write definition_id = def.id, the row
+            // we want IS the row at `id`. Practical net: the WHERE
+            // clause hits the right row in either shape (the fold
+            // row has id == def.id; the template-instance projection
+            // row has id == inst.id).
+            //
+            // For folded rows, instance.id != def.id — we need to
+            // resolve the routing. Look up the definition_id from
+            // the row keyed by `id`; if that row is a fold (id ==
+            // definition_id), flip the user_hidden on it. Otherwise
+            // (template-instance projection or freestanding row),
+            // also flip user_hidden on the same row.
             conn.execute(
-                "UPDATE db_agent_instances SET display_hidden = ?1 WHERE id = ?2",
+                "UPDATE db_agents SET user_hidden = ?1
+                 WHERE is_template = 0
+                   AND (
+                        id = ?2
+                        OR (definition_id = ?2 AND id = definition_id)
+                   )",
                 params![if hidden { 1_i64 } else { 0_i64 }, id],
             )?
         };
@@ -1898,9 +2131,6 @@ impl WaveStore {
                 }
             }
         }
-        // Phase 3a dual-write (Phase 3b: errors propagate): flip the
-        // hidden bit on db_agents.
-        self.agents_dual_write_instance_set_hidden(id, hidden)?;
         Ok(rows > 0 || registry_acted)
     }
 
@@ -1910,11 +2140,7 @@ impl WaveStore {
     /// dropdown's wire payload bounded.
     ///
     /// `definition_id`, when provided, restricts the result to
-    /// instances of that definition. Server-side filtering is
-    /// necessary because the launch modal opens per-definition: a
-    /// user with 200+ named agents across many definitions could
-    /// have the current definition's older instances cut off by a
-    /// purely global limit otherwise.
+    /// instances of that definition.
     pub fn instance_list_named(
         &self,
         limit: usize,
@@ -1925,9 +2151,11 @@ impl WaveStore {
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
                     status, github_context, started_at, ended_at, created_at,
                     identity_id, memory_id, instance_name, working_directory,
-                    display_hidden
-             FROM db_agent_instances
-             WHERE display_hidden = 0
+                    user_hidden
+             FROM db_agents
+             WHERE is_template = 0
+               AND definition_id <> ''
+               AND user_hidden = 0
                AND instance_name <> ''
                AND parent_instance_id = ''
                AND definition_id = ?1
@@ -1937,9 +2165,11 @@ impl WaveStore {
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
                     status, github_context, started_at, ended_at, created_at,
                     identity_id, memory_id, instance_name, working_directory,
-                    display_hidden
-             FROM db_agent_instances
-             WHERE display_hidden = 0
+                    user_hidden
+             FROM db_agents
+             WHERE is_template = 0
+               AND definition_id <> ''
+               AND user_hidden = 0
                AND instance_name <> ''
                AND parent_instance_id = ''
              ORDER BY started_at DESC
@@ -1974,10 +2204,12 @@ impl WaveStore {
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
                     status, github_context, started_at, ended_at, created_at,
                     identity_id, memory_id, instance_name, working_directory,
-                    display_hidden
-             FROM db_agent_instances
-             WHERE instance_name = ?1
-               AND display_hidden = 0
+                    user_hidden
+             FROM db_agents
+             WHERE is_template = 0
+               AND definition_id <> ''
+               AND user_hidden = 0
+               AND instance_name = ?1
              ORDER BY started_at DESC
              LIMIT 1",
         )?;
@@ -1989,41 +2221,58 @@ impl WaveStore {
         }
     }
 
-    /// Update mutable instance fields. `id`, `definition_id`,
-    /// `parent_instance_id`, `started_at`, `created_at` are immutable
-    /// after insert (they describe provenance, not state).
+    /// Update mutable instance fields on the consolidated `db_agents`
+    /// row. `id`, `definition_id`, `parent_instance_id`, `started_at`,
+    /// `created_at` are immutable after insert.
     pub fn instance_update(&self, inst: &AgentInstance) -> Result<bool, StoreError> {
+        // Continuation rows don't have their own projection — no-op.
+        if !inst.parent_instance_id.is_empty() {
+            return Ok(false);
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
         let rows = {
             let conn = self.conn.lock().unwrap();
+            // Monotonic floor on updated_at so the picker's recency
+            // sort sees a strict total order even under fast loops.
+            let global_prior: i64 = conn
+                .query_row(
+                    "SELECT COALESCE(MAX(updated_at), 0) FROM db_agents",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0);
+            let now_monotonic = std::cmp::max(now, global_prior.saturating_add(1));
             conn.execute(
-                "UPDATE db_agent_instances SET
+                "UPDATE db_agents SET
                     block_id = ?1,
                     session_id = ?2,
                     status = ?3,
                     github_context = ?4,
-                    ended_at = ?5
-                 WHERE id = ?6",
+                    ended_at = ?5,
+                    updated_at = ?6
+                 WHERE is_template = 0
+                   AND (
+                        id = ?7
+                        OR (definition_id = ?7 AND id = definition_id)
+                   )",
                 params![
                     inst.block_id,
                     inst.session_id,
                     inst.status,
                     inst.github_context,
                     inst.ended_at,
+                    now_monotonic,
                     inst.id,
                 ],
             )?
         };
         if rows > 0 {
             // Refresh the registry from the post-update authoritative row.
-            // `inst` is the caller's pre-update view; SQL UPDATE only
-            // touches a subset of fields, so we reload to keep registry
-            // mirror exact.
             if let Ok(Some(fresh)) = self.instance_get(&inst.id) {
                 self.registry_upsert_if_named(&fresh);
-                // Phase 3a dual-write (Phase 3b: errors propagate):
-                // mirror the fields the consolidation cares about
-                // (github_context, updated_at).
-                self.agents_dual_write_instance_update(&fresh)?;
             }
         }
         Ok(rows > 0)
@@ -2031,15 +2280,12 @@ impl WaveStore {
 
     /// Repoint every instance currently referencing `old_def_id` to
     /// `new_def_id`. Used by the Phase 1 two-tier-picker migration
-    /// (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md): when a seeded
-    /// template has been used directly (carries an `agent:<id>:current`
-    /// zone), the migration clones the template into a user agent and
-    /// repoints any instances so the existing reattach flow
-    /// (`continueOfInstanceId`) keeps working against the new
-    /// definition_id. Returns the number of rows updated.
+    /// (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
     ///
-    /// `definition_id` is declared immutable post-insert on the normal
-    /// `instance_update` path. This is the migration escape hatch.
+    /// Phase 3c: writes directly to `db_agents`. The instance's
+    /// `definition_id` column is rewritten, and `parent_template_id`
+    /// on template-instance projections is repointed too so the
+    /// reattach flow stays consistent.
     pub fn instance_repoint_definition(
         &self,
         old_def_id: &str,
@@ -2047,58 +2293,81 @@ impl WaveStore {
     ) -> Result<usize, StoreError> {
         let rows = {
             let conn = self.conn.lock().unwrap();
+            // Repoint the runtime definition_id pointer + the template
+            // lineage pointer on template-instance projections, all in
+            // one UPDATE. The WHERE filter restricts to rows whose
+            // `definition_id` matches (instances), so user-clone DEF
+            // rows (definition_id empty until first instance_create)
+            // and template rows (is_template = 1) are untouched.
             conn.execute(
-                "UPDATE db_agent_instances SET definition_id = ?1 WHERE definition_id = ?2",
+                "UPDATE db_agents
+                 SET definition_id = ?1,
+                     parent_template_id = CASE
+                        WHEN parent_template_id = ?2 THEN ?1
+                        ELSE parent_template_id
+                     END
+                 WHERE is_template = 0
+                   AND definition_id = ?2",
                 params![new_def_id, old_def_id],
-            )?
+            )? as usize
         };
-        // Phase 3a dual-write (Phase 3b: errors propagate): re-aim
-        // parent_template_id on the user-clone projection rows that
-        // were pointing at old_def_id.
-        if rows > 0 {
-            self.agents_dual_write_instance_repoint(old_def_id, new_def_id)?;
-        }
         Ok(rows)
     }
 
+    /// Delete an instance from `db_agents`.
+    ///
+    /// For a template-instance projection (the row's id IS the instance
+    /// id), the row is dropped. For a folded user-clone-def projection
+    /// (the def row carries instance state), the delete is a NO-OP at
+    /// the row level — the def itself persists when its instance ends.
+    /// `agent_def_delete` is the right entry point for removing the
+    /// folded def row.
+    ///
+    /// The cross-version registry file is cleaned up in both shapes:
+    /// the registry tracks instance lifecycle, not agent lifecycle,
+    /// so an instance "ending" must remove its named entry regardless
+    /// of whether the db_agents row persists.
     pub fn instance_delete(&self, id: &str) -> Result<bool, StoreError> {
         let rows = {
             let conn = self.conn.lock().unwrap();
-            conn.execute("DELETE FROM db_agent_instances WHERE id = ?1", params![id])?
+            // For a template-instance projection (id == inst.id), the
+            // row drops. For a folded user-clone-def instance, the row
+            // lives at def.id and the DELETE-by-inst.id matches
+            // nothing — that's the NO-OP at the row level. Either way
+            // we always clean the registry file (the instance
+            // lifecycle is ending; the registry tracks instances, not
+            // agents).
+            conn.execute(
+                "DELETE FROM db_agents
+                 WHERE id = ?1 AND is_template = 0",
+                params![id],
+            )?
         };
-        if rows > 0 {
-            if let Some(reg) = self.registry() {
-                if let Err(e) = reg.hard_delete(id) {
-                    tracing::warn!(
-                        instance_id = %id,
-                        error = %e,
-                        "registry: failed to mirror instance_delete"
-                    );
-                }
+        // Registry mirror runs unconditionally — `hard_delete` is
+        // NotFound-tolerant, so it's safe to call when no file exists
+        // (the folded-instance case, or stale id).
+        if let Some(reg) = self.registry() {
+            if let Err(e) = reg.hard_delete(id) {
+                tracing::warn!(
+                    instance_id = %id,
+                    error = %e,
+                    "registry: failed to mirror instance_delete"
+                );
             }
-            // Phase 3a dual-write (Phase 3b: errors propagate): drop
-            // the user-clone projection.
-            self.agents_dual_write_instance_delete(id)?;
         }
         Ok(rows > 0)
     }
 
-    /// Back-fill `db_agent_instances.identity_id` for legacy rows that
-    /// have either the empty string (post-v7 default before the launch
-    /// modal required Identity) or the literal `"blank"` sentinel
-    /// (pre-v8 placeholder for "use ambient creds"). Both shapes map
-    /// to "no Identity bundle assigned" and the OAuth-bundles startup
-    /// migration (PR E, spec §5) routes them to the newly-seeded
-    /// Default bundle so the resolver can inject env vars from the
-    /// captured ambient credentials at the next spawn.
+    /// Back-fill `identity_id` for legacy instance rows that have
+    /// either the empty string or the literal `"blank"` sentinel.
+    /// Both shapes map to "no Identity bundle assigned" and the
+    /// OAuth-bundles startup migration (PR E, spec §5) routes them
+    /// to the newly-seeded Default bundle so the resolver can inject
+    /// env vars from the captured ambient credentials.
     ///
-    /// Returns the number of rows touched. Caller must verify that
-    /// `new_identity_id` is a real `db_identity_bundles.id` — this
-    /// method does NOT enforce FK validity (the column has no FK
-    /// constraint per the v7 migration). Mis-use would orphan the
-    /// rows to a non-existent bundle; the OAuth-bundles migration
-    /// guards against this by only calling here when it just upserted
-    /// the bundle row.
+    /// Phase 3c: writes directly to `db_agents`. Scope restricted to
+    /// instance rows (is_template = 0 AND definition_id <> '') —
+    /// template rows leave identity_id empty by design.
     pub fn instance_backfill_identity_id(
         &self,
         new_identity_id: &str,
@@ -2106,15 +2375,14 @@ impl WaveStore {
         let rows = {
             let conn = self.conn.lock().unwrap();
             conn.execute(
-                "UPDATE db_agent_instances
+                "UPDATE db_agents
                  SET identity_id = ?1
-                 WHERE identity_id = '' OR identity_id = 'blank'",
+                 WHERE is_template = 0
+                   AND definition_id <> ''
+                   AND (identity_id = '' OR identity_id = 'blank')",
                 params![new_identity_id],
             )?
         };
-        // Phase 3a dual-write (Phase 3b: errors propagate): same
-        // backfill on db_agents user-clone rows.
-        self.agents_dual_write_backfill_identity(new_identity_id)?;
         Ok(rows)
     }
 
@@ -2212,9 +2480,12 @@ impl WaveStore {
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
                     status, github_context, started_at, ended_at, created_at,
                     identity_id, memory_id, instance_name, working_directory,
-                    display_hidden
-             FROM db_agent_instances
-             WHERE block_id = ?1 AND status IN ('running', 'paused')
+                    user_hidden
+             FROM db_agents
+             WHERE is_template = 0
+               AND definition_id <> ''
+               AND block_id = ?1
+               AND status IN ('running', 'paused')
              ORDER BY created_at DESC
              LIMIT 1",
         )?;
@@ -2227,512 +2498,20 @@ impl WaveStore {
     }
 
     // ====================================================================
-    // Phase 3a — db_agents dual-write helpers
+    // Phase 3c — internal helpers
     //
-    // Every mutation on `db_agent_definitions` / `db_agent_instances`
-    // mirrors into `db_agents` so a later read-migration PR (Phase 3b)
-    // can flip readers over with confidence. Dual-write failures LOG +
-    // CONTINUE — the old tables remain authoritative until Phase 3b.
-    // See docs/specs/SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md.
+    // The dual-write helpers from Phase 3a are gone; mutations now write
+    // directly to `db_agents`. The only remaining internal helper is a
+    // narrow read of the parent agent row used by `instance_create` to
+    // decide between INSERT (template parent) and UPDATE-fold (user-
+    // clone-def parent). See docs/specs/SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md.
     // ====================================================================
 
-    /// Mirror a `db_agent_definitions` row into `db_agents` as the
-    /// canonical row for that definition.
-    ///
-    /// - `is_seeded = 1` rows become `is_template = 1` (canonical
-    ///   template; bindings stay empty).
-    /// - `is_seeded = 0` rows become `is_template = 0` with
-    ///   `parent_template_id = parent_id` (user-cloned from a template;
-    ///   bindings come from the matching instance, if any — handled by
-    ///   `agents_dual_write_instance_create` updating in place).
-    ///
-    /// Idempotent: uses `INSERT … ON CONFLICT(id) DO UPDATE`. Existing
-    /// bindings on the row (written previously by an instance dual-write)
-    /// are preserved — only definition-side fields are overwritten.
-    ///
-    /// Phase 3b: returns `Err` on failure (previously logged + continued).
-    /// Phase 3b readers see `db_agents`, so a silent dual-write failure
-    /// would leak stale data into the picker.
-    pub(crate) fn agents_dual_write_definition_upsert(&self, def: &AgentDefinition) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let is_template = if def.is_seeded == 1 { 1_i64 } else { 0_i64 };
-        let parent_template_id = if def.is_seeded == 1 {
-            String::new()
-        } else {
-            def.parent_id.clone()
-        };
-        // Phase 3b: carry the caller's `user_hidden` into the INSERT
-        // (previously hardcoded to 0). The legacy `db_agent_definitions`
-        // INSERT honours it, and now that Phase 3b readers look at
-        // `db_agents`, the projection must agree from row creation —
-        // not just after a subsequent `agent_def_set_hidden` flip.
-        // ON CONFLICT deliberately does NOT update `user_hidden`: hide
-        // is a per-user view-state flag that survives definition
-        // payload edits.
-        conn.execute(
-            "INSERT INTO db_agents (
-                id, name, icon, description,
-                is_template, parent_template_id,
-                provider, provider_flags, shell, environment,
-                agent_type, agent_bus_id, accounts,
-                auto_start, restart_on_crash, idle_timeout_minutes,
-                slug, branch_label,
-                created_at, updated_at, is_seeded, user_hidden
-             ) VALUES (
-                ?1, ?2, ?3, ?4,
-                ?5, ?6,
-                ?7, ?8, ?9, ?10,
-                ?11, ?12, ?13,
-                ?14, ?15, ?16,
-                ?17, ?18,
-                ?19, ?20, ?21, ?22
-             )
-             ON CONFLICT(id) DO UPDATE SET
-                name = excluded.name,
-                icon = excluded.icon,
-                description = excluded.description,
-                is_template = excluded.is_template,
-                parent_template_id = excluded.parent_template_id,
-                provider = excluded.provider,
-                provider_flags = excluded.provider_flags,
-                shell = excluded.shell,
-                environment = excluded.environment,
-                agent_type = excluded.agent_type,
-                agent_bus_id = excluded.agent_bus_id,
-                accounts = excluded.accounts,
-                auto_start = excluded.auto_start,
-                restart_on_crash = excluded.restart_on_crash,
-                idle_timeout_minutes = excluded.idle_timeout_minutes,
-                slug = excluded.slug,
-                branch_label = excluded.branch_label,
-                updated_at = excluded.updated_at,
-                is_seeded = excluded.is_seeded",
-            params![
-                def.id,
-                def.name,
-                def.icon,
-                def.description,
-                is_template,
-                parent_template_id,
-                def.provider,
-                def.provider_flags,
-                def.shell,
-                def.environment,
-                def.agent_type,
-                def.agent_bus_id,
-                def.accounts,
-                def.auto_start,
-                def.restart_on_crash,
-                def.idle_timeout_minutes,
-                def.slug,
-                def.branch_label,
-                def.created_at,
-                def.updated_at,
-                def.is_seeded,
-                def.user_hidden,
-            ],
-        )?;
-        Ok(())
-    }
-
-    /// Mirror a `db_agent_definitions` DELETE into `db_agents`. The
-    /// definition row itself is removed; any user-cloned children (rows
-    /// with `parent_template_id = old_id`) are left intact because the
-    /// FK cascade on the OLD schema only deletes instances, not other
-    /// definitions.
-    pub(crate) fn agents_dual_write_definition_delete(&self, def_id: &str) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        // Reagent P2 on #1013 round 3: `id` is the PK so two DELETE
-        // statements scoped by `id = ?1 AND is_template = N` add nothing
-        // over a single PK delete (only one row can match either, and
-        // an early return on the first error would skip the second
-        // cleanup unnecessarily). Collapsed to a single direct PK
-        // delete that handles both template and user-clone projections.
-        conn.execute(
-            "DELETE FROM db_agents WHERE id = ?1",
-            params![def_id],
-        )?;
-        Ok(())
-    }
-
-    /// Bulk dual-write: mirror `agent_def_delete_seeded`. Deletes:
-    ///   1. every `is_template = 1` row (the template projections), AND
-    ///   2. every `db_agents` row whose `id` is in the
-    ///      `cascaded_inst_ids` set (template-instance projections that
-    ///      were just removed by the FK cascade on `db_agent_instances`).
-    ///
-    /// User-clone DEFINITION projections (`is_template = 0`, `id` is a
-    /// def_id in `db_agent_definitions`) are NOT touched — those rows
-    /// represent persistent user agents and live or die with their
-    /// `db_agent_definitions` row, not with the seeded-template bulk
-    /// delete. Reagent P1 round 4 on #1013: the previous version
-    /// scoped by `parent_template_id` and over-deleted user-clone DEF
-    /// projections too. Idempotent.
-    pub(crate) fn agents_dual_write_seeded_delete(&self, cascaded_inst_ids: &[String]) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "DELETE FROM db_agents WHERE is_template = 1",
-            [],
-        )?;
-        // Delete cascaded instance projections one by one. Could batch
-        // via `id IN (?1, ?2, ...)` but the seeded delete is rare and
-        // the typical set is small (< 100); per-id loop keeps the SQL
-        // simple and avoids dynamic-parameter expansion.
-        for inst_id in cascaded_inst_ids {
-            conn.execute(
-                "DELETE FROM db_agents WHERE id = ?1 AND is_template = 0",
-                params![inst_id],
-            )?;
-        }
-        Ok(())
-    }
-
-    /// Mirror a `db_agent_instances` INSERT into `db_agents`. Always
-    /// creates a NEW row in `db_agents` whose id == instance id.
-    ///
-    /// The row's identity comes from the instance (id, name, bindings).
-    /// Its template-config fields are copied from the parent definition;
-    /// `parent_template_id` points at that definition.
-    ///
-    /// Continuation rows (`parent_instance_id` non-empty) are skipped —
-    /// they're not "agents" in the new model, they're a vestigial
-    /// pre-Option-E continuation chain that the consolidation retires.
-    pub(crate) fn agents_dual_write_instance_create(&self, inst: &AgentInstance) -> Result<(), StoreError> {
-        if !inst.parent_instance_id.is_empty() {
-            return Ok(());
-        }
-        let conn = self.conn.lock().unwrap();
-        // Pull the parent definition for the cmd-config fields.
-        let def = match Self::load_definition_for_dual_write(&conn, &inst.definition_id)? {
-            Some(d) => d,
-            None => {
-                // Orphan instance — no matching definition. The legacy
-                // table accepted the row (no FK in the old test stores),
-                // but with nothing to project there's nothing this
-                // helper can mirror. Surfacing this as Err would block
-                // a write the legacy path tolerated; log at error level
-                // and continue with no projection.
-                tracing::error!(
-                    instance_id = %inst.id,
-                    definition_id = %inst.definition_id,
-                    "db_agents dual-write: instance has no matching definition; skipping mirror",
-                );
-                return Ok(());
-            }
-        };
-        let name = if inst.instance_name.is_empty() {
-            def.name.clone()
-        } else {
-            inst.instance_name.clone()
-        };
-        // Reagent P1 on #1013 round 2: match the backfill rule
-        // (`agents_consolidate.rs::backfill_instances`) exactly. When the
-        // parent def is a user-clone (`is_seeded = 0`), the existing
-        // `db_agents` row keyed by `def.id` already represents this
-        // agent — FOLD the instance's bindings into it instead of
-        // inserting a new row keyed by `inst.id` with
-        // `parent_template_id = def.id` (which would point at a
-        // non-template row and produce a shape inconsistent with what
-        // backfill produced for identical data).
-        let res = if def.is_seeded == 0 {
-            // Reagent P2 round 3 on #1013: don't write `inst.created_at`
-            // here — the user-clone def may already have a fresher
-            // `updated_at` from a prior `agent_def_update` (e.g. user
-            // renamed the agent after first launch). Wall-clock now()
-            // is the right monotonic stamp (matches what
-            // `agents_dual_write_instance_update` writes on subsequent
-            // touches). Avoids Phase 3b readers sorting on a regressed
-            // timestamp.
-            //
-            // Phase 3b: also bump strictly past the table's GLOBAL
-            // `MAX(updated_at)` so that successive fast-fire launches
-            // (e.g. a rapid relaunch after a crash, or tests that drive
-            // the store in-memory) end up with a strict total order on
-            // the sort key. Per-row floor isn't enough: two distinct
-            // defs touched in the same millisecond would tie. SQLite
-            // millisecond resolution on Windows collides under fast
-            // test loops; the table-wide max is the only monotonic
-            // floor we can use without adding a column.
-            let wall_now: i64 = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(inst.created_at);
-            let global_prior: i64 = conn
-                .query_row(
-                    "SELECT COALESCE(MAX(updated_at), 0) FROM db_agents",
-                    [],
-                    |row| row.get::<_, i64>(0),
-                )
-                .unwrap_or(0);
-            let now_ms = std::cmp::max(wall_now, global_prior.saturating_add(1));
-            conn.execute(
-                "UPDATE db_agents SET
-                    name = ?2,
-                    identity_id = ?3,
-                    memory_id = ?4,
-                    working_directory = ?5,
-                    github_context = ?6,
-                    instance_name = ?7,
-                    updated_at = ?8,
-                    user_hidden = ?9
-                 WHERE id = ?1",
-                params![
-                    def.id,
-                    name,
-                    inst.identity_id,
-                    inst.memory_id,
-                    inst.working_directory,
-                    inst.github_context,
-                    inst.instance_name,
-                    now_ms,
-                    if inst.display_hidden { 1_i64 } else { 0_i64 },
-                ],
-            )
-        } else {
-            conn.execute(
-                "INSERT INTO db_agents (
-                    id, name, icon, description,
-                    is_template, parent_template_id,
-                    provider, provider_flags, shell, environment,
-                    agent_type, agent_bus_id, accounts,
-                    auto_start, restart_on_crash, idle_timeout_minutes,
-                    slug, branch_label,
-                    identity_id, memory_id, working_directory, github_context,
-                    instance_name,
-                    created_at, updated_at, is_seeded, user_hidden
-                 ) VALUES (
-                    ?1, ?2, ?3, ?4,
-                    0, ?5,
-                    ?6, ?7, ?8, ?9,
-                    ?10, ?11, ?12,
-                    ?13, ?14, ?15,
-                    ?16, ?17,
-                    ?18, ?19, ?20, ?21,
-                    ?22,
-                    ?23, ?24, 0, ?25
-                 )
-                 ON CONFLICT(id) DO UPDATE SET
-                    name = excluded.name,
-                    identity_id = excluded.identity_id,
-                    memory_id = excluded.memory_id,
-                    working_directory = excluded.working_directory,
-                    github_context = excluded.github_context,
-                    instance_name = excluded.instance_name,
-                    updated_at = excluded.updated_at,
-                    user_hidden = excluded.user_hidden",
-                params![
-                    inst.id,
-                    name,
-                    def.icon,
-                    def.description,
-                    def.id,                  // parent_template_id = definition_id
-                    def.provider,
-                    def.provider_flags,
-                    def.shell,
-                    def.environment,
-                    def.agent_type,
-                    def.agent_bus_id,
-                    def.accounts,
-                    def.auto_start,
-                    def.restart_on_crash,
-                    def.idle_timeout_minutes,
-                    def.slug,
-                    def.branch_label,
-                    inst.identity_id,
-                    inst.memory_id,
-                    inst.working_directory,
-                    inst.github_context,
-                    inst.instance_name,
-                    inst.created_at,
-                    inst.created_at,          // updated_at = created_at on insert
-                    if inst.display_hidden { 1_i64 } else { 0_i64 },
-                ],
-            )
-        };
-        res?;
-        Ok(())
-    }
-
-    /// Mirror a `db_agent_instances` UPDATE into `db_agents`. Touches
-    /// only the fields that `instance_update` writes (block + session +
-    /// status + github_context + ended_at) — name/bindings come from
-    /// the original create.
-    pub(crate) fn agents_dual_write_instance_update(&self, inst: &AgentInstance) -> Result<(), StoreError> {
-        if !inst.parent_instance_id.is_empty() {
-            return Ok(());
-        }
-        let conn = self.conn.lock().unwrap();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64;
-        // Reagent P1 round 4 on #1013: route by projection key so the
-        // UPDATE actually hits the folded user-clone-def row when this
-        // instance was folded at create. The previous version keyed by
-        // `inst.id` always and silently no-op'd on every folded
-        // instance's lifecycle event.
-        let key = match Self::agents_projection_key_for_inst(&conn, &inst.id) {
-            Some((k, _)) => k,
-            None => return Ok(()),
-        };
-        // `instance_update` only touches block_id/session_id/status/
-        // github_context/ended_at. Of those, only `github_context` lands
-        // on db_agents (block/session/status/ended_at are not modelled
-        // on the consolidated row — they're block/session-machine
-        // concerns the consolidation deliberately drops). We DO refresh
-        // updated_at so a Phase-3b reader can sort by recency. Apply
-        // the same monotonic-floor trick as the fold branch in
-        // `agents_dual_write_instance_create` — wall clock alone
-        // collides under millisecond resolution on fast successive
-        // mutations.
-        let global_prior: i64 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(updated_at), 0) FROM db_agents",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap_or(0);
-        let now_monotonic = std::cmp::max(now, global_prior.saturating_add(1));
-        conn.execute(
-            "UPDATE db_agents SET
-                github_context = ?1,
-                updated_at = ?2
-             WHERE id = ?3 AND is_template = 0",
-            params![inst.github_context, now_monotonic, key],
-        )?;
-        Ok(())
-    }
-
-    /// Mirror `instance_set_hidden` into `db_agents.user_hidden`.
-    pub(crate) fn agents_dual_write_instance_set_hidden(&self, id: &str, hidden: bool) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        // Reagent P1 round 4 on #1013: route by projection key (see
-        // `agents_dual_write_instance_update` for context).
-        let key = match Self::agents_projection_key_for_inst(&conn, id) {
-            Some((k, _)) => k,
-            None => return Ok(()),
-        };
-        conn.execute(
-            "UPDATE db_agents SET user_hidden = ?1 WHERE id = ?2 AND is_template = 0",
-            params![if hidden { 1_i64 } else { 0_i64 }, key],
-        )?;
-        Ok(())
-    }
-
-    /// Mirror `instance_repoint_definition` into `db_agents`. The
-    /// `parent_template_id` of every user-clone row that pointed at
-    /// `old_def_id` is updated to `new_def_id`.
-    pub(crate) fn agents_dual_write_instance_repoint(
-        &self,
-        old_def_id: &str,
-        new_def_id: &str,
-    ) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            // Reagent P1 round 3 on #1013: `instance_repoint_definition`
-            // only rewrites `db_agent_instances.definition_id` — it
-            // does NOT rewrite the parent of a sibling user-cloned
-            // definition that happens to share the same parent template.
-            // Restrict the projection update to rows whose `id` is an
-            // ACTUALLY repointed instance id (i.e. the rows whose
-            // `db_agent_instances.definition_id` was just rewritten to
-            // `new_def_id`). User-clone definition projections, whose
-            // `id` lives in `db_agent_definitions` not `db_agent_instances`,
-            // are untouched.
-            "UPDATE db_agents
-             SET parent_template_id = ?1
-             WHERE is_template = 0
-               AND parent_template_id = ?2
-               AND id IN (SELECT id FROM db_agent_instances WHERE definition_id = ?1)",
-            params![new_def_id, old_def_id],
-        )?;
-        Ok(())
-    }
-
-    /// Mirror `instance_delete` into `db_agents`.
-    pub(crate) fn agents_dual_write_instance_delete(&self, id: &str) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        // Reagent P1 round 4 on #1013: route by projection key. For a
-        // template-instance projection (`is_folded = false`), the row
-        // lives at `id` and goes when the instance goes. For a
-        // user-clone-def fold (`is_folded = true`), the projection at
-        // `def.id` represents the DEF — the def persists when its
-        // instance ends, so NO-OP. `agents_dual_write_definition_delete`
-        // is the right entry point to remove that row.
-        //
-        // Race fallback: `instance_delete` runs the DELETE on
-        // `db_agent_instances` BEFORE calling this helper, so by now
-        // the instance row is gone and `agents_projection_key_for_inst`
-        // returns None. Fall back to checking `db_agents` directly: if
-        // there's a row at `id` with `is_template = 0`, that's a
-        // non-folded projection — delete it. (Folded projections live
-        // at `def.id`, never at `inst.id`, so this is safe.)
-        let key_info = Self::agents_projection_key_for_inst(&conn, id);
-        let (key, is_folded) = match key_info {
-            Some(info) => info,
-            None => (id.to_string(), false),
-        };
-        if is_folded {
-            return Ok(());
-        }
-        conn.execute(
-            "DELETE FROM db_agents WHERE id = ?1 AND is_template = 0",
-            params![key],
-        )?;
-        Ok(())
-    }
-
-    /// Mirror `instance_backfill_identity_id` into `db_agents`. Same
-    /// filter (empty or `"blank"` identity_id) restricted to user-clone
-    /// rows.
-    pub(crate) fn agents_dual_write_backfill_identity(&self, new_identity_id: &str) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE db_agents
-             SET identity_id = ?1
-             WHERE is_template = 0 AND (identity_id = '' OR identity_id = 'blank')",
-            params![new_identity_id],
-        )?;
-        Ok(())
-    }
-
-    /// Reagent P1 round 4 on #1013 — fold-aware projection key lookup.
-    /// Resolves "for an instance with this id, which `db_agents` row
-    /// represents it post-create?". Returns `Some((key, is_folded))`:
-    ///   - `is_folded = true`  → key is the parent definition id
-    ///                            (the user-clone-def projection absorbs
-    ///                            the instance's bindings).
-    ///   - `is_folded = false` → key is the instance id (template-instance
-    ///                            projection is its own row).
-    /// Returns `None` if the instance no longer exists in
-    /// `db_agent_instances` (e.g. already deleted by FK cascade).
-    fn agents_projection_key_for_inst(
-        conn: &Connection,
-        inst_id: &str,
-    ) -> Option<(String, bool)> {
-        conn.query_row(
-            "SELECT i.id, i.definition_id, COALESCE(d.is_seeded, 1) AS is_seeded
-             FROM db_agent_instances i
-             LEFT JOIN db_agent_definitions d ON i.definition_id = d.id
-             WHERE i.id = ?1",
-            params![inst_id],
-            |row| {
-                let id: String = row.get(0)?;
-                let def_id: String = row.get(1)?;
-                let is_seeded: i64 = row.get(2)?;
-                Ok(if is_seeded == 0 {
-                    (def_id, true)  // folded into def-projection
-                } else {
-                    (id, false)     // instance-projection in its own row
-                })
-            },
-        ).ok()
-    }
-
-    /// Helper: re-read a definition row from inside an active connection
-    /// lock (used by `agents_dual_write_instance_create` to avoid
-    /// re-locking the mutex recursively).
-    fn load_definition_for_dual_write(
+    /// Re-read the parent agent row from inside an active connection
+    /// lock — used by `instance_create` to route between fresh
+    /// projection (template parent) and fold-into-def (user-clone-def
+    /// parent) without re-locking the mutex recursively.
+    fn load_agent_row_for_instance(
         conn: &Connection,
         id: &str,
     ) -> rusqlite::Result<Option<AgentDefinition>> {
@@ -2741,42 +2520,18 @@ impl WaveStore {
                     working_directory, shell, provider_flags, auto_start,
                     restart_on_crash, idle_timeout_minutes, created_at,
                     agent_type, environment, agent_bus_id, is_seeded,
-                    accounts, parent_id, branch_label, updated_at,
+                    accounts, parent_template_id, branch_label, updated_at,
                     user_hidden
-             FROM db_agent_definitions WHERE id = ?1",
+             FROM db_agents WHERE id = ?1",
         )?;
-        let result = stmt.query_row(params![id], |row| {
-            Ok(AgentDefinition {
-                id: row.get(0)?,
-                slug: row.get(1)?,
-                name: row.get(2)?,
-                icon: row.get(3)?,
-                provider: row.get(4)?,
-                description: row.get(5)?,
-                working_directory: row.get(6)?,
-                shell: row.get(7)?,
-                provider_flags: row.get(8)?,
-                auto_start: row.get(9)?,
-                restart_on_crash: row.get(10)?,
-                idle_timeout_minutes: row.get(11)?,
-                created_at: row.get(12)?,
-                agent_type: row.get(13)?,
-                environment: row.get(14)?,
-                agent_bus_id: row.get(15)?,
-                is_seeded: row.get(16)?,
-                accounts: row.get(17)?,
-                parent_id: row.get(18)?,
-                branch_label: row.get(19)?,
-                updated_at: row.get(20)?,
-                user_hidden: row.get(21)?,
-            })
-        });
+        let result = stmt.query_row(params![id], map_agent_definition_row);
         match result {
             Ok(d) => Ok(Some(d)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e),
         }
     }
+
 
     // ====================================================================
     // v7 — Identity bundles (named credential bundles) + Memory bundles
@@ -3030,8 +2785,15 @@ fn map_memory_row(row: &rusqlite::Row) -> rusqlite::Result<Memory> {
     })
 }
 
+/// Phase 3c — row mapper for `db_agents` rows projected into the
+/// `AgentInstance` vestigial shape. Column order MUST match every
+/// SELECT that calls this mapper (instance_list, instance_get,
+/// instance_list_named, instance_get_by_name, instance_get_active_for_block).
+/// The final column is `user_hidden` (renamed from the retired
+/// `db_agent_instances.display_hidden`); we coerce the i64 into the
+/// struct's `bool` field.
 fn map_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
-    let display_hidden_int: i64 = row.get(14)?;
+    let hidden_int: i64 = row.get(14)?;
     Ok(AgentInstance {
         id: row.get(0)?,
         definition_id: row.get(1)?,
@@ -3047,7 +2809,7 @@ fn map_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
         memory_id: row.get(11)?,
         instance_name: row.get(12)?,
         working_directory: row.get(13)?,
-        display_hidden: display_hidden_int != 0,
+        display_hidden: hidden_int != 0,
     })
 }
 
@@ -3604,7 +3366,12 @@ mod tests {
     #[test]
     fn test_instance_create_update_filter() {
         let store = v6_test_store();
+        // Phase 3c: `instance_create` on a user-clone-def parent folds
+        // into the def row (no fresh `inst1` row). Use a template
+        // parent so the projection lives at `inst1` and this test's
+        // read-by-instance-id semantics hold.
         let mut agent = sample_agent("def1", "agent-x");
+        agent.is_seeded = 1;
         store.agent_def_insert(&mut agent).unwrap();
 
         let inst = AgentInstance {
@@ -4200,711 +3967,5 @@ mod tests {
         store.agent_def_delete("def-mirror").unwrap();
         assert!(reg.list_active().unwrap().is_empty(),
             "agent_def_delete cascade must remove all child instance registry files");
-    }
-
-    // ----------------------------------------------------------------
-    // Phase 3a — db_agents dual-write coverage
-    // ----------------------------------------------------------------
-
-    fn count_agents(store: &WaveStore, where_clause: &str) -> i64 {
-        let conn = store.conn.lock().unwrap();
-        let sql = format!("SELECT COUNT(*) FROM db_agents WHERE {where_clause}");
-        conn.query_row(&sql, [], |row| row.get(0)).unwrap()
-    }
-
-    fn read_agent_field(store: &WaveStore, id: &str, field: &str) -> Option<String> {
-        let conn = store.conn.lock().unwrap();
-        let sql = format!("SELECT {field} FROM db_agents WHERE id = ?1");
-        let mut stmt = conn.prepare(&sql).unwrap();
-        let r = stmt.query_row(params![id], |row| row.get::<_, String>(0));
-        match r {
-            Ok(s) => Some(s),
-            Err(rusqlite::Error::QueryReturnedNoRows) => None,
-            Err(e) => panic!("query failed: {e}"),
-        }
-    }
-
-    fn read_agent_int(store: &WaveStore, id: &str, field: &str) -> Option<i64> {
-        let conn = store.conn.lock().unwrap();
-        let sql = format!("SELECT {field} FROM db_agents WHERE id = ?1");
-        let mut stmt = conn.prepare(&sql).unwrap();
-        let r = stmt.query_row(params![id], |row| row.get::<_, i64>(0));
-        match r {
-            Ok(v) => Some(v),
-            Err(rusqlite::Error::QueryReturnedNoRows) => None,
-            Err(e) => panic!("query failed: {e}"),
-        }
-    }
-
-    #[test]
-    fn dual_write_agent_def_insert_seeded_creates_template_row() {
-        let store = make_store();
-        let mut def = AgentDefinition {
-            id: "tpl-dw-seeded".to_string(),
-            slug: String::new(),
-            name: "Coder".to_string(),
-            icon: "✦".to_string(),
-            provider: "claude".to_string(),
-            description: "desc".to_string(),
-            working_directory: String::new(),
-            shell: "bash".to_string(),
-            provider_flags: String::new(),
-            auto_start: 0,
-            restart_on_crash: 0,
-            idle_timeout_minutes: 0,
-            created_at: 1000,
-            agent_type: "standalone".to_string(),
-            environment: String::new(),
-            agent_bus_id: String::new(),
-            is_seeded: 1,
-            accounts: String::new(),
-            parent_id: String::new(),
-            branch_label: String::new(),
-            updated_at: 1000,
-            user_hidden: 0,
-        };
-        store.agent_def_insert(&mut def).unwrap();
-        // db_agents row exists, projected as template.
-        assert_eq!(read_agent_int(&store, "tpl-dw-seeded", "is_template"), Some(1));
-        assert_eq!(read_agent_field(&store, "tpl-dw-seeded", "parent_template_id"), Some(String::new()));
-        assert_eq!(read_agent_field(&store, "tpl-dw-seeded", "name"), Some("Coder".to_string()));
-        assert_eq!(read_agent_field(&store, "tpl-dw-seeded", "provider"), Some("claude".to_string()));
-    }
-
-    #[test]
-    fn dual_write_agent_def_insert_user_clone_carries_parent() {
-        let store = make_store();
-        // Seed the template first so the FK exists in the old table.
-        let mut tpl = AgentDefinition {
-            id: "tpl-parent".to_string(),
-            slug: String::new(),
-            name: "Coder".to_string(),
-            icon: "✦".to_string(),
-            provider: "claude".to_string(),
-            description: String::new(),
-            working_directory: String::new(),
-            shell: "bash".to_string(),
-            provider_flags: String::new(),
-            auto_start: 0,
-            restart_on_crash: 0,
-            idle_timeout_minutes: 0,
-            created_at: 1000,
-            agent_type: "standalone".to_string(),
-            environment: String::new(),
-            agent_bus_id: String::new(),
-            is_seeded: 1,
-            accounts: String::new(),
-            parent_id: String::new(),
-            branch_label: String::new(),
-            updated_at: 1000,
-            user_hidden: 0,
-        };
-        store.agent_def_insert(&mut tpl).unwrap();
-        // User-cloned def has is_seeded=0 + parent_id pointing at template.
-        let mut user_def = tpl.clone();
-        user_def.id = "def-user".to_string();
-        user_def.slug = String::new();
-        user_def.is_seeded = 0;
-        user_def.parent_id = "tpl-parent".to_string();
-        store.agent_def_insert(&mut user_def).unwrap();
-        assert_eq!(read_agent_int(&store, "def-user", "is_template"), Some(0));
-        assert_eq!(
-            read_agent_field(&store, "def-user", "parent_template_id"),
-            Some("tpl-parent".to_string())
-        );
-    }
-
-    #[test]
-    fn dual_write_agent_def_update_refreshes_name_in_db_agents() {
-        let store = make_store();
-        let mut def = AgentDefinition {
-            id: "tpl-update".to_string(),
-            slug: String::new(),
-            name: "Old Name".to_string(),
-            icon: "✦".to_string(),
-            provider: "claude".to_string(),
-            description: String::new(),
-            working_directory: String::new(),
-            shell: "bash".to_string(),
-            provider_flags: String::new(),
-            auto_start: 0,
-            restart_on_crash: 0,
-            idle_timeout_minutes: 0,
-            created_at: 1000,
-            agent_type: "standalone".to_string(),
-            environment: String::new(),
-            agent_bus_id: String::new(),
-            is_seeded: 1,
-            accounts: String::new(),
-            parent_id: String::new(),
-            branch_label: String::new(),
-            updated_at: 1000,
-            user_hidden: 0,
-        };
-        store.agent_def_insert(&mut def).unwrap();
-        def.name = "New Name".to_string();
-        assert!(store.agent_def_update(&mut def).unwrap());
-        assert_eq!(
-            read_agent_field(&store, "tpl-update", "name"),
-            Some("New Name".to_string())
-        );
-    }
-
-    #[test]
-    fn dual_write_agent_def_delete_removes_db_agents_row() {
-        let store = make_store();
-        let mut def = AgentDefinition {
-            id: "tpl-del".to_string(),
-            slug: String::new(),
-            name: "Goner".to_string(),
-            icon: "✦".to_string(),
-            provider: "claude".to_string(),
-            description: String::new(),
-            working_directory: String::new(),
-            shell: "bash".to_string(),
-            provider_flags: String::new(),
-            auto_start: 0,
-            restart_on_crash: 0,
-            idle_timeout_minutes: 0,
-            created_at: 1000,
-            agent_type: "standalone".to_string(),
-            environment: String::new(),
-            agent_bus_id: String::new(),
-            is_seeded: 1,
-            accounts: String::new(),
-            parent_id: String::new(),
-            branch_label: String::new(),
-            updated_at: 1000,
-            user_hidden: 0,
-        };
-        store.agent_def_insert(&mut def).unwrap();
-        assert_eq!(count_agents(&store, "id = 'tpl-del'"), 1);
-        store.agent_def_delete("tpl-del").unwrap();
-        assert_eq!(count_agents(&store, "id = 'tpl-del'"), 0);
-    }
-
-    #[test]
-    fn dual_write_instance_create_inserts_user_clone_row() {
-        let store = make_store();
-        // Seed template.
-        let mut tpl = AgentDefinition {
-            id: "tpl-for-inst".to_string(),
-            slug: String::new(),
-            name: "Coder".to_string(),
-            icon: "✦".to_string(),
-            provider: "claude".to_string(),
-            description: "desc".to_string(),
-            working_directory: String::new(),
-            shell: "bash".to_string(),
-            provider_flags: String::new(),
-            auto_start: 0,
-            restart_on_crash: 0,
-            idle_timeout_minutes: 0,
-            created_at: 1000,
-            agent_type: "standalone".to_string(),
-            environment: String::new(),
-            agent_bus_id: String::new(),
-            is_seeded: 1,
-            accounts: String::new(),
-            parent_id: String::new(),
-            branch_label: String::new(),
-            updated_at: 1000,
-            user_hidden: 0,
-        };
-        store.agent_def_insert(&mut tpl).unwrap();
-
-        let inst = AgentInstance {
-            id: "inst-dw".to_string(),
-            definition_id: "tpl-for-inst".to_string(),
-            parent_instance_id: String::new(),
-            block_id: String::new(),
-            session_id: String::new(),
-            status: "running".to_string(),
-            github_context: String::new(),
-            started_at: 2000,
-            ended_at: 0,
-            created_at: 2000,
-            identity_id: "id-1".to_string(),
-            memory_id: "mem-1".to_string(),
-            instance_name: "Maks".to_string(),
-            working_directory: "/wd/maks".to_string(),
-            display_hidden: false,
-        };
-        store.instance_create(&inst).unwrap();
-        // Projected row: id == inst.id, is_template = 0, parent = tpl id,
-        // bindings copied.
-        assert_eq!(read_agent_int(&store, "inst-dw", "is_template"), Some(0));
-        assert_eq!(
-            read_agent_field(&store, "inst-dw", "parent_template_id"),
-            Some("tpl-for-inst".to_string())
-        );
-        assert_eq!(read_agent_field(&store, "inst-dw", "name"), Some("Maks".to_string()));
-        assert_eq!(read_agent_field(&store, "inst-dw", "identity_id"), Some("id-1".to_string()));
-        assert_eq!(read_agent_field(&store, "inst-dw", "memory_id"), Some("mem-1".to_string()));
-        assert_eq!(read_agent_field(&store, "inst-dw", "working_directory"), Some("/wd/maks".to_string()));
-        // Continuation rows skipped.
-        let cont = AgentInstance {
-            id: "inst-cont".to_string(),
-            parent_instance_id: "inst-dw".to_string(),
-            ..inst.clone()
-        };
-        store.instance_create(&cont).unwrap();
-        assert_eq!(count_agents(&store, "id = 'inst-cont'"), 0);
-    }
-
-    /// Reagent P1 + P2 on #1013 round 2 — pins the user-cloned-def
-    /// branch of `agents_dual_write_instance_create` so it matches
-    /// the backfill rule (`agents_consolidate.rs::backfill_instances`
-    /// folds the instance's bindings into the EXISTING `db_agents`
-    /// row keyed by `def.id`, NOT a fresh row keyed by `inst.id`).
-    /// Round-1 test only covered the seeded-template branch.
-    #[test]
-    fn dual_write_instance_create_folds_into_user_clone_def() {
-        let store = make_store();
-        // Seed a template.
-        let mut tpl = AgentDefinition {
-            id: "tpl-folded".to_string(),
-            slug: String::new(),
-            name: "Coder".to_string(),
-            icon: "✦".to_string(),
-            provider: "claude".to_string(),
-            description: "desc".to_string(),
-            working_directory: String::new(),
-            shell: "bash".to_string(),
-            provider_flags: String::new(),
-            auto_start: 0,
-            restart_on_crash: 0,
-            idle_timeout_minutes: 0,
-            created_at: 1000,
-            agent_type: "standalone".to_string(),
-            environment: String::new(),
-            agent_bus_id: String::new(),
-            is_seeded: 1,
-            accounts: String::new(),
-            parent_id: String::new(),
-            branch_label: String::new(),
-            updated_at: 1000,
-            user_hidden: 0,
-        };
-        store.agent_def_insert(&mut tpl).unwrap();
-
-        // User-clone of the template (is_seeded = 0, parent_id = tpl id).
-        let mut clone = AgentDefinition {
-            id: "user-clone-1".to_string(),
-            slug: String::new(),
-            name: "Maks".to_string(),
-            is_seeded: 0,
-            parent_id: "tpl-folded".to_string(),
-            created_at: 1500,
-            updated_at: 1500,
-            ..tpl.clone()
-        };
-        store.agent_def_insert(&mut clone).unwrap();
-        // The user-clone projection in db_agents starts with empty bindings.
-        assert_eq!(read_agent_field(&store, "user-clone-1", "identity_id"), Some(String::new()));
-        assert_eq!(read_agent_field(&store, "user-clone-1", "memory_id"), Some(String::new()));
-
-        // Create an instance ON the user-clone def. Per backfill rule,
-        // this must FOLD the instance's bindings into the existing
-        // user-clone-1 row — NOT create a separate inst-fold-1 row
-        // with parent_template_id pointing at a non-template row.
-        let inst = AgentInstance {
-            id: "inst-fold-1".to_string(),
-            definition_id: "user-clone-1".to_string(),
-            parent_instance_id: String::new(),
-            block_id: String::new(),
-            session_id: String::new(),
-            status: "running".to_string(),
-            github_context: "gh-ctx-A".to_string(),
-            started_at: 2000,
-            ended_at: 0,
-            created_at: 2000,
-            identity_id: "id-folded".to_string(),
-            memory_id: "mem-folded".to_string(),
-            instance_name: "Maks v2".to_string(),
-            working_directory: "/wd/folded".to_string(),
-            display_hidden: false,
-        };
-        store.instance_create(&inst).unwrap();
-
-        // No new row keyed by inst.id — backfill never creates one for
-        // user-clone-def instances, and dual-write must match.
-        assert_eq!(count_agents(&store, "id = 'inst-fold-1'"), 0);
-
-        // Bindings folded onto the user-clone-1 row.
-        assert_eq!(read_agent_field(&store, "user-clone-1", "identity_id"), Some("id-folded".to_string()));
-        assert_eq!(read_agent_field(&store, "user-clone-1", "memory_id"), Some("mem-folded".to_string()));
-        assert_eq!(read_agent_field(&store, "user-clone-1", "working_directory"), Some("/wd/folded".to_string()));
-        assert_eq!(read_agent_field(&store, "user-clone-1", "github_context"), Some("gh-ctx-A".to_string()));
-        assert_eq!(read_agent_field(&store, "user-clone-1", "instance_name"), Some("Maks v2".to_string()));
-        assert_eq!(read_agent_field(&store, "user-clone-1", "name"), Some("Maks v2".to_string()));
-        // is_template stays 0, parent_template_id untouched (still empty
-        // since user-clone insert leaves it blank).
-        assert_eq!(read_agent_int(&store, "user-clone-1", "is_template"), Some(0));
-    }
-
-    #[test]
-    fn dual_write_instance_set_hidden_flips_user_hidden_bit() {
-        let store = make_store();
-        let mut tpl = AgentDefinition {
-            id: "tpl-hide".to_string(),
-            slug: String::new(),
-            name: "Coder".to_string(),
-            icon: "✦".to_string(),
-            provider: "claude".to_string(),
-            description: String::new(),
-            working_directory: String::new(),
-            shell: "bash".to_string(),
-            provider_flags: String::new(),
-            auto_start: 0,
-            restart_on_crash: 0,
-            idle_timeout_minutes: 0,
-            created_at: 1000,
-            agent_type: "standalone".to_string(),
-            environment: String::new(),
-            agent_bus_id: String::new(),
-            is_seeded: 1,
-            accounts: String::new(),
-            parent_id: String::new(),
-            branch_label: String::new(),
-            updated_at: 1000,
-            user_hidden: 0,
-        };
-        store.agent_def_insert(&mut tpl).unwrap();
-        let inst = AgentInstance {
-            id: "inst-hide".to_string(),
-            definition_id: "tpl-hide".to_string(),
-            parent_instance_id: String::new(),
-            block_id: String::new(),
-            session_id: String::new(),
-            status: "running".to_string(),
-            github_context: String::new(),
-            started_at: 2000,
-            ended_at: 0,
-            created_at: 2000,
-            identity_id: String::new(),
-            memory_id: String::new(),
-            instance_name: "H".to_string(),
-            working_directory: "/wd/h".to_string(),
-            display_hidden: false,
-        };
-        store.instance_create(&inst).unwrap();
-        assert_eq!(read_agent_int(&store, "inst-hide", "user_hidden"), Some(0));
-        store.instance_set_hidden("inst-hide", true).unwrap();
-        assert_eq!(read_agent_int(&store, "inst-hide", "user_hidden"), Some(1));
-        store.instance_set_hidden("inst-hide", false).unwrap();
-        assert_eq!(read_agent_int(&store, "inst-hide", "user_hidden"), Some(0));
-    }
-
-    #[test]
-    fn dual_write_instance_delete_drops_db_agents_row() {
-        let store = make_store();
-        let mut tpl = AgentDefinition {
-            id: "tpl-instdel".to_string(),
-            slug: String::new(),
-            name: "Coder".to_string(),
-            icon: "✦".to_string(),
-            provider: "claude".to_string(),
-            description: String::new(),
-            working_directory: String::new(),
-            shell: "bash".to_string(),
-            provider_flags: String::new(),
-            auto_start: 0,
-            restart_on_crash: 0,
-            idle_timeout_minutes: 0,
-            created_at: 1000,
-            agent_type: "standalone".to_string(),
-            environment: String::new(),
-            agent_bus_id: String::new(),
-            is_seeded: 1,
-            accounts: String::new(),
-            parent_id: String::new(),
-            branch_label: String::new(),
-            updated_at: 1000,
-            user_hidden: 0,
-        };
-        store.agent_def_insert(&mut tpl).unwrap();
-        let inst = AgentInstance {
-            id: "inst-del".to_string(),
-            definition_id: "tpl-instdel".to_string(),
-            parent_instance_id: String::new(),
-            block_id: String::new(),
-            session_id: String::new(),
-            status: "running".to_string(),
-            github_context: String::new(),
-            started_at: 2000,
-            ended_at: 0,
-            created_at: 2000,
-            identity_id: String::new(),
-            memory_id: String::new(),
-            instance_name: "D".to_string(),
-            working_directory: "/wd/d".to_string(),
-            display_hidden: false,
-        };
-        store.instance_create(&inst).unwrap();
-        assert_eq!(count_agents(&store, "id = 'inst-del'"), 1);
-        store.instance_delete("inst-del").unwrap();
-        assert_eq!(count_agents(&store, "id = 'inst-del'"), 0);
-    }
-
-    #[test]
-    fn dual_write_instance_repoint_updates_parent_template_id() {
-        let store = make_store();
-        let mut tpl_a = AgentDefinition {
-            id: "tpl-A".to_string(),
-            slug: String::new(),
-            name: "A".to_string(),
-            icon: "✦".to_string(),
-            provider: "claude".to_string(),
-            description: String::new(),
-            working_directory: String::new(),
-            shell: "bash".to_string(),
-            provider_flags: String::new(),
-            auto_start: 0,
-            restart_on_crash: 0,
-            idle_timeout_minutes: 0,
-            created_at: 1000,
-            agent_type: "standalone".to_string(),
-            environment: String::new(),
-            agent_bus_id: String::new(),
-            is_seeded: 1,
-            accounts: String::new(),
-            parent_id: String::new(),
-            branch_label: String::new(),
-            updated_at: 1000,
-            user_hidden: 0,
-        };
-        store.agent_def_insert(&mut tpl_a).unwrap();
-        let mut tpl_b = tpl_a.clone();
-        tpl_b.id = "tpl-B".to_string();
-        tpl_b.slug = String::new();
-        store.agent_def_insert(&mut tpl_b).unwrap();
-
-        let inst = AgentInstance {
-            id: "inst-rp".to_string(),
-            definition_id: "tpl-A".to_string(),
-            parent_instance_id: String::new(),
-            block_id: String::new(),
-            session_id: String::new(),
-            status: "running".to_string(),
-            github_context: String::new(),
-            started_at: 2000,
-            ended_at: 0,
-            created_at: 2000,
-            identity_id: String::new(),
-            memory_id: String::new(),
-            instance_name: "R".to_string(),
-            working_directory: "/wd/r".to_string(),
-            display_hidden: false,
-        };
-        store.instance_create(&inst).unwrap();
-        assert_eq!(
-            read_agent_field(&store, "inst-rp", "parent_template_id"),
-            Some("tpl-A".to_string())
-        );
-        store.instance_repoint_definition("tpl-A", "tpl-B").unwrap();
-        assert_eq!(
-            read_agent_field(&store, "inst-rp", "parent_template_id"),
-            Some("tpl-B".to_string())
-        );
-    }
-
-    #[test]
-    fn dual_write_agent_def_delete_seeded_drops_all_template_rows() {
-        let store = make_store();
-        for id in &["s1", "s2", "s3"] {
-            let mut d = AgentDefinition {
-                id: id.to_string(),
-                slug: String::new(),
-                name: id.to_string(),
-                icon: "✦".to_string(),
-                provider: "claude".to_string(),
-                description: String::new(),
-                working_directory: String::new(),
-                shell: "bash".to_string(),
-                provider_flags: String::new(),
-                auto_start: 0,
-                restart_on_crash: 0,
-                idle_timeout_minutes: 0,
-                created_at: 1000,
-                agent_type: "standalone".to_string(),
-                environment: String::new(),
-                agent_bus_id: String::new(),
-                is_seeded: 1,
-                accounts: String::new(),
-                parent_id: String::new(),
-                branch_label: String::new(),
-                updated_at: 1000,
-                user_hidden: 0,
-            };
-            store.agent_def_insert(&mut d).unwrap();
-        }
-        assert_eq!(count_agents(&store, "is_template = 1"), 3);
-        store.agent_def_delete_seeded().unwrap();
-        assert_eq!(count_agents(&store, "is_template = 1"), 0);
-    }
-
-    /// Reagent P2 round 4 on #1013 — pins the seeded-bulk-delete
-    /// scope: templates + cascaded INSTANCE projections go;
-    /// user-clone DEF projections survive.
-    #[test]
-    fn dual_write_seeded_delete_preserves_user_clone_def_projections() {
-        let store = make_store();
-        // Seeded template.
-        let mut tpl = AgentDefinition {
-            id: "tpl-keep-check".to_string(),
-            slug: String::new(),
-            name: "TplCheck".to_string(),
-            icon: "✦".to_string(),
-            provider: "claude".to_string(),
-            description: String::new(),
-            working_directory: String::new(),
-            shell: "bash".to_string(),
-            provider_flags: String::new(),
-            auto_start: 0,
-            restart_on_crash: 0,
-            idle_timeout_minutes: 0,
-            created_at: 1000,
-            agent_type: "standalone".to_string(),
-            environment: String::new(),
-            agent_bus_id: String::new(),
-            is_seeded: 1,
-            accounts: String::new(),
-            parent_id: String::new(),
-            branch_label: String::new(),
-            updated_at: 1000,
-            user_hidden: 0,
-        };
-        store.agent_def_insert(&mut tpl).unwrap();
-        // User-clone DEF of that template (Phase 1 created this).
-        let mut clone = AgentDefinition {
-            id: "user-clone-keep".to_string(),
-            slug: String::new(),
-            name: "MaksKeeper".to_string(),
-            is_seeded: 0,
-            parent_id: "tpl-keep-check".to_string(),
-            created_at: 1500,
-            updated_at: 1500,
-            ..tpl.clone()
-        };
-        store.agent_def_insert(&mut clone).unwrap();
-        // Instance ON the seeded template (cascaded instance projection).
-        let inst_on_tpl = AgentInstance {
-            id: "inst-on-tpl-keep".to_string(),
-            definition_id: "tpl-keep-check".to_string(),
-            parent_instance_id: String::new(),
-            block_id: String::new(),
-            session_id: String::new(),
-            status: "running".to_string(),
-            github_context: String::new(),
-            started_at: 2000,
-            ended_at: 0,
-            created_at: 2000,
-            identity_id: String::new(),
-            memory_id: String::new(),
-            instance_name: String::new(),
-            working_directory: String::new(),
-            display_hidden: false,
-        };
-        store.instance_create(&inst_on_tpl).unwrap();
-        // Now delete seeded → template + cascaded instance go, user-clone survives.
-        store.agent_def_delete_seeded().unwrap();
-        assert_eq!(count_agents(&store, "id = 'tpl-keep-check'"), 0, "template projection gone");
-        assert_eq!(count_agents(&store, "id = 'inst-on-tpl-keep'"), 0, "cascaded instance projection gone");
-        assert_eq!(count_agents(&store, "id = 'user-clone-keep'"), 1, "user-clone def projection survives");
-    }
-
-    /// Reagent P2 round 4 on #1013 — pins instance_update/hide/delete
-    /// routing through the projection key. The previous version keyed
-    /// everything on `inst.id` and silently no-op'd on folded rows.
-    #[test]
-    fn dual_write_instance_lifecycle_on_user_clone_def_routes_to_folded_row() {
-        let store = make_store();
-        // Template, user-clone def of it, instance on the user-clone.
-        let mut tpl = AgentDefinition {
-            id: "tpl-rt".to_string(),
-            slug: String::new(),
-            name: "Tpl".to_string(),
-            icon: "✦".to_string(),
-            provider: "claude".to_string(),
-            description: String::new(),
-            working_directory: String::new(),
-            shell: "bash".to_string(),
-            provider_flags: String::new(),
-            auto_start: 0,
-            restart_on_crash: 0,
-            idle_timeout_minutes: 0,
-            created_at: 1000,
-            agent_type: "standalone".to_string(),
-            environment: String::new(),
-            agent_bus_id: String::new(),
-            is_seeded: 1,
-            accounts: String::new(),
-            parent_id: String::new(),
-            branch_label: String::new(),
-            updated_at: 1000,
-            user_hidden: 0,
-        };
-        store.agent_def_insert(&mut tpl).unwrap();
-        let mut clone = AgentDefinition {
-            id: "user-rt".to_string(),
-            slug: String::new(),
-            name: "Maks".to_string(),
-            is_seeded: 0,
-            parent_id: "tpl-rt".to_string(),
-            created_at: 1500,
-            updated_at: 1500,
-            ..tpl.clone()
-        };
-        store.agent_def_insert(&mut clone).unwrap();
-        let inst = AgentInstance {
-            id: "inst-rt".to_string(),
-            definition_id: "user-rt".to_string(),
-            parent_instance_id: String::new(),
-            block_id: String::new(),
-            session_id: String::new(),
-            status: "running".to_string(),
-            github_context: "gh-initial".to_string(),
-            started_at: 2000,
-            ended_at: 0,
-            created_at: 2000,
-            identity_id: "id-init".to_string(),
-            memory_id: "mem-init".to_string(),
-            instance_name: "Maks v1".to_string(),
-            working_directory: "/wd".to_string(),
-            display_hidden: false,
-        };
-        store.instance_create(&inst).unwrap();
-        // Sanity: no inst-rt row (folded).
-        assert_eq!(count_agents(&store, "id = 'inst-rt'"), 0);
-        assert_eq!(read_agent_field(&store, "user-rt", "github_context"), Some("gh-initial".to_string()));
-
-        // instance_update: github_context flows through to the folded row.
-        let updated = AgentInstance {
-            github_context: "gh-updated".to_string(),
-            ..inst.clone()
-        };
-        store.instance_update(&updated).unwrap();
-        assert_eq!(
-            read_agent_field(&store, "user-rt", "github_context"),
-            Some("gh-updated".to_string()),
-            "instance_update on user-clone-def routes to folded row",
-        );
-
-        // instance_set_hidden: flips user_hidden on the folded row.
-        store.instance_set_hidden("inst-rt", true).unwrap();
-        assert_eq!(
-            read_agent_int(&store, "user-rt", "user_hidden"),
-            Some(1),
-            "instance_set_hidden routes to folded row",
-        );
-
-        // instance_delete: NO-OP on folded row (the def projection persists).
-        store.instance_delete("inst-rt").unwrap();
-        assert_eq!(
-            count_agents(&store, "id = 'user-rt'"),
-            1,
-            "instance_delete on user-clone-def is a no-op (def projection persists)",
-        );
     }
 }
