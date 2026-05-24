@@ -161,13 +161,19 @@ describe("UserMessageBlock — startup injection", () => {
     });
 
     it("pinned=true renders expanded (full markdown body visible)", () => {
+        // Per SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24, the
+        // summary is ALWAYS rendered for collapsible rows (so the
+        // ARIA / keyboard surface is stable across collapsed/
+        // expanded states). The body's visibility is what changes.
+        // Hint copy in the summary toggles to reflect the state.
         render(() => (
             <UserMessageBlock node={startupNode} pinned={true} onTogglePin={() => {}} />
         ));
-        // Body visible — first identity bullet matches the fixture
+        // Body visible — first identity bullet matches the fixture.
         expect(screen.queryByText(/Identity/)).not.toBeNull();
-        // No collapsed summary row when expanded
-        expect(screen.queryByText("Session context")).toBeNull();
+        // Summary still mounted; hint reflects the pinned state.
+        expect(screen.queryByText("Session context")).not.toBeNull();
+        expect(screen.queryByText(/click ✕ to collapse/)).not.toBeNull();
     });
 
     it("pinned=true gets the --pinned class on the root", () => {
@@ -181,23 +187,25 @@ describe("UserMessageBlock — startup injection", () => {
     });
 
     it("hover (mouseenter→delay) expands the body after 150ms", async () => {
+        // The summary is now ALWAYS mounted. Only the BODY's
+        // presence changes across the hover transition.
         vi.useFakeTimers();
         try {
             const { container } = render(() => (
                 <UserMessageBlock node={startupNode} pinned={false} onTogglePin={() => {}} />
             ));
             const root = container.querySelector(".agent-user-message") as HTMLElement;
-            // Pre-hover: collapsed summary present, body absent.
+            // Pre-hover: summary present, body absent.
             expect(screen.queryByText("Session context")).not.toBeNull();
             expect(screen.queryByText(/Identity/)).toBeNull();
             fireEvent.mouseEnter(root);
-            // 100ms in — still collapsed (under the 150ms threshold).
+            // 100ms in — still pre-threshold.
             vi.advanceTimersByTime(100);
             expect(screen.queryByText(/Identity/)).toBeNull();
-            // Past the threshold — expanded.
+            // Past the threshold — body now visible alongside summary.
             vi.advanceTimersByTime(60);
             expect(screen.queryByText(/Identity/)).not.toBeNull();
-            expect(screen.queryByText("Session context")).toBeNull();
+            expect(screen.queryByText("Session context")).not.toBeNull();
         } finally {
             vi.useRealTimers();
         }
@@ -247,5 +255,126 @@ describe("UserMessageBlock — startup injection", () => {
         const summary = container.querySelector(".agent-user-message-summary") as HTMLButtonElement;
         summary.click();
         expect(togglePin).toHaveBeenCalledTimes(1);
+    });
+
+    describe("body positioning (overlay vs flow)", () => {
+        // SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24:
+        // hover-expanded body uses absolute positioning so the
+        // summary's screen-Y is anchored across the transition;
+        // pinned body drops back into normal flow (Option B).
+
+        it("hover-expanded body has an overlay positioning class", async () => {
+            vi.useFakeTimers();
+            try {
+                const { container } = render(() => (
+                    <UserMessageBlock node={startupNode} pinned={false} onTogglePin={() => {}} />
+                ));
+                const root = container.querySelector(".agent-user-message") as HTMLElement;
+                // jsdom doesn't really compute getBoundingClientRect
+                // sizes for absolute layouts; with the default
+                // (top=0, bottom=0) the direction picker returns
+                // "below". That's fine for asserting the *class
+                // family*: we want one of the overlay classes, not
+                // the flow class.
+                fireEvent.mouseEnter(root);
+                vi.advanceTimersByTime(200);
+                const body = container.querySelector(".agent-user-message-content");
+                expect(body).not.toBeNull();
+                expect(body!.classList.contains("agent-user-message-content--flow")).toBe(false);
+                const isOverlay =
+                    body!.classList.contains("agent-user-message-content--overlay-below") ||
+                    body!.classList.contains("agent-user-message-content--overlay-above");
+                expect(isOverlay).toBe(true);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("pinned body uses the in-flow positioning class", () => {
+            const { container } = render(() => (
+                <UserMessageBlock node={startupNode} pinned={true} onTogglePin={() => {}} />
+            ));
+            const body = container.querySelector(".agent-user-message-content");
+            expect(body).not.toBeNull();
+            expect(body!.classList.contains("agent-user-message-content--flow")).toBe(true);
+            expect(body!.classList.contains("agent-user-message-content--overlay-below")).toBe(false);
+            expect(body!.classList.contains("agent-user-message-content--overlay-above")).toBe(false);
+        });
+
+        it("regular (non-startup) body uses the in-flow positioning class", () => {
+            const { container } = render(() => (
+                <UserMessageBlock node={baseNode} pinned={false} onTogglePin={() => {}} />
+            ));
+            const body = container.querySelector(".agent-user-message-content");
+            expect(body).not.toBeNull();
+            expect(body!.classList.contains("agent-user-message-content--flow")).toBe(true);
+        });
+
+        it("hover-expanded body has an inline max-height (per-hover cap)", () => {
+            // Codex P2 round 2: the overlay's max-height is computed
+            // per hover from the chosen-side container space, set
+            // inline. We can't assert a specific px value (jsdom's
+            // getBoundingClientRect returns zeros, plus
+            // window.innerHeight defaults), but we CAN assert that
+            // the style attribute carries a `max-height` rule —
+            // proving the inline path fired.
+            vi.useFakeTimers();
+            try {
+                const { container } = render(() => (
+                    <UserMessageBlock node={startupNode} pinned={false} onTogglePin={() => {}} />
+                ));
+                const root = container.querySelector(".agent-user-message") as HTMLElement;
+                fireEvent.mouseEnter(root);
+                vi.advanceTimersByTime(200);
+                const body = container.querySelector(".agent-user-message-content") as HTMLElement;
+                expect(body).not.toBeNull();
+                expect(body.style.maxHeight).toMatch(/^\d+px$/);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("pinned body has no inline max-height (in-flow, no cap)", () => {
+            const { container } = render(() => (
+                <UserMessageBlock node={startupNode} pinned={true} onTogglePin={() => {}} />
+            ));
+            const body = container.querySelector(".agent-user-message-content") as HTMLElement;
+            expect(body).not.toBeNull();
+            expect(body.style.maxHeight).toBe("");
+        });
+    });
+
+    describe("aria-expanded", () => {
+        it("is false when collapsed (not pinned, not hovering)", () => {
+            const { container } = render(() => (
+                <UserMessageBlock node={startupNode} pinned={false} onTogglePin={() => {}} />
+            ));
+            const summary = container.querySelector(".agent-user-message-summary");
+            expect(summary!.getAttribute("aria-expanded")).toBe("false");
+        });
+
+        it("is true when pinned (persistent expanded state)", () => {
+            const { container } = render(() => (
+                <UserMessageBlock node={startupNode} pinned={true} onTogglePin={() => {}} />
+            ));
+            const summary = container.querySelector(".agent-user-message-summary");
+            expect(summary!.getAttribute("aria-expanded")).toBe("true");
+        });
+
+        it("is true when transiently hover-expanded (mirrors visual state)", () => {
+            vi.useFakeTimers();
+            try {
+                const { container } = render(() => (
+                    <UserMessageBlock node={startupNode} pinned={false} onTogglePin={() => {}} />
+                ));
+                const root = container.querySelector(".agent-user-message") as HTMLElement;
+                fireEvent.mouseEnter(root);
+                vi.advanceTimersByTime(200);
+                const summary = container.querySelector(".agent-user-message-summary");
+                expect(summary!.getAttribute("aria-expanded")).toBe("true");
+            } finally {
+                vi.useRealTimers();
+            }
+        });
     });
 });
