@@ -301,19 +301,16 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             ON db_agents(parent_template_id);
         CREATE INDEX IF NOT EXISTS idx_agents_is_seeded
             ON db_agents(is_seeded);
-        CREATE INDEX IF NOT EXISTS idx_agents_block_id
-            ON db_agents(block_id);
-        CREATE INDEX IF NOT EXISTS idx_agents_status
-            ON db_agents(status);
-        CREATE INDEX IF NOT EXISTS idx_agents_definition_id
-            ON db_agents(definition_id);
         CREATE INDEX IF NOT EXISTS idx_agents_slug
             ON db_agents(slug);
-        CREATE INDEX IF NOT EXISTS idx_agents_name_recent
-            ON db_agents(instance_name, started_at DESC)
-            WHERE is_template = 0
-              AND user_hidden = 0
-              AND instance_name != '';
+        -- Reagent P0 on #1015: indexes that reference v5 ALTER-added
+        -- columns (block_id, status, definition_id, started_at) are
+        -- created AFTER the ALTER batch -- see the post-ALTER
+        -- execute_batch later in this function. Listing them here
+        -- would fail with a no-such-column error on a v4 to v5
+        -- upgrade because CREATE TABLE IF NOT EXISTS is a no-op
+        -- when the table exists, so the v5 columns are not on it
+        -- yet at this point in the chain.
 
         CREATE TABLE IF NOT EXISTS db_drone_definitions (
             id          TEXT PRIMARY KEY,
@@ -395,6 +392,28 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
     // which carries the same ids — pulling the old parent away must
     // not delete the children).
     retire_old_agent_tables(conn)?;
+
+    // ---- v5 indexes that depend on the ALTER-added columns ----
+    // Reagent P0 on #1015: the four indexes below reference columns
+    // (`block_id`, `status`, `definition_id`, `started_at`,
+    // `instance_name`) that the v5 ALTER batch adds to a pre-v5
+    // `db_agents`. Creating them in the upfront `CREATE TABLE` batch
+    // would fail on the v4 → v5 path (the columns don't exist yet),
+    // so they live here instead — they work for both fresh-v5
+    // (columns added by CREATE TABLE) and v4 → v5 (added by ALTERs).
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_agents_block_id
+            ON db_agents(block_id);
+         CREATE INDEX IF NOT EXISTS idx_agents_status
+            ON db_agents(status);
+         CREATE INDEX IF NOT EXISTS idx_agents_definition_id
+            ON db_agents(definition_id);
+         CREATE INDEX IF NOT EXISTS idx_agents_name_recent
+            ON db_agents(instance_name, started_at DESC)
+            WHERE is_template = 0
+              AND user_hidden = 0
+              AND instance_name != '';",
+    )?;
 
     // ---- Seed blank Identity / Memory singletons ----
     // The launch UI renders these as the default option in its Identity /
