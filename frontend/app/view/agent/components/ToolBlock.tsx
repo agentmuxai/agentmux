@@ -114,8 +114,16 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // `props.node.status`, and gate on a transition by comparing
     // against `prevStatus` captured outside the reactive scope.
     let prevStatus: string = props.node.status;
+    // ACTIVE states are the ones that keep the panel auto-expanded
+    // continuously. Terminal states (success, failed) trigger the
+    // 5s post-completion hold once, then collapse. Failed used to
+    // be in the active set (kept open forever) — removed per user
+    // feedback that failed panels cluttered the pane; the ✗ icon
+    // and red border-left already signal failure at a glance, and
+    // hover-to-peek covers the rare case where the user wants to
+    // re-read the output later.
     const isActive = (s: string): boolean =>
-        s === "running" || s === "pending_approval" || s === "failed";
+        s === "running" || s === "pending_approval";
     createEffect(() => {
         const s = props.node.status;
         if (isActive(prevStatus) && !isActive(s)) {
@@ -126,21 +134,21 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         prevStatus = s;
     });
 
-    // Auto-expand while the tool is actively running (or awaiting approval,
-    // or in a terminal-failure state where the user almost certainly wants
-    // to see the output). Pin still wins as an explicit override (so the
-    // user can keep a completed tool expanded). Hover keeps working as a
-    // peek affordance for collapsed (completed-success) tools.
+    // Auto-expand while the tool is actively running (or awaiting
+    // approval). Terminal states (success OR failure) get the 5s
+    // post-completion hold then collapse. Pin still wins as an
+    // explicit override (so the user can keep a completed tool
+    // expanded). Hover keeps working as a peek affordance for
+    // collapsed (completed) tools — successes and failures alike.
     //
-    // Per SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md §4.2 — Phase B. This
-    // hybrid is the minimal change that delivers the visibility win
-    // without introducing `userExpandState` (the three-state map). A
-    // follow-up phase can add click-to-collapse-mid-run if needed; for
-    // now, click on a running tool is a no-op visually because it's
-    // already expanded.
+    // Per SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md §4.2 — Phase B.
+    // The 2026-05-24 user feedback removed `failed` from the
+    // always-expanded set; failed-collapses-after-5s mirrors the
+    // success path, and the ✗ icon + red border-left at the
+    // collapsed row continue to flag the failure.
     const autoExpanded = (): boolean => {
         const s = props.node.status;
-        return s === "running" || s === "pending_approval" || s === "failed"
+        return s === "running" || s === "pending_approval"
             || postCompletionHold();
     };
     const expanded = () => props.pinned || autoExpanded() || hovering();
