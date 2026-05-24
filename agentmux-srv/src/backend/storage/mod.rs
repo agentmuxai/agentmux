@@ -4,6 +4,7 @@
 //! Storage layer: SQLite-backed object store and file store.
 //! Port of Go's pkg/wstore and pkg/filestore.
 
+pub mod agents_consolidate;
 pub mod error;
 pub mod filestore;
 pub mod migrations;
