@@ -26,6 +26,20 @@ import {
     UserMessageEvent,
 } from "./types";
 
+/**
+ * Detects the auto-generated startup payload by its literal first
+ * heading. `buildStartupPayload` emits `# Session Context` on the
+ * first line — this regex pins that contract. Updating the heading
+ * there without updating this regex will break the startup
+ * collapse-on-hover render. The L1 test on
+ * `ClaudeCodeStreamParser.userMessageToNode` asserts both
+ * positive and negative cases.
+ *
+ * Spec:
+ * `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`.
+ */
+export const STARTUP_HEADING_RE = /^# Session Context\b/;
+
 export class ClaudeCodeStreamParser {
     private buffer: string = "";
     private nodeIdCounter: number = 0;
@@ -316,16 +330,30 @@ export class ClaudeCodeStreamParser {
     }
 
     /**
-     * Convert user message event to user message node
+     * Convert user message event to user message node.
+     *
+     * Detects the auto-generated startup payload by the literal
+     * `# Session Context` heading that `buildStartupPayload` emits
+     * as line 1. The flag drives `UserMessageBlock` to render
+     * collapsed-by-default with hover-expand + click-to-pin
+     * (mirrors the ToolBlock pattern). Heuristic is one regex
+     * matched against the heading; any future rename in
+     * `buildStartupPayload.ts` needs to update both atomically —
+     * pinned by the L1 test on this method.
+     *
+     * Spec:
+     * `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`.
      */
     private userMessageToNode(event: UserMessageEvent): DocumentNode {
+        const isStartup = STARTUP_HEADING_RE.test(event.message);
         return {
             type: "user_message",
             id: `user_${this.nodeIdCounter++}`,
             message: event.message,
             timestamp: event.timestamp || Date.now(),
-            collapsed: false, // Always show user messages
+            collapsed: false, // UserMessageBlock owns the collapse state now
             summary: "👤 User Message",
+            isStartup,
         };
     }
 

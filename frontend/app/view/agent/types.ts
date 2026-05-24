@@ -245,6 +245,20 @@ export interface UserMessageNode {
     timestamp: number;
     collapsed: boolean;
     summary: string; // "👤 User Message"
+    /** True when this row is the auto-generated startup context
+     * payload (see `buildStartupPayload.ts` + onReadyFn in
+     * `agent-view.tsx`). The renderer surfaces these
+     * collapsed-by-default with hover-expand + click-to-pin,
+     * mirroring the ToolBlock pattern — they otherwise dominate
+     * the pane on every fresh agent launch.
+     *
+     * Detected by stream-parser via the literal `# Session Context`
+     * heading the builder emits. Frontend-only marker; never
+     * round-trips through the agent CLI.
+     *
+     * Spec:
+     * `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`. */
+    isStartup?: boolean;
 }
 
 /**
