@@ -616,6 +616,10 @@
         border-radius: 2px;
         user-select: text;
         cursor: text;
+        // Establish a positioning context for the overlay body
+        // (`agent-user-message-content--overlay-above/below` use
+        // `position: absolute` relative to this).
+        position: relative;
 
         .agent-user-message-content {
             pre {
@@ -627,6 +631,68 @@
                 overflow-x: auto;
                 overflow-y: hidden;
             }
+        }
+
+        // ─── Body render modes (PR for SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24) ─
+        //
+        // Three modes (gated by `bodyMode()` in UserMessageBlock):
+        //
+        //   --flow            — normal document flow. Used for regular
+        //                       (non-startup) user input AND for pinned
+        //                       startup rows. Row's measured height
+        //                       grows to include the body.
+        //
+        //   --overlay-below   — `position: absolute; top: 100%; …`.
+        //                       Body floats below the summary as a
+        //                       transient hover preview. Row's
+        //                       measured height stays at 32px so the
+        //                       virtualizer doesn't see a height
+        //                       change.
+        //
+        //   --overlay-above   — `position: absolute; bottom: 100%; …`.
+        //                       Same as above but anchored to the
+        //                       summary's TOP edge — body grows
+        //                       upward. Picked when the row is near
+        //                       the bottom of the viewport.
+        //
+        // The summary's screen-Y is anchored across the transition.
+        // No layout shift in the document, no jitter — geometry
+        // determines direction, mouseleave on the outer block
+        // doesn't fire when the cursor crosses summary→body because
+        // the absolute body is still a DOM descendant of
+        // `.agent-user-message`. See the doc comment in
+        // UserMessageBlock.tsx and the spec.
+        .agent-user-message-content--flow {
+            // Default — no special positioning. Body participates
+            // in document flow. (This is the regular-input style.)
+        }
+        .agent-user-message-content--overlay-below,
+        .agent-user-message-content--overlay-above {
+            position: absolute;
+            left: 0;
+            right: 0;
+            z-index: 10;
+            // max-height is set inline by UserMessageBlock from the
+            // chosen-side container space — keeps `overflow-y: auto`
+            // operating INSIDE the scroll container's bounds rather
+            // than relying on `calc(100vh - …)`, which clipped the
+            // overlay's tail when the agent pane is in a sub-region
+            // of the window (codex P2 round 2 on PR #1021).
+            overflow-y: auto;
+            // Solid background so the overlay reads as a discrete
+            // surface against the rows it covers. Slightly deeper
+            // than the inline tint to match the
+            // `&--expanded.agent-user-message--startup` rule below.
+            background: color-mix(in srgb, var(--user-input-color) 18%, var(--block-bg-solid-color, var(--main-bg-color, #1c1c1c)));
+            border: 1px solid color-mix(in srgb, var(--user-input-color) 40%, transparent);
+            border-radius: 4px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        }
+        .agent-user-message-content--overlay-below {
+            top: 100%;
+        }
+        .agent-user-message-content--overlay-above {
+            bottom: 100%;
         }
 
         // ─── Startup-injection variant ────────────────────────────
@@ -695,9 +761,26 @@
             //   - .agent-user-message-unpin shows ✕ when pinned,
             //     so the user can collapse without hunting.
             // Both share styling.
-            .agent-user-message-content {
+            //
+            // Anchoring (codex P1 round 3 on PR #1021):
+            //   - Overlay variants are `position: absolute` —
+            //     they serve as the containing block for the
+            //     absolute-positioned buttons themselves, no
+            //     explicit `position: relative` needed (and
+            //     applying `relative` here would lose at equal
+            //     specificity to the overlay rule, dropping the
+            //     overlay back into flow and breaking the whole
+            //     anchor design).
+            //   - The flow variant (pinned, or non-startup
+            //     regular input) needs an explicit
+            //     `position: relative` to serve as containing
+            //     block for the buttons. Scoped via the
+            //     `--flow` modifier so it can't accidentally
+            //     override the overlay rules.
+            .agent-user-message-content--flow {
                 position: relative;
-
+            }
+            .agent-user-message-content {
                 .agent-user-message-pin,
                 .agent-user-message-unpin {
                     position: absolute;
