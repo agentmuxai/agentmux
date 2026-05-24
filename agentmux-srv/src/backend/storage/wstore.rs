@@ -2287,13 +2287,14 @@ impl WaveStore {
     /// definitions.
     pub(crate) fn agents_dual_write_definition_delete(&self, def_id: &str) {
         let conn = self.conn.lock().unwrap();
-        // Reagent P2 on #1013 round 2: `id` is the PK so the prior
-        // subquery `... AND id NOT IN (SELECT id FROM db_agents
-        // WHERE is_template = 0 AND id = ?1)` could never match two
-        // different rows. Simplified to a direct PK delete; the
-        // template-vs-user-clone guard below handles the dispatch.
+        // Reagent P2 on #1013 round 3: `id` is the PK so two DELETE
+        // statements scoped by `id = ?1 AND is_template = N` add nothing
+        // over a single PK delete (only one row can match either, and
+        // an early return on the first error would skip the second
+        // cleanup unnecessarily). Collapsed to a single direct PK
+        // delete that handles both template and user-clone projections.
         if let Err(e) = conn.execute(
-            "DELETE FROM db_agents WHERE id = ?1 AND is_template = 1",
+            "DELETE FROM db_agents WHERE id = ?1",
             params![def_id],
         ) {
             tracing::warn!(
@@ -2301,30 +2302,25 @@ impl WaveStore {
                 error = %e,
                 "db_agents dual-write: definition delete failed",
             );
-            return;
-        }
-        // Also delete the user-clone projection if the deleted definition
-        // was a user-cloned one (is_seeded = 0 → projected as is_template = 0).
-        // The cascade on db_agent_instances → db_agent_definitions removes
-        // matching instances; their projected db_agents rows go with them.
-        if let Err(e) = conn.execute(
-            "DELETE FROM db_agents WHERE id = ?1 AND is_template = 0",
-            params![def_id],
-        ) {
-            tracing::warn!(
-                def_id = %def_id,
-                error = %e,
-                "db_agents dual-write: definition user-clone delete failed",
-            );
         }
     }
 
-    /// Bulk dual-write: delete every `is_template = 1` row in `db_agents`
-    /// to mirror `agent_def_delete_seeded`. Idempotent.
+    /// Bulk dual-write: mirror `agent_def_delete_seeded`. Deletes
+    /// every `is_template = 1` row AND any user-clone projections
+    /// (`is_template = 0`) whose `parent_template_id` points at one of
+    /// those templates — those rows are orphaned in `db_agents` once
+    /// the FK cascade removes the underlying `db_agent_instances`
+    /// rows. Single statement: the subquery is evaluated against the
+    /// pre-delete snapshot in SQLite, so the orphan set is captured
+    /// before the templates disappear. Reagent P1 round 3 on #1013.
+    /// Idempotent.
     pub(crate) fn agents_dual_write_seeded_delete(&self) {
         let conn = self.conn.lock().unwrap();
         if let Err(e) = conn.execute(
-            "DELETE FROM db_agents WHERE is_template = 1",
+            "DELETE FROM db_agents
+             WHERE is_template = 1
+                OR (is_template = 0
+                    AND parent_template_id IN (SELECT id FROM db_agents WHERE is_template = 1))",
             [],
         ) {
             tracing::warn!(
@@ -2384,6 +2380,18 @@ impl WaveStore {
         // non-template row and produce a shape inconsistent with what
         // backfill produced for identical data).
         let res = if def.is_seeded == 0 {
+            // Reagent P2 round 3 on #1013: don't write `inst.created_at`
+            // here — the user-clone def may already have a fresher
+            // `updated_at` from a prior `agent_def_update` (e.g. user
+            // renamed the agent after first launch). Wall-clock now()
+            // is the right monotonic stamp (matches what
+            // `agents_dual_write_instance_update` writes on subsequent
+            // touches). Avoids Phase 3b readers sorting on a regressed
+            // timestamp.
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(inst.created_at);
             conn.execute(
                 "UPDATE db_agents SET
                     name = ?2,
@@ -2403,7 +2411,7 @@ impl WaveStore {
                     inst.working_directory,
                     inst.github_context,
                     inst.instance_name,
-                    inst.created_at,
+                    now_ms,
                     if inst.display_hidden { 1_i64 } else { 0_i64 },
                 ],
             )
@@ -2537,9 +2545,21 @@ impl WaveStore {
     ) {
         let conn = self.conn.lock().unwrap();
         if let Err(e) = conn.execute(
+            // Reagent P1 round 3 on #1013: `instance_repoint_definition`
+            // only rewrites `db_agent_instances.definition_id` — it
+            // does NOT rewrite the parent of a sibling user-cloned
+            // definition that happens to share the same parent template.
+            // Restrict the projection update to rows whose `id` is an
+            // ACTUALLY repointed instance id (i.e. the rows whose
+            // `db_agent_instances.definition_id` was just rewritten to
+            // `new_def_id`). User-clone definition projections, whose
+            // `id` lives in `db_agent_definitions` not `db_agent_instances`,
+            // are untouched.
             "UPDATE db_agents
              SET parent_template_id = ?1
-             WHERE is_template = 0 AND parent_template_id = ?2",
+             WHERE is_template = 0
+               AND parent_template_id = ?2
+               AND id IN (SELECT id FROM db_agent_instances WHERE definition_id = ?1)",
             params![new_def_id, old_def_id],
         ) {
             tracing::warn!(
