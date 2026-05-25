@@ -114,14 +114,17 @@ Append compact-variant rules to the existing canonical chrome:
 
 ```scss
 :where(.modal-layer-mount--compact) {
-    .modal-panel { min-width: 0; width: 100%; max-width: 100%; }
+    // `[data-size]` ties the per-size base rules' specificity
+    // (`.modal-panel[data-size="fit"] { width: auto }` is 0,2,0;
+    // bare `.modal-panel` would be 0,1,0 and lose).
+    .modal-panel[data-size] { min-width: 0; width: 100%; max-width: 100%; }
     .modal-panel-header { padding: var(--space-1) var(--space-2); }
     .modal-panel-title { font-size: 14px; line-height: 1.3; }
     .modal-panel-description { font-size: 12px; margin-top: 2px; }
     .modal-panel-body { padding: var(--space-2); }
     .modal-panel-footer {
         padding: var(--space-1) var(--space-2);
-        flex-direction: column-reverse;
+        flex-direction: column;
         gap: var(--space-1);
 
         .button, button { width: 100%; }
@@ -129,7 +132,7 @@ Append compact-variant rules to the existing canonical chrome:
 }
 ```
 
-The `:where()` wrapper keeps the compact rules at the same specificity as the base rules, so per-panel SCSS overrides work cleanly.
+The `:where()` wrapper keeps the *wrapper* at zero specificity so per-panel SCSS overrides apply cleanly. The inner selectors then carry their native specificity: the `.modal-panel-*` chrome rules tie the base chrome (both 0,1,0) and win on source order, while the panel-width rule scopes to `.modal-panel[data-size]` (0,2,0) so it ties the base `.modal-panel[data-size="fit"]` (and friends) and wins on source order instead of losing to them. An earlier draft used bare `.modal-panel` and silently failed to override per-size widths — caught by codex P2 on PR #1039.
 
 ### 4.3 No JS API change
 

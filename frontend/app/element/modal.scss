@@ -291,11 +291,19 @@
 // content-driven min-widths (e.g. xterm-based install modal) can
 // override locally via `:where(.modal-layer-mount--compact) &`.
 //
-// `:where()` keeps these rules at the same specificity as the base
-// rules so per-panel overrides apply without `!important`.
+// `:where()` keeps the wrapper at zero specificity so per-panel
+// overrides apply without `!important`. The inner selectors then
+// carry their own native specificity — `.modal-panel-*` rules tie
+// the base chrome and win on source order, and the panel-width rule
+// scopes to `.modal-panel[data-size]` to match the base size rules
+// (`.modal-panel[data-size="fit"]` etc., specificity 0,2,0) which
+// would otherwise win over a bare `.modal-panel` (0,1,0) and leave
+// the compact panel at the per-size width. Codex P2 on PR #1039.
 // Spec: SPEC_MODAL_COMPACT_VARIANT_2026_05_25.md §2 §4.2.
 :where(.modal-layer-mount--compact) {
-    .modal-panel {
+    // `[data-size]` matches every variant (`sm`/`md`/`lg`/`xl`/`fit`)
+    // and ties their specificity so this rule wins on source order.
+    .modal-panel[data-size] {
         min-width: 0;
         width: 100%;
         max-width: 100%;
