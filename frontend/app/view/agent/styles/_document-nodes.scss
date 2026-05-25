@@ -201,14 +201,29 @@
             // fires on the way out. (SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md §Change 2)
 
             &--hidden {
+                // Collapse must be INSTANT for `max-height` / padding /
+                // margin. Reason: when the panel was in `--overlay-*`
+                // mode (`position: absolute`), going to `--hidden`
+                // drops the absolute positioning in the same render —
+                // if `max-height` then animates from the overlay's
+                // inline value (e.g. 250px) down to 0 over 200ms, the
+                // panel spends those 200ms as an IN-FLOW box that
+                // grows the row, producing a visible expand→collapse
+                // flap each time the cursor moves between tool rows.
+                //
+                // Only `opacity` keeps its transition — it doesn't
+                // affect layout, just adds a soft fade-out cue. Net
+                // result: the panel snaps to zero size instantly
+                // (no flap) and fades out over 150ms (no jank).
+                // (SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md §Change 2;
+                // refined per 2026-05-24 user report after PR #1025.)
                 max-height: 0 !important;
                 padding-top: 0 !important;
                 padding-bottom: 0 !important;
                 margin-top: 0 !important;
                 margin-bottom: 0 !important;
                 opacity: 0;
-                transition: max-height 200ms ease-out, opacity 150ms ease-out,
-                            padding 200ms ease-out, margin 200ms ease-out;
+                transition: opacity 150ms ease-out;
             }
 
             // Hover-anchor overlay variants
