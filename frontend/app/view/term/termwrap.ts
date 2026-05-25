@@ -87,6 +87,12 @@ export class TermWrap {
     private rafBuffer: Uint8Array[] = [];
     private rafPending: boolean = false;
     private writeInFlight: boolean = false;
+    // Thaw-cycle handles — cleared in dispose() so callbacks don't fire
+    // on a disposed Terminal. dispose() doesn't null `this.terminal`, so
+    // a null-check guard alone isn't enough.
+    private thawTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    private thawRafId: number | null = null;
+    private disposed: boolean = false;
 
     // ── Phase 1: CONSTRUCT (sync) ──────────────────────────────────────
 
@@ -319,23 +325,39 @@ export class TermWrap {
         // but short enough to feel immediate. Split across rAF ticks
         // because xterm coalesces back-to-back same-frame resizes
         // into a single SIGWINCH.
-        setTimeout(() => {
-            if (!this.terminal) return;
-            const baseCols = this.terminal.cols;
-            const baseRows = this.terminal.rows;
-            if (baseCols < 4) return; // too narrow to safely toggle ±1
-            try {
-                this.terminal.resize(baseCols + 1, baseRows);
-                this.sendTermSize();
-                requestAnimationFrame(() => {
-                    if (!this.terminal) return;
-                    this.terminal.resize(baseCols, baseRows);
+        //
+        // Gated to Windows (PLATFORM === "win32") because PSReadLine /
+        // ConPTY are the affected stack. Non-Windows shells (bash, zsh,
+        // fish) handle SIGWINCH cleanly on their own and the extra
+        // resize cycle would be needless overhead. Reagent P2.
+        //
+        // Handles tracked on `this` and cleared in dispose() so the
+        // callbacks can't fire on a disposed Terminal. Reagent P1.
+        if (PLATFORM === PlatformWindows) {
+            this.thawTimeoutId = setTimeout(() => {
+                this.thawTimeoutId = null;
+                if (this.disposed || !this.terminal) return;
+                const baseCols = this.terminal.cols;
+                const baseRows = this.terminal.rows;
+                if (baseCols < 4) return; // too narrow to safely toggle ±1
+                try {
+                    this.terminal.resize(baseCols + 1, baseRows);
                     this.sendTermSize();
-                });
-            } catch (e) {
-                console.warn("[term] PSReadLine-thaw resize cycle failed", e);
-            }
-        }, 250);
+                    this.thawRafId = requestAnimationFrame(() => {
+                        this.thawRafId = null;
+                        if (this.disposed || !this.terminal) return;
+                        try {
+                            this.terminal.resize(baseCols, baseRows);
+                            this.sendTermSize();
+                        } catch (e) {
+                            console.warn("[term] PSReadLine-thaw step 2 failed", e);
+                        }
+                    });
+                } catch (e) {
+                    console.warn("[term] PSReadLine-thaw step 1 failed", e);
+                }
+            }, 250);
+        }
 
         this.runProcessIdleTimeout();
     }
@@ -343,6 +365,20 @@ export class TermWrap {
     // ── Phase 3: RUNNING ───────────────────────────────────────────────
 
     dispose() {
+        this.disposed = true;
+        // Cancel pending PSReadLine-thaw callbacks so they don't fire
+        // on a disposed Terminal. dispose() doesn't null `this.terminal`
+        // (xterm.Terminal stays in memory until its own dispose finishes
+        // and references are dropped), so the `if (!this.terminal)`
+        // guards in the callbacks can't catch this race on their own.
+        if (this.thawTimeoutId !== null) {
+            clearTimeout(this.thawTimeoutId);
+            this.thawTimeoutId = null;
+        }
+        if (this.thawRafId !== null) {
+            cancelAnimationFrame(this.thawRafId);
+            this.thawRafId = null;
+        }
         const agentId = registeredAgentsByBlock.get(this.blockId);
         if (agentId) {
             fireAndForget(() => unregisterAgent(agentId));
