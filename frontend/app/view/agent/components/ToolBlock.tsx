@@ -38,6 +38,12 @@ import { Show, createEffect, createSignal, onCleanup, type JSX } from "solid-js"
 import { createBlock } from "@/store/global";
 import type { ToolNode } from "../types";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
+import {
+    findScrollContainerRect,
+    maxOverlayHeight,
+    pickExpandDirection,
+    type ExpandDirection,
+} from "./hover-anchor";
 
 interface ToolBlockProps {
     node: ToolNode;
@@ -70,9 +76,21 @@ const STATUS_ICON: Record<ToolNode["status"], string> = {
 
 const HOVER_ENTER_DELAY_MS = 150;
 
+// Tool overlay body estimate — log views can be much bigger than user
+// messages, but the cap is just a hint to `pickExpandDirection`; the
+// "fits-neither" tie-break handles oversized cases gracefully.
+const TOOL_BODY_ESTIMATE_PX = 320;
+
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     const [hovering, setHovering] = createSignal(false);
+    // Hover-anchor — direction and per-hover max-height for the
+    // overlay panel when in hover-only (not pinned, not auto-
+    // expanded) mode. Mirrors UserMessageBlock's mechanic
+    // (SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24.md).
+    const [expandDirection, setExpandDirection] = createSignal<ExpandDirection>("below");
+    const [overlayMaxHeight, setOverlayMaxHeight] = createSignal<number | null>(null);
     let enterTimer: ReturnType<typeof setTimeout> | undefined;
+    let rootEl: HTMLDivElement | undefined;
     // Codex P1 on #988: both the block container AND the inline panel
     // bind these handlers. A fast cursor traversal (container → panel)
     // fires enter twice without an intervening leave; without clearing
@@ -81,11 +99,33 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // top of enter makes the timer a single-active-armed value.
     const handleMouseEnter = () => {
         clearTimeout(enterTimer);
-        enterTimer = setTimeout(() => setHovering(true), HOVER_ENTER_DELAY_MS);
+        enterTimer = setTimeout(() => {
+            // Capture summary geometry + scroll-container bounds
+            // ONCE at expand-time. Direction stays fixed for the
+            // hover; next mouseenter re-evaluates. Same pattern as
+            // UserMessageBlock — see hover-anchor.ts.
+            if (rootEl) {
+                const summaryEl = rootEl.querySelector<HTMLElement>(".agent-tool-summary");
+                if (summaryEl) {
+                    const rect = summaryEl.getBoundingClientRect();
+                    const container = findScrollContainerRect(summaryEl);
+                    const summaryV = { top: rect.top, bottom: rect.bottom };
+                    const dir = pickExpandDirection(
+                        summaryV,
+                        container,
+                        TOOL_BODY_ESTIMATE_PX,
+                    );
+                    setExpandDirection(dir);
+                    setOverlayMaxHeight(maxOverlayHeight(summaryV, container, dir));
+                }
+            }
+            setHovering(true);
+        }, HOVER_ENTER_DELAY_MS);
     };
     const handleMouseLeave = () => {
         clearTimeout(enterTimer);
         setHovering(false);
+        setOverlayMaxHeight(null);
     };
     onCleanup(() => clearTimeout(enterTimer));
 
@@ -153,10 +193,36 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     };
     const expanded = () => props.pinned || autoExpanded() || hovering();
 
+    // Render mode for the panel — mirrors UserMessageBlock:
+    //
+    //   - `hidden`  : not expanded.
+    //   - `overlay` : expanded by hover ONLY (no pin, no
+    //                 auto-expand by status). Uses absolute
+    //                 positioning so the row doesn't change height
+    //                 and the panel can flip above/below based on
+    //                 available container space. The natural fit
+    //                 for "the user is just peeking."
+    //   - `flow`    : expanded by pin OR auto-status (running,
+    //                 pending_approval, post-completion hold).
+    //                 Renders in normal flow under the summary —
+    //                 the long-form persistent commitment.
+    //
+    // Per the user request for tool calls near the bottom of the
+    // pane to expand UPWARD instead of being clipped: hover state
+    // now uses the same hover-anchor design as the startup row
+    // (SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24.md §5.10
+    // contemplated exactly this generalization).
+    const panelMode = (): "hidden" | "overlay" | "flow" => {
+        if (!expanded()) return "hidden";
+        if (props.pinned || autoExpanded()) return "flow";
+        return "overlay";
+    };
+
     const statusIcon = (): string => STATUS_ICON[props.node.status] || "•";
 
     return (
         <div
+            ref={(el) => (rootEl = el)}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
             class={clsx("agent-tool-block", {
@@ -212,14 +278,33 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                     </button>
                 </Show>
             </div>
-            {/* Phase A: inline panel — replaces the Portal-to-document.body
-                positioning hack. The panel renders in normal document
-                flow underneath the summary row. Always in DOM so CSS can
-                animate the collapse transition; visibility is controlled by
-                the agent-tool-panel--hidden modifier class.
-                (SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md §Change 2) */}
+            {/* Panel — three render modes per `panelMode()`:
+             *
+             *   hidden  → `.agent-tool-panel--hidden` (off).
+             *   flow    → in-flow under the summary (default DOM
+             *             layout — pinned / running / post-hold).
+             *   overlay → absolute positioning above OR below the
+             *             summary so a hover near the pane's bottom
+             *             expands upward instead of being clipped.
+             *
+             * Always rendered in the DOM so CSS transitions can
+             * animate the off→on shift; `inert` + `aria-hidden`
+             * remove it from the focus/a11y tree when hidden.
+             */}
             <div
-                class={clsx("agent-tool-panel", { "agent-tool-panel--hidden": !expanded() })}
+                class={clsx("agent-tool-panel", {
+                    "agent-tool-panel--hidden": panelMode() === "hidden",
+                    "agent-tool-panel--flow": panelMode() === "flow",
+                    "agent-tool-panel--overlay-below":
+                        panelMode() === "overlay" && expandDirection() === "below",
+                    "agent-tool-panel--overlay-above":
+                        panelMode() === "overlay" && expandDirection() === "above",
+                })}
+                style={
+                    panelMode() === "overlay" && overlayMaxHeight() !== null
+                        ? { "max-height": `${overlayMaxHeight()}px` }
+                        : undefined
+                }
                 // Codex P2 on #988: with the always-rendered markup, the
                 // collapsed panel was visually hidden via max-height /
                 // opacity but still in the focusable + a11y tree, so
