@@ -29,7 +29,13 @@
     -webkit-app-region: no-drag;
     display: flex;
     align-items: center;
-    cursor: grab;
+    // Inherit `cursor: default` from `.window-header` (matches tabs —
+    // tab bodies also have no override and inherit the same default
+    // arrow). The previous `cursor: grab` here was visually noisy: it
+    // implied "drag me first" on every hover, even though the primary
+    // interaction is click-to-activate. `cursor: grabbing` is still
+    // applied during the actual drag (`:active`) so the user gets a
+    // real signal while a drag is in progress.
     border-radius: 4px;
     transition: opacity 120ms ease;
     touch-action: none;
@@ -66,7 +72,12 @@
     gap: var(--space-1);
     padding: var(--space-0-5) var(--space-2);
     height: 100%;
-    cursor: pointer;
+    // Inherit `cursor: default` from `.window-header` — matches the
+    // tab and widget-slot cursor discipline. (Was `cursor: pointer`
+    // which implied a web-link hand cursor; the title-bar chrome
+    // shouldn't read as a link.) Dropdown menu items inside
+    // `.action-widget-more-dropdown` keep `cursor: pointer` — they're
+    // a menu list, the link cursor is conventional there.
     border-radius: 4px;
     color: var(--secondary-text-color);
     font-size: 12px;
