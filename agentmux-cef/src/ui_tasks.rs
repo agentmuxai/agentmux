@@ -574,6 +574,7 @@ wrap_task! {
                         let render = find_main_render_widget(top_hwnd, &pane_outer_hwnds);
                         let target = render.unwrap_or(top_hwnd);
                         windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(target as _);
+                        crate::browser_pane::hwnd::record_intentional_focus(target);
                         tracing::info!(
                             "[main-focus-reclaim] Win32 SetFocus target={:p} render_found={} panes_excluded={}",
                             target,

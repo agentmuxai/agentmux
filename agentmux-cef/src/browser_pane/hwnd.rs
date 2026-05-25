@@ -71,6 +71,56 @@ pub fn remove_contexts_for_block(block_id: &str) {
 pub static ALLOW_BROWSER_PANE_FOCUS_ONCE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+/// Per-top-level-window record of the last child HWND to receive
+/// *intentional* keyboard focus — written by the pane subclass when an
+/// allowed-through `WM_SETFOCUS` lands and by `MainFocusReclaimTask`
+/// after its `SetFocus` on the main render widget. Programmatic pane
+/// focus that the redirect intercepts is NOT recorded — only paths the
+/// user actually intends.
+///
+/// Keyed by `GetAncestor(child, GA_ROOT)`. AgentMux runs multiple
+/// top-level windows in one process (primary `"main"` plus pool /
+/// sub-windows — see `state::list_browsers`); a single global slot
+/// would let `WM_ACTIVATE` on window A read window B's child and
+/// `SetFocus` the wrong one. See spec §4.5 for the empirical evidence
+/// (`docs/specs/SPEC_WINDOW_REACTIVATE_FOCUS_RESTORE_2026_05_23.md`).
+///
+/// `Mutex` (not `RwLock`): writes are rare (per intentional focus
+/// event), reads rarer still (per top-level `WM_ACTIVATE`). Contention
+/// is negligible.
+///
+/// Stale entries (child HWND destroyed) self-heal: the activate handler
+/// re-validates via `IsWindow` before calling `SetFocus`.
+pub static LAST_FOCUSED_BY_ROOT: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<usize, usize>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Single write helper called from both intentional-focus sites (the
+/// pane subclass in this module and `MainFocusReclaimTask` in
+/// `ui_tasks.rs`). Resolves `child`'s top-level ancestor via
+/// `GetAncestor(GA_ROOT)` and stores the pair into `LAST_FOCUSED_BY_ROOT`.
+///
+/// Safety: `child` must be a live HWND that the caller intentionally
+/// just focused (so the recorded value is meaningful). Caller must
+/// also be on the Win32 UI thread, since `GetAncestor` and the static
+/// `LazyLock` aren't sensitive to thread but Win32 idiom is to keep
+/// HWND traffic on the message-pump thread.
+pub unsafe fn record_intentional_focus(child: *mut std::ffi::c_void) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
+    let root = GetAncestor(child, GA_ROOT);
+    if root.is_null() {
+        return;
+    }
+    if let Ok(mut map) = LAST_FOCUSED_BY_ROOT.lock() {
+        map.insert(root as usize, child as usize);
+        tracing::info!(
+            "[focus-track] LAST_FOCUSED_BY_ROOT[root={:p}] <= child={:p}",
+            root,
+            child,
+        );
+    }
+}
+
 /// Last-redirect timestamp per root HWND, used by
 /// `should_redirect_pane_focus_to_root` to rate-limit programmatic focus
 /// storms (setInterval-driven `window.focus()`, OAuth redirector pages,
@@ -251,6 +301,7 @@ pub unsafe fn install_browser_pane_focus_redirect(
             // once, then revert to redirect-mode for subsequent events.
             if ALLOW_BROWSER_PANE_FOCUS_ONCE.swap(false, Ordering::Relaxed) {
                 tracing::info!("[pane-wndproc] WM_SETFOCUS allowed (intentional)");
+                record_intentional_focus(hwnd);
                 // Fall through to the original WndProc.
             } else {
                 // Programmatic focus (page load, JS window.focus()): redirect
