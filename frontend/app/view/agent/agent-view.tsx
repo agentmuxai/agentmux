@@ -65,18 +65,33 @@ import "./agent-view.scss";
 
 /**
  * Top-level wrapper — switches between agent picker and presentation view.
+ *
+ * The pane-scope `<ModalLayer>` wrap lives HERE (not inside
+ * AgentPresentationView) because the launch picker — which uses
+ * `useModalLayer()` to open the launch / install / new-bundle /
+ * create-from-template modals — runs in the fallback branch BEFORE
+ * an agentId exists. If the layer wrapped only the presentation
+ * view, every first-launch / template-launch call site would resolve
+ * `useModalLayer()` to the outer tab-scope layer and the modal would
+ * inert the whole tab instead of just this pane (codex P1 on PR
+ * #1034). Wrapping at the wrapper covers both the pre-launch picker
+ * AND the post-launch presentation view, so the pane-scope lock
+ * holds across the entire pane lifecycle.
+ * SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md.
  */
 export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Element => {
     const block = model.blockAtom;
     const agentId = () => block()?.meta?.["agentId"];
 
     return (
-        <Show
-            when={agentId()}
-            fallback={<AgentPicker model={model} />}
-        >
-            <AgentPresentationView model={model} agentId={agentId()} />
-        </Show>
+        <ModalLayer scope="pane">
+            <Show
+                when={agentId()}
+                fallback={<AgentPicker model={model} />}
+            >
+                <AgentPresentationView model={model} agentId={agentId()} />
+            </Show>
+        </ModalLayer>
     );
 };
 
@@ -653,14 +668,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     };
 
     return (
-        // Pane-scope modal host. Any `useModalLayer()` call inside this
-        // subtree (e.g. `AgentPicker`'s launch flow) resolves to THIS
-        // layer rather than the outer tab-scope one, so the launch
-        // modal's backdrop covers only this agent pane and `inert`
-        // locks only this pane's content — other panes in the same
-        // tab (browser, another agent, terminal) stay live.
-        // SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md.
-        <ModalLayer scope="pane">
+        // Pane-scope `<ModalLayer>` lives in AgentViewWrapper (above)
+        // so it covers BOTH this presentation view AND the picker
+        // fallback. Anything in this subtree that calls
+        // `useModalLayer()` resolves to that outer pane-scope layer.
         <div
             ref={rootRef}
             class="agent-view agent-view--presentation"
@@ -901,7 +912,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 )}
             </Show>
         </div>
-        </ModalLayer>
     );
 };
 
