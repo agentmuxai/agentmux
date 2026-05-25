@@ -276,3 +276,62 @@
         animation: modal-dismiss-nudge-static 240ms ease-in-out;
     }
 }
+
+// ── Compact variant ────────────────────────────────────────────────────
+//
+// Fires when the ModalLayer's mount node observes a width below
+// COMPACT_THRESHOLD_PX (400px). Used for narrow lock regions —
+// verified live at 240px (browser pane in a three-pane window
+// during the auth-modal investigation).
+//
+// Strategy: relax per-panel min-widths and shrink padding / font /
+// footer-layout so dialogs remain usable in narrow panes. The
+// canonical chrome classes (`.modal-panel-*`) live in this file
+// and get the variant for free; per-panel modal SCSS that has
+// content-driven min-widths (e.g. xterm-based install modal) can
+// override locally via `:where(.modal-layer-mount--compact) &`.
+//
+// `:where()` keeps these rules at the same specificity as the base
+// rules so per-panel overrides apply without `!important`.
+// Spec: SPEC_MODAL_COMPACT_VARIANT_2026_05_25.md §2 §4.2.
+:where(.modal-layer-mount--compact) {
+    .modal-panel {
+        min-width: 0;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .modal-panel-header {
+        padding: var(--space-1) var(--space-2);
+    }
+
+    .modal-panel-title {
+        font-size: 14px;
+        line-height: 1.3;
+    }
+
+    .modal-panel-description {
+        font-size: 12px;
+        margin-top: 2px;
+    }
+
+    .modal-panel-body {
+        padding: var(--space-2);
+    }
+
+    .modal-panel-footer {
+        padding: var(--space-1) var(--space-2);
+        // Primary action sits at the bottom in compact mode (mobile-
+        // app convention). `column-reverse` so the JSX order
+        // (Cancel first, Submit second) renders Submit at the
+        // bottom. Buttons stretch full-width for thumb-friendly
+        // hit targets in narrow panes.
+        flex-direction: column-reverse;
+        gap: var(--space-1);
+
+        .button,
+        button {
+            width: 100%;
+        }
+    }
+}
