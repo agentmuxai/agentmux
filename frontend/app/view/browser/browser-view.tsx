@@ -3,6 +3,7 @@
 
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import { ModalLayer } from "@/element/ModalLayer";
 import { useModalLayer } from "@/element/modal-layer";
 import type { BrowserViewModel } from "./browser-model";
 import "./browser-view.scss";
@@ -18,7 +19,33 @@ function tagElement(el: Element | null): string {
     return `${t}${id ? `#${id}` : ""}${cls ? `.${cls}` : ""}`;
 }
 
+/**
+ * Pane-scope modal host. Wraps the browser-pane content in a
+ * `<ModalLayer scope="pane">` so any `useModalLayer()` call inside
+ * resolves to THIS layer rather than the outer tab-scope one
+ * (from `tabcontent.tsx`). The HTTP Basic / Digest auth modal that
+ * fires on a 401-protected URL then locks only this pane —
+ * everything else in the tab (sibling panes, tab bar, title bar)
+ * stays interactive.
+ *
+ * Split into a thin outer + inner so the inner's `useModalLayer()`
+ * call (line below) resolves against the wrapper's context, not the
+ * caller's. Solid's hook resolves up the JSX tree at execution time,
+ * so the consumer must be a CHILD of the provider — putting the
+ * `useModalLayer()` call in the same function body as the
+ * `<ModalLayer>` JSX would have it resolve to the outer (tab) layer
+ * instead.
+ * SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md §5 (browser-auth follow-up).
+ */
 export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>): JSX.Element {
+    return (
+        <ModalLayer scope="pane">
+            <BrowserViewInner model={props.model} />
+        </ModalLayer>
+    );
+}
+
+function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
     const model = props.model;
     const modalLayer = useModalLayer();
     const _diagTag = `[browser-pane:diag][${model.blockId.slice(0, 7)}]`;
