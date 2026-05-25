@@ -1128,6 +1128,31 @@ impl AgentMuxHandler {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
 
         let error_code_raw = sys::cef_errorcode_t::from(error_code);
+
+        // [DIAG] Unconditional entry log — captures every load error
+        // BEFORE the ERR_ABORTED filter, sub-frame filter, or fallback-
+        // page render. Pair with `[browser-pane-auth][ENTRY]` to
+        // diagnose the auth-modal-doesn't-appear path: if we see a
+        // load-error here with no preceding auth-credentials entry,
+        // CEF skipped the auth flow entirely.
+        let failed_url_dbg = failed_url.map(CefString::to_string).unwrap_or_default();
+        let error_text_dbg = error_text.map(CefString::to_string).unwrap_or_default();
+        // `as_ref()` + auto-deref on `&&mut Frame` — relies only on
+        // `is_main(&self)` resolving through normal method-call deref,
+        // not on `Deref` for the `Option::as_deref()` blanket impl.
+        let is_main_frame = match frame.as_ref() {
+            Some(f) => f.is_main() == 1,
+            None => false,
+        };
+        tracing::info!(
+            "[load-error][ENTRY] url={:?} error={:?} ({}) is_main_frame={} aborted={}",
+            failed_url_dbg,
+            error_text_dbg,
+            error_code_raw as i32,
+            is_main_frame,
+            error_code_raw == sys::cef_errorcode_t::ERR_ABORTED,
+        );
+
         if error_code_raw == sys::cef_errorcode_t::ERR_ABORTED {
             return;
         }
@@ -1450,6 +1475,35 @@ impl AgentMuxHandler {
         _scheme: Option<&CefString>,
         callback: Option<&mut AuthCallback>,
     ) -> ::std::os::raw::c_int {
+        // [DIAG] Top-of-function entry log — fires unconditionally before
+        // every early-return so we can confirm whether CEF is invoking
+        // the callback at all for a given URL. The reagent-merged
+        // browser-pane auth flow (#906) appeared to fail silently for
+        // some sites in dev mode (e.g. https://pulse.asaf.cc returns
+        // ERR_INVALID_AUTH_CREDENTIALS without `[browser-pane-auth]`
+        // ever logging). This entry log narrows the diagnosis:
+        //   - Visible → CEF is calling the callback; early return below
+        //     OR downstream path is the problem.
+        //   - Not visible → CEF is suppressing the call entirely
+        //     (caching, security policy, missing vtable wire-up).
+        // Logs `origin/host/port/realm/is_proxy/has_browser/has_callback`
+        // so all the discriminators are captured even on the silent-
+        // decline branches that follow.
+        let origin_dbg = origin_url.map(CefString::to_string).unwrap_or_default();
+        let host_dbg = host.map(CefString::to_string).unwrap_or_default();
+        let realm_dbg = realm.map(CefString::to_string).unwrap_or_default();
+        tracing::info!(
+            "[browser-pane-auth][ENTRY] origin={:?} host={:?}:{} realm={:?} \
+             is_proxy={} has_browser={} has_callback={}",
+            origin_dbg,
+            host_dbg,
+            port,
+            realm_dbg,
+            is_proxy != 0,
+            browser.is_some(),
+            callback.is_some(),
+        );
+
         // Resolve the pane block_id from the browser ref. If this isn't
         // a browser-pane browser (i.e. it's the host frontend's browser),
         // we have no UI to prompt — decline and let CEF fail the
@@ -1467,6 +1521,14 @@ impl AgentMuxHandler {
             return 0;
         };
         let Some(cb) = callback else {
+            // [DIAG] Previously silent. If we reach here CEF gave us a
+            // browser + a resolvable pane block_id but no callback —
+            // an unusual combination worth logging so the diagnosis
+            // path doesn't have a blind spot.
+            tracing::warn!(
+                "[browser-pane-auth] callback is None (block={}) — declining",
+                block_id,
+            );
             return 0;
         };
 
