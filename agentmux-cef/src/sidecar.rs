@@ -130,7 +130,11 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
         .ok_or_else(|| "current_exe has no parent".to_string())?;
     let paths = if agentmux_common::is_dev_build_exe(host_exe_dir) {
         let mode = agentmux_common::RuntimeMode::current_path_only(host_exe_dir);
-        agentmux_common::DataPaths::resolve(current_version, &mode)?
+        // resolve_path_only mirrors current_path_only's env-isolation:
+        // ignore inherited AGENTMUX_CHANNEL so a re-spawned dev sidecar
+        // doesn't redirect into a parent agentmux instance's channel
+        // (would trip the channel single-instance lock).
+        agentmux_common::DataPaths::resolve_path_only(current_version, &mode)?
     } else {
         match agentmux_common::DataPaths::from_env() {
             Some(p) => p,

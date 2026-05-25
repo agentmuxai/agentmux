@@ -91,6 +91,19 @@ tasks:
     package:
         desc: 'Bump the patch version (committed), then build + package a portable to ~/Desktop. The bump is automatic, so EVERY portable gets a unique, monotonic version — two builds never collide on version or data dir.'
         platforms: [windows]
+        env:
+            # Locally-built portables land on the `dev-portable` channel
+            # (see SPEC_DATA_CHANNELS_2026_05_24.md §2.2). Release CI
+            # does NOT call `task package`, so this env never leaks
+            # into a release build — release builds get the default
+            # `stable` channel via the fallback in
+            # agentmux-common/src/data_paths.rs.
+            #
+            # The Rust crate reads this at compile time via
+            # `option_env!("AGENTMUX_BUILD_CHANNEL_DEFAULT")`, so the
+            # value must be set BEFORE the Rust build runs (which is
+            # what the env block does — it covers every cmd below).
+            AGENTMUX_BUILD_CHANNEL_DEFAULT: dev-portable
         cmds:
             # Auto-bump FIRST: makes a stale-versioned portable structurally
             # impossible. The committed version is the durable monotonic
