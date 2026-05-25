@@ -25,15 +25,23 @@
 //!     └── (same children as channels/<channel>/)
 //! ```
 //!
-//! Channel resolution:
-//! - `AGENTMUX_CHANNEL=<name>` env override always wins (any mode).
-//! - `RuntimeMode::Installed` / `Portable` → build-time default
-//!   from `AGENTMUX_BUILD_CHANNEL_DEFAULT` (set by the packaging
-//!   script; defaults to `"stable"` if unset, e.g. for `cargo run`).
+//! Channel resolution (via [`DataPaths::resolve`]):
+//! - `AGENTMUX_CHANNEL=<name>` env override wins for `Installed` /
+//!   `Portable` modes — lets the operator point a released binary at
+//!   any channel for parallel-channel testing.
+//! - `RuntimeMode::Installed` / `Portable` w/o override → build-time
+//!   default from `AGENTMUX_BUILD_CHANNEL_DEFAULT` (set by the
+//!   packaging script; defaults to `"stable"` if unset, e.g. for
+//!   `cargo run`).
 //! - `RuntimeMode::Dev { branch }` → channel name is `dev-<branch>`
 //!   for diagnostics; on-disk path stays at `~/.agentmux/dev/<branch>/`
-//!   (NOT under `channels/`) so per-branch dev isolation works as
-//!   before.
+//!   (NOT under `channels/`). Both the host (`agentmux-cef`) and
+//!   launcher (`agentmux-launcher`) use [`DataPaths::resolve_path_only`]
+//!   for dev builds to ignore `AGENTMUX_CHANNEL` — a dev session
+//!   launched from inside a parent agentmux pane mustn't inherit
+//!   the parent's channel and break per-branch isolation. Channel
+//!   override is intentionally NOT supported in dev mode; if you
+//!   want a different channel, use a portable build.
 
 use crate::RuntimeMode;
 use std::path::{Path, PathBuf};

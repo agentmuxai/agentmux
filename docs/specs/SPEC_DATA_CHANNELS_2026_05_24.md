@@ -95,7 +95,7 @@ Resolution: `agentmux_common::DataPaths::resolve(version, mode)` in `agentmux-co
 | `Portable` AND built by `task package` locally | `dev-portable` | Differentiated via embedded build marker (see §2.5) |
 | `Dev { branch }` | `dev-<branch>` (renamed for symmetry; resolves to `~/.agentmux/dev/<branch>/`, unchanged path on disk) | Per-branch — existing behavior |
 
-The operator can override with `AGENTMUX_CHANNEL=<name>` to point any binary at any channel (e.g., for testing a hot-fix build against the live stable data).
+The operator can override with `AGENTMUX_CHANNEL=<name>` to point an `Installed` / `Portable` binary at any channel (e.g., for testing a hot-fix build against the live stable data). **Dev mode does NOT honor the override** — the launcher and host both use `resolve_path_only` for dev builds, so a `task dev` session launched from inside a parent agentmux pane can't inherit the parent's channel and break per-branch isolation (codex P2 on PR #1027 caught this — without the symmetric ignore, launcher and host would disagree on the single-instance lock path). If you want a non-default channel, use a portable build.
 
 ### 2.3 Channel-name validation
 
