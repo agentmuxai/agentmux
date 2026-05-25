@@ -30,6 +30,8 @@ use tokio::signal;
 use backend::eventbus::EventBus;
 use backend::reactive::{self, Poller, PollerConfig};
 use backend::storage::filestore::FileStore;
+use backend::storage::migrations::OBJECT_SCHEMA_VERSION;
+use backend::storage::snapshot::maybe_snapshot_pre_migration;
 use backend::storage::wstore::WaveStore;
 use backend::wps::Broker;
 use backend::wconfig;
@@ -316,6 +318,43 @@ async fn main() {
 
     // Open databases
     let db_dir = base::get_wave_db_dir();
+
+    // Pre-migration snapshot (Increment B.2 lean cut from
+    // SPEC_DATA_CHANNELS §3.4). Run BEFORE WaveStore::open so the
+    // backup is taken before any DDL or table rename touches the DB.
+    // The safety lock inside WaveStore::open is the upgrade-direction
+    // guard; this snapshot is the rollback aid for the much rarer case
+    // of a buggy forward migration.
+    //
+    // Failures are logged and ignored — refusing to boot when the
+    // snapshot can't be written would be worse than booting without a
+    // backup (the safety lock still prevents downgrade corruption).
+    let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
+    let code_version = std::env::var("AGENTMUX_VERSION")
+        .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string());
+    // Snapshots live under the agentmux home root (sibling of `channels/`)
+    // so they survive channel switches and aren't counted against any one
+    // channel's data dir. Honor AGENTMUX_HOME_OVERRIDE for tests; else
+    // default to the OS-level `~/.agentmux/`. Matches `resolve_root` in
+    // agentmux-common — kept inline here to avoid threading the full
+    // DataPaths plumbing into main.rs for one path.
+    let snapshots_dir = std::env::var_os("AGENTMUX_HOME_OVERRIDE")
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| base::get_home_dir().join(".agentmux"))
+        .join("snapshots");
+    match maybe_snapshot_pre_migration(
+        &db_dir,
+        &snapshots_dir,
+        &channel,
+        &code_version,
+        OBJECT_SCHEMA_VERSION,
+    ) {
+        Ok(Some(path)) => tracing::info!(snapshot = %path.display(), "pre-migration snapshot written"),
+        Ok(None) => {}
+        Err(e) => tracing::warn!("pre-migration snapshot failed (continuing without backup): {}", e),
+    }
+
     let wstore_raw = WaveStore::open(&db_dir.join("objects.db")).unwrap_or_else(|e| {
         tracing::error!("Failed to open object store: {}", e);
         std::process::exit(1);
