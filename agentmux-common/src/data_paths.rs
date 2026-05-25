@@ -130,6 +130,34 @@ impl DataPaths {
     /// `RuntimeMode::Dev { branch }` constructed directly (e.g. by a
     /// test or future caller) is also rejected here.
     pub fn resolve(version: &str, mode: &RuntimeMode) -> Result<Self, String> {
+        Self::resolve_internal(version, mode, /* honor_env_channel = */ true)
+    }
+
+    /// Like [`Self::resolve`], but ignores the `AGENTMUX_CHANNEL` env
+    /// override and uses only the mode-based default channel. Mirror
+    /// of [`RuntimeMode::current_path_only`] for path resolution.
+    ///
+    /// Used by dev-build self-detection paths in `agentmux-cef`'s
+    /// `main.rs` and `sidecar.rs`. Those paths run when a dev host
+    /// has been launched from inside a parent AgentMux instance (e.g.
+    /// `task dev` invoked from inside an agent pane in a portable
+    /// build), where the child would otherwise inherit the parent's
+    /// `AGENTMUX_*` env — including `AGENTMUX_CHANNEL` — and write
+    /// into the parent's channel instead of `dev/<branch>/`. That
+    /// cross-contamination would also trip the channel's single-
+    /// instance lock and route every "open" back to the parent
+    /// window. Path-based mode detection is authoritative for dev
+    /// builds; channel resolution here mirrors that discipline.
+    /// Codex P1 follow-up on PR #1027.
+    pub fn resolve_path_only(version: &str, mode: &RuntimeMode) -> Result<Self, String> {
+        Self::resolve_internal(version, mode, /* honor_env_channel = */ false)
+    }
+
+    fn resolve_internal(
+        version: &str,
+        mode: &RuntimeMode,
+        honor_env_channel: bool,
+    ) -> Result<Self, String> {
         let root = resolve_root()?;
         // `version` is still validated for path safety even though it
         // no longer appears in the on-disk path — it flows into
@@ -144,7 +172,8 @@ impl DataPaths {
         // `dev-<branch>` for diagnostics; path stays at
         // `~/.agentmux/dev/<branch>/` so per-branch isolation works
         // unchanged from Phase 1.
-        let (channel, instance_dir) = resolve_channel_and_dir(mode, &root)?;
+        let (channel, instance_dir) =
+            resolve_channel_and_dir(mode, &root, honor_env_channel)?;
 
         let data_dir = instance_dir.join("data");
         let config_dir = instance_dir.join("config");
@@ -374,32 +403,38 @@ fn sanitize_channel_name(s: &str) -> Option<String> {
 }
 
 /// Resolve the channel name and on-disk channel dir for a given mode.
-/// Pure function over (env, mode, root) — the only env it reads is
-/// `AGENTMUX_CHANNEL` (the explicit override). Returns the channel
-/// name and the path that becomes [`DataPaths::instance_dir`].
+/// Pure function over (env, mode, root). When `honor_env_channel` is
+/// `true`, `AGENTMUX_CHANNEL` overrides the mode default; when `false`,
+/// the env is ignored and resolution depends only on `mode` +
+/// build-time defaults. The `false` path is used by dev-build self-
+/// detection (see [`DataPaths::resolve_path_only`]).
 ///
 /// Resolution order (mirrors `SPEC_DATA_CHANNELS_2026_05_24.md` §2.2):
-///   1. `AGENTMUX_CHANNEL` env override (any mode) → path is
-///      `<root>/channels/<channel>/`. Lets the operator point any
-///      binary at any channel for parallel-channel testing.
-///   2. No override, mode = Dev { branch } → channel name is
-///      `dev-<branch>`, path stays at `<root>/dev/<branch>/`
-///      (unchanged from Phase 1).
-///   3. No override, mode = Installed | Portable → channel name is
+///   1. (only if `honor_env_channel`) `AGENTMUX_CHANNEL` env override —
+///      any mode → path is `<root>/channels/<channel>/`. Lets the
+///      operator point any binary at any channel for parallel-channel
+///      testing.
+///   2. No override (or env-channel disallowed), mode = Dev { branch }
+///      → channel name is `dev-<branch>`, path stays at
+///      `<root>/dev/<branch>/` (unchanged from Phase 1).
+///   3. Same conditions, mode = Installed | Portable → channel name is
 ///      [`BUILD_CHANNEL_DEFAULT`] (set at build time by the packaging
 ///      script), path is `<root>/channels/<channel>/`.
 fn resolve_channel_and_dir(
     mode: &RuntimeMode,
     root: &Path,
+    honor_env_channel: bool,
 ) -> Result<(String, PathBuf), String> {
-    // (1) Explicit env override always wins.
-    if let Ok(raw) = std::env::var("AGENTMUX_CHANNEL") {
-        if !raw.is_empty() {
-            let channel = sanitize_channel_name(&raw).ok_or_else(|| {
-                format!("invalid AGENTMUX_CHANNEL value: {:?}", raw)
-            })?;
-            let dir = root.join("channels").join(&channel);
-            return Ok((channel, dir));
+    // (1) Explicit env override — only when caller opted in.
+    if honor_env_channel {
+        if let Ok(raw) = std::env::var("AGENTMUX_CHANNEL") {
+            if !raw.is_empty() {
+                let channel = sanitize_channel_name(&raw).ok_or_else(|| {
+                    format!("invalid AGENTMUX_CHANNEL value: {:?}", raw)
+                })?;
+                let dir = root.join("channels").join(&channel);
+                return Ok((channel, dir));
+            }
         }
     }
 
@@ -869,6 +904,63 @@ mod tests {
         ] {
             std::env::remove_var(k);
         }
+    }
+
+    #[test]
+    fn resolve_path_only_ignores_env_channel() {
+        // resolve_path_only is the dev-build self-detection variant —
+        // it deliberately ignores AGENTMUX_CHANNEL because a dev host
+        // launched from inside a parent agentmux instance would inherit
+        // the parent's channel env and cross-contaminate.
+        //
+        // This is the codex P1 regression test on PR #1027 — without
+        // the gate, dev hosts launched via `task dev` from inside an
+        // agent pane would redirect to the parent's channel/<channel>/
+        // dir instead of dev/<branch>/, tripping the channel's
+        // single-instance lock.
+        with_home_override(|root| {
+            std::env::set_var("AGENTMUX_CHANNEL", "stable");
+            struct ChannelGuard;
+            impl Drop for ChannelGuard {
+                fn drop(&mut self) {
+                    std::env::remove_var("AGENTMUX_CHANNEL");
+                }
+            }
+            let _g = ChannelGuard;
+
+            let dev = DataPaths::resolve_path_only(
+                "0.33.639",
+                &RuntimeMode::Dev { branch: "main".into() },
+            )
+            .unwrap();
+            // Dev mode default holds — channel name is dev-main, path
+            // stays under dev/main/. AGENTMUX_CHANNEL=stable does NOT
+            // redirect to channels/stable/.
+            assert_eq!(dev.channel, "dev-main");
+            assert_eq!(dev.instance_dir, root.join("dev").join("main"));
+
+            let inst = DataPaths::resolve_path_only(
+                "0.33.639",
+                &RuntimeMode::Installed,
+            )
+            .unwrap();
+            // Installed default holds — build-time channel
+            // (BUILD_CHANNEL_DEFAULT = "stable" in tests). Path lands
+            // at channels/stable/ regardless of the env override.
+            assert_eq!(inst.channel, "stable");
+            assert_eq!(inst.instance_dir, root.join("channels").join("stable"));
+
+            // Sanity: regular `resolve` DOES honor the env override in
+            // both modes — confirms the divergence is solely on the
+            // path_only variant.
+            let dev_env = DataPaths::resolve(
+                "0.33.639",
+                &RuntimeMode::Dev { branch: "main".into() },
+            )
+            .unwrap();
+            assert_eq!(dev_env.channel, "stable");
+            assert_eq!(dev_env.instance_dir, root.join("channels").join("stable"));
+        });
     }
 
     #[test]
