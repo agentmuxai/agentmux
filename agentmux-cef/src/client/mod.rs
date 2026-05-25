@@ -87,7 +87,7 @@ pub use handlers::AgentMuxClient;
 
 use helpers::{js_string_literal, html_escape, backend_close_window};
 #[cfg(target_os = "windows")]
-use wndproc::{set_window_icon, skip_taskbar};
+use wndproc::{install_top_level_focus_restore_hook, set_window_icon, skip_taskbar};
 
 impl AgentMuxHandler {
     pub fn new(state: Arc<AppState>, ipc_port: u16) -> Arc<Mutex<Self>> {
@@ -410,6 +410,14 @@ impl AgentMuxHandler {
 
             if !hwnd.is_null() {
                 unsafe { set_window_icon(hwnd); }
+
+                // Subclass for the focus-restore-on-WM_ACTIVATE behavior
+                // (window-reactivate-focus-restore spec §5.1.3). Observes
+                // WM_ACTIVATE only; all messages pass through to CEF.
+                // Install on every top-level — both `main` and Subwindow.
+                if is_top_level_window {
+                    unsafe { install_top_level_focus_restore_hook(hwnd); }
+                }
 
                 // Subwindow? Hide from taskbar. Full instances and browser-pane
                 // child HWNDs skip this branch.
