@@ -268,7 +268,13 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             } catch {
                 /* container still 0×0 — ResizeObserver below catches it */
             }
-            terminal.writeln("\x1b[90m# Click \"Install now\" to begin.\x1b[0m");
+            // The font wait can resolve up to 1s late on cold cache. By then the
+            // user may have already clicked "Install now" and install output is
+            // streaming — writing the idle hint over the top would corrupt the
+            // log. Gate on phase() === "idle". Codex P2 on PR #1041.
+            if (phase() === "idle") {
+                terminal.writeln("\x1b[90m# Click \"Install now\" to begin.\x1b[0m");
+            }
             // Refit on container resize (modal may animate in from 0×0).
             const tryFit = () => {
                 try {
