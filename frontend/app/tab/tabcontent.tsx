@@ -3,7 +3,7 @@
 
 import { Block } from "@/app/block/block";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-import { TabModalLayer } from "@/app/tab/TabModalLayer";
+import { ModalLayer } from "@/element/ModalLayer";
 import { CenteredDiv } from "@/element/quickelems";
 import logoUrl from "@/app/asset/logo-brain.svg?url";
 import { ContentRenderer, NodeModel, PreviewRenderer, TileLayout } from "@/layout/index";
@@ -109,13 +109,13 @@ function TabContent(props: { tabId: string }): JSX.Element {
                 <Show
                     when={isEmpty()}
                     fallback={
-                        <TabModalLayer>
+                        <ModalLayer scope="tab">
                             <TileLayout
                                 contents={tileLayoutContents()}
                                 tabAtom={tabAtom()}
                                 getCursorPoint={getApi().getCursorPoint}
                             />
-                        </TabModalLayer>
+                        </ModalLayer>
                     }
                 >
                     <img

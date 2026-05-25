@@ -10,7 +10,7 @@
  *    definitions with `is_seeded === 1` — user-owned agents go to the
  *    `MyAgentsList` sibling above the grid (mocked in this file).
  *  - clicking a template card opens the `create-from-template` modal
- *    request via the tab-modal API, not the `launch-agent` request.
+ *    request via the modal-layer API, not the `launch-agent` request.
  *  - the modal's `onCreatedAndLaunch` hook eventually fires
  *    `launchAgentDefinition` with the picked bindings.
  */
@@ -65,14 +65,14 @@ vi.mock("@/app/store/wps", () => ({
     waveEventSubscribe: vi.fn(() => () => {}),
 }));
 
-const tabModalOpen = vi.fn();
-const tabModalReplace = vi.fn();
-const tabModalClose = vi.fn();
-vi.mock("@/app/tab/tab-modal", () => ({
-    useTabModal: () => ({
-        open: tabModalOpen,
-        replace: tabModalReplace,
-        close: tabModalClose,
+const modalLayerOpen = vi.fn();
+const modalLayerReplace = vi.fn();
+const modalLayerClose = vi.fn();
+vi.mock("@/element/modal-layer", () => ({
+    useModalLayer: () => ({
+        open: modalLayerOpen,
+        replace: modalLayerReplace,
+        close: modalLayerClose,
     }),
 }));
 
@@ -175,9 +175,9 @@ const makeMockModel = () => ({
 
 beforeEach(async () => {
     vi.clearAllMocks();
-    tabModalOpen.mockClear();
-    tabModalReplace.mockClear();
-    tabModalClose.mockClear();
+    modalLayerOpen.mockClear();
+    modalLayerReplace.mockClear();
+    modalLayerClose.mockClear();
     contextMenuShow.mockClear();
     ({ RpcApi } = await import("@/app/store/rpc-api"));
     vi.mocked(RpcApi.ListAgentDefinitionsCommand).mockResolvedValue([
@@ -214,9 +214,9 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         render(() => <AgentPicker model={model as any} />);
         const card = await screen.findByTestId("agent-card-tpl-claude");
         fireEvent.click(card);
-        await waitFor(() => expect(tabModalOpen).toHaveBeenCalled());
+        await waitFor(() => expect(modalLayerOpen).toHaveBeenCalled());
 
-        const req = tabModalOpen.mock.calls[0][0];
+        const req = modalLayerOpen.mock.calls[0][0];
         expect(req.kind).toBe("create-from-template");
         expect(req.template.id).toBe("tpl-claude");
         // Template clicks never go through launchAgentDefinition
@@ -311,9 +311,9 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         render(() => <AgentPicker model={model as any} />);
         const card = await screen.findByTestId("agent-card-tpl-claude");
         fireEvent.click(card);
-        await waitFor(() => expect(tabModalOpen).toHaveBeenCalled());
+        await waitFor(() => expect(modalLayerOpen).toHaveBeenCalled());
 
-        const req = tabModalOpen.mock.calls[0][0];
+        const req = modalLayerOpen.mock.calls[0][0];
         await req.onCreatedAndLaunch(
             "new-def-id",
             "id-work",

@@ -3,7 +3,7 @@
 
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
-import { useTabModal } from "@/app/tab/tab-modal";
+import { useModalLayer } from "@/element/modal-layer";
 import type { BrowserViewModel } from "./browser-model";
 import "./browser-view.scss";
 
@@ -20,7 +20,7 @@ function tagElement(el: Element | null): string {
 
 export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>): JSX.Element {
     const model = props.model;
-    const tabModal = useTabModal();
+    const modalLayer = useModalLayer();
     const _diagTag = `[browser-pane:diag][${model.blockId.slice(0, 7)}]`;
     const diag = (msg: string): void => { console.log(`${_diagTag} ${msg}`); };
     // Captured once at mount — same window_label that createPane uses
@@ -163,7 +163,7 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
     // FIFO queue for concurrent auth challenges. Two protected
     // subresources on the same page (or two panes in the same tab)
     // can challenge before the user resolves the first prompt;
-    // unconditional tabModal.open would replace the visible modal,
+    // unconditional modalLayer.open would replace the visible modal,
     // and the unmounted panel's onCleanup would cancel the earlier
     // challenge — so authenticating the survivor still fails the
     // earlier requests. Queue new arrivals; open the next after the
@@ -181,7 +181,7 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
 
     const openAuthPrompt = (c: AuthChallenge) => {
         authActive = true;
-        tabModal.open({
+        modalLayer.open({
             kind: "browser-auth",
             blockId: model.blockId,
             requestId: c.request_id,
@@ -227,7 +227,7 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
             positionInterval = setInterval(syncPosition, 200);
         }
         // Subscribe to CEF's HTTP Basic/Digest auth challenges. Lives
-        // in the view (not the model) because it needs `useTabModal()`
+        // in the view (not the model) because it needs `useModalLayer()`
         // context, which is a SolidJS hook. Phase α of
         // SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18.md.
         void listenEvent<{

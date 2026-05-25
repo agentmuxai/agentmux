@@ -3,7 +3,7 @@
 
 // AgentLaunchModal — opens when user clicks a definition card.
 // Collects instance name + host/container runtime.
-// Rendered through the canonical `<Modal>` (today via TabModalLayer).
+// Rendered through the canonical `<Modal>` (today via `<ModalLayer scope="tab">`).
 // ── AgentLaunchModal ─────────────────────────────────────────────────────────
 // Modal that opens when the user clicks a definition card in the
 // picker. Collects instance name + host/container runtime. See

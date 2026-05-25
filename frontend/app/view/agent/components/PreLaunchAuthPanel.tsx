@@ -186,7 +186,7 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     //   - empty identityId → route to New Identity modal first; OAuth
     //     resumes against the new bundle on the autoStartAuth round
     //     trip. The parent's `onRequestNewIdentity` owns the
-    //     tabModal.replace chain into that modal.
+    //     modalLayer.replace chain into that modal.
     //   - empty identityId AND no `onRequestNewIdentity` callback →
     //     refuse to start OAuth. This is a guard against a future
     //     parent forgetting to wire the callback; a silent ambient-
