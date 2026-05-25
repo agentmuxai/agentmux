@@ -57,7 +57,7 @@ const SCOPE_HINT: Record<DecisionOutcome["scope"], string> = {
 const SCOPE_ORDER: DecisionOutcome["scope"][] = ["once", "session", "project", "global"];
 
 // Tiny child that calls usePaneOverlay against the panel root ref.
-// Same pattern as modal-v2's `ModalPaneOverlayClip` — mounted only
+// Same pattern as `<Modal>`'s `ModalPaneOverlayClip` — mounted only
 // when the panel is visible, so `onMount` runs while `rootRef` is
 // already attached to the live DOM element. Calling usePaneOverlay
 // from the outer component would register undefined on first mount

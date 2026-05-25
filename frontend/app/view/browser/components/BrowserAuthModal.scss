@@ -1,8 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// BrowserAuthModal — modal-panel chrome lives in modal-v2.scss; this
-// file only styles the form body. SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18.md.
+// BrowserAuthModal — modal-panel chrome lives in the canonical
+// `frontend/app/element/modal.scss`; this file only styles the form
+// body. SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18.md.
 
 .browser-auth-modal-body {
     display: flex;
