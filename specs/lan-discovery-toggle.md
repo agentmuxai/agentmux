@@ -4,7 +4,7 @@
 **Status:** Draft — design
 **Date:** 2026-05-25
 **Author:** AgentY
-**Related:** `specs/lan-awareness-and-embedded-jekt-api.md`, `specs/windows-firewall-fix.md`, `specs/hostname-popover.md`, `specs/SPEC_GOVERNANCE_WIDGET_2026-05-25.md`
+**Related:** `specs/lan-awareness-and-embedded-jekt-api.md`, `specs/windows-firewall-fix.md`, `specs/hostname-popover.md`, `specs/SPEC_WARDEN_WIDGET_2026-05-25.md`
 
 ---
 
@@ -224,7 +224,7 @@ const LanDiscoveryToggle = (): JSX.Element => {
     const enabled = () => !!settingsAtom()?.["network:lan_discovery"];
     const handleToggle = async (e: Event) => {
         const next = (e.target as HTMLInputElement).checked;
-        await invokeCommand("set_config", { "network:lan_discovery": next });
+        await RpcApi.SetConfigCommand(TabRpcClient, { "network:lan_discovery": next } as any);
     };
     return (
         <label class="status-bar-toggle">
@@ -235,8 +235,11 @@ const LanDiscoveryToggle = (): JSX.Element => {
 };
 ```
 
-`invokeCommand("set_config", {...})` is the existing path used elsewhere
-(e.g., `frontend/app/store/rpc-api.ts:396` `SetConfigCommand`).
+`RpcApi.SetConfigCommand(TabRpcClient, {...})` is the established settings-write
+path used elsewhere (e.g. `frontend/app/menu/base-menus.ts:71`,
+`frontend/app/window/action-widgets.tsx:85`,
+`frontend/app/tab/tabbar.tsx:614`). It wraps the `setconfig` RPC defined in
+`frontend/app/store/rpc-api.ts:396`.
 
 ### State sync
 
@@ -276,15 +279,15 @@ and `settingsAtom` re-syncs on the WS broadcast. No new state plumbing.
 | Flip default to `true` | Reverses `windows-firewall-fix.md`. Surprises Windows users with firewall popup on every fresh install. |
 | First-run nudge modal | Heavyweight for a one-line setting. Modal fatigue. Also harder to revisit later. |
 | Settings widget only | Already exists (`/settings`), but it just opens `settings.json` in an external editor. Not in-app, not discoverable, not one-click. |
-| New top-level network widget | Premature — once governance widget lands, this lives there too. For now, HostPopover is the right scope. |
+| New top-level network widget | Premature — once the Warden widget lands, this lives there too. For now, HostPopover is the right scope. |
 
 ---
 
 ## Future work / open questions
 
-1. **Governance widget integration.** Once `SPEC_GOVERNANCE_WIDGET_2026-05-25.md`
-   ships, the Governance widget's L2 section will also expose this toggle.
-   HostPopover's toggle remains as a quick-access affordance; Governance is the
+1. **Warden integration.** Once `SPEC_WARDEN_WIDGET_2026-05-25.md`
+   ships, the Warden's L2 section will also expose this toggle.
+   HostPopover's toggle remains as a quick-access affordance; the Warden is the
    deep-dive surface. Both write the same setting.
 2. **Per-interface enable.** A future enhancement could let the user pick which
    network interface mDNS advertises on (e.g., enable on Wi-Fi but not on a VPN

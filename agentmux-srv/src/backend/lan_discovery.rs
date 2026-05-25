@@ -283,10 +283,13 @@ impl LanDiscoveryController {
                         tracing::warn!("LAN discovery start failed: {e}");
                         // Surface to the UI so the user sees why the toggle
                         // didn't take effect (e.g. Windows Firewall blocked).
+                        // `e` is already a String, but `.to_string()` is the
+                        // documented contract for the wire payload (frontend
+                        // reads `event.data.error` as a string).
                         self.event_bus.broadcast_event(&WSEventType {
                             eventtype: "laninstances:error".to_string(),
                             oref: String::new(),
-                            data: Some(json!({ "error": e })),
+                            data: Some(json!({ "error": e.to_string() })),
                         });
                     }
                 }

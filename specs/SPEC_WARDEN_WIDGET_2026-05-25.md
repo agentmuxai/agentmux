@@ -1,6 +1,6 @@
-# Spec: Governance Widget
+# Spec: Warden Widget
 
-**Branch:** `agenty/governance-widget`
+**Branch:** `agenty/governance-widget-spec`
 **Status:** Draft — design / discovery
 **Date:** 2026-05-25
 **Author:** AgentY
@@ -8,13 +8,23 @@
 
 ---
 
+## Name
+
+**Warden** — one who watches over an institution. Authority + observation,
+matches the monitor-and-control role across boundaries (Host / LAN / Internet).
+Fits the existing single-word, evocative widget vocabulary (`swarm`, `drone`,
+`forge`) without bureaucratic baggage. The *concept* it implements is still
+called "governance" in this doc — the widget is just the surface.
+
+---
+
 ## TL;DR
 
-A **Governance** widget (More-dropdown tier) that monitors and controls every AgentMux
-instance reachable from this host — across three trust layers: **Host**, **LAN**, and
-**Internet**. The widget renders the same 3-layer fabric that the jekt cascade already
-uses (tiers 1-2 / tier 3 / tier 4) and exposes per-layer controls: identity, policy,
-audit, kill-switch, quotas.
+The **Warden** widget monitors and controls every AgentMux instance reachable
+from this host — across three trust layers: **Host**, **LAN**, and **Internet**.
+It renders the same 3-layer fabric that the jekt cascade already uses (tiers 1-2
+/ tier 3 / tier 4) and exposes per-layer controls: identity, policy, audit,
+kill-switch, quotas.
 
 **Sequencing:** networking first. The widget design is unblocked, but LAN-layer
 features have no substrate until `lan-awareness-and-embedded-jekt-api.md` Phase 1
@@ -24,7 +34,7 @@ substrates arrive.
 
 ---
 
-## Why a Governance widget — and why now
+## Why a Warden — and why now
 
 AgentMux is moving from "one process talking to a cloud relay" to a **mesh of
 instances** (host process + LAN peers + opt-in cloud relay). With more agents in more
@@ -37,7 +47,7 @@ places, the operator needs a single place to:
 - Keep an **audit trail** that is immutable and reviewable
 
 Today these capabilities are scattered (settings.json, swarm widget, logs, AgentBus
-console) or absent (no LAN policy because LAN doesn't exist yet). The Governance widget
+console) or absent (no LAN policy because LAN doesn't exist yet). The Warden
 consolidates them on the same conceptual surface the jekt cascade already uses, so
 operators learn one mental model.
 
@@ -77,7 +87,7 @@ Build order:
 
 ```
 Networking:   [Phase 1: mDNS] → [Phase 2: MCP/SSE] → [Phase 3: LAN forward] → [Phase 4: cloud fallback]
-Governance:   [Shell + L1]    → [L2 read-only]    → [L2 control]           → [L3 read/control]
+Warden:       [Shell + L1]    → [L2 read-only]    → [L2 control]           → [L3 read/control]
 ```
 
 The widget shell, L1 (Host) monitoring, and L1 controls (kill-agent, pause-instance)
@@ -86,7 +96,7 @@ behind their networking counterparts.
 
 ---
 
-## Governance: best-practices research
+## Best-practices research
 
 Distilled from CNCF (Kubernetes RBAC, NetworkPolicy, OPA), zero-trust networking,
 capability-based security, and existing AI-agent control planes (LangSmith, AgentOps,
@@ -128,9 +138,9 @@ instances, distributed consensus on policy. These are listed in Future Work.
 
 ### Placement
 
-`defwidget@governance` — **More dropdown** tier (alongside `swarm`, `drone`). Pinning
-can be enabled later if usage justifies. Icon: `shield-halved` or `gavel`. Label:
-`governance`.
+`defwidget@warden` — **Pinned** tier (per `CLAUDE.md`'s "every surfaced widget
+is pinned" default; collapses to icon-only on narrow title bars). Icon:
+`shield-halved` or `gavel`. Label: `warden`.
 
 ### Surface
 
@@ -138,7 +148,7 @@ A single pane, three vertically-stacked, collapsible sections — one per layer.
 section has identical structure so the operator learns one row:
 
 ```
-┌─ Governance ──────────────────────────────────────────── [⏻ kill all]
+┌─ Warden ────────────────────────────────────────────────── [⏻ kill all]
 │
 │ ▼ HOST                              ● 3 agents · 0 alerts   [⏸ pause] [⏻]
 │   ┌──────────────────────────────────────────────────────────────────┐
@@ -298,13 +308,13 @@ truncates and never rewrites). Rotation is by date file; retention is `audit.ret
 ## Implementation phases
 
 ### Phase 0 — Spec acceptance (this doc)
-Review, refine, merge to `specs/`. Decide naming (`Governance` vs `Govern`) and
-icon.
+Review, refine, merge to `specs/`. Naming decided (Warden); icon selection
+still open (`shield-halved` vs `gavel`).
 
 ### Phase 1 — Shell + L1 read-only
 Depends on: nothing.
 
-- Register `defwidget@governance` in `widgets.json`
+- Register `defwidget@warden` in `widgets.json`
 - Wire `GetGovernanceSnapshot` RPC returning Host layer only
 - Render shell with three sections; LAN/Internet sections stubbed as "requires
   networking (PR #lan-discovery)"
@@ -358,9 +368,9 @@ Depends on: `lan-awareness-and-embedded-jekt-api.md` Phase 4 (cloud fallback).
 
 ## Open questions
 
-1. **Widget vs first-class panel?** Governance is operator-grade and might warrant
-   pinned status (always visible chip in widget bar showing aggregate state).
-   Recommendation: ship in More dropdown first; promote based on usage.
+1. **Widget vs first-class panel?** ~~Pinned status~~ now resolved — per
+   `CLAUDE.md`'s "every surfaced widget is pinned" default, Warden ships
+   pinned from the start.
 2. **LAN enrollment UX.** mDNS discovers peers automatically, but enrollment (sharing
    a key) needs a flow. Options: QR code on host, copy/paste key, optimistic
    trust-on-first-use. TOFU is the lowest-friction path for dev; explicit key is
@@ -376,17 +386,17 @@ Depends on: `lan-awareness-and-embedded-jekt-api.md` Phase 4 (cloud fallback).
 6. **Quota enforcement granularity.** Per-minute is easy; per-agent-session may
    matter more. Start with per-minute global + per-layer; add per-agent later.
 7. **Relationship to `swarm` widget.** Both touch agent control, but Swarm is
-   workflow (task queues, lifecycle); Governance is policy (who can do what).
+   workflow (task queues, lifecycle); Warden is policy (who can do what).
    Keep separate; cross-link in the UI ("Swarm tasks for agent1 →").
 8. **Reagent / CI integration.** Should auto-approve/auto-kill rules be expressible
-   here, or stay in reagent? Lean: governance describes the boundary; reagent
+   here, or stay in reagent? Lean: Warden describes the boundary; reagent
    describes review behavior. Separate concerns.
 
 ---
 
 ## Acceptance criteria
 
-- [ ] Phase 1 — `defwidget@governance` appears in More dropdown
+- [ ] Phase 1 — `defwidget@warden` appears in More dropdown
 - [ ] Phase 1 — Widget renders three layer sections, Host populated, LAN/Internet
       stubbed with informative message
 - [ ] Phase 1 — Host section lists every agent with identity, caps, jekt/min rate,
@@ -426,7 +436,7 @@ Depends on: `lan-awareness-and-embedded-jekt-api.md` Phase 4 (cloud fallback).
 | `agentmuxsrv-rs/src/backend/governance/enforcer.rs` | Allow/deny hooks |
 | `agentmuxsrv-rs/src/backend/governance/audit.rs` | Append-only JSONL writer |
 | `agentmuxsrv-rs/src/server/governance.rs` | HTTP/WS endpoints |
-| `agentmuxsrv-rs/src/config/widgets.json` | Add `defwidget@governance` |
+| `agentmuxsrv-rs/src/config/widgets.json` | Add `defwidget@warden` |
 | `schema/governance.json` | JSON Schema for `governance.json` |
 | `frontend/app/widget/governance/` | React view + atoms |
 | `frontend/state/governance.ts` | Atoms + RPC bindings |
