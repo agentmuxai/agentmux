@@ -232,24 +232,50 @@ export class TermWrap {
             this.loaded = true;
         }
 
-        // Wait for web fonts to load before the first fit, but with a bounded timeout.
-        // proposeDimensions() measures rendered cell width from the DOM; if the configured
-        // term font (e.g. Hack) hasn't loaded yet, FitAddon uses fallback metrics and computes
-        // wrong cols, the PTY is told the wrong size, and TUIs (Ink/Claude Code) emit cursor
-        // sequences that don't line up — visible as jumbled glyphs until the next resize.
+        // Force-load the configured term font BEFORE the first fit, with a bounded
+        // timeout. proposeDimensions() measures rendered cell width from the DOM; if
+        // the configured term font (e.g. Hack) hasn't loaded yet, FitAddon uses fallback
+        // metrics and computes wrong cols, the PTY is told the wrong size, and TUIs
+        // (Ink/Claude Code) emit cursor sequences that don't line up — visible as
+        // jumbled glyphs until the next resize.
         //
-        // The timeout is essential: document.fonts.ready can hang under certain conditions
-        // (frontend/app-init.ts wraps the app-level wait in a 2s race for the same reason).
-        // Without it, a stalled font load would block sendTermSize()/resyncController("init")
-        // and the pane's PTY would never start. The rAF re-fit below catches the case where
-        // the font lands just after the timeout, so a missed wait isn't fatal.
+        // Why `document.fonts.load(spec)` and not `document.fonts.ready`:
+        //   - `fonts.ready` only awaits font faces that are ALREADY pending. Web fonts
+        //     are loaded lazily — the browser doesn't request the term font's WOFF/WOFF2
+        //     until something actually renders a glyph in that family. `terminal.open()`
+        //     above mounts the DOM but the font request typically isn't initiated until
+        //     `proposeDimensions()` measures a cell. So `await fonts.ready` resolves
+        //     vacuously (no pending loads) and `customFit()` then measures with fallback
+        //     metrics. This was the hole left by PR #1030's first cut — the same jumbled
+        //     glyphs reproduced when opening multiple terminals fast.
+        //   - `fonts.load("12px Hack")` actively REQUESTS the font and resolves only
+        //     when that specific face is ready. Subsequent terminals coalesce on the
+        //     same browser-level cache entry, so opening N panes in parallel waits
+        //     once.
+        //
+        // The timeout is essential: a stalled font load would block
+        // sendTermSize()/resyncController("init") and the pane's PTY would never start
+        // (`frontend/app-init.ts` wraps the app-level wait in a 2s race for the same
+        // reason). The rAF re-fit below catches the case where the font lands just
+        // after the timeout.
+        //
+        // We load the regular + bold + italic variants xterm.js uses, in parallel.
+        // Browsers dedupe identical font face requests, so this costs ~one network
+        // round-trip total on cold cache.
         const FIT_FONT_TIMEOUT_MS = 1000;
+        const fontFamily = this.terminal.options.fontFamily ?? "Hack";
+        const fontSize = this.terminal.options.fontSize ?? 12;
+        const fontSpec = (variant: string) => `${variant}${fontSize}px "${fontFamily}"`;
         try {
             await Promise.race([
-                document.fonts?.ready ?? Promise.resolve(),
+                Promise.all([
+                    document.fonts?.load(fontSpec("")) ?? Promise.resolve(),
+                    document.fonts?.load(fontSpec("bold ")) ?? Promise.resolve(),
+                    document.fonts?.load(fontSpec("italic ")) ?? Promise.resolve(),
+                ]),
                 new Promise<void>((resolve) => setTimeout(resolve, FIT_FONT_TIMEOUT_MS)),
             ]);
-        } catch (_) { /* font API unavailable — fall through with fallback metrics */ }
+        } catch (_) { /* font API unavailable or face unknown — fall through */ }
 
         // NOW fit and tell backend to start/resync the shell controller.
         // At this point we are fully subscribed and ready to receive data.
