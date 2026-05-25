@@ -57,6 +57,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createBlock, getApi, WOS } from "@/app/store/global";
 import { ConfirmModal } from "@/element/modal";
+import { ModalLayer } from "@/element/ModalLayer";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { parseAgentAccounts, loadAccounts } from "@/app/view/identity/identity-model";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
@@ -652,6 +653,14 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     };
 
     return (
+        // Pane-scope modal host. Any `useModalLayer()` call inside this
+        // subtree (e.g. `AgentPicker`'s launch flow) resolves to THIS
+        // layer rather than the outer tab-scope one, so the launch
+        // modal's backdrop covers only this agent pane and `inert`
+        // locks only this pane's content — other panes in the same
+        // tab (browser, another agent, terminal) stay live.
+        // SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md.
+        <ModalLayer scope="pane">
         <div
             ref={rootRef}
             class="agent-view agent-view--presentation"
@@ -892,6 +901,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 )}
             </Show>
         </div>
+        </ModalLayer>
     );
 };
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentLaunchModalPanel — the form rendered inside `<TabModalLayer>`
+ * AgentLaunchModalPanel — the form rendered inside the canonical `<ModalLayer>`
  * when the user clicks a definition card in the agent picker. Collects
  * the instance name + runtime (host vs container) and submits them to
  * the caller, which is responsible for calling launchAgentDefinition with
@@ -93,7 +93,7 @@ interface AgentLaunchModalPanelProps {
     /** Called when the "+" / empty-state New buttons fire, OR when the
      *  OAuth Connect panel needs the New Identity modal interposed
      *  (`purpose: "oauth-continue"`). The picker is expected to chain
-     *  `tabModal.replace(newIdentityRequest)` — this component doesn't
+     *  `modalLayer.replace(newIdentityRequest)` — this component doesn't
      *  know how to build that request.
      *
      *  The current launch form state is passed through so the picker
@@ -234,7 +234,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     });
 
     // "+ New ..." buttons delegate to picker-injected callbacks that
-    // chain `tabModal.replace(newBundleRequest)`. The picker owns the
+    // chain `modalLayer.replace(newBundleRequest)`. The picker owns the
     // chain because it can rebuild the Launch request with
     // preselectedIdentityId/preselectedMemoryId after creation. A
     // missing callback (Phase β ships Identity wiring only; Memory

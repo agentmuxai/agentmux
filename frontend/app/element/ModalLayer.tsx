@@ -2,46 +2,54 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * TabModalLayer — per-tab modal host.
+ * ModalLayer — scope-parameterized modal host.
  *
- * Stage 3 of SPEC_UNIFIED_MODAL_SYSTEM_2026_05_21. This layer keeps its
- * imperative request API (`TabModalApi`: open / replace / close /
- * current) exactly as callers know it, but no longer hand-rolls the
- * overlay / backdrop / panel DOM. Instead it:
+ * Single dispatcher used by both tab-scoped and pane-scoped modal
+ * hosts. Same request union, same imperative API (`open` / `replace`
+ * / `close` / `current`), same render-dispatch table — the only knob
+ * is the `scope` prop, which selects:
+ *  - which `<Modal>` scope is used (`scope="tab"` vs `scope="pane"`),
+ *  - which scope-mount context Provider is set (TabModalScope vs
+ *    PaneModalScope) so the inner `<Modal>` resolves its mount node
+ *    via the same scope axis.
  *
- *  1. Renders a real mount node (`.tab-modal-mount`) inside `TabContent`'s
- *     `position:relative` root. `TabContent`'s tile layout (`props.children`)
- *     is a child of that mount node, and a `scope="tab"` `<Modal>` portals
- *     into the *same* node — becoming a sibling of the tile layout.
- *  2. Wraps everything in a `<TabModalScope.Provider>` whose value is an
- *     accessor for that mount node, so the descendant `<Modal scope="tab">`
- *     resolves its tab via `useContext(TabModalScope)`.
- *  3. Delegates all rendering — backdrop, panel chrome, ESC, focus trap,
- *     scope-relative `inert` + scroll lock, pane-overlay clip — to the
- *     unified `<Modal>`. The dispatched agent panel (`renderRequest().panel`)
- *     is the modal's children.
+ * Mount strategy (unchanged from the original TabModalLayer):
+ *  1. A real DOM mount node (`.modal-layer-mount`) wraps `props.children`
+ *     and hosts the portalled `<Modal>` as a sibling.
+ *  2. The Scope.Provider exposes that mount node as an accessor so the
+ *     descendant `<Modal>` can resolve its mount via `useContext`.
+ *  3. The unified `<Modal>` owns backdrop, panel chrome, ESC, focus
+ *     trap, scope-relative `inert` + scroll lock, and the pane-overlay
+ *     clip — this layer only handles dispatch.
  *
- * The unified `<Modal>`'s scope-relative `inert` (spec §5) handles what
- * the old hand-rolled `inert` wrapper did: when the modal is open the
- * mount node's non-`.modal-root` children (the tile layout) are inerted,
- * trapping focus inside the panel while the tab bar + other tabs stay
- * live. Switching tabs still hides the modal via the existing
- * `display:none` on inactive tab content.
+ * Use:
+ *  - `<ModalLayer scope="tab">{props.children}</ModalLayer>` wraps a
+ *    tab's tile layout in `frontend/app/tab/tabcontent.tsx`.
+ *  - `<ModalLayer scope="pane">{props.children}</ModalLayer>` wraps a
+ *    pane's content in `frontend/app/view/agent/agent-view.tsx` (and
+ *    any other pane that wants pane-scoped modals).
  *
- * Dismissal (spec §9): `closeOnBackdropClick={false}` folds in the old
- * no-backdrop-dismiss behaviour — a backdrop click nudges the panel's
- * `[data-modal-dismiss]` Cancel/Close control instead of closing. ESC is
- * the unified `<Modal>`'s. The submit-in-flight guard still lives here:
- * `safeClose` no-ops while `submitting()`, so ESC routed through
- * `onClose` is swallowed mid-RPC.
+ * Inner components call `useModalLayer()` (from `./modal-layer`) and
+ * never care which scope they're inside — pane wins over tab via
+ * normal context resolution when both layers wrap the call site.
  *
- * See docs/specs/launch-modal-rearchitecture-2026-05-01.md (superseded)
- * and docs/specs/SPEC_UNIFIED_MODAL_SYSTEM_2026_05_21.md §3/§5/§7/§9/§11.
+ * History: this file is the descendant of `TabModalLayer` (per
+ * `docs/specs/launch-modal-rearchitecture-2026-05-01.md`,
+ * `SPEC_UNIFIED_MODAL_SYSTEM_2026_05_21.md` §3/§5/§7/§9/§11). Lifted
+ * out of `tab/` and parameterized over scope for the launch-modal
+ * pane-scope work (`SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md`).
+ *
+ * Dismissal: `closeOnBackdropClick={false}` keeps the no-backdrop-
+ * dismiss behaviour — a backdrop click nudges the panel's
+ * `[data-modal-dismiss]` Cancel/Close control instead of closing.
+ * ESC routes through `safeClose`, which no-ops while a submit RPC
+ * is in-flight so the user can't lose error feedback or trigger a
+ * duplicate launch.
  */
 
 import { createMemo, createSignal, Show, type Component, type JSX } from "solid-js";
 
-import { Modal, TabModalScope } from "@/element/modal";
+import { Modal, PaneModalScope, TabModalScope } from "@/element/modal";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { AgentLaunchModalPanel } from "@/app/view/agent/components/AgentLaunchModal";
@@ -55,22 +63,28 @@ import "@/app/view/agent/components/AgentPrereqModal.scss";
 import "@/app/view/agent/components/AgentNewBundleModal.scss";
 import "@/app/view/browser/components/BrowserAuthModal.scss";
 
-import { TabModalContext, type TabModalApi, type TabModalRequest } from "./tab-modal";
-import "./tab-modal.scss";
+import { ModalLayerContext, type ModalLayerApi, type ModalLayerRequest } from "./modal-layer";
+import "./modal-layer.scss";
 
-interface TabModalLayerProps {
+interface ModalLayerProps {
+    /** Which scope's lock + mount this layer provides. `"tab"` covers
+     *  the surrounding tab's content (legacy behaviour); `"pane"`
+     *  covers a single pane only. The `<Modal>` rendered inside uses
+     *  this same scope. */
+    scope: "tab" | "pane";
     children: JSX.Element;
 }
 
-export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
-    const [current, setCurrent] = createSignal<TabModalRequest | null>(null);
+export const ModalLayer: Component<ModalLayerProps> = (props) => {
+    const [current, setCurrent] = createSignal<ModalLayerRequest | null>(null);
     const [submitting, setSubmitting] = createSignal(false);
 
-    // The mount node `<Modal scope="tab">` portals into. It also wraps
-    // the tab's tile layout — so the unified Modal's scope-relative
-    // `inert` (spec §5) inerts the tile layout (a non-`.modal-root`
-    // sibling) while leaving the modal panel live. Held in a signal so
-    // the `TabModalScope` accessor resolves lazily once the ref lands.
+    // The mount node `<Modal>` portals into. It also wraps the layer's
+    // children — so the unified Modal's scope-relative `inert` (spec §5
+    // of SPEC_UNIFIED_MODAL_SYSTEM_2026_05_21) inerts the children (a
+    // non-`.modal-root` sibling) while leaving the modal panel live.
+    // Held in a signal so the Scope.Provider accessor resolves lazily
+    // once the ref lands.
     const [mountEl, setMountEl] = createSignal<HTMLElement | null>(null);
 
     // Guard close: ESC (routed via the unified Modal's `onClose`) and a
@@ -82,7 +96,7 @@ export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
         if (!submitting()) setCurrent(null);
     };
 
-    const api: TabModalApi = {
+    const api: ModalLayerApi = {
         open: (req) => { setSubmitting(false); setCurrent(req); },
         replace: (next) => {
             // Identical to `open` at the signal level — `replace` is a
@@ -105,18 +119,26 @@ export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
         return req ? requestLabel(req) : undefined;
     });
 
+    // Scope.Provider selection: the inner `<Modal>` reads the same
+    // scope-mount context that this layer publishes. `<ModalLayer
+    // scope="pane">` publishes `PaneModalScope`; `scope="tab"`
+    // publishes `TabModalScope`. The `<Modal scope={props.scope}>`
+    // below then looks up via the matching context — they always agree
+    // because they're parameterized over the same prop.
+    const ScopeProvider = props.scope === "pane" ? PaneModalScope.Provider : TabModalScope.Provider;
+
     return (
-        <TabModalContext.Provider value={api}>
-            <TabModalScope.Provider value={mountEl}>
-                {/* Real mount node: wraps the tile layout AND hosts the
-                    portalled <Modal>. `display:contents` keeps it
-                    layout-transparent so TileLayout still sees
-                    TabContent's flex container as its parent. */}
-                <div class="tab-modal-mount" style="display:contents" ref={setMountEl}>
+        <ModalLayerContext.Provider value={api}>
+            <ScopeProvider value={mountEl}>
+                {/* Real mount node: wraps the layer's children AND hosts
+                    the portalled <Modal>. `display:contents` keeps it
+                    layout-transparent so callers' flex / grid containers
+                    see their original parent. */}
+                <div class="modal-layer-mount" style="display:contents" ref={setMountEl}>
                     {props.children}
                     <Modal
                         open={current() != null}
-                        scope="tab"
+                        scope={props.scope}
                         onClose={safeClose}
                         closeOnBackdropClick={false}
                         size="fit"
@@ -134,15 +156,15 @@ export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
                             unrelated `current()` read. */}
                         <Show keyed when={current()}>
                             {(req) => (
-                                <div class="tab-modal-content">
+                                <div class="modal-layer-content">
                                     {renderRequest(req, api, setSubmitting).panel}
                                 </div>
                             )}
                         </Show>
                     </Modal>
                 </div>
-            </TabModalScope.Provider>
-        </TabModalContext.Provider>
+            </ScopeProvider>
+        </ModalLayerContext.Provider>
     );
 };
 
@@ -153,7 +175,7 @@ export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
  * `modalLabel` can read it without building a panel. `renderRequest`
  * reuses it so the two stay in sync.
  */
-function requestLabel(req: TabModalRequest): string {
+function requestLabel(req: ModalLayerRequest): string {
     switch (req.kind) {
         case "launch-agent":
             return `Launch ${req.agent.name}`;
@@ -173,8 +195,8 @@ function requestLabel(req: TabModalRequest): string {
 }
 
 function renderRequest(
-    req: TabModalRequest,
-    api: TabModalApi,
+    req: ModalLayerRequest,
+    api: ModalLayerApi,
     setSubmitting: (v: boolean) => void,
 ): { label: string; panel: JSX.Element } {
     switch (req.kind) {
@@ -236,7 +258,7 @@ function renderRequest(
                                     },
                                 );
                                 setSubmitting(false);
-                                // Caller's onCreated does tabModal.replace
+                                // Caller's onCreated does modalLayer.replace
                                 // back to Launch with the new id
                                 // preselected — that's what unmounts this
                                 // panel. We don't `api.close()` here.
@@ -246,7 +268,7 @@ function renderRequest(
                                 throw e;
                             }
                         }}
-                        // Caller's onCancel does tabModal.replace back to
+                        // Caller's onCancel does modalLayer.replace back to
                         // Launch with the prior selection intact. Running
                         // api.close() afterward would nullify that replace
                         // (both run synchronously, last write wins) and
@@ -325,8 +347,8 @@ function renderRequest(
                         onCancel={api.close}
                         onInstalled={(continueToLaunch: boolean) => {
                             // Hand off to the picker — it owns whether
-                            // to call `tabModal.replace(launchReq)`
-                            // (continueToLaunch=true) or `tabModal.close()`
+                            // to call `modalLayer.replace(launchReq)`
+                            // (continueToLaunch=true) or `modalLayer.close()`
                             // (continueToLaunch=false). Don't tear down
                             // the shell here — that would break the
                             // install→launch crossfade for the chain

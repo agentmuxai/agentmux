@@ -2,24 +2,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * TabModalLayer types + context — per-tab modal scoping.
+ * ModalLayer types + context — generic modal-host dispatcher.
  *
- * Each `<TabContent>` wraps its tile layout in a `<TabModalLayer>` which
- * provides this context. Components inside a tab call `useTabModal()` to
- * open and close tab-scoped modals (e.g., AgentLaunchModal). The layer
- * handles rendering the overlay; consumers only declare the request.
+ * Single, scope-neutral dispatcher used by both tab-scoped and pane-
+ * scoped modal hosts. A `<ModalLayer scope="tab">` wraps every tab's
+ * tile layout (see `frontend/app/tab/tabcontent.tsx`); a
+ * `<ModalLayer scope="pane">` wraps an individual pane's content (see
+ * `frontend/app/view/agent/agent-view.tsx`). Components inside any
+ * such layer call `useModalLayer()` to open / replace / close modals
+ * scoped to the nearest layer in the tree — pane wins over tab via
+ * normal context resolution.
  *
- * See docs/specs/launch-modal-rearchitecture-2026-05-01.md.
+ * Background: this primitive started as `TabModalLayer` (per
+ * `docs/specs/launch-modal-rearchitecture-2026-05-01.md`); when the
+ * launch modal needed to lock only its agent pane — not the whole
+ * tab — the dispatcher was lifted out of `tab/` and parameterized
+ * over scope (`SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md`). One
+ * dispatch table, one hook, one set of request types — DRY.
  */
 
 import { createContext, useContext, type Accessor } from "solid-js";
 
 // ── Request shape ────────────────────────────────────────────────────────────
 //
-// Discriminated union so the layer can dispatch on `kind`. New tab-modal
-// surfaces add a variant here and a render branch in TabModalLayer.
+// Discriminated union so the layer can dispatch on `kind`. New modal
+// surfaces add a variant here and a render branch in ModalLayer.
 
-export type TabModalRequest =
+export type ModalLayerRequest =
     | LaunchAgentRequest
     | InstallAgentRequest
     | AgentPrereqRequest
@@ -57,7 +66,7 @@ export interface LaunchAgentRequest {
     autoStartAuth?: boolean;
     /** Optional callback fired when the user wants to create a new
      *  identity bundle. Caller is expected to call
-     *  tabModal.replace(newIdentityRequest) — the picker does this.
+     *  modalLayer.replace(newIdentityRequest) — the picker does this.
      *  The `current` snapshot carries the modal's live form state so
      *  the picker can preserve it across the new-bundle round-trip.
      *
@@ -78,8 +87,8 @@ export interface LaunchAgentRequest {
 }
 
 /** Snapshot of the editable Launch form. Kept here (not imported from
- *  AgentLaunchModal) so tab-modal.ts stays a leaf type module with no
- *  imports into the view layer. */
+ *  AgentLaunchModal) so modal-layer.ts stays a leaf type module with
+ *  no imports into the view layer. */
 export interface LaunchFormStateWire {
     name: string;
     runtime: "host" | "container";
@@ -179,12 +188,12 @@ export interface NewIdentityBundleRequest {
      *  SPEC_BUNDLE_MANAGEMENT_2026_05_22.md §2. */
     purpose?: "create" | "oauth-continue";
     /** Called after the bundle is persisted on disk. Caller should
-     *  `tabModal.replace(launchRequest)` with the new id preselected;
+     *  `modalLayer.replace(launchRequest)` with the new id preselected;
      *  the layer does NOT close after this fires. */
     onCreated: (bundleId: string, bundleName: string) => void;
     /** Called when the user clicks Cancel. Caller should
-     *  `tabModal.replace(launchRequest)` with the prior selection
-     *  intact, OR `tabModal.close()` to exit. The layer does NOT
+     *  `modalLayer.replace(launchRequest)` with the prior selection
+     *  intact, OR `modalLayer.close()` to exit. The layer does NOT
      *  close after this fires — running both replace + close
      *  synchronously nullified the replace, reagent P1 on PR #910. */
     onCancel: () => void;
@@ -196,9 +205,9 @@ export interface NewIdentityBundleRequest {
  * `notes.md` context file).
  *
  * Same layer-owned-RPC contract as NewIdentityBundleRequest: the
- * UpsertMemory call lives in TabModalLayer's dispatch so the layer's
+ * UpsertMemory call lives in ModalLayer's dispatch so the layer's
  * submitting() flag tracks the in-flight RPC; caller routes after
- * success/cancel via tabModal.replace or tabModal.close.
+ * success/cancel via modalLayer.replace or modalLayer.close.
  *
  * Phase γ of SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md.
  */
@@ -206,7 +215,7 @@ export interface NewMemoryBundleRequest {
     kind: "new-memory";
     originBlockId: string;
     initialName?: string;
-    /** Caller should tabModal.replace(launchRequest) with the new id
+    /** Caller should modalLayer.replace(launchRequest) with the new id
      *  preselected. Layer does NOT close. */
     onCreated: (bundleId: string, bundleName: string) => void;
     /** Caller routes (replace vs close). Layer does NOT close. */
@@ -280,9 +289,9 @@ export interface BrowserAuthRequest {
 
 // ── Context API ──────────────────────────────────────────────────────────────
 
-export interface TabModalApi {
-    /** Open or replace the current tab modal request. */
-    open: (req: TabModalRequest) => void;
+export interface ModalLayerApi {
+    /** Open or replace the current modal request. */
+    open: (req: ModalLayerRequest) => void;
     /**
      * Replace the current modal with `next` as a continuation of the
      * same flow. The backdrop + outer panel stay mounted across the
@@ -291,24 +300,28 @@ export interface TabModalApi {
      *
      * See docs/specs/SPEC_MODAL_TRANSITIONS_2026_05_18.md.
      */
-    replace: (next: TabModalRequest) => void;
+    replace: (next: ModalLayerRequest) => void;
     /** Close the current modal, if any. No-op when nothing is open. */
     close: () => void;
     /** The currently open request, or null. */
-    current: Accessor<TabModalRequest | null>;
+    current: Accessor<ModalLayerRequest | null>;
 }
 
-export const TabModalContext = createContext<TabModalApi | null>(null);
+export const ModalLayerContext = createContext<ModalLayerApi | null>(null);
 
 /**
- * Access the tab-scoped modal API. Throws when called outside a
- * `<TabModalLayer>` so misuses surface immediately rather than silently
- * no-op'ing.
+ * Access the nearest modal-layer API in the tree. Pane-scoped layers
+ * override tab-scoped ones via normal context resolution — call sites
+ * don't need to know whether they're inside a tab layer or a pane
+ * layer, the modal just opens at whichever scope encloses them.
+ *
+ * Throws when called outside any layer so misuses surface immediately
+ * rather than silently no-op'ing.
  */
-export function useTabModal(): TabModalApi {
-    const ctx = useContext(TabModalContext);
+export function useModalLayer(): ModalLayerApi {
+    const ctx = useContext(ModalLayerContext);
     if (!ctx) {
-        throw new Error("useTabModal called outside <TabModalLayer>");
+        throw new Error("useModalLayer called outside <ModalLayer>");
     }
     return ctx;
 }
