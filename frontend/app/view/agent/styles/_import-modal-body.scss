@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Import Preview Modal — shows catalog entries being imported.
-// Top-level (rendered through modal-v2 portal).
+// Rendered through the canonical `<Modal>` (window scope, portals
+// to `document.body`).
 // ── Import Preview Modal ─────────────────────────────────────────────────────
-// Inner content styles for the Modal v2-rendered import preview. Kept
-// at top level because modal-v2 portals to `document.body`, so
-// selectors nested inside `.agent-view` never match (caught by reagent
-// on PR #513).
+// Inner content styles for the import-preview panel. Kept at top
+// level because window-scope modals portal to `document.body`, so
+// selectors nested inside `.agent-view` never match (caught by
+// reagent on PR #513).
 
 .agent-import-count {
     font-size: 12px;

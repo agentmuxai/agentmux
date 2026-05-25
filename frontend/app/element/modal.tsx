@@ -2,39 +2,48 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Modal — the unified, scope-based modal primitive.
+ * Modal — the canonical dialog primitive.
  *
- * Stage 1 of SPEC_UNIFIED_MODAL_SYSTEM_2026_05_21. This is `modal-v2`
- * evolved to add a first-class `scope` axis: what the modal *locks* —
- * the window, a tab, or a single pane. Mount point, backdrop extent,
- * `inert` boundary, scroll lock and the modal stack are all consequences
- * of that scope.
+ * One modal system for the whole app. The `scope` prop selects what
+ * region the modal *locks* — the window, a tab, or a single pane.
+ * Mount point, backdrop extent, `inert` boundary, scroll lock, and
+ * the modal stack are all consequences of that scope.
  *
- * `modal-v2.{tsx,scss}` is intentionally left untouched — the two systems
- * co-exist until later stages migrate every caller (spec §11).
- *
- * Scope model (spec §3):
+ * Scope model:
  * - `window` — Portal into the originating window's `document.body`.
  *   Inert = the body's element children; backdrop covers the full
- *   window. Identical to modal-v2 today.
+ *   window.
  * - `tab`   — mounts into the active tab's content root, supplied by a
  *   `TabModalScope` context. Inert = that tab's content; the tab bar +
  *   other tabs stay live. Falls back to `window` (with a console.warn)
  *   when no provider is present.
  * - `pane`  — mounts into a pane root supplied by a `PaneModalScope`
- *   context. Inert = that pane only. Built per spec §12.2 even though no
- *   caller uses it yet.
+ *   context. Inert = that pane only. The infrastructure is wired even
+ *   though no in-tree caller uses it yet — pane-scoped modals (e.g. a
+ *   launch flow that should only lock its own agent pane) plug in by
+ *   adding a `<PaneModalScope.Provider>` at the pane root and passing
+ *   `scope="pane"`.
  *
- * Ported verbatim from modal-v2 (spec §8): focus trap via sentinel
- * spans, focus save/restore, ARIA labelling + the title-id context,
- * the pane-overlay clip, `prefers-reduced-motion` handling.
+ * Features:
+ * - Focus trap via sentinel spans, focus save/restore on close.
+ * - ARIA labelling — auto-generated title id shared between the
+ *   dialog root and a nested `ModalHeader` via `ModalTitleIdContext`.
+ * - Pane-overlay clip — registers the modal's rect with the backend
+ *   so native browser-pane HWNDs paint transparent under the modal
+ *   (`SPEC_MODAL_PANE_CLIP_2026_04_24.md`).
+ * - `prefers-reduced-motion` honored — entrance/exit animations
+ *   suppressed when set.
+ * - `closeOnBackdropClick={false}` nudges the panel's
+ *   `[data-modal-dismiss]` control instead of silently swallowing
+ *   the click.
  *
- * Redesigned around `scope`: mount resolution (§7), scope-relative
- * inert + scroll lock (§5), the scope-aware stack (§6).
- *
- * New in §9: `closeOnBackdropClick={false}` no longer silently swallows
- * a backdrop click — it nudges the panel's `[data-modal-dismiss]`
- * control instead.
+ * History (relevant when reading older PRs / specs): this file is the
+ * descendant of two prior implementations — `modal.tsx` (v1, single
+ * Portal into `document.body`) and `modal-v2.tsx` (added the chrome
+ * slot system + paint gate). Both are gone; the surviving file is the
+ * canonical one. Older specs reference "modal-v2"; treat that as a
+ * pointer to this file. Design rationale for the scope axis lives in
+ * `SPEC_UNIFIED_MODAL_SYSTEM_2026_05_21.md`.
  *
  * Consumes design tokens from `theme.scss`:
  *   --z-modal, --shadow-modal, --shadow-focus-ring, --radius-lg,
@@ -69,7 +78,7 @@ export type ModalScope = "window" | "tab" | "pane";
 // nested `ModalHeader` so `aria-labelledby` on the dialog root resolves to
 // the heading `ModalHeader` actually renders. Without it the two sides
 // generate independent ids via `createUniqueId()` and never match,
-// breaking the labelling contract. (Ported verbatim from modal-v2.)
+// breaking the labelling contract.
 
 const ModalTitleIdContext = createContext<string | undefined>(undefined);
 
@@ -103,17 +112,17 @@ export const PaneModalScope = createContext<ModalScopeMount | undefined>(undefin
 // where the modal is. Rendered inside <Show> so registration is bound
 // to the modal's open/close lifecycle, not its component instance.
 // Full rationale: docs/specs/SPEC_MODAL_PANE_CLIP_2026_04_24.md.
-// Ported verbatim from modal-v2's ModalPaneOverlayClip (spec §8).
 
 const ModalPaneOverlayClip: Component<{ getEl: Accessor<HTMLElement | null | undefined> }> = (p) => {
     usePaneOverlay(p.getEl);
     return null;
 };
 
-// ── Modal stack (spec §6) ────────────────────────────────────────────────────
-// Module-level so every Modal instance shares it. Unlike modal-v2's flat
-// z-order stack, each entry records the modal's `scope` and `lockEl` so
-// ESC / backdrop can reason about scope containment.
+// ── Modal stack (SPEC_UNIFIED_MODAL_SYSTEM_2026_05_21 §6) ──────────────────
+// Module-level so every Modal instance shares it. Each entry records the
+// modal's `scope` and `lockEl` so ESC / backdrop dispatch can reason about
+// scope containment (e.g. a pane modal stacked inside a window modal stays
+// dismissable on its own ESC; window modal stays untouched).
 //
 // The "reachable topmost" is the highest-stacked modal NOT contained
 // within a higher modal's lock region. Modals whose lock regions don't
@@ -168,16 +177,16 @@ function isReachable(self: StackEntry): boolean {
     return true;
 }
 
-// ── Per-region scroll + inert lock (spec §5) ────────────────────────────────
-// modal-v2 inerts the whole document body unconditionally. The unified
-// system inerts only the *lock region's* element children that aren't a
-// modal root, and scroll-locks only that region.
+// ── Per-region scroll + inert lock (SPEC_UNIFIED_MODAL_SYSTEM §5) ─────────
+// Inert only the *lock region's* element children that aren't a modal
+// root, and scroll-lock only that region. Window-scope locks the
+// document body (every other element goes inert); tab-scope locks
+// just that tab's content; pane-scope locks just that pane.
 //
 // Reference-counted, keyed per lock-region element (a WeakMap keyed by
 // the region node) — so stacked modals sharing a region release the lock
 // only when the last one closes, while modals in disjoint regions never
-// interfere. The window-scope region is `document.body`, so window-modal
-// stacking behaves exactly as modal-v2's per-document lock did.
+// interfere.
 
 interface RegionLockState {
     openCount: number;
@@ -195,8 +204,8 @@ const supportsInert = typeof HTMLElement !== "undefined" && "inert" in HTMLEleme
  *
  * Inert is applied to `region`'s direct element children that are not a
  * `modal-root` and not already inert. For window scope `region` is the
- * document body — identical to modal-v2. For tab/pane scope only that
- * region's children are inerted, leaving the rest of the page live.
+ * document body. For tab/pane scope only that region's children are
+ * inerted, leaving the rest of the page live.
  */
 function acquireRegionLock(region: HTMLElement): void {
     const existing = regionLocks.get(region);
@@ -260,7 +269,7 @@ function lastFocusable(root: HTMLElement): HTMLElement | null {
  * Resolve the document the modal should mount into. Uses the currently
  * focused element's `ownerDocument` so a modal opened from a click in
  * the N-th CEF window mounts into that window's DOM, not the main
- * window's. (Ported verbatim from modal-v2 — used for `window` scope.)
+ * window's. Used for `window` scope.
  */
 function resolveMountDocument(): Document {
     const active = typeof document !== "undefined" ? document.activeElement : null;

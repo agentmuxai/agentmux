@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Command-palette specific styles. Outer chrome (backdrop, z-index,
-// scroll lock, inert) is provided by modal-v2; this file only styles
-// the panel sizing + inner search row + result list.
+// scroll lock, inert) is provided by the canonical `<Modal>`; this
+// file only styles the panel sizing + inner search row + result list.
 
-// Override modal-v2's default panel width for the palette. Applied
-// via the `panelClass="command-palette-panel"` prop passed to Modal.
+// Override the default panel width for the palette. Applied via the
+// `panelClass="command-palette-panel"` prop passed to Modal.
 .modal-panel.command-palette-panel {
     width: 560px;
     max-width: 92vw;

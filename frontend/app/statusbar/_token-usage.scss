@@ -66,7 +66,7 @@
     font-size: 12px;
     zoom: var(--zoomfactor);
     // Above the status bar and above browser panes — sits in the same
-    // stacking tier as modal-v2's overlays. pane-overlay.ts clips the
+    // stacking tier as the modal overlays. pane-overlay.ts clips the
     // pane HWND beneath this rect so the DOM content paints on top.
     z-index: var(--zindex-modal-wrapper);
     display: flex;

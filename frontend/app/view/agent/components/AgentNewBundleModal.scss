@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Shared styles for AgentNewIdentityModalPanel and
-// AgentNewMemoryModalPanel. Modal-v2 chrome lives in modal-v2.scss;
-// this file styles the form bodies only.
+// AgentNewMemoryModalPanel. Canonical modal chrome lives in
+// `frontend/app/element/modal.scss`; this file styles the form
+// bodies only.
 
 .agent-new-bundle-modal-body {
     display: flex;

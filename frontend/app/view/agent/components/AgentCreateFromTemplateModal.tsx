@@ -17,7 +17,7 @@
  * affordances, NamedAgents resource). For a template-create the
  * minimum surface is name + bindings; mixing it into the launch modal
  * would push its complexity onto a flow that doesn't need it. The
- * existing modal-v2 panel styles (`modal-panel-*`) and shared bundle
+ * canonical modal panel styles (`modal-panel-*`) and shared bundle
  * styles (`agent-new-bundle-modal-*`) are reused so this fits the
  * universal modal system per `feedback_use_universal_modal_system`.
  */

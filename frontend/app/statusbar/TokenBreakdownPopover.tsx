@@ -7,8 +7,8 @@
  * grand total row, and a destructive-gated "Reset counter" action.
  *
  * Calls `usePaneOverlay` so the popover renders cleanly over any
- * browser pane HWND (same airspace pattern as MoreDropdown and
- * modal-v2). Spec: SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md §4.2.
+ * browser pane HWND (same airspace pattern as MoreDropdown and the
+ * canonical `<Modal>`). Spec: SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md §4.2.
  */
 
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
@@ -52,7 +52,7 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
     let rootRef: HTMLDivElement | undefined;
 
     // Airspace cut so the popover shows through any browser pane HWND
-    // that the status bar overlaps. Same primitive used by modal-v2
+    // that the status bar overlaps. Same primitive used by `<Modal>`
     // (PR #544) and MoreDropdown.
     usePaneOverlay(() => rootRef);
 

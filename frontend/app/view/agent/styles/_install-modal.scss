@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // AgentInstallModal — install-specific bits only. The outer modal
-// chrome (header/body/footer/title/description) lives in
-// `frontend/app/element/modal-v2.scss` and is shared across all
-// tab-modal panels.
+// chrome (header/body/footer/title/description) lives in the canonical
+// `frontend/app/element/modal.scss` and is shared across every modal
+// panel in the app.
 
 .agent-install-modal-body {
     display: flex;

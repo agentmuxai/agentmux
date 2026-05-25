@@ -1,18 +1,21 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Modal — the unified, scope-based modal primitive (Stage 1 of
-// SPEC_UNIFIED_MODAL_SYSTEM_2026_05_21). Ports modal-v2.scss's rules and
-// adds: scope-specific positioning (tab/pane backdrops are absolute
-// within their mount node, not fixed full-window) and the cancel-nudge
-// keyframes (spec §9).
+// Modal — the canonical dialog primitive (paired with `modal.tsx`).
+//
+// Scope-aware positioning: window-scope renders a fixed full-window
+// overlay; tab/pane scope render absolute-positioned backdrops inside
+// their mount node so the lock visually covers only the scope, not the
+// whole window. Cancel-nudge keyframes (used when
+// `closeOnBackdropClick={false}` and the backdrop is clicked) live
+// alongside. Design rationale: SPEC_UNIFIED_MODAL_SYSTEM_2026_05_21.md.
 //
 // Consumes design tokens from `theme.scss` (SPEC_DESIGN_SYSTEM_2026_04_23).
 
 @use "../mixins.scss";
 
 .modal-root {
-    // Window scope: a fixed full-window overlay (identical to modal-v2).
+    // Window scope: a fixed full-window overlay.
     position: fixed;
     inset: 0;
     z-index: var(--z-modal);

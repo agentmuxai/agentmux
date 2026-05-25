@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Command palette modal — opened via Ctrl+P, lists all registered commands.
-// Migrated to the shared `element/modal-v2` primitive; the palette's
-// specific chrome (search row + scroll list) lives in the panel body.
+// Uses the canonical `element/modal` primitive; the palette's specific
+// chrome (search row + scroll list) lives in the panel body.
 
 import { commandRegistry, type CommandEntry } from "@/app/store/command-registry";
 import type { ModalCloseProps } from "@/app/store/modalmodel";
@@ -78,7 +78,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
     }
 
     // Arrow keys + Enter are palette-specific navigation. ESC and
-    // backdrop close are handled by modal-v2 → `onClose`.
+    // backdrop close are handled by `<Modal>` → `onClose`.
     function handleKeyDown(e: KeyboardEvent) {
         if (e.key === "ArrowDown") {
             e.preventDefault();
