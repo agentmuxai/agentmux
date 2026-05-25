@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::migrations::{
-    run_saga_log_migrations, stamp_and_check_version, SAGA_LOG_SCHEMA_VERSION,
+    check_schema_compat, run_saga_log_migrations, stamp_version, SAGA_LOG_SCHEMA_VERSION,
 };
 
 /// Outcome of a saga, written by `terminate`.
@@ -150,8 +150,12 @@ impl SagaLog {
              PRAGMA temp_store=MEMORY;
              PRAGMA foreign_keys=ON;",
         )?;
+        // Safety lock BEFORE migrations — same discipline as wstore /
+        // filestore: refuse to touch a newer-schema DB on disk before
+        // any mutating step runs. See `check_schema_compat` doc.
+        check_schema_compat(&conn, SAGA_LOG_SCHEMA_VERSION, "sagas.db")?;
         run_saga_log_migrations(&conn)?;
-        stamp_and_check_version(&conn, SAGA_LOG_SCHEMA_VERSION, "sagas.db")?;
+        stamp_version(&conn, SAGA_LOG_SCHEMA_VERSION)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
