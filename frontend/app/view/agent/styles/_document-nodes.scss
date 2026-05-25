@@ -188,6 +188,9 @@
             background: var(--surface-elevated, rgba(255, 255, 255, 0.02));
             border-radius: 0 4px 4px 0;
             padding: 6px 8px;
+            // `max-height` here is the in-flow default. The
+            // overlay variants below override it with an inline
+            // px value computed per hover.
             max-height: 50vh;
             min-height: 0;
             overflow: hidden;
@@ -198,14 +201,81 @@
             // fires on the way out. (SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md §Change 2)
 
             &--hidden {
+                // Collapse must be INSTANT for `max-height` / padding /
+                // margin. Reason: when the panel was in `--overlay-*`
+                // mode (`position: absolute`), going to `--hidden`
+                // drops the absolute positioning in the same render —
+                // if `max-height` then animates from the overlay's
+                // inline value (e.g. 250px) down to 0 over 200ms, the
+                // panel spends those 200ms as an IN-FLOW box that
+                // grows the row, producing a visible expand→collapse
+                // flap each time the cursor moves between tool rows.
+                //
+                // Only `opacity` keeps its transition — it doesn't
+                // affect layout, just adds a soft fade-out cue. Net
+                // result: the panel snaps to zero size instantly
+                // (no flap) and fades out over 150ms (no jank).
+                // (SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md §Change 2;
+                // refined per 2026-05-24 user report after PR #1025.)
                 max-height: 0 !important;
                 padding-top: 0 !important;
                 padding-bottom: 0 !important;
                 margin-top: 0 !important;
                 margin-bottom: 0 !important;
                 opacity: 0;
-                transition: max-height 200ms ease-out, opacity 150ms ease-out,
-                            padding 200ms ease-out, margin 200ms ease-out;
+                transition: opacity 150ms ease-out;
+            }
+
+            // Hover-anchor overlay variants
+            // (SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24.md
+            // §5.10 — generalized to tools per 2026-05-24 user
+            // request). When the panel is in hover-only mode (not
+            // pinned, not auto-expanded by status), it floats
+            // absolute above or below the summary so a tool near
+            // the pane's bottom expands upward instead of being
+            // clipped.
+            //
+            // The `--overlay-*` modifiers OVERRIDE the in-flow
+            // defaults (margin / max-height). Specificity is
+            // boosted by the row-elevation `:has()` rule in
+            // `_document.scss` so the overlay sits above sibling
+            // rows.
+            //
+            // The in-flow render path stays unchanged for pinned
+            // and auto-expanded states — that's where running
+            // tools live, and we don't want them moving.
+            &--overlay-below,
+            &--overlay-above {
+                position: absolute;
+                left: 24px;   // match the in-flow `margin-left: 24px`
+                right: 0;
+                z-index: 10;
+                margin: 0;
+                // Opaque background — overlay covers other rows so
+                // transparency would let neighbor content bleed
+                // through. No color-mix here (predictability).
+                background-color: var(--block-bg-solid-color, #1c1c1c);
+                border: 2px solid var(--accent-color, #2bd4a8);
+                border-radius: 4px;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+                overflow-y: auto;
+                // `max-height` is set inline by ToolBlock from the
+                // chosen-side container space — keeps `overflow-y`
+                // operating within the scroll container bounds.
+            }
+            &--overlay-below {
+                top: 100%;
+            }
+            &--overlay-above {
+                bottom: 100%;
+            }
+
+            // In-flow variant — the existing default. Explicit
+            // class for symmetry with --overlay-* (no behavioral
+            // change vs un-classed).
+            &--flow {
+                // (No overrides — the base `.agent-tool-panel`
+                // styling is already the in-flow layout.)
             }
         }
 
@@ -679,14 +749,23 @@
             // overlay's tail when the agent pane is in a sub-region
             // of the window (codex P2 round 2 on PR #1021).
             overflow-y: auto;
-            // Solid background so the overlay reads as a discrete
-            // surface against the rows it covers. Slightly deeper
-            // than the inline tint to match the
-            // `&--expanded.agent-user-message--startup` rule below.
-            background: color-mix(in srgb, var(--user-input-color) 18%, var(--block-bg-solid-color, var(--main-bg-color, #1c1c1c)));
-            border: 1px solid color-mix(in srgb, var(--user-input-color) 40%, transparent);
+            // Fully OPAQUE background — the overlay covers other
+            // rows, so any transparency would let neighbor content
+            // bleed through. Use `--block-bg-solid-color` directly
+            // (with a hex fallback for early-paint), not
+            // `color-mix`, so there's no chance of a translucent
+            // intermediate result.
+            background-color: var(--block-bg-solid-color, #1c1c1c);
+            // 2px accent border + drop shadow so the overlay reads
+            // as a discrete floating surface above the rows it
+            // covers. Border doubles as the visual link back to
+            // the summary's accent.
+            border: 2px solid var(--user-input-color);
             border-radius: 4px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            // Same padding as the inline `pre` would have, so the
+            // overlay's content lines up with the summary above it.
+            padding: var(--space-0-5) var(--space-1);
         }
         .agent-user-message-content--overlay-below {
             top: 100%;

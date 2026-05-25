@@ -160,26 +160,28 @@
             table-layout: fixed;
         }
 
-        // Elevate the row when it carries a hover-expanded
-        // startup-injection overlay. `contain: layout style`
-        // creates a stacking context per the CSS spec, which
-        // would otherwise trap the overlay's z-index inside the
-        // row — codex P1 round 2 on PR #1021. By elevating the
-        // ROW itself (with `position: relative` + `z-index`),
-        // the whole row stacks above its siblings; the overlay's
-        // inner `z-index: 10` then lifts it within the elevated
-        // row's own stacking context, putting it above the
-        // sibling rows' content too. The `:has()` selector
-        // scopes the elevation precisely to the moment a
-        // transient overlay is showing — no permanent z-index
-        // bump on every row.
+        // Elevate the row when it carries any hover-anchor
+        // overlay. `contain: layout style` creates a stacking
+        // context per the CSS spec, which would otherwise trap
+        // the overlay's z-index inside the row — codex P1 round
+        // 2 on PR #1021. By elevating the ROW itself (with
+        // `position: relative` + `z-index`), the whole row stacks
+        // above its siblings; the overlay's inner `z-index: 10`
+        // then lifts it within the elevated row's own stacking
+        // context, putting it above the sibling rows' content
+        // too. The `:has()` selector scopes the elevation
+        // precisely to the moment a transient overlay is showing
+        // — no permanent z-index bump on every row.
         //
-        // CEF 146+ supports `:has()` (Chromium 105+). Pinned
-        // bodies stay in normal flow (Option B) so they don't
+        // CEF 146+ supports `:has()` (Chromium 105+). Pinned and
+        // auto-expanded bodies stay in normal flow so they don't
         // need elevation.
-        &:has(
-            .agent-user-message--expanded.agent-user-message--startup:not(.agent-user-message--pinned)
-        ) {
+        //
+        // Both block types matched: the startup-injection user
+        // message and the tool panel.
+        &:has(.agent-user-message--expanded.agent-user-message--startup:not(.agent-user-message--pinned)),
+        &:has(.agent-tool-panel--overlay-below),
+        &:has(.agent-tool-panel--overlay-above) {
             position: relative;
             z-index: 100;
         }
