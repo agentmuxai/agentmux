@@ -171,6 +171,10 @@
         },
         "conn:wshenabled": {
           "type": "boolean"
+        },
+        "network:lan_discovery": {
+          "type": "boolean",
+          "description": "Enable mDNS-based discovery of other AgentMux instances on the same host and LAN. Defaults to false to avoid the Windows Firewall prompt; toggle from the HostPopover panel. See specs/lan-discovery-toggle.md."
         }
       },
       "additionalProperties": false,
