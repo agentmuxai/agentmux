@@ -232,12 +232,45 @@ export class TermWrap {
             this.loaded = true;
         }
 
+        // Wait for web fonts to load before the first fit, but with a bounded timeout.
+        // proposeDimensions() measures rendered cell width from the DOM; if the configured
+        // term font (e.g. Hack) hasn't loaded yet, FitAddon uses fallback metrics and computes
+        // wrong cols, the PTY is told the wrong size, and TUIs (Ink/Claude Code) emit cursor
+        // sequences that don't line up — visible as jumbled glyphs until the next resize.
+        //
+        // The timeout is essential: document.fonts.ready can hang under certain conditions
+        // (frontend/app-init.ts wraps the app-level wait in a 2s race for the same reason).
+        // Without it, a stalled font load would block sendTermSize()/resyncController("init")
+        // and the pane's PTY would never start. The rAF re-fit below catches the case where
+        // the font lands just after the timeout, so a missed wait isn't fatal.
+        const FIT_FONT_TIMEOUT_MS = 1000;
+        try {
+            await Promise.race([
+                document.fonts?.ready ?? Promise.resolve(),
+                new Promise<void>((resolve) => setTimeout(resolve, FIT_FONT_TIMEOUT_MS)),
+            ]);
+        } catch (_) { /* font API unavailable — fall through with fallback metrics */ }
+
         // NOW fit and tell backend to start/resync the shell controller.
         // At this point we are fully subscribed and ready to receive data.
         this.customFit();
         this.sendTermSize();
         await this.resyncController("init");
         this.hasResized = true;
+
+        // One re-fit after first paint to catch any remaining layout shift (slow CSS,
+        // late style recalculation, font swap that landed after fonts.ready resolved).
+        // If dimensions changed, sendTermSize() issues a SIGWINCH to the PTY so the
+        // controller redraws against the correct size before producing meaningful output.
+        requestAnimationFrame(() => {
+            if (!this.terminal) return;
+            const oldRows = this.terminal.rows;
+            const oldCols = this.terminal.cols;
+            this.customFit();
+            if (oldRows !== this.terminal.rows || oldCols !== this.terminal.cols) {
+                this.sendTermSize();
+            }
+        });
 
         this.runProcessIdleTimeout();
     }
@@ -436,7 +469,11 @@ export class TermWrap {
 
     private customFit() {
         const dims = this.fitAddon.proposeDimensions();
-        if (!dims) return;
+        // proposeDimensions can return {cols: NaN, rows: NaN} when the DOM cell measurement
+        // fails (font not loaded, hidden container, zero pixel dimensions). The truthy check
+        // alone doesn't catch this because the object exists — NaN < N is always false,
+        // so it propagates through to terminal.resize() and corrupts the rendered grid.
+        if (!dims || !Number.isFinite(dims.cols) || !Number.isFinite(dims.rows)) return;
         const core = (this.terminal as any)._core;
         const cellWidth: number = core?._renderService?.dimensions?.css?.cell?.width ?? 0;
         if (cellWidth > 0) {
