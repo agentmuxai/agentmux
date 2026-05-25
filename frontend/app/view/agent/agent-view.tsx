@@ -18,6 +18,10 @@ import {
     unregisterPane as unregisterAgentPane,
     type AgentPaneModel,
 } from "@/app/store/agent-pane-registration";
+import {
+    registerActivity as registerAgentActivity,
+    unregisterActivity as unregisterAgentActivity,
+} from "@/app/store/agentActivity";
 import { workingFromPhase } from "@/app/store/agent-pane-state/types";
 import type { SubagentLinkNode } from "./types";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
@@ -150,7 +154,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 turnPhase: a.turnPhaseAtom[1],
             },
         });
-        onCleanup(() => unregisterAgentPane(model.blockId));
+        registerAgentActivity(model.blockId, a.turnPhaseAtom[0]);
+        onCleanup(() => {
+            unregisterAgentPane(model.blockId);
+            unregisterAgentActivity(model.blockId);
+        });
     }
 
     // Activity log — collects per-session diagnostic entries from launch
