@@ -73,7 +73,11 @@
         }
 
         .window-action-btn {
-            cursor: pointer;
+            // Inherit `cursor: default` from `.window-header` — matches
+            // native Windows title-bar behavior (min/max/close buttons
+            // show the standard arrow cursor on hover, not the
+            // hand-link pointer). Also matches tabs + widgets, which
+            // also inherit `default`.
             width: 46px;
             height: 100%;
             padding: 0;
