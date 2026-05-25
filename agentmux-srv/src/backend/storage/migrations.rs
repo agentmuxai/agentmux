@@ -522,9 +522,8 @@ pub fn run_saga_log_migrations(conn: &Connection) -> Result<(), StoreError> {
 
 /// `PRAGMA user_version` tripwire (AUDIT_SQLITE_SYSTEMS §8.5).
 ///
-/// Reads the file's `user_version`; if it exceeds `current` the database
-/// was written by a newer AgentMux build — REFUSES to open it (returns
-/// [`StoreError::SchemaTooNew`]). Otherwise stamps `current`.
+/// Compare the file's `user_version` to `current` and refuse to open
+/// the database if it was written by a NEWER binary.
 ///
 /// This is the forward-compat **safety lock** from the channels design
 /// (`SPEC_DATA_CHANNELS_2026_05_24.md` §3.3). Within a channel,
@@ -533,19 +532,25 @@ pub fn run_saga_log_migrations(conn: &Connection) -> Result<(), StoreError> {
 /// newer binary. Same discipline as Chrome's profile-too-new check
 /// and Postgres's catalog version mismatch.
 ///
-/// Before this lock the function would WARN-and-proceed AND
-/// unconditionally overwrite `user_version` back down to `current`,
-/// which silently downgraded the stamp and made the corruption
-/// invisible to the next launch of the newer binary. The flat DDL is
-/// forward-compatible for *reads*, but a downgraded binary writing
-/// rows that the newer schema interprets through additional columns
-/// is exactly the corruption mode we want to prevent.
+/// **Must be called BEFORE `run_*_schema` / `run_*_migrations`.** The
+/// `run_*` functions include mutating steps (legacy-table renames,
+/// seed inserts, `CREATE TABLE` for new tables the older binary
+/// doesn't have), so if we ran them first and only then checked the
+/// version, a downgraded binary could still alter a newer database
+/// before the error fires — breaking the "reject without touching
+/// disk" invariant the lock is meant to guarantee (codex P1 on PR
+/// #1029).
 ///
-/// Recovery for the user: upgrade AgentMux to a version ≥ `found`, or
-/// set `AGENTMUX_CHANNEL=<other>` to land in a different channel
-/// dir. The data on disk is preserved either way — the lock only
-/// refuses to open it, never modifies it on the rejected path.
-pub fn stamp_and_check_version(
+/// Read-only: only `PRAGMA user_version` query, no writes.
+/// [`stamp_version`] does the corresponding write AFTER migrations
+/// complete successfully.
+///
+/// Recovery for the user when this returns `SchemaTooNew`: upgrade
+/// AgentMux to a version ≥ `found`, or set
+/// `AGENTMUX_CHANNEL=<other>` to land in a different channel dir.
+/// The data on disk is preserved either way — this function never
+/// modifies the database on the rejected path.
+pub fn check_schema_compat(
     conn: &Connection,
     current: i64,
     db_label: &str,
@@ -564,6 +569,23 @@ pub fn stamp_and_check_version(
             expected: current,
         });
     }
+    Ok(())
+}
+
+/// Stamp the database's `user_version` PRAGMA to `current`. Called
+/// AFTER `run_*_schema` succeeds, paired with a prior
+/// [`check_schema_compat`] that gated the migrations on the
+/// caller-binary speaking a compatible (or newer) schema version.
+///
+/// Splitting the read from the write makes the safety-lock order
+/// explicit at every call site:
+///
+/// ```ignore
+/// check_schema_compat(&conn, OBJECT_SCHEMA_VERSION, "objects.db")?;
+/// run_object_schema(&conn)?;
+/// stamp_version(&conn, OBJECT_SCHEMA_VERSION)?;
+/// ```
+pub fn stamp_version(conn: &Connection, current: i64) -> Result<(), StoreError> {
     conn.execute_batch(&format!("PRAGMA user_version = {current};"))?;
     Ok(())
 }
@@ -913,9 +935,9 @@ mod tests {
     }
 
     #[test]
-    fn stamp_and_check_version_stamps_on_fresh_db() {
+    fn stamp_version_writes_pragma() {
         let conn = Connection::open_in_memory().unwrap();
-        stamp_and_check_version(&conn, OBJECT_SCHEMA_VERSION, "objects.db").unwrap();
+        stamp_version(&conn, OBJECT_SCHEMA_VERSION).unwrap();
         let v: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
@@ -923,18 +945,18 @@ mod tests {
     }
 
     #[test]
-    fn stamp_and_check_version_safety_lock_refuses_newer_db() {
+    fn check_schema_compat_refuses_newer_db_without_writing() {
         // `SPEC_DATA_CHANNELS_2026_05_24.md` §3.3 safety lock — if the
         // DB on disk was stamped by a newer AgentMux binary, this one
-        // MUST refuse to open it. Before the channels work, the
-        // function would WARN and then unconditionally overwrite
-        // `user_version` back down to `current`, silently downgrading
-        // the stamp and hiding the corruption mode from the next run
-        // of the newer binary. The lock is what makes channel-shared
-        // data safe across multiple released versions.
+        // MUST refuse to open it. The split into
+        // check_schema_compat + stamp_version (codex P1 on #1029)
+        // ensures the check runs BEFORE any migration side effects:
+        // legacy-table rename + seed-insert in `run_object_schema` are
+        // mutating, and if we ran them first we'd partially alter a
+        // newer DB before the error fired.
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA user_version = 99;").unwrap();
-        let err = stamp_and_check_version(&conn, OBJECT_SCHEMA_VERSION, "objects.db")
+        let err = check_schema_compat(&conn, OBJECT_SCHEMA_VERSION, "objects.db")
             .expect_err("expected refusal");
         match err {
             StoreError::SchemaTooNew { db, found, expected } => {
@@ -944,9 +966,13 @@ mod tests {
             }
             other => panic!("expected SchemaTooNew, got {other:?}"),
         }
-        // Crucially, user_version on disk MUST NOT be downgraded.
-        // Re-reading the DB by a newer binary (after the user
-        // upgrades) needs to still see the original v99 stamp.
+        // Crucially, `check_schema_compat` made NO writes. The
+        // `user_version` is still 99. (Before the split — when the
+        // single function combined the check with the write — this
+        // invariant held only by virtue of the early `return Err`
+        // skipping the stamp; with the split the function is
+        // structurally read-only, eliminating the risk that a
+        // future refactor reintroduces a downgrade-corrupt path.)
         let v: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
@@ -954,20 +980,36 @@ mod tests {
     }
 
     #[test]
-    fn stamp_and_check_version_accepts_equal_or_lower() {
-        // Equal: idempotent re-stamp on a healthy DB.
+    fn check_schema_compat_accepts_equal_or_lower_without_writing() {
+        // check_schema_compat must NEVER write — it just gates
+        // migrations. The on-disk `user_version` is untouched by it,
+        // regardless of whether the verdict is accept or reject.
+        // stamp_version is the only thing that writes, and only after
+        // migrations succeed.
+
+        // Equal: check passes silently.
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(&format!("PRAGMA user_version = {};", OBJECT_SCHEMA_VERSION))
             .unwrap();
-        stamp_and_check_version(&conn, OBJECT_SCHEMA_VERSION, "objects.db").unwrap();
+        check_schema_compat(&conn, OBJECT_SCHEMA_VERSION, "objects.db").unwrap();
+        let v: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, OBJECT_SCHEMA_VERSION);
 
-        // Lower: forward-migration path — DB at older version, binary
-        // is current. Function stamps up. (Schema DDL is idempotent
-        // CREATE-IF-NOT-EXISTS so no destructive migration runs here;
-        // the version stamp is the only state change.)
+        // Lower (forward-migration path): check passes, version stays
+        // at the OLD value — stamp_version is what bumps it after
+        // migrations.
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA user_version = 1;").unwrap();
-        stamp_and_check_version(&conn, OBJECT_SCHEMA_VERSION, "objects.db").unwrap();
+        check_schema_compat(&conn, OBJECT_SCHEMA_VERSION, "objects.db").unwrap();
+        let v: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 1, "check_schema_compat must not write to user_version");
+
+        // Then stamp_version bumps it as the post-migration step.
+        stamp_version(&conn, OBJECT_SCHEMA_VERSION).unwrap();
         let v: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();

@@ -15,7 +15,7 @@ use super::cache::CacheEntry;
 use super::types::{FileMeta, FileOpts, WaveFile};
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::migrations::{
-    run_filestore_migrations, stamp_and_check_version, FILESTORE_SCHEMA_VERSION,
+    check_schema_compat, run_filestore_migrations, stamp_version, FILESTORE_SCHEMA_VERSION,
 };
 
 /// Default part size: 64KB (matches Go's DefaultPartDataSize).
@@ -71,8 +71,12 @@ impl FileStore {
             "PRAGMA journal_mode=WAL;
              PRAGMA busy_timeout=5000;",
         )?;
+        // Safety lock BEFORE migrations — same discipline as wstore /
+        // sagas: refuse to touch a newer-schema DB on disk before any
+        // mutating step runs. See `check_schema_compat` doc.
+        check_schema_compat(&conn, FILESTORE_SCHEMA_VERSION, "filestore.db")?;
         run_filestore_migrations(&conn)?;
-        stamp_and_check_version(&conn, FILESTORE_SCHEMA_VERSION, "filestore.db")?;
+        stamp_version(&conn, FILESTORE_SCHEMA_VERSION)?;
         Ok(Self {
             conn: Mutex::new(conn),
             cache: Mutex::new(HashMap::new()),
