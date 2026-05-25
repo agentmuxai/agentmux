@@ -322,11 +322,15 @@
     .modal-panel-footer {
         padding: var(--space-1) var(--space-2);
         // Primary action sits at the bottom in compact mode (mobile-
-        // app convention). `column-reverse` so the JSX order
-        // (Cancel first, Submit second) renders Submit at the
-        // bottom. Buttons stretch full-width for thumb-friendly
-        // hit targets in narrow panes.
-        flex-direction: column-reverse;
+        // app convention — thumb-reachable). Modal panels in this
+        // codebase render Cancel FIRST and Submit SECOND in JSX
+        // order (e.g. BrowserAuthModal, AgentLaunchModal). Plain
+        // `column` preserves that order vertically: Cancel on top,
+        // Submit at the bottom. `column-reverse` would flip them
+        // and put a destructive/cancel action at the thumb position,
+        // the opposite of what the contract states. Codex P2 on PR
+        // #1039 caught the wrong direction in the first cut.
+        flex-direction: column;
         gap: var(--space-1);
 
         .button,

@@ -43,12 +43,12 @@ When `.modal-layer-mount--compact` is set:
 | `.modal-panel-title` | `font-size: 18px` | `font-size: 14px`, `line-height: 1.3` |
 | `.modal-panel-description` | `font-size: 13px` | `font-size: 12px`, `margin-top: 2px` |
 | `.modal-panel-body` | `padding: var(--space-3)` | `padding: var(--space-2)` |
-| `.modal-panel-footer` | `padding: var(--space-2) var(--space-3)`, `flex-direction: row` (right-aligned) | `padding: var(--space-1) var(--space-2)`, `flex-direction: column-reverse`, button `width: 100%` |
+| `.modal-panel-footer` | `padding: var(--space-2) var(--space-3)`, `flex-direction: row` (right-aligned) | `padding: var(--space-1) var(--space-2)`, `flex-direction: column`, button `width: 100%` |
 | Buttons | natural width | `width: 100%`, smaller font |
 | Backdrop | unchanged | unchanged (still covers lock region) |
 | Animation keyframes | unchanged | unchanged |
 
-The `column-reverse` footer direction keeps the primary action (typically `submit` / `green-solid`) at the BOTTOM, matching mobile-app convention where the thumb-reachable action is bottom. Cancel sits above. Reagent + UX precedent in [`SPEC_MODAL_TRANSITIONS_2026_05_18`](./SPEC_MODAL_TRANSITIONS_2026_05_18.md) doesn't apply (it's about cold→hot transitions, not layout).
+The `column` footer direction keeps the primary action (typically `submit` / `green-solid`) at the BOTTOM, matching mobile-app convention where the thumb-reachable action is bottom. Modal panels render `Cancel` FIRST and `Submit` SECOND in JSX order; plain `column` lays JSX-order top-to-bottom, so Cancel sits above Submit. (An earlier draft of this spec said `column-reverse`, which would have flipped them and put Cancel at the thumb position — fixed after codex P2 on PR #1039.)
 
 ## 3. Per-panel opt-in (the rare case)
 
