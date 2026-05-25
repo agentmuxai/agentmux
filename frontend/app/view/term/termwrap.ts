@@ -232,12 +232,36 @@ export class TermWrap {
             this.loaded = true;
         }
 
+        // Wait for web fonts to load before the first fit.
+        // proposeDimensions() measures rendered cell width from the DOM; if the configured
+        // term font (e.g. Hack) hasn't loaded yet, FitAddon uses fallback metrics and computes
+        // wrong cols, the PTY is told the wrong size, and TUIs (Ink/Claude Code) emit cursor
+        // sequences that don't line up — visible as jumbled glyphs until the next resize.
+        // document.fonts.ready resolves once all pending FontFaces have either loaded or failed.
+        try {
+            await document.fonts?.ready;
+        } catch (_) { /* font API unavailable — fall through with fallback metrics */ }
+
         // NOW fit and tell backend to start/resync the shell controller.
         // At this point we are fully subscribed and ready to receive data.
         this.customFit();
         this.sendTermSize();
         await this.resyncController("init");
         this.hasResized = true;
+
+        // One re-fit after first paint to catch any remaining layout shift (slow CSS,
+        // late style recalculation, font swap that landed after fonts.ready resolved).
+        // If dimensions changed, sendTermSize() issues a SIGWINCH to the PTY so the
+        // controller redraws against the correct size before producing meaningful output.
+        requestAnimationFrame(() => {
+            if (!this.terminal) return;
+            const oldRows = this.terminal.rows;
+            const oldCols = this.terminal.cols;
+            this.customFit();
+            if (oldRows !== this.terminal.rows || oldCols !== this.terminal.cols) {
+                this.sendTermSize();
+            }
+        });
 
         this.runProcessIdleTimeout();
     }
@@ -436,7 +460,11 @@ export class TermWrap {
 
     private customFit() {
         const dims = this.fitAddon.proposeDimensions();
-        if (!dims) return;
+        // proposeDimensions can return {cols: NaN, rows: NaN} when the DOM cell measurement
+        // fails (font not loaded, hidden container, zero pixel dimensions). The truthy check
+        // alone doesn't catch this because the object exists — NaN < N is always false,
+        // so it propagates through to terminal.resize() and corrupts the rendered grid.
+        if (!dims || !Number.isFinite(dims.cols) || !Number.isFinite(dims.rows)) return;
         const core = (this.terminal as any)._core;
         const cellWidth: number = core?._renderService?.dimensions?.css?.cell?.width ?? 0;
         if (cellWidth > 0) {
