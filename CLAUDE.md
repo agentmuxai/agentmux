@@ -105,6 +105,7 @@ The widget bar's visibility logic is in `frontend/app/window/action-widgets.tsx`
 | `defwidget@drone` | `drone` | drone | Pinned |
 | `defwidget@help` | `help` | help | Pinned |
 | `defwidget@swarm` | `swarm` | swarm | Pinned |
+| `defwidget@warden` | `warden` | warden | Pinned |
 
 ### Not widgets
 
