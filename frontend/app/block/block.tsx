@@ -19,6 +19,7 @@ import { BrowserViewModel } from "@/app/view/browser/browser";
 import { MemoryViewModel } from "@/app/view/memory/memory";
 import { IdentityPaneViewModel } from "@/app/view/identity/identity-pane";
 import { DroneViewModel } from "@/app/view/drone/drone";
+import { WardenViewModel } from "@/app/view/warden/warden";
 import { invokeCommand } from "@/app/platform/ipc";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
@@ -56,6 +57,7 @@ BlockRegistry.set("browser", BrowserViewModel as any);
 BlockRegistry.set("memory", MemoryViewModel as any);
 BlockRegistry.set("identity", IdentityPaneViewModel as any);
 BlockRegistry.set("drone", DroneViewModel as any);
+BlockRegistry.set("warden", WardenViewModel as any);
 
 function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel): ViewModel {
     // Migration shims:
