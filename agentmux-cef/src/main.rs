@@ -221,7 +221,11 @@ fn main() {
     // launcher-provided env (it's the launcher's job to publish them).
     let common_paths = if agentmux_common::is_dev_build_exe(&host_exe_dir) {
         let mode = agentmux_common::RuntimeMode::current_path_only(&host_exe_dir);
-        agentmux_common::DataPaths::resolve(version, &mode).ok()
+        // resolve_path_only mirrors current_path_only's env-isolation:
+        // ignore inherited AGENTMUX_CHANNEL so a dev host launched from
+        // inside a parent agentmux instance doesn't redirect into the
+        // parent's channel (would trip the channel single-instance lock).
+        agentmux_common::DataPaths::resolve_path_only(version, &mode).ok()
     } else {
         agentmux_common::DataPaths::from_env().or_else(|| {
             let mode = agentmux_common::RuntimeMode::current(&host_exe_dir);

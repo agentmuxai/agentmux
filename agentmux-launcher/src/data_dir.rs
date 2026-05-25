@@ -59,12 +59,30 @@ pub fn resolve_paths(launcher_exe_dir: &Path, version: &str) -> Result<DataPaths
     // Path-only when the exe is a dev build — see SPEC_DEV_ENV_ISOLATION.
     // Prevents inheriting AGENTMUX_RUNTIME_MODE from a parent AgentMux
     // process when `task dev` is launched from inside an existing pane.
-    let mode = if agentmux_common::is_dev_build_exe(launcher_exe_dir) {
+    let is_dev = agentmux_common::is_dev_build_exe(launcher_exe_dir);
+    let mode = if is_dev {
         RuntimeMode::current_path_only(launcher_exe_dir)
     } else {
         RuntimeMode::current(launcher_exe_dir)
     };
-    let common = CommonDataPaths::resolve(version, &mode)?;
+    // For dev builds the launcher MUST use `resolve_path_only` too —
+    // not just `resolve` — so that AGENTMUX_CHANNEL is ignored
+    // symmetrically with the host's dev-build branch in
+    // agentmux-cef/src/main.rs and sidecar.rs. Without this, the
+    // launcher would honor a leaked `AGENTMUX_CHANNEL` from a parent
+    // agentmux pane and write the lockfile + IPC files into
+    // `channels/<override>/runtime/`, while the host (running its own
+    // path-only resolution) would look for them under
+    // `dev/<branch>/runtime/`. Launcher/host disagreement on the
+    // single-instance lock breaks dev-mode isolation. Channel
+    // override is intentionally an Installed/Portable-only feature in
+    // this design (codex P2 follow-up on PR #1027); dev mode keeps
+    // its per-branch isolation as the sole identity axis.
+    let common = if is_dev {
+        CommonDataPaths::resolve_path_only(version, &mode)?
+    } else {
+        CommonDataPaths::resolve(version, &mode)?
+    };
 
     let portable_root = if mode == RuntimeMode::Portable {
         Some(launcher_exe_dir.to_path_buf())
