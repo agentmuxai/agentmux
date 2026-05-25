@@ -232,14 +232,23 @@ export class TermWrap {
             this.loaded = true;
         }
 
-        // Wait for web fonts to load before the first fit.
+        // Wait for web fonts to load before the first fit, but with a bounded timeout.
         // proposeDimensions() measures rendered cell width from the DOM; if the configured
         // term font (e.g. Hack) hasn't loaded yet, FitAddon uses fallback metrics and computes
         // wrong cols, the PTY is told the wrong size, and TUIs (Ink/Claude Code) emit cursor
         // sequences that don't line up — visible as jumbled glyphs until the next resize.
-        // document.fonts.ready resolves once all pending FontFaces have either loaded or failed.
+        //
+        // The timeout is essential: document.fonts.ready can hang under certain conditions
+        // (frontend/app-init.ts wraps the app-level wait in a 2s race for the same reason).
+        // Without it, a stalled font load would block sendTermSize()/resyncController("init")
+        // and the pane's PTY would never start. The rAF re-fit below catches the case where
+        // the font lands just after the timeout, so a missed wait isn't fatal.
+        const FIT_FONT_TIMEOUT_MS = 1000;
         try {
-            await document.fonts?.ready;
+            await Promise.race([
+                document.fonts?.ready ?? Promise.resolve(),
+                new Promise<void>((resolve) => setTimeout(resolve, FIT_FONT_TIMEOUT_MS)),
+            ]);
         } catch (_) { /* font API unavailable — fall through with fallback metrics */ }
 
         // NOW fit and tell backend to start/resync the shell controller.
