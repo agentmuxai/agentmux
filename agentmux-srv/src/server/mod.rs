@@ -33,7 +33,7 @@ use serde_json::json;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::backend::eventbus::EventBus;
-use crate::backend::lan_discovery::LanDiscovery;
+use crate::backend::lan_discovery::LanDiscoveryController;
 use crate::backend::messagebus::MessageBus;
 use crate::backend::reactive::{Poller, ReactiveHandler};
 use crate::backend::storage::filestore::FileStore;
@@ -66,7 +66,11 @@ pub struct AppState {
     /// provides kill-tree on pane close / host exit.
     /// See `backend::process_tracker` + `agentmux-ai/AGENT_SPAWNED_PROCESSES_SPEC.md`.
     pub process_tracker: Arc<crate::backend::process_tracker::registry::AgentProcessRegistry>,
-    pub lan_discovery: Option<Arc<LanDiscovery>>,
+    /// Live controller for mDNS-based LAN/host peer discovery. The controller
+    /// owns a swappable daemon slot so the `network:lan_discovery` setting can
+    /// be toggled at runtime without restarting the process.
+    /// See `specs/lan-discovery-toggle.md`.
+    pub lan_discovery: Arc<LanDiscoveryController>,
     /// Local HTTP URL of this instance (e.g. "http://127.0.0.1:PORT").
     /// Used for cross-instance inject forwarding and file registry entries.
     pub local_web_url: String,
@@ -292,12 +296,7 @@ async fn handle_diag_sagas(State(state): State<AppState>) -> Json<serde_json::Va
 }
 
 async fn handle_lan_instances(State(state): State<AppState>) -> Json<serde_json::Value> {
-    let instances = state
-        .lan_discovery
-        .as_ref()
-        .map(|d| d.get_instances())
-        .unwrap_or_default();
-    Json(json!(instances))
+    Json(json!(state.lan_discovery.get_instances()))
 }
 
 async fn stub_501() -> impl IntoResponse {

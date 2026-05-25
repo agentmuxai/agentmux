@@ -48,9 +48,15 @@ pub(crate) fn test_state() -> AppState {
         messagebus: Arc::new(crate::backend::messagebus::MessageBus::new()),
         http_client: reqwest::Client::new(),
         local_web_url: String::new(),
-        subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus)),
+        subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone())),
         history_service: Arc::new(crate::backend::history::HistoryService::new()),
-        lan_discovery: None,
+        lan_discovery: Arc::new(crate::backend::lan_discovery::LanDiscoveryController::new(
+            "test-instance".to_string(),
+            "test-host".to_string(),
+            "0.28.20".to_string(),
+            0,
+            event_bus.clone(),
+        )),
         process_tracker,
         // Phase E.2c.2 — workspace RPC dispatches through reducer.
         // Tests get fresh state + a dummy broadcast bus.
