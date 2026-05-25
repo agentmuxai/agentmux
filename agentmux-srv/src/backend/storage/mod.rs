@@ -8,6 +8,7 @@ pub mod agents_consolidate;
 pub mod error;
 pub mod filestore;
 pub mod migrations;
+pub mod snapshot;
 pub mod wstore;
 
 pub use error::StoreError;
