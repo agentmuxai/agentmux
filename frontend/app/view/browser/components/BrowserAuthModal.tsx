@@ -7,7 +7,7 @@
  *
  * Phase α of SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18.md.
  * Sibling to `AgentLaunchModalPanel` / `AgentInstallModalPanel` —
- * mounts inside `TabModalLayer` via the `browser-auth` request kind.
+ * mounts inside the canonical `<ModalLayer>` via the `browser-auth` request kind.
  */
 
 import { createSignal, onCleanup, type JSX } from "solid-js";

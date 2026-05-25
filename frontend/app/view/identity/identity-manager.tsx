@@ -402,7 +402,7 @@ export const IdentityManagerBody = (props: IdentityManagerBodyProps): JSX.Elemen
 export interface IdentityManagerProps {
     /** Forwarded to `IdentityManagerBody.onReconnect`. Host wires this to
      *  the OAuth flow it owns (e.g. the bundle-manager modal opens a
-     *  Reconnect tabModal request). When omitted, the Reconnect button
+     *  Reconnect modalLayer request). When omitted, the Reconnect button
      *  is hidden — no dead affordance. */
     onReconnect?: (bundleId: string, providerId: string) => void;
 }

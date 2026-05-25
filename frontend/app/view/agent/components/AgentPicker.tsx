@@ -35,7 +35,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { waveEventSubscribe } from "@/app/store/wps";
-import { useTabModal, type LaunchFormStateWire } from "@/app/tab/tab-modal";
+import { useModalLayer, type LaunchFormStateWire } from "@/element/modal-layer";
 import { getPlatform } from "@/util/platformutil";
 import type { AgentViewModel } from "../agent-model";
 import { getProvider } from "../providers";
@@ -92,7 +92,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     const [launching, setLaunching] = createSignal<string | null>(null);
     const [nodejsError, setNodejsError] = createSignal<string | null>(null);
     const agents = useAgentDefinitions();
-    const tabModal = useTabModal();
+    const modalLayer = useModalLayer();
 
     // Per-agent install state, keyed by agent.id.
     //   undefined = not yet checked / non-npm provider (no install needed)
@@ -131,7 +131,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
 
     // Build the launch-agent request descriptor. Separated from the
     // open call so the install→launch chain can hand the same shape
-    // to `tabModal.replace()` for a crossfade (no shell teardown).
+    // to `modalLayer.replace()` for a crossfade (no shell teardown).
     //
     // `initialFormState` carries the user's in-progress launch-form
     // edits through the "+ New identity/memory" round-trip — name,
@@ -187,12 +187,12 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             //    the new id selected AND `autoStartAuth` set so OAuth
             //    resumes automatically against the freshly-named
             //    bundle.
-            tabModal.replace({
+            modalLayer.replace({
                 kind: "new-identity" as const,
                 originBlockId: props.model.blockId,
                 purpose,
                 onCreated: (id: string) => {
-                    tabModal.replace(
+                    modalLayer.replace(
                         buildLaunchRequest(
                             agent,
                             {
@@ -204,7 +204,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     );
                 },
                 onCancel: () => {
-                    tabModal.replace(buildLaunchRequest(agent, current));
+                    modalLayer.replace(buildLaunchRequest(agent, current));
                 },
             });
         },
@@ -213,11 +213,11 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             // form snapshot through the new-memory round-trip so the
             // user's other edits (name, runtime, image, identity)
             // survive alongside the freshly-created memory id.
-            tabModal.replace({
+            modalLayer.replace({
                 kind: "new-memory" as const,
                 originBlockId: props.model.blockId,
                 onCreated: (id: string) => {
-                    tabModal.replace(
+                    modalLayer.replace(
                         buildLaunchRequest(agent, {
                             ...current,
                             memoryId: id,
@@ -225,14 +225,14 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     );
                 },
                 onCancel: () => {
-                    tabModal.replace(buildLaunchRequest(agent, current));
+                    modalLayer.replace(buildLaunchRequest(agent, current));
                 },
             });
         },
     });
 
     const openLaunchModal = (agent: AgentDefinition) => {
-        tabModal.open(buildLaunchRequest(agent));
+        modalLayer.open(buildLaunchRequest(agent));
     };
 
     // Cascade follow-up (2026-05-23) — reattach via Recent Sessions.
@@ -302,9 +302,9 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 return next;
             });
             if (continueToLaunch) {
-                tabModal.replace(buildLaunchRequest(agent));
+                modalLayer.replace(buildLaunchRequest(agent));
             } else {
-                tabModal.close();
+                modalLayer.close();
             }
         },
     });
@@ -433,7 +433,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // RPCs are covered by a single `submitting()` gate (ESC + backdrop
     // dismiss stay blocked until the new agent is fully launched).
     const openCreateFromTemplateModal = (template: AgentDefinition) => {
-        tabModal.open({
+        modalLayer.open({
             kind: "create-from-template" as const,
             template,
             originBlockId: props.model.blockId,
@@ -528,7 +528,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         // defeating the template-clone migration. Open
                         // the same template-aware install request the
                         // non-prereq branch (line ~545) uses.
-                        tabModal.replace(buildTemplateInstallRequest(agent));
+                        modalLayer.replace(buildTemplateInstallRequest(agent));
                     } else {
                         openCreateFromTemplateModal(agent);
                     }
@@ -555,15 +555,15 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         onProceed: proceedWithFlow,
                         onCancel: () => {},
                     };
-                    if (op === "open") tabModal.open(req);
-                    else tabModal.replace(req);
+                    if (op === "open") modalLayer.open(req);
+                    else modalLayer.replace(req);
                 };
                 openPrereqModal(missing, "open");
                 return;
             }
 
             if (installed === false) {
-                tabModal.open(buildTemplateInstallRequest(agent));
+                modalLayer.open(buildTemplateInstallRequest(agent));
                 return;
             }
 
@@ -597,7 +597,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             if (continueToLaunch) {
                 openCreateFromTemplateModal(agent);
             } else {
-                tabModal.close();
+                modalLayer.close();
             }
         },
     });

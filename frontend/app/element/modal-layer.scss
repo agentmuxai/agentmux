@@ -1,0 +1,28 @@
+// Copyright 2024-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// ModalLayer — content-swap animation only.
+//
+// The unified `<Modal>` owns the backdrop, panel chrome, scroll lock,
+// `inert`, focus trap, and pane-overlay clip (see
+// `element/modal.scss`). What remains here is the per-request content-
+// fade: the keyed <Show> inside `<Modal>` remounts `.modal-layer-content`
+// on every `modalLayer.replace(...)`, so this entrance keyframe fires
+// fresh for the new panel while the <Modal> shell (backdrop + panel)
+// stays put — the install→launch / launch→new-bundle crossfade.
+// See SPEC_MODAL_TRANSITIONS_2026_05_18.md §3.3.
+
+.modal-layer-content {
+    animation: modal-layer-content-in 140ms cubic-bezier(0.2, 1, 0.3, 1);
+}
+
+@keyframes modal-layer-content-in {
+    from { opacity: 0; transform: translateY(2px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .modal-layer-content {
+        animation: none;
+    }
+}

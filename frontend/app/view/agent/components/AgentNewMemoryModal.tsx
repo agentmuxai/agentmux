@@ -12,7 +12,7 @@
  *   - Paste text: pastes go into a single `notes.md` context file.
  *   - Pick files: deferred (file picker integration is its own work).
  *
- * The actual UpsertMemory RPC lives in TabModalLayer's new-memory
+ * The actual UpsertMemory RPC lives in ModalLayer's new-memory
  * dispatch (mirrors the Launch modal's onSubmit pattern) so the
  * layer's `submitting()` flag — which gates safeClose — tracks the
  * in-flight call. Reagent P1 on PR #911.

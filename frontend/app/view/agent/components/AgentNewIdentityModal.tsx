@@ -77,7 +77,7 @@ export const AgentNewIdentityModalPanel = (
                 description: description().trim(),
             });
             // On success the layer unmounts this panel via the
-            // request's chained tabModal.replace. The reset is for
+            // request's chained modalLayer.replace. The reset is for
             // the fragile case where the caller's chain doesn't fire.
             setSubmitting(false);
         } catch (e) {
