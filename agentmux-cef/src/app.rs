@@ -403,6 +403,26 @@ wrap_app! {
                 cmd.append_switch(Some(&CefString::from("disable-sync")));
                 cmd.append_switch(Some(&CefString::from("disable-extensions")));
 
+                // HTTP Basic / Digest auth — route the challenge to the
+                // embedder's `RequestHandler::on_auth_credentials` callback
+                // (which surfaces our `BrowserAuthModal` from PR #906)
+                // instead of letting the Chrome runtime show its own in-
+                // process login dialog. Without this switch, CEF 146
+                // silently consumes the challenge and the request fails
+                // with `ERR_INVALID_AUTH_CREDENTIALS (-338)` — the
+                // embedder callback is never invoked, so the auth modal
+                // stays dormant.
+                //
+                // The Alloy runtime was removed in 2024, so CEF 146 only
+                // ships the Chrome runtime — this switch is mandatory.
+                // CEF4Delphi sets it by default for the same reason
+                // (sister binding hitting the same surface).
+                //
+                // Tracking: docs/research/
+                //   RESEARCH_CEF_AUTH_CALLBACK_SUPPRESSED_2026_05_25.md
+                // Upstream: https://github.com/chromiumembedded/cef/issues/3603
+                cmd.append_switch(Some(&CefString::from("disable-chrome-login-prompt")));
+
                 // GPU compositing runs in a separate process (Chromium default).
                 // This allows Chromium to restart the GPU process transparently
                 // after driver resets (TDR, DXGI device removal, display power
