@@ -241,24 +241,14 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
 
         fitAddon = new FitAddon();
         terminal.loadAddon(fitAddon);
-        terminal.open(termRef);
-        const tryFit = () => {
-            try {
-                fitAddon?.fit();
-            } catch {
-                /* container still 0×0 — wait for next resize */
-            }
-        };
-        // Force-load the term font BEFORE the first fit so cell-width
-        // measurement uses real glyph metrics, not fallback (Courier).
-        // Same race as termwrap.ts — see
-        // docs/terminal-jumbled-startup-investigation.md "Follow-up".
-        // fonts.load() actively requests the face and resolves when ready;
-        // fonts.ready alone is vacuous because the WOFF/WOFF2 isn't
-        // requested until something measures a glyph.
+        // Force-load the term font BEFORE terminal.open(). xterm caches
+        // cell-width metrics at open() time using whatever font is currently
+        // rendering — if Hack/JetBrains hasn't loaded yet, the cached width
+        // is fallback (Courier) and sticks. See termwrap.ts for the full
+        // diagnosis and docs/terminal-jumbled-startup-investigation.md.
         const FIT_FONT_TIMEOUT_MS = 1000;
         const fontSpec = (variant: string) => `${variant}12px ${termFont}`;
-        const fontsReady = (async () => {
+        const openAndFit = async () => {
             try {
                 await Promise.race([
                     Promise.all([
@@ -271,18 +261,26 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                     ),
                 ]);
             } catch (_) { /* font API unavailable — fall through */ }
-        })();
-        void fontsReady.then(() => {
-            if (disposed) return;
-            tryFit();
-        });
-        tryFit(); // best-effort initial fit (often fallback metrics on cold cache)
-        // Refit on container resize. The modal may animate in from
-        // 0×0; without an observer the terminal stays at the default
-        // 80×24 indefinitely.
-        resizeObserver = new ResizeObserver(() => tryFit());
-        resizeObserver.observe(termRef);
-        terminal.writeln("\x1b[90m# Click \"Install now\" to begin.\x1b[0m");
+            if (disposed || !terminal || !termRef) return;
+            terminal.open(termRef);
+            try {
+                fitAddon?.fit();
+            } catch {
+                /* container still 0×0 — ResizeObserver below catches it */
+            }
+            terminal.writeln("\x1b[90m# Click \"Install now\" to begin.\x1b[0m");
+            // Refit on container resize (modal may animate in from 0×0).
+            const tryFit = () => {
+                try {
+                    fitAddon?.fit();
+                } catch {
+                    /* container still 0×0 — wait for next resize */
+                }
+            };
+            resizeObserver = new ResizeObserver(() => tryFit());
+            resizeObserver.observe(termRef);
+        };
+        void openAndFit();
     });
 
     onCleanup(() => {

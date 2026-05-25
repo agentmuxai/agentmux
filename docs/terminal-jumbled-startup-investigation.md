@@ -147,6 +147,71 @@ try {
 } catch (_) { /* font API unavailable or face unknown — fall through */ }
 ```
 
+## Follow-up #2 — PR #1040 also insufficient (2026-05-25, hours later)
+
+After PR #1040 merged and the dev process was restarted to clear the
+FontFaceSet, the user reported the jumbled glyphs STILL reproduced when
+opening many terminals in parallel — "happens more often when I load
+many terminals at once, it's a timing issue."
+
+The real bug: **xterm.js caches cell-width metrics at `terminal.open()`
+time**, using whatever font is currently rendering at that moment. If
+Hack hasn't loaded yet when `open()` runs, xterm caches fallback
+(Courier) metrics into its render service's dimensions object.
+`FitAddon.proposeDimensions()` reads that cached width — not a fresh
+DOM measurement — so it returns wrong cols *forever*, regardless of
+whether Hack has loaded later. The font visually swaps in when it
+finishes loading, but the cached cell width does not invalidate.
+
+Both #1030 and #1040 placed the `await fonts.ready` / `fonts.load(...)`
+**after** `terminal.open()`, which was always too late. The post-open
+await closed the race for proposeDimensions reading the DOM, but
+proposeDimensions doesn't read the DOM — it reads xterm's cached
+metrics. With many terminals opening in parallel, all of them hit
+`open()` before any `fonts.load(...)` resolves, and every one of them
+caches fallback metrics.
+
+### Correct fix (PR #1041)
+
+Await `document.fonts.load(spec)` BEFORE `terminal.open()`. Parallel
+terminals dedupe on the underlying browser load (one network fetch on
+cold cache), then each terminal's `open()` measures cell metrics with
+Hack actually rendered, and the cached width is correct on the first
+try. No rAF re-fit gymnastics, no SIGWINCH-after-the-fact — the
+measurement is right from frame 1.
+
+Sequence with the correct fix, 6 terminals opening simultaneously:
+
+1. T1-T6 each enter `init()`, hit
+   `await document.fonts.load("12px Hack")`.
+2. Browser dedupes — single fetch for the Hack WOFF2.
+3. (cold cache, ~50ms) Hack loads. All 6 awaits unblock.
+4. Each `terminal.open(connectElem)` mounts xterm. xterm measures cell
+   metrics with Hack rendering → caches correct width.
+5. `customFit()` → `proposeDimensions()` returns correct cols.
+6. `sendTermSize()` informs PTY of correct dims.
+7. `resyncController("init")` spawns shell at correct size.
+8. PTY output renders against correct dimensions. No jumble.
+
+The NaN guard in `customFit()` and the post-init rAF re-fit from #1030
+remain as belt-and-suspenders for late layout shifts (CSS animations,
+window-zoom changes), but with the font-before-open fix they are
+defense-in-depth, not the primary mechanism.
+
+### Lesson
+
+When debugging an xterm.js startup race, distinguish three timing
+points: (a) when the font binary loads, (b) when xterm measures cell
+metrics, (c) when the FitAddon reads metrics for sizing. PR #1030 and
+#1040 thought the race was between (a) and (c), and tried to delay (c).
+The real race is between (a) and (b) — once (b) caches wrong metrics,
+(c) is stuck.
+
+The simplest verification of which race is at play: open xterm with
+font Y, swap to font X via `terminal.options.fontFamily = "X"` after
+the fact, and observe whether dimensions update. If they don't, (b) is
+the culprit.
+
 ### Other xterm mounts not yet touched
 
 `AgentInstallModal.tsx` constructs its own `new Terminal()` with its own

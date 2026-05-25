@@ -183,7 +183,51 @@ export class TermWrap {
      * Sequence: mount → subscribe → load data → flush held → resync controller.
      */
     async init() {
-        // Mount terminal to DOM
+        // Force-load the configured term font BEFORE `terminal.open()`. xterm.js
+        // caches cell-width metrics at open() time based on whatever font is
+        // *currently* rendering — if Hack hasn't loaded yet, it caches fallback
+        // (Courier) metrics and the cached value sticks even after Hack later
+        // swaps in. `proposeDimensions()` reads the cached width forever; no
+        // amount of post-open fits, rAF re-fits, or SIGWINCH can undo it.
+        //
+        // PR #1030 and #1040 awaited fonts AFTER open() — that closed the
+        // measurement race for proposeDimensions but didn't fix the cached
+        // metrics, so opening many terminals in parallel still reproduced
+        // the jumble (each terminal opened before any fonts.load resolved,
+        // and all 6 cached fallback metrics).
+        //
+        // Why `document.fonts.load(spec)` (not `document.fonts.ready`):
+        //   - `fonts.ready` only awaits already-pending font faces; before
+        //     anything has rendered a glyph in the family, it resolves with
+        //     no work to do.
+        //   - `fonts.load(spec)` actively requests the named face and
+        //     resolves only when it is loaded. Parallel terminals dedupe on
+        //     the underlying load — opening N panes pays the cost once.
+        //
+        // The timeout is essential: a stalled font load would block this
+        // init forever and the pane's PTY would never start (`app-init.ts`
+        // wraps the app-level wait in a 2s race for the same reason).
+        //
+        // We load regular + bold + italic variants xterm.js uses, in parallel.
+        // See docs/terminal-jumbled-startup-investigation.md for the full
+        // chain of debugging that led here.
+        const FIT_FONT_TIMEOUT_MS = 1000;
+        const fontFamily = this.terminal.options.fontFamily ?? "Hack";
+        const fontSize = this.terminal.options.fontSize ?? 12;
+        const fontSpec = (variant: string) => `${variant}${fontSize}px "${fontFamily}"`;
+        try {
+            await Promise.race([
+                Promise.all([
+                    document.fonts?.load(fontSpec("")) ?? Promise.resolve(),
+                    document.fonts?.load(fontSpec("bold ")) ?? Promise.resolve(),
+                    document.fonts?.load(fontSpec("italic ")) ?? Promise.resolve(),
+                ]),
+                new Promise<void>((resolve) => setTimeout(resolve, FIT_FONT_TIMEOUT_MS)),
+            ]);
+        } catch (_) { /* font API unavailable or face unknown — fall through */ }
+
+        // NOW mount terminal to DOM. xterm's first cell-metric measurement
+        // uses the loaded term font, so the cached width matches reality.
         this.terminal.open(this.connectElem);
 
         // Enable cursor blink only while this pane is focused.  The textarea is
@@ -232,53 +276,9 @@ export class TermWrap {
             this.loaded = true;
         }
 
-        // Force-load the configured term font BEFORE the first fit, with a bounded
-        // timeout. proposeDimensions() measures rendered cell width from the DOM; if
-        // the configured term font (e.g. Hack) hasn't loaded yet, FitAddon uses fallback
-        // metrics and computes wrong cols, the PTY is told the wrong size, and TUIs
-        // (Ink/Claude Code) emit cursor sequences that don't line up — visible as
-        // jumbled glyphs until the next resize.
-        //
-        // Why `document.fonts.load(spec)` and not `document.fonts.ready`:
-        //   - `fonts.ready` only awaits font faces that are ALREADY pending. Web fonts
-        //     are loaded lazily — the browser doesn't request the term font's WOFF/WOFF2
-        //     until something actually renders a glyph in that family. `terminal.open()`
-        //     above mounts the DOM but the font request typically isn't initiated until
-        //     `proposeDimensions()` measures a cell. So `await fonts.ready` resolves
-        //     vacuously (no pending loads) and `customFit()` then measures with fallback
-        //     metrics. This was the hole left by PR #1030's first cut — the same jumbled
-        //     glyphs reproduced when opening multiple terminals fast.
-        //   - `fonts.load("12px Hack")` actively REQUESTS the font and resolves only
-        //     when that specific face is ready. Subsequent terminals coalesce on the
-        //     same browser-level cache entry, so opening N panes in parallel waits
-        //     once.
-        //
-        // The timeout is essential: a stalled font load would block
-        // sendTermSize()/resyncController("init") and the pane's PTY would never start
-        // (`frontend/app-init.ts` wraps the app-level wait in a 2s race for the same
-        // reason). The rAF re-fit below catches the case where the font lands just
-        // after the timeout.
-        //
-        // We load the regular + bold + italic variants xterm.js uses, in parallel.
-        // Browsers dedupe identical font face requests, so this costs ~one network
-        // round-trip total on cold cache.
-        const FIT_FONT_TIMEOUT_MS = 1000;
-        const fontFamily = this.terminal.options.fontFamily ?? "Hack";
-        const fontSize = this.terminal.options.fontSize ?? 12;
-        const fontSpec = (variant: string) => `${variant}${fontSize}px "${fontFamily}"`;
-        try {
-            await Promise.race([
-                Promise.all([
-                    document.fonts?.load(fontSpec("")) ?? Promise.resolve(),
-                    document.fonts?.load(fontSpec("bold ")) ?? Promise.resolve(),
-                    document.fonts?.load(fontSpec("italic ")) ?? Promise.resolve(),
-                ]),
-                new Promise<void>((resolve) => setTimeout(resolve, FIT_FONT_TIMEOUT_MS)),
-            ]);
-        } catch (_) { /* font API unavailable or face unknown — fall through */ }
-
-        // NOW fit and tell backend to start/resync the shell controller.
-        // At this point we are fully subscribed and ready to receive data.
+        // Fonts were already loaded above (before terminal.open) so the cached
+        // cell metrics xterm computed at open() time are correct. Fit and tell
+        // backend to start/resync the shell controller.
         this.customFit();
         this.sendTermSize();
         await this.resyncController("init");
