@@ -6,7 +6,7 @@
  * Used from both handleHeaderContextMenu (header) and onContextMenu (body) in blockframe.tsx.
  */
 
-import { atoms, createBlockSplitHorizontally, createBlockSplitVertically, replaceBlock } from "@/app/store/global";
+import { atoms, createBlockSplitHorizontally, createBlockSplitVertically, getApi, replaceBlock } from "@/app/store/global";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 
 type SplitDirection = "up" | "down" | "left" | "right";
@@ -144,6 +144,13 @@ export interface PaneContextMenuOpts {
     magnified: boolean;
     onMagnifyToggle: () => void;
     onClose: () => void;
+    /**
+     * Right-click coordinates in window-relative pixels. When supplied, the
+     * menu adds an "Inspect Element" entry at the bottom that opens DevTools
+     * focused on the element at those coords (CEF's
+     * `show_dev_tools(..., inspect_element_at)`). Omit to suppress the entry.
+     */
+    inspectAt?: { x: number; y: number };
 }
 
 /**
@@ -204,5 +211,25 @@ export function buildPaneContextMenu(
             click: opts.onMagnifyToggle,
         },
         { label: "Close Block", click: opts.onClose },
+        // Inspect Element — opens CEF DevTools focused on whatever was
+        // under the right-click. Only appears when `inspectAt` was supplied
+        // (call sites that don't capture click coords don't get the entry).
+        // Available in any build; the DevTools window itself decides whether
+        // to launch based on the app's debug flags.
+        ...(opts.inspectAt
+            ? [
+                  { type: "separator" } as ContextMenuItem,
+                  {
+                      label: "Inspect Element",
+                      click: () => {
+                          try {
+                              getApi().inspectElementAt(opts.inspectAt!.x, opts.inspectAt!.y);
+                          } catch (e) {
+                              console.error("[pane-actions] inspect failed:", e);
+                          }
+                      },
+                  } as ContextMenuItem,
+              ]
+            : []),
     ];
 }

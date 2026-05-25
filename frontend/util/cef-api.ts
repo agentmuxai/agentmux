@@ -405,6 +405,22 @@ export function buildCefApi(): AppApi {
             const label = params.get("windowLabel") ?? "main";
             invokeCommand("toggle_devtools", { label }).catch(console.error);
         },
+        inspectElementAt: (x: number, y: number) => {
+            const params = new URLSearchParams(window.location.search);
+            const label = params.get("windowLabel") ?? "main";
+            invokeCommand("inspect_element_at", {
+                label,
+                x: Math.round(x),
+                y: Math.round(y),
+            }).catch((err) => {
+                // Fall back to plain DevTools toggle when the backend
+                // doesn't recognize the new IPC (e.g. when running a
+                // host binary built before this change landed). The
+                // user gets DevTools open and can navigate themselves.
+                console.warn(`[cef-api] inspect_element_at unsupported, falling back to toggleDevtools: ${err}`);
+                invokeCommand("toggle_devtools", { label }).catch(console.error);
+            });
+        },
         getWindowLabel: async () => {
             const params = new URLSearchParams(window.location.search);
             return params.get("windowLabel") ?? "main";
