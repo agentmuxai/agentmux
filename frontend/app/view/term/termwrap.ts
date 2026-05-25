@@ -298,6 +298,45 @@ export class TermWrap {
             }
         });
 
+        // PSReadLine cursor-desync "thaw" — see #1042 / docs/analysis/
+        // TERM_JUMBLE_STRUCTURED_2026_05_25.md §7a.
+        //
+        // When a terminal is created without subsequent sibling-pane
+        // splits, its only init-time resize is the default-80 → final
+        // transition. pwsh's PSReadLine emits its first prompt against
+        // the inherited (cols=80) ConPTY environment, then xterm's
+        // SIGWINCH from sendTermSize lands as the final cols (e.g. 14).
+        // PSReadLine's tracked cursor diverges from xterm's actual
+        // cursor — visible as "cursor jumps on Enter," cursor desync,
+        // prompt mis-layout. Manual pane resize fixes it because the
+        // resulting SIGWINCH triggers PSReadLine to re-sync.
+        //
+        // Terminals that DID get subsequent resizes (because later
+        // panes shrank them) accumulated several corrective SIGWINCH
+        // events that re-synced PSReadLine. To get the same outcome
+        // unconditionally, replay one synthetic resize cycle ~250ms
+        // post-init: that gap is enough for the first prompt to land
+        // but short enough to feel immediate. Split across rAF ticks
+        // because xterm coalesces back-to-back same-frame resizes
+        // into a single SIGWINCH.
+        setTimeout(() => {
+            if (!this.terminal) return;
+            const baseCols = this.terminal.cols;
+            const baseRows = this.terminal.rows;
+            if (baseCols < 4) return; // too narrow to safely toggle ±1
+            try {
+                this.terminal.resize(baseCols + 1, baseRows);
+                this.sendTermSize();
+                requestAnimationFrame(() => {
+                    if (!this.terminal) return;
+                    this.terminal.resize(baseCols, baseRows);
+                    this.sendTermSize();
+                });
+            } catch (e) {
+                console.warn("[term] PSReadLine-thaw resize cycle failed", e);
+            }
+        }, 250);
+
         this.runProcessIdleTimeout();
     }
 
