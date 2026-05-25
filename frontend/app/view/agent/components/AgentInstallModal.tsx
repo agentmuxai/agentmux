@@ -249,7 +249,34 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                 /* container still 0×0 — wait for next resize */
             }
         };
-        tryFit();
+        // Force-load the term font BEFORE the first fit so cell-width
+        // measurement uses real glyph metrics, not fallback (Courier).
+        // Same race as termwrap.ts — see
+        // docs/terminal-jumbled-startup-investigation.md "Follow-up".
+        // fonts.load() actively requests the face and resolves when ready;
+        // fonts.ready alone is vacuous because the WOFF/WOFF2 isn't
+        // requested until something measures a glyph.
+        const FIT_FONT_TIMEOUT_MS = 1000;
+        const fontSpec = (variant: string) => `${variant}12px ${termFont}`;
+        const fontsReady = (async () => {
+            try {
+                await Promise.race([
+                    Promise.all([
+                        document.fonts?.load(fontSpec("")) ?? Promise.resolve(),
+                        document.fonts?.load(fontSpec("bold ")) ?? Promise.resolve(),
+                        document.fonts?.load(fontSpec("italic ")) ?? Promise.resolve(),
+                    ]),
+                    new Promise<void>((resolve) =>
+                        setTimeout(resolve, FIT_FONT_TIMEOUT_MS),
+                    ),
+                ]);
+            } catch (_) { /* font API unavailable — fall through */ }
+        })();
+        void fontsReady.then(() => {
+            if (disposed) return;
+            tryFit();
+        });
+        tryFit(); // best-effort initial fit (often fallback metrics on cold cache)
         // Refit on container resize. The modal may animate in from
         // 0×0; without an observer the terminal stays at the default
         // 80×24 indefinitely.
