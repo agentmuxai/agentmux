@@ -18,7 +18,7 @@ use crate::backend::obj::{wave_obj_from_json, wave_obj_to_json, WaveObj};
 use crate::registry::Registry;
 
 use super::error::StoreError;
-use super::migrations::{run_object_schema, stamp_and_check_version, OBJECT_SCHEMA_VERSION};
+use super::migrations::{check_schema_compat, run_object_schema, stamp_version, OBJECT_SCHEMA_VERSION};
 
 /// SQLite-backed object store for WaveObj types.
 pub struct WaveStore {
@@ -81,8 +81,15 @@ impl WaveStore {
              PRAGMA mmap_size=268435456;
              PRAGMA temp_store=MEMORY;",
         )?;
+        // Safety lock BEFORE any migration side effects — the legacy-
+        // table rename + seed-insert steps in `run_object_schema` are
+        // mutating, so we must refuse to open a newer-schema DB before
+        // we touch it. (codex P1 on #1029 — fixes the original PR's
+        // check-after-migrate order that let a downgraded binary
+        // partially mutate a newer DB before the error fired.)
+        check_schema_compat(&conn, OBJECT_SCHEMA_VERSION, "objects.db")?;
         run_object_schema(&conn)?;
-        stamp_and_check_version(&conn, OBJECT_SCHEMA_VERSION, "objects.db")?;
+        stamp_version(&conn, OBJECT_SCHEMA_VERSION)?;
         Ok(Self {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
