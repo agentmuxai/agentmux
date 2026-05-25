@@ -213,17 +213,34 @@ impl LanDiscovery {
     pub fn peer_count(&self) -> usize {
         self.instances.read().len()
     }
+
+    /// Stop the mDNS daemon — synchronously closes the daemon socket
+    /// (UDP:5353), causing the `browse_receiver` to return Err and the
+    /// event-loop thread spawned by `start()` to exit.
+    ///
+    /// Required for live-disable to actually stop discovery: the event-loop
+    /// thread holds its own `Arc<Self>` clone, so simply dropping the
+    /// controller's Arc never reaches refcount zero and `Drop` does not
+    /// run. Callers must invoke `shutdown()` before clearing their Arc.
+    /// Idempotent — safe to call from both the explicit path and `Drop`.
+    pub fn shutdown(&self) {
+        if let Err(e) = self.daemon.unregister(&self.service_fullname) {
+            // Likely already unregistered; do not warn loudly.
+            tracing::debug!("mDNS unregister returned: {e}");
+        }
+        if let Err(e) = self.daemon.shutdown() {
+            tracing::debug!("mDNS daemon shutdown returned: {e}");
+        }
+    }
 }
 
 impl Drop for LanDiscovery {
     fn drop(&mut self) {
-        // Gracefully unregister from mDNS
-        if let Err(e) = self.daemon.unregister(&self.service_fullname) {
-            tracing::warn!("mDNS unregister failed: {e}");
-        }
-        if let Err(e) = self.daemon.shutdown() {
-            tracing::warn!("mDNS daemon shutdown failed: {e}");
-        }
+        // Fallback path. Under normal live-toggle flow the controller calls
+        // `shutdown()` explicitly; this only fires for process exit, when
+        // the event-loop thread has already terminated and the final Arc
+        // is being released.
+        self.shutdown();
     }
 }
 
@@ -303,8 +320,19 @@ impl LanDiscoveryController {
                 }
             }
             (false, true) => {
+                // Explicitly shut down before dropping our Arc. The
+                // spawn_blocking event-loop thread holds an `Arc<LanDiscovery>`
+                // clone (see `start()` line ~94), so dropping the slot's Arc
+                // alone does not reach refcount zero — `Drop` would never run
+                // and the daemon would keep advertising/browsing. `shutdown()`
+                // closes the mDNS socket synchronously, the receiver returns
+                // Err, the event-loop exits, and the spawned thread releases
+                // its Arc. `Drop`'s subsequent call to `shutdown()` is a
+                // no-op (idempotent).
+                if let Some(d) = slot.as_ref() {
+                    d.shutdown();
+                }
                 *slot = None;
-                // Drop impl on LanDiscovery handles mDNS unregister + shutdown.
                 tracing::info!("LAN discovery disabled via setting");
                 self.event_bus.broadcast_event(&WSEventType {
                     eventtype: "laninstances".to_string(),
