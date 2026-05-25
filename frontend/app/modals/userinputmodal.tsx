@@ -64,7 +64,7 @@ const UserInputModal = (props: UserInputRequest & ModalCloseProps) => {
     };
 
     const handleKeyDown = (waveEvent: WaveKeyboardEvent): boolean => {
-        // Enter submits; ESC is handled by modal-v2's closeOnEscape
+        // Enter submits; ESC is handled by `<Modal>`'s closeOnEscape
         // which calls our onClose → handleSendErrResponse.
         if (keyutil.checkKeyPressed(waveEvent, "Enter")) {
             handleSubmit();

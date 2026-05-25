@@ -43,7 +43,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
 
     // Airspace cut so the popover paints over any browser pane HWND that
     // the status bar overlaps. Same primitive as TokenBreakdownPopover,
-    // MoreDropdown, modal-v2.
+    // MoreDropdown, and `<Modal>`.
     usePaneOverlay(() => rootRef);
 
     const about = createMemo(() => {

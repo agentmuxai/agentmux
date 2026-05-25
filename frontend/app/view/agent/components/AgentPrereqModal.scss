@@ -1,8 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Modal-panel chrome lives in modal-v2.scss; this file only styles
-// the prereq list body. SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md.
+// Modal-panel chrome lives in `frontend/app/element/modal.scss`;
+// this file only styles the prereq list body.
+// SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md.
 
 .agent-prereq-modal-body {
     display: flex;
