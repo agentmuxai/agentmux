@@ -27,7 +27,7 @@
             "@/perf/*": ["frontend/perf/*"]
         },
         "lib": ["dom", "dom.iterable", "es6"],
-        "types": ["vite/client"],
+        "types": ["vite/client", "@testing-library/jest-dom/vitest"],
         "allowJs": true,
         "strict": false,
         "noEmit": true
