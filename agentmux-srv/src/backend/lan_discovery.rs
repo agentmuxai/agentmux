@@ -264,8 +264,16 @@ impl LanDiscoveryController {
 
     /// Idempotent: starts the daemon when `enabled` and not running, stops it
     /// when `!enabled` and running. Re-entrant safe.
+    ///
+    /// Holds the slot's write lock for the entire check-and-modify transaction
+    /// to avoid a TOCTOU race between the `is_running` read and the slot
+    /// mutation. `apply()` is called from toggle clicks and setting writes —
+    /// low frequency — so briefly blocking concurrent peer-list reads is
+    /// acceptable. `LanDiscovery::start()` and `Drop` are both fast (mDNS
+    /// daemon construction + service register/unregister are local socket ops).
     pub fn apply(&self, enabled: bool) {
-        let is_running = self.slot.read().is_some();
+        let mut slot = self.slot.write();
+        let is_running = slot.is_some();
         match (enabled, is_running) {
             (true, false) => {
                 match LanDiscovery::start(
@@ -276,7 +284,7 @@ impl LanDiscoveryController {
                     self.event_bus.clone(),
                 ) {
                     Ok(d) => {
-                        *self.slot.write() = Some(d);
+                        *slot = Some(d);
                         tracing::info!("LAN discovery enabled via setting");
                     }
                     Err(e) => {
@@ -295,7 +303,7 @@ impl LanDiscoveryController {
                 }
             }
             (false, true) => {
-                *self.slot.write() = None;
+                *slot = None;
                 // Drop impl on LanDiscovery handles mDNS unregister + shutdown.
                 tracing::info!("LAN discovery disabled via setting");
                 self.event_bus.broadcast_event(&WSEventType {
