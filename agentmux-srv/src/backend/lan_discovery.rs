@@ -226,3 +226,92 @@ impl Drop for LanDiscovery {
         }
     }
 }
+
+/// Controller for live start/stop of `LanDiscovery` in response to setting changes.
+///
+/// Owns the daemon slot plus the start arguments, so toggling
+/// `network:lan_discovery` from the UI (or from an external edit of
+/// `settings.json`) can start or stop the daemon without restarting the
+/// process.
+///
+/// Spec: specs/lan-discovery-toggle.md
+pub struct LanDiscoveryController {
+    slot: Arc<RwLock<Option<Arc<LanDiscovery>>>>,
+    instance_id: String,
+    hostname: String,
+    version: String,
+    port: u16,
+    event_bus: Arc<EventBus>,
+}
+
+impl LanDiscoveryController {
+    pub fn new(
+        instance_id: String,
+        hostname: String,
+        version: String,
+        port: u16,
+        event_bus: Arc<EventBus>,
+    ) -> Self {
+        Self {
+            slot: Arc::new(RwLock::new(None)),
+            instance_id,
+            hostname,
+            version,
+            port,
+            event_bus,
+        }
+    }
+
+    /// Idempotent: starts the daemon when `enabled` and not running, stops it
+    /// when `!enabled` and running. Re-entrant safe.
+    pub fn apply(&self, enabled: bool) {
+        let is_running = self.slot.read().is_some();
+        match (enabled, is_running) {
+            (true, false) => {
+                match LanDiscovery::start(
+                    self.instance_id.clone(),
+                    self.hostname.clone(),
+                    self.version.clone(),
+                    self.port,
+                    self.event_bus.clone(),
+                ) {
+                    Ok(d) => {
+                        *self.slot.write() = Some(d);
+                        tracing::info!("LAN discovery enabled via setting");
+                    }
+                    Err(e) => {
+                        tracing::warn!("LAN discovery start failed: {e}");
+                        // Surface to the UI so the user sees why the toggle
+                        // didn't take effect (e.g. Windows Firewall blocked).
+                        self.event_bus.broadcast_event(&WSEventType {
+                            eventtype: "laninstances:error".to_string(),
+                            oref: String::new(),
+                            data: Some(json!({ "error": e })),
+                        });
+                    }
+                }
+            }
+            (false, true) => {
+                *self.slot.write() = None;
+                // Drop impl on LanDiscovery handles mDNS unregister + shutdown.
+                tracing::info!("LAN discovery disabled via setting");
+                self.event_bus.broadcast_event(&WSEventType {
+                    eventtype: "laninstances".to_string(),
+                    oref: String::new(),
+                    data: Some(json!([])),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    /// Read the current peer list. Returns empty when the daemon is not
+    /// running (discovery disabled or start failed).
+    pub fn get_instances(&self) -> Vec<LanInstance> {
+        self.slot
+            .read()
+            .as_ref()
+            .map(|d| d.get_instances())
+            .unwrap_or_default()
+    }
+}

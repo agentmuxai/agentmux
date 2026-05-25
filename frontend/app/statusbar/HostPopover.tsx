@@ -1,8 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getApi, lanInstancesAtom, settingsAtom } from "@/store/global";
+import { getApi, lanInstancesAtom, lanDiscoveryErrorAtom, setLanDiscoveryErrorAtom, settingsAtom } from "@/store/global";
 import { invokeCommand } from "@/app/platform/ipc";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
 type HostInfo = {
@@ -31,6 +33,24 @@ const HostPopover = (): JSX.Element => {
     const lanInstances = lanInstancesAtom;
     const lanCount = () => lanInstances().length;
     const lanDiscoveryEnabled = () => !!settingsAtom()?.["network:lan_discovery"];
+    const lanDiscoveryError = lanDiscoveryErrorAtom;
+
+    // Toggle the network:lan_discovery setting. The backend's setconfig handler
+    // calls LanDiscoveryController.apply, which starts/stops the mDNS daemon
+    // live — no restart. On Windows, the first enable triggers the firewall
+    // prompt; if the user clicks Block, a "laninstances:error" event flows back
+    // and surfaces in the panel.
+    // Spec: specs/lan-discovery-toggle.md
+    const handleLanToggle = async (enabled: boolean) => {
+        // Optimistic clear of any prior error; backend will resend if it still
+        // can't start the daemon.
+        setLanDiscoveryErrorAtom(null);
+        try {
+            await RpcApi.SetConfigCommand(TabRpcClient, { "network:lan_discovery": enabled } as any);
+        } catch (e) {
+            setLanDiscoveryErrorAtom(`Failed to update setting: ${e}`);
+        }
+    };
 
     const handleClick = async () => {
         if (popoverOpen()) {
@@ -113,38 +133,60 @@ const HostPopover = (): JSX.Element => {
                                 </span>
                             </div>
 
-                            {/* Network */}
+                            {/* Network — LAN discovery toggle.
+                                Spec: specs/lan-discovery-toggle.md */}
                             <div class="status-bar-popover-divider" />
-                            <Show when={lanCount() > 0}>
-                                <div class="status-bar-popover-row">
-                                    <span style={{ color: "var(--accent-color)" }}>{"◆"}</span>
-                                    <span>{lanCount()} instance{lanCount() !== 1 ? "s" : ""} on LAN</span>
+                            <div class="status-bar-popover-row">
+                                <span class="status-bar-popover-label">LAN discovery</span>
+                                <label
+                                    class="status-bar-toggle"
+                                    data-tip={lanDiscoveryEnabled() ? "Disable" : "Enable (may prompt Windows Firewall)"}
+                                    style={{ "margin-left": "auto" }}
+                                >
+                                    <input
+                                        type="checkbox"
+                                        checked={lanDiscoveryEnabled()}
+                                        onChange={(e) =>
+                                            void handleLanToggle((e.target as HTMLInputElement).checked)
+                                        }
+                                    />
+                                </label>
+                            </div>
+                            <Show when={lanDiscoveryError()}>
+                                <div
+                                    class="status-bar-popover-row"
+                                    style={{
+                                        "padding-left": "12px",
+                                        "font-size": "0.85em",
+                                        color: "var(--warning-color, #d97706)",
+                                    }}
+                                >
+                                    <span>⚠ {lanDiscoveryError()}</span>
+                                </div>
+                            </Show>
+                            <Show when={lanDiscoveryEnabled() && lanCount() > 0}>
+                                <div class="status-bar-popover-row" style={{ "padding-left": "12px" }}>
+                                    <span style={{ color: "var(--accent-color)" }}>◆</span>
+                                    <span>{lanCount()} peer{lanCount() !== 1 ? "s" : ""}</span>
                                 </div>
                                 <For each={lanInstances()}>
                                     {(inst: LanInstance) => (
-                                        <div class="status-bar-popover-row" style={{ "padding-left": "12px" }}>
+                                        <div class="status-bar-popover-row" style={{ "padding-left": "20px" }}>
                                             <span style={{ opacity: "0.7" }}>{inst.hostname || inst.instance_id}</span>
                                             <span class="status-bar-popover-mono" style={{ opacity: "0.5" }}>v{inst.version}</span>
                                         </div>
                                     )}
                                 </For>
-                                <div class="status-bar-popover-divider" />
                             </Show>
-                            <Show when={lanCount() === 0 && lanDiscoveryEnabled()}>
-                                <div class="status-bar-popover-row" style={{ opacity: "0.5" }}>
-                                    <span>No LAN peers found</span>
+                            <Show when={lanDiscoveryEnabled() && lanCount() === 0 && !lanDiscoveryError()}>
+                                <div
+                                    class="status-bar-popover-row"
+                                    style={{ "padding-left": "12px", opacity: "0.5", "font-size": "0.85em" }}
+                                >
+                                    <span>Searching for peers…</span>
                                 </div>
-                                <div class="status-bar-popover-divider" />
                             </Show>
-                            <Show when={lanCount() === 0 && !lanDiscoveryEnabled()}>
-                                <div class="status-bar-popover-row" style={{ opacity: "0.5" }}>
-                                    <span>LAN discovery disabled</span>
-                                </div>
-                                <div class="status-bar-popover-row" style={{ opacity: "0.4", "font-size": "0.85em" }}>
-                                    <span>Enable via "network:lan_discovery": true</span>
-                                </div>
-                                <div class="status-bar-popover-divider" />
-                            </Show>
+                            <div class="status-bar-popover-divider" />
 
                             {/* Ports */}
                             <div class="status-bar-popover-row">

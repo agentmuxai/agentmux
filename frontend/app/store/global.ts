@@ -134,6 +134,9 @@ export const [isTermMultiInput, setIsTermMultiInput] = createSignal(false);
 export const [windowInstanceNumAtom, setWindowInstanceNumAtom] = createSignal(0);
 export const [windowCountAtom, setWindowCountAtom] = createSignal(1);
 export const [lanInstancesAtom, setLanInstancesAtom] = createSignal<LanInstance[]>([]);
+// Last error message from the LAN discovery daemon (e.g. firewall block).
+// Cleared on successful enable. See specs/lan-discovery-toggle.md.
+export const [lanDiscoveryErrorAtom, setLanDiscoveryErrorAtom] = createSignal<string | null>(null);
 
 // List of all open AgentMux window labels in this process. Updated by
 // app-init's window-instances-changed listener whenever a window opens
@@ -284,6 +287,15 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
             handler: (event) => {
                 const instances: LanInstance[] = event.data ?? [];
                 setLanInstancesAtom(instances);
+                // A successful broadcast clears any prior error state.
+                setLanDiscoveryErrorAtom(null);
+            },
+        },
+        {
+            eventType: "laninstances:error",
+            handler: (event) => {
+                const errMsg = event.data?.error ?? "unknown error";
+                setLanDiscoveryErrorAtom(String(errMsg));
             },
         },
     );

@@ -1169,11 +1169,13 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
     // The fs watcher's subsequent reload is a no-op (settings already up to date).
     let config_watcher_setconfig = state.config_watcher.clone();
     let event_bus_setconfig = state.event_bus.clone();
+    let lan_discovery_setconfig = state.lan_discovery.clone();
     engine.register_handler(
         COMMAND_SET_CONFIG,
         Box::new(move |data, _ctx| {
             let cw = config_watcher_setconfig.clone();
             let eb = event_bus_setconfig.clone();
+            let lan = lan_discovery_setconfig.clone();
             Box::pin(async move {
                 let new_keys: serde_json::Map<String, serde_json::Value> =
                     serde_json::from_value(data).map_err(|e| format!("setconfig: {e}"))?;
@@ -1184,9 +1186,16 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
 
                 // 2. Update in-memory config immediately
                 let merged_settings = crate::backend::config_watcher_fs::merge_settings_into_current(&cw, new_keys);
+                let lan_enabled = merged_settings.network_lan_discovery;
                 cw.update_settings(merged_settings);
 
-                // 3. Broadcast updated config now — no waiting for fs watcher
+                // 3. Live-toggle LAN discovery if the key changed. `apply` is
+                //    idempotent so it's safe to call unconditionally — when the
+                //    daemon is already in the requested state, this is a no-op.
+                //    See specs/lan-discovery-toggle.md.
+                lan.apply(lan_enabled);
+
+                // 4. Broadcast updated config now — no waiting for fs watcher
                 let config = cw.get_full_config();
                 if let Ok(config_val) = serde_json::to_value(config.as_ref()) {
                     let event = crate::backend::eventbus::WSEventType {
