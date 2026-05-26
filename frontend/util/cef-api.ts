@@ -408,10 +408,20 @@ export function buildCefApi(): AppApi {
         inspectElementAt: (x: number, y: number) => {
             const params = new URLSearchParams(window.location.search);
             const label = params.get("windowLabel") ?? "main";
+            // CEF's show_dev_tools(..., inspect_element_at) expects DIP
+            // (device-independent pixels in view coords). `MouseEvent.clientX/Y`
+            // is in CSS pixels — these match DIP when no zoom applies in the
+            // event-target's ancestor chain. AgentMux today only zooms
+            // `.window-header` and `.status-bar` (via the per-pane chrome
+            // zoom in `zoom.platform.ts`), so pane content events ARE in
+            // view DIP. Defensive against future page-zoom changes:
+            // divide by any inherited CSS `zoom` on documentElement.
+            const rootZoomStr = getComputedStyle(document.documentElement).getPropertyValue("zoom").trim();
+            const zoom = rootZoomStr ? parseFloat(rootZoomStr) || 1 : 1;
             invokeCommand("inspect_element_at", {
                 label,
-                x: Math.round(x),
-                y: Math.round(y),
+                x: Math.round(x / zoom),
+                y: Math.round(y / zoom),
             }).catch((err) => {
                 // Fall back to plain DevTools toggle when the backend
                 // doesn't recognize the new IPC (e.g. when running a
