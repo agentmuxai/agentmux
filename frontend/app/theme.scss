@@ -50,6 +50,14 @@
     --accent-color: rgb(65, 159, 224);
     --accent-color-rgb: 65, 159, 224;
 
+    // Top-bar widget menu icon tokens. The icon bar is a nav-chrome
+    // surface — monochrome by default, brighter on hover, accent on
+    // active. Themes that want a bespoke feel can override these
+    // tokens; see `SPEC_WIDGET_ICON_COLORS_2026-05-26.md`.
+    --widget-icon-color: var(--secondary-text-color);
+    --widget-icon-hover-color: var(--main-text-color);
+    --widget-icon-active-color: var(--accent-color);
+
     // User-input highlight — distinct from --accent-color so that
     // re-themings of the accent (button highlights, link color, etc.)
     // don't drag typed-input visibility with them. Default is a

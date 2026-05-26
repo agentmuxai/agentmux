@@ -116,7 +116,7 @@ const ActionWidget = (props: {
             divClassName="flex flex-row items-center gap-1 px-2 py-0.5 text-secondary hover:bg-hoverbg hover:text-white cursor-pointer rounded-sm h-full"
             divOnClick={() => handleWidgetSelect(props.widget)}
         >
-            <div style={{ color: props.widget.color }} class="text-sm">
+            <div class="widget-icon text-sm">
                 <i class={makeIconClass(props.widget.icon, true, { defaultIcon: "browser" })}></i>
             </div>
             <Show when={!props.iconOnly && !isBlank(props.widget.label)}>
@@ -191,7 +191,7 @@ const MoreDropdown = ({
                         onClick={() => handleItemClick(widget)}
                         onContextMenu={(e) => handleItemContextMenu(e, key)}
                     >
-                        <span class="action-widget-more-item-icon" style={{ color: widget.color }}>
+                        <span class="action-widget-more-item-icon widget-icon">
                             <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
                         </span>
                         <span class="action-widget-more-item-label">{widget.label}</span>

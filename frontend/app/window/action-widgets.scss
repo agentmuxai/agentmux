@@ -3,6 +3,23 @@
 
 @use "../element/menu-frame" as menuFrame;
 
+// Top-bar widget menu icon. Monochrome by default, brighter on hover
+// when inside the pinned bar. See SPEC_WIDGET_ICON_COLORS_2026-05-26.md.
+//
+// The selector specificity here intentionally beats the Tooltip wrapper's
+// Tailwind `hover:text-white` (which would otherwise hardcode the hover
+// color to literal white and ignore the theme). Inside the More dropdown
+// the hover-brighten is suppressed — row-hover background is enough; an
+// icon color flicker on every menu-row hover reads as noisy.
+.widget-icon {
+    color: var(--widget-icon-color);
+    transition: color 120ms ease;
+}
+
+.action-widget-slot:hover .widget-icon {
+    color: var(--widget-icon-hover-color);
+}
+
 .action-widgets {
     display: flex;
     flex-direction: row;
