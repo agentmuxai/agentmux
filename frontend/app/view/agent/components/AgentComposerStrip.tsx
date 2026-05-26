@@ -164,15 +164,23 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return m != null && m !== "auto" && m in PERMISSION_LABELS;
     };
 
-    // Shared "did this event come from a nested button" gate. Used by
-    // both onClick and onKeyDown so keyboard activation on the process
-    // badge / future inline buttons doesn't bubble up and toggle the
-    // strip — only the strip itself should trigger the panel. Codex
-    // P1 on PR #1069 caught the keyboard side missing this gate.
-    const eventTargetIsNestedButton = (e: Event): boolean => {
+    // ARIA contract (codex P2 round 3 on PR #1069):
+    //   • The outer strip is JUST a layout container — no `role`,
+    //     no `tabIndex`, no `aria-*`. A `role="button"` div containing
+    //     a real `<button>` (the process badge) is nested-interactive-
+    //     control which assistive tech may misreport or skip.
+    //   • The CHEVRON is the canonical toggle: a real `<button>` that
+    //     owns `aria-expanded` + `aria-controls` + the keyboard
+    //     contract. Screen readers announce "expand/collapse composer
+    //     details, button" — semantically precise.
+    //   • The strip body still toggles on mouse click for sighted-
+    //     user convenience (delegated `onClick` checks the target
+    //     wasn't a nested button), but it's a pointer-only affordance
+    //     — keyboard users use Tab → chevron → Enter.
+    const eventTargetIsNestedButton = (e: MouseEvent): boolean => {
         const t = e.target as HTMLElement | null;
         if (!t) return false;
-        return t.closest("button, [data-strip-button]") != null;
+        return t.closest("button") != null;
     };
 
     return (
@@ -180,23 +188,11 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             class="agent-composer-strip"
             classList={{ "agent-composer-strip--expanded": props.expanded }}
             onClick={(e) => {
+                // Body click expands (mouse-only convenience). Nested
+                // buttons own their own activation; don't double-fire.
                 if (!eventTargetIsNestedButton(e)) {
                     props.onToggleExpanded();
                 }
-            }}
-            role="button"
-            tabIndex={0}
-            aria-expanded={props.expanded}
-            aria-controls={props.detailsPanelId}
-            aria-label={props.expanded ? "Collapse composer details" : "Expand composer details"}
-            onKeyDown={(e) => {
-                if (e.key !== "Enter" && e.key !== " ") return;
-                // Don't hijack the key when focus is on a nested button —
-                // pressing Enter on the process badge should open swarm,
-                // not also toggle the details panel.
-                if (eventTargetIsNestedButton(e)) return;
-                e.preventDefault();
-                props.onToggleExpanded();
             }}
         >
             <span class="agent-composer-strip-left">
@@ -255,18 +251,29 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         {PERMISSION_LABELS[props.permissionMode!]}
                     </span>
                 </Show>
-                <span
+                <button
+                    type="button"
                     class="agent-composer-strip-chevron"
                     classList={{ "agent-composer-strip-chevron--expanded": props.expanded }}
-                    aria-hidden="true"
+                    aria-expanded={props.expanded}
+                    aria-controls={props.detailsPanelId}
+                    aria-label={
+                        props.expanded
+                            ? `Collapse composer details${props.unreadCount > 0 ? ` (${props.unreadCount} unread)` : ""}`
+                            : `Expand composer details${props.unreadCount > 0 ? ` (${props.unreadCount} unread)` : ""}`
+                    }
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        props.onToggleExpanded();
+                    }}
                 >
-                    {props.expanded ? "▴" : "▾"}
+                    <span aria-hidden="true">{props.expanded ? "▴" : "▾"}</span>
                     <Show when={!props.expanded && props.unreadCount > 0}>
-                        <sup class="agent-composer-strip-chevron-badge">
+                        <sup class="agent-composer-strip-chevron-badge" aria-hidden="true">
                             {fmtBadgeCount(props.unreadCount)}
                         </sup>
                     </Show>
-                </span>
+                </button>
             </span>
         </div>
     );

@@ -35,12 +35,9 @@
     &--expanded {
         border-bottom: 1px solid transparent;
     }
-
-    // Focus ring for keyboard activation (Enter / Space toggles).
-    &:focus-visible {
-        outline: 2px solid var(--accent-color);
-        outline-offset: -2px;
-    }
+    // No `:focus-visible` here — the wrapper is purely a layout
+    // container; keyboard focus lands on the chevron button (and
+    // process badge when present), each with its own focus ring.
 }
 
 .agent-composer-strip-left {
@@ -131,12 +128,21 @@
 }
 
 .agent-composer-strip-chevron {
+    // Real <button> per the ARIA contract — reset the browser
+    // default appearance so it reads as a chevron glyph, not a
+    // chrome-style button.
     display: inline-flex;
     align-items: center;
     position: relative;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    border: 0;
+    font: inherit;
     font-size: 12px;
     line-height: 1;
     color: var(--secondary-text-color);
+    cursor: pointer;
     transition: color 0.08s;
 
     .agent-composer-strip:hover & {
@@ -144,6 +150,17 @@
     }
 
     &--expanded {
+        color: var(--main-text-color);
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--accent-color);
+        outline-offset: 2px;
+    }
+
+    // Hover only on the chevron itself (not via the strip hover) —
+    // makes the toggle target feel discoverable.
+    &:hover {
         color: var(--main-text-color);
     }
 }
