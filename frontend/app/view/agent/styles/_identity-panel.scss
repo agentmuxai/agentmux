@@ -41,7 +41,7 @@
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-1) var(--space-1-5);
-    border-radius: 3px;
+    border-radius: 0;
 
     &:hover {
         background: color-mix(in srgb, var(--highlight-bg-color) 50%, transparent);
@@ -100,7 +100,7 @@
     background: var(--panel-bg-color, var(--main-bg-color));
     color: var(--main-text-color);
     border: 1px solid var(--border-color);
-    border-radius: 3px;
+    border-radius: 0;
     padding: var(--space-0-5) var(--space-1);
     max-width: 140px;
     cursor: pointer;
@@ -121,7 +121,7 @@
     font-size: 11px;
     background: none;
     border: 1px solid var(--border-color);
-    border-radius: 3px;
+    border-radius: 0;
     color: color-mix(in srgb, var(--secondary-text-color) 80%, transparent);
     padding: var(--space-0-5) 5px;
     cursor: pointer;
@@ -154,7 +154,7 @@
     color: var(--error-color);
     padding: var(--space-1) var(--space-1-5);
     background: color-mix(in srgb, var(--error-color) 10%, transparent);
-    border-radius: 3px;
+    border-radius: 0;
 }
 
 .agent-identity-unsaved {

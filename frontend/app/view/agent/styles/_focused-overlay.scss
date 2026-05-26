@@ -57,7 +57,7 @@
         color: var(--secondary-text-color);
         font-size: 12px;
         padding: var(--space-0-5) var(--space-1);
-        border-radius: 3px;
+        border-radius: 0;
         line-height: 1;
 
         &:hover {
@@ -96,7 +96,7 @@
 
     .agent-focused-rename-btn {
         padding: var(--space-1) var(--space-3);
-        border-radius: 4px;
+        border-radius: 0;
         font-size: 12px;
         cursor: pointer;
         border: 1px solid var(--border-color, rgba(255, 255, 255, 0.2));

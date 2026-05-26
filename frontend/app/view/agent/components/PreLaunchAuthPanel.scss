@@ -13,7 +13,7 @@
     padding: var(--space-4);
     margin: var(--space-3) 0;
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: 0;
     background-color: var(--panel-bg, rgba(255, 255, 255, 0.02));
 }
 
@@ -114,7 +114,7 @@
     padding: var(--space-2) var(--space-3);
     background-color: var(--input-bg, rgba(255, 255, 255, 0.04));
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: 0;
     color: var(--main-text-color);
     font-family: var(--mono-font-family);
     font-size: 12px;
@@ -131,7 +131,7 @@
     padding: var(--space-2) var(--space-3);
     background-color: var(--input-bg, rgba(255, 255, 255, 0.04));
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: 0;
     color: var(--main-text-color);
     font-family: var(--mono-font-family);
     font-size: 12px;
@@ -148,7 +148,7 @@
     padding: var(--space-3);
     background-color: var(--input-bg, rgba(255, 255, 255, 0.04));
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: 0;
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
@@ -184,7 +184,7 @@
     font-weight: 500;
     padding: var(--space-2) var(--space-3);
     background-color: rgba(16, 185, 129, 0.08);
-    border-radius: 4px;
+    border-radius: 0;
 }
 
 .pre-launch-auth-panel-failed {
@@ -194,7 +194,7 @@
     padding: var(--space-3);
     background-color: rgba(239, 68, 68, 0.08);
     border: 1px solid rgba(239, 68, 68, 0.3);
-    border-radius: 4px;
+    border-radius: 0;
 }
 
 .pre-launch-auth-panel-failed-message {

@@ -49,7 +49,7 @@
     color: var(--main-text-color);
     background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: 0;
     padding: var(--space-1-5) var(--space-2);
     outline: none;
 
@@ -90,7 +90,7 @@
     gap: var(--space-2);
     padding: var(--space-1-5) var(--space-2);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: 0;
     cursor: pointer;
     transition: background 0.08s, border-color 0.08s;
 
@@ -124,7 +124,7 @@
     padding: var(--space-1-5) var(--space-2);
     background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
     border: 1px dashed var(--border-color);
-    border-radius: 4px;
+    border-radius: 0;
 
     code {
         font-family: var(--termfontfamily, monospace);
@@ -144,7 +144,7 @@
     color: var(--error-color);
     padding: var(--space-1-5) var(--space-2);
     background: color-mix(in srgb, var(--error-color) 10%, transparent);
-    border-radius: 3px;
+    border-radius: 0;
 }
 
 // Advanced disclosure — collapsed by default. Reveals the container-image
@@ -236,7 +236,7 @@
     padding: var(--space-1-5) var(--space-2);
     border: 1px dashed var(--border-color);
     background: transparent;
-    border-radius: 4px;
+    border-radius: 0;
     color: var(--main-text-color);
     font-size: var(--text-sm);
     cursor: pointer;
@@ -287,7 +287,7 @@
     padding: 0;
     border: 1px solid var(--border-color);
     background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
-    border-radius: 4px;
+    border-radius: 0;
     color: var(--main-text-color);
     font-size: 16px;
     font-weight: 500;
