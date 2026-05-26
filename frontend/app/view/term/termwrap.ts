@@ -341,11 +341,22 @@ export class TermWrap {
                 const baseRows = this.terminal.rows;
                 if (baseCols < 4) return; // too narrow to safely toggle ±1
                 try {
-                    this.terminal.resize(baseCols + 1, baseRows);
+                    const targetCols1 = baseCols + 1;
+                    this.terminal.resize(targetCols1, baseRows);
                     this.sendTermSize();
                     this.thawRafId = requestAnimationFrame(() => {
                         this.thawRafId = null;
                         if (this.disposed || !this.terminal) return;
+                        // If something else (e.g. a sibling-split firing
+                        // handleResize between step 1 and now) changed the
+                        // grid since step 1's +1, that resize ALREADY fired
+                        // its own SIGWINCH at the current correct size —
+                        // restoring to baseCols here would force xterm back
+                        // to stale geometry and send a wrong SIGWINCH.
+                        // Skip step 2 in that case. Codex P2 on #1043.
+                        if (this.terminal.cols !== targetCols1 || this.terminal.rows !== baseRows) {
+                            return;
+                        }
                         try {
                             this.terminal.resize(baseCols, baseRows);
                             this.sendTermSize();
