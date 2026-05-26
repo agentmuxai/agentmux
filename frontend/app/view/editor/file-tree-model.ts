@@ -3,9 +3,14 @@
 //
 // State for the editor pane's file-tree explorer.
 //
-// Two reactive bags:
-//   - `expandedAtom: Set<string>`   — which folder paths are currently open
-//   - `dataAtom:     Map<string,…>` — fetched child rows + load phase per path
+// Three reactive bags:
+//   - `rootsAtom:    Root[]`         — top-level entries (HOME + drives/mounts)
+//   - `expandedAtom: Set<string>`    — which folder paths are currently open
+//   - `dataAtom:     Map<string,…>`  — fetched child rows + load phase per path
+//
+// HOME is the primary root and is auto-expanded on first load; drives/mounts
+// are sibling roots, collapsed by default — user can navigate anywhere on
+// the system without leaving the tree.
 //
 // Lazy-load on first expand; subsequent collapse keeps the data cached so
 // re-expanding is instant. Refresh re-fetches every currently-expanded path.
@@ -17,6 +22,15 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createSignal, type Accessor } from "solid-js";
+
+export interface Root {
+    /** Display name (e.g. "asaf", "C:", "/", "Macintosh HD") */
+    name: string;
+    /** Absolute path the tree expands under */
+    path: string;
+    /** Marks the user's HOME root — gets auto-expanded on load */
+    isHome: boolean;
+}
 
 interface NodeData {
     phase: "loading" | "loaded" | "error";
@@ -52,8 +66,8 @@ export class FileTreeModel {
     private _data = createSignal<Map<string, NodeData>>(new Map());
     dataAtom: Accessor<Map<string, NodeData>> = this._data[0];
 
-    private _root = createSignal<string>("");
-    rootAtom: Accessor<string> = this._root[0];
+    private _roots = createSignal<Root[]>([]);
+    rootsAtom: Accessor<Root[]> = this._roots[0];
 
     isExpanded(path: string): boolean {
         return this._expanded[0]().has(path);
@@ -64,11 +78,29 @@ export class FileTreeModel {
     }
 
     /**
-     * Set the tree root and immediately expand + load it. Called once on
-     * mount after `GetEditorHomeCommand` returns.
+     * Set the roots (HOME + drives/mounts) and auto-expand HOME.
+     * Called once on mount after `GetEditorRootsCommand` returns.
      */
-    async setRootAndLoad(home: string): Promise<void> {
-        this._root[1](home);
+    async setRootsAndLoad(home: string, drives: { name: string; path: string }[]): Promise<void> {
+        // Derive HOME's display name from the path's basename.
+        const homeName =
+            home.split(/[\\/]/).filter(Boolean).pop() ?? home;
+        const roots: Root[] = [
+            { name: homeName, path: home, isHome: true },
+            ...drives
+                // Don't double-show the drive that hosts HOME on Windows
+                // (e.g. hide C:\ when HOME is C:\Users\…). UNIX `/` is the
+                // exception: every HOME starts with `/`, but `/` is the only
+                // way to reach /etc, /opt, /mnt etc., so we always keep it.
+                .filter((d) => {
+                    if (d.path === "/") return true;
+                    return !home.toLowerCase().startsWith(d.path.toLowerCase());
+                })
+                .map((d) => ({ name: d.name, path: d.path, isHome: false })),
+        ];
+        this._roots[1](roots);
+
+        // Auto-expand HOME (only); drives stay collapsed.
         const next = new Set(this._expanded[0]());
         next.add(home);
         this._expanded[1](next);
@@ -97,10 +129,9 @@ export class FileTreeModel {
         await Promise.all(paths.map((p) => this.load(p)));
     }
 
-    /** Close every folder except the root. */
+    /** Close every folder. Roots stay rendered (they're the top-level entries). */
     collapseAll(): void {
-        const root = this._root[0]();
-        this._expanded[1](root ? new Set<string>([root]) : new Set<string>());
+        this._expanded[1](new Set<string>());
     }
 
     private async load(path: string): Promise<void> {

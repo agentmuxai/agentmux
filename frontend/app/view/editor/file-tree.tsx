@@ -11,7 +11,7 @@
 // Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
 
 import { createMemo, For, Show, type JSX } from "solid-js";
-import { FileTreeModel, isHiddenName, joinPath } from "./file-tree-model";
+import { FileTreeModel, isHiddenName, joinPath, type Root } from "./file-tree-model";
 
 interface FileTreeProps {
     model: FileTreeModel;
@@ -22,12 +22,6 @@ interface FileTreeProps {
 }
 
 export function FileTree(props: FileTreeProps): JSX.Element {
-    const rootName = createMemo(() => {
-        const r = props.model.rootAtom();
-        if (!r) return "";
-        return r.split(/[\\/]/).filter(Boolean).pop() ?? r;
-    });
-
     return (
         <div class="file-tree">
             <FileTreeToolbar
@@ -36,19 +30,21 @@ export function FileTree(props: FileTreeProps): JSX.Element {
                 onToggleHidden={props.onToggleHidden}
             />
             <div class="file-tree-body">
-                <Show when={props.model.rootAtom()}>
-                    <TreeNode
-                        model={props.model}
-                        path={props.model.rootAtom()}
-                        name={rootName()}
-                        depth={0}
-                        isDir={true}
-                        isSymlink={false}
-                        activeFilePath={props.activeFilePath}
-                        showHidden={props.showHidden}
-                        onFileClick={props.onFileClick}
-                    />
-                </Show>
+                <For each={props.model.rootsAtom()}>
+                    {(root: Root) => (
+                        <TreeNode
+                            model={props.model}
+                            path={root.path}
+                            name={root.name}
+                            depth={0}
+                            isDir={true}
+                            isSymlink={false}
+                            activeFilePath={props.activeFilePath}
+                            showHidden={props.showHidden}
+                            onFileClick={props.onFileClick}
+                        />
+                    )}
+                </For>
             </div>
         </div>
     );

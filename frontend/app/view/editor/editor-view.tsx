@@ -116,10 +116,11 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     };
 
     onMount(() => {
-        // Load file tree root from backend's home dir.
-        void RpcApi.GetEditorHomeCommand(TabRpcClient, {}).then((res) => {
+        // Load file-tree roots from backend: $HOME (auto-expanded) +
+        // every reachable drive/mount (sibling roots, collapsed).
+        void RpcApi.GetEditorRootsCommand(TabRpcClient, {}).then((res) => {
             if (res?.home) {
-                void model.treeModel.setRootAndLoad(res.home);
+                void model.treeModel.setRootsAndLoad(res.home, res.drives ?? []);
             }
         });
 
@@ -130,6 +131,29 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             void setupEditor(content, lang, readOnly);
         }
     });
+
+    // Resize-handle drag — tracks global mousemove until release so the user
+    // can drag past the handle without losing the grip. Live updates the
+    // tree-width signal; persists once on mouseup.
+    const handleResizeMouseDown = (e: MouseEvent) => {
+        e.preventDefault();
+        const startX = e.clientX;
+        const startWidth = model.treeWidthAtom();
+        const onMove = (ev: MouseEvent) => {
+            model.setTreeWidth(startWidth + (ev.clientX - startX));
+        };
+        const onUp = () => {
+            document.removeEventListener("mousemove", onMove);
+            document.removeEventListener("mouseup", onUp);
+            document.body.style.cursor = "";
+            document.body.style.userSelect = "";
+            void model.commitTreeWidth();
+        };
+        document.body.style.cursor = "col-resize";
+        document.body.style.userSelect = "none";
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+    };
 
     // Rebuild only when a NEW file is opened (path changes), not on every
     // keystroke. contentAtom is updated by onContentChange on every keypress —
@@ -168,7 +192,13 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             classList={{ "editor-view--tree-collapsed": !model.treeExpandedAtom() }}
         >
             <Show when={model.treeExpandedAtom()}>
-                <div class="editor-tree-column">
+                <div
+                    class="editor-tree-column"
+                    style={{
+                        width: `${model.treeWidthAtom()}px`,
+                        flex: `0 0 ${model.treeWidthAtom()}px`,
+                    }}
+                >
                     <FileTree
                         model={model.treeModel}
                         activeFilePath={model.filePathAtom()}
@@ -198,6 +228,11 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                         </div>
                     </Show>
                 </div>
+                <div
+                    class="editor-tree-resize-handle"
+                    onMouseDown={handleResizeMouseDown}
+                    title="Drag to resize file tree"
+                />
             </Show>
 
             <div class="editor-main-column">
