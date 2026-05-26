@@ -1,5 +1,10 @@
 # AgentMux Version History
 
+## 0.38.9 — 2026-05-26
+
+- fix(modal): add compact-mode min-width override to launch/prereq/new-bundle/browser-auth modals
+
+
 ## 0.38.6 — 2026-05-26
 
 - fix(lan): normalize mDNS hostname with .local. suffix so service registration succeeds on Windows / non-mDNS hosts
