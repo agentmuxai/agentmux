@@ -70,7 +70,7 @@
     padding: var(--space-1-5);
     background: #0d0e0f;
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: 0;
     overflow: hidden;
 
     .xterm {
@@ -82,7 +82,7 @@
     padding: var(--space-1) var(--space-1-5);
     background: color-mix(in srgb, var(--error-color, #ff6b6b) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--error-color, #ff6b6b) 40%, transparent);
-    border-radius: 4px;
+    border-radius: 0;
     color: var(--error-color, #ff6b6b);
     font-size: var(--text-sm);
 }

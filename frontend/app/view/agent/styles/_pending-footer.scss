@@ -63,7 +63,7 @@
             padding: var(--space-0-5) var(--space-2);
             background: color-mix(in srgb, var(--accent-color) 20%, transparent);
             border: 1px solid var(--accent-color);
-            border-radius: 3px;
+            border-radius: 0;
             color: var(--accent-color);
             font-family: inherit;
             font-size: 10px;
@@ -85,7 +85,7 @@
         .agent-pending-item {
             padding: 3px 5px;
             border-left: 2px solid var(--warning-color);
-            border-radius: 2px;
+            border-radius: 0;
             background: color-mix(in srgb, var(--warning-color) 4%, transparent);
             pre {
                 margin: 0;
@@ -113,7 +113,7 @@
                 padding: 3px var(--space-1);
                 background: var(--main-bg-color);
                 border: 1px solid var(--border-color);
-                border-radius: 2px;
+                border-radius: 0;
                 color: var(--main-text-color);
                 font-family: inherit;
                 font-size: 12px;

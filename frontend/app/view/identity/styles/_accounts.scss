@@ -22,7 +22,7 @@
     }
     &::-webkit-scrollbar-thumb {
         background: var(--border-color);
-        border-radius: 2px;
+        border-radius: 0;
     }
 }
 
@@ -86,6 +86,6 @@
     color: var(--secondary-text-color);
     background: var(--panel-bg-color);
     padding: 1px 5px;
-    border-radius: 3px;
+    border-radius: 0;
 }
 

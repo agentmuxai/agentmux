@@ -20,7 +20,7 @@
         background: var(--accent-color);
         color: #fff; /* stylelint-disable-line color-no-hex */
         border: none;
-        border-radius: 4px;
+        border-radius: 0;
         cursor: pointer;
         &:hover { opacity: 0.85; }
         &:active { opacity: 0.7; }
@@ -50,7 +50,7 @@
         border: 1px solid var(--accent-color);
         background: transparent;
         color: var(--accent-color);
-        border-radius: 4px;
+        border-radius: 0;
         cursor: pointer;
         font-size: 13px;
         transition: background 0.15s, color 0.15s;

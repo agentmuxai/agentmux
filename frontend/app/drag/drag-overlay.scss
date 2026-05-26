@@ -13,7 +13,7 @@
     justify-content: center;
     background: rgba(34, 197, 94, 0.08);
     border: 2px dashed var(--accent-color);
-    border-radius: 8px;
+    border-radius: 0;
     pointer-events: none;
     animation: cross-drag-fade-in 0.15s ease-out;
 
