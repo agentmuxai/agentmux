@@ -14,6 +14,30 @@
 
 @use "../mixins.scss";
 
+// The mount node wraps ModalLayer's children and hosts the portalled
+// `<Modal>`. `container-type: inline-size` lets CSS `@container modal-
+// mount (max-width: 400px)` queries drive the compact variant
+// continuously, replacing the JS class toggle + ResizeObserver in
+// ModalLayer.tsx that Phase 1 still relied on. The element needs a
+// real principal box (container queries can't apply to `display:
+// contents`), so it fills its parent (`100% × 100%`) and establishes
+// a positioning context for the absolutely-positioned `.modal-root`
+// children. `min-width: 0; min-height: 0` keeps the box from acting
+// as a flex-shrink anchor in parent flex layouts (the previous
+// `display: contents` was layout-transparent).
+//
+// Phase 2 of MODAL_COMPACT_VARIANT_ARCHITECTURE_2026_05_26.
+.modal-layer-mount {
+    display: block;
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    container-type: inline-size;
+    container-name: modal-mount;
+}
+
 .modal-root {
     // Window scope: a fixed full-window overlay.
     position: fixed;
@@ -96,29 +120,27 @@
 // `min-width: 0` cascade for modal body content **in compact mode only**.
 //
 // Flex children default to `min-width: auto` (intrinsic content size),
-// which pins the parent to the widest descendant. The default bites every
-// content-managed surface — xterm canvas, monaco editor, browser webview
-// — and every fixed-width form field. In compact mode (narrow pane) we
-// want it to be 0 universally; in wide mode the per-modal body's
-// declared min-width (560/440/420/380) is intentional and must win.
+// which pins the parent to the widest descendant. In compact mode
+// (narrow pane) we want it to be 0 universally; in wide mode the
+// per-modal body's declared min-width (560/440/420/380) is intentional
+// and must win.
 //
-// Specificity contract:
-//   • Per-modal body `.agent-install-modal-body { min-width: 560px }`
-//     has specificity (0,1,0).
-//   • This rule uses a real (non-`:where()`) class wrapper, so the
-//     compiled selector `.modal-layer-mount--compact .modal-panel-body > *`
-//     has specificity (0,2,0) and wins over the per-modal min-widths
-//     in compact mode regardless of import order. In wide mode the
-//     wrapper class isn't on the DOM, so the rule doesn't apply and
-//     per-modal min-widths stay in force.
+// Phase 2: gated by `@container modal-mount (max-width: 400px)`. The
+// container query takes effect only when the mount node's inline-size
+// crosses below the threshold — same end-user behavior as the prior
+// `.modal-layer-mount--compact` class, with no JS observer involved.
 //
-// Reagent + codex both flagged the prior `:where()`-wrapped version as
-// specificity-tied with the per-modal rules — bundle import order
-// would have decided which won. Promoting to a real class wrapper
-// closes that ambiguity.
-.modal-layer-mount--compact {
-    .modal-panel-body,
-    .modal-panel-body > * {
+// Specificity inside an `@container` rule is computed from the
+// inner selector alone (the at-rule itself adds none), so
+// `.modal-panel-body > *` carries its natural (0,1,0). The bundle
+// import order issue from Phase 1 is unchanged: per-modal body
+// `.agent-install-modal-body { min-width: 560px }` is also (0,1,0).
+// In compact mode we still need to win — make the selector
+// `.modal-panel-body[class]` to bump specificity to (0,2,0) without
+// requiring a wrapper class. Reagent + codex P1 on PR #1060 round 1.
+@container modal-mount (max-width: 400px) {
+    .modal-panel-body[class],
+    .modal-panel-body[class] > * {
         min-width: 0;
     }
 }
@@ -316,28 +338,26 @@
 
 // ── Compact variant ────────────────────────────────────────────────────
 //
-// Fires when the ModalLayer's mount node observes a width below
-// COMPACT_THRESHOLD_PX (400px). Used for narrow lock regions —
-// verified live at 240px (browser pane in a three-pane window
-// during the auth-modal investigation).
+// Fires when the `.modal-layer-mount` container queries below 400px of
+// inline-size. Used for narrow lock regions — verified live at 240px
+// (browser pane in a three-pane window during the auth-modal
+// investigation).
 //
-// Strategy: relax per-panel min-widths and shrink padding / font /
-// footer-layout so dialogs remain usable in narrow panes. The
-// canonical chrome classes (`.modal-panel-*`) live in this file
-// and get the variant for free; per-panel modal SCSS that has
-// content-driven min-widths (e.g. xterm-based install modal) can
-// override locally via `:where(.modal-layer-mount--compact) &`.
+// Phase 2: the JS class-toggle `.modal-layer-mount--compact` has been
+// replaced by `@container modal-mount (max-width: 400px)`. The browser
+// drives the variant continuously as the mount rect changes; no
+// JS observer, no near-threshold flicker. End-user behavior is
+// unchanged from Phase 1.
 //
-// `:where()` keeps the wrapper at zero specificity so per-panel
-// overrides apply without `!important`. The inner selectors then
-// carry their own native specificity — `.modal-panel-*` rules tie
-// the base chrome and win on source order, and the panel-width rule
-// scopes to `.modal-panel[data-size]` to match the base size rules
-// (`.modal-panel[data-size="fit"]` etc., specificity 0,2,0) which
-// would otherwise win over a bare `.modal-panel` (0,1,0) and leave
-// the compact panel at the per-size width. Codex P2 on PR #1039.
-// Spec: SPEC_MODAL_COMPACT_VARIANT_2026_05_25.md §2 §4.2.
-:where(.modal-layer-mount--compact) {
+// Specificity inside an `@container` rule: the at-rule itself adds
+// none; inner selectors carry their natural specificity. The
+// panel-width rule scopes to `.modal-panel[data-size]` (0,2,0) to
+// match the base size rules (`.modal-panel[data-size="fit"]` etc.,
+// also 0,2,0) which would otherwise win over a bare `.modal-panel`
+// (0,1,0) and leave the compact panel at the per-size width.
+//
+// MODAL_COMPACT_VARIANT_ARCHITECTURE_2026_05_26 §7 (Layer A).
+@container modal-mount (max-width: 400px) {
     // Edge-padding reclaim — drawer-style clearance hugging the pane.
     // Default `.modal-root { padding: var(--space-6) }` reserves 24px on
     // every side; in a 200px pane that's 48px (~24%) of horizontal real

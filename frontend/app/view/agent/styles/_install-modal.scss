@@ -18,9 +18,10 @@
     // Compact variant — keep the min-height override (xterm needs a
     // usable vertical viewport even in narrow panes). The min-width:0
     // line that used to live here is now provided by the universal
-    // `.modal-panel-body > * { min-width: 0 }` cascade in modal.scss
-    // (Layer C of MODAL_COMPACT_VARIANT_ARCHITECTURE_2026_05_26).
-    :where(.modal-layer-mount--compact) & {
+    // `.modal-panel-body[class] > * { min-width: 0 }` cascade in
+    // modal.scss (Layer C of MODAL_COMPACT_VARIANT_ARCHITECTURE_2026_05_26).
+    // Phase 2 moves the trigger from a class selector to a container query.
+    @container modal-mount (max-width: 400px) {
         min-height: 200px;
     }
 }

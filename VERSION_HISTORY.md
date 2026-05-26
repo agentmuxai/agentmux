@@ -1,5 +1,9 @@
 # AgentMux Version History
 
+## 0.38.11 — 2026-05-26
+
+- (no semantic content — internal portable-build counter increment from `task package`; backfilled to satisfy the release-consistency invariant)
+
 ## 0.38.10 — 2026-05-26
 
 - (no semantic content — internal portable-build counter increment from `task package` to give each portable ZIP a unique version label; backfilled to satisfy the release-consistency invariant)
@@ -497,6 +501,7 @@ Auto-appended by `scripts/package-cef-portable.sh`. Newest first.
 
 | Version | Date | ZIP (compressed) | Folder (uncompressed) | Note |
 |---------|------|------------------|-----------------------|------|
+| 0.38.11 | 2026-05-26 | 164.8 MiB | 346.1 MiB | |
 | 0.38.10 | 2026-05-26 | 164.8 MiB | 346.1 MiB | |
 | 0.38.6 | 2026-05-26 | 164.8 MiB | 346.1 MiB | |
 | 0.37.3 | 2026-05-21 | 164.7 MiB | 345.6 MiB | |
