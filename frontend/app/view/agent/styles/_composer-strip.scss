@@ -1,0 +1,174 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// AgentComposerStrip — slim 28-32px status row above the textarea.
+// Replaces AgentStatusLine's loading-bar slab + AgentControlBar's
+// always-visible chrome with a single inline row + expand affordance.
+// Spec: docs/specs/SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md.
+
+@use "../../mixins.scss";
+
+.agent-composer-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    min-height: 28px;
+    max-height: 32px;
+    padding: var(--space-1) var(--space-2);
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--secondary-text-color);
+    background: color-mix(in srgb, var(--main-bg-color) 96%, var(--main-text-color));
+    border-top: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.08s;
+
+    &:hover {
+        background: color-mix(in srgb, var(--main-bg-color) 92%, var(--main-text-color));
+    }
+
+    // While expanded the strip reads as "open container header" — flatten
+    // the bottom border so it joins the details panel.
+    &--expanded {
+        border-bottom: 1px solid transparent;
+    }
+
+    // Focus ring for keyboard activation (Enter / Space toggles).
+    &:focus-visible {
+        outline: 2px solid var(--accent-color);
+        outline-offset: -2px;
+    }
+}
+
+.agent-composer-strip-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    min-width: 0;     // flex-shrink trap break — let the text truncate
+    flex: 1 1 auto;
+}
+
+.agent-composer-strip-left-text {
+    // Single-line latest-log-line ticker. Truncates at any width.
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--main-text-color);
+    font-family: inherit;
+}
+
+.agent-composer-strip-spinner {
+    display: inline-flex;
+    align-items: center;
+    color: var(--accent-color, #3b82f6);
+    animation: agent-strip-spin 1s linear infinite;
+
+    &--decelerating {
+        // Stopping… — decelerate to a halt over ~600ms so the user
+        // sees the interrupt was accepted.
+        animation: agent-strip-spin 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+        opacity: 0.7;
+    }
+}
+
+@keyframes agent-strip-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+}
+
+@include mixins.respect-reduced-motion {
+    .agent-composer-strip-spinner,
+    .agent-composer-strip-spinner--decelerating {
+        animation: none;
+    }
+}
+
+.agent-composer-strip-right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    flex-shrink: 0;
+}
+
+.agent-composer-strip-stats {
+    font-family: var(--termfontfamily, monospace);
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+}
+
+.agent-composer-strip-process-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 1px var(--space-1);
+    font-size: 11px;
+    font-family: var(--termfontfamily, monospace);
+    color: var(--main-text-color);
+    background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent-color) 30%, transparent);
+    border-radius: 0;
+    cursor: pointer;
+
+    &:hover {
+        background: color-mix(in srgb, var(--accent-color) 20%, transparent);
+    }
+}
+
+.agent-composer-strip-perm-pill {
+    padding: 1px var(--space-1);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border: 1px solid currentColor;
+    border-radius: 0;
+}
+
+.agent-composer-strip-chevron {
+    display: inline-flex;
+    align-items: center;
+    position: relative;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--secondary-text-color);
+    transition: color 0.08s;
+
+    .agent-composer-strip:hover & {
+        color: var(--main-text-color);
+    }
+
+    &--expanded {
+        color: var(--main-text-color);
+    }
+}
+
+.agent-composer-strip-chevron-badge {
+    position: absolute;
+    top: -6px;
+    right: -10px;
+    min-width: 14px;
+    padding: 0 3px;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1.3;
+    text-align: center;
+    color: var(--main-bg-color);
+    background: var(--accent-color);
+    border-radius: 8px;
+}
+
+// Narrow-pane truncation — when the pane is < 240px, drop stats first,
+// then process badge stays; chevron always visible.
+// Uses container queries so behavior is consistent with the modal
+// compact-variant design (MODAL_COMPACT_VARIANT_ARCHITECTURE_2026_05_26).
+@container modal-mount (max-width: 240px) {
+    .agent-composer-strip-stats {
+        display: none;
+    }
+}

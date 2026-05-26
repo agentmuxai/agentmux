@@ -81,6 +81,22 @@ export interface AgentAtoms {
      * Spec: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §5–§7.
      */
     turnPhaseAtom: SignalPair<TurnPhase>;
+    /**
+     * Composer details panel — open/closed. Reducer-owned (see
+     * `AgentPaneState.detailsOpen`, added in #1068). Drives the
+     * chevron orientation in the composer strip and the conditional
+     * render of the `AgentComposerDetails` block.
+     *
+     * SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
+     */
+    detailsOpenAtom: SignalPair<boolean>;
+    /**
+     * Activity-log entries that arrived while the panel was closed.
+     * Reducer-owned (see `AgentPaneState.composerUnreadCount`,
+     * added in #1068). Drives the chevron's unread badge in the
+     * composer strip; resets to 0 when the panel opens.
+     */
+    composerUnreadCountAtom: SignalPair<number>;
 }
 
 /**
@@ -127,5 +143,9 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         // after PR G removed the legacy `turnActiveAtom` / `stoppingAtom`.
         initPhaseAtom: createSignal<InitPhase>({ kind: "InitPending" }),
         turnPhaseAtom: createSignal<TurnPhase>({ kind: "Idle" }),
+        // Composer details panel — reducer-owned (PR #1068).
+        // SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
+        detailsOpenAtom: createSignal<boolean>(false),
+        composerUnreadCountAtom: createSignal<number>(0),
     };
 }
