@@ -196,34 +196,33 @@
             overflow: hidden;
             font-family: var(--fixed-font, monospace);
             font-size: 12px;
-            // No transition here — open is instant (after the hover delay).
-            // The --hidden modifier carries the collapse transition so it only
-            // fires on the way out. (SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md §Change 2)
+            // Quick smooth transition on all collapse-related properties.
+            // Per 2026-05-26 user request — the prior instant-snap (no
+            // max-height transition) felt jittery during auto-collapse
+            // and flow-mode departures. 120ms is fast enough that the
+            // overlay→hidden "flap" noted in SPEC_TOOL_BLOCK_UX_POLISH
+            // §Change 2 is barely perceptible (was a 200ms concern at
+            // the time of that spec), while flow → hidden (the
+            // 5s-post-completion-hold auto-collapse path) and the row's
+            // entry get a clean ease-out shrink.
+            transition:
+                max-height 120ms cubic-bezier(0.4, 0, 0.2, 1),
+                padding 120ms cubic-bezier(0.4, 0, 0.2, 1),
+                margin 120ms cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 100ms ease-out;
 
             &--hidden {
-                // Collapse must be INSTANT for `max-height` / padding /
-                // margin. Reason: when the panel was in `--overlay-*`
-                // mode (`position: absolute`), going to `--hidden`
-                // drops the absolute positioning in the same render —
-                // if `max-height` then animates from the overlay's
-                // inline value (e.g. 250px) down to 0 over 200ms, the
-                // panel spends those 200ms as an IN-FLOW box that
-                // grows the row, producing a visible expand→collapse
-                // flap each time the cursor moves between tool rows.
-                //
-                // Only `opacity` keeps its transition — it doesn't
-                // affect layout, just adds a soft fade-out cue. Net
-                // result: the panel snaps to zero size instantly
-                // (no flap) and fades out over 150ms (no jank).
-                // (SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md §Change 2;
-                // refined per 2026-05-24 user report after PR #1025.)
+                // `!important` retained — the `--overlay-*` modifiers
+                // below set a max-height via inline style; if --hidden
+                // is applied AFTER overlay (the hover-departure path),
+                // the inline value would otherwise win until the next
+                // render cycle, blocking the transition to 0.
                 max-height: 0 !important;
                 padding-top: 0 !important;
                 padding-bottom: 0 !important;
                 margin-top: 0 !important;
                 margin-bottom: 0 !important;
                 opacity: 0;
-                transition: opacity 150ms ease-out;
             }
 
             // Hover-anchor overlay variants
@@ -694,13 +693,29 @@
         .agent-user-message-content {
             pre {
                 margin: 0;
-                // pre = honor newlines, no soft-wrap. Long lines
-                // scroll horizontally inside the bubble; word-break
-                // rules removed so URLs / paths stay intact.
+                // Default (used by startup-injected session-context
+                // messages): pre = honor newlines, no soft-wrap. Long
+                // lines scroll horizontally inside the bubble; word-
+                // break rules removed so URLs / paths in the system
+                // prompt stay intact.
                 white-space: pre;
                 overflow-x: auto;
                 overflow-y: hidden;
             }
+        }
+
+        // User-typed input (NOT startup) word-wraps so long lines
+        // don't introduce horizontal scroll inside the conversation.
+        // Per 2026-05-26 user request — typed input is conversational
+        // and rarely contains URLs/paths that need to stay intact;
+        // wrapping is the natural read pattern. Startup-injected
+        // context stays on `white-space: pre` (above) since system
+        // prompts often DO contain long paths that need to read
+        // verbatim, and that node has its own hover-expand UX.
+        &:not(.agent-user-message--startup) .agent-user-message-content pre {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            overflow-x: hidden;
         }
 
         // ─── Body render modes (PR for SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24) ─
