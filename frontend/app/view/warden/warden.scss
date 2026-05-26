@@ -95,3 +95,72 @@
         background: var(--border-color);
     }
 }
+
+// ── Host section ──────────────────────────────────────────────────────
+
+.warden-host {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.warden-host-error {
+    font-size: 0.85em;
+    color: var(--warning-color, #d97706);
+}
+
+.warden-host-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9em;
+
+    th {
+        text-align: left;
+        font-weight: 500;
+        opacity: 0.6;
+        padding: var(--space-1) var(--space-2);
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    td {
+        padding: var(--space-1) var(--space-2);
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    tr[data-state="idle"] td {
+        opacity: 0.7;
+    }
+}
+
+.warden-host-mono {
+    font-family: monospace;
+}
+
+.warden-host-dim {
+    opacity: 0.55;
+}
+
+.warden-host-state {
+    display: inline-block;
+    text-transform: uppercase;
+    font-size: 0.7em;
+    letter-spacing: 0.05em;
+    padding: 2px 6px;
+    border-radius: 3px;
+
+    &--active {
+        background: rgba(34, 197, 94, 0.15);
+        color: #22c55e;
+    }
+
+    &--idle {
+        background: var(--border-color);
+        opacity: 0.7;
+    }
+}
+
+.warden-host-footnote {
+    font-size: 0.8em;
+    opacity: 0.5;
+    line-height: 1.5;
+}
