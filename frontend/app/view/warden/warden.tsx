@@ -41,25 +41,54 @@ interface HostAgent {
     last_seen: number;
 }
 
+interface AuditEntry {
+    timestamp: number;
+    source_agent?: string;
+    target_agent: string;
+    block_id: string;
+    message_hash: string;
+    message_length: number;
+    success: boolean;
+    error_message?: string;
+    request_id: string;
+}
+
 const HOST_REFRESH_MS = 5_000;
+const AUDIT_LIMIT = 50;
 // Last-seen newer than this counts as "active"; older is "idle".
 const ACTIVE_THRESHOLD_MS = 30_000;
 
-async function fetchHostAgents(): Promise<HostAgent[]> {
+function authedHeaders(): Record<string, string> {
     const headers: Record<string, string> = {};
     if (globalThis.window != null) {
         const authKey = getApi()?.getAuthKey?.();
         if (authKey) headers["X-AuthKey"] = authKey;
     }
+    return headers;
+}
+
+async function fetchHostAgents(): Promise<HostAgent[]> {
     const resp = await fetch(
         getWebServerEndpoint() + "/agentmux/reactive/agents",
-        { headers },
+        { headers: authedHeaders() },
     );
     if (!resp.ok) {
         throw new Error(`warden: GET /agentmux/reactive/agents → ${resp.status}`);
     }
     const data = await resp.json();
     return Array.isArray(data) ? (data as HostAgent[]) : [];
+}
+
+async function fetchHostAudit(): Promise<AuditEntry[]> {
+    const resp = await fetch(
+        getWebServerEndpoint() + `/agentmux/reactive/audit?limit=${AUDIT_LIMIT}`,
+        { headers: authedHeaders() },
+    );
+    if (!resp.ok) {
+        throw new Error(`warden: GET /agentmux/reactive/audit → ${resp.status}`);
+    }
+    const data = await resp.json();
+    return Array.isArray(data) ? (data as AuditEntry[]) : [];
 }
 
 function ageMs(ts: number, now: number): number {
@@ -79,14 +108,19 @@ function agentState(agent: HostAgent, now: number): "active" | "idle" {
 
 const HostSection = (): JSX.Element => {
     const [agents, setAgents] = createSignal<HostAgent[]>([]);
+    const [audit, setAudit] = createSignal<AuditEntry[]>([]);
     const [error, setError] = createSignal<string | null>(null);
     const [loading, setLoading] = createSignal(true);
     const [now, setNow] = createSignal(Date.now());
 
     const refresh = async () => {
         try {
-            const list = await fetchHostAgents();
-            setAgents(list);
+            const [agentList, auditLog] = await Promise.all([
+                fetchHostAgents(),
+                fetchHostAudit().catch(() => [] as AuditEntry[]),
+            ]);
+            setAgents(agentList);
+            setAudit(auditLog);
             setError(null);
         } catch (e) {
             setError(String(e));
@@ -152,9 +186,46 @@ const HostSection = (): JSX.Element => {
                     </tbody>
                 </table>
             </Show>
+            <div class="warden-host-section-divider">Recent jekts (audit)</div>
+            <Show
+                when={audit().length > 0}
+                fallback={
+                    <div class="warden-section-stub">No jekt activity yet.</div>
+                }
+            >
+                <ul class="warden-audit-feed">
+                    <For each={audit().slice(0, 20)}>
+                        {(entry) => (
+                            <li
+                                class="warden-audit-row"
+                                data-success={entry.success ? "true" : "false"}
+                            >
+                                <span class="warden-audit-time">
+                                    {formatAge(ageMs(entry.timestamp, now()))} ago
+                                </span>
+                                <span class="warden-audit-flow">
+                                    <Show when={entry.source_agent} fallback={<span class="warden-host-dim">—</span>}>
+                                        <span class="warden-host-mono">{entry.source_agent}</span>
+                                    </Show>
+                                    {" → "}
+                                    <span class="warden-host-mono">{entry.target_agent}</span>
+                                </span>
+                                <span class={`warden-audit-status warden-audit-status--${entry.success ? "ok" : "err"}`}>
+                                    {entry.success ? "ok" : "err"}
+                                </span>
+                                <span class="warden-audit-bytes">{entry.message_length}b</span>
+                                <Show when={!entry.success && entry.error_message}>
+                                    <span class="warden-audit-error">{entry.error_message}</span>
+                                </Show>
+                            </li>
+                        )}
+                    </For>
+                </ul>
+            </Show>
             <div class="warden-host-footnote">
-                Refreshes every {HOST_REFRESH_MS / 1000}s. Identity, capabilities, and
-                jekt/min are coming in a follow-up PR.
+                Refreshes every {HOST_REFRESH_MS / 1000}s · last {AUDIT_LIMIT} jekts.
+                Identity, capabilities, and jekt/min counters are coming in a
+                follow-up PR.
             </div>
         </div>
     );
