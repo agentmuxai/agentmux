@@ -587,10 +587,29 @@ tasks:
                     || echo "⚠ install-linux-desktop.sh failed; icon may be wrong but launch continues"
                 fi
 
-                # Refuse to attach the host to a foreign Vite. If port 5173
-                # is already held by another AgentMux dev session, our spawn
-                # would silently die and the curl readiness probe would still
-                # pass against the *other* Vite — the host then loads that
+                # Per-clone Vite port — companion to RuntimeMode::Dev clone_id
+                # (PR #1053). 5173 is the default for the first dev clone;
+                # a second clone running `task dev` simultaneously gets a
+                # different deterministic port derived from a hash of its
+                # workspace root so two clones never collide. Manual override
+                # via AGENTMUX_VITE_PORT=<n> always wins.
+                #
+                # `cksum` is in POSIX coreutils and ships with git-bash on
+                # Windows + every Linux/macOS we target — no toolchain risk.
+                # Range is 5173-5372 (200 ports — far more than enough).
+                if [ -z "$AGENTMUX_VITE_PORT" ]; then
+                  CLONE_ROOT="$(pwd)"
+                  PORT_OFFSET=$(( $(echo -n "$CLONE_ROOT" | cksum | cut -d' ' -f1) % 200 ))
+                  AGENTMUX_VITE_PORT=$((5173 + PORT_OFFSET))
+                  echo "Auto-selected Vite port $AGENTMUX_VITE_PORT for clone $CLONE_ROOT"
+                fi
+                VITE_URL="http://localhost:$AGENTMUX_VITE_PORT"
+                export AGENTMUX_VITE_PORT
+
+                # Refuse to attach the host to a foreign Vite. If our chosen
+                # port is already held by another process, our spawn would
+                # silently die and the curl readiness probe would still pass
+                # against the *other* Vite — the host then loads that
                 # workspace's source, surfacing confusing cross-tree errors.
                 # Pre-check the port before spawning so a collision fails
                 # fast with a clear message.
@@ -599,10 +618,10 @@ tasks:
                 # go-task's embedded shell (mvdan/sh) tracks background jobs
                 # as goroutine IDs ("g1"), not real OS PIDs — so $! is never
                 # a kill-able pid in this context.
-                if curl -s --max-time 1 http://localhost:5173 > /dev/null 2>&1; then
-                  echo "❌ Port 5173 is already in use by another process."
-                  echo "   Close any other AgentMux dev session first. To kill an orphan:"
-                  echo "   pwsh -NoProfile -Command \"Get-NetTCPConnection -LocalPort 5173 | Select-Object -First 1 | ForEach-Object { Stop-Process -Id \$_.OwningProcess -Force }\""
+                if curl -s --max-time 1 "$VITE_URL" > /dev/null 2>&1; then
+                  echo "❌ Port $AGENTMUX_VITE_PORT is already in use by another process."
+                  echo "   The per-clone derivation collided (rare). Override with:"
+                  echo "   AGENTMUX_VITE_PORT=<free-port> task dev"
                   exit 1
                 fi
 
@@ -615,22 +634,23 @@ tasks:
                 # (no stale binaries leak across versions).
                 #
                 # --strictPort closes the TOCTOU window: if something binds
-                # :5173 between our pre-check and Vite startup, Vite errors
-                # out instead of silently rebinding to :5174 (which would
-                # let the readiness loop succeed against the foreign Vite
-                # we're trying to avoid attaching to). Reagent P1 on #866.
-                npx vite --config vite.config.ts --port 5173 --strictPort &
+                # our port between the pre-check and Vite startup, Vite
+                # errors out instead of silently rebinding to the next free
+                # port (which would let the readiness loop succeed against
+                # the foreign Vite we're trying to avoid attaching to).
+                # Reagent P1 on #866.
+                AGENTMUX_VITE_PORT="$AGENTMUX_VITE_PORT" npx vite --config vite.config.ts --port "$AGENTMUX_VITE_PORT" --strictPort &
 
-                echo "Waiting for Vite on port 5173..."
+                echo "Waiting for Vite on port $AGENTMUX_VITE_PORT..."
                 for i in $(seq 1 30); do
-                  curl -s http://localhost:5173 > /dev/null 2>&1 && break
+                  curl -s "$VITE_URL" > /dev/null 2>&1 && break
                   sleep 1
                 done
-                if ! curl -s http://localhost:5173 > /dev/null 2>&1; then
+                if ! curl -s "$VITE_URL" > /dev/null 2>&1; then
                   echo "❌ Vite failed to start within 30 seconds"
                   exit 1
                 fi
-                echo "Vite ready."
+                echo "Vite ready at $VITE_URL."
                 # Inline AGENTMUX_DEV=1 on the launch: go-task's top-level
                 # env: block (on the `dev` task) doesn't propagate into
                 # cmd: shell subprocesses invoked via `task:` on Windows,
@@ -639,9 +659,9 @@ tasks:
                 # The launcher inherits AGENTMUX_DEV and the host inherits
                 # it transitively through tokio::process::Command::spawn.
                 if [ "{{OS}}" = "windows" ]; then
-                  cd "$DEV_DIR" && AGENTMUX_DEV=1 ./agentmux-launcher.exe --url=http://localhost:5173
+                  cd "$DEV_DIR" && AGENTMUX_DEV=1 ./agentmux-launcher.exe --url="$VITE_URL"
                 else
-                  cd "$DEV_DIR" && LD_LIBRARY_PATH=. AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url=http://localhost:5173
+                  cd "$DEV_DIR" && LD_LIBRARY_PATH=. AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url="$VITE_URL"
                 fi
 
     dev:standalone:serve:
@@ -672,35 +692,43 @@ tasks:
                     || echo "⚠ install-linux-desktop.sh failed; icon may be wrong but launch continues"
                 fi
 
-                # Mirror dev:serve's pre-check + strictPort pattern. The
-                # previous `kill -0 "$VITE_PID"` check was broken under
-                # go-task's mvdan/sh shell — $! returns a goroutine ID
-                # ("g1"), not a real OS PID, so `kill -0 g1` exits non-zero
-                # immediately and the loop reported a false "Vite exited"
-                # on every run. Reagent P1 on #866.
-                if curl -s --max-time 1 http://localhost:5173 > /dev/null 2>&1; then
-                  echo "❌ Port 5173 is already in use by another process."
-                  echo "   Close any other AgentMux dev session first."
+                # Mirror dev:serve's pre-check + strictPort pattern + per-clone
+                # port derivation. The previous `kill -0 "$VITE_PID"` check was
+                # broken under go-task's mvdan/sh shell — $! returns a goroutine
+                # ID ("g1"), not a real OS PID, so `kill -0 g1` exits non-zero
+                # immediately and the loop reported a false "Vite exited" on
+                # every run. Reagent P1 on #866.
+                if [ -z "$AGENTMUX_VITE_PORT" ]; then
+                  CLONE_ROOT="$(pwd)"
+                  PORT_OFFSET=$(( $(echo -n "$CLONE_ROOT" | cksum | cut -d' ' -f1) % 200 ))
+                  AGENTMUX_VITE_PORT=$((5173 + PORT_OFFSET))
+                  echo "Auto-selected Vite port $AGENTMUX_VITE_PORT for clone $CLONE_ROOT"
+                fi
+                VITE_URL="http://localhost:$AGENTMUX_VITE_PORT"
+                export AGENTMUX_VITE_PORT
+                if curl -s --max-time 1 "$VITE_URL" > /dev/null 2>&1; then
+                  echo "❌ Port $AGENTMUX_VITE_PORT is already in use."
+                  echo "   Override with AGENTMUX_VITE_PORT=<free-port> task dev:standalone"
                   exit 1
                 fi
-                npx vite --config vite.config.ts --port 5173 --strictPort &
-                echo "Waiting for Vite on port 5173..."
+                AGENTMUX_VITE_PORT="$AGENTMUX_VITE_PORT" npx vite --config vite.config.ts --port "$AGENTMUX_VITE_PORT" --strictPort &
+                echo "Waiting for Vite on port $AGENTMUX_VITE_PORT..."
                 for i in $(seq 1 30); do
-                  curl -s http://localhost:5173 > /dev/null 2>&1 && break
+                  curl -s "$VITE_URL" > /dev/null 2>&1 && break
                   sleep 1
                 done
-                if ! curl -s http://localhost:5173 > /dev/null 2>&1; then
+                if ! curl -s "$VITE_URL" > /dev/null 2>&1; then
                   echo "❌ Vite failed to start within 30 seconds"
                   exit 1
                 fi
-                echo "Vite ready."
+                echo "Vite ready at $VITE_URL."
                 # `LD_LIBRARY_PATH` is a Unix-only convention; on Windows
                 # it has no effect but is inconsistent with the `dev:serve`
                 # OS gate above. Mirror that gate here.
                 if [ "{{OS}}" = "windows" ]; then
-                  cd "$DEV_DIR" && AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url=http://localhost:5173
+                  cd "$DEV_DIR" && AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url="$VITE_URL"
                 else
-                  cd "$DEV_DIR" && LD_LIBRARY_PATH=. AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url=http://localhost:5173
+                  cd "$DEV_DIR" && LD_LIBRARY_PATH=. AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url="$VITE_URL"
                 fi
 
     run:
