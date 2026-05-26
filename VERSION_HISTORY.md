@@ -1,5 +1,9 @@
 # AgentMux Version History
 
+## 0.38.13 — 2026-05-26
+
+- (no semantic content — internal portable-build counter increment from `task package`; backfilled to satisfy the release-consistency invariant)
+
 ## 0.38.12 — 2026-05-26
 
 - feat(window): top-bar widget icons become theme-driven, monochrome by default (PR 1 of SPEC_WIDGET_ICON_COLORS)
@@ -510,6 +514,7 @@ Auto-appended by `scripts/package-cef-portable.sh`. Newest first.
 
 | Version | Date | ZIP (compressed) | Folder (uncompressed) | Note |
 |---------|------|------------------|-----------------------|------|
+| 0.38.13 | 2026-05-26 | 164.8 MiB | 346.2 MiB | |
 | 0.38.11 | 2026-05-26 | 164.8 MiB | 346.1 MiB | |
 | 0.38.10 | 2026-05-26 | 164.8 MiB | 346.1 MiB | |
 | 0.38.6 | 2026-05-26 | 164.8 MiB | 346.1 MiB | |
