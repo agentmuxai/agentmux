@@ -151,20 +151,38 @@ export class LspClient {
         return this.state;
     }
 
+    /** Workspace root the server is anchored to (set after start()). */
+    getWorkspaceRoot(): string | null {
+        return this.workspaceRoot;
+    }
+
+    /** URI currently registered via didOpen, or null. */
+    getOpenedFileUri(): string | null {
+        return this.openedFileUri;
+    }
+
     /** Tear down — send shutdown to server (best-effort) and call lspstop. */
     async dispose(): Promise<void> {
         if (this.state.kind === "disposed") return;
         if (this.state.kind === "ready") {
-            // Best-effort: notify server of close + shutdown. Failures are
-            // non-fatal since we'll lspstop right after, which kills the
-            // child via kill_on_drop.
+            // Best-effort graceful shutdown per LSP spec:
+            //   1. textDocument/didClose for the open doc (notification)
+            //   2. shutdown (request, awaited briefly — server flushes state)
+            //   3. exit (notification — server self-terminates)
+            // We bound the shutdown wait so a hung server can't block teardown;
+            // lspstop on the backend kills the child via kill_on_drop regardless.
             try {
                 if (this.openedFileUri) {
                     this.notify("textDocument/didClose", {
                         textDocument: { uri: this.openedFileUri },
                     });
                 }
-                this.notify("shutdown", null);
+                const shutdownAck = this.request("shutdown", null);
+                await Promise.race([
+                    shutdownAck.catch(() => undefined),
+                    new Promise((r) => setTimeout(r, 500)),
+                ]);
+                this.notify("exit", null);
             } catch {
                 // ignore
             }

@@ -17,7 +17,7 @@
 // Spec: specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md (Tier 1).
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 
@@ -303,9 +303,6 @@ async fn read_lsp_messages(stdout: ChildStdout, server_id: ServerId, event_bus: 
         });
     }
 }
-
-#[allow(dead_code)] // Cargo.toml dep marker — see binary_for_language usage above
-fn _ensure_path_marker_for_workspace(_path: &Path) {}
 
 #[cfg(test)]
 mod tests {

@@ -114,6 +114,33 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         if (!isLspSupportedLanguage(language)) return;
         if (settingsAtom()?.["editor:lsp.enabled"] === false) return;
 
+        // Reuse the existing client when only the file changed (same language
+        // AND the new file lives under the server's workspace root). The
+        // refcount-sharing design relies on this — tearing down per-file
+        // would defeat it and respawn the server every navigation. The
+        // diagnostics extension is re-wired because setupEditor rebuilt cmView.
+        const existing = lspClient;
+        if (
+            existing &&
+            existing.language === language &&
+            existing.getState().kind === "ready" &&
+            workspaceCovers(existing.getWorkspaceRoot(), filePath)
+        ) {
+            const prevUri = existing.getOpenedFileUri();
+            if (prevUri) {
+                // Best-effort close of the previous file.
+                void existing.didClose(decodeFileUri(prevUri));
+            }
+            await existing.didOpen(filePath, content, language);
+            if (cmView) {
+                if (lspDiagUnsub) lspDiagUnsub();
+                const [ext, unsub] = lspDiagnosticsExtension(cmView, existing);
+                lspDiagUnsub = unsub;
+                cmView.dispatch({ effects: lintCompartment.reconfigure(ext) });
+            }
+            return;
+        }
+
         await teardownLsp();
 
         const client = new LspClient(language, filePath);
@@ -131,6 +158,28 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             lspDiagUnsub = unsub;
             cmView.dispatch({ effects: lintCompartment.reconfigure(ext) });
         }
+    };
+
+    // True when `filePath` lives under `root` — handles both POSIX and
+    // Windows separators, case-insensitive on Windows drives.
+    const workspaceCovers = (root: string | null, filePath: string): boolean => {
+        if (!root) return false;
+        const normRoot = root.replace(/\\/g, "/").replace(/\/+$/, "");
+        const normFile = filePath.replace(/\\/g, "/");
+        const isWin = /^[a-zA-Z]:\//.test(normRoot);
+        const r = isWin ? normRoot.toLowerCase() : normRoot;
+        const f = isWin ? normFile.toLowerCase() : normFile;
+        return f === r || f.startsWith(r + "/");
+    };
+
+    // file:// → OS path (inverse of pathToFileUri in lsp-client.ts).
+    const decodeFileUri = (uri: string): string => {
+        if (uri.startsWith("file:///") && /^file:\/\/\/[a-zA-Z]:/.test(uri)) {
+            // Windows: strip "file:///", restore backslashes
+            return uri.slice(8).replace(/\//g, "\\");
+        }
+        if (uri.startsWith("file://")) return uri.slice(7);
+        return uri;
     };
 
     // Build or rebuild CodeMirror when content/language changes
