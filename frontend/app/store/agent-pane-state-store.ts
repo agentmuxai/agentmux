@@ -54,6 +54,18 @@ export interface AgentPaneProjections {
      * projection) keep compiling.
      */
     turnPhase?: (next: TurnPhase) => void;
+    /**
+     * Composer details panel — open/closed. Reducer-owned (PR #1068).
+     * Drives the chevron orientation in the composer strip + the
+     * conditional render of the details panel. Optional for back-compat
+     * with existing test projections.
+     */
+    detailsOpen?: (next: boolean) => void;
+    /**
+     * Activity-log entries that arrived while the panel was closed.
+     * Reducer-owned (PR #1068). Drives the chevron's unread badge.
+     */
+    composerUnreadCount?: (next: number) => void;
 }
 
 interface Slot {
@@ -145,6 +157,8 @@ export function dispatch(
     proj("pending", prev.pending, slot.state.pending, slot.proj.pending);
     proj("initPhase", prev.initPhase, slot.state.initPhase, slot.proj.initPhase);
     proj("turnPhase", prev.turnPhase, slot.state.turnPhase, slot.proj.turnPhase);
+    proj("detailsOpen", prev.detailsOpen, slot.state.detailsOpen, slot.proj.detailsOpen);
+    proj("composerUnreadCount", prev.composerUnreadCount, slot.state.composerUnreadCount, slot.proj.composerUnreadCount);
 
     if (cascadeSetter != null) {
         console.warn(

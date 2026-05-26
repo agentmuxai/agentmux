@@ -12,6 +12,7 @@ import {
 } from "@/app/store/agent-document-store";
 import {
     dispatch as dispatchPane,
+    dispatchIfRegistered as dispatchPaneIfRegistered,
 } from "@/app/store/agent-pane-state-store";
 import {
     registerPane as registerAgentPane,
@@ -44,7 +45,8 @@ import { ActivityLogPanel } from "./components/ActivityLogPanel";
 import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
 import { AgentDocumentView } from "./components/AgentDocumentView";
-import { AgentFooter, AgentStatusLine } from "./components/AgentFooter";
+import { AgentFooter } from "./components/AgentFooter";
+import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { AgentPicker, useAgentDefinitions } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
@@ -174,6 +176,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 pending: a.pendingMessagesAtom[1],
                 initPhase: a.initPhaseAtom[1],
                 turnPhase: a.turnPhaseAtom[1],
+                detailsOpen: a.detailsOpenAtom[1],
+                composerUnreadCount: a.composerUnreadCountAtom[1],
             },
         });
         registerAgentActivity(model.blockId, a.turnPhaseAtom[0]);
@@ -188,6 +192,25 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // in the collapsible `<ActivityLogPanel>` above the composer.
     // `log` is passed down to every hook whose signature takes a `LogFn`.
     const { lines: logLines, append: log } = useActivityLog();
+
+    // Cross-slice projection: dispatch `LogEntryArrived` to the pane
+    // reducer on each new log line, so it can increment
+    // `composerUnreadCount` while the composer details panel is closed.
+    // Tracked via prev-length to detect strict growth (`clear()` shrinks
+    // the array; we don't want to count that). Reducer-side gating means
+    // entries arriving while the panel is open are no-ops, so this is
+    // safe to dispatch unconditionally on growth.
+    // SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
+    createEffect((prevLen: number) => {
+        const cur = logLines().length;
+        if (cur > prevLen) {
+            const grown = cur - prevLen;
+            for (let i = 0; i < grown; i++) {
+                dispatchPaneIfRegistered(model.blockId, { type: "LogEntryArrived" }, "system");
+            }
+        }
+        return cur;
+    }, 0);
 
     // Startup sequence callback ref — assigned after commands + handleSendMessage
     // are defined (below), so the onReady callback can reference them.
@@ -827,19 +850,16 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 }}
             />
 
-            {/* Working…/Stopping… status — reads as "what the agent is
-                doing about the queue above". Used to live inside the
-                composer region right above the input; moved here so the
-                activity log doesn't push it off-screen during long
-                agent output.
-
-                Since PR G the working animation reads
-                `workingFromPhase(turnPhase)` (PR B migration) and the
-                "Stopping…" label binding reads `turnPhase.kind ===
-                "Interrupting"`. The legacy `turnActive` / `stopping`
-                booleans were dropped in PR G — turnPhase is the only
-                source. */}
-            <AgentStatusLine
+            {/* Slim composer status strip — single 28-32px row replacing
+                the prior AgentStatusLine. Surfaces the latest activity-
+                log entry as a live ticker on the left, tokens/elapsed/
+                process-count on the right, and a chevron with unread
+                badge that toggles the details panel. State is reducer-
+                owned (`AgentPaneState.detailsOpen` /
+                `composerUnreadCount`, added in #1068).
+                SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md. */}
+            <AgentComposerStrip
+                detailsPanelId={`agent-composer-details-${model.blockId}`}
                 loading={
                     status.isLoading()
                     || workingFromPhase(agentAtoms().turnPhaseAtom[0]())
@@ -850,19 +870,38 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 turnTokens={agentAtoms().turnTokensAtom[0]()}
                 processCount={processCount()}
                 onProcessBadgeClick={() => {
-                    // Open the swarm pane so the user can see every
-                    // process (and eventually kill them). Idempotent
-                    // by design — createBlock doesn't dedupe, so
-                    // clicking repeatedly creates multiple panes.
-                    // Acceptable trade-off until we add a "focus if
-                    // already open" swarm-pane-manager entry point.
                     createBlock({ meta: { view: "swarm" } });
                 }}
+                latestLogLine={logLines()[logLines().length - 1]?.text}
+                permissionMode={
+                    (block()?.meta?.["agent:runtime"]?.permissionMode) as
+                        import("./types").PermissionMode | undefined
+                }
+                expanded={agentAtoms().detailsOpenAtom[0]()}
+                unreadCount={agentAtoms().composerUnreadCountAtom[0]()}
+                onToggleExpanded={() =>
+                    dispatchPane(model.blockId, { type: "DetailsToggle" }, "user")
+                }
             />
 
-            <ActivityLogPanel entries={logLines} />
-
             <div class="agent-composer-region">
+                {/* Details panel — when the user expands the strip, show
+                    the activity log + control bar inside this section.
+                    Phase 1 of the redesign keeps the activity log and
+                    control bar mostly intact (just gated on
+                    `detailsOpen`); a follow-up will consolidate them
+                    into a single AgentComposerDetails component.
+                    SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §4. */}
+                <Show when={agentAtoms().detailsOpenAtom[0]()}>
+                    <div class="agent-composer-details" id={`agent-composer-details-${model.blockId}`}>
+                        <ActivityLogPanel entries={logLines} />
+                        <AgentControlBar
+                            blockId={model.blockId}
+                            blockAtom={block}
+                            providerId={provider()?.id ?? ""}
+                        />
+                    </div>
+                </Show>
                 <Show when={commands.helpVisible()}>
                     <SlashHelpPanel
                         commands={commands.availableCommands()}
@@ -882,11 +921,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                         />
                     )}
                 </Show>
-                <AgentControlBar
-                    blockId={model.blockId}
-                    blockAtom={block}
-                    providerId={provider()?.id ?? ""}
-                />
                 <AgentFooter
                     agentName={agentName()}
                     onSendMessage={handleSendMessage}
