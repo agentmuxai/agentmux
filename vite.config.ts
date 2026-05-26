@@ -111,8 +111,15 @@ export default defineConfig({
         },
     },
     server: {
-        port: 5173,
-        strictPort: true, // Fail if port 5173 is already in use (CEF dev server expects this port)
+        // Default 5173 preserves single-clone behavior. Set
+        // AGENTMUX_VITE_PORT to run a second `task dev` from a parallel
+        // clone — the Taskfile derives a per-clone port automatically
+        // from the clone's workspace-root hash, so both clones can run
+        // simultaneously without colliding. strictPort still fails fast
+        // if the chosen port is taken (TOCTOU guard, see Taskfile).
+        // Companion to RuntimeMode::Dev clone_id (PR #1053).
+        port: Number(process.env.AGENTMUX_VITE_PORT) || 5173,
+        strictPort: true,
         open: false,
         watch: {
             ignored: ["dist/**", "**/*.md", "**/*.json"],
