@@ -17,6 +17,10 @@ import { FileTreeModel } from "./file-tree-model";
 
 const META_TREE_EXPANDED = "editor:tree_expanded";
 const META_SHOW_HIDDEN = "editor:show_hidden";
+const META_TREE_WIDTH = "editor:tree_width";
+const TREE_WIDTH_DEFAULT = 240;
+const TREE_WIDTH_MIN = 150;
+const TREE_WIDTH_MAX = 600;
 
 export class EditorViewModel implements ViewModel {
     viewType = "editor";
@@ -64,6 +68,9 @@ export class EditorViewModel implements ViewModel {
     private _showHidden = createSignal<boolean>(false);
     showHiddenAtom: Accessor<boolean> = this._showHidden[0];
 
+    private _treeWidth = createSignal<number>(TREE_WIDTH_DEFAULT);
+    treeWidthAtom: Accessor<number> = this._treeWidth[0];
+
     treeModel = new FileTreeModel();
 
     blockAtom: Accessor<Block | undefined>;
@@ -102,6 +109,10 @@ export class EditorViewModel implements ViewModel {
         }
         if (meta?.[META_SHOW_HIDDEN] === true) {
             this._showHidden[1](true);
+        }
+        const persistedWidth = meta?.[META_TREE_WIDTH];
+        if (typeof persistedWidth === "number") {
+            this._treeWidth[1](clampTreeWidth(persistedWidth));
         }
 
         // Load file from block meta on init
@@ -172,6 +183,19 @@ export class EditorViewModel implements ViewModel {
         await this.persistMeta({ [META_SHOW_HIDDEN]: next });
     }
 
+    /**
+     * Live tree-width update during drag — fast signal-only path, no RPC.
+     * Use `commitTreeWidth()` on mouseup to persist.
+     */
+    setTreeWidth(width: number): void {
+        this._treeWidth[1](clampTreeWidth(width));
+    }
+
+    /** Persist the current tree width to block meta. Call on drag-release. */
+    async commitTreeWidth(): Promise<void> {
+        await this.persistMeta({ [META_TREE_WIDTH]: this._treeWidth[0]() });
+    }
+
     private async persistMeta(meta: Record<string, unknown>): Promise<void> {
         try {
             await RpcApi.SetMetaCommand(TabRpcClient, {
@@ -190,6 +214,11 @@ export class EditorViewModel implements ViewModel {
     }
 
     dispose(): void {}
+}
+
+function clampTreeWidth(w: number): number {
+    if (!Number.isFinite(w)) return TREE_WIDTH_DEFAULT;
+    return Math.max(TREE_WIDTH_MIN, Math.min(TREE_WIDTH_MAX, Math.round(w)));
 }
 
 // ── Language detection ──────────────────────────────────────────────────────

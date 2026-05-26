@@ -35,6 +35,44 @@ use super::service::update_object_meta;
 
 use super::AppState;
 
+/// Enumerate drives/mounts accessible from the current OS user.
+/// Used by the `geteditorroots` RPC so the editor file-tree exposes
+/// every reachable filesystem root, not just $HOME.
+/// Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md (multi-root follow-up).
+#[cfg(target_os = "windows")]
+fn list_drives() -> Vec<serde_json::Value> {
+    let mut drives = Vec::new();
+    for letter in b'A'..=b'Z' {
+        let path = format!("{}:\\", letter as char);
+        if std::path::Path::new(&path).exists() {
+            drives.push(serde_json::json!({
+                "name": format!("{}:", letter as char),
+                "path": path,
+            }));
+        }
+    }
+    drives
+}
+
+#[cfg(not(target_os = "windows"))]
+fn list_drives() -> Vec<serde_json::Value> {
+    let mut drives = vec![serde_json::json!({ "name": "/", "path": "/" })];
+    for mount_dir in ["/mnt", "/media", "/Volumes"] {
+        if let Ok(entries) = std::fs::read_dir(mount_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    drives.push(serde_json::json!({
+                        "name": entry.file_name().to_string_lossy().to_string(),
+                        "path": path.to_string_lossy().to_string(),
+                    }));
+                }
+            }
+        }
+    }
+    drives
+}
+
 /// Incoming WebSocket message envelope.
 /// Supports both ping/pong messages and wscommand-based RPC.
 #[derive(Deserialize)]
@@ -1227,6 +1265,25 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     .ok_or_else(|| "geteditorhome: cannot determine home directory".to_string())?;
                 Ok(Some(serde_json::json!({
                     "home": home.to_string_lossy(),
+                })))
+            })
+        }),
+    );
+
+    // geteditorroots → home + every reachable drive/mount on the system.
+    // The editor file-tree renders these as sibling top-level roots so the
+    // user can navigate to anywhere on the machine, not just inside $HOME.
+    // Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md (multi-root follow-up)
+    engine.register_handler(
+        "geteditorroots",
+        Box::new(|_data, _ctx| {
+            Box::pin(async move {
+                let home = dirs::home_dir()
+                    .ok_or_else(|| "geteditorroots: cannot determine home directory".to_string())?;
+                let drives = list_drives();
+                Ok(Some(serde_json::json!({
+                    "home": home.to_string_lossy(),
+                    "drives": drives,
                 })))
             })
         }),
