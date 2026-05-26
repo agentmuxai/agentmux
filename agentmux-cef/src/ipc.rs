@@ -252,6 +252,7 @@ async fn route_command(
         "move_window_by" => commands::window::move_window_by(state, args),
         "set_window_position" => commands::window::set_window_position(state, args),
         "toggle_devtools" => commands::window::toggle_devtools(state, args),
+        "inspect_element_at" => commands::window::inspect_element_at(state, args),
         "show_context_menu" => {
             tracing::debug!("show_context_menu: handled in JS overlay");
             Ok(serde_json::Value::Null)
