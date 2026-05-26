@@ -41,6 +41,19 @@ pub struct LanDiscovery {
     service_fullname: String,
 }
 
+/// Normalize an OS hostname into a valid mDNS host name by appending the
+/// `.local.` suffix that mdns-sd's `ServiceInfo::new` requires. Idempotent
+/// — already-normalized inputs pass through unchanged. We also strip any
+/// trailing dot first so `"foo.local"` doesn't end up as `"foo.local..local."`.
+fn mdns_hostname(os_hostname: &str) -> String {
+    let trimmed = os_hostname.trim_end_matches('.');
+    if trimmed.ends_with(".local") {
+        format!("{trimmed}.")
+    } else {
+        format!("{trimmed}.local.")
+    }
+}
+
 impl LanDiscovery {
     /// Start LAN discovery: register this instance and browse for peers.
     pub fn start(
@@ -52,8 +65,11 @@ impl LanDiscovery {
     ) -> Result<Arc<Self>, String> {
         let daemon = ServiceDaemon::new().map_err(|e| format!("mDNS daemon failed: {e}"))?;
 
-        // Register this instance
+        // Register this instance. mdns-sd requires the host name passed to
+        // `ServiceInfo::new` to end with `.local.` — we always normalize so
+        // a raw OS hostname like "claudius" becomes "claudius.local.".
         let service_name = format!("agentmux-{}", &instance_id);
+        let host_name_mdns = mdns_hostname(&hostname);
         let properties = [
             ("version", version.as_str()),
             ("hostname", hostname.as_str()),
@@ -62,7 +78,7 @@ impl LanDiscovery {
         let service_info = ServiceInfo::new(
             SERVICE_TYPE,
             &service_name,
-            &hostname,
+            &host_name_mdns,
             "",  // empty = auto-detect IP
             port,
             &properties[..],
@@ -352,5 +368,39 @@ impl LanDiscoveryController {
             .as_ref()
             .map(|d| d.get_instances())
             .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mdns_hostname;
+
+    #[test]
+    fn appends_local_dot_to_bare_hostname() {
+        assert_eq!(mdns_hostname("claudius"), "claudius.local.");
+    }
+
+    #[test]
+    fn preserves_already_fully_qualified_name() {
+        assert_eq!(mdns_hostname("claudius.local."), "claudius.local.");
+    }
+
+    #[test]
+    fn appends_trailing_dot_to_local_suffix() {
+        // mdns-sd needs the trailing dot; we add it without doubling .local.
+        assert_eq!(mdns_hostname("claudius.local"), "claudius.local.");
+    }
+
+    #[test]
+    fn handles_trailing_dot_on_bare_hostname() {
+        assert_eq!(mdns_hostname("claudius."), "claudius.local.");
+    }
+
+    #[test]
+    fn does_not_double_suffix() {
+        // Two passes through the normalizer produce the same result.
+        let once = mdns_hostname("claudius");
+        let twice = mdns_hostname(&once);
+        assert_eq!(twice, once);
     }
 }
