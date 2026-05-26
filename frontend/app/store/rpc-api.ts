@@ -1202,6 +1202,16 @@ class RpcApiType {
         return client.rpcCall("geteditorhome", data, opts);
     }
 
+    // command "geteditorroots" [call] — home + drives/mounts. The editor
+    // file-tree renders these as sibling top-level roots.
+    GetEditorRootsCommand(
+        client: RpcClient,
+        data: Record<string, never> = {},
+        opts?: RpcOpts,
+    ): Promise<{ home: string; drives: { name: string; path: string }[] }> {
+        return client.rpcCall("geteditorroots", data, opts);
+    }
+
     // command "resolvecli" [call]
     ResolveCliCommand(client: RpcClient, data: CommandResolveCliData, opts?: RpcOpts): Promise<ResolveCliResult> {
         return client.rpcCall("resolvecli", data, opts);

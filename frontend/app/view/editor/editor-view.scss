@@ -21,13 +21,30 @@
 // ── Tree column ─────────────────────────────────────────────────────────────
 
 .editor-tree-column {
-    width: 240px;
-    flex: 0 0 240px;
+    // width + flex set inline by editor-view.tsx (driven by treeWidthAtom)
     display: flex;
     flex-direction: column;
-    border-right: 1px solid var(--border-color);
     overflow: hidden;
     background: var(--secondary-bg-color, var(--block-bg-color));
+}
+
+// Vertical resize strip between the tree column and the main editor column.
+// 4px wide; cursor flips to col-resize on hover; the center 1px line acts as
+// the visual border. Drag handlers live in editor-view.tsx (track global
+// mousemove until mouseup so the user can drag past the strip without
+// losing grip). Per-pane width persists via `editor:tree_width` in block meta.
+.editor-tree-resize-handle {
+    flex: 0 0 4px;
+    width: 4px;
+    cursor: col-resize;
+    background: var(--border-color);
+    transition: background 80ms ease;
+    position: relative;
+
+    &:hover,
+    &:active {
+        background: var(--accent-color, var(--main-text-color));
+    }
 }
 
 .editor-tree-path-input {
