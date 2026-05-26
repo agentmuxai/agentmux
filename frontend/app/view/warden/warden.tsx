@@ -231,14 +231,115 @@ const HostSection = (): JSX.Element => {
     );
 };
 
-// ── Stub sections (unchanged from Phase 1 shell) ─────────────────────
+// ── LAN section ──────────────────────────────────────────────────────
 
-const LanStub = (): JSX.Element => (
-    <div class="warden-section-stub">
-        Peer list reads through to <code>lan_discovery</code>. Enrollment + policy
-        push wait on lan-awareness Phase 3 (LAN jekt forwarding).
-    </div>
-);
+interface LanPeer {
+    instance_id: string;
+    hostname: string;
+    version: string;
+    address: string;
+    port: number;
+    agents: string[];
+    first_seen: number;
+    last_seen: number;
+}
+
+async function fetchLanPeers(): Promise<LanPeer[]> {
+    // /api/lan-instances is a public route (no auth required).
+    const resp = await fetch(getWebServerEndpoint() + "/api/lan-instances");
+    if (!resp.ok) {
+        throw new Error(`warden: GET /api/lan-instances → ${resp.status}`);
+    }
+    const data = await resp.json();
+    return Array.isArray(data) ? (data as LanPeer[]) : [];
+}
+
+const LanSection = (): JSX.Element => {
+    const [peers, setPeers] = createSignal<LanPeer[]>([]);
+    const [loading, setLoading] = createSignal(true);
+    const [error, setError] = createSignal<string | null>(null);
+    const [now, setNow] = createSignal(Date.now());
+
+    const refresh = async () => {
+        try {
+            const list = await fetchLanPeers();
+            setPeers(list);
+            setError(null);
+        } catch (e) {
+            setError(String(e));
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    onMount(() => {
+        void refresh();
+        const dataTimer = window.setInterval(() => void refresh(), HOST_REFRESH_MS);
+        // `last_seen` is in unix *seconds* on the LAN endpoint (not ms like
+        // ReactiveHandler) — see lan_discovery.rs:135. The clock tick keeps
+        // the relative "Xs ago" column fresh between fetches.
+        const clockTimer = window.setInterval(() => setNow(Date.now()), 1000);
+        onCleanup(() => {
+            window.clearInterval(dataTimer);
+            window.clearInterval(clockTimer);
+        });
+    });
+
+    return (
+        <div class="warden-host">
+            <Show when={error()}>
+                <div class="warden-host-error">⚠ {error()}</div>
+            </Show>
+            <Show
+                when={peers().length > 0}
+                fallback={
+                    <div class="warden-section-stub">
+                        {loading()
+                            ? "Loading…"
+                            : 'No LAN peers. Enable mDNS via the HostPopover toggle ("LAN discovery") on each instance.'}
+                    </div>
+                }
+            >
+                <table class="warden-host-table">
+                    <thead>
+                        <tr>
+                            <th>peer</th>
+                            <th>version</th>
+                            <th>address</th>
+                            <th>agents</th>
+                            <th>last seen</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <For each={peers()}>
+                            {(p) => {
+                                const lastSeenMs = p.last_seen * 1000;
+                                return (
+                                    <tr>
+                                        <td class="warden-host-mono">
+                                            {p.hostname || p.instance_id}
+                                        </td>
+                                        <td class="warden-host-mono warden-host-dim">v{p.version}</td>
+                                        <td class="warden-host-mono warden-host-dim">
+                                            {p.address}:{p.port}
+                                        </td>
+                                        <td>{p.agents.length}</td>
+                                        <td>{formatAge(ageMs(lastSeenMs, now()))} ago</td>
+                                    </tr>
+                                );
+                            }}
+                        </For>
+                    </tbody>
+                </table>
+            </Show>
+            <div class="warden-host-footnote">
+                Refreshes every {HOST_REFRESH_MS / 1000}s · mDNS via
+                <code> _agentmux._tcp.local</code>. Cross-instance jekt and
+                quarantine controls land in PR-F (after lan-awareness Phase 3).
+            </div>
+        </div>
+    );
+};
 
 const InternetStub = (): JSX.Element => (
     <div class="warden-section-stub">
@@ -269,8 +370,8 @@ const SECTIONS: LayerSection[] = [
         key: "lan",
         title: "LAN",
         summary: "mDNS-discovered peers · jekt tier 3 · 1–10 ms",
-        status: "stub",
-        render: () => <LanStub />,
+        status: "live",
+        render: () => <LanSection />,
     },
     {
         key: "internet",
