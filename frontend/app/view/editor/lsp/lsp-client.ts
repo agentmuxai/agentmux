@@ -161,31 +161,23 @@ export class LspClient {
         return this.openedFileUri;
     }
 
-    /** Tear down — send shutdown to server (best-effort) and call lspstop. */
+    /** Tear down this client's view of the server. Decrements the backend
+     *  refcount via lspstop; the supervisor terminates the process only
+     *  when refcount reaches zero. We deliberately do NOT send LSP
+     *  `shutdown`/`exit` here — the server is shared across panes on the
+     *  same `(workspace, language)`, and sending `exit` from one pane would
+     *  kill it for the others. Process lifecycle is owned by the supervisor
+     *  (currently SIGKILL via `kill_on_drop`; graceful shutdown moves there
+     *  in a follow-up). */
     async dispose(): Promise<void> {
         if (this.state.kind === "disposed") return;
-        if (this.state.kind === "ready") {
-            // Best-effort graceful shutdown per LSP spec:
-            //   1. textDocument/didClose for the open doc (notification)
-            //   2. shutdown (request, awaited briefly — server flushes state)
-            //   3. exit (notification — server self-terminates)
-            // We bound the shutdown wait so a hung server can't block teardown;
-            // lspstop on the backend kills the child via kill_on_drop regardless.
-            try {
-                if (this.openedFileUri) {
-                    this.notify("textDocument/didClose", {
-                        textDocument: { uri: this.openedFileUri },
-                    });
-                }
-                const shutdownAck = this.request("shutdown", null);
-                await Promise.race([
-                    shutdownAck.catch(() => undefined),
-                    new Promise((r) => setTimeout(r, 500)),
-                ]);
-                this.notify("exit", null);
-            } catch {
-                // ignore
-            }
+        if (this.state.kind === "ready" && this.openedFileUri) {
+            // didClose is a per-document notification — safe to send even
+            // when the server is shared; it just tells the server this
+            // pane is no longer interested in the file.
+            this.notify("textDocument/didClose", {
+                textDocument: { uri: this.openedFileUri },
+            });
         }
         if (this.serverId) {
             try {
@@ -229,12 +221,22 @@ export class LspClient {
         });
     }
 
-    /** JSON-RPC notification — fire-and-forget (no id). */
+    /** JSON-RPC notification — fire-and-forget (no id). Send failures
+     *  indicate the transport is broken (server exited / backend RPC
+     *  failed); transition to `crashed` so the UI reflects reality and
+     *  subsequent `didChange` calls don't pile up against a dead server. */
     private notify(method: string, params: unknown): void {
         if (!this.serverId) return;
         void RpcApi.LspSendCommand(TabRpcClient, {
             server_id: this.serverId,
             message: { jsonrpc: "2.0", method, params },
+        }).catch((e: unknown) => {
+            if (this.state.kind === "ready") {
+                this.setState({
+                    kind: "crashed",
+                    error: e instanceof Error ? e.message : String(e),
+                });
+            }
         });
     }
 
@@ -276,14 +278,24 @@ export class LspClient {
 }
 
 /** Convert an OS file path to a file:// URI. LSP requires this for
- *  every document identifier. Windows paths need extra care: backslashes
- *  → forward slashes, drive letter prefixed with /.  */
+ *  every document identifier. Path segments are percent-encoded so that
+ *  reserved characters (`#`, `?`, space, etc.) don't produce malformed
+ *  URIs the server interprets differently from the editor.
+ *  Windows paths need extra care: backslashes → forward slashes,
+ *  drive letter prefixed with /.  */
 function pathToFileUri(p: string): string {
-    if (/^[a-zA-Z]:[\\/]/.test(p)) {
-        // Windows absolute path
-        const normalized = p.replace(/\\/g, "/");
-        return "file:///" + normalized;
-    }
-    // POSIX absolute
-    return "file://" + p;
+    const isWin = /^[a-zA-Z]:[\\/]/.test(p);
+    const normalized = isWin ? p.replace(/\\/g, "/") : p;
+    // Encode each path segment individually so the slashes survive.
+    // `encodeURI` would leave `#` and `?` unencoded, which break URIs.
+    const encoded = normalized
+        .split("/")
+        .map((seg, i) => {
+            // First segment on Windows is `C:` — leave the colon alone so
+            // the URI stays well-formed (`file:///C:/foo`, not `file:///C%3A/foo`).
+            if (isWin && i === 0 && /^[a-zA-Z]:$/.test(seg)) return seg;
+            return encodeURIComponent(seg);
+        })
+        .join("/");
+    return isWin ? "file:///" + encoded : "file://" + encoded;
 }

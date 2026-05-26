@@ -179,13 +179,25 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     };
 
     // file:// → OS path (inverse of pathToFileUri in lsp-client.ts).
+    // Percent-decodes each segment to undo the encoding applied on the way out.
     const decodeFileUri = (uri: string): string => {
-        if (uri.startsWith("file:///") && /^file:\/\/\/[a-zA-Z]:/.test(uri)) {
-            // Windows: strip "file:///", restore backslashes
-            return uri.slice(8).replace(/\//g, "\\");
-        }
-        if (uri.startsWith("file://")) return uri.slice(7);
-        return uri;
+        const isWin = uri.startsWith("file:///") && /^file:\/\/\/[a-zA-Z]:/.test(uri);
+        const body = uri.startsWith("file:///")
+            ? uri.slice(isWin ? 8 : 7) // Windows strips the leading "/" before the drive
+            : uri.startsWith("file://")
+              ? uri.slice(7)
+              : uri;
+        const decoded = body
+            .split("/")
+            .map((seg) => {
+                try {
+                    return decodeURIComponent(seg);
+                } catch {
+                    return seg;
+                }
+            })
+            .join("/");
+        return isWin ? decoded.replace(/\//g, "\\") : decoded;
     };
 
     // Build or rebuild CodeMirror when content/language changes
