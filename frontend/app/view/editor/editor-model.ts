@@ -27,7 +27,7 @@ export class EditorViewModel implements ViewModel {
     blockId: string;
     nodeModel: BlockNodeModel;
 
-    viewIcon: Accessor<string> = () => "file-code";
+    viewIcon: Accessor<string | IconButtonDecl>;
     viewName: Accessor<string>;
     viewText: Accessor<string | HeaderElem[]>;
     noPadding: Accessor<boolean> = () => true;
@@ -81,26 +81,34 @@ export class EditorViewModel implements ViewModel {
 
         this.blockAtom = getWaveObjectAtom<Block>(makeORef("block", blockId));
 
-        // Derive view name from file path
+        // Pane title — full file path (or "Editor" when nothing open). Marked
+        // with a trailing `*` when there are unsaved changes. Showing the
+        // complete path (not just the basename) lets the operator know
+        // exactly which file they're editing when multiple panes are open
+        // on similarly-named files (e.g. two `index.ts` in different dirs).
         this.viewName = createMemo(() => {
             const fp = this.filePathAtom();
             if (!fp) return "Editor";
-            const name = fp.split("/").pop() || fp.split("\\").pop() || fp;
-            return this.dirtyAtom() ? `${name} *` : name;
+            return this.dirtyAtom() ? `${fp} *` : fp;
         });
 
-        // Header items — the file-tree chevron toggle.
-        this.viewText = createMemo<HeaderElem[]>(() => {
+        // Pane icon doubles as the file-tree expand/collapse toggle.
+        // Clicking the icon hides/shows the tree column; preference persists
+        // per pane in block meta (`editor:tree_expanded`). The icon glyph
+        // reflects the current state: `folder-tree` when the tree is open,
+        // `folder` when collapsed.
+        this.viewIcon = createMemo<IconButtonDecl>(() => {
             const expanded = this.treeExpandedAtom();
-            return [
-                {
-                    elemtype: "iconbutton",
-                    icon: expanded ? "folder-tree" : "folder",
-                    title: expanded ? "Hide file tree" : "Show file tree",
-                    click: () => void this.toggleTreeExpanded(),
-                },
-            ];
+            return {
+                elemtype: "iconbutton",
+                icon: expanded ? "folder-tree" : "folder",
+                title: expanded ? "Hide file tree" : "Show file tree",
+                click: () => void this.toggleTreeExpanded(),
+            };
         });
+
+        // No additional header items today — the icon owns the tree toggle.
+        this.viewText = () => [];
 
         // Restore persisted tree state from block meta.
         const meta = this.blockAtom()?.meta;
