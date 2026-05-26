@@ -194,6 +194,42 @@ export interface AgentPaneState {
      * `state.turnPhase.kind`; PR G removed the legacy fields.
      */
     turnPhase: TurnPhase;
+
+    // ── Composer details panel ────────────────────────────────────────
+    /**
+     * Whether the composer details panel (the expandable section that
+     * holds the activity log, session stats, permission/model/effort
+     * dropdowns, and Archive/Export/Restore buttons) is open. Default
+     * `false`. Persists across renders within a pane lifetime; resets
+     * to `false` on pane unmount (because a new pane gets a fresh
+     * state via `initialState()`). Not persisted to backend — this is
+     * a per-session ephemeral preference, same contract today's
+     * AgentControlBar uses.
+     *
+     * Auto-collapses on `TurnStart` (sending a message hides the
+     * panel so users don't send-blind into a still-open dropdown).
+     *
+     * SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
+     */
+    detailsOpen: boolean;
+
+    /**
+     * Number of activity-log entries that arrived while
+     * `detailsOpen === false`. Resets to 0 on every transition
+     * `detailsOpen: false → true`. Drives the chevron's unread badge
+     * (`▾³`) in the composer strip.
+     *
+     * The activity-log slice (`agentActivity`) owns the entries
+     * themselves; this counter is a lightweight projection so the
+     * strip can render its badge without subscribing to both slices.
+     * The view dispatches `LogEntryArrived` after every log-line
+     * append, and the reducer here ignores the command when
+     * `detailsOpen === true` (the user can already see the new
+     * entry).
+     *
+     * SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
+     */
+    composerUnreadCount: number;
 }
 
 export const initialState = (agentId: string): AgentPaneState => ({
@@ -205,6 +241,8 @@ export const initialState = (agentId: string): AgentPaneState => ({
     initPhase: { kind: "InitPending" },
     lastEventMs: null,
     turnPhase: { kind: "Idle" },
+    detailsOpen: false,
+    composerUnreadCount: 0,
 });
 
 /**
@@ -385,7 +423,37 @@ export type AgentPaneCommand =
      * Issue #728 gap 2 — prevents zombie pending rows when the backend
      * never acknowledges a queued message (e.g. RPC hang post-send).
      */
-    | { type: "PendingMessageExpired"; id: string };
+    | { type: "PendingMessageExpired"; id: string }
+
+    // ── Composer details panel ────────────────────────────────────
+    /**
+     * User clicked the chevron or the strip body — toggle the details
+     * panel. On flip-to-open, resets `composerUnreadCount` to 0.
+     *
+     * SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
+     */
+    | { type: "DetailsToggle" }
+    /**
+     * Explicit expand (keyboard shortcut, programmatic open). Sets
+     * `detailsOpen → true` and `composerUnreadCount → 0`. Idempotent
+     * if already open.
+     */
+    | { type: "DetailsExpand" }
+    /**
+     * Explicit collapse. Fired by the outside-click handler in the
+     * view and by the `TurnStart` auto-collapse cross-arm.
+     * `composerUnreadCount` is intentionally NOT reset — it
+     * accumulates fresh from this point forward.
+     */
+    | { type: "DetailsCollapse" }
+    /**
+     * A new activity-log entry just landed. The activity-log hook
+     * dispatches this AFTER its own slice's append. When
+     * `detailsOpen === false`, increments `composerUnreadCount` so
+     * the strip's chevron badge updates. When the panel is already
+     * open, no-op (the user sees the new entry directly).
+     */
+    | { type: "LogEntryArrived" };
 
 export type AgentPaneEvent =
     | { type: "init-ready" }
