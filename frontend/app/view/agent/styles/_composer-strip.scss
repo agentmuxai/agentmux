@@ -6,7 +6,7 @@
 // always-visible chrome with a single inline row + expand affordance.
 // Spec: docs/specs/SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md.
 
-@use "../../mixins.scss";
+@use "../../../mixins.scss";
 
 .agent-composer-strip {
     display: flex;
