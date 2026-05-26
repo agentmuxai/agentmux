@@ -22,7 +22,7 @@ import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ObjectService } from "@/store/services";
 import { getObjectValue, makeORef } from "@/store/wos";
-import { dispatchWindowOpacity } from "@/app/store/window-opacity-store";
+import { dispatchWindowOpacity, liveWindowOpacity } from "@/app/store/window-opacity-store";
 import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import {
     DISPLAY_NAME_MAX_LEN,
@@ -481,7 +481,14 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                         }}
                                     />
                                     <span class="instance-panel-opacity-value">
-                                        {Math.round(currentOpacity() * 100)}%
+                                        {/* Live store value tracks the drag tick-by-tick;
+                                            falls back to the persisted meta when the store
+                                            has no entry yet. The slider <input> and its
+                                            onInput/onChange handlers are deliberately
+                                            untouched — only this label is reactive. */}
+                                        {Math.round(
+                                            (liveWindowOpacity(entry.windowId) ?? currentOpacity()) * 100,
+                                        )}%
                                     </span>
                                 </div>
                             </Show>
