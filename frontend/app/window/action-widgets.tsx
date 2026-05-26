@@ -98,27 +98,29 @@ function unpinWidget(shortName: string, settings: Record<string, any>, wmap: Rec
 
 // ── ActionWidget ──────────────────────────────────────────────────────────────
 
-const ActionWidget = ({
-    widget,
-    iconOnly,
-    onContextMenu,
-}: {
+// NOTE: don't destructure props in the signature — Solid props are getters
+// that lose reactivity when destructured outside an effect (Solid issue
+// #1224). Access via `props.iconOnly` so the `<Show>` below stays reactive
+// to upstream `tooNarrow` changes. Without this fix the responsive widget
+// bar collapse-to-icons never visually applies even though `tooNarrow`
+// computes correctly — diagnosed live via the fe_log pipe.
+const ActionWidget = (props: {
     widget: WidgetConfigType;
     iconOnly: boolean;
     onContextMenu?: (e: MouseEvent) => void;
 }): JSX.Element => (
-    <div onContextMenu={onContextMenu}>
+    <div onContextMenu={props.onContextMenu}>
         <Tooltip
-            content={widget.description || widget.label}
+            content={props.widget.description || props.widget.label}
             placement="bottom"
             divClassName="flex flex-row items-center gap-1 px-2 py-0.5 text-secondary hover:bg-hoverbg hover:text-white cursor-pointer rounded-sm h-full"
-            divOnClick={() => handleWidgetSelect(widget)}
+            divOnClick={() => handleWidgetSelect(props.widget)}
         >
-            <div style={{ color: widget.color }} class="text-sm">
-                <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
+            <div style={{ color: props.widget.color }} class="text-sm">
+                <i class={makeIconClass(props.widget.icon, true, { defaultIcon: "browser" })}></i>
             </div>
-            <Show when={!iconOnly && !isBlank(widget.label)}>
-                <div class="text-xs whitespace-nowrap">{widget.label}</div>
+            <Show when={!props.iconOnly && !isBlank(props.widget.label)}>
+                <div class="text-xs whitespace-nowrap">{props.widget.label}</div>
             </Show>
         </Tooltip>
     </div>
