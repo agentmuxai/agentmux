@@ -255,16 +255,15 @@ async function performTearOff(
         //
         // Tab tear-off (branch below) is unchanged — tabs continue
         // to spawn a brand-new instance with its own taskbar entry.
-        const layoutModel = getLayoutModelForStaticTab();
-        if (layoutModel) {
-            const node = layoutModel.getNodeByBlockId(payload.blockId);
-            if (node) {
-                layoutModel.treeReducer({
-                    type: LayoutTreeActionType.DeleteNode,
-                    nodeId: node.id,
-                } as LayoutTreeDeleteNodeAction);
-            }
-        }
+        //
+        // CRITICAL: invoke the IPC FIRST, then mutate the layout on
+        // success. If we delete the layout node up front and the IPC
+        // fails (e.g. the H.7 mid-close gate in
+        // `agentmux-cef/src/commands/floating_pane.rs` rejects with
+        // "a pane is currently closing; retry shortly", or any other
+        // error path), the pane would be orphaned — still in
+        // `blockids` but with no layout node and no floater. The user
+        // would see the pane vanish silently. Reagent P1 on PR #1073.
         try {
             await invokeCommand<{ window_label: string }>("open_floating_pane_window", {
                 pane_id: payload.blockId,
@@ -279,10 +278,25 @@ async function performTearOff(
                 screenY,
             });
         } catch (e) {
-            Logger.error("dnd:cross", "open_floating_pane_window failed", {
+            Logger.error("dnd:cross", "open_floating_pane_window failed — leaving pane docked", {
                 error: String(e),
                 blockId: payload.blockId,
             });
+            return;
+        }
+        // IPC succeeded → safe to drop the docked node so the pane
+        // doesn't render twice. If we crash between here and the next
+        // statement, the worst case is a transient double-render that
+        // resolves on next layout refresh — survivable.
+        const layoutModel = getLayoutModelForStaticTab();
+        if (layoutModel) {
+            const node = layoutModel.getNodeByBlockId(payload.blockId);
+            if (node) {
+                layoutModel.treeReducer({
+                    type: LayoutTreeActionType.DeleteNode,
+                    nodeId: node.id,
+                } as LayoutTreeDeleteNodeAction);
+            }
         }
     } else if (dragType === "tab" && payload.tabId) {
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
