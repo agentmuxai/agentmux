@@ -47,7 +47,7 @@
  * duplicate launch.
  */
 
-import { createMemo, createSignal, onCleanup, Show, type Component, type JSX } from "solid-js";
+import { createMemo, createSignal, Show, type Component, type JSX } from "solid-js";
 
 import { Modal, PaneModalScope, TabModalScope } from "@/element/modal";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -66,14 +66,12 @@ import "@/app/view/browser/components/BrowserAuthModal.scss";
 import { ModalLayerContext, type ModalLayerApi, type ModalLayerRequest } from "./modal-layer";
 import "./modal-layer.scss";
 
-/** Pane-width threshold (CSS px) below which the compact-modal chrome
- *  fires. Picked so multi-pane layouts (browser pane at 240px in a
- *  three-pane window verified live during the auth-modal investigation)
- *  trigger the variant, while a single-pane window (e.g. a comfortable
- *  600+px agent pane) keeps the standard layout. Above this width
- *  every existing modal panel renders cleanly without horizontal
- *  scroll. Spec: SPEC_MODAL_COMPACT_VARIANT_2026_05_25.md §1. */
-const COMPACT_THRESHOLD_PX = 400;
+// Compact-variant threshold lives in CSS as a `@container modal-mount
+// (max-width: 400px)` query — see `modal.scss`. The mount div below
+// declares the container with `container-type: inline-size`, so the
+// browser drives compact behavior continuously as the mount rect
+// changes. No JS observer, no class toggle, no near-threshold
+// flicker. Phase 2 of MODAL_COMPACT_VARIANT_ARCHITECTURE_2026_05_26.
 
 interface ModalLayerProps {
     /** Which scope's lock + mount this layer provides. `"tab"` covers
@@ -95,50 +93,6 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
     // Held in a signal so the Scope.Provider accessor resolves lazily
     // once the ref lands.
     const [mountEl, setMountEl] = createSignal<HTMLElement | null>(null);
-
-    // Compact-modal trigger — a ResizeObserver watches the mount node
-    // and toggles a class when the lock region is narrower than
-    // COMPACT_THRESHOLD_PX. CSS in `modal.scss` keys off
-    // `.modal-layer-mount--compact` to shrink panel chrome (smaller
-    // padding, smaller title, footer stacks vertically) so dialogs
-    // remain usable in narrow panes (verified at 240px in a multi-
-    // pane window). Spec: SPEC_MODAL_COMPACT_VARIANT_2026_05_25.md.
-    const [isCompact, setIsCompact] = createSignal(false);
-    let resizeObserver: ResizeObserver | null = null;
-
-    const attachMountRef = (el: HTMLElement | null) => {
-        setMountEl(el);
-        // Disconnect any prior observer (handles re-mount in HMR /
-        // hot-reload) before attaching a new one.
-        if (resizeObserver) {
-            resizeObserver.disconnect();
-            resizeObserver = null;
-        }
-        if (!el) return;
-        // `display:contents` on the mount node has no layout box of
-        // its own, but `ResizeObserver` reports the content rect of
-        // the observed element's children. In practice the mount
-        // wraps the pane root, so `contentRect.width` equals the
-        // pane width. (codex-anticipated edge case: observe lands
-        // ~one frame post-mount; isCompact() stays false until then.
-        // First-frame standard-variant flash is acceptable — the
-        // compact variant is an additive layout adjustment, not a
-        // correctness gate.)
-        resizeObserver = new ResizeObserver((entries) => {
-            for (const entry of entries) {
-                const w = entry.contentRect.width;
-                const compact = w > 0 && w < COMPACT_THRESHOLD_PX;
-                if (compact !== isCompact()) setIsCompact(compact);
-            }
-        });
-        resizeObserver.observe(el);
-    };
-    onCleanup(() => {
-        if (resizeObserver) {
-            resizeObserver.disconnect();
-            resizeObserver = null;
-        }
-    });
 
     // Guard close: ESC (routed via the unified Modal's `onClose`) and a
     // would-be backdrop dismiss are blocked while a submit RPC is
@@ -184,13 +138,21 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
         <ModalLayerContext.Provider value={api}>
             <ScopeProvider value={mountEl}>
                 {/* Real mount node: wraps the layer's children AND hosts
-                    the portalled <Modal>. `display:contents` keeps it
-                    layout-transparent so callers' flex / grid containers
-                    see their original parent. */}
+                    the portalled <Modal>. `container-type: inline-size`
+                    (declared in modal.scss) lets CSS `@container modal-
+                    mount (max-width: 400px)` queries drive the compact
+                    variant continuously — no JS class toggle, no
+                    near-threshold flicker. The element generates a
+                    real box (drops the previous `display: contents`)
+                    because container queries require a principal box;
+                    the box is sized to fill its parent (`width: 100%;
+                    height: 100%; position: relative`) so it stays
+                    visually transparent to the surrounding pane
+                    layout. Phase 2 of MODAL_COMPACT_VARIANT_
+                    ARCHITECTURE_2026_05_26. */}
                 <div
-                    class={`modal-layer-mount${isCompact() ? " modal-layer-mount--compact" : ""}`}
-                    style="display:contents"
-                    ref={attachMountRef}
+                    class="modal-layer-mount"
+                    ref={setMountEl}
                 >
                     {props.children}
                     <Modal
