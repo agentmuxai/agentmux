@@ -151,17 +151,23 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     });
 
     // Permission pill only renders when:
-    //   - the mode is defined AND known (defends against legacy / typo
-    //     values from block meta — an unrecognized key would render an
-    //     empty pill with `undefined` label/color), AND
+    //   - the mode is defined AND a known own-property of
+    //     `PERMISSION_LABELS` (defends against legacy / typo values from
+    //     block meta — an unrecognized key would render an empty pill
+    //     with `undefined` label/color), AND
     //   - the mode is NOT `auto` (the quiet baseline; AI classifier).
     // `default` (explicit prompt-all) DOES render the pill — users
     // expect to see that they're in the conservative mode. Spec §3.2
-    // table row "Permission != Auto". Reagent P2 on PR #1069 caught
-    // the doc/code mismatch + the missing validity gate.
+    // table row "Permission != Auto". Reagent P2 round 1 caught the
+    // doc/code mismatch + the missing validity gate; codex P2 round 4
+    // caught the `in` operator walking the prototype chain (matches
+    // `"toString"` / `"constructor"` etc.) — `hasOwnProperty.call`
+    // checks own properties only (ES2022's `Object.hasOwn` would be
+    // cleaner but the TS lib config tops out at ES2021 here).
+    const hasOwn = Object.prototype.hasOwnProperty;
     const showPermissionPill = (): boolean => {
         const m = props.permissionMode;
-        return m != null && m !== "auto" && m in PERMISSION_LABELS;
+        return m != null && m !== "auto" && hasOwn.call(PERMISSION_LABELS, m);
     };
 
     // ARIA contract (codex P2 round 3 on PR #1069):
