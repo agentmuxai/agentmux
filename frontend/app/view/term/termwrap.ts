@@ -87,6 +87,12 @@ export class TermWrap {
     private rafBuffer: Uint8Array[] = [];
     private rafPending: boolean = false;
     private writeInFlight: boolean = false;
+    // Thaw-cycle handles — cleared in dispose() so callbacks don't fire
+    // on a disposed Terminal. dispose() doesn't null `this.terminal`, so
+    // a null-check guard alone isn't enough.
+    private thawTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    private thawRafId: number | null = null;
+    private disposed: boolean = false;
 
     // ── Phase 1: CONSTRUCT (sync) ──────────────────────────────────────
 
@@ -298,12 +304,92 @@ export class TermWrap {
             }
         });
 
+        // PSReadLine cursor-desync "thaw" — see #1042 / docs/analysis/
+        // TERM_JUMBLE_STRUCTURED_2026_05_25.md §7a.
+        //
+        // When a terminal is created without subsequent sibling-pane
+        // splits, its only init-time resize is the default-80 → final
+        // transition. pwsh's PSReadLine emits its first prompt against
+        // the inherited (cols=80) ConPTY environment, then xterm's
+        // SIGWINCH from sendTermSize lands as the final cols (e.g. 14).
+        // PSReadLine's tracked cursor diverges from xterm's actual
+        // cursor — visible as "cursor jumps on Enter," cursor desync,
+        // prompt mis-layout. Manual pane resize fixes it because the
+        // resulting SIGWINCH triggers PSReadLine to re-sync.
+        //
+        // Terminals that DID get subsequent resizes (because later
+        // panes shrank them) accumulated several corrective SIGWINCH
+        // events that re-synced PSReadLine. To get the same outcome
+        // unconditionally, replay one synthetic resize cycle ~250ms
+        // post-init: that gap is enough for the first prompt to land
+        // but short enough to feel immediate. Split across rAF ticks
+        // because xterm coalesces back-to-back same-frame resizes
+        // into a single SIGWINCH.
+        //
+        // Gated to Windows (PLATFORM === "win32") because PSReadLine /
+        // ConPTY are the affected stack. Non-Windows shells (bash, zsh,
+        // fish) handle SIGWINCH cleanly on their own and the extra
+        // resize cycle would be needless overhead. Reagent P2.
+        //
+        // Handles tracked on `this` and cleared in dispose() so the
+        // callbacks can't fire on a disposed Terminal. Reagent P1.
+        if (PLATFORM === PlatformWindows) {
+            this.thawTimeoutId = setTimeout(() => {
+                this.thawTimeoutId = null;
+                if (this.disposed || !this.terminal) return;
+                const baseCols = this.terminal.cols;
+                const baseRows = this.terminal.rows;
+                if (baseCols < 4) return; // too narrow to safely toggle ±1
+                try {
+                    const targetCols1 = baseCols + 1;
+                    this.terminal.resize(targetCols1, baseRows);
+                    this.sendTermSize();
+                    this.thawRafId = requestAnimationFrame(() => {
+                        this.thawRafId = null;
+                        if (this.disposed || !this.terminal) return;
+                        // If something else (e.g. a sibling-split firing
+                        // handleResize between step 1 and now) changed the
+                        // grid since step 1's +1, that resize ALREADY fired
+                        // its own SIGWINCH at the current correct size —
+                        // restoring to baseCols here would force xterm back
+                        // to stale geometry and send a wrong SIGWINCH.
+                        // Skip step 2 in that case. Codex P2 on #1043.
+                        if (this.terminal.cols !== targetCols1 || this.terminal.rows !== baseRows) {
+                            return;
+                        }
+                        try {
+                            this.terminal.resize(baseCols, baseRows);
+                            this.sendTermSize();
+                        } catch (e) {
+                            console.warn("[term] PSReadLine-thaw step 2 failed", e);
+                        }
+                    });
+                } catch (e) {
+                    console.warn("[term] PSReadLine-thaw step 1 failed", e);
+                }
+            }, 250);
+        }
+
         this.runProcessIdleTimeout();
     }
 
     // ── Phase 3: RUNNING ───────────────────────────────────────────────
 
     dispose() {
+        this.disposed = true;
+        // Cancel pending PSReadLine-thaw callbacks so they don't fire
+        // on a disposed Terminal. dispose() doesn't null `this.terminal`
+        // (xterm.Terminal stays in memory until its own dispose finishes
+        // and references are dropped), so the `if (!this.terminal)`
+        // guards in the callbacks can't catch this race on their own.
+        if (this.thawTimeoutId !== null) {
+            clearTimeout(this.thawTimeoutId);
+            this.thawTimeoutId = null;
+        }
+        if (this.thawRafId !== null) {
+            cancelAnimationFrame(this.thawRafId);
+            this.thawRafId = null;
+        }
         const agentId = registeredAgentsByBlock.get(this.blockId);
         if (agentId) {
             fireAndForget(() => unregisterAgent(agentId));

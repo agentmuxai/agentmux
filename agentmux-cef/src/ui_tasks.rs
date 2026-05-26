@@ -506,6 +506,48 @@ pub fn post_show_dev_tools(state: &Arc<AppState>, label: &str) {
     post_task(ThreadId::UI, Some(&mut task));
 }
 
+// ── DevTools — Inspect Element at coordinates ─────────────────────────────
+
+wrap_task! {
+    pub struct InspectElementAtTask {
+        state: Arc<AppState>,
+        label: String,
+        x: i32,
+        y: i32,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let browser = match self.state.get_browser(&self.label) {
+                Some(b) => b,
+                None => {
+                    tracing::warn!("[devtools] inspect-at: browser '{}' not found", self.label);
+                    return;
+                }
+            };
+
+            match browser.host() {
+                Some(host) => {
+                    // The 4th arg to show_dev_tools is `inspect_element_at: Option<CefPoint>`
+                    // in window-relative coords. CEF opens DevTools (creating it if not
+                    // already open) and selects the element at that point, equivalent to
+                    // Chrome's right-click → Inspect Element flow.
+                    let point = Point { x: self.x, y: self.y };
+                    host.show_dev_tools(None, None, None, Some(&point));
+                }
+                None => {
+                    tracing::warn!("[devtools] inspect-at: no browser host for '{}'", self.label);
+                }
+            }
+        }
+    }
+}
+
+pub fn post_inspect_element_at(state: &Arc<AppState>, label: &str, x: i32, y: i32) {
+    let mut task = InspectElementAtTask::new(state.clone(), label.to_string(), x, y);
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
 // ── Main-focus reclaim ────────────────────────────────────────────────────
 //
 // Reclaim keyboard focus for the main browser when the user clicks a

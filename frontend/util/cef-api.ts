@@ -405,6 +405,45 @@ export function buildCefApi(): AppApi {
             const label = params.get("windowLabel") ?? "main";
             invokeCommand("toggle_devtools", { label }).catch(console.error);
         },
+        inspectElementAt: (x: number, y: number) => {
+            const params = new URLSearchParams(window.location.search);
+            const label = params.get("windowLabel") ?? "main";
+            // CEF's show_dev_tools(..., inspect_element_at) expects DIP
+            // (device-independent pixels in view coords). `MouseEvent.clientX/Y`
+            // is in CSS pixels — these match DIP when no zoom applies in the
+            // event-target's ancestor chain. AgentMux today only zooms
+            // `.window-header` and `.status-bar` (via the per-pane chrome
+            // zoom in `zoom.platform.ts`), so pane content events ARE in
+            // view DIP. Defensive against future page-zoom changes:
+            // divide by any inherited CSS `zoom` on documentElement.
+            const rootZoomStr = getComputedStyle(document.documentElement).getPropertyValue("zoom").trim();
+            const zoom = rootZoomStr ? parseFloat(rootZoomStr) || 1 : 1;
+            invokeCommand("inspect_element_at", {
+                label,
+                x: Math.round(x / zoom),
+                y: Math.round(y / zoom),
+            }).catch((err) => {
+                // No fallback. The only candidate (toggle_devtools) is
+                // stateful — it would CLOSE DevTools when already open,
+                // the opposite of what the user asked for by clicking
+                // "Inspect Element". Codex flagged this twice on #1043,
+                // and the right answer is to surface the failure rather
+                // than paper over it with the wrong action. If the host
+                // is mismatched (frontend has the new IPC, host doesn't
+                // yet — e.g. mid-dev-rebuild), the user can fall back
+                // to the hamburger menu's "Dev Tools" toggle manually.
+                const errStr = typeof err === "string" ? err : (err?.message ?? String(err));
+                if (errStr.startsWith("Unknown command")) {
+                    console.warn(
+                        "[cef-api] inspect_element_at not supported by current host. " +
+                        "Rebuild the host binary (task build:backend) to enable Inspect Element; " +
+                        "until then use the hamburger menu's Dev Tools entry."
+                    );
+                } else {
+                    console.error("[cef-api] inspect_element_at failed:", err);
+                }
+            });
+        },
         getWindowLabel: async () => {
             const params = new URLSearchParams(window.location.search);
             return params.get("windowLabel") ?? "main";

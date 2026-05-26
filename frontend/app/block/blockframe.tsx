@@ -53,6 +53,7 @@ function handleHeaderContextMenu(
         magnified,
         onMagnifyToggle,
         onClose,
+        inspectAt: { x: e.clientX, y: e.clientY },
     }, viewModel);
 
     // Header-only: view-specific settings (font size, theme, etc.)
@@ -730,6 +731,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
             magnified: isMagnified(),
             onMagnifyToggle: nodeModel.toggleMagnify,
             onClose: nodeModel.onClose,
+            inspectAt: { x: e.clientX, y: e.clientY },
         }, props.viewModel));
         ContextMenuModel.showContextMenu(menu, e);
     };

@@ -587,6 +587,17 @@ pub fn toggle_devtools(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
     Ok(serde_json::Value::Null)
 }
 
+/// Open DevTools focused on the element at the given window-relative
+/// coordinates. Equivalent to Chrome's right-click → Inspect Element.
+/// Used by the pane context menu's Inspect entry.
+pub fn inspect_element_at(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+    let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    crate::ui_tasks::post_inspect_element_at(state, label, x, y);
+    Ok(serde_json::Value::Null)
+}
+
 /// Resolve the base URL for the frontend.
 /// Production: IPC server serves static files from `frontend/` next to the exe.
 /// Dev: Vite dev server at `http://localhost:5173`.
