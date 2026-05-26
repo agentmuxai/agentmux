@@ -93,21 +93,34 @@
 }
 
 // Layer C (MODAL_COMPACT_VARIANT_ARCHITECTURE_2026_05_26 §7): universal
-// `min-width: 0` cascade for modal body content. Flex children default
-// to `min-width: auto` (intrinsic content size), which pins the parent
-// to the widest descendant. The default bites every content-managed
-// surface — xterm canvas, monaco editor, browser webview — and every
-// fixed-width form field. Setting it to 0 on `.modal-panel-body` and
-// its direct children eliminates the per-modal-body opt-in that
-// existed before (each modal had to remember to add its own
-// `:where(.modal-layer-mount--compact) & { min-width: 0 }` block).
+// `min-width: 0` cascade for modal body content **in compact mode only**.
 //
-// Scoped to `.modal-panel-body` (already-isolated DOM) and to direct
-// children only — modals that intentionally need a min-width on a
-// specific descendant can still override locally.
-.modal-panel-body,
-.modal-panel-body > * {
-    min-width: 0;
+// Flex children default to `min-width: auto` (intrinsic content size),
+// which pins the parent to the widest descendant. The default bites every
+// content-managed surface — xterm canvas, monaco editor, browser webview
+// — and every fixed-width form field. In compact mode (narrow pane) we
+// want it to be 0 universally; in wide mode the per-modal body's
+// declared min-width (560/440/420/380) is intentional and must win.
+//
+// Specificity contract:
+//   • Per-modal body `.agent-install-modal-body { min-width: 560px }`
+//     has specificity (0,1,0).
+//   • This rule uses a real (non-`:where()`) class wrapper, so the
+//     compiled selector `.modal-layer-mount--compact .modal-panel-body > *`
+//     has specificity (0,2,0) and wins over the per-modal min-widths
+//     in compact mode regardless of import order. In wide mode the
+//     wrapper class isn't on the DOM, so the rule doesn't apply and
+//     per-modal min-widths stay in force.
+//
+// Reagent + codex both flagged the prior `:where()`-wrapped version as
+// specificity-tied with the per-modal rules — bundle import order
+// would have decided which won. Promoting to a real class wrapper
+// closes that ambiguity.
+.modal-layer-mount--compact {
+    .modal-panel-body,
+    .modal-panel-body > * {
+        min-width: 0;
+    }
 }
 
 // Tab / pane scoped panels cannot rely on viewport-relative height —
@@ -344,6 +357,17 @@
         min-width: 0;
         width: 100%;
         max-width: 100%;
+    }
+
+    // Recompute max-height for the smaller compact root padding.
+    // Base rules subtract 48px (`2 * 24px`) for `var(--space-6)` root
+    // padding; compact uses 1px so the subtraction is wrong and the
+    // panel can't use the height the root gives it (~46px wasted).
+    // `100%` works for both window scope (root is fixed/full-viewport)
+    // and tab/pane scope (root is absolute/full-region). Codex P2 on
+    // PR #1060.
+    .modal-panel {
+        max-height: calc(100% - 2px);
     }
 
     .modal-panel-header {
