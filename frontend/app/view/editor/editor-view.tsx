@@ -110,9 +110,15 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         language: string,
         content: string,
     ): Promise<void> => {
-        // Bail early on unsupported language or master kill switch.
-        if (!isLspSupportedLanguage(language)) return;
-        if (settingsAtom()?.["editor:lsp.enabled"] === false) return;
+        // Bail early on unsupported language or master kill switch — but
+        // tear down any client carried over from the previous file first.
+        // Otherwise a non-LSP file leaves the prior client (and its
+        // server-side refcount) alive, debounced didChange calls keep
+        // firing, and the status chip/banner still reflect the old file.
+        if (!isLspSupportedLanguage(language) || settingsAtom()?.["editor:lsp.enabled"] === false) {
+            await teardownLsp();
+            return;
+        }
 
         // Reuse the existing client when only the file changed (same language
         // AND the new file lives under the server's workspace root). The

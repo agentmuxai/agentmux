@@ -22,7 +22,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 use tokio::sync::Mutex;
 
 use crate::backend::eventbus::{EventBus, WSEventType};
@@ -142,13 +142,25 @@ impl LspSupervisor {
             .stdout
             .take()
             .ok_or_else(|| LspError::SpawnFailed("no stdout".to_string()))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| LspError::SpawnFailed("no stderr".to_string()))?;
 
         // Spawn the stdout reader. Each framed message becomes an
         // `lsp:message` WSEvent broadcast for the frontend to dispatch.
         let event_bus = self.event_bus.clone();
-        let server_id_for_task = server_id.clone();
+        let server_id_for_stdout = server_id.clone();
         tokio::spawn(async move {
-            read_lsp_messages(stdout, server_id_for_task, event_bus).await;
+            read_lsp_messages(stdout, server_id_for_stdout, event_bus).await;
+        });
+
+        // Drain stderr — a chatty server (rust-analyzer, tsserver on errors)
+        // can fill the pipe buffer and stall its own stdin/stdout. Log each
+        // line via tracing so the supervisor surface remains observable.
+        let server_id_for_stderr = server_id.clone();
+        tokio::spawn(async move {
+            drain_lsp_stderr(stderr, server_id_for_stderr).await;
         });
 
         let handle = Arc::new(ServerHandle {
@@ -157,7 +169,22 @@ impl LspSupervisor {
             _child: Mutex::new(child),
         });
 
+        // Re-check under the second lock — a concurrent start() for the same
+        // (workspace, language) could have raced past the fast-path check
+        // above. If so, drop our just-spawned child (kill_on_drop reaps it)
+        // and bump the existing entry's refcount instead.
         let mut servers = self.servers.lock().await;
+        if let Some(existing) = servers.get(&key) {
+            existing
+                .refcount
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            drop(servers);
+            drop(handle); // releases our spawned child via kill_on_drop
+            return Ok(StartResult {
+                server_id,
+                workspace_root: root_str,
+            });
+        }
         servers.insert(key, handle);
 
         Ok(StartResult {
@@ -301,6 +328,32 @@ async fn read_lsp_messages(stdout: ChildStdout, server_id: ServerId, event_bus: 
                 "message": message,
             })),
         });
+    }
+}
+
+/// Drain the server's stderr line-by-line, logging each line via tracing.
+/// Without this the OS pipe buffer fills up on chatty servers (rust-analyzer
+/// during indexing, tsserver on startup errors) and the server's own writes
+/// block, which can stall stdin/stdout handling.
+async fn drain_lsp_stderr(stderr: ChildStderr, server_id: ServerId) {
+    let mut reader = BufReader::new(stderr);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line).await {
+            Ok(0) => return, // EOF
+            Ok(_) => {
+                tracing::debug!(
+                    server_id = %server_id,
+                    stderr = %line.trim_end_matches(['\r', '\n']),
+                    "LSP stderr"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(server_id = %server_id, error = %e, "LSP: stderr read error");
+                return;
+            }
+        }
     }
 }
 
