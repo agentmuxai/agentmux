@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Workspace } from "@/app/workspace/workspace";
+import { FloatingPaneWorkspace } from "@/app/workspace/floating-pane-workspace";
 import { ContextMenuModel } from "@/store/contextmenu";
 import { atoms, getApi, getSettingsPrefixAtom, isDev, openLink, removeFlashError, flashErrors } from "@/store/global";
 import { appHandleKeyDown, keyboardMouseDownHandler } from "@/store/keymodel";
@@ -362,6 +363,23 @@ const FlashError = () => {
     );
 };
 
+// Detect floating-pane mode once at module load — the URL never changes
+// in-flight for an AgentMux renderer (each render process is opened with
+// its own URL and stays on it). Reading the search params once avoids
+// re-parsing on every render.
+//
+// When `?floatingPaneId=` is present the host opened this window via
+// `open_floating_pane_window` (SPEC_FLOATING_PANE_TEAROFF), and we
+// render `<FloatingPaneWorkspace>` instead of the standard
+// `<Workspace>` — same backend, no tab bar / widgets / status bar.
+const IS_FLOATING_PANE: boolean = (() => {
+    try {
+        return new URLSearchParams(window.location.search).has("floatingPaneId");
+    } catch {
+        return false;
+    }
+})();
+
 const AppInner = () => {
     const prefersReducedMotion = atoms.prefersReducedMotionAtom;
     const client = atoms.client;
@@ -382,6 +400,7 @@ const AppInner = () => {
                 class={clsx("flex flex-col w-full h-full", PLATFORM, {
                     fullscreen: isFullScreen(),
                     "prefers-reduced-motion": prefersReducedMotion(),
+                    "floating-pane-mode": IS_FLOATING_PANE,
                 })}
                 onContextMenu={handleContextMenu}
             >
@@ -394,9 +413,18 @@ const AppInner = () => {
                     elsewhere" banner for the app-wide Identity & Memory
                     manager. Shows "open in <Window N> — click to focus"
                     in non-holding windows; renders nothing otherwise.
-                    See SPEC_BUNDLE_MANAGEMENT §3 + §5 decision 6. */}
-                <BundleManagerElsewhereBanner />
-                <Workspace />
+                    See SPEC_BUNDLE_MANAGEMENT §3 + §5 decision 6.
+                    Hidden in floating-pane mode — floaters don't own
+                    bundles. */}
+                <Show when={!IS_FLOATING_PANE}>
+                    <BundleManagerElsewhereBanner />
+                </Show>
+                <Show
+                    when={IS_FLOATING_PANE}
+                    fallback={<Workspace />}
+                >
+                    <FloatingPaneWorkspace />
+                </Show>
                 <CrossWindowDragMonitor />
                 <DragOverlay />
                 <FlashError />
