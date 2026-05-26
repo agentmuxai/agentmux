@@ -187,7 +187,14 @@ export const AgentStatusLine = (props: AgentStatusLineProps): JSX.Element => {
 AgentStatusLine.displayName = "AgentStatusLine";
 
 interface AgentFooterProps {
-    agentId: string;
+    /**
+     * Display name for the composer placeholder ("Send message to …").
+     * The caller derives this from `block().meta.agentName ?? agentId`
+     * so the placeholder shows the human-readable name (e.g. "Claude")
+     * instead of the hex agent UUID. Same fallback chain used elsewhere
+     * in `agent-view.tsx` (see the log() call on line 380).
+     */
+    agentName: string;
     onSendMessage?: (message: string) => void | Promise<void>;
     /**
      * Called when the user types in the composer. Used to tell the document
@@ -446,7 +453,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                 <textarea
                     ref={textareaRef}
                     class="agent-input"
-                    placeholder={`Send message to ${props.agentId}...`}
+                    placeholder={`Send message to ${props.agentName}...`}
                     onKeyDown={handleKeyDown}
                     onInput={handleInput}
                     rows={1}

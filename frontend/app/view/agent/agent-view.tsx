@@ -107,6 +107,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const providerKey = (): string => block()?.meta?.["agentProvider"] ?? agentId;
     const provider = () => getProvider(providerKey());
     const outputFormat = (): string => block()?.meta?.["agentOutputFormat"] ?? "claude-stream-json";
+    // Human-readable display name for the composer placeholder. Matches
+    // the same fallback chain used by the onMount log() on line 380 —
+    // single source of truth for "what to call this agent in the UI."
+    // Reactive: the textarea placeholder updates if the user renames
+    // the agent without remounting the pane.
+    const agentName = (): string => block()?.meta?.["agentName"] ?? agentId;
 
     // Overlay tab signal — lives in the component so SolidJS can track it.
     // The model's _setOverlayTab callback is wired on mount and cleaned up on unmount.
@@ -882,7 +888,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     providerId={provider()?.id ?? ""}
                 />
                 <AgentFooter
-                    agentId={agentId}
+                    agentName={agentName()}
                     onSendMessage={handleSendMessage}
                     onTyping={() => scrollToBottomFn?.()}
                     onStopAgent={commands.stopAgent}
