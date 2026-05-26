@@ -88,10 +88,14 @@ export class FileTreeModel {
         const roots: Root[] = [
             { name: homeName, path: home, isHome: true },
             ...drives
-                // Don't double-show the drive that hosts HOME (e.g. C:\ when
-                // HOME is C:\Users\…). User can still reach it by collapsing
-                // HOME and expanding from a different angle if needed.
-                .filter((d) => !home.toLowerCase().startsWith(d.path.toLowerCase()))
+                // Don't double-show the drive that hosts HOME on Windows
+                // (e.g. hide C:\ when HOME is C:\Users\…). UNIX `/` is the
+                // exception: every HOME starts with `/`, but `/` is the only
+                // way to reach /etc, /opt, /mnt etc., so we always keep it.
+                .filter((d) => {
+                    if (d.path === "/") return true;
+                    return !home.toLowerCase().startsWith(d.path.toLowerCase());
+                })
                 .map((d) => ({ name: d.name, path: d.path, isHome: false })),
         ];
         this._roots[1](roots);
