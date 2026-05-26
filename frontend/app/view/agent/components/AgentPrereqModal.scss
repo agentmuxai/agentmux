@@ -12,12 +12,9 @@
     min-width: 440px;
     max-width: 540px;
 
-    // Compact variant — relax the body min-width so the modal can mount
-    // in panes narrower than 440px. The ModalLayer toggles this class
-    // when its mount node is < 400px (see SPEC_MODAL_COMPACT_VARIANT_2026_05_25.md).
-    :where(.modal-layer-mount--compact) & {
-        min-width: 0;
-    }
+    // Compact-variant min-width: 0 was here; superseded by the
+    // universal `.modal-panel-body > * { min-width: 0 }` cascade in
+    // modal.scss (Layer C of MODAL_COMPACT_VARIANT_ARCHITECTURE_2026_05_26).
 }
 
 .agent-prereq-modal-list {

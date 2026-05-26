@@ -189,6 +189,17 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         // Bind to the same theme source the regular term pane uses
         // (single source of truth — see SPEC_INSTALL_MODAL_TERM_THEME_BINDING_2026_05_18.md).
         const [initialTheme] = computeTermThemeFromSettings(atoms.fullConfigAtom());
+        // Layer D1 of MODAL_COMPACT_VARIANT_ARCHITECTURE_2026_05_26 §7:
+        // construct at the smallest viable size (2×2) instead of the
+        // xterm.js default of 80×24. In a narrow agent pane, default
+        // cols=80 paints a ~600px-wide canvas BEFORE FitAddon's first
+        // ResizeObserver tick can fire — the modal-panel locks in to
+        // that width, `.modal-panel { overflow: auto }` reserves a
+        // horizontal scrollbar, and the user sees an unshrunk modal
+        // even though the parent CSS has `min-width: 0`. Starting at
+        // 2×2 means the initial paint is tiny; the synchronous
+        // `fitAddon.fit()` after `terminal.open(termRef)` then sizes
+        // to the actual container width on the same frame.
         terminal = new Terminal({
             cursorBlink: false,
             scrollback: 5000,
@@ -197,6 +208,8 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             theme: initialTheme,
             convertEol: false,
             scrollOnUserInput: false,
+            cols: 2,
+            rows: 2,
         });
         // Live theme swap — mirrors TermThemeUpdater so settings changes
         // while the modal is open take effect without remount.
