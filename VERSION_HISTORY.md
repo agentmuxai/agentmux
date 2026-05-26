@@ -1,5 +1,9 @@
 # AgentMux Version History
 
+## 0.38.5 — 2026-05-26
+
+- chore: version bump (post-release rebuild to give the next portable a distinct version label from prior 0.38.4 portables on the build machine)
+
 ## 0.38.4 — 2026-05-26
 
 - feat(statusbar): opacity slider % tracks the drag (reactive store)
