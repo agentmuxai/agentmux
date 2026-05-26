@@ -859,6 +859,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 `composerUnreadCount`, added in #1068).
                 SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md. */}
             <AgentComposerStrip
+                detailsPanelId={`agent-composer-details-${model.blockId}`}
                 loading={
                     status.isLoading()
                     || workingFromPhase(agentAtoms().turnPhaseAtom[0]())
@@ -892,7 +893,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     into a single AgentComposerDetails component.
                     SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §4. */}
                 <Show when={agentAtoms().detailsOpenAtom[0]()}>
-                    <div class="agent-composer-details" id="agent-composer-details">
+                    <div class="agent-composer-details" id={`agent-composer-details-${model.blockId}`}>
                         <ActivityLogPanel entries={logLines} />
                         <AgentControlBar
                             blockId={model.blockId}

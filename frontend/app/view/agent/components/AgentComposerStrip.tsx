@@ -62,6 +62,14 @@ function fmtBadgeCount(n: number): string {
 }
 
 interface AgentComposerStripProps {
+    /**
+     * DOM id of the details panel this strip toggles. Used for the
+     * `aria-controls` attribute on the strip and the matching `id` on
+     * the panel. Per-pane uniqueness is the caller's responsibility —
+     * a fixed id would collide when multiple agent panes are open in
+     * the same tab. Codex P2 on PR #1069.
+     */
+    detailsPanelId: string;
     /** True while a turn is in flight (Submitting / Streaming / Interrupting). */
     loading?: boolean;
     /** True after Esc → SIGINT, until session_end arrives. */
@@ -156,27 +164,39 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return m != null && m !== "auto" && m in PERMISSION_LABELS;
     };
 
+    // Shared "did this event come from a nested button" gate. Used by
+    // both onClick and onKeyDown so keyboard activation on the process
+    // badge / future inline buttons doesn't bubble up and toggle the
+    // strip — only the strip itself should trigger the panel. Codex
+    // P1 on PR #1069 caught the keyboard side missing this gate.
+    const eventTargetIsNestedButton = (e: Event): boolean => {
+        const t = e.target as HTMLElement | null;
+        if (!t) return false;
+        return t.closest("button, [data-strip-button]") != null;
+    };
+
     return (
         <div
             class="agent-composer-strip"
             classList={{ "agent-composer-strip--expanded": props.expanded }}
             onClick={(e) => {
-                // Strip-body click expands (anywhere not a button).
-                // Stop propagation on button children below.
-                if ((e.target as HTMLElement).closest("button, [data-strip-button]") == null) {
+                if (!eventTargetIsNestedButton(e)) {
                     props.onToggleExpanded();
                 }
             }}
             role="button"
             tabIndex={0}
             aria-expanded={props.expanded}
-            aria-controls="agent-composer-details"
+            aria-controls={props.detailsPanelId}
             aria-label={props.expanded ? "Collapse composer details" : "Expand composer details"}
             onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    props.onToggleExpanded();
-                }
+                if (e.key !== "Enter" && e.key !== " ") return;
+                // Don't hijack the key when focus is on a nested button —
+                // pressing Enter on the process badge should open swarm,
+                // not also toggle the details panel.
+                if (eventTargetIsNestedButton(e)) return;
+                e.preventDefault();
+                props.onToggleExpanded();
             }}
         >
             <span class="agent-composer-strip-left">
