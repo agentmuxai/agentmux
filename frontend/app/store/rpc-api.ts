@@ -1183,6 +1183,25 @@ class RpcApiType {
         return client.rpcCall("writeeditorfile", data, opts);
     }
 
+    // command "listeditordir" [call] — list directory contents for the editor file-tree.
+    // Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
+    ListEditorDirCommand(
+        client: RpcClient,
+        data: { path: string },
+        opts?: RpcOpts,
+    ): Promise<{ path: string; entries: DirEntry[] }> {
+        return client.rpcCall("listeditordir", data, opts);
+    }
+
+    // command "geteditorhome" [call] — return the OS home dir (file-tree default root).
+    GetEditorHomeCommand(
+        client: RpcClient,
+        data: Record<string, never> = {},
+        opts?: RpcOpts,
+    ): Promise<{ home: string }> {
+        return client.rpcCall("geteditorhome", data, opts);
+    }
+
     // command "resolvecli" [call]
     ResolveCliCommand(client: RpcClient, data: CommandResolveCliData, opts?: RpcOpts): Promise<ResolveCliResult> {
         return client.rpcCall("resolvecli", data, opts);

@@ -1141,6 +1141,97 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
         }),
     );
 
+    // listeditordir → list directory contents for the editor's file-tree pane.
+    // Symlinks are followed (matches VS Code semantics; the frontend marks
+    // followed symlinks with a ↗ overlay).
+    // Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
+    engine.register_handler(
+        "listeditordir",
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Cmd { path: String }
+                let cmd: Cmd = serde_json::from_value(data)
+                    .map_err(|e| format!("listeditordir: {e}"))?;
+                let expanded = expand_home_dir_safe(&cmd.path);
+                let canonical = expanded.canonicalize()
+                    .map_err(|e| format!("listeditordir: {e}"))?;
+                let read_dir = std::fs::read_dir(&canonical)
+                    .map_err(|e| format!("listeditordir: {e}"))?;
+
+                let mut entries: Vec<serde_json::Value> = Vec::new();
+                for entry in read_dir.flatten() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    // `file_type()` returns the entry's own type — symlinks
+                    // appear as symlinks (no follow). `metadata()` follows
+                    // symlinks, so a symlinked dir reports is_dir=true.
+                    // We need both: is_symlink from file_type, is_dir/size
+                    // from metadata (so a symlink-to-dir reads as a directory,
+                    // matching VS Code).
+                    let is_symlink = entry
+                        .file_type()
+                        .map(|t| t.is_symlink())
+                        .unwrap_or(false);
+                    let metadata = entry.metadata().ok();
+                    let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+                    let size = metadata
+                        .as_ref()
+                        .and_then(|m| if !m.is_dir() { Some(m.len()) } else { None });
+                    let mtime = metadata
+                        .as_ref()
+                        .and_then(|m| m.modified().ok())
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_millis() as u64);
+
+                    let mut entry_obj = serde_json::json!({
+                        "name": name,
+                        "is_dir": is_dir,
+                        "is_symlink": is_symlink,
+                    });
+                    if let Some(s) = size {
+                        entry_obj["size"] = serde_json::json!(s);
+                    }
+                    if let Some(m) = mtime {
+                        entry_obj["mtime"] = serde_json::json!(m);
+                    }
+                    entries.push(entry_obj);
+                }
+
+                // Folders first, then files; alphabetical, case-insensitive.
+                entries.sort_by(|a, b| {
+                    let a_dir = a["is_dir"].as_bool().unwrap_or(false);
+                    let b_dir = b["is_dir"].as_bool().unwrap_or(false);
+                    let a_name = a["name"].as_str().unwrap_or("").to_lowercase();
+                    let b_name = b["name"].as_str().unwrap_or("").to_lowercase();
+                    match (a_dir, b_dir) {
+                        (true, false) => std::cmp::Ordering::Less,
+                        (false, true) => std::cmp::Ordering::Greater,
+                        _ => a_name.cmp(&b_name),
+                    }
+                });
+
+                Ok(Some(serde_json::json!({
+                    "path": canonical.to_string_lossy(),
+                    "entries": entries,
+                })))
+            })
+        }),
+    );
+
+    // geteditorhome → OS home directory, used as the editor file-tree default root.
+    engine.register_handler(
+        "geteditorhome",
+        Box::new(|_data, _ctx| {
+            Box::pin(async move {
+                let home = dirs::home_dir()
+                    .ok_or_else(|| "geteditorhome: cannot determine home directory".to_string())?;
+                Ok(Some(serde_json::json!({
+                    "home": home.to_string_lossy(),
+                })))
+            })
+        }),
+    );
+
     // CLI handlers (resolvecli, checkcliauth, runclilogin)
     super::cli_handlers::register_cli_handlers(engine, &state);
 
