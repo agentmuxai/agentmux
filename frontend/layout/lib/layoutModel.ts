@@ -295,6 +295,13 @@ export class LayoutModel {
      */
     isResizing: () => boolean;
     /**
+     * True ONLY when a resize handle (splitter) is currently being dragged.
+     * Unlike `isResizing`, this does NOT flip on window/container resize.
+     * Use this when surfacing UI tied to splitter drags specifically
+     * (e.g. the pane WxH badge — codex P2 on PR #1057).
+     */
+    isSplitterDragging: () => boolean;
+    /**
      * True if the whole TileLayout container is being resized.
      * @internal
      */
@@ -400,10 +407,13 @@ export class LayoutModel {
             this.pendingTreeAction = atomWithThrottle<LayoutTreeAction>(null, 10);
 
             this.isContainerResizing = createSignalAtom(false);
-            this.isResizing = createMemo(() => {
+            this.isSplitterDragging = createMemo(() => {
                 const pendingAction = this.pendingTreeAction.throttledValueAtom();
+                return pendingAction?.type === LayoutTreeActionType.ResizeNode;
+            });
+            this.isResizing = createMemo(() => {
                 const isWindowResizing = this.isContainerResizing();
-                return isWindowResizing || pendingAction?.type === LayoutTreeActionType.ResizeNode;
+                return isWindowResizing || this.isSplitterDragging();
             });
 
             this.displayContainerRef = { current: null };

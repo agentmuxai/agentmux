@@ -1,0 +1,28 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// PaneSizeBadge — bottom-left `WxH` overlay during pane resize.
+// Spec: SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md.
+
+.pane-size-badge {
+    position: absolute;
+    left: var(--space-2);
+    bottom: var(--space-2);
+    // Above pane content (BlockMask uses var(--zindex-block-mask),
+    // overlays sit at 20) but below modals (50+).
+    z-index: 30;
+    padding: 2px var(--space-1-5);
+    font-family: var(--termfontfamily, monospace);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.4;
+    letter-spacing: 0.02em;
+    color: var(--main-text-color);
+    background: color-mix(in srgb, var(--main-bg-color) 88%, transparent);
+    border: 1px solid var(--border-color);
+    border-radius: 0;             // hard-corners design (SPEC_HARD_CORNERS_2026_05_26)
+    backdrop-filter: blur(2px);   // legibility over busy content
+    pointer-events: none;         // never blocks pane interactions
+    user-select: none;
+    white-space: nowrap;
+}
