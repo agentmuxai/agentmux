@@ -1,5 +1,54 @@
 # AgentMux Version History
 
+## 0.38.4 — 2026-05-26
+
+- feat(statusbar): opacity slider % tracks the drag (reactive store)
+- feat(activity): add global agent-activity aggregator (taskbar indicator step 1)
+- tweak(tool-block): bump post-completion hold from 1s to 5s
+- feat(srv): agent-anchored session zones (backend)
+- feat(agent): default-continue from agent session zones (frontend)
+- feat(focus): instrument LAST_FOCUSED_CHILD on intentional Win32 focus (window-reactivate step 1)
+- feat(picker): two-tier — My Agents + templates
+- feat(picker): hide templates
+- feat(srv): db_agents schema + dual-write
+- feat(srv): migrate read paths to db_agents (Phase 3b)
+- fix(srv): drop parent_instance_id filter from instance_list_named so continuation rows appear in My Agents picker (Option E)
+- fix(srv): make template_promote migration self-idempotent (data-invariant-gated, not marker-gated)
+- fix(agent): pass prior session id through reattach so spawn includes --resume on the first turn
+- fix(agent): failed tool panels collapse after the 5s post-completion hold like successes
+- docs(spec): per-root focus tracking (window-reactivate step 1.5)
+- fix(agent): high-contrast user-input color + no soft-wrap on typed messages
+- fix(agent): mark startup-injection user messages via stream-parser flag
+- fix(agent): UserMessageBlock collapses startup injection on hover, mirrors ToolBlock
+- refactor(focus): per-root LAST_FOCUSED_BY_ROOT map (window-reactivate step 1.5)
+- fix(agent): hover-expanded startup body uses absolute overlay so summary stays under cursor
+- fix(agent): opaque overlay bg + extend hover-anchor to ToolBlock for upward expansion near pane bottom
+- fix(test): exclude .claude/worktrees from vitest discovery to drop 82 duplicate failures
+- fix(test): unstale browser-pane title and ACP openclaw OAuth assertions
+- feat(focus): top-level WM_ACTIVATE handler restores focus on window re-activate (step 2)
+- chore(test): load @testing-library/jest-dom/vitest types in tsconfig (29 tsc errors → 0)
+- feat(common): channels — version-spanning data isolation (Increment A from SPEC_DATA_CHANNELS)
+- fix(window): drop hand-link cursor on title-bar widgets + Windows window controls
+- fix(term): await fonts.ready + NaN guard + post-paint refit to fix jumbled startup render
+- feat(srv): safety lock — refuse to open schema written by newer binary (channels Increment B.1)
+- chore(modal): drop modal-v2 references from comments — canonical modal is the only version
+- feat(network): add LAN discovery toggle to HostPopover with live daemon start/stop
+- feat(modal): parameterize ModalLayer over scope — pane-scope launch modal (SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25)
+- diag(cef): instrument on_auth_credentials + on_load_error entry points (browser-pane auth diagnosis)
+- feat(srv): pre-migration SQLite snapshots — Increment B.2 lean cut from SPEC_DATA_CHANNELS
+- fix(cef): pass --disable-chrome-login-prompt so OnGetAuthCredentials fires (browser-pane HTTP auth modal)
+- feat(browser-pane): wrap browser view in pane-scope ModalLayer (auth modal locks only the pane)
+- feat(modal): compact variant for narrow lock regions (auto-trigger via ResizeObserver)
+- fix(term): use document.fonts.load() to force-load Hack before first fit (#1030 follow-up)
+- fix(term): PSReadLine cursor-desync thaw on terminal init (#1042)
+- feat(warden): add widget shell with three-section (Host/LAN/Internet) scaffold
+- feat(warden): host section renders live agent list from reactive registry
+- feat(warden): host section shows recent jekt audit feed
+- feat(warden): LAN section renders live mDNS peer list
+- feat(warden): host section adds soft-deregister button per agent
+- feat(theme): hard corners on buttons + modals; pills/avatars stay round
+
+
 ## 0.38.3 — 2026-05-23
 
 - feat(widgets): responsive labels collapse to icons on narrow title bars; all widgets pinned by default
