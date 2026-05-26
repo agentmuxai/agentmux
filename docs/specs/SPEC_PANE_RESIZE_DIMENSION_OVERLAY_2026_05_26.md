@@ -25,15 +25,23 @@ hit-testing, focus, or pane content.
 
 ### 2.1 Visibility
 
-The badge mounts on **every visible pane** while `layoutModel.isResizing()`
+The badge mounts on **every visible pane** while `layoutModel.isSplitterDragging()`
 is `true`. It unmounts when the signal flips back to `false` (drag end /
 splitter release / ESC cancel).
+
+**Why not `isResizing()`?** `LayoutModel.isResizing` is true for both
+splitter drags AND container resizes (window resize, initial layout
+observation). Gating on `isResizing` causes the badge to briefly flash
+on every pane during a window resize, which the spec explicitly excludes.
+`isSplitterDragging` is a separate memo that returns true *only* for
+splitter-drag `pendingTreeAction`s. Codex P2 on PR #1057.
 
 | State                                | Badge mounted? |
 |--------------------------------------|----------------|
 | Idle (no drag)                       | No             |
 | Splitter drag in progress            | **Yes (all panes)** |
-| Magnified-pane edge drag in progress | **Yes (all panes)** |
+| Magnified-pane edge drag in progress | **Yes (all panes)** — when wired through `isSplitterDragging` |
+| Window / container resize            | No (intentional — see above) |
 | Pane move drag (pragmatic-dnd reorder) | No (sizes don't change) |
 | Tab tear-off drag                    | No             |
 | Pane being resized via keyboard      | Optional follow-up — out of scope for v1 |

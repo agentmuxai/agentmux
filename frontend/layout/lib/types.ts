@@ -250,6 +250,12 @@ export interface NodeModel {
     addEphemeralNodeToLayout: () => void;
     animationTimeS: Accessor<number>;
     isResizing: Accessor<boolean>;
+    /**
+     * True ONLY when a resize handle (splitter) is being dragged.
+     * Unlike `isResizing`, does NOT flip on window/container resize.
+     * Codex P2 on PR #1057.
+     */
+    isSplitterDragging: Accessor<boolean>;
     isFocused: Accessor<boolean>;
     isMagnified: Accessor<boolean>;
     isEphemeral: Accessor<boolean>;

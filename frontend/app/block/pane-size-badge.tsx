@@ -3,13 +3,14 @@
 
 /**
  * PaneSizeBadge — small `<width>×<height>` overlay rendered at the
- * bottom-left of a pane while any pane in the tab is being resized.
+ * bottom-left of a pane while a splitter is being dragged.
  *
  * Lifetime is gated by the caller (see `blockframe.tsx` — wraps the
- * mount in `<Show when={nodeModel.isResizing()}>`), so this component
- * only exists during a drag. The ResizeObserver attaches on mount
+ * mount in `<Show when={nodeModel.isSplitterDragging()}>`), so this
+ * component only exists during a splitter drag — NOT during window
+ * or container resize. The ResizeObserver attaches on mount
  * (drag start) and detaches on unmount (drag end); zero work runs in
- * the idle steady state. Codex P2 on PR #1057.
+ * the idle steady state. Codex P2 rounds 1 + 2 on PR #1057.
  *
  * Both the seed measurement and the observer callback read the **border
  * box** so the displayed value never jumps when the first ResizeObserver

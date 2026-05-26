@@ -801,12 +801,15 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                     connBtnRef={connBtnRef}
                 />
             </Show>
-            {/* Pane size badge — bottom-left WxH while any pane is being
-                resized. The Show gate keeps the badge component (and its
-                ResizeObserver) mounted *only* during the drag, so idle
-                panes do no observer work. Codex P2 on PR #1057.
+            {/* Pane size badge — bottom-left WxH while a splitter is
+                being dragged. Gated on `isSplitterDragging` (not
+                `isResizing`) so a window-resize tick doesn't flash the
+                badge on every pane. The Show keeps the component (and
+                its ResizeObserver) mounted only during the drag, so
+                idle panes do no observer work. Codex P2 rounds 1 + 2
+                on PR #1057.
                 SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md. */}
-            <Show when={!props.preview && nodeModel.isResizing()}>
+            <Show when={!props.preview && nodeModel.isSplitterDragging()}>
                 <PaneSizeBadge target={frameEl} />
             </Show>
             {/* BlockMask is last in DOM so it paints above all block content,
