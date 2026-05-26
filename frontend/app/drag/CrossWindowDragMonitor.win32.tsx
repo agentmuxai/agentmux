@@ -228,6 +228,13 @@ async function performCrossWindowDrop(
     // The target window handles the actual move when it receives the cross-drag-end event.
 }
 
+// Default floating-pane size when we don't have a captured source rect
+// (the tearoff-pane-size spec — agenta/feat-tearoff-match-source-size —
+// will refine this to use the source pane's measured dimensions). 720×480
+// is a comfortable single-block working area without dominating the screen.
+const DEFAULT_FLOATER_WIDTH = 720;
+const DEFAULT_FLOATER_HEIGHT = 480;
+
 async function performTearOff(
     dragType: "pane" | "tab",
     payload: { blockId?: string; tabId?: string },
@@ -239,21 +246,57 @@ async function performTearOff(
 ) {
     const api = getApi();
     if (dragType === "pane" && payload.blockId) {
-        const newWsId = await WorkspaceService.TearOffBlock(payload.blockId, sourceTabId, sourceWsId, true);
-        if (newWsId) {
-            // Remove the block's node from the source window's layout tree.
-            // The backend removed it from blockids but the frontend layout is independent.
-            const layoutModel = getLayoutModelForStaticTab();
-            if (layoutModel) {
-                const node = layoutModel.getNodeByBlockId(payload.blockId);
-                if (node) {
-                    layoutModel.treeReducer({
-                        type: LayoutTreeActionType.DeleteNode,
-                        nodeId: node.id,
-                    } as LayoutTreeDeleteNodeAction);
-                }
+        // Phase 3 of SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md:
+        // tearing a pane out spawns a floating CHILD window of the
+        // source instance, NOT a new full instance. The block stays
+        // in the source workspace's blockids; we only need to drop
+        // its tile-layout node so the docked pane doesn't render
+        // twice (once in the layout, once in the floater).
+        //
+        // Tab tear-off (branch below) is unchanged — tabs continue
+        // to spawn a brand-new instance with its own taskbar entry.
+        //
+        // CRITICAL: invoke the IPC FIRST, then mutate the layout on
+        // success. If we delete the layout node up front and the IPC
+        // fails (e.g. the H.7 mid-close gate in
+        // `agentmux-cef/src/commands/floating_pane.rs` rejects with
+        // "a pane is currently closing; retry shortly", or any other
+        // error path), the pane would be orphaned — still in
+        // `blockids` but with no layout node and no floater. The user
+        // would see the pane vanish silently. Reagent P1 on PR #1073.
+        try {
+            await invokeCommand<{ window_label: string }>("open_floating_pane_window", {
+                pane_id: payload.blockId,
+                x: screenX,
+                y: screenY,
+                width: DEFAULT_FLOATER_WIDTH,
+                height: DEFAULT_FLOATER_HEIGHT,
+            });
+            Logger.info("dnd:cross", "floating pane spawned", {
+                blockId: payload.blockId,
+                screenX,
+                screenY,
+            });
+        } catch (e) {
+            Logger.error("dnd:cross", "open_floating_pane_window failed — leaving pane docked", {
+                error: String(e),
+                blockId: payload.blockId,
+            });
+            return;
+        }
+        // IPC succeeded → safe to drop the docked node so the pane
+        // doesn't render twice. If we crash between here and the next
+        // statement, the worst case is a transient double-render that
+        // resolves on next layout refresh — survivable.
+        const layoutModel = getLayoutModelForStaticTab();
+        if (layoutModel) {
+            const node = layoutModel.getNodeByBlockId(payload.blockId);
+            if (node) {
+                layoutModel.treeReducer({
+                    type: LayoutTreeActionType.DeleteNode,
+                    nodeId: node.id,
+                } as LayoutTreeDeleteNodeAction);
             }
-            await openTearOffWindow(api, newWsId, screenX, screenY, window.outerWidth, window.outerHeight);
         }
     } else if (dragType === "tab" && payload.tabId) {
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
