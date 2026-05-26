@@ -1,5 +1,12 @@
 # AgentMux Version History
 
+## 0.38.6 — 2026-05-26
+
+- fix(lan): normalize mDNS hostname with .local. suffix so service registration succeeds on Windows / non-mDNS hosts
+- docs(readme): refresh widget table — all-pinned default, add Warden, drop stale More tier
+- feat(common): per-clone Dev isolation — RuntimeMode::Dev now carries clone_id for two-clones-same-branch parity
+- fix(widgets): preserve Solid reactivity in ActionWidget so responsive collapse to icon-only works
+
 ## 0.38.5 — 2026-05-26
 
 - chore: version bump (post-release rebuild to give the next portable a distinct version label from prior 0.38.4 portables on the build machine)
@@ -481,6 +488,7 @@ Auto-appended by `scripts/package-cef-portable.sh`. Newest first.
 
 | Version | Date | ZIP (compressed) | Folder (uncompressed) | Note |
 |---------|------|------------------|-----------------------|------|
+| 0.38.6 | 2026-05-26 | 164.8 MiB | 346.1 MiB | |
 | 0.37.3 | 2026-05-21 | 164.7 MiB | 345.6 MiB | |
 | 0.36.0 | 2026-05-19 | 164.6 MiB | 345.7 MiB | |
 | 0.35.0 | 2026-05-19 | 164.6 MiB | 345.6 MiB | |
