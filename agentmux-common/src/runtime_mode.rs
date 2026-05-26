@@ -42,9 +42,21 @@ pub enum RuntimeMode {
     /// portable binaries are stateless on disk.
     Portable,
     /// Running from a source-tree build. State lives in
-    /// `~/.agentmux/dev/<branch>/` so different branches don't share
-    /// state.
-    Dev { branch: String },
+    /// `~/.agentmux/dev/<branch>/<clone_id>/` so different branches
+    /// AND different clones of the same branch don't share state.
+    ///
+    /// `clone_id` is a 16-char hex hash of the clone's workspace-root
+    /// path, derived by [`derive_clone_id`] when the launcher detects
+    /// Dev mode. `None` is permitted for backward compatibility with
+    /// callers that construct `RuntimeMode::Dev` directly (tests, the
+    /// `dev:branch` env-string parser that pre-dates this field): in
+    /// that case path resolution falls back to the old two-level
+    /// `dev/<branch>/` layout. See
+    /// `docs/analyses/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md`.
+    Dev {
+        branch: String,
+        clone_id: Option<String>,
+    },
 }
 
 impl RuntimeMode {
@@ -74,7 +86,8 @@ impl RuntimeMode {
         //    build-output dir.
         if exe_dir_is_dev_build(exe_dir) {
             let branch = detect_branch(exe_dir);
-            return Self::Dev { branch };
+            let clone_id = derive_clone_id(exe_dir);
+            return Self::Dev { branch, clone_id };
         }
 
         // 4. AGENTMUX_DEV_BRANCH override. The env-var IS the branch
@@ -91,7 +104,11 @@ impl RuntimeMode {
         if let Ok(b) = std::env::var("AGENTMUX_DEV_BRANCH") {
             let slug = sanitize_branch_slug(&b);
             if !slug.is_empty() {
-                return Self::Dev { branch: slug };
+                let clone_id = derive_clone_id(exe_dir);
+                return Self::Dev {
+                    branch: slug,
+                    clone_id,
+                };
             }
         }
 
@@ -120,7 +137,8 @@ impl RuntimeMode {
         }
         if exe_dir_is_dev_build(exe_dir) {
             let branch = detect_branch(exe_dir);
-            return Self::Dev { branch };
+            let clone_id = derive_clone_id(exe_dir);
+            return Self::Dev { branch, clone_id };
         }
         Self::Installed
     }
@@ -131,7 +149,11 @@ impl RuntimeMode {
         match self {
             Self::Installed => "installed".to_string(),
             Self::Portable => "portable".to_string(),
-            Self::Dev { branch } => format!("dev:{}", branch),
+            // clone_id is intentionally NOT encoded here; it round-trips
+            // via a dedicated `AGENTMUX_CLONE_ID` env var so the existing
+            // `dev:<branch>` wire format stays backward-compatible with
+            // older launchers / parsers.
+            Self::Dev { branch, .. } => format!("dev:{}", branch),
         }
     }
 
@@ -150,8 +172,36 @@ impl RuntimeMode {
             // followed by a single-segment branch slug — so callers
             // splitting on `/` see the expected shape and the resulting
             // filesystem path is always a child of `dev/`.
-            Self::Dev { branch } => format!("dev/{}", sanitize_branch_slug(branch)),
+            // Slug includes the clone_id when present so two clones of
+            // the same branch land in distinct subdirs. When clone_id
+            // is None (env-roundtrip or direct test construction), fall
+            // back to the legacy two-level layout for compatibility.
+            Self::Dev { branch, clone_id } => {
+                let b = sanitize_branch_slug(branch);
+                match clone_id.as_deref().map(sanitize_clone_id) {
+                    Some(c) if !c.is_empty() => format!("dev/{}/{}", b, c),
+                    _ => format!("dev/{}", b),
+                }
+            }
         }
+    }
+
+    /// Read the runtime mode AND clone_id from the env vars exported
+    /// by the parent process. Pairs `AGENTMUX_RUNTIME_MODE` (variant +
+    /// branch) with `AGENTMUX_CLONE_ID` (Dev-only clone discriminator).
+    /// This is the version every child process (host, srv) should
+    /// call — [`Self::from_env`] is the legacy single-var form kept
+    /// for callers that don't care about clone isolation.
+    pub fn from_env_with_clone() -> Option<Self> {
+        let mode = Self::from_env()?;
+        if let Self::Dev { branch, .. } = mode {
+            let clone_id = std::env::var("AGENTMUX_CLONE_ID")
+                .ok()
+                .map(|s| sanitize_clone_id(&s))
+                .filter(|s| !s.is_empty());
+            return Some(Self::Dev { branch, clone_id });
+        }
+        Some(mode)
     }
 }
 
@@ -181,14 +231,91 @@ fn parse_mode_string(s: &str) -> Option<RuntimeMode> {
         if slug.is_empty() {
             return None;
         }
-        return Some(RuntimeMode::Dev { branch: slug });
+        // clone_id is not encoded in this wire format — callers that
+        // care about clone isolation should use [`RuntimeMode::from_env_with_clone`]
+        // which pairs this with `AGENTMUX_CLONE_ID`.
+        return Some(RuntimeMode::Dev {
+            branch: slug,
+            clone_id: None,
+        });
     }
     if trimmed.eq_ignore_ascii_case("dev") {
         return Some(RuntimeMode::Dev {
             branch: "default".to_string(),
+            clone_id: None,
         });
     }
     None
+}
+
+// ── Clone-id derivation ────────────────────────────────────────────────
+
+/// Walk up from `exe_dir` looking for a workspace-root marker, then
+/// hash that absolute (canonical) path with FNV-1a and return a 16-char
+/// hex string. Used as the per-clone discriminator in
+/// `~/.agentmux/dev/<branch>/<clone_id>/`. Returns `None` if no marker
+/// is found (extreme edge case — `task dev` always runs from inside a
+/// clone with `.git`/`Cargo.toml`/`Taskfile.yml`).
+///
+/// Recognized markers (any one suffices, in priority order):
+/// `.git` (dir or file — supports git worktrees), `Cargo.toml`,
+/// `Taskfile.yml`. We prefer `.git` because it identifies the literal
+/// clone, but Cargo.toml is a safe fallback (the workspace root has
+/// a `[workspace]` Cargo.toml).
+pub fn derive_clone_id(exe_dir: &Path) -> Option<String> {
+    let root = find_clone_root(exe_dir)?;
+    // Canonicalize to absorb mixed casing on Windows and resolve `..`
+    // segments. Falls back to the raw path if canonicalize fails
+    // (rare on real filesystems but possible on transient mounts).
+    let canonical = root.canonicalize().unwrap_or(root);
+    let s = canonical.to_string_lossy().to_lowercase();
+    Some(format!("{:016x}", fnv1a_64(s.as_bytes())))
+}
+
+fn find_clone_root(start: &Path) -> Option<std::path::PathBuf> {
+    let mut cur = Some(start);
+    while let Some(p) = cur {
+        if p.join(".git").exists()
+            || p.join("Cargo.toml").is_file()
+            || p.join("Taskfile.yml").is_file()
+        {
+            return Some(p.to_path_buf());
+        }
+        cur = p.parent();
+    }
+    None
+}
+
+/// Lenient sanitization for a clone_id received via env. The launcher
+/// produces a clean 16-hex string, but env vars survive process hops
+/// and could be tampered with — refuse anything that contains path
+/// separators or `..` segments before it lands in a filesystem path.
+fn sanitize_clone_id(s: &str) -> String {
+    let trimmed = s.trim();
+    if trimmed.is_empty()
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.contains("..")
+        || trimmed.contains('\0')
+    {
+        return String::new();
+    }
+    trimmed.to_string()
+}
+
+// Tiny FNV-1a-64 kept inline so agentmux-common doesn't have to depend
+// on agentmux-launcher. Matches `agentmux-launcher/src/hash.rs`
+// byte-for-byte so hashes are interchangeable.
+const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+fn fnv1a_64(bytes: &[u8]) -> u64 {
+    let mut hash = FNV_OFFSET_BASIS;
+    for b in bytes {
+        hash ^= *b as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
 }
 
 /// True when `exe_dir` (or its parent on macOS app bundles) contains
@@ -362,9 +489,11 @@ mod tests {
             RuntimeMode::Portable,
             RuntimeMode::Dev {
                 branch: "main".into(),
+                clone_id: None,
             },
             RuntimeMode::Dev {
                 branch: "agenta-feature-x".into(),
+                clone_id: None,
             },
         ] {
             let s = mode.to_env_string();
@@ -378,13 +507,15 @@ mod tests {
         assert_eq!(
             parse_mode_string("dev"),
             Some(RuntimeMode::Dev {
-                branch: "default".into()
+                branch: "default".into(),
+                clone_id: None,
             })
         );
         assert_eq!(
             parse_mode_string("DEV"),
             Some(RuntimeMode::Dev {
-                branch: "default".into()
+                branch: "default".into(),
+                clone_id: None,
             })
         );
     }
@@ -401,7 +532,8 @@ mod tests {
                 assert_eq!(
                     mode,
                     RuntimeMode::Dev {
-                        branch: "main".into()
+                        branch: "main".into(),
+                        clone_id: None,
                     }
                 );
             });
@@ -445,17 +577,29 @@ mod tests {
         assert_eq!(RuntimeMode::Portable.dir_slug(), "versions");
         assert_eq!(
             RuntimeMode::Dev {
-                branch: "main".into()
+                branch: "main".into(),
+                clone_id: None,
             }
             .dir_slug(),
             "dev/main"
         );
         assert_eq!(
             RuntimeMode::Dev {
-                branch: "agenta/x".into()
+                branch: "agenta/x".into(),
+                clone_id: None,
             }
             .dir_slug(),
             "dev/agenta-x"
+        );
+        // With a clone_id, the slug nests one level deeper so two
+        // clones on the same branch land in distinct subdirs.
+        assert_eq!(
+            RuntimeMode::Dev {
+                branch: "main".into(),
+                clone_id: Some("abcdef1234567890".into()),
+            }
+            .dir_slug(),
+            "dev/main/abcdef1234567890"
         );
     }
 
@@ -477,7 +621,7 @@ mod tests {
         // are replaced and `..` segment is dropped).
         let m = parse_mode_string("dev:../versions/x").expect("parses");
         match m {
-            RuntimeMode::Dev { branch } => {
+            RuntimeMode::Dev { branch, .. } => {
                 assert!(!branch.contains(".."));
                 assert!(!branch.contains('/'));
                 assert!(!branch.contains('\\'));
@@ -562,5 +706,107 @@ mod tests {
         assert_eq!(sanitize_branch_slug("foo/../bar"), "foo-bar");
         assert_eq!(sanitize_branch_slug(".hidden"), "hidden");
         assert_eq!(sanitize_branch_slug("ok-branch"), "ok-branch");
+    }
+
+    // ── derive_clone_id ─────────────────────────────────────────────
+
+    #[test]
+    fn derive_clone_id_returns_16_hex_chars_when_marker_present() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        // Plant a Cargo.toml at the root to act as the clone-root marker.
+        std::fs::write(tmp.path().join("Cargo.toml"), b"[workspace]").unwrap();
+        let nested = tmp.path().join("target/release");
+        std::fs::create_dir_all(&nested).unwrap();
+        let id = derive_clone_id(&nested).expect("found");
+        assert_eq!(id.len(), 16);
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn derive_clone_id_is_stable_for_same_clone() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        std::fs::write(tmp.path().join("Taskfile.yml"), b"version: 3").unwrap();
+        let exe = tmp.path().join("dist/cef-dev");
+        std::fs::create_dir_all(&exe).unwrap();
+        let a = derive_clone_id(&exe).unwrap();
+        let b = derive_clone_id(&exe).unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn derive_clone_id_differs_between_clones() {
+        let tmp1 = tempfile::TempDir::new().expect("tempdir1");
+        let tmp2 = tempfile::TempDir::new().expect("tempdir2");
+        for t in [&tmp1, &tmp2] {
+            std::fs::write(t.path().join("Cargo.toml"), b"[workspace]").unwrap();
+        }
+        let id1 = derive_clone_id(tmp1.path()).unwrap();
+        let id2 = derive_clone_id(tmp2.path()).unwrap();
+        assert_ne!(
+            id1, id2,
+            "two clones at different paths must hash to different ids"
+        );
+    }
+
+    #[test]
+    fn derive_clone_id_returns_none_without_marker() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        // No marker at all — caller has no clone root to anchor to.
+        let id = derive_clone_id(tmp.path());
+        assert!(id.is_none());
+    }
+
+    #[test]
+    fn derive_clone_id_walks_up_to_find_marker() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let deep = tmp.path().join("a/b/c/d");
+        std::fs::create_dir_all(&deep).unwrap();
+        // From a deeply nested subdir, we should still find the .git marker.
+        assert!(derive_clone_id(&deep).is_some());
+    }
+
+    #[test]
+    fn sanitize_clone_id_rejects_traversal() {
+        assert_eq!(sanitize_clone_id("../foo"), "");
+        assert_eq!(sanitize_clone_id("a/b"), "");
+        assert_eq!(sanitize_clone_id("a\\b"), "");
+        assert_eq!(sanitize_clone_id("a..b"), "");
+        assert_eq!(sanitize_clone_id(""), "");
+        assert_eq!(sanitize_clone_id("abcdef1234567890"), "abcdef1234567890");
+    }
+
+    #[test]
+    fn from_env_with_clone_populates_clone_id_for_dev() {
+        let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        with_env("AGENTMUX_RUNTIME_MODE", Some("dev:main"), || {
+            with_env("AGENTMUX_CLONE_ID", Some("deadbeefcafebabe"), || {
+                let m = RuntimeMode::from_env_with_clone().unwrap();
+                assert_eq!(
+                    m,
+                    RuntimeMode::Dev {
+                        branch: "main".into(),
+                        clone_id: Some("deadbeefcafebabe".into()),
+                    }
+                );
+            });
+        });
+    }
+
+    #[test]
+    fn from_env_with_clone_leaves_clone_id_none_when_unset() {
+        let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        with_env("AGENTMUX_RUNTIME_MODE", Some("dev:main"), || {
+            with_env("AGENTMUX_CLONE_ID", None, || {
+                let m = RuntimeMode::from_env_with_clone().unwrap();
+                assert_eq!(
+                    m,
+                    RuntimeMode::Dev {
+                        branch: "main".into(),
+                        clone_id: None,
+                    }
+                );
+            });
+        });
     }
 }

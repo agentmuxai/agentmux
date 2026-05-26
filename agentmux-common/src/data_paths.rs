@@ -243,7 +243,7 @@ impl DataPaths {
     /// (it's a fixed ASCII vocabulary).
     pub fn to_env_vars(&self) -> Vec<(&'static str, std::ffi::OsString)> {
         use std::ffi::OsString;
-        vec![
+        let mut vars: Vec<(&'static str, OsString)> = vec![
             ("AGENTMUX_INSTANCE_DIR", self.instance_dir.clone().into_os_string()),
             ("AGENTMUX_DATA_DIR", self.data_dir.clone().into_os_string()),
             ("AGENTMUX_CONFIG_DIR", self.config_dir.clone().into_os_string()),
@@ -260,7 +260,16 @@ impl DataPaths {
             // surface in diagnostics. NOT used to recompute paths
             // (paths flow through the dir vars above).
             ("AGENTMUX_CHANNEL", OsString::from(self.channel.clone())),
-        ]
+        ];
+        // Dev mode also exports AGENTMUX_CLONE_ID so child processes
+        // (host, srv) can reconstruct the full `Dev { branch, clone_id }`
+        // variant via [`RuntimeMode::from_env_with_clone`]. The
+        // mode-string format (`dev:<branch>`) was kept backward-compatible
+        // and doesn't carry clone_id itself — see runtime_mode.rs.
+        if let RuntimeMode::Dev { clone_id: Some(id), .. } = &self.mode {
+            vars.push(("AGENTMUX_CLONE_ID", OsString::from(id.clone())));
+        }
+        vars
     }
 
     /// Reconstruct from env vars set by the launcher. Returns
@@ -278,7 +287,11 @@ impl DataPaths {
         let agents_dir = std::env::var_os("AGENTMUX_AGENTS_DIR")?;
         let instance_runtime_dir = std::env::var_os("AGENTMUX_INSTANCE_RUNTIME_DIR")?;
         let shared_dir = std::env::var_os("AGENTMUX_SHARED_DIR")?;
-        let mode = RuntimeMode::from_env()?;
+        // Pair AGENTMUX_RUNTIME_MODE with AGENTMUX_CLONE_ID so the Dev
+        // variant carries its clone discriminator. Legacy single-var
+        // form (no AGENTMUX_CLONE_ID set) leaves clone_id as None,
+        // which falls back to the pre-PR two-level dev path layout.
+        let mode = RuntimeMode::from_env_with_clone()?;
         // Channel is required from the launcher (same fail-fast
         // discipline as every other dir var). Missing AGENTMUX_CHANNEL
         // means the launcher didn't export it — that's a launcher /
@@ -446,13 +459,32 @@ fn resolve_channel_and_dir(
         }
     }
 
-    // (2) Dev mode default: dev-<branch>, path under dev/<branch>/.
-    if let RuntimeMode::Dev { branch } = mode {
+    // (2) Dev mode default: dev-<branch>[-<clone_id>], path under
+    // dev/<branch>/[<clone_id>/]. The clone_id nests one level deeper
+    // so two clones of the same branch don't collide on data dir,
+    // lockfile, or named-pipe IPC. When clone_id is None (legacy
+    // env-string round-trip or direct test construction) the layout
+    // falls back to the original two-level form for back-compat.
+    // See SPEC_DATA_CHANNELS_2026_05_24.md §2.4 and
+    // docs/analyses/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md.
+    if let RuntimeMode::Dev { branch, clone_id } = mode {
         let safe_branch = sanitize_path_segment(branch).ok_or_else(|| {
             format!("invalid dev branch for path: {:?}", branch)
         })?;
-        let channel = format!("dev-{}", safe_branch);
-        let dir = root.join("dev").join(safe_branch);
+        let safe_clone = clone_id
+            .as_deref()
+            .and_then(sanitize_path_segment)
+            .filter(|s| !s.is_empty());
+        let (channel, dir) = match safe_clone {
+            Some(c) => (
+                format!("dev-{}-{}", safe_branch, c),
+                root.join("dev").join(safe_branch).join(c),
+            ),
+            None => (
+                format!("dev-{}", safe_branch),
+                root.join("dev").join(safe_branch),
+            ),
+        };
         return Ok((channel, dir));
     }
 
@@ -545,6 +577,7 @@ mod tests {
                 "0.33.641",
                 &RuntimeMode::Dev {
                     branch: "main".into(),
+                    clone_id: None,
                 },
             )
             .unwrap();
@@ -573,11 +606,72 @@ mod tests {
     }
 
     #[test]
+    fn dev_paths_under_branch_and_clone_id() {
+        // Two clones of the same branch must resolve to distinct
+        // instance dirs when clone_id is supplied. Same branch +
+        // different clone_id → different paths → distinct lockfile
+        // and pipe namespaces downstream.
+        with_home_override(|root| {
+            clear_channel_env();
+            let a = DataPaths::resolve(
+                "0.39.0",
+                &RuntimeMode::Dev {
+                    branch: "main".into(),
+                    clone_id: Some("aaaaaaaa00000000".into()),
+                },
+            )
+            .unwrap();
+            let b = DataPaths::resolve(
+                "0.39.0",
+                &RuntimeMode::Dev {
+                    branch: "main".into(),
+                    clone_id: Some("bbbbbbbb00000000".into()),
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                a.instance_dir,
+                root.join("dev").join("main").join("aaaaaaaa00000000")
+            );
+            assert_eq!(
+                b.instance_dir,
+                root.join("dev").join("main").join("bbbbbbbb00000000")
+            );
+            assert_ne!(a.instance_dir, b.instance_dir);
+            assert_eq!(a.channel, "dev-main-aaaaaaaa00000000");
+            assert_eq!(b.channel, "dev-main-bbbbbbbb00000000");
+        });
+    }
+
+    #[test]
+    fn dev_paths_legacy_two_level_when_clone_id_none() {
+        // Backward compat: a Dev variant without clone_id (e.g.
+        // constructed by an older launcher binary, or by the
+        // env-string parser) MUST land at the pre-PR two-level dev
+        // path so existing in-flight dev sessions don't lose their
+        // state on first launch after the upgrade.
+        with_home_override(|root| {
+            clear_channel_env();
+            let p = DataPaths::resolve(
+                "0.39.0",
+                &RuntimeMode::Dev {
+                    branch: "main".into(),
+                    clone_id: None,
+                },
+            )
+            .unwrap();
+            assert_eq!(p.instance_dir, root.join("dev").join("main"));
+            assert_eq!(p.channel, "dev-main");
+        });
+    }
+
+    #[test]
     fn dev_paths_under_dev_branch() {
         with_home_override(|root| {
             clear_channel_env();
             let mode = RuntimeMode::Dev {
                 branch: "main".into(),
+                clone_id: None,
             };
             let p = DataPaths::resolve("0.33.639", &mode).unwrap();
             // Dev mode default: on-disk path stays under dev/<branch>/
@@ -619,7 +713,7 @@ mod tests {
 
             let dev = DataPaths::resolve(
                 "0.33.639",
-                &RuntimeMode::Dev { branch: "main".into() },
+                &RuntimeMode::Dev { branch: "main".into(), clone_id: None },
             )
             .unwrap();
             // Override beats the dev/<branch>/ default — channel name
@@ -716,12 +810,12 @@ mod tests {
             clear_channel_env();
             let r = DataPaths::resolve(
                 "0.33.639",
-                &RuntimeMode::Dev { branch: "..".into() },
+                &RuntimeMode::Dev { branch: "..".into(), clone_id: None },
             );
             assert!(r.is_err());
             let r = DataPaths::resolve(
                 "0.33.639",
-                &RuntimeMode::Dev { branch: "foo/bar".into() },
+                &RuntimeMode::Dev { branch: "foo/bar".into(), clone_id: None },
             );
             assert!(r.is_err());
         });
@@ -785,6 +879,7 @@ mod tests {
                 "0.33.639",
                 &RuntimeMode::Dev {
                     branch: "main".into(),
+                    clone_id: None,
                 },
             )
             .unwrap();
@@ -814,10 +909,12 @@ mod tests {
             clear_channel_env();
             let mode = RuntimeMode::Dev {
                 branch: "..".into(),
+                clone_id: None,
             };
             assert!(DataPaths::resolve("0.33.639", &mode).is_err());
             let mode = RuntimeMode::Dev {
                 branch: "foo/bar".into(),
+                clone_id: None,
             };
             assert!(DataPaths::resolve("0.33.639", &mode).is_err());
         });
@@ -938,7 +1035,7 @@ mod tests {
 
             let dev = DataPaths::resolve_path_only(
                 "0.33.639",
-                &RuntimeMode::Dev { branch: "main".into() },
+                &RuntimeMode::Dev { branch: "main".into(), clone_id: None },
             )
             .unwrap();
             // Dev mode default holds — channel name is dev-main, path
@@ -963,7 +1060,7 @@ mod tests {
             // path_only variant.
             let dev_env = DataPaths::resolve(
                 "0.33.639",
-                &RuntimeMode::Dev { branch: "main".into() },
+                &RuntimeMode::Dev { branch: "main".into(), clone_id: None },
             )
             .unwrap();
             assert_eq!(dev_env.channel, "stable");
