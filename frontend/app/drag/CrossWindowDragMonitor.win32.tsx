@@ -246,27 +246,42 @@ async function performTearOff(
 ) {
     const api = getApi();
     if (dragType === "pane" && payload.blockId) {
-        // Phase 3 of SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md:
+        // Phase 2 of SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md (issue #1077):
         // tearing a pane out spawns a floating CHILD window of the
-        // source instance, NOT a new full instance. The block stays
-        // in the source workspace's blockids; we only need to drop
-        // its tile-layout node so the docked pane doesn't render
-        // twice (once in the layout, once in the floater).
+        // source instance, NOT a new full instance. We mirror the
+        // tab tear-off backend model: `TearOffBlock` creates a new
+        // backend workspace+tab containing the block, and the floating
+        // window's `initApp` → `initHostNewWindow` path attaches to
+        // that workspace via the standard `?workspaceId=` URL param.
+        // The floater renders the workspace in floating mode (no tab
+        // bar / widgets / status bar — see App.tsx floatingPaneId branch).
         //
         // Tab tear-off (branch below) is unchanged — tabs continue
         // to spawn a brand-new instance with its own taskbar entry.
-        //
+        const newWsId = await WorkspaceService.TearOffBlock(
+            payload.blockId,
+            sourceTabId,
+            sourceWsId,
+            true,
+        );
+        if (!newWsId) {
+            Logger.error("dnd:cross", "TearOffBlock returned no workspace id", {
+                blockId: payload.blockId,
+            });
+            return;
+        }
         // CRITICAL: invoke the IPC FIRST, then mutate the layout on
         // success. If we delete the layout node up front and the IPC
         // fails (e.g. the H.7 mid-close gate in
         // `agentmux-cef/src/commands/floating_pane.rs` rejects with
         // "a pane is currently closing; retry shortly", or any other
         // error path), the pane would be orphaned — still in
-        // `blockids` but with no layout node and no floater. The user
-        // would see the pane vanish silently. Reagent P1 on PR #1073.
+        // `blockids` but with no layout node and no floater.
+        // Reagent P1 on PR #1073.
         try {
             await invokeCommand<{ window_label: string }>("open_floating_pane_window", {
                 pane_id: payload.blockId,
+                workspace_id: newWsId,
                 x: screenX,
                 y: screenY,
                 width: DEFAULT_FLOATER_WIDTH,
@@ -274,6 +289,7 @@ async function performTearOff(
             });
             Logger.info("dnd:cross", "floating pane spawned", {
                 blockId: payload.blockId,
+                newWsId,
                 screenX,
                 screenY,
             });
@@ -282,12 +298,14 @@ async function performTearOff(
                 error: String(e),
                 blockId: payload.blockId,
             });
+            // TODO(phase-5): undo TearOffBlock here to avoid an orphaned
+            // workspace if the host couldn't create the floating window.
+            // For now we leave the new workspace in place; it's reachable
+            // via the workspace switcher and the user can close it.
             return;
         }
         // IPC succeeded → safe to drop the docked node so the pane
-        // doesn't render twice. If we crash between here and the next
-        // statement, the worst case is a transient double-render that
-        // resolves on next layout refresh — survivable.
+        // doesn't render twice.
         const layoutModel = getLayoutModelForStaticTab();
         if (layoutModel) {
             const node = layoutModel.getNodeByBlockId(payload.blockId);
