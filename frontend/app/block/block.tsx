@@ -39,6 +39,7 @@ import clsx from "clsx";
 import type { JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, Suspense } from "solid-js";
 import "./block.scss";
+import "./pane-size-badge.scss";
 import { BlockErrorBoundary } from "./BlockErrorBoundary";
 import { BlockFrame } from "./blockframe";
 import { blockViewToIcon, blockViewToName } from "./blockutil";

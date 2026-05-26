@@ -33,6 +33,7 @@ import { CopyButton } from "../element/copybutton";
 import { detectAgentColor, detectAgentFromEnv, detectAgentTextColor, getEffectiveTitle } from "./autotitle";
 import { buildPaneContextMenu } from "./pane-actions";
 import { BlockFrameProps } from "./blocktypes";
+import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
 
 const NumActiveConnColors = 8;
@@ -654,6 +655,11 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     let connBtnRef: { current: HTMLDivElement | null } = { current: null };
     const noHeader = util.useAtomValueSafe(props.viewModel?.noHeader);
 
+    // Captured outer-frame ref for PaneSizeBadge. Live as long as the
+    // frame is mounted; cleared on unmount via the callback ref.
+    // SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md.
+    const [frameEl, setFrameEl] = createSignal<HTMLDivElement | undefined>(undefined);
+
     // Agent color for border — matches header color on agent-loaded terminals
     const blockAgentColor = createMemo(() => {
         if (!props.preview && blockData()?.meta?.view === "term") {
@@ -750,7 +756,12 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
             onClick={props.blockModel?.onClick}
             onFocusIn={props.blockModel?.onFocusCapture}
             onContextMenu={onBodyContextMenu}
-            ref={props.blockModel?.blockRef ? (el) => { props.blockModel.blockRef.current = el; } : undefined}
+            ref={(el) => {
+                setFrameEl(el);
+                if (props.blockModel?.blockRef) {
+                    props.blockModel.blockRef.current = el;
+                }
+            }}
             style={
                 {
                     "--magnified-block-opacity": magnifiedBlockOpacity(),
@@ -789,6 +800,17 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                     setChangeConnModalOpen={(v) => changeConnModalAtom._set(v)}
                     connBtnRef={connBtnRef}
                 />
+            </Show>
+            {/* Pane size badge — bottom-left WxH while a splitter is
+                being dragged. Gated on `isSplitterDragging` (not
+                `isResizing`) so a window-resize tick doesn't flash the
+                badge on every pane. The Show keeps the component (and
+                its ResizeObserver) mounted only during the drag, so
+                idle panes do no observer work. Codex P2 rounds 1 + 2
+                on PR #1057.
+                SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md. */}
+            <Show when={!props.preview && nodeModel.isSplitterDragging()}>
+                <PaneSizeBadge target={frameEl} />
             </Show>
             {/* BlockMask is last in DOM so it paints above all block content,
                 including hardware-accelerated WebGL surfaces */}
