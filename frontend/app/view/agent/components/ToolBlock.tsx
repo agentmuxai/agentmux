@@ -132,10 +132,11 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // Stays true for POST_COMPLETION_HOLD_MS after a running tool
     // completes so the user can read the final output line before the
     // panel collapses.
-    // (SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md §Change 3 — bumped from
-    // 1s to 5s on user request after live testing showed 1s was too
-    // tight to actually finish reading the last lines of a Bash/Read.)
-    const POST_COMPLETION_HOLD_MS = 5000;
+    // - Originally 1s (#988).
+    // - Bumped to 5s in #1006 — too tight to finish reading.
+    // - Dropped to 3s 2026-05-26 — 5s felt too long during live
+    //   conversation; user wants it punchier.
+    const POST_COMPLETION_HOLD_MS = 3000;
     const [postCompletionHold, setPostCompletionHold] = createSignal(false);
     // Gate the post-completion hold on a real active → inactive
     // TRANSITION (not on a status-value snapshot). The earlier draft
