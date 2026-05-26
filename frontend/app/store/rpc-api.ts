@@ -1212,6 +1212,39 @@ class RpcApiType {
         return client.rpcCall("geteditorroots", data, opts);
     }
 
+    // ── LSP — Phase 1 of SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md ──────
+    // Backend is a dumb proxy: lspstart spawns (or attaches to) the
+    // server for (workspace, language); lspsend forwards an arbitrary
+    // LSP JSON-RPC message to its stdin; lspstop refcount-decrements.
+    // Server-pushed notifications arrive via the `lsp:message` WS event.
+
+    // command "lspstart" [call]
+    LspStartCommand(
+        client: RpcClient,
+        data: { language: string; file_path: string },
+        opts?: RpcOpts,
+    ): Promise<{ server_id: string; workspace_root: string }> {
+        return client.rpcCall("lspstart", data, opts);
+    }
+
+    // command "lspsend" [call]
+    LspSendCommand(
+        client: RpcClient,
+        data: { server_id: string; message: unknown },
+        opts?: RpcOpts,
+    ): Promise<void> {
+        return client.rpcCall("lspsend", data, opts);
+    }
+
+    // command "lspstop" [call]
+    LspStopCommand(
+        client: RpcClient,
+        data: { server_id: string },
+        opts?: RpcOpts,
+    ): Promise<void> {
+        return client.rpcCall("lspstop", data, opts);
+    }
+
     // command "resolvecli" [call]
     ResolveCliCommand(client: RpcClient, data: CommandResolveCliData, opts?: RpcOpts): Promise<ResolveCliResult> {
         return client.rpcCall("resolvecli", data, opts);

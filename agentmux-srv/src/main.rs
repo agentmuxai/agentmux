@@ -711,6 +711,11 @@ async fn main() {
     // Honor the current setting at boot — starts the daemon if enabled.
     lan_discovery.apply(config_watcher.get_settings().network_lan_discovery);
 
+    // LSP supervisor — owns LSP server child processes. Nothing spawned
+    // until the editor pane calls `lspstart`. Spec:
+    // specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md
+    let lsp_supervisor = Arc::new(backend::lsp::LspSupervisor::new(event_bus.clone()));
+
     // Clean up stale cross-instance agent registry entries (entries older than 4h).
     backend::reactive::registry::cleanup_stale(
         &base::get_wave_data_dir(),
@@ -809,6 +814,7 @@ async fn main() {
         subagent_watcher,
         history_service,
         lan_discovery,
+        lsp_supervisor,
         local_web_url: local_web_url.clone(),
         http_client: reqwest::Client::new(),
         process_tracker,

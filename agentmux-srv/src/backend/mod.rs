@@ -15,6 +15,7 @@ pub mod eventbus;
 pub mod agent_seed;
 pub mod history;
 pub mod lan_discovery;
+pub mod lsp;
 pub mod messagebus;
 pub mod oref;
 pub mod process_tracker;

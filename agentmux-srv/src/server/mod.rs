@@ -34,6 +34,7 @@ use tower_http::cors::{Any, CorsLayer};
 
 use crate::backend::eventbus::EventBus;
 use crate::backend::lan_discovery::LanDiscoveryController;
+use crate::backend::lsp::LspSupervisor;
 use crate::backend::messagebus::MessageBus;
 use crate::backend::reactive::{Poller, ReactiveHandler};
 use crate::backend::storage::filestore::FileStore;
@@ -71,6 +72,11 @@ pub struct AppState {
     /// be toggled at runtime without restarting the process.
     /// See `specs/lan-discovery-toggle.md`.
     pub lan_discovery: Arc<LanDiscoveryController>,
+    /// Language Server Protocol supervisor — owns the lifecycle of LSP
+    /// server child processes (one per workspace/language) and proxies
+    /// LSP messages between the editor pane and the server.
+    /// Spec: `specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md`.
+    pub lsp_supervisor: Arc<LspSupervisor>,
     /// Local HTTP URL of this instance (e.g. "http://127.0.0.1:PORT").
     /// Used for cross-instance inject forwarding and file registry entries.
     pub local_web_url: String,
