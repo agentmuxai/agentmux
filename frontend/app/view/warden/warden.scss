@@ -159,6 +159,33 @@
     }
 }
 
+.warden-host-actions {
+    text-align: right;
+    width: 24px;
+}
+
+.warden-host-deregister {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--main-text-color);
+    opacity: 0.4;
+    cursor: pointer;
+    width: 20px;
+    height: 20px;
+    border-radius: 3px;
+    font-size: 1em;
+    line-height: 1;
+    padding: 0;
+    transition: opacity 100ms ease, background 100ms ease, border-color 100ms ease;
+
+    &:hover {
+        opacity: 1;
+        background: rgba(239, 68, 68, 0.1);
+        border-color: rgba(239, 68, 68, 0.3);
+        color: #ef4444;
+    }
+}
+
 .warden-host-section-divider {
     margin-top: var(--space-2);
     padding-top: var(--space-2);
