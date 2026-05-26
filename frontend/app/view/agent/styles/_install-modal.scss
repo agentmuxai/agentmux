@@ -23,6 +23,19 @@
     :where(.modal-layer-mount--compact) & {
         min-width: 0;
         min-height: 200px;
+
+        // Flex-shrink trap: `.agent-install-modal-term` defaults to
+        // `min-width: auto` (intrinsic content size), so xterm.js
+        // renders at its default 80 cols (~600px canvas) and the
+        // outer `.modal-panel { overflow: auto }` exposes the
+        // overflow as a horizontal scrollbar — modal appears wide
+        // and unshrinkable in narrow panes despite the body's
+        // min-width: 0 override. Force the flex child to allow
+        // sub-content shrinking so FitAddon's first resize tick
+        // lands at the actual pane width.
+        .agent-install-modal-term {
+            min-width: 0;
+        }
     }
 }
 
