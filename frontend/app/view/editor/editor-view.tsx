@@ -132,6 +132,14 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             existing.getState().kind === "ready" &&
             workspaceCovers(existing.getWorkspaceRoot(), filePath)
         ) {
+            // Cancel any pending didChange from the OUTGOING file. The
+            // debounced callback reads model.filePathAtom() at fire time, so
+            // a stale tick would send the previous file's text under the new
+            // file's URI and desync the server until the next keystroke.
+            if (lspChangeDebounce) {
+                clearTimeout(lspChangeDebounce);
+                lspChangeDebounce = null;
+            }
             const prevUri = existing.getOpenedFileUri();
             if (prevUri) {
                 // Best-effort close of the previous file.
