@@ -802,10 +802,12 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 />
             </Show>
             {/* Pane size badge — bottom-left WxH while any pane is being
-                resized. No-op when isResizing() is false.
+                resized. The Show gate keeps the badge component (and its
+                ResizeObserver) mounted *only* during the drag, so idle
+                panes do no observer work. Codex P2 on PR #1057.
                 SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md. */}
-            <Show when={!props.preview}>
-                <PaneSizeBadge nodeModel={nodeModel} target={frameEl} />
+            <Show when={!props.preview && nodeModel.isResizing()}>
+                <PaneSizeBadge target={frameEl} />
             </Show>
             {/* BlockMask is last in DOM so it paints above all block content,
                 including hardware-accelerated WebGL surfaces */}
