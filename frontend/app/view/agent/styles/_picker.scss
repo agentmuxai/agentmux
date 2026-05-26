@@ -105,7 +105,7 @@
         align-items: center;
         gap: var(--space-3);
         padding: var(--space-2) var(--space-3);
-        border-radius: 4px;
+        border-radius: 0;
         background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
 
         &:hover {
@@ -123,7 +123,7 @@
         all: unset;
         cursor: pointer;
         padding: 4px 10px;
-        border-radius: 4px;
+        border-radius: 0;
         font-size: var(--text-xs, 0.75rem);
         font-weight: 500;
         color: var(--accent-color);
@@ -145,7 +145,7 @@
         padding: var(--space-3) 14px;
         border: 1px solid var(--border-color);
         background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
-        border-radius: 6px;
+        border-radius: 0;
         cursor: pointer;
         transition: all 0.15s;
         color: var(--main-text-color);
@@ -202,7 +202,7 @@
             text-transform: uppercase;
             color: #fff; /* stylelint-disable-line color-no-hex */
             background: var(--warning-color, #e9b800);
-            border-radius: 4px 0 4px 0;
+            border-radius: 0;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
             pointer-events: none;
             z-index: 1;
@@ -233,7 +233,7 @@
             color: var(--secondary-text-color);
             background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
             border: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
-            border-radius: 3px;
+            border-radius: 0;
             cursor: pointer;
             opacity: 0;
             transition: opacity 0.12s ease-out, background 0.12s, color 0.12s, border-color 0.12s;
@@ -336,7 +336,7 @@
             color: var(--main-text-color);
             background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
             border: 1px solid var(--accent-color);
-            border-radius: 3px;
+            border-radius: 0;
             padding: 1px 5px;
             outline: none;
 
@@ -354,7 +354,7 @@
             padding: 0;
             border: 1px solid var(--border-color);
             background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
-            border-radius: 3px;
+            border-radius: 0;
             color: var(--main-text-color);
             font-size: 11px;
             cursor: pointer;
@@ -392,7 +392,7 @@
     .agent-card-settings-panel {
         margin: var(--space-1) 0 var(--space-3) 0;
         border: 1px solid var(--accent-color);
-        border-radius: 6px;
+        border-radius: 0;
         background: color-mix(in srgb, var(--main-bg-color) 95%, transparent);
         overflow: hidden;
         // Guarantee a visible content area below the header. Without
@@ -425,7 +425,7 @@
             border: 1px solid var(--border-color);
             background: transparent;
             color: var(--secondary-text-color);
-            border-radius: 4px;
+            border-radius: 0;
             font-size: 12px;
             cursor: pointer;
             transition: all 0.1s;
@@ -451,7 +451,7 @@
             color: var(--secondary-text-color);
             font-size: 14px;
             cursor: pointer;
-            border-radius: 4px;
+            border-radius: 0;
 
             &:hover {
                 color: var(--main-text-color);
@@ -486,7 +486,7 @@
         gap: var(--space-3);
         padding: var(--space-3);
         margin: var(--space-2) 0;
-        border-radius: 6px;
+        border-radius: 0;
         background: rgba(245, 158, 11, 0.08);
         border: 1px solid rgba(245, 158, 11, 0.3);
 

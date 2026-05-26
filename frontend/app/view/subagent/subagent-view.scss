@@ -63,7 +63,7 @@
     font-size: 10px;
     background: var(--highlight-bg-color);
     padding: 1px 5px;
-    border-radius: 3px;
+    border-radius: 0;
     white-space: nowrap;
 }
 
@@ -72,7 +72,7 @@
     font-weight: 600;
     text-transform: uppercase;
     padding: 1px var(--space-1-5);
-    border-radius: 3px;
+    border-radius: 0;
     letter-spacing: 0.5px;
 
     &.subagent-status-active {
@@ -189,7 +189,7 @@
     margin: var(--space-1) 0 var(--space-0-5) var(--space-4);
     padding: var(--space-1-5) var(--space-2);
     background: var(--highlight-bg-color);
-    border-radius: 4px;
+    border-radius: 0;
     font-size: 11px;
     font-family: var(--termfontfamily);
     line-height: 1.4;
@@ -223,7 +223,7 @@
     left: 50%;
     transform: translateX(-50%);
     padding: var(--space-1) var(--space-3);
-    border-radius: 12px;
+    border-radius: 0;
     border: 1px solid var(--border-color);
     background: var(--panel-bg-color);
     color: var(--main-text-color);

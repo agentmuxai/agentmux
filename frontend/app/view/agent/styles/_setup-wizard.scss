@@ -105,7 +105,7 @@
         .setup-wizard-error {
             background: color-mix(in srgb, var(--error-color) 10%, transparent);
             border: 1px solid var(--error-color);
-            border-radius: 4px;
+            border-radius: 0;
             padding: var(--space-2) var(--space-3);
             margin-bottom: var(--space-4);
             font-size: 12px;
@@ -142,7 +142,7 @@
 
         .setup-wizard-cli-card {
             border: 1px solid var(--border-color);
-            border-radius: 4px;
+            border-radius: 0;
             padding: var(--space-3);
             display: flex;
             justify-content: space-between;
@@ -214,7 +214,7 @@
                     code {
                         background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
                         padding: var(--space-0-5) var(--space-1-5);
-                        border-radius: 2px;
+                        border-radius: 0;
                     }
 
                     a {
@@ -255,7 +255,7 @@
             align-items: center;
             gap: var(--space-3);
             border: 1px solid var(--border-color);
-            border-radius: 4px;
+            border-radius: 0;
             padding: var(--space-3);
             cursor: pointer;
             transition: all 0.15s;
@@ -290,7 +290,7 @@
 
         .setup-wizard-summary {
             border: 1px solid var(--border-color);
-            border-radius: 4px;
+            border-radius: 0;
             padding: var(--space-4);
             margin-bottom: var(--space-4);
             display: flex;
@@ -314,7 +314,7 @@
                     code {
                         background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
                         padding: 1px var(--space-1);
-                        border-radius: 2px;
+                        border-radius: 0;
                         font-size: 11px;
                     }
                 }
@@ -329,7 +329,7 @@
 
         .setup-wizard-btn {
             padding: var(--space-2) var(--space-4);
-            border-radius: 4px;
+            border-radius: 0;
             font-size: 12px;
             font-weight: 500;
             cursor: pointer;

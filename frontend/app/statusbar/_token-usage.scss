@@ -17,7 +17,7 @@
     font-size: inherit;
     cursor: pointer;
     white-space: nowrap;
-    border-radius: 2px;
+    border-radius: 0;
     opacity: 0.7;
     transition: background 80ms ease, opacity 80ms ease;
 
@@ -60,7 +60,7 @@
 .token-usage-breakdown {
     background: var(--modal-bg-color);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: 0;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
     color: var(--main-text-color);
     font-size: 12px;
@@ -154,7 +154,7 @@
         font-family: inherit;
         font-size: 11px;
         padding: var(--space-0-5) var(--space-2);
-        border-radius: 3px;
+        border-radius: 0;
         cursor: pointer;
         transition: background 80ms ease, border-color 80ms ease;
 

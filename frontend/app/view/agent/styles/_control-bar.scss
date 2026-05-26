@@ -213,7 +213,7 @@
         padding: 1px var(--space-1-5);
         background: color-mix(in srgb, var(--accent-color) 12%, transparent);
         border: 1px solid color-mix(in srgb, var(--accent-color) 40%, transparent);
-        border-radius: 10px;
+        border-radius: 0;
         color: var(--accent-color);
         font-family: inherit;
         font-size: 10px;
@@ -328,7 +328,7 @@
         background: var(--main-bg-color);
         color: var(--main-text-color);
         border: 1px solid var(--border-color);
-        border-radius: 3px;
+        border-radius: 0;
         padding: var(--space-0-5) var(--space-1);
         font-size: 11px;
         font-family: inherit;

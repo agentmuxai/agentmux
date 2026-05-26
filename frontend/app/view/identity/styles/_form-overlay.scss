@@ -44,7 +44,7 @@
     cursor: pointer;
     font-size: 14px;
     padding: var(--space-0-5) var(--space-1-5);
-    border-radius: 3px;
+    border-radius: 0;
 
     &:hover { background: var(--hover-bg-color); }
 }
@@ -62,7 +62,7 @@
     }
     &::-webkit-scrollbar-thumb {
         background: var(--border-color);
-        border-radius: 2px;
+        border-radius: 0;
     }
 }
 
@@ -83,7 +83,7 @@
     font-size: 12px;
     background: var(--form-element-bg-color);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: 0;
     color: var(--main-text-color);
     outline: none;
     width: 100%;
@@ -98,7 +98,7 @@
     font-size: 12px;
     background: rgba(239, 68, 68, 0.1);
     border: 1px solid rgba(239, 68, 68, 0.3);
-    border-radius: 4px;
+    border-radius: 0;
     color: var(--error-color);
 }
 
@@ -107,7 +107,7 @@
     font-size: 11px;
     background: rgba(245, 158, 11, 0.1);
     border: 1px solid rgba(245, 158, 11, 0.3);
-    border-radius: 4px;
+    border-radius: 0;
     color: var(--warning-color);
 }
 

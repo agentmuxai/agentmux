@@ -34,7 +34,7 @@
     line-height: normal;
     letter-spacing: -0.12px;
     width: 100%;
-    border-radius: 2px;
+    border-radius: 0;
 
     .label {
         @include mixins.ellipsis();
@@ -58,7 +58,7 @@
 
     &:hover {
         background-color: var(--hover-bg-color);
-        border-radius: 2px;
+        border-radius: 0;
     }
 }
 

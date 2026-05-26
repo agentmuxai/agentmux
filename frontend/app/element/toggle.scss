@@ -30,7 +30,10 @@
             right: 0;
             background-color: var(--toggle-bg-color);
             transition: 0.5s;
-            border-radius: 33px;
+            // Toggle slider is a pill switch — explicit exception in
+            // SPEC_HARD_CORNERS_2026_05_26.md (toggles read as round
+            // on purpose). The thumb (`.slider:before`) is 50% below.
+            border-radius: var(--radius-full);
         }
 
         .slider:before {

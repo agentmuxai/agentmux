@@ -48,13 +48,13 @@
         code {
             background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
             padding: 1px var(--space-1);
-            border-radius: 2px;
+            border-radius: 0;
         }
 
         pre {
             background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
             padding: var(--space-1) var(--space-1-5);
-            border-radius: 3px;
+            border-radius: 0;
             overflow-x: auto;
         }
     }
@@ -142,7 +142,7 @@
                 padding: 0 6px;
                 color: var(--accent-color, #2bd4a8);
                 background: rgba(43, 212, 168, 0.08);
-                border-radius: 3px;
+                border-radius: 0;
                 font-family: var(--fixed-font, monospace);
                 font-size: 11px;
                 white-space: nowrap;
@@ -186,7 +186,7 @@
             margin: 4px 0 8px 24px;
             border-left: 2px solid var(--accent-color, #2bd4a8);
             background: var(--surface-elevated, rgba(255, 255, 255, 0.02));
-            border-radius: 0 4px 4px 0;
+            border-radius: 0;
             padding: 6px 8px;
             // `max-height` here is the in-flow default. The
             // overlay variants below override it with an inline
@@ -256,7 +256,7 @@
                 // through. No color-mix here (predictability).
                 background-color: var(--block-bg-solid-color, #1c1c1c);
                 border: 2px solid var(--accent-color, #2bd4a8);
-                border-radius: 4px;
+                border-radius: 0;
                 box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
                 overflow-y: auto;
                 // `max-height` is set inline by ToolBlock from the
@@ -287,7 +287,7 @@
         .agent-tool-open-pane {
             background: none;
             border: 1px solid var(--border-color);
-            border-radius: 3px;
+            border-radius: 0;
             color: var(--accent-color);
             cursor: pointer;
             font-size: 13px;
@@ -323,7 +323,7 @@
             background: var(--accent-color);
             color: var(--main-bg-color);
             border: none;
-            border-radius: 3px;
+            border-radius: 0;
             cursor: pointer;
             font-size: 11px;
 
@@ -442,7 +442,7 @@
         color: var(--secondary-text-color);
         padding: var(--space-1) var(--space-1-5);
         background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
-        border-radius: 3px;
+        border-radius: 0;
     }
 
     // === Bash Output ===
@@ -585,7 +585,7 @@
             .agent-message-body {
                 background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
                 padding: var(--space-1) var(--space-1-5);
-                border-radius: 3px;
+                border-radius: 0;
                 margin: 0;
                 white-space: pre-wrap;
             }
@@ -600,7 +600,7 @@
         padding: var(--space-2) var(--space-3);
         border: 1px solid var(--border-color);
         border-left: 2px solid var(--accent-color);
-        border-radius: 4px;
+        border-radius: 0;
         cursor: pointer;
         transition: all 0.15s;
         user-select: none;
@@ -683,7 +683,7 @@
         padding: 3px var(--space-1);
         background: color-mix(in srgb, var(--user-input-color) 14%, transparent);
         border-left: 3px solid var(--user-input-color);
-        border-radius: 2px;
+        border-radius: 0;
         user-select: text;
         cursor: text;
         // Establish a positioning context for the overlay body
@@ -761,7 +761,7 @@
             // covers. Border doubles as the visual link back to
             // the summary's accent.
             border: 2px solid var(--user-input-color);
-            border-radius: 4px;
+            border-radius: 0;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
             // Same padding as the inline `pre` would have, so the
             // overlay's content lines up with the summary above it.
@@ -871,7 +871,7 @@
                     font-size: 0.9em;
                     line-height: 1;
                     padding: 2px 6px;
-                    border-radius: 3px;
+                    border-radius: 0;
                     cursor: pointer;
                     opacity: 0.6;
 
@@ -939,7 +939,7 @@
         .agent-tool-read-content {
             background: var(--main-bg-color);
             border: 1px solid var(--border-color);
-            border-radius: 3px;
+            border-radius: 0;
             max-height: 400px;
             overflow-y: auto;
             margin: 0;
@@ -976,7 +976,7 @@
             background: var(--main-bg-color);
             border: 1px solid var(--border-color);
             padding: var(--space-1) var(--space-1-5);
-            border-radius: 3px;
+            border-radius: 0;
             max-height: 400px;
             overflow-y: auto;
             margin: 0;
@@ -990,7 +990,7 @@
         background: var(--main-bg-color);
         border: 1px solid var(--border-color);
         padding: var(--space-1) var(--space-1-5);
-        border-radius: 3px;
+        border-radius: 0;
         max-height: 400px;
         overflow-y: auto;
         margin: 0;
@@ -1033,7 +1033,7 @@
             background: var(--main-bg-color);
             border: 1px solid var(--border-color);
             padding: var(--space-1) var(--space-1-5);
-            border-radius: 3px;
+            border-radius: 0;
             max-height: 400px;
             overflow-y: auto;
             margin: var(--space-1) 0 0 0;
