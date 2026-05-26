@@ -1,5 +1,14 @@
 # AgentMux Version History
 
+## 0.38.12 — 2026-05-26
+
+- feat(window): top-bar widget icons become theme-driven, monochrome by default (PR 1 of SPEC_WIDGET_ICON_COLORS)
+- feat(layout): show WxH badge at pane corner during resize
+- fix(modal): structural compact-variant redesign — Phase 1 of MODAL_COMPACT_VARIANT_ARCHITECTURE
+- feat(dev): per-clone Vite port derivation so two task dev instances can run in parallel
+- chore(modal): Phase 2 — replace JS class-toggle with CSS container queries
+
+
 ## 0.38.11 — 2026-05-26
 
 - (no semantic content — internal portable-build counter increment from `task package`; backfilled to satisfy the release-consistency invariant)
