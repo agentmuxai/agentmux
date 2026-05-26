@@ -7,14 +7,19 @@
 
 import { createEffect, createSignal, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import { EditorView, basicSetup } from "codemirror";
-import { EditorState, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { search } from "@codemirror/search";
+import { lintGutter } from "@codemirror/lint";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { settingsAtom } from "@/store/global";
 import type { EditorViewModel } from "./editor-model";
 import { FileTree } from "./file-tree";
+import { LspClient, type LspState } from "./lsp/lsp-client";
+import { lspDiagnosticsExtension } from "./lsp/lsp-extensions";
+import { installHintFor, isLspSupportedLanguage } from "./lsp/install-hints";
 import "./editor-view.scss";
 
 // ── Language loader ─────────────────────────────────────────────────────────
@@ -68,6 +73,66 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     let cmView: EditorView | null = null;
     const [fileInput, setFileInput] = createSignal("");
 
+    // ── LSP integration (Phase 1 — diagnostics for TS/JS) ────────────
+    // One LspClient per (pane, file) — replaced when the file changes
+    // or the language switches. Diagnostics flow through a Compartment
+    // so they can be reconfigured without rebuilding CodeMirror.
+    let lspClient: LspClient | null = null;
+    let lspDiagUnsub: (() => void) | null = null;
+    let lspStateUnsub: (() => void) | null = null;
+    let lspChangeDebounce: ReturnType<typeof setTimeout> | null = null;
+    const [lspState, setLspState] = createSignal<LspState | null>(null);
+    const lintCompartment = new Compartment();
+
+    const teardownLsp = async (): Promise<void> => {
+        if (lspChangeDebounce) {
+            clearTimeout(lspChangeDebounce);
+            lspChangeDebounce = null;
+        }
+        if (lspDiagUnsub) {
+            lspDiagUnsub();
+            lspDiagUnsub = null;
+        }
+        if (lspStateUnsub) {
+            lspStateUnsub();
+            lspStateUnsub = null;
+        }
+        const old = lspClient;
+        lspClient = null;
+        setLspState(null);
+        if (old) {
+            await old.dispose();
+        }
+    };
+
+    const startLspIfSupported = async (
+        filePath: string,
+        language: string,
+        content: string,
+    ): Promise<void> => {
+        // Bail early on unsupported language or master kill switch.
+        if (!isLspSupportedLanguage(language)) return;
+        if (settingsAtom()?.["editor:lsp.enabled"] === false) return;
+
+        await teardownLsp();
+
+        const client = new LspClient(language, filePath);
+        lspClient = client;
+        lspStateUnsub = client.onStateChange(setLspState);
+
+        const ok = await client.start();
+        if (!ok) {
+            // Status is "missing" or "crashed" — banner takes over from here.
+            return;
+        }
+        await client.didOpen(filePath, content, language);
+        if (cmView && lspClient === client) {
+            const [ext, unsub] = lspDiagnosticsExtension(cmView, client);
+            lspDiagUnsub = unsub;
+            cmView.dispatch({ effects: lintCompartment.reconfigure(ext) });
+        }
+    };
+
     // Build or rebuild CodeMirror when content/language changes
     const setupEditor = async (content: string, language: string, readOnly: boolean) => {
         if (!containerRef) return;
@@ -82,10 +147,21 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             basicSetup,
             oneDark,
             search(),
+            lintGutter(),
+            lintCompartment.of([]),
             EditorView.lineWrapping,
             EditorView.updateListener.of((update) => {
                 if (update.docChanged) {
-                    model.onContentChange(update.state.doc.toString());
+                    const content = update.state.doc.toString();
+                    model.onContentChange(content);
+                    // Debounced LSP didChange — Phase 1 ships full-sync,
+                    // which is the simplest and works on every server.
+                    if (lspChangeDebounce) clearTimeout(lspChangeDebounce);
+                    lspChangeDebounce = setTimeout(() => {
+                        if (lspClient && lspClient.getState().kind === "ready") {
+                            void lspClient.didChange(model.filePathAtom(), content);
+                        }
+                    }, 250);
                 }
             }),
             // Ctrl+S → save
@@ -161,19 +237,24 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     // on every keystroke. untrack() prevents SolidJS from subscribing to
     // those inner reads.
     createEffect(() => {
-        const _path = model.filePathAtom(); // reactive dependency
+        const path = model.filePathAtom(); // reactive dependency
         const loading = model.loadingAtom(); // reactive dependency
-        if (!loading && _path && containerRef) {
+        if (!loading && path && containerRef) {
             untrack(() => {
                 const content = model.contentAtom();
                 const lang = model.languageAtom();
                 const readOnly = model.readOnlyAtom();
-                void setupEditor(content, lang, readOnly);
+                void setupEditor(content, lang, readOnly).then(() => {
+                    // Kick off LSP after CodeMirror is up so the Compartment
+                    // reconfigure has somewhere to land.
+                    void startLspIfSupported(path, lang, content);
+                });
             });
         }
     });
 
     onCleanup(() => {
+        void teardownLsp();
         cmView?.destroy();
         cmView = null;
     });
@@ -184,6 +265,52 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             void model.openFile(path);
             setFileInput("");
         }
+    };
+
+    // ── LSP install banner state ──────────────────────────────────────
+    // Dismissed-for-session list keyed by language. Allows the operator
+    // to silence the banner per session; it returns on next launch if the
+    // binary is still missing.
+    const [dismissedLanguages, setDismissedLanguages] = createSignal<Set<string>>(new Set());
+    const lspBannerVisible = (): boolean => {
+        const s = lspState();
+        if (!s || s.kind !== "missing") return false;
+        return !dismissedLanguages().has(s.language);
+    };
+    const dismissBanner = (language: string) => {
+        const next = new Set(dismissedLanguages());
+        next.add(language);
+        setDismissedLanguages(next);
+    };
+    const copyToClipboard = (text: string) => {
+        try {
+            void navigator.clipboard?.writeText(text);
+        } catch {
+            // Clipboard might not be available — silently ignore
+        }
+    };
+    const statusChipText = (): string => {
+        const s = lspState();
+        if (!s) return "";
+        const lang = model.languageAtom();
+        switch (s.kind) {
+            case "starting":
+                return `${lang}: starting…`;
+            case "initializing":
+                return `${lang}: initializing…`;
+            case "ready":
+                return `${lang}: ready`;
+            case "missing":
+                return `${lang}: not installed`;
+            case "crashed":
+                return `${lang}: error`;
+            case "disposed":
+                return "";
+        }
+    };
+    const statusChipKind = (): string => {
+        const s = lspState();
+        return s?.kind ?? "none";
     };
 
     return (
@@ -244,6 +371,55 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                     <div class="editor-error">{model.errorAtom()}</div>
                 </Show>
 
+                {/* LSP install banner — appears when the language server's binary
+                    isn't on PATH. Dismissable per session via the X button. */}
+                <Show when={lspBannerVisible()}>
+                    {(() => {
+                        const state = lspState();
+                        if (!state || state.kind !== "missing") return null;
+                        const hint = installHintFor(state.language);
+                        return (
+                            <div class="editor-lsp-banner" role="status">
+                                <div class="editor-lsp-banner-row">
+                                    <span class="editor-lsp-banner-icon" aria-hidden="true">ⓘ</span>
+                                    <span class="editor-lsp-banner-text">
+                                        {hint?.serverName ?? state.language} not installed.
+                                    </span>
+                                    <button
+                                        class="editor-lsp-banner-dismiss"
+                                        aria-label="Dismiss banner for this session"
+                                        title="Dismiss for this session"
+                                        onClick={() => dismissBanner(state.language)}
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+                                <Show when={hint}>
+                                    <div class="editor-lsp-banner-row editor-lsp-banner-install">
+                                        <span>Install:</span>
+                                        <code class="editor-lsp-banner-cmd">{hint!.install}</code>
+                                        <button
+                                            class="editor-lsp-banner-copy"
+                                            onClick={() => copyToClipboard(hint!.install)}
+                                            title="Copy install command"
+                                        >
+                                            Copy
+                                        </button>
+                                        <a
+                                            class="editor-lsp-banner-docs"
+                                            href={hint!.docs}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                        >
+                                            Docs ↗
+                                        </a>
+                                    </div>
+                                </Show>
+                            </div>
+                        );
+                    })()}
+                </Show>
+
                 <Show
                     when={model.filePathAtom() && !model.loadingAtom()}
                     fallback={
@@ -273,6 +449,15 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                     }
                 >
                     <div class="editor-codemirror" ref={containerRef} />
+                </Show>
+
+                {/* LSP status chip — bottom-of-pane indicator. Only shown when
+                    there's an active client (i.e. an LSP-supported file is open). */}
+                <Show when={lspState() && lspState()?.kind !== "disposed"}>
+                    <div class="editor-lsp-status" data-kind={statusChipKind()}>
+                        <span class="editor-lsp-status-dot" />
+                        <span class="editor-lsp-status-text">{statusChipText()}</span>
+                    </div>
                 </Show>
             </div>
         </div>

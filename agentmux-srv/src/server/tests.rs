@@ -57,6 +57,7 @@ pub(crate) fn test_state() -> AppState {
             0,
             event_bus.clone(),
         )),
+        lsp_supervisor: Arc::new(crate::backend::lsp::LspSupervisor::new(event_bus.clone())),
         process_tracker,
         // Phase E.2c.2 — workspace RPC dispatches through reducer.
         // Tests get fresh state + a dummy broadcast bus.
