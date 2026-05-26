@@ -423,20 +423,24 @@ export function buildCefApi(): AppApi {
                 x: Math.round(x / zoom),
                 y: Math.round(y / zoom),
             }).catch((err) => {
-                // Only fall back to plain DevTools toggle when the backend
-                // doesn't recognize the new IPC (older host binary). The
-                // dispatcher in agentmux-cef/src/ipc.rs returns
-                // "Unknown command: inspect_element_at" for that case.
-                // Other errors (transport hiccup, runtime panic) are
-                // logged but NOT used to trigger the toggle — that would
-                // close already-open DevTools on a transient error, the
-                // opposite of what the user asked for. Codex P2 on #1043.
+                // No fallback. The only candidate (toggle_devtools) is
+                // stateful — it would CLOSE DevTools when already open,
+                // the opposite of what the user asked for by clicking
+                // "Inspect Element". Codex flagged this twice on #1043,
+                // and the right answer is to surface the failure rather
+                // than paper over it with the wrong action. If the host
+                // is mismatched (frontend has the new IPC, host doesn't
+                // yet — e.g. mid-dev-rebuild), the user can fall back
+                // to the hamburger menu's "Dev Tools" toggle manually.
                 const errStr = typeof err === "string" ? err : (err?.message ?? String(err));
                 if (errStr.startsWith("Unknown command")) {
-                    console.warn(`[cef-api] inspect_element_at not supported by host; falling back to toggleDevtools`);
-                    invokeCommand("toggle_devtools", { label }).catch(console.error);
+                    console.warn(
+                        "[cef-api] inspect_element_at not supported by current host. " +
+                        "Rebuild the host binary (task build:backend) to enable Inspect Element; " +
+                        "until then use the hamburger menu's Dev Tools entry."
+                    );
                 } else {
-                    console.error(`[cef-api] inspect_element_at failed:`, err);
+                    console.error("[cef-api] inspect_element_at failed:", err);
                 }
             });
         },
