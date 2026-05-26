@@ -91,6 +91,29 @@ async function fetchHostAudit(): Promise<AuditEntry[]> {
     return Array.isArray(data) ? (data as AuditEntry[]) : [];
 }
 
+/**
+ * Deregister an agent from the local ReactiveHandler. This is a *soft*
+ * enforcement action — it removes the agent's routing entry so future
+ * jekts return "agent not found", but does NOT kill the underlying PTY
+ * process (that's owned by the pane / block controller). The agent's
+ * shell auto-register hook may re-register on its next heartbeat.
+ *
+ * Hard kill (PTY termination) lives outside Warden — see future PR.
+ */
+async function deregisterAgent(agentId: string): Promise<void> {
+    const resp = await fetch(
+        getWebServerEndpoint() + "/agentmux/reactive/unregister",
+        {
+            method: "POST",
+            headers: { ...authedHeaders(), "Content-Type": "application/json" },
+            body: JSON.stringify({ agent_id: agentId }),
+        },
+    );
+    if (!resp.ok) {
+        throw new Error(`warden: POST /agentmux/reactive/unregister → ${resp.status}`);
+    }
+}
+
 function ageMs(ts: number, now: number): number {
     // `last_seen` / `registered_at` are unix millis from the Rust backend.
     return Math.max(0, now - ts);
@@ -129,6 +152,19 @@ const HostSection = (): JSX.Element => {
         }
     };
 
+    const handleDeregister = async (agentId: string) => {
+        const confirmed = globalThis.window?.confirm(
+            `Deregister agent "${agentId}"?\n\nThis removes its routing entry so future jekts return "agent not found". The underlying process keeps running and may re-register on its next heartbeat.`,
+        );
+        if (!confirmed) return;
+        try {
+            await deregisterAgent(agentId);
+            void refresh();
+        } catch (e) {
+            setError(String(e));
+        }
+    };
+
     onMount(() => {
         void refresh();
         const dataTimer = window.setInterval(() => void refresh(), HOST_REFRESH_MS);
@@ -161,6 +197,7 @@ const HostSection = (): JSX.Element => {
                             <th>block</th>
                             <th>last seen</th>
                             <th>state</th>
+                            <th></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -178,6 +215,15 @@ const HostSection = (): JSX.Element => {
                                             <span class={`warden-host-state warden-host-state--${state()}`}>
                                                 {state()}
                                             </span>
+                                        </td>
+                                        <td class="warden-host-actions">
+                                            <button
+                                                class="warden-host-deregister"
+                                                title="Deregister (soft kill — removes from jekt routing, leaves process running)"
+                                                onClick={() => void handleDeregister(a.agent_id)}
+                                            >
+                                                ×
+                                            </button>
                                         </td>
                                     </tr>
                                 );
