@@ -29,7 +29,7 @@
     padding: var(--space-2) var(--space-2-5);
     background: color-mix(in srgb, var(--warning-color, #e9b800) 6%, transparent);
     border: 1px solid color-mix(in srgb, var(--warning-color, #e9b800) 30%, transparent);
-    border-radius: 6px;
+    border-radius: 0;
 }
 
 .agent-prereq-modal-icon {
@@ -85,7 +85,7 @@
     code {
         padding: 1px 4px;
         background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
-        border-radius: 3px;
+        border-radius: 0;
         font-size: 0.9em;
     }
 }

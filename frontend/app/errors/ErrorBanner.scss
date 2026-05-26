@@ -14,7 +14,7 @@
     padding: var(--space-2) var(--space-2-5);
     background: color-mix(in srgb, var(--error-color, #ff6b6b) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--error-color, #ff6b6b) 40%, transparent);
-    border-radius: 6px;
+    border-radius: 0;
     color: var(--main-text-color);
     font-size: var(--text-sm, 13px);
     line-height: 1.4;
@@ -72,7 +72,7 @@
     padding: var(--space-1) var(--space-1-5);
     background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
     border: 1px solid var(--border-color);
-    border-radius: 3px;
+    border-radius: 0;
     font-family: var(--fixed-font, monospace);
     font-size: 11px;
     white-space: pre-wrap;
@@ -91,7 +91,7 @@
     letter-spacing: 0.04em;
     background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
     color: var(--secondary-text-color);
-    border-radius: 3px;
+    border-radius: 0;
     user-select: text;
     white-space: nowrap;
 }

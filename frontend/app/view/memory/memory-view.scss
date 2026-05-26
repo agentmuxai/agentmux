@@ -28,7 +28,7 @@
         background: var(--accent-color);
         color: var(--accent-text-color, #fff);
         border: none;
-        border-radius: 4px;
+        border-radius: 0;
         cursor: pointer;
         font-size: 13px;
 
@@ -89,7 +89,7 @@
         margin-bottom: 12px;
         background: var(--error-bg-color, rgba(255, 80, 80, 0.15));
         color: var(--error-text-color, #ff8080);
-        border-radius: 4px;
+        border-radius: 0;
         font-size: 13px;
     }
 
@@ -142,7 +142,7 @@
         margin: 0;
         padding: 8px;
         background: var(--code-bg-color, rgba(0, 0, 0, 0.2));
-        border-radius: 4px;
+        border-radius: 0;
         white-space: pre-wrap;
         font-family: var(--mono-font, "JetBrains Mono", monospace);
         font-size: 12px;
@@ -162,7 +162,7 @@
     .memory-view-save-btn {
         padding: 6px 14px;
         border: 1px solid var(--border-color);
-        border-radius: 4px;
+        border-radius: 0;
         background: transparent;
         color: var(--main-text-color);
         cursor: pointer;
@@ -219,7 +219,7 @@
         background: var(--input-bg-color, rgba(0, 0, 0, 0.2));
         color: var(--main-text-color);
         border: 1px solid var(--border-color);
-        border-radius: 4px;
+        border-radius: 0;
         font-size: 13px;
         font-family: inherit;
 

@@ -131,7 +131,7 @@
     --modal-bg-color: #232323;
     --modal-header-bottom-border-color: rgba(241, 246, 243, 0.15);
     --modal-border-color: rgba(255, 255, 255, 0.12); /* toggle colors */
-    --modal-border-radius: 6px;
+    --modal-border-radius: 0; /* SPEC_HARD_CORNERS_2026_05_26 */
     --toggle-bg-color: var(--border-color);
     --modal-shadow-color: rgba(0, 0, 0, 0.8);
     --modal-box-shadow: box-shadow: 0px 8px 24px 0px var(--modal-shadow-color);
@@ -260,11 +260,12 @@
     --text-heading: var(--font-weight-bold)   var(--text-xl)   / var(--leading-tight)  var(--font-sans);
     --text-title:   var(--font-weight-bold)   var(--text-2xl)  / var(--leading-tight)  var(--font-sans);
 
-    // Radius scale — chips → modals → pills.
-    --radius-sm:   3px;
-    --radius-md:   6px;
-    --radius-lg:   10px;
-    --radius-xl:   16px;
+    // Radius scale — hard corners on interactive surfaces; pills/avatars
+    // keep `--radius-full`. Spec: SPEC_HARD_CORNERS_2026_05_26.md.
+    --radius-sm:   0;
+    --radius-md:   0;
+    --radius-lg:   0;
+    --radius-xl:   0;
     --radius-full: 9999px;
 
     // Shadow scale. `--shadow-modal` is explicitly named so modal specs

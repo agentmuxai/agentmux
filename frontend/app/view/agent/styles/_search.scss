@@ -26,7 +26,7 @@
         background: var(--main-bg-color);
         color: var(--main-text-color);
         border: 1px solid var(--border-color);
-        border-radius: 3px;
+        border-radius: 0;
         padding: 3px var(--space-1-5);
         font-size: 12px;
         font-family: inherit;
@@ -63,7 +63,7 @@
         justify-content: center;
         background: none;
         border: 1px solid transparent;
-        border-radius: 3px;
+        border-radius: 0;
         cursor: pointer;
         color: var(--secondary-text-color);
         font-size: 11px;
@@ -95,7 +95,7 @@
         background: color-mix(in srgb, var(--accent-color) 10%, transparent) !important; /* stylelint-disable-line declaration-no-important */
         // Left border acts as a gutter indicator
         border-left: 3px solid var(--accent-color) !important; /* stylelint-disable-line declaration-no-important */
-        border-radius: 2px;
+        border-radius: 0;
         // Small padding-left offset to compensate for the border
         padding-left: var(--space-1);
         // Brief animation so the highlight is immediately noticeable when
