@@ -85,8 +85,11 @@ interface AgentComposerStripProps {
     /**
      * Permission mode (`auto` / `plan` / `bypass` / `acceptEdits` /
      * `default`). Renders an inline color-coded pill ONLY when the
-     * mode is NOT `auto` — default mode = quiet UI; any other mode is
-     * a signal worth showing in the strip.
+     * mode is NOT `auto` — `auto` (AI classifier) is the quiet
+     * baseline most users sit in; any other mode (including the
+     * conservative `default = prompt all`) is information worth
+     * surfacing in the strip without an expand. An unknown/legacy
+     * value also hides the pill — see `showPermissionPill`.
      */
     permissionMode?: PermissionMode;
     /** Reducer-projected: details panel open/closed. */
@@ -139,9 +142,19 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return parts.join("  ·  ");
     });
 
-    // Permission pill only renders when NOT the default `auto` mode.
-    const showPermissionPill = (): boolean =>
-        props.permissionMode != null && props.permissionMode !== "auto" && props.permissionMode !== "default";
+    // Permission pill only renders when:
+    //   - the mode is defined AND known (defends against legacy / typo
+    //     values from block meta — an unrecognized key would render an
+    //     empty pill with `undefined` label/color), AND
+    //   - the mode is NOT `auto` (the quiet baseline; AI classifier).
+    // `default` (explicit prompt-all) DOES render the pill — users
+    // expect to see that they're in the conservative mode. Spec §3.2
+    // table row "Permission != Auto". Reagent P2 on PR #1069 caught
+    // the doc/code mismatch + the missing validity gate.
+    const showPermissionPill = (): boolean => {
+        const m = props.permissionMode;
+        return m != null && m !== "auto" && m in PERMISSION_LABELS;
+    };
 
     return (
         <div
