@@ -74,18 +74,19 @@ task package:linux     # Linux AppImage (writes to ~/Desktop)
 
 ## Widgets
 
-The widget bar shows pinned widgets directly; the rest live in a **More** dropdown. Pin/unpin any widget by right-clicking it. The canonical list is `agentmux-srv/src/config/widgets.json`.
+Every widget is pinned by default — the widget bar shows the full set directly, collapsing to icon-only when the title bar is narrow. The canonical list is `agentmux-srv/src/config/widgets.json`.
 
-| Widget | Icon | View | Description | Tier |
-|--------|------|------|-------------|------|
-| **Agent** | sparkles | `agent` | AI agent with streaming output and tool execution | Pinned |
-| **Browser** | globe | `browser` | Embedded native `CefBrowserView` | Pinned |
-| **Terminal** | square-terminal | `term` | Terminal with xterm.js and real PTY | Pinned |
-| **Sysinfo** | chart-line | `sysinfo` | Live system metrics (CPU, memory, network, disk) | Pinned |
-| **Editor** | file-code | `editor` | Code editor with syntax highlighting | More |
-| **Swarm** | bee | `swarm` | Multi-agent orchestration overview | More |
-| **Drone** | diagram-project | `drone` | Visual DAG-of-blocks drone engine | More |
-| **Help** | circle-question | `help` | Built-in documentation and help | More |
+| Widget | Icon | View | Description |
+|--------|------|------|-------------|
+| **Agent** | sparkles | `agent` | AI agent with streaming output and tool execution |
+| **Browser** | globe | `browser` | Embedded native `CefBrowserView` |
+| **Terminal** | square-terminal | `term` | Terminal with xterm.js and real PTY |
+| **Sysinfo** | chart-line | `sysinfo` | Live system metrics (CPU, memory, network, disk) |
+| **Editor** | file-code | `editor` | Code editor with syntax highlighting |
+| **Swarm** | bee | `swarm` | Multi-agent orchestration overview |
+| **Drone** | diagram-project | `drone` | Visual DAG-of-blocks drone engine |
+| **Help** | circle-question | `help` | Built-in documentation and help |
+| **Warden** | shield-halved | `warden` | Monitor and control agents across Host / LAN / Internet layers |
 
 ### Not widgets — opened from elsewhere
 
