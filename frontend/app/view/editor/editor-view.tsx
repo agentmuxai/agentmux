@@ -1,5 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
+//
+// Editor view — file-tree column on the left + CodeMirror on the right.
+// Tree visibility toggled by the header chevron (model.treeExpandedAtom).
+// Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
 
 import { createEffect, createSignal, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import { EditorView, basicSetup } from "codemirror";
@@ -7,7 +11,10 @@ import { EditorState, type Extension } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { search } from "@codemirror/search";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import type { EditorViewModel } from "./editor-model";
+import { FileTree } from "./file-tree";
 import "./editor-view.scss";
 
 // ── Language loader ─────────────────────────────────────────────────────────
@@ -109,6 +116,13 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     };
 
     onMount(() => {
+        // Load file tree root from backend's home dir.
+        void RpcApi.GetEditorHomeCommand(TabRpcClient, {}).then((res) => {
+            if (res?.home) {
+                void model.treeModel.setRootAndLoad(res.home);
+            }
+        });
+
         const content = model.contentAtom();
         const lang = model.languageAtom();
         const readOnly = model.readOnlyAtom();
@@ -144,45 +158,88 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         const path = fileInput().trim();
         if (path) {
             void model.openFile(path);
+            setFileInput("");
         }
     };
 
     return (
-        <div class="editor-view">
-            <Show when={!model.filePathAtom()}>
-                <div class="editor-open-prompt">
-                    <div class="editor-open-label">Open a file</div>
-                    <div class="editor-open-row">
-                        <input
-                            class="editor-open-input"
-                            type="text"
-                            placeholder="/path/to/file.ts"
-                            value={fileInput()}
-                            onInput={(e) => setFileInput(e.currentTarget.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === "Enter") handleOpenFile();
-                            }}
-                        />
-                        <button class="editor-open-btn" onClick={handleOpenFile}>
-                            Open
-                        </button>
-                    </div>
+        <div
+            class="editor-view"
+            classList={{ "editor-view--tree-collapsed": !model.treeExpandedAtom() }}
+        >
+            <Show when={model.treeExpandedAtom()}>
+                <div class="editor-tree-column">
+                    <FileTree
+                        model={model.treeModel}
+                        activeFilePath={model.filePathAtom()}
+                        showHidden={model.showHiddenAtom()}
+                        onFileClick={(path) => void model.openFile(path)}
+                        onToggleHidden={() => void model.toggleShowHidden()}
+                    />
+                    <Show when={!model.filePathAtom()}>
+                        <div class="editor-tree-path-input">
+                            <input
+                                class="editor-open-input"
+                                type="text"
+                                placeholder="/path/to/file.ts"
+                                value={fileInput()}
+                                onInput={(e) => setFileInput(e.currentTarget.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter") handleOpenFile();
+                                }}
+                            />
+                            <button
+                                class="editor-open-btn"
+                                onClick={handleOpenFile}
+                                disabled={!fileInput().trim()}
+                            >
+                                Open
+                            </button>
+                        </div>
+                    </Show>
                 </div>
             </Show>
 
-            <Show when={model.loadingAtom()}>
-                <div class="editor-loading">Loading...</div>
-            </Show>
+            <div class="editor-main-column">
+                <Show when={model.loadingAtom()}>
+                    <div class="editor-loading">Loading...</div>
+                </Show>
 
-            <Show when={model.errorAtom()}>
-                <div class="editor-error">{model.errorAtom()}</div>
-            </Show>
+                <Show when={model.errorAtom()}>
+                    <div class="editor-error">{model.errorAtom()}</div>
+                </Show>
 
-            <div
-                class="editor-codemirror"
-                ref={containerRef}
-                style={{ display: model.filePathAtom() && !model.loadingAtom() ? "block" : "none" }}
-            />
+                <Show
+                    when={model.filePathAtom() && !model.loadingAtom()}
+                    fallback={
+                        <Show when={!model.treeExpandedAtom()}>
+                            <div class="editor-open-prompt">
+                                <div class="editor-open-label">Open a file</div>
+                                <div class="editor-open-row">
+                                    <input
+                                        class="editor-open-input"
+                                        type="text"
+                                        placeholder="/path/to/file.ts"
+                                        value={fileInput()}
+                                        onInput={(e) => setFileInput(e.currentTarget.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter") handleOpenFile();
+                                        }}
+                                    />
+                                    <button class="editor-open-btn" onClick={handleOpenFile}>
+                                        Open
+                                    </button>
+                                </div>
+                                <div class="editor-open-hint">
+                                    Show the file tree from the header chevron to browse your files.
+                                </div>
+                            </div>
+                        </Show>
+                    }
+                >
+                    <div class="editor-codemirror" ref={containerRef} />
+                </Show>
+            </div>
         </div>
     );
 }
