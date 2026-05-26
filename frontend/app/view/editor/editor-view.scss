@@ -1,13 +1,224 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
+//
+// Editor pane: file-tree column on the left + CodeMirror on the right.
+// Tree column visibility toggled by the header chevron.
+// Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
 
 .editor-view {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     height: 100%;
     width: 100%;
     overflow: hidden;
     background: var(--block-bg-color);
+
+    &.editor-view--tree-collapsed {
+        // Only main column visible; tree column not rendered
+    }
+}
+
+// ── Tree column ─────────────────────────────────────────────────────────────
+
+.editor-tree-column {
+    width: 240px;
+    flex: 0 0 240px;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border-color);
+    overflow: hidden;
+    background: var(--secondary-bg-color, var(--block-bg-color));
+}
+
+.editor-tree-path-input {
+    display: flex;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-1-5);
+    border-top: 1px solid var(--border-color);
+    background: var(--block-bg-color);
+
+    .editor-open-input {
+        flex: 1;
+        min-width: 0;
+        width: auto;
+        padding: var(--space-1) var(--space-1-5);
+        font-size: 11px;
+    }
+
+    .editor-open-btn {
+        padding: var(--space-1) var(--space-2);
+        font-size: 11px;
+
+        &:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+    }
+}
+
+// ── File tree ───────────────────────────────────────────────────────────────
+
+.file-tree {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    font-size: 12px;
+    color: var(--main-text-color);
+}
+
+.file-tree-toolbar {
+    display: flex;
+    gap: 2px;
+    padding: var(--space-1);
+    border-bottom: 1px solid var(--border-color);
+    background: var(--secondary-bg-color, var(--block-bg-color));
+}
+
+// Pure-CSS instant tooltip — same pattern as the status bar's `data-tip`,
+// scoped here so it doesn't leak. No JS, no entry animation; tooltip is
+// visible the same frame mouseenter fires.
+.file-tree-toolbar [data-tip] {
+    position: relative;
+
+    &:hover::after,
+    &:focus-visible::after {
+        content: attr(data-tip);
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 50%;
+        transform: translateX(-50%);
+        padding: var(--space-1) var(--space-1-5);
+        background: var(--modal-bg-color, #2a2a2a);
+        color: var(--main-text-color);
+        border: 1px solid var(--border-color);
+        border-radius: 3px;
+        font-size: 11px;
+        white-space: nowrap;
+        pointer-events: none;
+        z-index: 1000;
+    }
+}
+
+.file-tree-toolbar-btn {
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--secondary-text-color);
+    cursor: pointer;
+    font-size: 11px;
+    transition: background 80ms ease, color 80ms ease, border-color 80ms ease;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--main-text-color);
+    }
+
+    &:active {
+        background: rgba(255, 255, 255, 0.1);
+    }
+
+    &--active {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--accent-color);
+        border-color: var(--border-color);
+    }
+}
+
+.file-tree-body {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: var(--space-1) 0;
+}
+
+.file-tree-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 2px var(--space-1);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.04);
+    }
+
+    &--active {
+        background: rgba(var(--accent-color-rgb, 100, 150, 255), 0.15);
+        color: var(--accent-color, var(--main-text-color));
+    }
+
+    &--dir {
+        // Folders read slightly bolder to anchor the eye
+        font-weight: 500;
+    }
+}
+
+.file-tree-chevron {
+    width: 10px;
+    font-size: 9px;
+    color: var(--secondary-text-color);
+    opacity: 0.7;
+    flex: 0 0 auto;
+}
+
+.file-tree-chevron-spacer {
+    width: 10px;
+    flex: 0 0 auto;
+}
+
+.file-tree-icon {
+    width: 14px;
+    font-size: 11px;
+    opacity: 0.8;
+    flex: 0 0 auto;
+    text-align: center;
+}
+
+.file-tree-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.file-tree-symlink {
+    opacity: 0.5;
+    font-size: 10px;
+    margin-left: 2px;
+}
+
+.file-tree-loading {
+    padding: 2px var(--space-1);
+    color: var(--secondary-text-color);
+    font-size: 11px;
+    opacity: 0.6;
+    font-style: italic;
+}
+
+.file-tree-error {
+    padding: 2px var(--space-1);
+    color: var(--error-color, #d97706);
+    font-size: 11px;
+}
+
+// ── Main column (CodeMirror or empty-state) ─────────────────────────────────
+
+.editor-main-column {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 .editor-open-prompt {
@@ -18,10 +229,18 @@
     height: 100%;
     gap: var(--space-3);
     color: var(--secondary-text-color);
+    padding: var(--space-4);
 }
 
 .editor-open-label {
     font-size: 14px;
+}
+
+.editor-open-hint {
+    font-size: 11px;
+    opacity: 0.6;
+    text-align: center;
+    max-width: 320px;
 }
 
 .editor-open-row {
