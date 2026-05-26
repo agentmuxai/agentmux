@@ -9,7 +9,6 @@ import { initLogPipe } from "./log/log-pipe";
 import { initErrorForwarder } from "./log/error-forwarder";
 import { setupCefApi } from "./cef-init";
 import { initApp } from "./app-init";
-import { renderFloatingPaneShell } from "./app/floating-pane/floating-pane-shell";
 import { benchMark } from "@/util/startup-bench";
 import { initPerf } from "@/perf";
 
@@ -114,18 +113,16 @@ async function bootstrap() {
         benchMark("setupCefApi-done");
         log("INFO", "API initialized, window.api available:", !!window.api);
 
-        // Floating pane shell branch — when the host opens a window via
-        // `open_floating_pane_window`, it appends `?floatingPaneId=<id>`
-        // to the URL. We render a minimal shell instead of the full
-        // workspace. See issue #810 / SPEC_FLOATING_PANE_TEAROFF_2026_05_11.
-        const params = new URLSearchParams(window.location.search);
-        const floatingPaneId = params.get("floatingPaneId");
-        if (floatingPaneId) {
-            const windowLabel = params.get("windowLabel") ?? "";
-            log("INFO", `[floating-pane] detected floatingPaneId=${floatingPaneId} — rendering shell`);
-            renderFloatingPaneShell(floatingPaneId, windowLabel);
-            return;
-        }
+        // Floating pane: when the host opens a window via
+        // `open_floating_pane_window` (SPEC_FLOATING_PANE_TEAROFF), it
+        // appends `?floatingPaneId=<id>&workspaceId=<id>` to the URL.
+        // Phase 1 (#810) short-circuited bootstrap to render a placeholder
+        // shell. Phase 2 (#1077) lets the standard `initApp` →
+        // `initHostNewWindow` path handle it: that path already picks up
+        // `?workspaceId=` to attach to the existing workspace, and the
+        // `App` component reads `?floatingPaneId=` to render a chromeless
+        // single-pane layout (no tab bar / widgets / status bar). One
+        // codepath, no synthesized renderers.
 
         // Launch the main application
         log("INFO", "Starting main application (app-init)...");

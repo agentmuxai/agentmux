@@ -38,6 +38,14 @@ pub struct OpenFloatingPaneArgs {
     /// through to the frontend via the query string so the floating-
     /// pane shell knows what to render.
     pub pane_id: String,
+    /// Backend workspace id the floating window should attach to.
+    /// Threaded through the URL so the floater's `initApp` →
+    /// `initHostNewWindow` path picks it up via `?workspaceId=` and
+    /// reuses the existing tear-off plumbing (frontend/app-init.ts:236).
+    /// Optional for back-compat with Phase 1 callers that didn't pass it.
+    /// Issue #1077.
+    #[serde(default)]
+    pub workspace_id: Option<String>,
     /// Screen-space top-left coordinates where the new floating window
     /// should appear. Typically the cursor position at drop time.
     pub x: i32,

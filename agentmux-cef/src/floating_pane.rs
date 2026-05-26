@@ -211,7 +211,14 @@ pub fn post_create_floating_window(
     // pane_id is a UUID-ish identifier in current callers — no
     // percent-encoding needed today. Use a minimal escape that handles
     // a few special chars in case future callers pass arbitrary names.
-    let url = format!(
+    // workspaceId threads through to the floater's `initApp` →
+    // `initHostNewWindow` path which already understands a `?workspaceId=`
+    // URL param (the existing tab tear-off uses the same handoff —
+    // see frontend/app-init.ts:236). Phase 1 floaters didn't pass it
+    // and rendered the placeholder shell; Phase 2 callers (#1077) pass
+    // the newly-created workspace id so the floater renders the actual
+    // `<Block>` via the standard new-window init.
+    let mut url = format!(
         "{}{}ipc_port={}&ipc_token={}&windowLabel={}&floatingPaneId={}",
         base_url,
         separator,
@@ -220,6 +227,10 @@ pub fn post_create_floating_window(
         window_label,
         escape_query_value(&args.pane_id),
     );
+    if let Some(ws_id) = args.workspace_id.as_deref().filter(|s| !s.is_empty()) {
+        url.push_str("&workspaceId=");
+        url.push_str(&escape_query_value(ws_id));
+    }
 
     // Phase B.5 pre-create handoff — same shape as the main
     // open-window path so the existing window_meta plumbing (label →
