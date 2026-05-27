@@ -283,27 +283,27 @@ fn escape_query_value(s: &str) -> String {
 }
 
 /// WndProc for the floating-pane class. Removes the system non-client
-/// area (no native title bar / borders drawn) and maps the frontend's
-/// 30 CSS-px title bar to `HTCAPTION` so the OS handles the drag loop
-/// natively. The close button on the right side of the title bar is
-/// excluded from the drag region so React can receive its click.
+/// area (no native title bar / borders drawn) and maps the 6 CSS-px
+/// edge bands to `HT{LEFT,RIGHT,...}` so the window remains resizable.
 ///
-/// CSS reference (must stay in sync with `frontend/app/workspace/floating-pane-workspace.tsx`):
-///   - title-bar height: 30 CSS px
-///   - close button: 28 CSS px wide, right-anchored; allow 36 CSS px
-///     of click-through to be safe (covers padding-right + button width).
+/// Window-drag is intentionally NOT handled here. We tried HTCAPTION
+/// over the pane header but two problems made it unworkable:
 ///
-/// Edge resize zones (6 physical px) take precedence over `HTCAPTION`
-/// so the corner resize cursors still work when the cursor is in the
-/// title-bar band near a corner.
+///   1. The pane header sits below tile-layout padding (some y-offset
+///      from the window top), so any hard-coded Y range is fragile.
+///   2. Mouse events in an HTCAPTION zone never reach the CEF child
+///      HWND — buttons inside the header (close / magnify / mic /
+///      view-specific endIconButtons) stop responding.
 ///
-/// This mirrors the agentmux frameless-window pattern in
-/// `agentmux-cef/src/client/wndproc.rs::install_frameless_resize_hook`
-/// — extended with `HTCAPTION`. We don't reuse the main window's
-/// JS-driven `useWindowDrag` hook because that path resolves the HWND
-/// via `find_own_top_level_window` (process-wide `EnumWindows`), which
-/// returns whichever top-level window the OS enumerates first — not
-/// necessarily the calling floating pane.
+/// Window drag is instead JS-driven in
+/// `frontend/app/workspace/floating-pane-workspace.tsx`: a targeted
+/// document-level mousedown listener scoped to `[data-role="block-header"]`,
+/// `preventDefault`-ing to suppress the HTML5 dragstart that
+/// pragmatic-dnd would have used (which otherwise tore the pane off
+/// into a second floating window — the "double tear-off" bug). Same
+/// pattern as the main window's `useWindowDrag` hook.
+///
+/// See `docs/analyses/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md`.
 #[cfg(target_os = "windows")]
 unsafe extern "system" fn floating_pane_wndproc(
     hwnd: *mut std::ffi::c_void,
@@ -314,14 +314,12 @@ unsafe extern "system" fn floating_pane_wndproc(
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-    // All zone constants are in CSS / DIP pixels and scaled to physical
-    // pixels per the HWND's DPI inside the WM_NCHITTEST branch. Hard-
-    // coded physical-pixel constants here would shrink the hit zones on
-    // HiDPI monitors — a 6-physical-px resize border is 3 CSS px at 200%
-    // DPI and effectively unreachable.
+    // Edge resize zone in CSS / DIP pixels, scaled to physical pixels
+    // per the HWND's DPI inside the WM_NCHITTEST branch. A hard-coded
+    // physical-pixel constant would shrink the hit zone on HiDPI —
+    // a 6-physical-px resize border is 3 CSS px at 200% DPI and
+    // effectively unreachable.
     const RESIZE_BORDER_CSS: i32 = 6;
-    const TITLEBAR_HEIGHT_CSS: i32 = 30;
-    const CLOSE_BUTTON_ZONE_CSS: i32 = 36;
 
     match msg {
         // Claim the entire window rect as client area — no system title
@@ -337,14 +335,13 @@ unsafe extern "system" fn floating_pane_wndproc(
             let mut rect = std::mem::zeroed::<windows_sys::Win32::Foundation::RECT>();
             GetWindowRect(hwnd, &mut rect);
 
-            // Scale all CSS-px zones to physical px against THIS HWND's
-            // current monitor — handles mid-life monitor changes (the
-            // window can move between monitors at different DPIs).
+            // Scale the resize-border CSS px to physical px against
+            // THIS HWND's current monitor — handles mid-life monitor
+            // changes (the window can move between monitors at
+            // different DPIs).
             let dpi = GetDpiForWindow(hwnd) as i32;
             let dpi = if dpi > 0 { dpi } else { 96 };
             let resize_border_px = (RESIZE_BORDER_CSS * dpi / 96).max(1);
-            let titlebar_px = TITLEBAR_HEIGHT_CSS * dpi / 96;
-            let close_zone_px = CLOSE_BUTTON_ZONE_CSS * dpi / 96;
 
             let left = x - rect.left < resize_border_px;
             let right = rect.right - x < resize_border_px;
@@ -375,10 +372,9 @@ unsafe extern "system" fn floating_pane_wndproc(
                 return HTBOTTOM as isize;
             }
 
-            // Title bar drag zone (excluding close-button click-through).
-            if y - rect.top < titlebar_px && rect.right - x > close_zone_px {
-                return HTCAPTION as isize;
-            }
+            // Pane-header drag is JS-driven (see floating-pane-workspace.tsx);
+            // we don't map any zone to HTCAPTION here. Fall through to
+            // HTCLIENT so clicks reach CEF and the JS handler.
         }
         _ => {}
     }
@@ -404,7 +400,7 @@ fn create_owned_popup(
     use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, RegisterClassExW, ShowWindow, CS_HREDRAW, CS_VREDRAW, SW_SHOWNOACTIVATE,
-        WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_OVERLAPPEDWINDOW, WS_POPUP,
+        WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP, WS_THICKFRAME,
     };
 
     // ---- Register the class once per process ----
@@ -468,11 +464,15 @@ fn create_owned_popup(
             class_name_utf16.as_ptr(),
             title_utf16.as_ptr(),
             // WS_POPUP for free positioning (NOT WS_CHILD — children
-            // are clipped to parent's client area). WS_OVERLAPPEDWINDOW
-            // for the resizable border + sysmenu. Phase 6 will
-            // customize the title bar via WM_NCHITTEST; Phase 1 ships
-            // with the default chrome so drag works out of the box.
-            WS_POPUP | WS_OVERLAPPEDWINDOW,
+            // are clipped to parent's client area). WS_THICKFRAME for
+            // the resize border. NO `WS_CAPTION` — Win32 still reserves
+            // title-bar space for WS_CAPTION windows even when
+            // WM_NCCALCSIZE returns 0, which leaves a system title bar
+            // drawn on top of the client area AND truncates the
+            // effective client size (CEF embedded at (0,0,W,H) overruns
+            // the visible client → content cut off bottom+right). The
+            // frontend's `BlockFrame_Header` is the only chrome.
+            WS_POPUP | WS_THICKFRAME,
             x,
             y,
             width,
@@ -487,6 +487,34 @@ fn create_owned_popup(
     if hwnd.is_null() {
         let err = unsafe { windows_sys::Win32::Foundation::GetLastError() };
         return Err(format!("CreateWindowExW returned NULL (GetLastError={err})"));
+    }
+
+    // Tell DWM to extend the entire frame into the client area. Without
+    // this, DWM keeps drawing the standard Win32 title bar (and the
+    // minimize/maximize/close caption buttons that come with it) on top
+    // of our client area, even though our `WM_NCCALCSIZE → 0` says the
+    // client area fills the window. Mirrors the main-window setup in
+    // `client/wndproc.rs::setup_native_frameless` — combined with our
+    // WndProc's `WM_NCCALCSIZE`/`WM_NCACTIVATE`/`WM_NCHITTEST`, this
+    // gives a truly chrome-free outer HWND. The docked-pane's standard
+    // `BlockFrame_Header` (33 CSS px, `--header-height` in theme.scss:97)
+    // is the sole chrome — drag is JS-driven from
+    // `frontend/app/workspace/floating-pane-workspace.tsx`.
+    unsafe {
+        use windows_sys::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea;
+        use windows_sys::Win32::UI::Controls::MARGINS;
+        let margins = MARGINS {
+            cxLeftWidth: -1,
+            cxRightWidth: -1,
+            cyTopHeight: -1,
+            cyBottomHeight: -1,
+        };
+        let hr = DwmExtendFrameIntoClientArea(hwnd, &margins);
+        if hr != 0 {
+            tracing::warn!(
+                "[floating-pane] DwmExtendFrameIntoClientArea failed hr=0x{hr:08x} — system title bar may still be drawn",
+            );
+        }
     }
 
     unsafe {
