@@ -3,14 +3,24 @@
 
 import {
     autoUpdate,
-    computePosition,
     type Placement,
 } from "@floating-ui/dom";
 import clsx from "clsx";
-import { createEffect, createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 
+import {
+    assertMenuInPaintableArea,
+    computeMenuPosition,
+    type MenuPositionResult,
+} from "@/app/util/menu-position";
+
 import "./flyoutmenu.scss";
+
+/** Serialize a MenuPositionResult.style (position:fixed + left/top) to a CSS string. */
+function styleToString(s: MenuPositionResult["style"]): string {
+    return `position:${s.position};left:${s.left};top:${s.top}`;
+}
 
 type MenuProps = {
     items: MenuItem[];
@@ -25,9 +35,7 @@ type MenuProps = {
 const FlyoutMenu = (props: MenuProps): JSX.Element => {
     const [visibleSubMenus, setVisibleSubMenus] = createSignal<{ [key: string]: any }>({});
     const [hoveredItems, setHoveredItems] = createSignal<string[]>([]);
-    const [subMenuPosition, setSubMenuPosition] = createSignal<{
-        [key: string]: { top: number; left: number; parentLeft: number; label: string };
-    }>({});
+    const [subMenuPosition, setSubMenuPosition] = createSignal<SubMenuPositionMap>({});
 
     const [isOpen, setIsOpen] = createSignal(false);
     const [floatingStyle, setFloatingStyle] = createSignal("position:absolute;left:0px;top:0px");
@@ -48,10 +56,11 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
 
     const updatePosition = async () => {
         if (!referenceEl || !floatingEl) return;
-        const pos = await computePosition(referenceEl, floatingEl, {
-            placement: props.placement ?? "bottom-start",
-        });
-        setFloatingStyle(`position:absolute;left:${pos.x}px;top:${pos.y}px`);
+        const pos = await computeMenuPosition(
+            { anchor: referenceEl, placement: props.placement ?? "bottom-start" },
+            floatingEl,
+        );
+        setFloatingStyle(styleToString(pos.style));
     };
 
     const registerFloating = (el: HTMLElement) => {
@@ -60,6 +69,9 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
             if (!(referenceEl instanceof Element) || !(floatingEl instanceof Element)) return;
             cleanupAutoUpdate?.();
             cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
+            // Dev-only paintable-area guard (spec §6.1); gated so it is
+            // zero-cost in release builds.
+            assertMenuInPaintableArea(el, "flyout-menu");
         });
     };
 
@@ -82,12 +94,10 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
     });
 
     const handleSubMenuPosition = (key: string, itemRect: DOMRect, label: string) => {
-        const scrollTop = window.scrollY || document.documentElement.scrollTop;
-        const scrollLeft = window.scrollX || document.documentElement.scrollLeft;
-        const top = itemRect.top - 2 + scrollTop;
-        const left = itemRect.right + scrollLeft - 2;
-        const parentLeft = itemRect.left + scrollLeft;
-        setSubMenuPosition((prev) => ({ ...prev, [key]: { top, left, parentLeft, label } }));
+        // Store the parent menu item's rect; the SubMenu component routes it
+        // through useMenuPosition (right-start, flips to left-start near the
+        // right edge) — no hand-rolled window-edge math here.
+        setSubMenuPosition((prev) => ({ ...prev, [key]: { anchorRect: itemRect, label } }));
     };
 
     const handleMouseEnterItem = (
@@ -236,7 +246,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
 };
 
 type SubMenuPositionMap = {
-    [key: string]: { top: number; left: number; parentLeft: number; label: string };
+    [key: string]: { anchorRect: DOMRect; label: string };
 };
 
 type SubMenuProps = {
@@ -260,43 +270,49 @@ type SubMenuProps = {
 };
 
 const SubMenu = (props: SubMenuProps): JSX.Element => {
-    let subMenuEl: HTMLDivElement | undefined;
-    let flipped = false;
     const position = () => props.subMenuPosition[props.parentKey];
 
-    createEffect(() => {
-        const pos = position();
-        if (!pos || flipped || !subMenuEl) return;
-        const rect = subMenuEl.getBoundingClientRect();
-        const overflowRight = rect.right - window.innerWidth;
-        const overflowBottom = rect.bottom - window.innerHeight;
-        if (overflowRight <= 0 && overflowBottom <= 0) {
-            flipped = true;
-            return;
-        }
-        flipped = true;
-        props.setSubMenuPosition((prev) => ({
-            ...prev,
-            [props.parentKey]: {
-                label: pos.label,
-                parentLeft: pos.parentLeft,
-                left: overflowRight > 0 ? pos.parentLeft - rect.width + 2 : pos.left,
-                top: overflowBottom > 0
-                    ? window.innerHeight - rect.height - 10 + window.scrollY
-                    : pos.top,
-            },
-        }));
-    });
+    // Submenu positioning routes through the Phase 1 primitive: anchored to the
+    // parent menu item's rect, preferred placement right-start — flip() turns
+    // that into left-start near the right edge, shift() pulls it back inside
+    // near the bottom edge, all paintable-area aware. autoUpdate keeps it live
+    // on scroll/resize (the old one-shot `flipped` flag never re-evaluated).
+    const [subStyle, setSubStyle] = createSignal("position:fixed;left:0px;top:0px");
+    let cleanupAutoUpdate: (() => void) | null = null;
+
+    const registerSubMenu = (el: HTMLDivElement) => {
+        requestAnimationFrame(() => {
+            const pos = position();
+            if (!pos || !(el instanceof Element)) return;
+            const update = async () => {
+                const cur = position();
+                if (!cur) return;
+                const computed = await computeMenuPosition(
+                    { anchor: cur.anchorRect, placement: "right-start" },
+                    el,
+                );
+                setSubStyle(styleToString(computed.style));
+            };
+            cleanupAutoUpdate?.();
+            // anchorRect is a static DOMRect, so autoUpdate's reference is a
+            // virtual element; it still re-runs on scroll/resize.
+            cleanupAutoUpdate = autoUpdate(
+                { getBoundingClientRect: () => position()?.anchorRect ?? pos.anchorRect },
+                el,
+                update,
+            );
+            // Dev-only paintable-area guard (spec §6.1).
+            assertMenuInPaintableArea(el, "submenu");
+        });
+    };
+
+    onCleanup(() => cleanupAutoUpdate?.());
 
     const subMenu = (
         <div
-            ref={(el) => { subMenuEl = el; }}
+            ref={registerSubMenu}
             class="menu sub-menu"
-            style={{
-                top: `${position()?.top ?? 0}px`,
-                left: `${position()?.left ?? 0}px`,
-                position: "absolute",
-            }}
+            style={subStyle()}
             data-pane-overlay
         >
             <For each={props.subItems}>

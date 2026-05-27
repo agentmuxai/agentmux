@@ -8,6 +8,7 @@
 // the React app bootstraps.
 
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import { computeMenuPosition } from "@/app/util/menu-position";
 import { benchMark } from "@/util/startup-bench";
 
 // Cache for "synchronous" values that are fetched once at startup.
@@ -144,6 +145,10 @@ function showJsContextMenu(
     menuEl.setAttribute("data-pane-overlay", "");
     menuEl.style.left = `${position.x}px`;
     menuEl.style.top = `${position.y}px`;
+    // Hidden until computeMenuPosition places it — avoids a one-frame flash
+    // at the cursor and stops the pane-overlay clip from firing for a
+    // not-yet-positioned menu (visibility:hidden de-registers the rect).
+    menuEl.style.visibility = "hidden";
 
     function renderItems(container: HTMLElement, itemList: NativeContextMenuItem[]) {
         for (const item of itemList) {
@@ -216,16 +221,33 @@ function showJsContextMenu(
 
     renderItems(menuEl, items);
 
-    // Clamp to viewport
     overlay.appendChild(menuEl);
     document.body.appendChild(overlay);
-    const rect = menuEl.getBoundingClientRect();
-    if (rect.right > window.innerWidth) {
-        menuEl.style.left = `${Math.max(0, window.innerWidth - rect.width - 4)}px`;
-    }
-    if (rect.bottom > window.innerHeight) {
-        menuEl.style.top = `${Math.max(0, window.innerHeight - rect.height - 4)}px`;
-    }
+
+    // Position at the cursor via the shared framework — flip/shift/size keep
+    // the menu on-screen near window edges. Unlike FlyoutMenu/Popover, a
+    // right-click context menu MUST appear where the user clicked, so
+    // `avoidNativePanes` is OFF: it is *expected* to land over a browser
+    // pane. The `data-pane-overlay` clip reveals it through the native pane;
+    // holding it visibility:hidden until placed means the clip rect registers
+    // once, at the final position — no flapping, no stale-rect black artifact.
+    void computeMenuPosition(
+        {
+            anchor: { x: position.x, y: position.y },
+            placement: "bottom-start",
+            avoidNativePanes: false,
+        },
+        menuEl,
+    ).then((pos) => {
+        if (!menuEl.isConnected) return;
+        if (pos.style.left != null) menuEl.style.left = String(pos.style.left);
+        if (pos.style.top != null) menuEl.style.top = String(pos.style.top);
+        menuEl.style.visibility = "";
+    }).catch(() => {
+        // computeMenuPosition should not throw; if it does, fall back to the
+        // raw cursor position rather than leaving the menu invisible.
+        if (menuEl.isConnected) menuEl.style.visibility = "";
+    });
 }
 
 /**
