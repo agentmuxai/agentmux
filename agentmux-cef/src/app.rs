@@ -525,8 +525,14 @@ wrap_browser_process_handler! {
                     // Production or portable: always use IPC server
                     format!("http://127.0.0.1:{}", self.ipc_port)
                 } else {
-                    // Dev mode only: Vite HMR server
-                    "http://localhost:5173".to_string()
+                    // Dev mode only: Vite HMR server. Honor AGENTMUX_VITE_PORT
+                    // (per-clone port from Taskfile.yml dev:serve); see
+                    // docs/analyses/ANALYSIS_DEV_VITE_PORT_HARDCODE_2026-05-26.md.
+                    let port: u16 = std::env::var("AGENTMUX_VITE_PORT")
+                        .ok()
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(5173);
+                    format!("http://localhost:{}", port)
                 }
             } else {
                 base_url
