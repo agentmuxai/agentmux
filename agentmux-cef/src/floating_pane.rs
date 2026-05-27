@@ -419,7 +419,7 @@ fn create_owned_popup(
     use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, RegisterClassExW, ShowWindow, CS_HREDRAW, CS_VREDRAW, SW_SHOWNOACTIVATE,
-        WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_OVERLAPPEDWINDOW, WS_POPUP,
+        WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP, WS_THICKFRAME,
     };
 
     // ---- Register the class once per process ----
@@ -483,11 +483,15 @@ fn create_owned_popup(
             class_name_utf16.as_ptr(),
             title_utf16.as_ptr(),
             // WS_POPUP for free positioning (NOT WS_CHILD — children
-            // are clipped to parent's client area). WS_OVERLAPPEDWINDOW
-            // for the resizable border + sysmenu. Phase 6 will
-            // customize the title bar via WM_NCHITTEST; Phase 1 ships
-            // with the default chrome so drag works out of the box.
-            WS_POPUP | WS_OVERLAPPEDWINDOW,
+            // are clipped to parent's client area). WS_THICKFRAME for
+            // the resize border. NO `WS_CAPTION` — Win32 still reserves
+            // title-bar space for WS_CAPTION windows even when
+            // WM_NCCALCSIZE returns 0, which leaves a system title bar
+            // drawn on top of the client area AND truncates the
+            // effective client size (CEF embedded at (0,0,W,H) overruns
+            // the visible client → content cut off bottom+right). The
+            // frontend's `BlockFrame_Header` is the only chrome.
+            WS_POPUP | WS_THICKFRAME,
             x,
             y,
             width,
