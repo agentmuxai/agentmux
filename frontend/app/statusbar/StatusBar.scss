@@ -330,7 +330,12 @@
                 width: 12px;
                 height: 12px;
                 background: var(--main-bg-color, #fff);
-                border-radius: 50%;
+                // Square thumb — matches the canonical Toggle component
+                // and the rest of the chrome's hard-corners design
+                // (2026-05-26 toggle audit; supersedes the round-thumb
+                // detail that was still here after the broader
+                // SPEC_HARD_CORNERS_2026_05_26 sweep).
+                border-radius: 0;
                 transition: transform 120ms ease;
             }
 

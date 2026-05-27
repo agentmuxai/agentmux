@@ -30,10 +30,12 @@
             right: 0;
             background-color: var(--toggle-bg-color);
             transition: 0.5s;
-            // Toggle slider is a pill switch — explicit exception in
-            // SPEC_HARD_CORNERS_2026_05_26.md (toggles read as round
-            // on purpose). The thumb (`.slider:before`) is 50% below.
-            border-radius: var(--radius-full);
+            // Square toggle — per 2026-05-26 user request, toggles join
+            // the rest of the chrome on hard corners. The previous
+            // SPEC_HARD_CORNERS_2026_05_26 exception (toggles stayed
+            // round) is rescinded. Pills/avatars/status-dots still use
+            // --radius-full; toggle track + thumb are now square.
+            border-radius: 0;
         }
 
         .slider:before {
@@ -45,7 +47,7 @@
             bottom: 2px;
             background-color: var(--toggle-thumb-color);
             transition: 0.5s;
-            border-radius: 50%;
+            border-radius: 0;
         }
 
         input:checked + .slider {
