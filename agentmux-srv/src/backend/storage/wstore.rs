@@ -2107,13 +2107,27 @@ impl WaveStore {
                   status, github_context, started_at, ended_at, created_at,
                   identity_id, memory_id, instance_name, working_directory,
                   display_hidden, root_id) AS (
+                -- Anchor: a row is its own root if it has no parent OR
+                -- its parent no longer exists in the table. The latter
+                -- case (orphan continuation) happens when
+                -- `deleteagentinstance` hard-deletes a chain head —
+                -- there's no FK cascade, so descendant rows remain. If
+                -- we seeded only from `parent_instance_id = ''`,
+                -- orphans would be unreachable by the recursive walk
+                -- and disappear from My Agents even though they're
+                -- recoverable sessions. Codex P2 on PR #1096
+                -- bbe897cc → orphan-as-root anchor.
                 SELECT id, definition_id, parent_instance_id, block_id, session_id,
                        status, github_context, started_at, ended_at, created_at,
                        identity_id, memory_id, instance_name, working_directory,
                        display_hidden,
                        id
-                FROM db_agent_instances
-                WHERE parent_instance_id = ''
+                FROM db_agent_instances p
+                WHERE p.parent_instance_id = ''
+                   OR NOT EXISTS (
+                       SELECT 1 FROM db_agent_instances q
+                       WHERE q.id = p.parent_instance_id
+                   )
                 UNION ALL
                 SELECT c.id, c.definition_id, c.parent_instance_id, c.block_id,
                        c.session_id, c.status, c.github_context, c.started_at,
@@ -4405,6 +4419,55 @@ mod tests {
         // MRU order: b-head (200) before a-cont (150).
         assert_eq!(rows[0].id, "b-head");
         assert_eq!(rows[1].id, "a-cont");
+    }
+
+    #[test]
+    fn instance_list_named_picker_mode_orphan_continuation_surfaces() {
+        // Regression for codex P2 on PR #1096 bbe897cc: when a chain
+        // head is hard-deleted via `deleteagentinstance` (no FK
+        // cascade on `parent_instance_id`), descendant continuation
+        // rows are orphaned — `parent_instance_id` points at an id
+        // that no longer exists.
+        //
+        // The recursive CTE anchor must seed from BOTH (a) real
+        // heads (`parent_instance_id = ''`) and (b) orphans (parent
+        // doesn't exist in the table). Without the orphan anchor,
+        // the recursive walk can't reach them and they disappear
+        // from My Agents — even though they're recoverable sessions
+        // the previous (buggy) query surfaced.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        // Seed a chain: head + 2 continuations.
+        let mut head = make_named_inst("inst-deleted-head", "Claude", &agents_root);
+        head.started_at = 100;
+        store.instance_create(&head).unwrap();
+
+        let mut cont1 = make_named_inst("inst-orphan-cont1", "Claude", &agents_root);
+        cont1.parent_instance_id = "inst-deleted-head".to_string();
+        cont1.started_at = 200;
+        store.instance_create(&cont1).unwrap();
+
+        let mut cont2 = make_named_inst("inst-orphan-cont2", "Claude", &agents_root);
+        cont2.parent_instance_id = "inst-orphan-cont1".to_string();
+        cont2.started_at = 300;
+        store.instance_create(&cont2).unwrap();
+
+        // Hard-delete the head — no cascade, so cont1 + cont2 are
+        // now orphaned (cont1.parent_instance_id points at the
+        // deleted head; cont2 still has a valid parent).
+        store.instance_delete("inst-deleted-head").unwrap();
+
+        let rows = store.instance_list_named(10, None, true).unwrap();
+        // The orphan chain (cont1 → cont2) must surface as ONE row:
+        // cont1 becomes a root (its parent is gone); cont2 chains
+        // off cont1. Newest in chain (cont2) wins.
+        assert_eq!(
+            rows.len(),
+            1,
+            "orphan chain must remain reachable after head deletion"
+        );
+        assert_eq!(rows[0].id, "inst-orphan-cont2");
     }
 
     #[test]
