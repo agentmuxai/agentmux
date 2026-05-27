@@ -102,32 +102,48 @@ function flushClip(): void {
     //     whose layout has the panes elsewhere. No clip work needed
     //     and no holes to punch.
     //
-    // We DO still need to fire when the previous clip was non-empty and
-    // the new one is empty (a "clear" — the menu just closed and the
-    // pane has to be made whole again). The lastDispatchedKey gate
-    // catches that: empty-now-after-non-empty differs from empty-now-
-    // after-empty.
+    // CRITICAL: when transitioning from "previously intersecting" to
+    // "now does not intersect" (e.g. an overlay moves off the pane,
+    // or its rect shrinks to non-overlapping), we MUST dispatch a
+    // clearing IPC — otherwise Rust keeps the prior clip applied and
+    // the pane shows a transparent hole where the overlay used to be.
+    // The "previously intersecting" state is whether
+    // `lastDispatchedKey` is non-empty (= we last dispatched some
+    // non-empty rect set to Rust).
+    const intersects = rects.length > 0 && paneCount() > 0 && rects.some(anyPaneIntersects);
+    const wasNonEmpty = lastDispatchedKey !== "";
     let needIpc: boolean;
-    if (rects.length === 0) {
-        needIpc = lastDispatchedKey !== "";
-    } else if (paneCount() === 0) {
-        needIpc = false;
+    if (intersects) {
+        needIpc = true;
+    } else if (wasNonEmpty) {
+        // We last sent a non-empty clip; now nothing intersects (either
+        // overlay rect changed or the panes moved). Dispatch a CLEARING
+        // IPC with empty rects so Rust resets each pane's region.
+        needIpc = true;
     } else {
-        needIpc = rects.some(anyPaneIntersects);
+        // Nothing intersected before, nothing intersects now → no-op.
+        needIpc = false;
     }
-    const key = rectsKey(rects);
+
     if (!needIpc) {
-        lastDispatchedKey = key;
+        // No IPC fired → don't touch lastDispatchedKey. The dedup gate
+        // remains correctly anchored to whatever Rust last received.
         return;
     }
+    // What we'll actually send: the intersecting set when there IS an
+    // intersection, else an explicit empty set to clear.
+    const rectsToSend = intersects ? rects : [];
+    const sendKey = rectsKey(rectsToSend);
     // Identical-rect deduplication — if the menu closes-then-reopens
     // exactly the same overlay rect within one tick, skip the redundant
     // IPC. Most observed-rect change cycles aren't identical, so this
     // is a small bonus on top of the rAF coalesce.
-    if (key === lastDispatchedKey) return;
-    lastDispatchedKey = key;
+    if (sendKey === lastDispatchedKey) return;
+    lastDispatchedKey = sendKey;
     const window_label = currentWindowLabel();
-    invokeCommand("browser_panes_set_overlay_clip", { rects, window_label }).catch(() => {});
+    invokeCommand("browser_panes_set_overlay_clip", { rects: rectsToSend, window_label }).catch(
+        () => {},
+    );
 }
 
 /** Test-only. Forces a synchronous flush — useful in vitest where the

@@ -423,7 +423,8 @@ impl BrowserPaneManager {
     ) {
         use windows_sys::Win32::Foundation::{POINT, RECT};
         use windows_sys::Win32::Graphics::Gdi::{
-            CombineRgn, CreateRectRgn, DeleteObject, MapWindowPoints, SetWindowRgn, RGN_DIFF,
+            CombineRgn, CreateRectRgn, DeleteObject, InvalidateRect, MapWindowPoints, SetWindowRgn,
+            RGN_DIFF,
         };
         use windows_sys::Win32::UI::WindowsAndMessaging::{
             GetAncestor, GetParent, GetWindowRect, GA_ROOT,
@@ -481,8 +482,22 @@ impl BrowserPaneManager {
 
             unsafe {
                 // Empty overlay list = restore full visibility (region=NULL).
+                // bRedraw=FALSE (0) — see #1097 fix #5. With bRedraw=TRUE
+                // SetWindowRgn does a SYNCHRONOUS redraw inside the call
+                // (it sends WM_WINDOWPOSCHANGING/CHANGED + a paint pass),
+                // which serializes against the IPC handler. Passing FALSE
+                // updates the region without painting; an explicit
+                // InvalidateRect schedules WM_PAINT for the NEXT message
+                // pump tick. For a menu hover that re-fires this code path
+                // several times per gesture, that's a material win.
                 if overlay_rects.is_empty() {
-                    SetWindowRgn(pane_hwnd as _, std::ptr::null_mut(), 1);
+                    SetWindowRgn(pane_hwnd as _, std::ptr::null_mut(), 0);
+                    // The pane is being made WHOLE again — the previously
+                    // hidden sub-area needs to repaint its content. We
+                    // don't track the diff yet (Phase 2 follow-up), so
+                    // invalidate the entire pane; CEF will paint only
+                    // dirty regions on the next pump.
+                    InvalidateRect(pane_hwnd as _, std::ptr::null(), 0);
                     continue;
                 }
 
@@ -535,7 +550,14 @@ impl BrowserPaneManager {
                 // SetWindowRgn takes ownership of the region handle on
                 // success; the system frees it when the window is destroyed
                 // or a new region is set.
-                SetWindowRgn(pane_hwnd as _, region as _, 1);
+                // bRedraw=FALSE — async paint via InvalidateRect below.
+                // See the empty-overlay branch above for the rationale.
+                SetWindowRgn(pane_hwnd as _, region as _, 0);
+                // The clip may have GROWN (more area hidden) or SHRUNK
+                // (less area hidden); we don't track the diff yet, so
+                // invalidate the whole pane. CEF dirty-region painting
+                // keeps the actual GPU work proportional to the change.
+                InvalidateRect(pane_hwnd as _, std::ptr::null(), 0);
             }
         }
         tracing::info!(
