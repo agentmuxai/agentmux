@@ -16,6 +16,7 @@
 // See `BROWSER_PANE_Z_ORDER_FOCUS_REPORT.md` Issue 1 for the full diagnosis.
 
 import { invokeCommand } from "@/app/platform/ipc";
+import { anyPaneIntersects, paneCount } from "@/app/platform/pane-rect-registry";
 import { onCleanup, onMount, type Accessor } from "solid-js";
 
 interface OverlayRect {
@@ -50,14 +51,112 @@ function currentWindowLabel(): string {
     }
 }
 
+// Per-frame coalescing: every overlay add/remove/resize used to fire its
+// own IPC synchronously. A single menu hover transition emits 2–3 rect
+// changes in the same microtask checkpoint (Show toggle off, Show toggle
+// on, overflow-correction re-write), so we'd send 2–3 separate
+// SetWindowRgn fan-outs for one user gesture. Batching into one rAF tick
+// is the dominant win — see discussion #1097, fix #2.
+//
+// Visible-for-tests scheduling state: a Solid signal would create a
+// reactive owner dependency on whichever component triggered the first
+// scheduleSendClip call, which isn't what we want — the schedule is
+// global.
+let clipScheduled = false;
+let lastDispatchedKey = "";
+
+function rectsKey(rects: readonly OverlayRect[]): string {
+    if (rects.length === 0) return "";
+    let s = "";
+    for (const r of rects) s += `${r.x},${r.y},${r.w},${r.h}|`;
+    return s;
+}
+
 function sendClip(): void {
+    if (clipScheduled) return;
+    clipScheduled = true;
+    // rAF is the correct queue: the user gesture's DOM mutations have
+    // already committed by the time the rAF fires, so we send the
+    // settled state instead of the in-flight one.
+    requestAnimationFrame(() => {
+        clipScheduled = false;
+        flushClip();
+    });
+}
+
+function flushClip(): void {
     const rects: OverlayRect[] = [];
     for (const r of overlayRects.values()) rects.push(r);
     for (const r of autoOverlayRects.values()) {
         if (r.w > 0 && r.h > 0) rects.push(r);
     }
+
+    // Short-circuits — see discussion #1097, fix #1.
+    //
+    // (a) Zero panes alive in this window? The Rust handler would no-op
+    //     anyway after iterating an empty pane list, but we still pay
+    //     the HTTP round-trip + JSON serialize/parse + main-thread
+    //     await. Skip entirely.
+    // (b) Overlay rects don't intersect any pane? Common case for the
+    //     hamburger menu, statusbar popovers, tooltips in a workspace
+    //     whose layout has the panes elsewhere. No clip work needed
+    //     and no holes to punch.
+    //
+    // CRITICAL: when transitioning from "previously intersecting" to
+    // "now does not intersect" (e.g. an overlay moves off the pane,
+    // or its rect shrinks to non-overlapping), we MUST dispatch a
+    // clearing IPC — otherwise Rust keeps the prior clip applied and
+    // the pane shows a transparent hole where the overlay used to be.
+    // The "previously intersecting" state is whether
+    // `lastDispatchedKey` is non-empty (= we last dispatched some
+    // non-empty rect set to Rust).
+    const intersects = rects.length > 0 && paneCount() > 0 && rects.some(anyPaneIntersects);
+    const wasNonEmpty = lastDispatchedKey !== "";
+    let needIpc: boolean;
+    if (intersects) {
+        needIpc = true;
+    } else if (wasNonEmpty) {
+        // We last sent a non-empty clip; now nothing intersects (either
+        // overlay rect changed or the panes moved). Dispatch a CLEARING
+        // IPC with empty rects so Rust resets each pane's region.
+        needIpc = true;
+    } else {
+        // Nothing intersected before, nothing intersects now → no-op.
+        needIpc = false;
+    }
+
+    if (!needIpc) {
+        // No IPC fired → don't touch lastDispatchedKey. The dedup gate
+        // remains correctly anchored to whatever Rust last received.
+        return;
+    }
+    // What we'll actually send: the intersecting set when there IS an
+    // intersection, else an explicit empty set to clear.
+    const rectsToSend = intersects ? rects : [];
+    const sendKey = rectsKey(rectsToSend);
+    // Identical-rect deduplication — if the menu closes-then-reopens
+    // exactly the same overlay rect within one tick, skip the redundant
+    // IPC. Most observed-rect change cycles aren't identical, so this
+    // is a small bonus on top of the rAF coalesce.
+    if (sendKey === lastDispatchedKey) return;
+    lastDispatchedKey = sendKey;
     const window_label = currentWindowLabel();
-    invokeCommand("browser_panes_set_overlay_clip", { rects, window_label }).catch(() => {});
+    invokeCommand("browser_panes_set_overlay_clip", { rects: rectsToSend, window_label }).catch(
+        () => {},
+    );
+}
+
+/** Test-only. Forces a synchronous flush — useful in vitest where the
+ *  rAF callback would otherwise never fire under happy-dom. */
+export function __flushPaneOverlayClipForTests(): void {
+    clipScheduled = false;
+    flushClip();
+}
+
+/** Test-only. Resets the dedup memo. */
+export function __resetPaneOverlayDispatchForTests(): void {
+    clipScheduled = false;
+    lastDispatchedKey = "";
 }
 
 /**
