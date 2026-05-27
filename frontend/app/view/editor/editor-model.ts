@@ -9,6 +9,7 @@
 // SPEC_EDITOR_FILE_TREE_2026-05-26.md.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
+import { useBlockAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
@@ -75,11 +76,32 @@ export class EditorViewModel implements ViewModel {
 
     blockAtom: Accessor<Block | undefined>;
 
+    /** Per-pane zoom factor (1.0 default; clamped 0.5–2.0 by zoom store).
+     *  Backed by `term:zoom` in block meta — the same key terminals and
+     *  agents use, so the universal zoom system (Ctrl+wheel, keyboard
+     *  shortcuts, indicator overlay) Just Works. */
+    zoomAtom!: Accessor<number>;
+
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
 
         this.blockAtom = getWaveObjectAtom<Block>(makeORef("block", blockId));
+
+        // Derive zoom from block meta. The zoom store reads/writes `term:zoom`
+        // via SetMetaCommand; this accessor re-renders the view's CSS var
+        // whenever it changes so CodeMirror + the tree resize live.
+        //
+        // Wrapped in `useBlockAtom` (which calls createRoot under the hood) —
+        // a bare createMemo in the constructor wouldn't have a tracking owner,
+        // so it'd read once and never re-evaluate when block meta updates.
+        this.zoomAtom = useBlockAtom(blockId, "editor-zoom", () =>
+            createMemo<number>(() => {
+                const z = this.blockAtom()?.meta?.["term:zoom"];
+                if (typeof z !== "number" || isNaN(z)) return 1.0;
+                return Math.max(0.5, Math.min(2.0, z));
+            }),
+        );
 
         // Pane title — full file path (or "Editor" when nothing open). Marked
         // with a trailing `*` when there are unsaved changes. Showing the
