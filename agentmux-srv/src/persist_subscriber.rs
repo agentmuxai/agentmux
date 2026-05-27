@@ -42,7 +42,7 @@ use agentmux_common::ipc::Event;
 use tokio::sync::{broadcast, Mutex};
 
 use crate::backend::obj::{Block, Client, LayoutState as PersistedLayoutState, Tab, Window, Workspace};
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 use crate::backend::wcore;
 use crate::state::State;
 
@@ -52,7 +52,7 @@ use crate::state::State;
 /// full-resync after a `RecvError::Lagged`.
 pub fn spawn_persist_subscriber(
     events_rx: broadcast::Receiver<Event>,
-    wstore: Arc<WaveStore>,
+    wstore: Arc<Store>,
     state: Arc<Mutex<State>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(run_persist_subscriber(events_rx, wstore, state))
@@ -60,7 +60,7 @@ pub fn spawn_persist_subscriber(
 
 async fn run_persist_subscriber(
     mut events_rx: broadcast::Receiver<Event>,
-    wstore: Arc<WaveStore>,
+    wstore: Arc<Store>,
     state: Arc<Mutex<State>>,
 ) {
     tracing::info!(target: "srv-persist-subscriber", "[srv-persist-subscriber] started");
@@ -134,7 +134,7 @@ async fn run_persist_subscriber(
 ///      no-op if name matches, update if name differs.
 async fn resync_workspaces(
     state: &Arc<Mutex<State>>,
-    wstore: &WaveStore,
+    wstore: &Store,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Snapshot under lock; release before any I/O.
     let snapshot: Vec<(String, String)> = {
@@ -182,7 +182,7 @@ async fn resync_workspaces(
 /// arms are idempotent — the subscriber's later apply is a no-op.
 pub(crate) fn apply_event_to_wstore(
     event: &Event,
-    wstore: &WaveStore,
+    wstore: &Store,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match event {
         Event::WorkspaceCreated {
@@ -299,7 +299,7 @@ pub(crate) fn apply_event_to_wstore(
 }
 
 fn apply_workspace_created(
-    wstore: &WaveStore,
+    wstore: &Store,
     workspace_id: &str,
     name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -316,7 +316,7 @@ fn apply_workspace_created(
 }
 
 fn apply_workspace_deleted(
-    wstore: &WaveStore,
+    wstore: &Store,
     workspace_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if wstore.get::<Workspace>(workspace_id)?.is_none() {
@@ -327,7 +327,7 @@ fn apply_workspace_deleted(
 }
 
 fn apply_tab_created(
-    wstore: &WaveStore,
+    wstore: &Store,
     workspace_id: &str,
     tab_id: &str,
     name: &str,
@@ -378,7 +378,7 @@ fn apply_tab_created(
 }
 
 fn apply_tab_deleted(
-    wstore: &WaveStore,
+    wstore: &Store,
     workspace_id: &str,
     tab_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -397,7 +397,7 @@ fn apply_tab_deleted(
 }
 
 fn apply_active_tab_changed(
-    wstore: &WaveStore,
+    wstore: &Store,
     workspace_id: &str,
     tab_id: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -414,7 +414,7 @@ fn apply_active_tab_changed(
 }
 
 fn apply_tab_reordered(
-    wstore: &WaveStore,
+    wstore: &Store,
     workspace_id: &str,
     tab_id: &str,
     new_index: u32,
@@ -453,7 +453,7 @@ fn apply_tab_reordered(
 }
 
 fn apply_block_created(
-    wstore: &WaveStore,
+    wstore: &Store,
     tab_id: &str,
     block_id: &str,
     meta: &serde_json::Value,
@@ -492,7 +492,7 @@ fn apply_block_created(
 }
 
 fn apply_block_deleted(
-    wstore: &WaveStore,
+    wstore: &Store,
     tab_id: &str,
     block_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -516,7 +516,7 @@ fn apply_block_deleted(
 /// Window row exists but `GetClientData` / focus-order logic can't
 /// see it. (codex P1 #619.)
 fn apply_srv_window_opened(
-    wstore: &WaveStore,
+    wstore: &Store,
     window_id: &str,
     workspace_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -564,7 +564,7 @@ fn apply_srv_window_opened(
 /// doesn't see a dangling id), then delete the Window row.
 /// (codex P1 #619.)
 fn apply_srv_window_closed(
-    wstore: &WaveStore,
+    wstore: &Store,
     window_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // F1.A — Client.windowids prune + Window-row delete in one tx.
@@ -594,7 +594,7 @@ fn apply_srv_window_closed(
 /// upsert behavior; separate function for log-clarity since the
 /// emitted event is distinct.
 fn apply_srv_window_workspace_changed(
-    wstore: &WaveStore,
+    wstore: &Store,
     window_id: &str,
     workspace_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -609,7 +609,7 @@ fn apply_srv_window_workspace_changed(
 /// in SQLite would cause UI double-insertion (`workspace.tsx`
 /// builds the displayed tab list as `[...pinnedtabids, ...tabids]`).
 fn apply_tabs_reordered_bulk(
-    wstore: &WaveStore,
+    wstore: &Store,
     workspace_id: &str,
     tab_ids: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -629,7 +629,7 @@ fn apply_tabs_reordered_bulk(
 
 /// Phase E.5.3 — rename a persisted workspace.
 fn apply_workspace_renamed(
-    wstore: &WaveStore,
+    wstore: &Store,
     workspace_id: &str,
     name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -646,7 +646,7 @@ fn apply_workspace_renamed(
 
 /// Phase E.5.3 — rename a persisted tab.
 fn apply_tab_renamed(
-    wstore: &WaveStore,
+    wstore: &Store,
     tab_id: &str,
     name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -669,7 +669,7 @@ fn apply_tab_renamed(
 /// `LayoutState` fields stay on their existing wcore-direct path until
 /// Option B lands.
 fn apply_focused_node_changed(
-    wstore: &WaveStore,
+    wstore: &Store,
     tab_id: &str,
     node_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -694,7 +694,7 @@ fn apply_focused_node_changed(
 /// onto the tab's `LayoutState.magnifiednodeid` column. Same shape as
 /// `apply_focused_node_changed`.
 fn apply_magnified_node_changed(
-    wstore: &WaveStore,
+    wstore: &Store,
     tab_id: &str,
     node_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -721,7 +721,7 @@ fn apply_magnified_node_changed(
 /// JSON object that merges shallow-key-by-shallow-key on top of the
 /// existing meta. `null` values in the patch delete the key.
 fn apply_workspace_meta_updated(
-    wstore: &WaveStore,
+    wstore: &Store,
     workspace_id: &str,
     meta_patch: &serde_json::Value,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -739,7 +739,7 @@ fn apply_workspace_meta_updated(
 /// the window doesn't exist in wstore (preserves the idempotency
 /// contract — duplicate or stale events fold to no-op).
 fn apply_window_meta_updated(
-    wstore: &WaveStore,
+    wstore: &Store,
     window_id: &str,
     meta_patch: &serde_json::Value,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -754,7 +754,7 @@ fn apply_window_meta_updated(
 
 /// Phase E.5.3 — apply a meta-patch to a tab's `meta` map.
 fn apply_tab_meta_updated(
-    wstore: &WaveStore,
+    wstore: &Store,
     tab_id: &str,
     meta_patch: &serde_json::Value,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -769,7 +769,7 @@ fn apply_tab_meta_updated(
 
 /// Phase E.5.3 — apply a meta-patch to a block's `meta` map.
 fn apply_block_meta_updated(
-    wstore: &WaveStore,
+    wstore: &Store,
     block_id: &str,
     meta_patch: &serde_json::Value,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -797,7 +797,7 @@ fn apply_block_meta_updated(
 /// * Updates the `Tab` row's parent ref so loaders find it under
 ///   the new workspace.
 fn apply_tab_moved(
-    wstore: &WaveStore,
+    wstore: &Store,
     tab_id: &str,
     src_workspace_id: &str,
     dst_workspace_id: &str,
@@ -859,7 +859,7 @@ fn apply_tab_moved(
 /// Handles both cross-tab moves and intra-tab repositioning.
 /// Idempotent on re-delivery (checks current parent before mutating).
 fn apply_block_moved(
-    wstore: &WaveStore,
+    wstore: &Store,
     block_id: &str,
     src_tab_id: &str,
     dst_tab_id: &str,
@@ -1004,11 +1004,11 @@ fn event_kind(event: &Event) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::storage::wstore::WaveStore;
+    use crate::backend::storage::store::Store;
 
-    fn store() -> Arc<WaveStore> {
+    fn store() -> Arc<Store> {
         // In-memory SQLite for tests (matches existing wstore test pattern).
-        let store = WaveStore::open_in_memory().expect("in-memory wstore");
+        let store = Store::open_in_memory().expect("in-memory wstore");
         Arc::new(store)
     }
 

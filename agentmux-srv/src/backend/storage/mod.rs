@@ -9,11 +9,11 @@ pub mod error;
 pub mod filestore;
 pub mod migrations;
 pub mod snapshot;
-pub mod wstore;
+pub mod store;
 
 pub use error::StoreError;
-pub use wstore::AgentDefinition;
-pub use wstore::AgentContent;
+pub use store::AgentDefinition;
+pub use store::AgentContent;
 #[allow(unused_imports)]
-pub use wstore::AgentHistory;
-pub use wstore::AgentSkill;
+pub use store::AgentHistory;
+pub use store::AgentSkill;

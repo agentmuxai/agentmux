@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! WaveStore extension methods for `db_drone_definitions` +
+//! Store extension methods for `db_drone_definitions` +
 //! `db_drone_runs`. Lives in the drone module because the table
 //! schema is local to this feature; if Drone ever ships separately
 //! we can pull these methods out into a wstore module without changing
@@ -10,7 +10,7 @@
 use rusqlite::params;
 
 use crate::backend::storage::error::StoreError;
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 
 use super::types::{DroneDefinition, DroneRun};
 
@@ -32,7 +32,7 @@ pub trait DroneStore {
     ) -> Result<Vec<DroneRun>, StoreError>;
 }
 
-impl DroneStore for WaveStore {
+impl DroneStore for Store {
     fn drone_list(&self) -> Result<Vec<DroneDefinition>, StoreError> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(

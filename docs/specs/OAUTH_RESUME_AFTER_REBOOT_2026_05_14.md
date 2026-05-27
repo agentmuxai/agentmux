@@ -102,7 +102,7 @@ the agent. **This piece is what makes "log in once, reuse" actually work.**
 - Spec: `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` (§10 PR C, §12 acceptance criteria)
 - Storage spec: `docs/specs/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md`
 - Diagnostic report: `docs/specs/OAUTH_FLOW_SMOKE_DIAGNOSTIC_2026_05_14.md`
-- WStore identity methods: `agentmux-srv/src/backend/storage/wstore.rs:2013` (`bundle_identity_upsert`), `:2052` (`bundle_identity_bind`), `:1460` (`identity_upsert`)
+- WStore identity methods: `agentmux-srv/src/backend/storage/store.rs:2013` (`bundle_identity_upsert`), `:2052` (`bundle_identity_bind`), `:1460` (`identity_upsert`)
 - Auth session manager: `agentmux-srv/src/identity/auth_session.rs`
 - Existing handlers: `agentmux-srv/src/server/identity_handlers.rs`
 

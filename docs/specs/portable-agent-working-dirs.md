@@ -156,7 +156,7 @@ resolved `cmd:cwd`).
 This is the motivating safety argument for the fix, worth stating explicitly
 because the current layout assumes otherwise.
 
-Per `agentmux-srv/src/backend/storage/wstore.rs:565-598`, `forge_insert`
+Per `agentmux-srv/src/backend/storage/store.rs:565-598`, `forge_insert`
 auto-resolves slug collisions **within one Forge DB** by appending `-2`,
 `-3`, etc. under a mutex-guarded uniqueness scan. A unit test
 (`test_forge_insert_collision_resolves_at_runtime`, L1253) confirms this.

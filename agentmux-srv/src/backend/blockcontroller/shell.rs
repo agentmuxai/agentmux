@@ -36,7 +36,7 @@ use super::{
 use crate::backend::eventbus::EventBus;
 use crate::backend::shellexec::{ConnInterface, ShellProc};
 use crate::backend::storage::filestore::FileStore;
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 use crate::backend::obj::{self, MetaMapType};
 use crate::backend::wps;
 
@@ -144,7 +144,7 @@ pub struct ShellController {
     #[allow(dead_code)]
     event_bus: Option<Arc<EventBus>>,
     /// Wave object store — used to seed cmd:cwd on shell spawn.
-    wstore: Option<Arc<WaveStore>>,
+    wstore: Option<Arc<Store>>,
 }
 
 impl ShellController {
@@ -155,7 +155,7 @@ impl ShellController {
         block_id: String,
         broker: Option<Arc<wps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
-        wstore: Option<Arc<WaveStore>>,
+        wstore: Option<Arc<Store>>,
     ) -> Self {
         Self {
             controller_type,

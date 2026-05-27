@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use chrono::Utc;
 use serde_json::{json, Value};
 
-use crate::backend::storage::wstore::AgentSkill;
+use crate::backend::storage::store::AgentSkill;
 
 /// A single file to be written to the agent working directory.
 #[derive(Debug, Clone)]

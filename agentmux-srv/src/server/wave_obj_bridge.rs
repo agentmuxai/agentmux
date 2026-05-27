@@ -33,10 +33,10 @@ use tokio::sync::broadcast;
 
 use crate::backend::eventbus::{EventBus, WSEventType};
 use crate::backend::obj::{
-    wave_obj_to_value, Client, Tab, WaveObj, OTYPE_BLOCK, OTYPE_CLIENT, OTYPE_LAYOUT, OTYPE_TAB,
+    wave_obj_to_value, Client, Tab, StoreObj, OTYPE_BLOCK, OTYPE_CLIENT, OTYPE_LAYOUT, OTYPE_TAB,
     OTYPE_WINDOW, OTYPE_WORKSPACE,
 };
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 
 /// JSON shape that gets broadcast as the `data` payload of a
 /// `waveobj:update` WS event. Matches the shape of `WaveObjUpdate` in
@@ -70,15 +70,15 @@ fn emit(event_bus: &EventBus, otype: &str, oid: &str, payload: serde_json::Value
     });
 }
 
-/// Fetch one WaveObj by oid and broadcast it as a `waveobj:update`. The
+/// Fetch one StoreObj by oid and broadcast it as a `waveobj:update`. The
 /// SQLite read is offloaded to the blocking thread pool per ReAgent P1
-/// on PR #852 (WaveStore is `std::sync::Mutex<Connection>`; brief in
+/// on PR #852 (Store is `std::sync::Mutex<Connection>`; brief in
 /// steady state but a long reducer transaction would block the tokio
 /// worker thread). Silently logs + skips on missing/error to satisfy
 /// the §8.15 idempotency contract — duplicate or stale events fold to
 /// no-op.
-async fn emit_fetched<T: WaveObj + Send + 'static>(
-    wstore: &Arc<WaveStore>,
+async fn emit_fetched<T: StoreObj + Send + 'static>(
+    wstore: &Arc<Store>,
     event_bus: &Arc<EventBus>,
     otype: &'static str,
     oid: String,
@@ -129,7 +129,7 @@ fn emit_delete(event_bus: &EventBus, otype: &'static str, oid: &str) {
     emit(event_bus, otype, oid, payload);
 }
 
-/// Broadcast the singleton `Client` WaveObj. SrvWindowOpened /
+/// Broadcast the singleton `Client` StoreObj. SrvWindowOpened /
 /// SrvWindowClosed mutate `Client.windowids` (per
 /// `apply_srv_window_opened` in persist_subscriber.rs:518) so renderers
 /// holding a pinned Client need to see the new windowids list — without
@@ -139,7 +139,7 @@ fn emit_delete(event_bus: &EventBus, otype: &'static str, oid: &str) {
 /// Client is a singleton — the first `get_all::<Client>()` row is THE
 /// client. Same lookup pattern persist_subscriber uses.
 async fn emit_client_singleton(
-    wstore: &Arc<WaveStore>,
+    wstore: &Arc<Store>,
     event_bus: &Arc<EventBus>,
     context: &'static str,
 ) {
@@ -181,12 +181,12 @@ async fn emit_client_singleton(
     }
 }
 
-/// Layout events all reference a `tab_id`; the affected WaveObj is the
+/// Layout events all reference a `tab_id`; the affected StoreObj is the
 /// `LayoutState` referenced by the tab's `layoutstate` field. Two
 /// SQLite reads chained inside one `spawn_blocking` to keep the lock
 /// hold short.
 async fn emit_layout_for_tab(
-    wstore: &Arc<WaveStore>,
+    wstore: &Arc<Store>,
     event_bus: &Arc<EventBus>,
     tab_id: String,
     context: &'static str,
@@ -270,7 +270,7 @@ async fn emit_layout_for_tab(
 /// **Coverage:** Phase 1 + 2 covers workspace, window, tab, block, layout
 /// events. Saga events, OS facts, launcher-domain events all fall through
 /// to the catch-all `_ => {}` arm.
-async fn dispatch_event(event: Event, wstore: Arc<WaveStore>, event_bus: Arc<EventBus>) {
+async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBus>) {
     use crate::backend::obj::{Block, Window, Workspace};
 
     match event {
@@ -449,7 +449,7 @@ async fn dispatch_event(event: Event, wstore: Arc<WaveStore>, event_bus: Arc<Eve
         }
 
         // Saga lifecycle, launcher-domain events, OS facts, etc. — not
-        // WaveObj changes. The catch-all keeps the bridge future-proof
+        // StoreObj changes. The catch-all keeps the bridge future-proof
         // for new event variants the reducer may add.
         _ => {}
     }
@@ -469,7 +469,7 @@ async fn dispatch_event(event: Event, wstore: Arc<WaveStore>, event_bus: Arc<Eve
 /// publishing the event, so the bridge always sees post-event state.
 pub fn spawn_wave_obj_bridge(
     events_rx: broadcast::Receiver<Event>,
-    wstore: Arc<WaveStore>,
+    wstore: Arc<Store>,
     event_bus: Arc<EventBus>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(run_wave_obj_bridge(events_rx, wstore, event_bus))
@@ -477,7 +477,7 @@ pub fn spawn_wave_obj_bridge(
 
 async fn run_wave_obj_bridge(
     mut events_rx: broadcast::Receiver<Event>,
-    wstore: Arc<WaveStore>,
+    wstore: Arc<Store>,
     event_bus: Arc<EventBus>,
 ) {
     tracing::info!(target: "wave-obj-bridge", "[wave-obj-bridge] started (Phase 1: workspace events)");

@@ -33,7 +33,7 @@ use super::{
 use super::health::{classify_output_line, HealthMonitor};
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 use crate::backend::wps;
 
 /// WPS file subject name for persistent subprocess output.
@@ -74,7 +74,7 @@ pub struct PersistentSubprocessController {
     inner: Arc<Mutex<PersistentInner>>,
     broker: Option<Arc<wps::Broker>>,
     event_bus: Option<Arc<EventBus>>,
-    wstore: Option<Arc<WaveStore>>,
+    wstore: Option<Arc<Store>>,
     /// FileStore for write-through persistence of output lines (Phase 1.3).
     filestore: Option<Arc<FileStore>>,
     health_monitor: Arc<HealthMonitor>,
@@ -86,7 +86,7 @@ impl PersistentSubprocessController {
         block_id: String,
         broker: Option<Arc<wps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
-        wstore: Option<Arc<WaveStore>>,
+        wstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
     ) -> Self {
         let health_monitor = Arc::new(HealthMonitor::new(

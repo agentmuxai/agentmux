@@ -5,20 +5,20 @@
 
 use uuid::Uuid;
 
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 use crate::backend::storage::StoreError;
 use crate::backend::obj::*;
 
 /// Create a new tab in a workspace.
 /// If `tab_name` is empty, auto-generates "Untitled1", "Untitled2", etc.
 /// If `pinned` is true, the tab goes into `pinnedtabids` instead of `tabids`.
-pub fn create_tab(store: &WaveStore, ws_id: &str) -> Result<Tab, StoreError> {
+pub fn create_tab(store: &Store, ws_id: &str) -> Result<Tab, StoreError> {
     create_tab_with_opts(store, ws_id, "", false)
 }
 
 /// Create a new tab with explicit name and pinned options.
 pub fn create_tab_with_opts(
-    store: &WaveStore,
+    store: &Store,
     ws_id: &str,
     tab_name: &str,
     pinned: bool,
@@ -74,7 +74,7 @@ pub fn create_tab_with_opts(
 
 /// Delete a tab and its blocks/layout.
 pub fn delete_tab(
-    store: &WaveStore,
+    store: &Store,
     ws_id: &str,
     tab_id: &str,
 ) -> Result<(), StoreError> {
@@ -96,7 +96,7 @@ pub fn delete_tab(
 
 /// Internal: delete a tab's layout and blocks, then the tab itself.
 /// Kills shell processes for all blocks before deleting from the database.
-pub(super) fn delete_tab_inner(store: &WaveStore, tab_id: &str) -> Result<(), StoreError> {
+pub(super) fn delete_tab_inner(store: &Store, tab_id: &str) -> Result<(), StoreError> {
     if let Ok(tab) = store.must_get::<Tab>(tab_id) {
         // Kill shell processes FIRST — must happen before DB cleanup
         for block_id in &tab.blockids {
@@ -117,7 +117,7 @@ pub(super) fn delete_tab_inner(store: &WaveStore, tab_id: &str) -> Result<(), St
 
 /// Set the active tab in a workspace.
 pub fn set_active_tab(
-    store: &WaveStore,
+    store: &Store,
     ws_id: &str,
     tab_id: &str,
 ) -> Result<(), StoreError> {
@@ -133,7 +133,7 @@ pub fn set_active_tab(
 
 /// Reorder a tab within a workspace by moving it to a new index.
 pub fn reorder_tab(
-    store: &WaveStore,
+    store: &Store,
     ws_id: &str,
     tab_id: &str,
     new_index: usize,

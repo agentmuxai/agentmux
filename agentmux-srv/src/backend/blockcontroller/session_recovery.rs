@@ -26,7 +26,7 @@
 use std::sync::Arc;
 
 use crate::backend::obj::{Block, MetaMapType};
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 
 /// PID of the current running subprocess; 0 or missing = no process.
 pub const META_SESSION_ACTIVE_PID: &str = "session:active_pid";
@@ -35,7 +35,7 @@ pub const META_SESSION_WAS_INTERRUPTED: &str = "session:was_interrupted";
 
 /// Record that a subprocess with `pid` has been spawned for `block_id`.
 /// Best-effort — logs on failure but never panics.
-pub fn mark_active_pid(wstore: &Arc<WaveStore>, block_id: &str, pid: u32) {
+pub fn mark_active_pid(wstore: &Arc<Store>, block_id: &str, pid: u32) {
     let mut meta = MetaMapType::new();
     meta.insert(META_SESSION_ACTIVE_PID.to_string(), serde_json::json!(pid));
     // Clear any stale interrupt flag — we're running again.
@@ -47,7 +47,7 @@ pub fn mark_active_pid(wstore: &Arc<WaveStore>, block_id: &str, pid: u32) {
 }
 
 /// Clear `session:active_pid` — called when the subprocess exits for any reason.
-pub fn clear_active_pid(wstore: &Arc<WaveStore>, block_id: &str) {
+pub fn clear_active_pid(wstore: &Arc<Store>, block_id: &str) {
     let mut meta = MetaMapType::new();
     meta.insert(META_SESSION_ACTIVE_PID.to_string(), serde_json::Value::Null);
     let oref_str = format!("block:{}", block_id);
@@ -60,7 +60,7 @@ pub fn clear_active_pid(wstore: &Arc<WaveStore>, block_id: &str) {
 /// `session:active_pid` set, transfer the flag to `session:was_interrupted`.
 ///
 /// Returns the number of orphaned sessions found.
-pub fn scan_orphans(wstore: &Arc<WaveStore>) -> u32 {
+pub fn scan_orphans(wstore: &Arc<Store>) -> u32 {
     let all_blocks = match wstore.get_all::<Block>() {
         Ok(blocks) => blocks,
         Err(e) => {
@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn test_scan_orphans_transfers_flag() {
         let tmp = tempfile::tempdir().unwrap();
-        let wstore = Arc::new(WaveStore::open(&tmp.path().join("objects.db")).unwrap());
+        let wstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
 
         // ORef parser requires valid UUIDs, so generate them inline.
         let orphan_id = "11111111-1111-1111-1111-111111111111";
