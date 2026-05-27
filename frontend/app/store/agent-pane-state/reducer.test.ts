@@ -2114,15 +2114,19 @@ describe("agent-pane-state reducer", () => {
             expect(s.composerUnreadCount).toBe(1);
         });
 
-        it("TurnStart auto-collapses an open details panel", () => {
-            // Cross-arm interaction: sending a message hides the panel
-            // so the user isn't dropdown-staring as the turn begins.
+        it("TurnStart preserves details-panel state (cascade hotfix 2026-05-27)", () => {
+            // The TurnStart auto-collapse was removed because writing
+            // to detailsOpen co-occurred with the first StreamFlush
+            // and triggered a Solid replaceChild reconcile crash —
+            // see reducer.ts TurnStart arm + analysis in
+            // docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md.
+            // detailsOpen stays whatever the user last set it to.
             let s = ready(100);
             s = update(s, { type: "DetailsExpand" }).state;
             expect(s.detailsOpen).toBe(true);
             const r = update(s, { type: "TurnStart", at: 200 });
-            expect(r.state.detailsOpen).toBe(false);
-            // And the turn still actually started — no side-effects
+            expect(r.state.detailsOpen).toBe(true);
+            // The turn still actually started — no side-effects
             // on the existing TurnStart contract.
             expect(r.state.turnPhase.kind).toBe("Submitting");
         });
