@@ -1,5 +1,10 @@
 # AgentMux Version History
 
+## 0.39.1 — 2026-05-27
+
+- (no semantic content — internal portable-build counter increment from `task package`; auto-appended by `scripts/bump-wrapper.sh` to satisfy the release-consistency invariant)
+
+
 ## 0.39.0 — 2026-05-27
 
 - docs(menu): spec for menu positioning framework + paintable-area guard
