@@ -191,6 +191,12 @@
         // cache yet. Styled as a small "For Sale" sign tag so the user
         // immediately understands clicking will start the install
         // (modal) flow rather than launching the agent directly.
+        //
+        // Color: success-green, not warning-yellow. Installing is a
+        // *forward* action (the user wants this agent, the system can
+        // get it), not a warning. Matches the green "Install now"
+        // button in AgentInstallModal so the visual chain reads as
+        // one continuous CTA.
         .agent-card-install-ribbon {
             position: absolute;
             right: 0;            // anchored fully inside the card so
@@ -201,7 +207,7 @@
             letter-spacing: 0.04em;
             text-transform: uppercase;
             color: #fff; /* stylelint-disable-line color-no-hex */
-            background: var(--warning-color, #e9b800);
+            background: var(--success-color, #4e9a06);
             border-radius: 0;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
             pointer-events: none;
@@ -212,7 +218,7 @@
         }
 
         &:hover .agent-card-install-ribbon {
-            background: color-mix(in srgb, var(--warning-color, #e9b800) 80%, white);
+            background: color-mix(in srgb, var(--success-color, #4e9a06) 80%, white);
             transform: scale(1.06);
         }
 

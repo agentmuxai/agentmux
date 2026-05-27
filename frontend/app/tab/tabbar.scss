@@ -4,6 +4,18 @@
 @use "../mixins.scss";
 
 .tab-bar {
+    // Workspace tabs adopt editor-tab-style sizing: each tab targets a
+    // preferred basis and shrinks with per-tab ellipsis when the row gets
+    // crowded, instead of staying at content-width and triggering horizontal
+    // scroll. Floor is `--ws-tab-min`; once every tab is at the floor and the
+    // row still overflows, `.tab-bar-scroll`'s `overflow-x: auto` re-engages
+    // as the safety net (no tabs are hidden — workspace tabs are
+    // unrecoverable from the bar today, unlike editor tabs which clip).
+    // Spec: specs/SPEC_WORKSPACE_TAB_SIZING_2026-05-27.md.
+    --ws-tab-basis: 160px;
+    --ws-tab-min: 64px;
+    --ws-tab-max: 220px;
+
     display: flex;
     flex-direction: row;
     align-items: flex-end;
@@ -38,11 +50,17 @@
             display: none; // Chrome/Safari
         }
 
-        // Override tab.scss absolute positioning — render tabs in flex flow
+        // Override tab.scss absolute positioning — render tabs in flex flow.
+        // `flex: 0 1 basis` lets each tab shrink (so the inner `.name`'s
+        // existing `text-overflow: ellipsis` finally trips) but never grow
+        // past basis — the `.tab-bar-fill` filler absorbs slack on the right.
         .tab {
             position: relative;
             opacity: 1;
-            flex-shrink: 0;
+            flex: 0 1 var(--ws-tab-basis);
+            min-width: var(--ws-tab-min);
+            max-width: var(--ws-tab-max);
+            overflow: hidden;
             left: unset;
             transform: none;
             -webkit-app-region: no-drag;
@@ -97,9 +115,13 @@
     }
 
     // --- Drag-and-drop wrapper for each tab ---
+    // `flex: 0 1 auto` + `min-width: 0` is the critical pair: without
+    // `min-width: 0` the flex engine treats this wrapper's content width as
+    // an implicit floor and the inner `.tab`'s shrink never engages.
     .tab-drop-wrapper {
         position: relative;
-        flex-shrink: 0;
+        flex: 0 1 auto;
+        min-width: 0;
         display: flex;
         align-items: flex-end;
         height: 100%;
