@@ -564,6 +564,79 @@ pub fn resolve_window_at_cursor(
     }
 }
 
+/// Update the host's "active floating-pane redock hover" state.
+/// Called from the dragged floater's mousemove (throttled) so target
+/// windows can render a highlight overlay while the floater hovers
+/// over them. The host computes the resolved target via the same
+/// Z-order walk as `resolve_window_at_cursor` (with the dragged
+/// floater excluded), and emits the `floating-redock:hover-state`
+/// event ONLY when the target changes — mousemove fires at high
+/// frequency but the visual highlight only cares about transitions.
+///
+/// Args: `{ "source_label": string, "x": int, "y": int }`. Returns
+/// `{ "target_label": string|null }` for callers that want to
+/// piggyback on this for the resolved target.
+pub fn update_floating_redock_hover(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let source_label = args
+        .get("source_label")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let resolve_args = serde_json::json!({
+        "x": args.get("x").cloned().unwrap_or(serde_json::Value::Null),
+        "y": args.get("y").cloned().unwrap_or(serde_json::Value::Null),
+        "exclude_label": source_label,
+    });
+    let resolved = resolve_window_at_cursor(state, &resolve_args)?;
+    let new_target = resolved
+        .get("label")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let prev_target = {
+        let mut guard = state.active_redock_target.lock();
+        let prev = guard.clone();
+        *guard = new_target.clone();
+        prev
+    };
+
+    if prev_target != new_target {
+        let payload = serde_json::json!({
+            "target_label": new_target.clone(),
+            "source_label": source_label,
+        });
+        crate::events::emit_event_to_top_level_windows(
+            state,
+            "floating-redock:hover-state",
+            &payload,
+        );
+    }
+
+    Ok(serde_json::json!({ "target_label": new_target }))
+}
+
+/// Clear the active floating-pane redock hover state. Called from the
+/// dragged floater's mouseup (and any drag-cancel path). Emits the
+/// `floating-redock:hover-state` event with `target_label: null` so
+/// target windows tear down their highlight overlay.
+pub fn clear_floating_redock_hover(
+    state: &Arc<AppState>,
+    _args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let prev = state.active_redock_target.lock().take();
+    if prev.is_some() {
+        crate::events::emit_event_to_top_level_windows(
+            state,
+            "floating-redock:hover-state",
+            &serde_json::json!({ "target_label": serde_json::Value::Null }),
+        );
+    }
+    Ok(serde_json::Value::Null)
+}
+
 /// Set window transparency/blur effects for a single window.
 ///
 /// Targets exactly the window identified by `label` (from the frontend's URL

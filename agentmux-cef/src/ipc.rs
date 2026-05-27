@@ -250,6 +250,8 @@ async fn route_command(
         "start_window_drag" => commands::window::start_window_drag(state, args),
         "get_window_position" => commands::window::get_window_position(state, args),
         "resolve_window_at_cursor" => commands::window::resolve_window_at_cursor(state, args),
+        "update_floating_redock_hover" => commands::window::update_floating_redock_hover(state, args),
+        "clear_floating_redock_hover" => commands::window::clear_floating_redock_hover(state, args),
         "move_window_by" => commands::window::move_window_by(state, args),
         "set_window_position" => commands::window::set_window_position(state, args),
         "toggle_devtools" => commands::window::toggle_devtools(state, args),

@@ -198,6 +198,28 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             }
         };
 
+        // Throttled redock-hover push — drives the highlight overlay
+        // on whichever agentmux window the cursor is currently over.
+        // ~50 ms cadence is plenty for highlight tracking and keeps
+        // IPC load minimal during fast drags.
+        const HOVER_PUSH_THROTTLE_MS = 50;
+        let lastHoverPushAt = 0;
+        const pushRedockHover = (screenX: number, screenY: number) => {
+            const now = performance.now();
+            if (now - lastHoverPushAt < HOVER_PUSH_THROTTLE_MS) return;
+            lastHoverPushAt = now;
+            const dpr = window.devicePixelRatio || 1;
+            const px = Math.round(screenX * dpr);
+            const py = Math.round(screenY * dpr);
+            const sourceLabel = windowLabel();
+            if (!sourceLabel) return;
+            invokeCommand("update_floating_redock_hover", {
+                source_label: sourceLabel,
+                x: px,
+                y: py,
+            }).catch(() => {});
+        };
+
         const onMouseMove = (e: MouseEvent) => {
             // Track the latest cursor position even before `dragging`
             // is armed so the catch-up at IPC resolution can use the
@@ -215,6 +237,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             const ty =
                 initWinY + Math.round((e.screenY - clickScreenY) * dpr);
             sendPos(tx, ty);
+            pushRedockHover(e.screenX, e.screenY);
         };
 
         const onMouseUp = (e: MouseEvent) => {
@@ -241,6 +264,11 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             // `window_hwnds` map — another agentmux version's HWNDs
             // aren't in it, so cross-process drops silently no-op.
             if (wasDragging) {
+                // Always clear the hover state on release — the highlight
+                // overlay needs to disappear whether or not we ended up
+                // over a target. Fire-and-forget; the redock attempt
+                // below doesn't depend on this completing.
+                invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
                 void tryRedockAtCursor(e.screenX, e.screenY);
             }
         };

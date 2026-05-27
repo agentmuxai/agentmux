@@ -48,6 +48,7 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 import { isHostApp } from "@/app/init/host-detect";
 import { showStartupError } from "@/app/init/error-display";
 import { withTimeout } from "@/app/init/timeout";
+import { fireAndForget } from "@/util/util";
 import { scheduleRevealLift } from "@/store/tab-reveal";
 import { installLauncherEventBridge } from "@/util/launcher-events";
 import { installSrvEventBridge } from "@/util/srv-events";
@@ -76,6 +77,41 @@ window.removeNotificationById = removeNotificationById;
 window.modalsModel = modalsModel;
 
 const RPC_TIMEOUT = 5_000; // 5 seconds for individual RPC calls
+
+/**
+ * Subscribe to the host's `floating-redock:hover-state` event so this
+ * window paints the redock highlight overlay when a floater is being
+ * dragged over it. The host computes the target window via the same
+ * Z-order walk `resolve_window_at_cursor` uses, with the dragged
+ * floater excluded, so the highlight appears on whatever real window
+ * the cursor is over (not the floater itself).
+ *
+ * Each window's renderer runs this in its own JS context (separate
+ * renderer process per CEF browser), so the toggle is local — the
+ * host fans the same event out to every top-level renderer and each
+ * decides whether the event targets it.
+ *
+ * The visual rule lives in `app/app.scss::body.floating-redock-hover-target`.
+ * Implementation matches the tear-off hover pattern in
+ * `app/tab/tabbar.tsx::listenEvent("tearoff:hover-*")`.
+ */
+function installFloatingRedockHoverListener(): void {
+    const myLabel =
+        new URLSearchParams(window.location.search).get("windowLabel") || "main";
+    fireAndForget(async () => {
+        const { listenEvent } = await import("@/app/platform/ipc");
+        await listenEvent<{ target_label: string | null; source_label?: string }>(
+            "floating-redock:hover-state",
+            (payload) => {
+                if (payload?.target_label === myLabel) {
+                    document.body.classList.add("floating-redock-hover-target");
+                } else {
+                    document.body.classList.remove("floating-redock-hover-target");
+                }
+            },
+        );
+    });
+}
 
 /**
  * Initialize the window-instance-number atom and seed the reducer
@@ -692,6 +728,7 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     t = performance.now();
     initGlobalEventSubs(initOpts);
     subscribeToConnEvents();
+    installFloatingRedockHoverListener();
     tlog("initEventSubs", t);
 
     // Prime the identity-account cache from the DB so synchronous callers
