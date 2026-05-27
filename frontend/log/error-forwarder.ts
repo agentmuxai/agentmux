@@ -25,6 +25,7 @@
 // initLogPipe() so any errors during the rest of bootstrap are caught.
 
 import { invokeCommand } from "@/app/platform/ipc";
+import { resolveStack, resolveStackSync, type ResolveStatus } from "./source-map-resolver";
 
 let initialized = false;
 
@@ -56,6 +57,34 @@ function safeStringify(value: unknown): string {
 function forward(tag: string, payload: ForwardedErrorPayload): void {
     try {
         const headline = `${tag} ${payload.name ?? "Error"}: ${payload.message}`;
+
+        // Synchronously resolve whatever stack frames we already have
+        // a cached source-map for. First error in a given bundle chunk
+        // pays a one-time async fetch (deferred to the follow-up below);
+        // subsequent errors in cached chunks resolve fully right here.
+        // See SPEC_FE_SOURCE_MAP_RESOLVER_2026_05_27.md.
+        //
+        // `stack_resolved` is a tri-state:
+        //   "resolved" — fully rewritten; trust `stack`.
+        //   "partial"  — pending map load; async follow-up will fire.
+        //   "failed"   — terminal failure; some/all frames still raw,
+        //                no retry coming. (Distinct from "resolved" —
+        //                codex P2 on PR #1090 b80a2ed6.)
+        let stackForLog: string | null = payload.stack;
+        let stackResolved: ResolveStatus = "failed";
+        if (payload.stack) {
+            try {
+                const sync = resolveStackSync(payload.stack);
+                stackForLog = sync.resolved;
+                stackResolved = sync.status;
+            } catch {
+                // Resolver itself failed — fall back to the raw stack.
+                // Never break the log pipe.
+                stackForLog = payload.stack;
+                stackResolved = "failed";
+            }
+        }
+
         // Fire-and-forget — never let logging break the app
         invokeCommand("fe_log_structured", {
             level: "error",
@@ -65,10 +94,53 @@ function forward(tag: string, payload: ForwardedErrorPayload): void {
                 tag,
                 name: payload.name,
                 message: payload.message,
-                stack: payload.stack,
+                stack: stackForLog,
+                stack_raw: payload.stack,
+                stack_resolved: stackResolved,
                 source: payload.source,
             },
         }).catch(() => {});
+
+        // If the synchronous resolver couldn't reach every frame,
+        // kick off the async load + emit a follow-up entry once the
+        // missing `.map` files are fetched. The follow-up is its own
+        // log line so consumers see "headline -> later -> resolved".
+        // Bounded by Promise.allSettled inside resolveStack; if any
+        // map fails, the failed frames stay raw.
+        if (stackResolved === "partial" && payload.stack) {
+            const stackToResolve = payload.stack;
+            void resolveStack(stackToResolve)
+                .then((fullyResolved) => {
+                    try {
+                        invokeCommand("fe_log_structured", {
+                            level: "warn",
+                            module: "uncaught",
+                            message: `${tag} (stack-resolved) ${payload.name ?? "Error"}: ${payload.message}`,
+                            data: {
+                                tag,
+                                name: payload.name,
+                                message: payload.message,
+                                stack: fullyResolved.resolved,
+                                stack_raw: stackToResolve,
+                                // After async, the status is either
+                                // "resolved" (everything mapped) or
+                                // "failed" (some chunks terminally
+                                // failed). It cannot be "partial" —
+                                // resolveStack awaits every load.
+                                stack_resolved: fullyResolved.status,
+                                source: payload.source,
+                            },
+                        }).catch(() => {});
+                    } catch {
+                        // swallow
+                    }
+                })
+                .catch(() => {
+                    // resolveStack swallows individual failures already;
+                    // a top-level catch here keeps us safe against any
+                    // sync-throw in the chain.
+                });
+        }
     } catch {
         // swallow
     }
