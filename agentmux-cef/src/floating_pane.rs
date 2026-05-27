@@ -496,8 +496,10 @@ fn create_owned_popup(
     // client area fills the window. Mirrors the main-window setup in
     // `client/wndproc.rs::setup_native_frameless` — combined with our
     // WndProc's `WM_NCCALCSIZE`/`WM_NCACTIVATE`/`WM_NCHITTEST`, this
-    // gives a truly chrome-free outer HWND. Only the frontend's 30 CSS-px
-    // header remains, and it's the sole drag/close UI.
+    // gives a truly chrome-free outer HWND. The docked-pane's standard
+    // `BlockFrame_Header` (33 CSS px, `--header-height` in theme.scss:97)
+    // is the sole chrome — drag is JS-driven from
+    // `frontend/app/workspace/floating-pane-workspace.tsx`.
     unsafe {
         use windows_sys::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea;
         use windows_sys::Win32::UI::Controls::MARGINS;
