@@ -149,19 +149,39 @@ export function update(
                     ],
                 };
             }
+            // Scrub orphans in the freshly-loaded replay. Same reason
+            // as HistoryRestored: the legacy/NDJSON fallback path
+            // (useHistoryPagination, no-snapshot path) can replay a
+            // session that ended with a thinking block or a
+            // `status:"running"` tool — those must not render as live
+            // on reopen. Codex P2 on #1104: the command contract
+            // already says HistoryLoaded scrubs, but the reducer
+            // wasn't doing it. Scrub only `fresh` (same fix as
+            // HistoryRestored — keep live nodes untouched).
+            // Spec: SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
+            const scrubResult = scrubOrphanedInProgress(fresh, nowMs);
+            const scrubbedFresh = scrubResult ? scrubResult.nodes : fresh;
+            const loadEvents: ReducerResult["events"] = [
+                {
+                    type: "history-loaded",
+                    addedCount: fresh.length,
+                    duplicatesDropped: duplicates,
+                },
+            ];
+            if (scrubResult) {
+                loadEvents.push({
+                    type: "orphans-scrubbed",
+                    markdownCanceled: scrubResult.markdownCanceled,
+                    toolsCanceled: scrubResult.toolsCanceled,
+                });
+            }
             return {
                 state: {
                     ...state,
-                    nodes: [...fresh, ...state.nodes],
+                    nodes: [...scrubbedFresh, ...state.nodes],
                     nodeIdSet: nextIdSet,
                 },
-                events: [
-                    {
-                        type: "history-loaded",
-                        addedCount: fresh.length,
-                        duplicatesDropped: duplicates,
-                    },
-                ],
+                events: loadEvents,
             };
         }
 
@@ -190,8 +210,18 @@ export function update(
             // tool stuck at `status="running"`. The user shouldn't
             // see those as live on next open. Spec:
             // SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
-            const mergedNodes = [...fresh, ...state.nodes];
-            const scrub = scrubOrphanedInProgress(mergedNodes, nowMs);
+            //
+            // Scrub ONLY `fresh` (the historical snapshot). Codex P2
+            // on #1104: scrubbing the merged array would also cancel
+            // live nodes that landed in state.nodes during the async
+            // snapshot-read window — a thinking markdown still being
+            // streamed would get flipped to canceled and stay rendered
+            // that way (StreamFlush markdown updates only replace
+            // content, not metadata). Live nodes pass through
+            // untouched; only the replay gets sanitized.
+            const scrubResult = scrubOrphanedInProgress(fresh, nowMs);
+            const scrubbedFresh = scrubResult ? scrubResult.nodes : fresh;
+            const mergedNodes = [...scrubbedFresh, ...state.nodes];
             const restoreEvents: ReducerResult["events"] = [
                 {
                     type: "history-restored",
@@ -199,17 +229,17 @@ export function update(
                     fromSnapshot: true,
                 },
             ];
-            if (scrub) {
+            if (scrubResult) {
                 restoreEvents.push({
                     type: "orphans-scrubbed",
-                    markdownCanceled: scrub.markdownCanceled,
-                    toolsCanceled: scrub.toolsCanceled,
+                    markdownCanceled: scrubResult.markdownCanceled,
+                    toolsCanceled: scrubResult.toolsCanceled,
                 });
             }
             return {
                 state: {
                     ...state,
-                    nodes: scrub ? scrub.nodes : mergedNodes,
+                    nodes: mergedNodes,
                     nodeIdSet: nextIdSet,
                     sessionPhase: "active",
                 },

@@ -813,5 +813,70 @@ describe("agent document reducer", () => {
             });
             expect(r.events.some((e: any) => e.type === "orphans-scrubbed")).toBe(false);
         });
+
+        // Codex P2 on #1104: HistoryRestored arriving AFTER live
+        // stream events have populated state.nodes must not flip
+        // those live nodes to canceled — only the snapshot replay
+        // gets sanitized.
+        it("does NOT scrub live thinking nodes already in state.nodes", () => {
+            // Live event landed first: an actively-streaming thinking
+            // markdown is in state.nodes.
+            const live = thinkingMd("live-think");
+            const base = seed([live]);
+            // Now the snapshot read returns — bringing only a clean
+            // historical node. The live thinking should stay thinking.
+            const r = update(base, {
+                type: "HistoryRestored",
+                nodes: [md("snap-1")],
+                fromSnapshot: true,
+            });
+            // No orphans event — fresh was clean and live was untouched.
+            expect(r.events.some((e: any) => e.type === "orphans-scrubbed")).toBe(false);
+            const liveAfter = r.state.nodes.find((n) => n.id === "live-think") as any;
+            expect(liveAfter.metadata.thinking).toBe(true);
+            expect(liveAfter.metadata.canceled).toBeUndefined();
+        });
+    });
+
+    // Codex P2 on #1104 (gap 2): HistoryLoaded is the legacy/NDJSON
+    // fallback path. Contract said it scrubs; reducer wasn't doing it.
+    describe("HistoryLoaded scrubs orphans in the replay", () => {
+        const thinkingMd = (id: string): DocumentNode => ({
+            type: "markdown",
+            id,
+            content: id,
+            timestamp: 0,
+            metadata: { thinking: true },
+        });
+
+        it("flips dirty nodes from the legacy/NDJSON replay", () => {
+            const r = update(initialState(), {
+                type: "HistoryLoaded",
+                nodes: [thinkingMd("orphan-think"), tool("orphan-tool", { status: "running" })],
+            });
+            expect((r.state.nodes[0] as any).metadata.canceled).toBe(true);
+            expect((r.state.nodes[1] as ToolNode).status).toBe("canceled");
+            expect(r.events.some((e: any) => e.type === "orphans-scrubbed")).toBe(true);
+        });
+
+        it("doesn't emit orphans-scrubbed when the replay is clean", () => {
+            const r = update(initialState(), {
+                type: "HistoryLoaded",
+                nodes: [md("m1"), md("m2")],
+            });
+            expect(r.events.some((e: any) => e.type === "orphans-scrubbed")).toBe(false);
+        });
+
+        it("leaves live thinking nodes already in state.nodes untouched", () => {
+            const live = thinkingMd("live-think");
+            const base = seed([live]);
+            const r = update(base, {
+                type: "HistoryLoaded",
+                nodes: [md("hist-1")],
+            });
+            const liveAfter = r.state.nodes.find((n) => n.id === "live-think") as any;
+            expect(liveAfter.metadata.thinking).toBe(true);
+            expect(liveAfter.metadata.canceled).toBeUndefined();
+        });
     });
 });
