@@ -283,34 +283,27 @@ fn escape_query_value(s: &str) -> String {
 }
 
 /// WndProc for the floating-pane class. Removes the system non-client
-/// area (no native title bar / borders drawn) and maps the docked-pane
-/// standard `BlockFrame_Header` (rendered by the frontend at the top of
-/// the floater) to `HTCAPTION` so the OS handles the drag loop
-/// natively. The per-pane action buttons on the right side of the
-/// header (close, magnify, mic, endIconButtons) are excluded from the
-/// drag region so React can receive their clicks.
+/// area (no native title bar / borders drawn) and maps the 6 CSS-px
+/// edge bands to `HT{LEFT,RIGHT,...}` so the window remains resizable.
 ///
-/// CSS reference (must stay in sync with the docked-pane header):
-///   - pane header height: 33 CSS px (`--header-height` in
-///     `frontend/app/theme.scss:97`)
-///   - action button cluster: right-anchored; reserve 130 CSS px of
-///     click-through to cover the typical button set (close ~28,
-///     magnify ~28, plus padding + extras). Buttons sit at the right
-///     edge per `BlockFrame_Header_End` in
-///     `frontend/app/block/blockframe.tsx`.
+/// Window-drag is intentionally NOT handled here. We tried HTCAPTION
+/// over the pane header but two problems made it unworkable:
 ///
-/// Edge resize zones take precedence over `HTCAPTION` so the corner
-/// resize cursors still work when the cursor is in the header band
-/// near a corner. All CSS-px constants are DPI-scaled via
-/// `GetDpiForWindow`.
+///   1. The pane header sits below tile-layout padding (some y-offset
+///      from the window top), so any hard-coded Y range is fragile.
+///   2. Mouse events in an HTCAPTION zone never reach the CEF child
+///      HWND — buttons inside the header (close / magnify / mic /
+///      view-specific endIconButtons) stop responding.
 ///
-/// This mirrors the agentmux frameless-window pattern in
-/// `agentmux-cef/src/client/wndproc.rs::install_frameless_resize_hook`
-/// — extended with `HTCAPTION`. We don't reuse the main window's
-/// JS-driven `useWindowDrag` hook because that path resolves the HWND
-/// via `find_own_top_level_window` (process-wide `EnumWindows`), which
-/// returns whichever top-level window the OS enumerates first — not
-/// necessarily the calling floating pane.
+/// Window drag is instead JS-driven in
+/// `frontend/app/workspace/floating-pane-workspace.tsx`: a targeted
+/// document-level mousedown listener scoped to `[data-role="block-header"]`,
+/// `preventDefault`-ing to suppress the HTML5 dragstart that
+/// pragmatic-dnd would have used (which otherwise tore the pane off
+/// into a second floating window — the "double tear-off" bug). Same
+/// pattern as the main window's `useWindowDrag` hook.
+///
+/// See `docs/analyses/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md`.
 #[cfg(target_os = "windows")]
 unsafe extern "system" fn floating_pane_wndproc(
     hwnd: *mut std::ffi::c_void,
@@ -321,20 +314,12 @@ unsafe extern "system" fn floating_pane_wndproc(
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-    // All zone constants are in CSS / DIP pixels and scaled to physical
-    // pixels per the HWND's DPI inside the WM_NCHITTEST branch. Hard-
-    // coded physical-pixel constants here would shrink the hit zones on
-    // HiDPI monitors — a 6-physical-px resize border is 3 CSS px at 200%
-    // DPI and effectively unreachable.
-    //
-    // PANE_HEADER_HEIGHT_CSS matches `--header-height` in
-    // `frontend/app/theme.scss:97`. ACTION_BUTTON_ZONE_CSS is empirical
-    // — large enough to cover the docked-pane action cluster (close,
-    // magnify, mic, view-specific endIconButtons) without intruding on
-    // the title-text area where window drag should be live.
+    // Edge resize zone in CSS / DIP pixels, scaled to physical pixels
+    // per the HWND's DPI inside the WM_NCHITTEST branch. A hard-coded
+    // physical-pixel constant would shrink the hit zone on HiDPI —
+    // a 6-physical-px resize border is 3 CSS px at 200% DPI and
+    // effectively unreachable.
     const RESIZE_BORDER_CSS: i32 = 6;
-    const PANE_HEADER_HEIGHT_CSS: i32 = 33;
-    const ACTION_BUTTON_ZONE_CSS: i32 = 130;
 
     match msg {
         // Claim the entire window rect as client area — no system title
@@ -350,14 +335,13 @@ unsafe extern "system" fn floating_pane_wndproc(
             let mut rect = std::mem::zeroed::<windows_sys::Win32::Foundation::RECT>();
             GetWindowRect(hwnd, &mut rect);
 
-            // Scale all CSS-px zones to physical px against THIS HWND's
-            // current monitor — handles mid-life monitor changes (the
-            // window can move between monitors at different DPIs).
+            // Scale the resize-border CSS px to physical px against
+            // THIS HWND's current monitor — handles mid-life monitor
+            // changes (the window can move between monitors at
+            // different DPIs).
             let dpi = GetDpiForWindow(hwnd) as i32;
             let dpi = if dpi > 0 { dpi } else { 96 };
             let resize_border_px = (RESIZE_BORDER_CSS * dpi / 96).max(1);
-            let header_px = PANE_HEADER_HEIGHT_CSS * dpi / 96;
-            let action_zone_px = ACTION_BUTTON_ZONE_CSS * dpi / 96;
 
             let left = x - rect.left < resize_border_px;
             let right = rect.right - x < resize_border_px;
@@ -388,12 +372,9 @@ unsafe extern "system" fn floating_pane_wndproc(
                 return HTBOTTOM as isize;
             }
 
-            // Pane-header drag zone (excluding the right-anchored action
-            // button cluster so close / magnify / mic / endIconButtons
-            // remain clickable).
-            if y - rect.top < header_px && rect.right - x > action_zone_px {
-                return HTCAPTION as isize;
-            }
+            // Pane-header drag is JS-driven (see floating-pane-workspace.tsx);
+            // we don't map any zone to HTCAPTION here. Fall through to
+            // HTCLIENT so clicks reach CEF and the JS handler.
         }
         _ => {}
     }
