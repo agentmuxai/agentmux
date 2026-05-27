@@ -30,12 +30,46 @@ import { ErrorBoundary } from "@/app/element/errorboundary";
 import { CenteredDiv } from "@/app/element/quickelems";
 import { ModalsRenderer } from "@/app/modals/modalsrenderer";
 import { TabContent } from "@/app/tab/tabcontent";
-import { atoms } from "@/store/global";
-import { Show, type JSX } from "solid-js";
+import { atoms, getApi } from "@/store/global";
+import { Show, createEffect, createMemo, type JSX } from "solid-js";
 
 function FloatingPaneWorkspaceElem(): JSX.Element {
     const tabId = atoms.activeTabId;
     const ws = atoms.workspace;
+
+    const windowLabel = createMemo(() => {
+        const params = new URLSearchParams(window.location.search);
+        return params.get("windowLabel") ?? "";
+    });
+
+    // Auto-close the floating window when its workspace becomes empty —
+    // a floater wraps exactly one pane today (single-block workspace),
+    // so closing that pane via the standard BlockFrame_Header × button
+    // should also dismiss the now-purposeless outer window. We watch
+    // `workspace.blockids` and trigger close as soon as it transitions
+    // from non-empty → empty (the `hadBlocks` latch avoids closing on
+    // the brief empty state during initial workspace load).
+    let hadBlocks = false;
+    createEffect(() => {
+        const w = ws();
+        if (!w) return;
+        const blockids = (w as { blockids?: string[] }).blockids ?? [];
+        if (blockids.length > 0) {
+            hadBlocks = true;
+        } else if (hadBlocks) {
+            const label = windowLabel();
+            if (label) {
+                getApi()
+                    .closeWindowByLabel(label)
+                    .catch((e) =>
+                        console.error(
+                            "[floating-pane] auto-close on empty workspace failed",
+                            e,
+                        ),
+                    );
+            }
+        }
+    });
 
     return (
         <div class="flex flex-col w-full flex-grow overflow-hidden">
