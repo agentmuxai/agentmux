@@ -59,6 +59,7 @@
  * post-cleanup dispatch from reaching the underlying store at all.
  */
 
+import { trail } from "@/log/render-trail";
 import {
     type AgentDocumentCommand,
     type AgentDocumentEvent,
@@ -165,6 +166,15 @@ class AgentPaneModelImpl implements AgentPaneModel {
             );
             return [];
         }
+        // Crash-trace: every reducer command flows through here, so a
+        // single trail point covers the whole agent-pane action surface.
+        // The boundary dumps the trail when a render fault catches —
+        // see frontend/log/render-trail.ts.
+        trail("agent:dispatchPane", {
+            block: this.blockId.slice(0, 7),
+            cmd: command.type,
+            source,
+        });
         return dispatchPaneIfRegisteredRaw(this.blockId, command, source);
     }
 

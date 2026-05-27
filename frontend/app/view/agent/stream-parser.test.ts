@@ -311,10 +311,72 @@ describe("reset", () => {
         parser.parseStreamEvent({ type: "text", content: "hello" });
         parser.reset();
 
-        // After reset, a new text event should get a fresh node_0 ID
+        // After reset, a new text event should get a fresh node_0 ID.
+        // Deterministic counter is the dedup contract — see
+        // `parseHistoryLines` and the codex P1 on PR #1101.
         const node = parser.parseStreamEvent({ type: "text", content: "fresh" });
         expect(node!.id).toBe("node_0");
         expect((node as MarkdownNode).content).toBe("fresh");
+    });
+});
+
+// ── skipIds (snapshot-collision avoidance) ─────────────────────────────────
+// Render-gap fix on PR #1101: a fresh parser mounting against a resumed-
+// session snapshot would generate `node_0` for its first text chunk, which
+// the document reducer treats as "merge into existing node" — the response
+// gets silently merged into the snapshot's old `node_0` 100+ positions
+// back. The parser now accepts a `skipIds` set (the snapshot's id set) and
+// advances its counter past anything already present.
+
+describe("skipIds — snapshot-collision avoidance", () => {
+    test("skips ids present in the snapshot set on first event", () => {
+        const skip = new Set<string>(["node_0", "node_1", "node_2"]);
+        const p = new ClaudeCodeStreamParser({ skipIds: skip });
+        const node = p.parseStreamEvent({ type: "text", content: "first new" });
+        expect(node!.id).toBe("node_3");
+    });
+
+    test("skip-set only affects matching id prefixes (msg_/user_ unaffected)", () => {
+        // Snapshot has node_0..node_2; a new user_message should still
+        // start its own `user_*` sequence at 0 because the counter is
+        // shared but the prefix is different and only matching ids
+        // are skipped. (Counter actually advances past node_*, so
+        // user_3 is what we'd see if the agent already emitted three
+        // `node_*` events first.)
+        const p = new ClaudeCodeStreamParser({ skipIds: new Set(["user_0", "user_1"]) });
+        const um = p.parseStreamEvent({
+            type: "user_message",
+            message: "hi",
+        });
+        expect(um!.id).toBe("user_2");
+    });
+
+    test("no skipIds → original counter-from-0 behavior preserved", () => {
+        const p = new ClaudeCodeStreamParser();
+        const a = p.parseStreamEvent({ type: "text", content: "a" });
+        p.reset();
+        const b = p.parseStreamEvent({ type: "text", content: "b" });
+        expect(a!.id).toBe("node_0");
+        expect(b!.id).toBe("node_0");
+    });
+
+    test("skipIds callback is read ON-DEMAND, not at construction (async snapshot race)", () => {
+        // Codex P1 #2 on PR #1101: in resumed sessions the snapshot
+        // restore is async — `HistoryLoaded` lands AFTER the parser
+        // is constructed. A static skip-set captured at construction
+        // would be empty, leaving the parser to collide with the
+        // restored snapshot's ids. The callback form must read the
+        // live set at each id generation.
+        const liveSet = new Set<string>(); // initially empty
+        const p = new ClaudeCodeStreamParser({ skipIds: () => liveSet });
+
+        // Simulate: snapshot restore lands AFTER the parser was
+        // constructed but BEFORE the first id is generated.
+        liveSet.add("node_0");
+        liveSet.add("node_1");
+
+        const node = p.parseStreamEvent({ type: "text", content: "live" });
+        expect(node!.id).toBe("node_2");
     });
 });
 

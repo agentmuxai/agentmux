@@ -10,6 +10,7 @@
 import { getFileSubject, waveEventSubscribe } from "@/app/store/wps";
 import * as WOS from "@/app/store/wos";
 import { base64ToArray } from "@/util/util";
+import { trail } from "@/log/render-trail";
 import { createEffect, onCleanup, onMount } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import type { PendingMessage, SignalPair } from "./state";
@@ -322,7 +323,9 @@ export function useAgentStream({
                     // it back, leaving the status line stuck on "Worked"
                     // with no running animation even though the CLI is
                     // processing the next message).
+                    trail("agent:dispatch:TurnStart", { messageId });
                     model.dispatchPane({ type: "TurnStart", at: Date.now() });
+                    trail("agent:dispatch:TurnStart:done", { messageId });
                     // Append as a normal user_message so it joins the
                     // conversation stream. Keeps the same id so the new
                     // node ties back to the pending entry 1:1.
@@ -358,6 +361,25 @@ export function useAgentStream({
         // mount and scan. The reducer keeps `nodeIdSet` in lockstep
         // with `nodes[]` so this read is always current.
         nodeIdSet = new Set(getNodeIdSet(blockId));
+
+        // Pass a callback (NOT a static snapshot) so the parser's
+        // skip-set tracks the live document's `nodeIdSet`.
+        //
+        // Why a callback: resumed-session snapshots are restored
+        // **asynchronously** via `useHistoryPagination` →
+        // `HistoryLoaded`. A static snapshot captured at mount
+        // would be empty (history hasn't landed yet), and the
+        // parser's first `node_0` would collide with the
+        // restored `node_0` from the snapshot — the very bug
+        // this PR fixes. The callback reads the reducer's live
+        // index at id-generation time, so by the time the agent
+        // emits its first text event, the snapshot's ids are
+        // already in the index and get skipped.
+        //
+        // Codex P1 #2 on PR #1101.
+        parser = new ClaudeCodeStreamParser({
+            skipIds: () => getNodeIdSet(blockId),
+        });
 
         // Two reducers signaled in lockstep: pane-state owns the streaming
         // metadata (active flag), agent-document owns the session phase
