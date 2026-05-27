@@ -325,7 +325,7 @@ export type BrowserPaneCommand =
      * navigation in the active tab. Sets loading=true, clears error.
      * After dispose, a no-op. No-op when `activeTabId === null`.
      */
-    | { type: "Navigate"; url: string }
+    | { type: "Navigate"; url: string; source?: BrowserCommandSource }
     /**
      * A load began but the destination URL isn't known yet (e.g.
      * `goBack` / `goForward`). Same shape-effect as `Navigate` for
@@ -402,6 +402,22 @@ export type BrowserPaneEvent =
     | { type: "tab-backend-created"; tabId: string }
     | { type: "last-tab-closed" }
     | { type: "tabs-restored"; tabIds: string[]; activeTabId: string | null }
+    // ─── Suppression events (convention §2: "Suppressed/dropped commands
+    //     MUST emit a 'negative' event"). Surfaced to the diagnostics
+    //     ring so a late IPC or buggy caller is visible in audit rather
+    //     than swallowed.
+    | { type: "close-suppressed"; tabId: string; reason: "unknown-tab" }
+    | { type: "switch-suppressed"; tabId: string; reason: "unknown-tab" }
+    | {
+          type: "reorder-suppressed";
+          tabId: string;
+          reason: "unknown-tab" | "noop" | "single-tab";
+      }
+    | { type: "reopen-empty" }
+    | {
+          type: "hydrate-suppressed";
+          reason: "duplicate-tab-ids" | "empty-tabs-with-active-id";
+      }
     // ─── Existing events (pre-Phase-1A) ───────────────────────────
     /** Active-tab navigate intent. Suppressed when the originating
      *  command carried `source: "backend"` (echo-loop guard). */

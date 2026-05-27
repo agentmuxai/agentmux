@@ -679,13 +679,15 @@ describe("browser-pane-state reducer (Phase 1A — multi-tab)", () => {
             expect(r.state.recentlyClosed[0].url).toBe("https://a");
         });
 
-        it("closing an unknown tabId is a no-op", () => {
+        it("closing an unknown tabId is a state no-op but emits close-suppressed", () => {
             let s = initialState();
             s = update(s, { type: "OpenTab", url: "https://a" }).state;
             const before = s;
             const r = update(s, { type: "CloseTab", tabId: "nope" });
             expect(r.state).toBe(before);
-            expect(r.events).toEqual([]);
+            expect(r.events).toEqual([
+                { type: "close-suppressed", tabId: "nope", reason: "unknown-tab" },
+            ]);
         });
     });
 
@@ -702,13 +704,15 @@ describe("browser-pane-state reducer (Phase 1A — multi-tab)", () => {
             ]);
         });
 
-        it("is a no-op on an unknown tabId", () => {
+        it("is a state no-op on an unknown tabId but emits switch-suppressed", () => {
             let s = initialState();
             s = update(s, { type: "OpenTab", url: "https://a" }).state;
             const before = s;
             const r = update(s, { type: "SwitchTab", tabId: "nope" });
             expect(r.state).toBe(before);
-            expect(r.events).toEqual([]);
+            expect(r.events).toEqual([
+                { type: "switch-suppressed", tabId: "nope", reason: "unknown-tab" },
+            ]);
         });
 
         it("is a no-op when the requested tab is already active", () => {
@@ -759,12 +763,38 @@ describe("browser-pane-state reducer (Phase 1A — multi-tab)", () => {
             expect(r2.state.tabs.map((t) => t.id)).toEqual([ids[1], ids[0]]);
         });
 
-        it("is a no-op when only one tab exists", () => {
+        it("is a state no-op when only one tab exists but emits reorder-suppressed", () => {
             let s = initialState();
             s = update(s, { type: "OpenTab", url: "https://a" }).state;
             const id = s.activeTabId!;
             const r = update(s, { type: "ReorderTab", tabId: id, toIndex: 5 });
             expect(r.state).toBe(s);
+            expect(r.events).toEqual([
+                { type: "reorder-suppressed", tabId: id, reason: "single-tab" },
+            ]);
+        });
+
+        it("emits reorder-suppressed with reason=unknown-tab for missing id", () => {
+            let s = initialState();
+            s = update(s, { type: "OpenTab", url: "https://a" }).state;
+            s = update(s, { type: "OpenTab", url: "https://b" }).state;
+            const r = update(s, { type: "ReorderTab", tabId: "nope", toIndex: 0 });
+            expect(r.state).toBe(s);
+            expect(r.events).toEqual([
+                { type: "reorder-suppressed", tabId: "nope", reason: "unknown-tab" },
+            ]);
+        });
+
+        it("emits reorder-suppressed with reason=noop for identical-position reorder", () => {
+            let s = initialState();
+            s = update(s, { type: "OpenTab", url: "https://a" }).state;
+            s = update(s, { type: "OpenTab", url: "https://b" }).state;
+            const id = s.tabs[0].id;
+            const r = update(s, { type: "ReorderTab", tabId: id, toIndex: 0 });
+            expect(r.state).toBe(s);
+            expect(r.events).toEqual([
+                { type: "reorder-suppressed", tabId: id, reason: "noop" },
+            ]);
         });
     });
 
@@ -920,11 +950,11 @@ describe("browser-pane-state reducer (Phase 1A — multi-tab)", () => {
     });
 
     describe("ReopenLastClosed", () => {
-        it("is a no-op when the stack is empty", () => {
+        it("is a state no-op when the stack is empty but emits reopen-empty", () => {
             const s0 = initialState();
             const r = update(s0, { type: "ReopenLastClosed" });
             expect(r.state).toBe(s0);
-            expect(r.events).toEqual([]);
+            expect(r.events).toEqual([{ type: "reopen-empty" }]);
         });
 
         it("pops the newest entry and opens it as a new tab", () => {
@@ -988,6 +1018,61 @@ describe("browser-pane-state reducer (Phase 1A — multi-tab)", () => {
             });
             expect(r.state.tabs.length).toBe(0);
             expect(r.state.activeTabId).toBeNull();
+        });
+
+        it("rejects duplicate tab ids with hydrate-suppressed", () => {
+            const s0 = initialState();
+            const r = update(s0, {
+                type: "HydrateFromMeta",
+                tabs: [
+                    { id: "dup", url: "https://a" },
+                    { id: "dup", url: "https://b" },
+                ],
+                activeTabId: "dup",
+            });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([
+                { type: "hydrate-suppressed", reason: "duplicate-tab-ids" },
+            ]);
+        });
+
+        it("rejects empty tabs with non-null activeTabId", () => {
+            const s0 = initialState();
+            const r = update(s0, {
+                type: "HydrateFromMeta",
+                tabs: [],
+                activeTabId: "ghost",
+            });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([
+                { type: "hydrate-suppressed", reason: "empty-tabs-with-active-id" },
+            ]);
+        });
+    });
+
+    describe("Navigate echo-loop guard", () => {
+        it("emits `navigate` event for user-source command (default)", () => {
+            let s = initialState();
+            s = update(s, { type: "OpenTab", url: "https://a" }).state;
+            const r = update(s, { type: "Navigate", url: "https://b" });
+            const navEvents = r.events.filter((e) => e.type === "navigate");
+            expect(navEvents.length).toBe(1);
+        });
+
+        it("suppresses the `navigate` event for backend-source command", () => {
+            let s = initialState();
+            s = update(s, { type: "OpenTab", url: "https://a" }).state;
+            const r = update(s, {
+                type: "Navigate",
+                url: "https://b",
+                source: "backend",
+            });
+            // State still updates (URL/optimistic title are local
+            // projections of the host's known truth), but the IPC-
+            // bound `navigate` event is suppressed.
+            expect(activeTab(r.state).url).toBe("https://b");
+            const navEvents = r.events.filter((e) => e.type === "navigate");
+            expect(navEvents.length).toBe(0);
         });
     });
 });

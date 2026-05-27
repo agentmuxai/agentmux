@@ -161,7 +161,14 @@ export function update(
 
         case "CloseTab": {
             const idx = findTabIndex(state, command.tabId);
-            if (idx < 0) return { state, events: [] };
+            if (idx < 0) {
+                return {
+                    state,
+                    events: [
+                        { type: "close-suppressed", tabId: command.tabId, reason: "unknown-tab" },
+                    ],
+                };
+            }
             const tab = state.tabs[idx];
             const nextTabs = [
                 ...state.tabs.slice(0, idx),
@@ -199,8 +206,19 @@ export function update(
 
         case "SwitchTab": {
             const idx = findTabIndex(state, command.tabId);
-            if (idx < 0) return { state, events: [] };
+            if (idx < 0) {
+                return {
+                    state,
+                    events: [
+                        { type: "switch-suppressed", tabId: command.tabId, reason: "unknown-tab" },
+                    ],
+                };
+            }
             if (state.activeTabId === command.tabId) {
+                // Already active — idempotent. Don't emit anything (no
+                // state change, no diagnostic value in a "suppressed"
+                // event for the no-op case; calling code does this
+                // regularly via Ctrl+Tab when cycling once).
                 return { state, events: [] };
             }
             return {
@@ -211,13 +229,34 @@ export function update(
 
         case "ReorderTab": {
             const idx = findTabIndex(state, command.tabId);
-            if (idx < 0) return { state, events: [] };
-            if (state.tabs.length <= 1) return { state, events: [] };
+            if (idx < 0) {
+                return {
+                    state,
+                    events: [
+                        { type: "reorder-suppressed", tabId: command.tabId, reason: "unknown-tab" },
+                    ],
+                };
+            }
+            if (state.tabs.length <= 1) {
+                return {
+                    state,
+                    events: [
+                        { type: "reorder-suppressed", tabId: command.tabId, reason: "single-tab" },
+                    ],
+                };
+            }
             const clamped = Math.max(
                 0,
                 Math.min(state.tabs.length - 1, command.toIndex),
             );
-            if (clamped === idx) return { state, events: [] };
+            if (clamped === idx) {
+                return {
+                    state,
+                    events: [
+                        { type: "reorder-suppressed", tabId: command.tabId, reason: "noop" },
+                    ],
+                };
+            }
             const next = [...state.tabs];
             const [moved] = next.splice(idx, 1);
             next.splice(clamped, 0, moved);
@@ -236,8 +275,12 @@ export function update(
             const tab = state.tabs[idx];
             if (tab.url === command.url) return { state, events: [] };
             // Same origin-aware favicon preservation as the legacy
-            // UrlConfirmed path. Backend-source commands suppress
-            // the `navigate` event to prevent an echo loop.
+            // UrlConfirmed path. The `tab-url-changed` event we emit is
+            // a state-mirror notification, NOT a `navigate` intent — so
+            // there's no echo-loop risk here regardless of source. The
+            // explicit guard lives where intent-bearing commands
+            // (`Navigate`) decide whether to emit `navigate` (the saga
+            // consumer treats that event as "call browser_pane_tab_navigate").
             const originChanged = sameOriginUrl(tab.url, command.url) === false;
             const faviconAlreadyForNewOrigin = tab.faviconOverridden
                 && sameOriginUrl(tab.faviconUrl, command.url);
@@ -406,7 +449,7 @@ export function update(
 
         case "ReopenLastClosed": {
             if (state.recentlyClosed.length === 0) {
-                return { state, events: [] };
+                return { state, events: [{ type: "reopen-empty" }] };
             }
             const last = state.recentlyClosed[state.recentlyClosed.length - 1];
             const trimmed = state.recentlyClosed.slice(0, -1);
@@ -420,6 +463,32 @@ export function update(
         }
 
         case "HydrateFromMeta": {
+            // Invariant 2: tab ids are unique within a pane. Malformed
+            // persisted meta with duplicate ids would silently break
+            // `findTabIndex` (returns the first match) and make the
+            // saga's per-tab IPC routing ambiguous. Detect + reject.
+            const seen = new Set<string>();
+            for (const t of command.tabs) {
+                if (seen.has(t.id)) {
+                    return {
+                        state,
+                        events: [
+                            { type: "hydrate-suppressed", reason: "duplicate-tab-ids" },
+                        ],
+                    };
+                }
+                seen.add(t.id);
+            }
+            // Activating into an empty tab list is invalid — the model
+            // would project null setters but request a switch.
+            if (command.tabs.length === 0 && command.activeTabId != null) {
+                return {
+                    state,
+                    events: [
+                        { type: "hydrate-suppressed", reason: "empty-tabs-with-active-id" },
+                    ],
+                };
+            }
             const tabs: BrowserTab[] = command.tabs.map((t) => ({
                 id: t.id,
                 url: t.url,
@@ -482,9 +551,19 @@ export function update(
                 nextActive,
                 ...state.tabs.slice(idx + 1),
             ];
+            // Echo-loop guard (convention §6). The `navigate` event tells
+            // the saga to call `browser_pane_tab_navigate` on the host.
+            // If the originating command came FROM the host (it shouldn't
+            // for Navigate today — user/programmatic only — but the slot
+            // store may relay backend-driven URL applies via this command
+            // in future plumbing), suppress the IPC-bound event to avoid
+            // a host → reducer → host loop.
+            const events: BrowserPaneEvent[] = isBackendSource(command.source)
+                ? []
+                : [{ type: "navigate", url: command.url }];
             return {
                 state: { ...state, tabs: nextTabs },
-                events: [{ type: "navigate", url: command.url }],
+                events,
             };
         }
 
