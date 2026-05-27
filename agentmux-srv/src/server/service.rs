@@ -2060,7 +2060,23 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             }
 
             let mut updates = Vec::new();
+            // Layout updates MUST come first — `append_block_to_target_layout`
+            // and `queue_source_layout_delete` write straight to wstore via
+            // `store.update`, which is NOT auto-broadcast (only the SQLite
+            // row gets a new version). Without these entries in the response,
+            // the target window's frontend never sees the new leaf and
+            // renders nothing; the source's pending delete action never
+            // gets pulled either. Both layouts are read AFTER the helpers
+            // run so we capture the fresh state.
             if let Ok(src_tab) = store.must_get::<Tab>(&source_tab_id) {
+                if let Ok(src_layout) = store.must_get::<LayoutState>(&src_tab.layoutstate) {
+                    updates.push(WaveObjUpdate {
+                        updatetype: "update".into(),
+                        otype: OTYPE_LAYOUT.to_string(),
+                        oid: src_tab.layoutstate.clone(),
+                        obj: Some(wave_obj_to_value(&src_layout)),
+                    });
+                }
                 updates.push(WaveObjUpdate {
                     updatetype: "update".into(),
                     otype: OTYPE_TAB.to_string(),
@@ -2069,6 +2085,14 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 });
             }
             if let Ok(dst_tab) = store.must_get::<Tab>(&target_tab_id) {
+                if let Ok(dst_layout) = store.must_get::<LayoutState>(&dst_tab.layoutstate) {
+                    updates.push(WaveObjUpdate {
+                        updatetype: "update".into(),
+                        otype: OTYPE_LAYOUT.to_string(),
+                        oid: dst_tab.layoutstate.clone(),
+                        obj: Some(wave_obj_to_value(&dst_layout)),
+                    });
+                }
                 updates.push(WaveObjUpdate {
                     updatetype: "update".into(),
                     otype: OTYPE_TAB.to_string(),
