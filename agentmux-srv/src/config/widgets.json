@@ -18,7 +18,7 @@
         }
     },
     "defwidget@swarm": {
-        "display:order": 4,
+        "display:order": 2,
         "display:pinned": true,
         "icon": "bee",
         "color": "#f59e0b",
@@ -31,7 +31,7 @@
         }
     },
     "defwidget@browser": {
-        "display:order": 2,
+        "display:order": 7,
         "display:pinned": true,
         "icon": "globe",
         "label": "Browser",
@@ -44,7 +44,7 @@
         }
     },
     "defwidget@editor": {
-        "display:order": 3,
+        "display:order": 6,
         "display:pinned": true,
         "icon": "file-code",
         "label": "Editor",
@@ -69,7 +69,7 @@
         }
     },
     "defwidget@sysinfo": {
-        "display:order": 6,
+        "display:order": 8,
         "display:pinned": true,
         "icon": "chart-line",
         "label": "Sysinfo",
@@ -80,7 +80,7 @@
         }
     },
     "defwidget@drone": {
-        "display:order": 9,
+        "display:order": 3,
         "display:pinned": true,
         "icon": "diagram-project",
         "color": "#06b6d4",
@@ -93,7 +93,7 @@
         }
     },
     "defwidget@help": {
-        "display:order": 7,
+        "display:order": 9,
         "display:pinned": true,
         "icon": "circle-question",
         "label": "Help",
@@ -105,7 +105,7 @@
         }
     },
     "defwidget@warden": {
-        "display:order": 10,
+        "display:order": 4,
         "display:pinned": true,
         "icon": "shield-halved",
         "color": "#8b5cf6",
