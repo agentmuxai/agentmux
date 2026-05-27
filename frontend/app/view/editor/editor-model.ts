@@ -23,7 +23,6 @@ import {
     EditorPaneEvent,
     EditorTab,
     canonicalizePath,
-    deriveLanguage,
     dispatch,
     registerEditorPane,
     setEventSink,
@@ -281,10 +280,14 @@ export class EditorViewModel implements ViewModel {
 
         // Dispatch OpenFile. The slice either activates an existing tab (and
         // emits only TabActivated) or appends a new one (TabOpened +
-        // TabActivated). We then load content if the tab hasn't loaded yet.
+        // TabActivated). Pass the *mapped* language (detectLanguage) — the
+        // slice's bare `deriveLanguage` returns raw extensions, which
+        // downstream lookups (loadLanguage in editor-view, LSP support
+        // table) don't recognize.
         const events = dispatch(this.blockId, {
             type: "OpenFile",
             path: filePath,
+            language: detectLanguage(filePath),
             source: "user",
         });
 
@@ -459,6 +462,50 @@ function clampTreeWidth(w: number): number {
     return Math.max(TREE_WIDTH_MIN, Math.min(TREE_WIDTH_MAX, Math.round(w)));
 }
 
-// Re-export `deriveLanguage` so callers that previously imported
-// `detectLanguage` from this module continue to work.
-export { deriveLanguage as detectLanguage };
+// ── Language detection ──────────────────────────────────────────────────────
+// Maps file extensions to the canonical names the rest of the editor expects:
+// `loadLanguage` in editor-view.tsx, LSP_SUPPORTED_LANGUAGES in install-hints.ts.
+// The slice's `deriveLanguage` returns raw extensions ("ts", "py") — fine as a
+// fallback label, but downstream lookups need the mapped form ("typescript",
+// "python"). Keep this map in sync with `loadLanguage`'s switch.
+
+const EXTENSION_MAP: Record<string, string> = {
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".py": "python",
+    ".rs": "rust",
+    ".html": "html",
+    ".htm": "html",
+    ".css": "css",
+    ".scss": "css",
+    ".json": "json",
+    ".md": "markdown",
+    ".markdown": "markdown",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".toml": "toml",
+    ".sh": "shell",
+    ".bash": "shell",
+    ".zsh": "shell",
+    ".ps1": "powershell",
+    ".sql": "sql",
+    ".go": "go",
+    ".java": "java",
+    ".c": "c",
+    ".cpp": "cpp",
+    ".h": "c",
+    ".hpp": "cpp",
+    ".xml": "html",
+    ".svg": "html",
+};
+
+export function detectLanguage(filePath: string): string {
+    const i = filePath.lastIndexOf(".");
+    if (i < 0) return "text";
+    const ext = filePath.slice(i).toLowerCase();
+    return EXTENSION_MAP[ext] ?? "text";
+}
