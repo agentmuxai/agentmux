@@ -2087,11 +2087,20 @@ impl WaveStore {
         //     chain. The id tiebreaker keeps the ordering
         //     deterministic when two rows share `started_at` (only
         //     happens in tests / on adjacent inserts).
-        //   - The `display_hidden = 0 AND instance_name <> ''`
-        //     filter is applied AFTER the chain walk: a hidden head
-        //     doesn't suppress a visible continuation; a hidden
-        //     continuation drops out of ranking but its siblings
-        //     remain candidates.
+        //   - **Hidden filter must run AFTER ranking.** Otherwise
+        //     `hidenamedagent` becomes a no-op for any chain with
+        //     older visible siblings: the SQL excludes the hidden
+        //     row before ranking, so the next-newest visible row
+        //     inherits `rn = 1` and the "forgotten" agent
+        //     immediately reappears in the picker. Codex P2 on PR
+        //     #1096. By ranking first and filtering
+        //     `display_hidden` last, hiding the surfaced row
+        //     suppresses the whole chain — exactly what the user's
+        //     forget action means.
+        //   - The unnamed-row filter (`instance_name <> ''`) stays
+        //     pre-rank: an unnamed continuation row should never
+        //     win, but also shouldn't influence chain ranking — it
+        //     simply isn't a candidate.
         let mut sql = String::from(
             r#"WITH RECURSIVE
             roots(id, definition_id, parent_instance_id, block_id, session_id,
@@ -2124,15 +2133,15 @@ impl WaveStore {
                            ORDER BY started_at DESC, id DESC
                        ) AS rn
                 FROM roots
-                WHERE display_hidden = 0
-                  AND instance_name <> ''
+                WHERE instance_name <> ''
             )
             SELECT id, definition_id, parent_instance_id, block_id, session_id,
                    status, github_context, started_at, ended_at, created_at,
                    identity_id, memory_id, instance_name, working_directory,
                    display_hidden
             FROM ranked
-            WHERE rn = 1"#
+            WHERE rn = 1
+              AND display_hidden = 0"#
                 .to_string(),
         );
         let limit_param_idx = if definition_id.is_some() {
@@ -4396,6 +4405,55 @@ mod tests {
         // MRU order: b-head (200) before a-cont (150).
         assert_eq!(rows[0].id, "b-head");
         assert_eq!(rows[1].id, "a-cont");
+    }
+
+    #[test]
+    fn instance_list_named_picker_mode_forget_suppresses_whole_chain() {
+        // Regression for codex P2 on PR #1096: when the user clicks
+        // "Forget" on a continuation row that's currently the picker's
+        // surfaced entry, `hidenamedagent` flips `display_hidden=1`
+        // only on that one row. If the dedup query filtered hidden
+        // BEFORE ranking, the next-newest visible row in the same
+        // chain would inherit `rn = 1` and the "forgotten" agent
+        // would immediately reappear — making forget a no-op.
+        //
+        // Correct behavior: filter hidden AFTER ranking. When the
+        // surfaced row is hidden, the entire chain disappears from
+        // the picker until the user explicitly unhides one.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let mut head = make_named_inst("inst-head", "Claude", &agents_root);
+        head.started_at = 100;
+        store.instance_create(&head).unwrap();
+
+        let mut cont1 = make_named_inst("inst-cont1", "Claude", &agents_root);
+        cont1.parent_instance_id = "inst-head".to_string();
+        cont1.started_at = 200;
+        store.instance_create(&cont1).unwrap();
+
+        let mut cont2 = make_named_inst("inst-cont2", "Claude", &agents_root);
+        cont2.parent_instance_id = "inst-cont1".to_string();
+        cont2.started_at = 300;
+        store.instance_create(&cont2).unwrap();
+
+        // Before forget: chain surfaces as cont2 (newest).
+        let before = store.instance_list_named(10, None, true).unwrap();
+        assert_eq!(before.len(), 1);
+        assert_eq!(before[0].id, "inst-cont2");
+
+        // User clicks "Forget" on the surfaced row.
+        store.instance_set_hidden("inst-cont2", true).unwrap();
+
+        // After forget: the whole chain must stay forgotten — older
+        // visible rows in the chain (head, cont1) must NOT bubble up.
+        let after = store.instance_list_named(10, None, true).unwrap();
+        assert_eq!(
+            after.len(),
+            0,
+            "hiding the surfaced row must suppress the entire chain — \
+             older visible siblings must NOT be promoted to rn=1"
+        );
     }
 
     #[test]
