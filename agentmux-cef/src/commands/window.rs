@@ -175,6 +175,60 @@ pub fn maximize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 /// returns the embedded browser's WS_CHILD HWND rather than our
 /// outer top-level — without it, `SetWindowPos` would only shift the
 /// child within its parent, not move the outer floater.
+/// Class name of the floating-pane outer HWND
+/// (`agentmux-cef/src/floating_pane.rs::CLASS_NAME`). Kept in sync so
+/// `find_main_window` can EnumWindows-skip floaters when CEF Views
+/// hides the main window's HWND.
+#[cfg(target_os = "windows")]
+const FLOATING_PANE_CLASS_NAME: &str = "AgentMuxFloatingPane";
+
+/// Like `find_own_top_level_window` but skips floating-pane windows.
+/// Used when the label points at the main window but the reducer-
+/// registry path failed (CEF Views' `BrowserHost::window_handle()`
+/// returns NULL on Win32 for Views-based browsers). Without the
+/// skip, the floater (owned, drawn ABOVE its owner) would be
+/// enumerated first and we'd target it instead.
+#[cfg(target_os = "windows")]
+unsafe fn find_main_window() -> *mut std::ffi::c_void {
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+    let _pid = GetCurrentProcessId();
+    let mut result: *mut std::ffi::c_void = std::ptr::null_mut();
+
+    unsafe extern "system" fn enum_callback(
+        hwnd: *mut std::ffi::c_void,
+        lparam: isize,
+    ) -> i32 {
+        use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+        let mut window_pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut window_pid);
+        if window_pid != GetCurrentProcessId() {
+            return 1;
+        }
+        if IsWindowVisible(hwnd) == 0 {
+            return 1;
+        }
+        // Read the window class name; skip if it matches the floating-
+        // pane class. `GetClassNameW` writes up to `cchClassMaxCount`
+        // UTF-16 code units (excluding the null terminator).
+        let mut buf: [u16; 64] = [0; 64];
+        let len = GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
+        if len > 0 {
+            let class = String::from_utf16_lossy(&buf[..len as usize]);
+            if class == FLOATING_PANE_CLASS_NAME {
+                return 1;
+            }
+        }
+        let result_ptr = lparam as *mut *mut std::ffi::c_void;
+        *result_ptr = hwnd;
+        0
+    }
+
+    EnumWindows(Some(enum_callback), &mut result as *mut _ as isize);
+    result
+}
+
 #[cfg(target_os = "windows")]
 unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> *mut std::ffi::c_void {
     use cef::ImplBrowser;
@@ -199,29 +253,45 @@ unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> *mut std::f
                 tracing::warn!(
                     target: "win-resolve",
                     label = %label,
-                    "[win-resolve] host.window_handle() returned NULL — falling back to EnumWindows"
+                    "[win-resolve] host.window_handle() returned NULL — using class-aware EnumWindows fallback"
                 );
             } else {
                 tracing::warn!(
                     target: "win-resolve",
                     label = %label,
-                    "[win-resolve] browser.host() returned None — falling back to EnumWindows"
+                    "[win-resolve] browser.host() returned None — using class-aware EnumWindows fallback"
                 );
             }
         } else {
             tracing::warn!(
                 target: "win-resolve",
                 label = %label,
-                "[win-resolve] state.get_browser(label) returned None — falling back to EnumWindows"
+                "[win-resolve] state.get_browser(label) returned None — using class-aware EnumWindows fallback"
             );
         }
     }
-    let fallback = find_own_top_level_window();
+
+    // CEF Views (main window) hides the HWND behind a Views container,
+    // so `BrowserHost::window_handle()` returns NULL on Win32 for the
+    // main browser. Z-order-based `find_own_top_level_window` returns
+    // the floater first (owned windows draw ABOVE their owner). For
+    // the "main" label specifically, enumerate top-levels while
+    // skipping the floating-pane class — gives us a deterministic
+    // main-window HWND regardless of Z-order. For non-"main" labels
+    // we still fall through to the plain EnumWindows (this is rare —
+    // it means a label whose browser is registered but whose host has
+    // no HWND, which shouldn't happen today but keeps the fallback
+    // useful).
+    let fallback = if label == "main" {
+        find_main_window()
+    } else {
+        find_own_top_level_window()
+    };
     tracing::info!(
         target: "win-resolve",
         label = %label,
         fallback_hwnd = ?fallback,
-        "[win-resolve] EnumWindows fallback"
+        "[win-resolve] class-aware EnumWindows fallback"
     );
     fallback
 }
