@@ -12,9 +12,13 @@
     // as the safety net (no tabs are hidden — workspace tabs are
     // unrecoverable from the bar today, unlike editor tabs which clip).
     // Spec: specs/SPEC_WORKSPACE_TAB_SIZING_2026-05-27.md.
-    --ws-tab-basis: 160px;
-    --ws-tab-min: 64px;
-    --ws-tab-max: 220px;
+    // Basis aligns with VS Code's `workbench.editor.tabSizing: "fit"` default
+    // (~200px); floor at 100px keeps a tab readable rather than collapsing
+    // into a pill. Editor tabs run narrower (140 basis) because the editor
+    // pane itself is narrower than the workspace title bar.
+    --ws-tab-basis: 200px;
+    --ws-tab-min: 100px;
+    --ws-tab-max: 240px;
 
     display: flex;
     flex-direction: row;
