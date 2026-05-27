@@ -41,6 +41,7 @@ const STATUS_LABEL: Record<ToolNode["status"], string> = {
     success: "ok",
     failed: "failed",
     denied: "denied",
+    canceled: "canceled",
 };
 
 export const ToolBlockOverlay = (props: ToolBlockOverlayProps): JSX.Element => (

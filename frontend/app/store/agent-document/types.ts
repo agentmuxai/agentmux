@@ -106,7 +106,23 @@ export type AgentDocumentCommand =
      */
     | { type: "StreamTruncate"; reason: string }
     /** User invoked /clear — always honored. */
-    | { type: "UserClear" };
+    | { type: "UserClear" }
+    /**
+     * Scrub orphaned in-progress nodes. Walks `nodes[]` and:
+     *  - flips any markdown with `metadata.thinking === true` to
+     *    `metadata.canceled === true` (clearing the thinking flag).
+     *  - flips any `tool` with `status === "running"` to
+     *    `status: "canceled"`.
+     *
+     * Dispatched as a side-effect of `SessionEnd` (clean exits)
+     * and `HistoryRestored` / `HistoryLoaded` (resumed sessions
+     * where the kill happened before `SessionEnd` ever fired).
+     * Idempotent — running it twice is a no-op against the
+     * already-scrubbed state.
+     *
+     * Spec: docs/specs/SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
+     */
+    | { type: "ScrubOrphanedInProgress"; at: number };
 
 /**
  * Audit events emitted by the reducer. v1 logs them via the dispatcher's
@@ -148,7 +164,14 @@ export type AgentDocumentEvent =
           /** Reason the chunk was rejected without touching state. */
           reason: "unknown-tool-id" | "node-not-tool" | "duplicate";
       }
-    | { type: "user-cleared"; clearedCount: number };
+    | { type: "user-cleared"; clearedCount: number }
+    | {
+          type: "orphans-scrubbed";
+          /** Thinking-markdown nodes flipped to canceled. */
+          markdownCanceled: number;
+          /** Tool nodes whose status flipped from "running" → "canceled". */
+          toolsCanceled: number;
+      };
 
 export interface ReducerResult {
     state: AgentDocumentState;

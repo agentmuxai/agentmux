@@ -22,6 +22,62 @@ import {
     TRUNCATE_GRACE_MS,
 } from "./types";
 
+/**
+ * Walk the document and mark orphaned in-progress nodes as canceled.
+ *
+ * Returns `null` if nothing changed (so the caller can skip the
+ * state allocation), otherwise an object with the rewritten nodes +
+ * counts for the audit event. Idempotent — re-running over an
+ * already-scrubbed document returns `null`.
+ *
+ * Two transformations:
+ *   - Markdown nodes with `metadata.thinking === true` → flip
+ *     `thinking` off and set `canceled: true` (+ `canceledAt`).
+ *   - Tool nodes with `status === "running"` → set
+ *     `status: "canceled"`.
+ *
+ * `pending_approval` tools are left alone: they represent a user
+ * decision still in flight, not an interrupted stream. The user
+ * sees the decision panel on next open and can decide explicitly.
+ *
+ * Spec: docs/specs/SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
+ */
+function scrubOrphanedInProgress(
+    nodes: DocumentNode[],
+    at: number,
+): { nodes: DocumentNode[]; markdownCanceled: number; toolsCanceled: number } | null {
+    let next: DocumentNode[] | null = null;
+    let markdownCanceled = 0;
+    let toolsCanceled = 0;
+
+    for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        if (n.type === "markdown" && n.metadata?.thinking === true) {
+            if (!next) next = nodes.slice();
+            next[i] = {
+                ...n,
+                metadata: {
+                    ...n.metadata,
+                    thinking: false,
+                    canceled: true,
+                    canceledAt: at,
+                },
+            };
+            markdownCanceled++;
+            continue;
+        }
+        if (n.type === "tool" && n.status === "running") {
+            if (!next) next = nodes.slice();
+            next[i] = { ...n, status: "canceled" };
+            toolsCanceled++;
+            continue;
+        }
+    }
+
+    if (!next) return null;
+    return { nodes: next, markdownCanceled, toolsCanceled };
+}
+
 export function update(
     state: AgentDocumentState,
     command: AgentDocumentCommand,
@@ -41,11 +97,34 @@ export function update(
                 events: [{ type: "session-started", at: command.at }],
             };
 
-        case "SessionEnd":
+        case "SessionEnd": {
+            // SessionEnd is the natural moment to mark any nodes
+            // left in-progress as canceled — the stream is over,
+            // they're never going to complete. Cleanup runs here
+            // (clean exits) AND on HistoryRestored / HistoryLoaded
+            // (covers the app-kill case where SessionEnd never
+            // fired and a dirty snapshot lives on disk).
+            // Spec: docs/specs/SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
+            const scrub = scrubOrphanedInProgress(state.nodes, command.at);
+            const events: ReducerResult["events"] = [
+                { type: "session-ended", at: command.at },
+            ];
+            if (scrub) {
+                events.push({
+                    type: "orphans-scrubbed",
+                    markdownCanceled: scrub.markdownCanceled,
+                    toolsCanceled: scrub.toolsCanceled,
+                });
+                return {
+                    state: { ...state, sessionPhase: "ended", nodes: scrub.nodes },
+                    events,
+                };
+            }
             return {
                 state: { ...state, sessionPhase: "ended" },
-                events: [{ type: "session-ended", at: command.at }],
+                events,
             };
+        }
 
         case "HistoryLoaded": {
             if (command.nodes.length === 0) {
@@ -105,20 +184,36 @@ export function update(
                 nextIdSet.add(n.id);
                 fresh.push(n);
             }
+            // Scrub orphans in the freshly-restored snapshot. The
+            // snapshot was saved while the prior session was running
+            // and could contain a thinking node mid-stream or a
+            // tool stuck at `status="running"`. The user shouldn't
+            // see those as live on next open. Spec:
+            // SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
+            const mergedNodes = [...fresh, ...state.nodes];
+            const scrub = scrubOrphanedInProgress(mergedNodes, nowMs);
+            const restoreEvents: ReducerResult["events"] = [
+                {
+                    type: "history-restored",
+                    restoredCount: fresh.length,
+                    fromSnapshot: true,
+                },
+            ];
+            if (scrub) {
+                restoreEvents.push({
+                    type: "orphans-scrubbed",
+                    markdownCanceled: scrub.markdownCanceled,
+                    toolsCanceled: scrub.toolsCanceled,
+                });
+            }
             return {
                 state: {
                     ...state,
-                    nodes: [...fresh, ...state.nodes],
+                    nodes: scrub ? scrub.nodes : mergedNodes,
                     nodeIdSet: nextIdSet,
                     sessionPhase: "active",
                 },
-                events: [
-                    {
-                        type: "history-restored",
-                        restoredCount: fresh.length,
-                        fromSnapshot: true,
-                    },
-                ],
+                events: restoreEvents,
             };
         }
 
@@ -288,6 +383,29 @@ export function update(
                         ? state
                         : { ...state, nodes: [], nodeIdSet: new Set<string>() },
                 events: [{ type: "user-cleared", clearedCount: cleared }],
+            };
+        }
+
+        case "ScrubOrphanedInProgress": {
+            // Standalone entry point — callers that want to scrub
+            // without crossing a session boundary (e.g., a follow-up
+            // pass triggered by external state). The SessionEnd and
+            // HistoryRestored handlers above also call the same
+            // `scrubOrphanedInProgress` helper directly; this case
+            // exists for explicit dispatchers and for testability.
+            // Idempotent: returns state unchanged if nothing's
+            // in-progress.
+            const scrub = scrubOrphanedInProgress(state.nodes, command.at);
+            if (!scrub) return { state, events: [] };
+            return {
+                state: { ...state, nodes: scrub.nodes },
+                events: [
+                    {
+                        type: "orphans-scrubbed",
+                        markdownCanceled: scrub.markdownCanceled,
+                        toolsCanceled: scrub.toolsCanceled,
+                    },
+                ],
             };
         }
     }
