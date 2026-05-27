@@ -802,6 +802,7 @@ pub fn migrate_promote_template_sessions_v1(
         let new_name = match wstore.instance_list_named(
             1,
             Some(&old_def_id),
+            /* identity_id */ None,
             /* include_continuations */ true,
         ) {
             Ok(rows) => rows
