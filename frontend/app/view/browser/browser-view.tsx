@@ -5,6 +5,7 @@ import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { ModalLayer } from "@/element/ModalLayer";
 import { useModalLayer } from "@/element/modal-layer";
+import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-registry";
 import type { BrowserViewModel } from "./browser-model";
 import "./browser-view.scss";
 
@@ -105,6 +106,19 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         };
     };
 
+    /** CSS-pixel rect (same coordinate space as `getBoundingClientRect`
+     *  on overlay elements). Stored in `pane-rect-registry` so
+     *  `sendClip` can short-circuit when no overlay intersects a pane. */
+    const paneRectCss = () => {
+        const r = placeholderRef!.getBoundingClientRect();
+        return {
+            x: Math.round(r.x),
+            y: Math.round(r.y),
+            w: Math.round(r.width),
+            h: Math.round(r.height),
+        };
+    };
+
     const syncPosition = () => {
         if (!placeholderRef || !paneCreated() || model.closed) return;
         const rect = paneRect();
@@ -122,6 +136,10 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             block_id: model.blockId,
             ...rect,
         }).catch(() => {});
+        // Keep the overlay-clip short-circuit registry in sync with the
+        // host's actual HWND rect. Cheap (two property reads + a Map
+        // write).
+        registerPaneRect(model.blockId, paneRectCss());
     };
 
     const createPane = async (url: string) => {
@@ -138,6 +156,9 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             });
             setPaneCreated(true);
             diag(`paneCreated=true`);
+            // Seed the overlay-clip short-circuit registry with the initial
+            // rect; subsequent syncPosition ticks keep it current.
+            registerPaneRect(model.blockId, paneRectCss());
             model.onLoad();
         } catch (e) {
             model.onError(`Failed to create browser pane: ${e}`);
@@ -300,6 +321,9 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
 
     onCleanup(() => {
         diag(`view-unmount paneCreated=${paneCreated()}`);
+        // Drop from the overlay-clip short-circuit registry FIRST so a
+        // late sendClip() doesn't see a stale rect for the closed pane.
+        unregisterPaneRect(model.blockId);
         // Fire close IPC BEFORE disconnecting observers — the IPC flips the
         // backend pane to Closing, so any in-flight resize/focus/nav calls
         // that haven't reached the backend yet get no-op'd there instead of

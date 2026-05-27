@@ -82,7 +82,12 @@ function track(el: Element): void {
     ro.observe(el);
     observers.set(el, ro);
     const so = new MutationObserver(() => updateRect(el));
-    so.observe(el, { attributes: true, attributeFilter: ["style", "class"] });
+    // Watch only `style` — class mutations don't change box geometry
+    // (the ResizeObserver covers that case), and Solid's classList
+    // toggles + portal data-attrs were firing updateRect on every
+    // hover-driven `.active` flip for no benefit. See discussion #1097,
+    // fix #3.
+    so.observe(el, { attributes: true, attributeFilter: ["style"] });
     styleObservers.set(el, so);
     const onTransitionEnd = () => updateRect(el);
     el.addEventListener("transitionend", onTransitionEnd);
