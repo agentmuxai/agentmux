@@ -351,12 +351,24 @@ export function update(
                         submittedAt: command.at,
                         pendingContent: "",
                     },
-                    // Auto-collapse the composer details panel on send:
-                    // the user pressed Enter, they don't want to be
-                    // looking at a dropdown over the textarea while the
-                    // turn starts.
-                    // SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
-                    detailsOpen: false,
+                    // NOTE: the spec calls for auto-collapsing the
+                    // composer details panel here on send. Live
+                    // testing 2026-05-27 found that this write
+                    // co-occurs with the first `StreamFlush` against
+                    // agent-document-store and triggers a Solid
+                    // replaceChild reconcile crash via the cascade-
+                    // disposal path documented in
+                    // `docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md`
+                    // (signature: `data-index={index}` virt-row warning
+                    // immediately preceding `NotFoundError: Failed to
+                    // execute 'replaceChild'` and a CASCADE_DETECTED on
+                    // `StreamFlush`). Auto-collapse will return after
+                    // the cascade root cause is fixed structurally;
+                    // until then, the user clicks ▴ to close the
+                    // panel themselves. Minor UX hit; the crash is
+                    // a hard blocker. Spec
+                    // SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md
+                    // §5.4 will get a follow-up note.
                 },
                 events,
             };
