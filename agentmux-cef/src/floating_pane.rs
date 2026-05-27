@@ -282,6 +282,110 @@ fn escape_query_value(s: &str) -> String {
     out
 }
 
+/// WndProc for the floating-pane class. Removes the system non-client
+/// area (no native title bar / borders drawn) and maps the frontend's
+/// 30 CSS-px title bar to `HTCAPTION` so the OS handles the drag loop
+/// natively. The close button on the right side of the title bar is
+/// excluded from the drag region so React can receive its click.
+///
+/// CSS reference (must stay in sync with `frontend/app/workspace/floating-pane-workspace.tsx`):
+///   - title-bar height: 30 CSS px
+///   - close button: 28 CSS px wide, right-anchored; allow 36 CSS px
+///     of click-through to be safe (covers padding-right + button width).
+///
+/// Edge resize zones (6 physical px) take precedence over `HTCAPTION`
+/// so the corner resize cursors still work when the cursor is in the
+/// title-bar band near a corner.
+///
+/// This mirrors the agentmux frameless-window pattern in
+/// `agentmux-cef/src/client/wndproc.rs::install_frameless_resize_hook`
+/// — extended with `HTCAPTION`. We don't reuse the main window's
+/// JS-driven `useWindowDrag` hook because that path resolves the HWND
+/// via `find_own_top_level_window` (process-wide `EnumWindows`), which
+/// returns whichever top-level window the OS enumerates first — not
+/// necessarily the calling floating pane.
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn floating_pane_wndproc(
+    hwnd: *mut std::ffi::c_void,
+    msg: u32,
+    wparam: usize,
+    lparam: isize,
+) -> isize {
+    use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+    // All zone constants are in CSS / DIP pixels and scaled to physical
+    // pixels per the HWND's DPI inside the WM_NCHITTEST branch. Hard-
+    // coded physical-pixel constants here would shrink the hit zones on
+    // HiDPI monitors — a 6-physical-px resize border is 3 CSS px at 200%
+    // DPI and effectively unreachable.
+    const RESIZE_BORDER_CSS: i32 = 6;
+    const TITLEBAR_HEIGHT_CSS: i32 = 30;
+    const CLOSE_BUTTON_ZONE_CSS: i32 = 36;
+
+    match msg {
+        // Claim the entire window rect as client area — no system title
+        // bar / borders drawn. WS_THICKFRAME (via WS_OVERLAPPEDWINDOW)
+        // still gives us the resize border for `WM_NCHITTEST` to map.
+        WM_NCCALCSIZE if wparam == 1 => return 0,
+        // Suppress the DWM activation border repaint.
+        WM_NCACTIVATE => return 1,
+        WM_NCHITTEST => {
+            let x = (lparam & 0xFFFF) as i16 as i32;
+            let y = ((lparam >> 16) & 0xFFFF) as i16 as i32;
+
+            let mut rect = std::mem::zeroed::<windows_sys::Win32::Foundation::RECT>();
+            GetWindowRect(hwnd, &mut rect);
+
+            // Scale all CSS-px zones to physical px against THIS HWND's
+            // current monitor — handles mid-life monitor changes (the
+            // window can move between monitors at different DPIs).
+            let dpi = GetDpiForWindow(hwnd) as i32;
+            let dpi = if dpi > 0 { dpi } else { 96 };
+            let resize_border_px = (RESIZE_BORDER_CSS * dpi / 96).max(1);
+            let titlebar_px = TITLEBAR_HEIGHT_CSS * dpi / 96;
+            let close_zone_px = CLOSE_BUTTON_ZONE_CSS * dpi / 96;
+
+            let left = x - rect.left < resize_border_px;
+            let right = rect.right - x < resize_border_px;
+            let top = y - rect.top < resize_border_px;
+            let bottom = rect.bottom - y < resize_border_px;
+            if top && left {
+                return HTTOPLEFT as isize;
+            }
+            if top && right {
+                return HTTOPRIGHT as isize;
+            }
+            if bottom && left {
+                return HTBOTTOMLEFT as isize;
+            }
+            if bottom && right {
+                return HTBOTTOMRIGHT as isize;
+            }
+            if left {
+                return HTLEFT as isize;
+            }
+            if right {
+                return HTRIGHT as isize;
+            }
+            if top {
+                return HTTOP as isize;
+            }
+            if bottom {
+                return HTBOTTOM as isize;
+            }
+
+            // Title bar drag zone (excluding close-button click-through).
+            if y - rect.top < titlebar_px && rect.right - x > close_zone_px {
+                return HTCAPTION as isize;
+            }
+        }
+        _ => {}
+    }
+
+    DefWindowProcW(hwnd, msg, wparam, lparam)
+}
+
 /// CreateWindowExW wrapper that produces the owned `WS_POPUP +
 /// WS_EX_TOOLWINDOW` HWND used as the floating-pane outer shell.
 ///
@@ -299,8 +403,8 @@ fn create_owned_popup(
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, RegisterClassExW, ShowWindow, CS_HREDRAW, CS_VREDRAW,
-        SW_SHOWNOACTIVATE, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_OVERLAPPEDWINDOW, WS_POPUP,
+        CreateWindowExW, RegisterClassExW, ShowWindow, CS_HREDRAW, CS_VREDRAW, SW_SHOWNOACTIVATE,
+        WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_OVERLAPPEDWINDOW, WS_POPUP,
     };
 
     // ---- Register the class once per process ----
@@ -313,8 +417,9 @@ fn create_owned_popup(
     // TODO(phase-6, codex P1 on #811 — explicitly deferred): The
     // documented CEF embedding pattern is for the host's wndproc to
     // intercept WM_CLOSE and route through `CloseBrowser(false)` so
-    // DoClose fires before destroy. Phase 1 uses DefWindowProcW —
-    // the OS X-button cascade still works end-to-end:
+    // DoClose fires before destroy. Today the OS X-button cascade
+    // still works end-to-end via `floating_pane_wndproc`'s fallthrough
+    // to `DefWindowProcW(WM_CLOSE)`:
     //
     //   1. User clicks X → DefWindowProcW(WM_CLOSE) → DestroyWindow.
     //   2. Outer HWND's WM_DESTROY cascades into the CEF child HWND
@@ -325,21 +430,15 @@ fn create_owned_popup(
     //
     // What's *skipped*: the DoClose hook's chance to cancel close
     // (e.g. for a "Are you sure?" prompt). Floating panes have no
-    // such prompt, so this is harmless for Phase 1. The full custom
-    // wndproc is Phase 6 polish per spec §9. Files this needs to
-    // touch: replace `lpfnWndProc: Some(DefWindowProcW)` with a
-    // custom proc; add a `OnceLock<Arc<AppState>>` accessor (mirror
-    // `wrr::win_event::app_state`); in WM_CLOSE iterate
-    // `state.list_browsers()` and call `host.close_browser(false)`
-    // on any whose `window_handle()`'s GA_ROOT ancestor matches our
-    // outer HWND.
+    // such prompt, so this is harmless. The full WM_CLOSE → CloseBrowser
+    // routing is still future work.
     CLASS_REGISTERED.call_once(|| unsafe {
         let h_instance =
             windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null());
         let wnd_class = WNDCLASSEXW {
             cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
             style: CS_HREDRAW | CS_VREDRAW,
-            lpfnWndProc: Some(DefWindowProcW),
+            lpfnWndProc: Some(floating_pane_wndproc),
             cbClsExtra: 0,
             cbWndExtra: 0,
             hInstance: h_instance,
