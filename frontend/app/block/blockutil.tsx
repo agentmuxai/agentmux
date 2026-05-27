@@ -30,26 +30,28 @@ export function blockViewToIcon(view: string): string {
     return "square";
 }
 
+const VIEW_LABELS: Record<string, string> = {
+    agent: "Agent",
+    "agent-def": "Agent Definition",
+    browser: "Browser",
+    chat: "Chat",
+    drone: "Drone",
+    editor: "Editor",
+    help: "Help",
+    identity: "Identity",
+    memory: "Memory",
+    subagent: "Subagent",
+    swarm: "Swarm",
+    sysinfo: "Sysinfo",
+    term: "Terminal",
+    warden: "Warden",
+};
+
 export function blockViewToName(view: string): string {
     if (util.isBlank(view)) {
         return "(No View)";
     }
-    if (view == "term") {
-        return "Terminal";
-    }
-    if (view == "help") {
-        return "Help";
-    }
-    if (view == "subagent") {
-        return "Subagent";
-    }
-    if (view == "swarm") {
-        return "Swarm";
-    }
-    if (view == "drone") {
-        return "Drone";
-    }
-    return view;
+    return VIEW_LABELS[view] ?? view;
 }
 
 export function processTitleString(titleString: string): JSX.Element[] {
