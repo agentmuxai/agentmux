@@ -23,6 +23,8 @@
 //     the existing cascade-detection warnings.
 
 import { invokeCommand } from "@/app/platform/ipc";
+import { resolveStack, resolveStackSync, type ResolveStatus } from "@/log/source-map-resolver";
+import { getTrail } from "@/log/render-trail";
 import { ErrorBoundary as SolidErrorBoundary, createSignal, Show } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -40,12 +42,48 @@ export interface BlockErrorBoundaryProps {
     children: JSX.Element;
 }
 
-/** Pure side effect: forward the catch to the host log. */
+/**
+ * Pure side effect: forward the catch to the host log, with the stack
+ * rewritten through the source-map resolver and a snapshot of the
+ * render trail attached (see `frontend/log/render-trail.ts`).
+ *
+ * Why the trail matters: SolidJS reconciler crashes throw from deep
+ * inside `web.js` with no user-land frames — the effect that scheduled
+ * the bad DOM op has already returned. The trail captures recent
+ * reactive activity (reducer actions, render-effect entries, etc.) so
+ * log readers can see "what was happening just before the throw."
+ */
 function logBoundaryCatch(blockId: string, viewType: string | undefined, err: Error): void {
     try {
         const errName = err?.name ?? "Error";
         const errMessage = err?.message ?? String(err);
-        const errStack = err?.stack ?? null;
+        const rawStack = err?.stack ?? null;
+
+        // Sync-first resolve: whichever frames are already cached get
+        // rewritten now; anything pending falls into the async
+        // follow-up below. Mirrors the pattern in
+        // `frontend/log/error-forwarder.ts`.
+        let stackForLog: string | null = rawStack;
+        let stackResolved: ResolveStatus = "failed";
+        if (rawStack) {
+            try {
+                const sync = resolveStackSync(rawStack);
+                stackForLog = sync.resolved;
+                stackResolved = sync.status;
+            } catch {
+                stackForLog = rawStack;
+                stackResolved = "failed";
+            }
+        }
+
+        const trailSnapshot = (() => {
+            try {
+                return getTrail();
+            } catch {
+                return [];
+            }
+        })();
+
         // Fire-and-forget — never let logging compound the rendering fault.
         invokeCommand("fe_log_structured", {
             level: "error",
@@ -56,9 +94,45 @@ function logBoundaryCatch(blockId: string, viewType: string | undefined, err: Er
                 view_type: viewType ?? null,
                 error_name: errName,
                 error_message: errMessage,
-                error_stack: errStack,
+                error_stack: stackForLog,
+                error_stack_raw: rawStack,
+                stack_resolved: stackResolved,
+                render_trail: trailSnapshot,
             },
         }).catch(() => {});
+
+        // If the synchronous resolve couldn't reach every frame, kick
+        // off the async load and emit a follow-up entry once the
+        // missing `.map` files are fetched. Crash investigations
+        // typically need the fully-resolved stack, so the follow-up
+        // is high-value even though it lands seconds later.
+        if (stackResolved === "partial" && rawStack) {
+            const stackToResolve = rawStack;
+            void resolveStack(stackToResolve)
+                .then((fullyResolved) => {
+                    try {
+                        invokeCommand("fe_log_structured", {
+                            level: "warn",
+                            module: "block-error-boundary",
+                            message: `[block-error-boundary] (stack-resolved) ${errName}: ${errMessage} (block=${blockId.substring(0, 7)})`,
+                            data: {
+                                block_id: blockId,
+                                view_type: viewType ?? null,
+                                error_name: errName,
+                                error_message: errMessage,
+                                error_stack: fullyResolved.resolved,
+                                error_stack_raw: stackToResolve,
+                                stack_resolved: fullyResolved.status,
+                            },
+                        }).catch(() => {});
+                    } catch {
+                        // swallow
+                    }
+                })
+                .catch(() => {
+                    // swallow
+                });
+        }
     } catch {
         // swallow — logging must never break the fallback UI
     }

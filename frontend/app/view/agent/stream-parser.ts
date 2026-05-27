@@ -40,14 +40,82 @@ import {
  */
 export const STARTUP_HEADING_RE = /^# Session Context\b/;
 
+/**
+ * Shared default skip-callback — returns the same empty `Set`
+ * reference each call so the no-op path stays allocation-free.
+ */
+const EMPTY_SKIP_SET: ReadonlySet<string> = new Set<string>();
+const STATIC_EMPTY_SKIP_SET_FN = (): ReadonlySet<string> => EMPTY_SKIP_SET;
+
 export class ClaudeCodeStreamParser {
     private buffer: string = "";
     private nodeIdCounter: number = 0;
+    /**
+     * Optional callback returning the set of ids the parser must
+     * avoid when generating new ones — typically the document
+     * store's current `nodeIdSet`. Called **on-demand at each id
+     * generation**, NOT captured at construction time.
+     *
+     * Why on-demand: resumed-session snapshots are restored
+     * **asynchronously** (`useHistoryPagination` dispatches
+     * `HistoryLoaded` after an RPC round-trip). Capturing a static
+     * set at parser construction leaves the parser with an empty
+     * skip-set even though the document IS populated by the time
+     * the first live event arrives. Codex P1 #2 on PR #1101
+     * caught that race after the static-Set version was pushed.
+     *
+     * **Counter-based ids stay deterministic across instances** so
+     * that `parseHistoryLines` (in `useHistoryPagination`) and the
+     * live `useAgentStream` parser produce matching ids for the
+     * same NDJSON line — that's the contract the
+     * `agent-document-store` reducer's `HistoryLoaded` /
+     * `StreamFlush` dedup relies on. The skip-callback is the
+     * only deviation: the live parser skips over ids that happen
+     * to be in the document at id-generation time.
+     * `parseHistoryLines` doesn't supply a callback so its
+     * counter sequence is unchanged.
+     */
+    private skipIdsFn: () => ReadonlySet<string> = STATIC_EMPTY_SKIP_SET_FN;
     private pendingToolCalls: Map<string, ToolCallEvent> = new Map();
     private currentAgentId?: string;
     // Mutable node objects for accumulated text/thinking — content is appended in-place
     private currentTextNode: { type: "markdown"; id: string; content: string } | null = null;
     private currentThinkingNode: { type: "markdown"; id: string; content: string; metadata: { thinking: true } } | null = null;
+
+    /**
+     * `skipIds` accepts either a static `ReadonlySet<string>` (for
+     * tests and single-pass uses where the document doesn't grow
+     * out-of-band) OR a `() => ReadonlySet<string>` callback (for
+     * the live `useAgentStream` parser that needs to observe
+     * async snapshot restore). The callback form is the
+     * production path.
+     */
+    constructor(opts?: {
+        skipIds?: ReadonlySet<string> | (() => ReadonlySet<string>);
+    }) {
+        if (opts?.skipIds) {
+            this.skipIdsFn = typeof opts.skipIds === "function"
+                ? opts.skipIds
+                : ((s) => () => s)(opts.skipIds);
+        }
+    }
+
+    /**
+     * Generate the next node id of the given form (`node_N` /
+     * `msg_N` / `user_N`), skipping any value that's already in
+     * the document **as of right now** (per `skipIdsFn()`). The
+     * skip-loop advances the counter past collisions so
+     * subsequent ids don't repeat work. Pure increment when no
+     * skip callback is supplied.
+     */
+    private nextIdOf(prefix: string): string {
+        const skip = this.skipIdsFn();
+        let id = `${prefix}_${this.nodeIdCounter++}`;
+        while (skip.has(id)) {
+            id = `${prefix}_${this.nodeIdCounter++}`;
+        }
+        return id;
+    }
 
     /**
      * Parse NDJSON stream line by line
@@ -184,7 +252,7 @@ export class ClaudeCodeStreamParser {
     private textToNode(event: TextEvent): DocumentNode {
         this.currentThinkingNode = null;
         if (!this.currentTextNode) {
-            this.currentTextNode = { type: "markdown", id: `node_${this.nodeIdCounter++}`, content: event.content };
+            this.currentTextNode = { type: "markdown", id: this.nextIdOf("node"), content: event.content };
         } else {
             this.currentTextNode = { ...this.currentTextNode, content: this.currentTextNode.content + event.content };
         }
@@ -199,7 +267,7 @@ export class ClaudeCodeStreamParser {
     private thinkingToNode(event: ThinkingEvent): DocumentNode {
         this.currentTextNode = null;
         if (!this.currentThinkingNode) {
-            this.currentThinkingNode = { type: "markdown", id: `node_${this.nodeIdCounter++}`, content: event.content, metadata: { thinking: true } };
+            this.currentThinkingNode = { type: "markdown", id: this.nextIdOf("node"), content: event.content, metadata: { thinking: true } };
         } else {
             this.currentThinkingNode = { ...this.currentThinkingNode, content: this.currentThinkingNode.content + event.content };
         }
@@ -317,7 +385,7 @@ export class ClaudeCodeStreamParser {
 
         return {
             type: "agent_message",
-            id: `msg_${this.nodeIdCounter++}`,
+            id: this.nextIdOf("msg"),
             from: event.from,
             to: event.to,
             message: event.message,
@@ -348,7 +416,7 @@ export class ClaudeCodeStreamParser {
         const isStartup = STARTUP_HEADING_RE.test(event.message);
         return {
             type: "user_message",
-            id: `user_${this.nodeIdCounter++}`,
+            id: this.nextIdOf("user"),
             message: event.message,
             timestamp: event.timestamp || Date.now(),
             isStartup,
@@ -421,5 +489,13 @@ export class ClaudeCodeStreamParser {
         this.pendingToolCalls.clear();
         this.currentTextNode = null;
         this.currentThinkingNode = null;
+        // skipIds intentionally NOT cleared — a `reset()` typically
+        // follows a `StreamTruncate` (the snapshot's nodes are gone
+        // from the doc) but we keep the original skip-set out of
+        // caution. The counter restarts at 0 and the loop skips
+        // anything that was in the snapshot, even if those ids no
+        // longer exist in the document. Cost: a few wasted counter
+        // increments at worst. Benefit: callers can't accidentally
+        // re-introduce the collision by triggering a reset.
     }
 }

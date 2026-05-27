@@ -43,13 +43,32 @@ export interface VirtualizationPartition {
 }
 
 /**
- * Pure split — no allocation if the document is shorter than the
- * buffer (whole list is streaming buffer). Otherwise slices out the
- * trailing N nodes.
+ * Pure split. Two modes:
+ *
+ *  - **Count-based** (no `stickyFrontierId` passed): split by trailing
+ *    buffer size. Whenever the document grows past the threshold, the
+ *    split point moves. **Do not use this mode while reactive renders
+ *    are reading the partition** — it causes a node to migrate from
+ *    `streamingNodes` → `virtualizedNodes` on each append, which
+ *    triggers a SolidJS reconciler crash when the same node-id appears
+ *    in both subtrees during one reactive tick (see
+ *    `docs/analysis/AGENT_PANE_REPLACECHILD_CRASH_ON_SEND_2026_05_27.md`).
+ *  - **Sticky** (caller supplies `stickyFrontierId`): the split point
+ *    is the index of the node whose id matches `stickyFrontierId`.
+ *    The frontier never moves on simple appends — new nodes flow into
+ *    `streamingNodes`, the virtualized head stays fixed, no cross-list
+ *    migration. If the frontier id is stale (the anchor node was
+ *    truncated away), this function returns `splitIndex = -1` so the
+ *    caller knows to re-anchor.
+ *
+ * Callers that don't render reactively (tests, debug utilities) can
+ * keep using the count-based form. The agent virtual list always uses
+ * sticky.
  */
 export function partitionForVirtualization(
     nodes: readonly DocumentNode[],
     bufferSize: number = STREAMING_BUFFER_SIZE,
+    stickyFrontierId?: string | null,
 ): VirtualizationPartition {
     if (nodes.length <= bufferSize) {
         return {
@@ -58,12 +77,45 @@ export function partitionForVirtualization(
             splitIndex: 0,
         };
     }
+    if (stickyFrontierId != null) {
+        const idx = nodes.findIndex((n) => n.id === stickyFrontierId);
+        if (idx < 0) {
+            // Caller's frontier is stale (truncate/clear/reset). Signal
+            // re-anchor needed via splitIndex = -1; caller picks a
+            // fresh anchor and retries.
+            return {
+                virtualizedNodes: EMPTY_NODES,
+                streamingNodes: nodes,
+                splitIndex: -1,
+            };
+        }
+        return {
+            virtualizedNodes: nodes.slice(0, idx),
+            streamingNodes: nodes.slice(idx),
+            splitIndex: idx,
+        };
+    }
     const splitIndex = nodes.length - bufferSize;
     return {
         virtualizedNodes: nodes.slice(0, splitIndex),
         streamingNodes: nodes.slice(splitIndex),
         splitIndex,
     };
+}
+
+/**
+ * Pick the initial frontier id when the document first crosses
+ * `STREAMING_BUFFER_SIZE`. Returns the id of the node at
+ * `length - bufferSize` (the first node that belongs in the streaming
+ * buffer). Returns `null` if the document is still within the buffer
+ * — there's no need for a sticky split yet.
+ */
+export function initialStickyFrontierId(
+    nodes: readonly DocumentNode[],
+    bufferSize: number = STREAMING_BUFFER_SIZE,
+): string | null {
+    if (nodes.length <= bufferSize) return null;
+    return nodes[nodes.length - bufferSize]?.id ?? null;
 }
 
 /**

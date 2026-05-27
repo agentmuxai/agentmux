@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { DocumentNode } from "../types";
 import {
+    initialStickyFrontierId,
     locateIndex,
     partitionForVirtualization,
     STREAMING_BUFFER_SIZE,
@@ -64,6 +65,86 @@ describe("partitionForVirtualization", () => {
         expect(p.virtualizedNodes).toHaveLength(0);
         expect(p.streamingNodes).toHaveLength(0);
         expect(p.splitIndex).toBe(0);
+    });
+});
+
+describe("partitionForVirtualization — sticky frontier", () => {
+    it("splits at the frontier id when supplied (independent of count)", () => {
+        // 70 nodes; anchor at n25 (which would NOT be the count-based
+        // split point of n20). Streaming buffer contains n25..n69 (45
+        // nodes), virtualized contains n0..n24 (25 nodes).
+        const nodes = range(70);
+        const p = partitionForVirtualization(nodes, 50, "n25");
+        expect(p.splitIndex).toBe(25);
+        expect(p.virtualizedNodes).toHaveLength(25);
+        expect(p.streamingNodes).toHaveLength(45);
+        expect(p.streamingNodes[0].id).toBe("n25");
+    });
+
+    it("never migrates a node across the split on a simple append", () => {
+        // Set the frontier with the document at 70 nodes, then append
+        // 50 more. Streaming grows from 45 → 95; virtualized stays at
+        // n0..n24. Crucially: every id that was in `streamingNodes`
+        // before is STILL in `streamingNodes` after.
+        const before = range(70);
+        const frontier = initialStickyFrontierId(before, 50);
+        expect(frontier).toBe("n20"); // first call sets it to length-buffer
+
+        const after = [...before, ...Array.from({ length: 50 }, (_, i) => md(`x${i}`))];
+        const p = partitionForVirtualization(after, 50, frontier);
+
+        const streamIdsBefore = new Set(
+            partitionForVirtualization(before, 50, frontier).streamingNodes.map(
+                (n) => n.id,
+            ),
+        );
+        for (const id of streamIdsBefore) {
+            expect(p.streamingNodes.map((n) => n.id)).toContain(id);
+        }
+        // And the new tail nodes also landed in streaming.
+        expect(p.streamingNodes.map((n) => n.id)).toContain("x49");
+    });
+
+    it("returns splitIndex=-1 when the frontier id is stale", () => {
+        // Document truncated — the anchor node no longer exists.
+        const nodes = range(70);
+        const p = partitionForVirtualization(nodes, 50, "deleted-id");
+        expect(p.splitIndex).toBe(-1);
+    });
+
+    it("ignores the frontier when the document is within the buffer", () => {
+        // Document hasn't crossed the threshold yet; everything streams.
+        // No sticky behavior should kick in.
+        const nodes = range(20);
+        const p = partitionForVirtualization(nodes, 50, "n5");
+        expect(p.splitIndex).toBe(0);
+        expect(p.virtualizedNodes).toHaveLength(0);
+        expect(p.streamingNodes).toBe(nodes);
+    });
+
+    it("falls back to count-based split when no frontier supplied", () => {
+        const nodes = range(70);
+        const p = partitionForVirtualization(nodes, 50, null);
+        expect(p.splitIndex).toBe(20);
+    });
+});
+
+describe("initialStickyFrontierId", () => {
+    it("returns null when the document fits in the buffer", () => {
+        expect(initialStickyFrontierId(range(20), 50)).toBeNull();
+        expect(initialStickyFrontierId(range(50), 50)).toBeNull();
+    });
+
+    it("returns the id at length-buffer when the document exceeds the buffer", () => {
+        // 70 nodes, buffer 50 → first streaming node is at index 20
+        // → frontier should be n20.
+        expect(initialStickyFrontierId(range(70), 50)).toBe("n20");
+    });
+
+    it("uses STREAMING_BUFFER_SIZE as default", () => {
+        // length = bufferSize + 1 → frontier at index 1 → n1
+        const nodes = range(STREAMING_BUFFER_SIZE + 1);
+        expect(initialStickyFrontierId(nodes)).toBe("n1");
     });
 });
 
