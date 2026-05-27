@@ -16,6 +16,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { settingsAtom } from "@/store/global";
 import type { EditorViewModel } from "./editor-model";
+import { EditorTabStrip } from "./editor-tab-strip";
 import { FileTree } from "./file-tree";
 import { LspClient, type LspState } from "./lsp/lsp-client";
 import { lspDiagnosticsExtension } from "./lsp/lsp-extensions";
@@ -233,7 +234,14 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         return isWin ? decoded.replace(/\//g, "\\") : decoded;
     };
 
-    // Build or rebuild CodeMirror when content/language changes
+    // Per-tab CodeMirror state cache — preserves cursor, selection, scroll,
+    // undo history across tab switches. Populated on tab switch (snapshot of
+    // outgoing), cleared on TabClosed via the slice event subscription
+    // wired below.
+    const cmStates = new Map<string, EditorState>();
+    let activeTabIdForCm: string | null = null;
+
+    // Build or rebuild CodeMirror when the active tab changes
     const setupEditor = async (content: string, language: string, readOnly: boolean) => {
         if (!containerRef) return;
 
@@ -331,30 +339,57 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         document.addEventListener("mouseup", onUp);
     };
 
-    // Rebuild only when a NEW file is opened (path changes), not on every
-    // keystroke. contentAtom is updated by onContentChange on every keypress —
-    // reading it inside a tracked effect would destroy+recreate CodeMirror
-    // on every keystroke. untrack() prevents SolidJS from subscribing to
-    // those inner reads.
+    // Rebuild CodeMirror on tab change. Tracks activeIdAtom (not just
+    // filePathAtom) so we get a unique trigger per tab — multiple tabs
+    // could share the same path in pathological cases, but each has its own
+    // id. The outgoing tab's state is snapshotted into cmStates BEFORE the
+    // rebuild so we can restore it on the next switch back.
     createEffect(() => {
-        const path = model.filePathAtom(); // reactive dependency
-        const loading = model.loadingAtom(); // reactive dependency
-        if (!loading && path && containerRef) {
-            untrack(() => {
-                const content = model.contentAtom();
-                const lang = model.languageAtom();
-                const readOnly = model.readOnlyAtom();
-                void setupEditor(content, lang, readOnly).then(() => {
-                    // Kick off LSP after CodeMirror is up so the Compartment
-                    // reconfigure has somewhere to land.
-                    void startLspIfSupported(path, lang, content);
-                });
+        const activeId = model.activeIdAtom(); // reactive: tab change
+        const loading = model.loadingAtom(); // reactive: wait for content
+        if (!activeId || loading || !containerRef) return;
+
+        untrack(() => {
+            const path = model.filePathAtom();
+            const content = model.contentAtom();
+            const lang = model.languageAtom();
+            const readOnly = model.readOnlyAtom();
+
+            // Snapshot outgoing tab's CodeMirror state for cursor/scroll/
+            // undo preservation. Skipped on first mount (no prevId).
+            if (activeTabIdForCm && activeTabIdForCm !== activeId && cmView) {
+                cmStates.set(activeTabIdForCm, cmView.state);
+            }
+            activeTabIdForCm = activeId;
+
+            // If we have a saved state for this tab, restore via setState
+            // on the existing cmView (no destroy). Otherwise build fresh.
+            const saved = cmStates.get(activeId);
+            if (saved && cmView) {
+                cmView.setState(saved);
+                // Re-wire LSP for the now-active file's content.
+                void startLspIfSupported(path, lang, content);
+                return;
+            }
+            void setupEditor(content, lang, readOnly).then(() => {
+                void startLspIfSupported(path, lang, content);
             });
+        });
+    });
+
+    // Clear cached CodeMirror state when its tab closes, so re-opening
+    // the same file later starts fresh (matches user expectation —
+    // closed-then-reopened ≠ "still has unsaved changes").
+    const unsubSliceEvents = model.onSliceEvent((event) => {
+        if (event.type === "TabClosed") {
+            cmStates.delete(event.tabId);
         }
     });
 
     onCleanup(() => {
         void teardownLsp();
+        unsubSliceEvents();
+        cmStates.clear();
         cmView?.destroy();
         cmView = null;
     });
@@ -465,6 +500,10 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             </Show>
 
             <div class="editor-main-column">
+                <Show when={model.tabsAtom().length > 0}>
+                    <EditorTabStrip model={model} />
+                </Show>
+
                 <Show when={model.loadingAtom()}>
                     <div class="editor-loading">Loading...</div>
                 </Show>

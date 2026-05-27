@@ -5,11 +5,30 @@
 // It is NOT a standalone IDE — complex editing happens in the agent's terminal
 // or via agent tool calls. This covers quick edits, file viewing, and diffing.
 //
-// File-tree explorer + header chevron toggle landed in Phase 1 of
-// SPEC_EDITOR_FILE_TREE_2026-05-26.md.
+// State management: slice #10 editor-pane-state (frontend/app/store/
+// editor-pane-state-store.ts) owns the tab list, active id, dirty flags, and
+// recently-closed stack. This file is a thin projection layer between that
+// slice and the editor view. Tab-content blobs are held in a view-local Map
+// (this._contentByTab) — content is deliberately NOT in the slice (large,
+// not auditable, not persistable cheaply). The slice tracks contentHash +
+// contentLoaded so it can reason about dirty-vs-disk without holding the
+// buffer.
+//
+// Spec: specs/SPEC_EDITOR_TABS_2026-05-26.md (Phase 1B).
+// Earlier specs: SPEC_EDITOR_FILE_TREE_2026-05-26.md, SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { useBlockAtom } from "@/app/store/global";
+import {
+    EditorPaneEvent,
+    EditorTab,
+    canonicalizePath,
+    dispatch,
+    registerEditorPane,
+    setEventSink,
+    snapshot,
+    unregisterEditorPane,
+} from "@/app/store/editor-pane-state-store";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
@@ -19,9 +38,36 @@ import { FileTreeModel } from "./file-tree-model";
 const META_TREE_EXPANDED = "editor:tree_expanded";
 const META_SHOW_HIDDEN = "editor:show_hidden";
 const META_TREE_WIDTH = "editor:tree_width";
+const META_LEGACY_FILE = "file";
 const TREE_WIDTH_DEFAULT = 240;
 const TREE_WIDTH_MIN = 150;
 const TREE_WIDTH_MAX = 600;
+
+/** Hash a string with SHA-256 → hex. Used for the slice's contentHash field
+ *  so the saga (Phase 1C) can decide whether a tab is dirty vs. disk. Cheap;
+ *  files are capped at 10 MB by the read RPC. */
+async function sha256Hex(s: string): Promise<string> {
+    const buf = new TextEncoder().encode(s);
+    const digest = await crypto.subtle.digest("SHA-256", buf);
+    return Array.from(new Uint8Array(digest))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+}
+
+// ── Module-level event-sink fan-out ───────────────────────────────────────
+// The slice's setEventSink is a singleton — a per-instance call would
+// last-writer-wins and silently disable earlier panes' subscriptions. We
+// install the sink ONCE at module load and dispatch every slice event to
+// each registered EditorViewModel instance. Add/remove on construct/dispose.
+const _instanceHandlers = new Set<(events: EditorPaneEvent[]) => void>();
+let _sinkInstalled = false;
+function installGlobalSinkOnce(): void {
+    if (_sinkInstalled) return;
+    setEventSink((events: EditorPaneEvent[]) => {
+        for (const handler of _instanceHandlers) handler(events);
+    });
+    _sinkInstalled = true;
+}
 
 export class EditorViewModel implements ViewModel {
     viewType = "editor";
@@ -37,32 +83,38 @@ export class EditorViewModel implements ViewModel {
         return null; // overridden by barrel via Object.defineProperty
     }
 
-    // Editor state
-    private _filePath = createSignal<string>("");
-    filePathAtom: Accessor<string> = this._filePath[0];
-    setFilePath = this._filePath[1];
+    // ── Slice projection ───────────────────────────────────────────────
+    // A version counter signal triggers Solid re-evaluation whenever the
+    // slice's slot cell mutates. We use a setEventSink callback (set in the
+    // constructor) to bump the counter on every dispatch.
+    private _sliceVersion = createSignal<number>(0);
+    sliceVersionAtom: Accessor<number> = this._sliceVersion[0];
 
-    private _content = createSignal<string>("");
-    contentAtom: Accessor<string> = this._content[0];
-    setContent = this._content[1];
+    tabsAtom: Accessor<EditorTab[]>;
+    activeIdAtom: Accessor<string | null>;
+    activeTabAtom: Accessor<EditorTab | null>;
 
-    private _language = createSignal<string>("");
-    languageAtom: Accessor<string> = this._language[0];
+    // ── Derived accessors (preserve the old surface so editor-view.tsx
+    //    keeps working unchanged) ────────────────────────────────────
+    filePathAtom: Accessor<string>;
+    languageAtom: Accessor<string>;
+    dirtyAtom: Accessor<boolean>;
+    readOnlyAtom: Accessor<boolean>;
+    errorAtom: Accessor<string | null>;
+    loadingAtom: Accessor<boolean>;
 
-    private _loading = createSignal<boolean>(false);
-    loadingAtom: Accessor<boolean> = this._loading[0];
+    /** Content of the active tab. Sourced from the view-local Map; signals
+     *  re-evaluation when the active tab changes OR when its content
+     *  loads/updates. */
+    contentAtom: Accessor<string>;
 
-    private _dirty = createSignal<boolean>(false);
-    dirtyAtom: Accessor<boolean> = this._dirty[0];
-    setDirty = this._dirty[1];
+    // ── Per-tab content store (view-local) ────────────────────────────
+    // Content blobs by tabId. Keys removed on TabClosed.
+    private _contentByTab = new Map<string, string>();
+    // Bump-counter signal so contentAtom re-evaluates when we mutate the Map.
+    private _contentVersion = createSignal<number>(0);
 
-    private _readOnly = createSignal<boolean>(false);
-    readOnlyAtom: Accessor<boolean> = this._readOnly[0];
-
-    private _error = createSignal<string | null>(null);
-    errorAtom: Accessor<string | null> = this._error[0];
-
-    // File-tree state (per-pane, persisted in block meta)
+    // ── Tree state (per-pane, persisted in block meta) ──────────────────
     private _treeExpanded = createSignal<boolean>(true);
     treeExpandedAtom: Accessor<boolean> = this._treeExpanded[0];
 
@@ -75,12 +127,19 @@ export class EditorViewModel implements ViewModel {
     treeModel = new FileTreeModel();
 
     blockAtom: Accessor<Block | undefined>;
-
-    /** Per-pane zoom factor (1.0 default; clamped 0.5–2.0 by zoom store).
-     *  Backed by `term:zoom` in block meta — the same key terminals and
-     *  agents use, so the universal zoom system (Ctrl+wheel, keyboard
-     *  shortcuts, indicator overlay) Just Works. */
     zoomAtom!: Accessor<number>;
+
+    /** Tabs that started loading via openFile — used so concurrent dispatches
+     *  for the same path don't double-fetch. */
+    private _loadingPaths = new Set<string>();
+
+    /** Slice event subscribers wired from the view (for snapshot/restore of
+     *  CodeMirror state, dirty-confirm modal, LSP didOpen/didClose). */
+    private _eventSubscribers = new Set<(event: EditorPaneEvent) => void>();
+
+    /** Per-instance handler registered into the module-level fan-out.
+     *  Removed on dispose. */
+    private _globalHandler: (events: EditorPaneEvent[]) => void;
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
@@ -88,13 +147,68 @@ export class EditorViewModel implements ViewModel {
 
         this.blockAtom = getWaveObjectAtom<Block>(makeORef("block", blockId));
 
-        // Derive zoom from block meta. The zoom store reads/writes `term:zoom`
-        // via SetMetaCommand; this accessor re-renders the view's CSS var
-        // whenever it changes so CodeMirror + the tree resize live.
-        //
-        // Wrapped in `useBlockAtom` (which calls createRoot under the hood) —
-        // a bare createMemo in the constructor wouldn't have a tracking owner,
-        // so it'd read once and never re-evaluate when block meta updates.
+        // Register this pane's slot in the slice.
+        registerEditorPane(blockId);
+
+        // Install the module-level event-sink fan-out the first time any
+        // editor pane is constructed; subsequent panes share it.
+        installGlobalSinkOnce();
+
+        // Register this instance's handler in the fan-out. Bumps our local
+        // sliceVersion signal so all projections re-evaluate, then mirrors
+        // events to view-side subscribers (CodeMirror snapshot/restore,
+        // future dirty-confirm modal, LSP coupling). Removed on dispose so
+        // no closure over a disposed model survives.
+        this._globalHandler = (events: EditorPaneEvent[]) => {
+            this._sliceVersion[1]((v) => v + 1);
+            for (const ev of events) {
+                if (ev.type === "TabClosed") {
+                    this._contentByTab.delete(ev.tabId);
+                }
+                for (const sub of this._eventSubscribers) sub(ev);
+            }
+        };
+        _instanceHandlers.add(this._globalHandler);
+
+        // Projections from the slice's slot cell. Reading sliceVersionAtom
+        // creates the Solid dependency that makes these re-evaluate.
+        this.tabsAtom = createMemo<EditorTab[]>(() => {
+            this.sliceVersionAtom();
+            return snapshot(this.blockId)?.tabs ?? [];
+        });
+        this.activeIdAtom = createMemo<string | null>(() => {
+            this.sliceVersionAtom();
+            return snapshot(this.blockId)?.activeTabId ?? null;
+        });
+        this.activeTabAtom = createMemo<EditorTab | null>(() => {
+            const id = this.activeIdAtom();
+            const tabs = this.tabsAtom();
+            return tabs.find((t) => t.id === id) ?? null;
+        });
+
+        // Derived: per-active-tab signals. Existing consumers see the same
+        // shape as before — they just track whichever tab is active.
+        this.filePathAtom = () => this.activeTabAtom()?.filePath ?? "";
+        this.languageAtom = () => this.activeTabAtom()?.language ?? "";
+        this.dirtyAtom = () => this.activeTabAtom()?.dirty ?? false;
+        this.readOnlyAtom = () => this.activeTabAtom()?.readOnly ?? false;
+        this.errorAtom = () => this.activeTabAtom()?.loadError ?? null;
+        // "Loading" is true between OpenFile and TabContentLoaded — i.e. the
+        // active tab exists but its content hasn't arrived yet.
+        this.loadingAtom = () => {
+            const tab = this.activeTabAtom();
+            return tab != null && !tab.contentLoaded && tab.loadError == null;
+        };
+
+        this.contentAtom = createMemo<string>(() => {
+            this._contentVersion[0](); // dep on content bumps
+            const id = this.activeIdAtom();
+            return id ? this._contentByTab.get(id) ?? "" : "";
+        });
+
+        // Per-pane zoom (PR #1084). Wrapped in useBlockAtom (which calls
+        // createRoot under the hood) — a bare createMemo here wouldn't have
+        // a tracking owner and would snapshot once.
         this.zoomAtom = useBlockAtom(blockId, "editor-zoom", () =>
             createMemo<number>(() => {
                 const z = this.blockAtom()?.meta?.["term:zoom"];
@@ -103,11 +217,7 @@ export class EditorViewModel implements ViewModel {
             }),
         );
 
-        // Pane title — full file path (or "Editor" when nothing open). Marked
-        // with a trailing `*` when there are unsaved changes. Showing the
-        // complete path (not just the basename) lets the operator know
-        // exactly which file they're editing when multiple panes are open
-        // on similarly-named files (e.g. two `index.ts` in different dirs).
+        // Pane title — full file path of active tab, with `*` for dirty.
         this.viewName = createMemo(() => {
             const fp = this.filePathAtom();
             if (!fp) return "Editor";
@@ -115,10 +225,6 @@ export class EditorViewModel implements ViewModel {
         });
 
         // Pane icon doubles as the file-tree expand/collapse toggle.
-        // Clicking the icon hides/shows the tree column; preference persists
-        // per pane in block meta (`editor:tree_expanded`). The icon glyph
-        // reflects the current state: `folder-tree` when the tree is open,
-        // `folder` when collapsed.
         this.viewIcon = createMemo<IconButtonDecl>(() => {
             const expanded = this.treeExpandedAtom();
             return {
@@ -129,7 +235,6 @@ export class EditorViewModel implements ViewModel {
             };
         });
 
-        // No additional header items today — the icon owns the tree toggle.
         this.viewText = () => [];
 
         // Restore persisted tree state from block meta.
@@ -145,83 +250,184 @@ export class EditorViewModel implements ViewModel {
             this._treeWidth[1](clampTreeWidth(persistedWidth));
         }
 
-        // Load file from block meta on init
-        if (meta?.["file"]) {
-            void this.openFile(meta["file"] as string);
+        // Backwards-compat hydration: existing block meta uses `file` (the
+        // pre-tabs key). If present, restore as a single tab. The saga in
+        // Phase 1C will own the new `editor:tabs` key; this branch stays
+        // until 1C lands + one minor version of grace.
+        const legacyFile = meta?.[META_LEGACY_FILE];
+        if (typeof legacyFile === "string" && legacyFile) {
+            void this.openFile(legacyFile);
         }
     }
 
-    async openFile(filePath: string): Promise<void> {
-        this._loading[1](true);
-        this._error[1](null);
-        this.setFilePath(filePath);
-        this._language[1](detectLanguage(filePath));
+    // ── Event subscription (used by editor-view.tsx for CodeMirror state
+    //    snapshot/restore + future modals) ──────────────────────────────
+    onSliceEvent(handler: (event: EditorPaneEvent) => void): () => void {
+        this._eventSubscribers.add(handler);
+        return () => this._eventSubscribers.delete(handler);
+    }
 
+    // ── Tab actions (dispatched into the slice) ──────────────────────
+    async openFile(filePath: string): Promise<void> {
+        const canonical = canonicalizePath(filePath);
+        // Claim the loading slot BEFORE dispatching so two synchronous calls
+        // for the same path don't both issue ReadEditorFileCommand. Without
+        // this, the second call would pass _loadingPaths.has() (still empty)
+        // and the .add() below would fire after the first call's RPC already
+        // returned, racing the content write.
+        if (this._loadingPaths.has(canonical)) return;
+        this._loadingPaths.add(canonical);
+
+        // Dispatch OpenFile. The slice either activates an existing tab (and
+        // emits only TabActivated) or appends a new one (TabOpened +
+        // TabActivated). Pass the *mapped* language (detectLanguage) — the
+        // slice's bare `deriveLanguage` returns raw extensions, which
+        // downstream lookups (loadLanguage in editor-view, LSP support
+        // table) don't recognize.
+        const events = dispatch(this.blockId, {
+            type: "OpenFile",
+            path: filePath,
+            language: detectLanguage(filePath),
+            source: "user",
+        });
+
+        // Find the tab id (just-opened or pre-existing).
+        const opened = events.find(
+            (e) => e.type === "TabOpened" || e.type === "TabActivated",
+        );
+        if (!opened || (opened.type !== "TabOpened" && opened.type !== "TabActivated")) {
+            this._loadingPaths.delete(canonical);
+            return;
+        }
+        const tabId = opened.tabId;
+
+        // If content's already loaded for this tab, we're done.
+        if (this._contentByTab.has(tabId)) {
+            this._loadingPaths.delete(canonical);
+            return;
+        }
         try {
             const result = await RpcApi.ReadEditorFileCommand(TabRpcClient, {
                 path: filePath,
             });
-            this.setContent(result?.content ?? "");
-            this._readOnly[1](result?.read_only ?? false);
-            this._dirty[1](false);
+            const content = result?.content ?? "";
+            this._contentByTab.set(tabId, content);
+            this._contentVersion[1]((v) => v + 1);
 
-            // Store file path in block meta
-            await RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: makeORef("block", this.blockId),
-                meta: { file: filePath },
+            const hash = await sha256Hex(content);
+            dispatch(this.blockId, {
+                type: "TabContentLoaded",
+                tabId,
+                contentHash: hash,
+                readOnly: result?.read_only ?? false,
+                source: "system",
             });
-        } catch (e: any) {
-            this._error[1](e?.message ?? String(e));
+
+            // Backwards-compat: persist the active file path under the legacy
+            // meta key so a downgrade (or a Phase 1C-less build) restores it.
+            // The 1C saga replaces this with the full editor:tabs persistence.
+            await this.persistMeta({ [META_LEGACY_FILE]: filePath });
+        } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : String(e);
+            dispatch(this.blockId, {
+                type: "TabContentLoadFailed",
+                tabId,
+                error: message,
+                source: "system",
+            });
         } finally {
-            this._loading[1](false);
+            this._loadingPaths.delete(canonical);
+        }
+    }
+
+    closeTab(tabId: string): void {
+        // Phase 1B: force-close even for dirty tabs (matches today's
+        // behavior — pane closes silently lose unsaved changes). The
+        // dirty-confirm modal lands in a follow-up commit; until then,
+        // `force: true` short-circuits the RequestDirtyConfirm path.
+        dispatch(this.blockId, { type: "CloseTab", tabId, force: true, source: "user" });
+    }
+
+    switchTab(tabId: string): void {
+        dispatch(this.blockId, { type: "SwitchTab", tabId, source: "user" });
+    }
+
+    reopenLastClosed(): void {
+        dispatch(this.blockId, { type: "ReopenLastClosed", source: "user" });
+    }
+
+    /** Called by CodeMirror's updateListener on every change. Updates the
+     *  view-local content Map and dispatches MarkDirty on the first transition
+     *  from clean → dirty. (The slice no-ops MarkDirty on already-dirty.) */
+    onContentChange(content: string): void {
+        const tabId = this.activeIdAtom();
+        if (!tabId) return;
+        this._contentByTab.set(tabId, content);
+        // No content-version bump here — CodeMirror is the source of truth
+        // for the live buffer; contentAtom doesn't need to re-fire on every
+        // keystroke (that would defeat CodeMirror's incremental rendering).
+        if (!this.dirtyAtom()) {
+            dispatch(this.blockId, {
+                type: "MarkDirty",
+                tabId,
+                source: "cm-update",
+            });
         }
     }
 
     async saveFile(): Promise<void> {
         if (this.readOnlyAtom()) return;
-        const filePath = this.filePathAtom();
-        if (!filePath) return;
+        const tab = this.activeTabAtom();
+        if (!tab) return;
+        const content = this._contentByTab.get(tab.id) ?? "";
 
         try {
             await RpcApi.WriteEditorFileCommand(TabRpcClient, {
-                path: filePath,
-                content: this.contentAtom(),
+                path: tab.filePath,
+                content,
             });
-            this._dirty[1](false);
-            this._error[1](null);
-        } catch (e: any) {
-            this._error[1](`Save failed: ${e?.message ?? String(e)}`);
+            dispatch(this.blockId, {
+                type: "ClearDirty",
+                tabId: tab.id,
+                source: "system",
+            });
+            // Recompute content hash since disk now matches buffer.
+            const hash = await sha256Hex(content);
+            dispatch(this.blockId, {
+                type: "TabContentLoaded",
+                tabId: tab.id,
+                contentHash: hash,
+                readOnly: tab.readOnly,
+                source: "system",
+            });
+        } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : String(e);
+            dispatch(this.blockId, {
+                type: "TabContentLoadFailed",
+                tabId: tab.id,
+                error: `Save failed: ${message}`,
+                source: "system",
+            });
         }
     }
 
-    onContentChange(content: string): void {
-        this.setContent(content);
-        this._dirty[1](true);
-    }
-
-    /** Toggle file-tree visibility. Persists to block meta. */
+    // ── Tree state (unchanged from Phase 1A of file-tree spec) ─────────
     async toggleTreeExpanded(): Promise<void> {
         const next = !this._treeExpanded[0]();
         this._treeExpanded[1](next);
         await this.persistMeta({ [META_TREE_EXPANDED]: next });
     }
 
-    /** Toggle hidden-file visibility in the tree. Persists to block meta. */
     async toggleShowHidden(): Promise<void> {
         const next = !this._showHidden[0]();
         this._showHidden[1](next);
         await this.persistMeta({ [META_SHOW_HIDDEN]: next });
     }
 
-    /**
-     * Live tree-width update during drag — fast signal-only path, no RPC.
-     * Use `commitTreeWidth()` on mouseup to persist.
-     */
     setTreeWidth(width: number): void {
         this._treeWidth[1](clampTreeWidth(width));
     }
 
-    /** Persist the current tree width to block meta. Call on drag-release. */
     async commitTreeWidth(): Promise<void> {
         await this.persistMeta({ [META_TREE_WIDTH]: this._treeWidth[0]() });
     }
@@ -233,9 +439,9 @@ export class EditorViewModel implements ViewModel {
                 meta,
             });
         } catch {
-            // Persistence failure isn't fatal — the in-memory signal still
-            // drives the current pane's behavior. On reopen, the previous
-            // persisted value (or default) wins.
+            // Persistence failure isn't fatal — in-memory signal still drives
+            // the current pane's behavior. On reopen, the previous persisted
+            // value (or default) wins.
         }
     }
 
@@ -243,7 +449,12 @@ export class EditorViewModel implements ViewModel {
         return false;
     }
 
-    dispose(): void {}
+    dispose(): void {
+        _instanceHandlers.delete(this._globalHandler);
+        this._eventSubscribers.clear();
+        this._contentByTab.clear();
+        unregisterEditorPane(this.blockId);
+    }
 }
 
 function clampTreeWidth(w: number): number {
@@ -252,6 +463,11 @@ function clampTreeWidth(w: number): number {
 }
 
 // ── Language detection ──────────────────────────────────────────────────────
+// Maps file extensions to the canonical names the rest of the editor expects:
+// `loadLanguage` in editor-view.tsx, LSP_SUPPORTED_LANGUAGES in install-hints.ts.
+// The slice's `deriveLanguage` returns raw extensions ("ts", "py") — fine as a
+// fallback label, but downstream lookups need the mapped form ("typescript",
+// "python"). Keep this map in sync with `loadLanguage`'s switch.
 
 const EXTENSION_MAP: Record<string, string> = {
     ".ts": "typescript",
@@ -287,13 +503,15 @@ const EXTENSION_MAP: Record<string, string> = {
     ".svg": "html",
 };
 
-function detectLanguage(filePath: string): string {
+export function detectLanguage(filePath: string): string {
     const lower = filePath.toLowerCase();
+    // Extension lookup. Use endsWith so multi-segment extensions like
+    // `.test.tsx` still resolve via the trailing component.
     for (const [ext, lang] of Object.entries(EXTENSION_MAP)) {
         if (lower.endsWith(ext)) return lang;
     }
-    // Special filenames
-    const name = lower.split("/").pop() || "";
+    // Special bareword filenames (no extension or unusual conventions).
+    const name = lower.split(/[\\/]/).pop() ?? "";
     if (name === "dockerfile") return "shell";
     if (name === "makefile") return "shell";
     if (name === "cargo.toml" || name === "cargo.lock") return "toml";
