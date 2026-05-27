@@ -302,11 +302,22 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                     // Restore from anchor by id — partition reflects the
                     // new prepended nodes, so the anchor's new index
                     // gives a fresh measured offset.
+                    //
+                    // Use the same `partition()` memo the DOM is
+                    // rendered from. Recomputing via the raw
+                    // `partitionForVirtualization()` here would use a
+                    // count-based split that ignores the sticky
+                    // frontier, so an anchor that's actually in the
+                    // streaming buffer could be classified as
+                    // virtualized, then `getOffsetForIndex(newIdx)`
+                    // would be called with an index past the
+                    // virtualizer's count and the restore would
+                    // silently fail. Codex P2 on PR #1101.
                     const anchor = props.viewState.headAnchor();
                     if (anchor != null && scrollRef) {
                         const newIdx = props.viewState.indexOf(anchor.nodeId);
                         if (newIdx >= 0) {
-                            const newP = partitionForVirtualization(props.viewState.nodes());
+                            const newP = partition();
                             if (newIdx < newP.splitIndex) {
                                 // Still virtualized — recompute via virtualizer's offsetForIndex.
                                 // The returned offset already includes scrollMargin in v3,
