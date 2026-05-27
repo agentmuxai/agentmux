@@ -2,60 +2,116 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pure reducer for the browser-pane state slice (slice #9, Phases 3a +
- * 3b + 3c + 3d + 3e complete). See
- * `docs/specs/browser-pane-reducer-roadmap.md` and the conventions
- * doc `frontend-reducer-conventions-2026-05-03.md`.
- * This module is the exact mirror of slice #4's reducer pattern
- * (agent-pane-state) — same `update(state, command) → { state, events }`
- * shape, same idempotency rules, same no-throw policy.
+ * Pure reducer for the browser-pane state slice.
+ *
+ * **Phase 1A** (`specs/SPEC_BROWSER_PANE_TABS_2026-05-27.md`) — extends
+ * slice #9 to hold an ordered tab list. Per-page fields (`url`, `title`,
+ * `loading`, `error`, `canGoBack`, `canGoForward`, `faviconUrl`) move
+ * into `BrowserTab` records. Existing commands (`Navigate`, `LoadStarted`,
+ * `LoadFinished`, `LoadFailed`, `HistoryUpdated`, `TitleChanged`,
+ * `UrlConfirmed`, `UrlCleared`, `FaviconUrlsReceived`) operate on the
+ * active tab; when `activeTabId === null` they are defensive no-ops.
  *
  * Invariants enforced:
- *   1. Once `closed` flips true, every subsequent command emits
+ *   1. `activeTabId` always points to a tab in `tabs[]` or is null
+ *      when `tabs.length === 0`.
+ *   2. Tab `id`s are unique within a pane (uuid generator).
+ *   3. `recentlyClosed.length <= MAX_RECENTLY_CLOSED` (oldest evicted).
+ *   4. Once `closed` flips true, every subsequent command emits
  *      `post-close-command-dropped` and returns the unchanged state.
- *      `Disposed` itself is idempotent (second dispatch is a no-op).
- *   2. `loading` and `error` are mutually exclusive — at most one of
- *      the two is truthy at any time.
- *   3. `Navigate` always clears any prior `error` (a fresh attempt
- *      supersedes the prior failure) AND updates `state.url` to the
- *      target URL atomically with the loading flip.
- *   4. `LoadFinished` is a no-op if `loading` was already false AND
- *      `error` was already null (nothing to clear; avoids a spurious
- *      load-finished event on a steady-state pane).
- *   5. `HistoryUpdated` is idempotent: if the supplied fields match
- *      the current state, return the unchanged state with no event.
- *      An omitted field leaves its cell alone (the host can emit
- *      partial updates).
- *   6. `TitleChanged` folds empty/whitespace input to
- *      `TITLE_FALLBACK` so `state.title` is never blank.
- *      Idempotent on identical (post-fold) values.
- *   7. `UrlConfirmed` updates `state.url` only — does NOT touch
- *      loading/error/history (those transition via the
- *      LoadFinished/LoadFailed/HistoryUpdated dispatches that
- *      typically accompany the same nav-state IPC event).
- *      Idempotent on identical url.
- *   8. `UrlCleared` sets `state.url = ""` without touching any
- *      other cell except `faviconUrl` (which derives from `url`).
- *      Distinct from `UrlConfirmed { url: "" }` so the audit ring
- *      distinguishes the reload force-reload pattern from a
- *      host-confirmed empty URL. Idempotent (already empty → no-op).
- *   9. `faviconUrl` is a **derived projection** of `url` — every
- *      transition that writes `url` also writes
- *      `faviconUrl = deriveFaviconUrl(url)`. There is no
- *      `FaviconChanged` command; the cell is not an independent
- *      input. Empty / unparseable URL → empty faviconUrl (view falls
- *      back to globe icon).
+ *      `Disposed` itself is idempotent.
+ *   5. Per-tab `loading` and `error` are mutually exclusive — at most
+ *      one of the two is truthy at any time for a given tab.
+ *   6. Tab-mutating commands with a non-matching `tabId` are no-ops
+ *      (defensive).
+ *   7. Backend-source commands (`source: "backend"`) suppress the
+ *      `navigate` event emission to prevent the echo loop where
+ *      `OnAddressChange` is interpreted as a navigate intent.
  */
 
 import {
+    BrowserCommandSource,
     BrowserPaneCommand,
+    BrowserPaneEvent,
     BrowserPaneState,
+    BrowserTab,
+    ClosedBrowserTab,
+    MAX_RECENTLY_CLOSED,
     ReducerResult,
     TITLE_FALLBACK,
     deriveFaviconUrl,
     deriveTitlePlaceholder,
+    makeTab,
     sameOriginUrl,
 } from "./types";
+
+// ─────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────
+
+function findTabIndex(state: BrowserPaneState, tabId: string): number {
+    return state.tabs.findIndex((t) => t.id === tabId);
+}
+
+function getActiveTab(state: BrowserPaneState): BrowserTab | null {
+    if (state.activeTabId == null) return null;
+    return state.tabs.find((t) => t.id === state.activeTabId) ?? null;
+}
+
+function replaceTab(
+    state: BrowserPaneState,
+    tabId: string,
+    patch: (tab: BrowserTab) => BrowserTab,
+): BrowserPaneState | null {
+    const idx = findTabIndex(state, tabId);
+    if (idx < 0) return null;
+    const nextTab = patch(state.tabs[idx]);
+    if (nextTab === state.tabs[idx]) return state;
+    const nextTabs = [
+        ...state.tabs.slice(0, idx),
+        nextTab,
+        ...state.tabs.slice(idx + 1),
+    ];
+    return { ...state, tabs: nextTabs };
+}
+
+function pushRecentlyClosed(
+    list: ClosedBrowserTab[],
+    entry: ClosedBrowserTab,
+): ClosedBrowserTab[] {
+    const next = [...list, entry];
+    if (next.length > MAX_RECENTLY_CLOSED) {
+        return next.slice(next.length - MAX_RECENTLY_CLOSED);
+    }
+    return next;
+}
+
+/**
+ * Pick the new active id after `tabId` has been removed from `prevTabs`.
+ * Prefer the right neighbour of the closed tab; fall back to the left
+ * when closing the rightmost tab; null when no tabs remain.
+ */
+function pickNextActiveId(
+    prevTabs: BrowserTab[],
+    closedIndex: number,
+): string | null {
+    const remaining = prevTabs.length - 1;
+    if (remaining <= 0) return null;
+    if (closedIndex < remaining) {
+        return prevTabs[closedIndex + 1].id;
+    }
+    return prevTabs[closedIndex - 1].id;
+}
+
+/** Returns true if the command's `source` is `"backend"`. Used to
+ *  suppress the `navigate` event for backend-driven URL updates. */
+function isBackendSource(source: BrowserCommandSource | undefined): boolean {
+    return source === "backend";
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Reducer
+// ─────────────────────────────────────────────────────────────────────
 
 export function update(
     state: BrowserPaneState,
@@ -74,74 +130,457 @@ export function update(
     }
 
     switch (command.type) {
-        case "Navigate": {
-            // Optimistic header (SPEC_BROWSER_PANE_OPTIMISTIC_HEADER_2026_05_18):
-            // also seed the title with a hostname-based placeholder so
-            // the header doesn't show the previous page's title for
-            // the 500ms–3s before CEF emits `TitleChanged`. The real
-            // title overrides this when it arrives.
-            const placeholder = deriveTitlePlaceholder(command.url);
-            const title = placeholder !== "" ? placeholder : TITLE_FALLBACK;
+        // ─── Tab list management ───────────────────────────────────
+        case "OpenTab": {
+            const tab = makeTab(command.url);
+            const nextTabs = [...state.tabs, tab];
+            const background = command.mode === "background";
+            const nextActiveId = background && state.activeTabId != null
+                ? state.activeTabId
+                : tab.id;
+            const events: BrowserPaneEvent[] = [
+                {
+                    type: "tab-opened",
+                    tabId: tab.id,
+                    url: command.url,
+                    atIndex: nextTabs.length - 1,
+                },
+            ];
+            if (nextActiveId === tab.id) {
+                events.push({ type: "tab-activated", tabId: tab.id });
+            }
             return {
                 state: {
                     ...state,
-                    loading: true,
-                    error: null,
-                    url: command.url,
-                    faviconUrl: deriveFaviconUrl(command.url),
-                    faviconOverridden: false,
-                    title,
-                    titleOverridden: false,
+                    tabs: nextTabs,
+                    activeTabId: nextActiveId,
                 },
+                events,
+            };
+        }
+
+        case "CloseTab": {
+            const idx = findTabIndex(state, command.tabId);
+            if (idx < 0) return { state, events: [] };
+            const tab = state.tabs[idx];
+            const nextTabs = [
+                ...state.tabs.slice(0, idx),
+                ...state.tabs.slice(idx + 1),
+            ];
+            const wasActive = state.activeTabId === tab.id;
+            const nextActiveId = wasActive
+                ? pickNextActiveId(state.tabs, idx)
+                : state.activeTabId;
+            const closedEntry: ClosedBrowserTab = {
+                url: tab.url,
+                title: tab.title,
+                closedAt: Date.now(),
+            };
+            const nextState: BrowserPaneState = {
+                ...state,
+                tabs: nextTabs,
+                activeTabId: nextActiveId,
+                recentlyClosed: pushRecentlyClosed(
+                    state.recentlyClosed,
+                    closedEntry,
+                ),
+            };
+            const events: BrowserPaneEvent[] = [
+                { type: "tab-closed", tabId: tab.id, url: tab.url },
+            ];
+            if (wasActive && nextActiveId != null) {
+                events.push({ type: "tab-activated", tabId: nextActiveId });
+            }
+            if (nextTabs.length === 0) {
+                events.push({ type: "last-tab-closed" });
+            }
+            return { state: nextState, events };
+        }
+
+        case "SwitchTab": {
+            const idx = findTabIndex(state, command.tabId);
+            if (idx < 0) return { state, events: [] };
+            if (state.activeTabId === command.tabId) {
+                return { state, events: [] };
+            }
+            return {
+                state: { ...state, activeTabId: command.tabId },
+                events: [{ type: "tab-activated", tabId: command.tabId }],
+            };
+        }
+
+        case "ReorderTab": {
+            const idx = findTabIndex(state, command.tabId);
+            if (idx < 0) return { state, events: [] };
+            if (state.tabs.length <= 1) return { state, events: [] };
+            const clamped = Math.max(
+                0,
+                Math.min(state.tabs.length - 1, command.toIndex),
+            );
+            if (clamped === idx) return { state, events: [] };
+            const next = [...state.tabs];
+            const [moved] = next.splice(idx, 1);
+            next.splice(clamped, 0, moved);
+            return {
+                state: { ...state, tabs: next },
+                events: [
+                    { type: "tab-reordered", tabId: command.tabId, toIndex: clamped },
+                ],
+            };
+        }
+
+        // ─── Per-tab backend-driven updates ────────────────────────
+        case "TabUrlChanged": {
+            const idx = findTabIndex(state, command.tabId);
+            if (idx < 0) return { state, events: [] };
+            const tab = state.tabs[idx];
+            if (tab.url === command.url) return { state, events: [] };
+            // Same origin-aware favicon preservation as the legacy
+            // UrlConfirmed path. Backend-source commands suppress
+            // the `navigate` event to prevent an echo loop.
+            const originChanged = sameOriginUrl(tab.url, command.url) === false;
+            const faviconAlreadyForNewOrigin = tab.faviconOverridden
+                && sameOriginUrl(tab.faviconUrl, command.url);
+            const keepFaviconOverride = tab.faviconOverridden
+                && (!originChanged || faviconAlreadyForNewOrigin);
+            const faviconUrl = keepFaviconOverride
+                ? tab.faviconUrl
+                : deriveFaviconUrl(command.url);
+            const faviconOverridden = keepFaviconOverride
+                ? tab.faviconOverridden
+                : false;
+            const title = originChanged
+                ? (deriveTitlePlaceholder(command.url) || TITLE_FALLBACK)
+                : tab.title;
+            const titleOverridden = originChanged ? false : tab.titleOverridden;
+            const nextTab: BrowserTab = {
+                ...tab,
+                url: command.url,
+                faviconUrl,
+                faviconOverridden,
+                title,
+                titleOverridden,
+            };
+            const nextTabs = [
+                ...state.tabs.slice(0, idx),
+                nextTab,
+                ...state.tabs.slice(idx + 1),
+            ];
+            return {
+                state: { ...state, tabs: nextTabs },
+                events: [
+                    { type: "tab-url-changed", tabId: command.tabId, url: command.url },
+                ],
+            };
+        }
+
+        case "TabTitleChanged": {
+            const idx = findTabIndex(state, command.tabId);
+            if (idx < 0) return { state, events: [] };
+            const tab = state.tabs[idx];
+            const trimmed = command.title.trim();
+            const next = trimmed === "" ? TITLE_FALLBACK : command.title;
+            const overridden = trimmed !== "";
+            if (next === tab.title && overridden === tab.titleOverridden) {
+                return { state, events: [] };
+            }
+            const nextTab: BrowserTab = {
+                ...tab,
+                title: next,
+                titleOverridden: overridden,
+            };
+            const nextTabs = [
+                ...state.tabs.slice(0, idx),
+                nextTab,
+                ...state.tabs.slice(idx + 1),
+            ];
+            return {
+                state: { ...state, tabs: nextTabs },
+                events: [
+                    { type: "tab-title-changed", tabId: command.tabId, title: next },
+                ],
+            };
+        }
+
+        case "TabFaviconChanged": {
+            const idx = findTabIndex(state, command.tabId);
+            if (idx < 0) return { state, events: [] };
+            const tab = state.tabs[idx];
+            const cefUrl = command.faviconUrl;
+            const next = cefUrl !== "" ? cefUrl : deriveFaviconUrl(tab.url);
+            const overridden = cefUrl !== "";
+            if (next === tab.faviconUrl && overridden === tab.faviconOverridden) {
+                return { state, events: [] };
+            }
+            const nextTab: BrowserTab = {
+                ...tab,
+                faviconUrl: next,
+                faviconOverridden: overridden,
+            };
+            const nextTabs = [
+                ...state.tabs.slice(0, idx),
+                nextTab,
+                ...state.tabs.slice(idx + 1),
+            ];
+            return {
+                state: { ...state, tabs: nextTabs },
+                events: [
+                    { type: "tab-favicon-changed", tabId: command.tabId, faviconUrl: next },
+                ],
+            };
+        }
+
+        case "TabLoadingChanged": {
+            const idx = findTabIndex(state, command.tabId);
+            if (idx < 0) return { state, events: [] };
+            const tab = state.tabs[idx];
+            if (
+                tab.loading === command.loading &&
+                tab.canGoBack === command.canGoBack &&
+                tab.canGoForward === command.canGoForward
+            ) {
+                return { state, events: [] };
+            }
+            // Maintain Invariant 5: loading clears any prior error
+            // when it transitions to true (a fresh attempt is in
+            // flight); when loading goes false, error is preserved
+            // (it stays from a TabLoadFailed dispatch).
+            const error = command.loading ? null : tab.error;
+            const nextTab: BrowserTab = {
+                ...tab,
+                loading: command.loading,
+                canGoBack: command.canGoBack,
+                canGoForward: command.canGoForward,
+                error,
+            };
+            const nextTabs = [
+                ...state.tabs.slice(0, idx),
+                nextTab,
+                ...state.tabs.slice(idx + 1),
+            ];
+            return {
+                state: { ...state, tabs: nextTabs },
+                events: [
+                    {
+                        type: "tab-loading-changed",
+                        tabId: command.tabId,
+                        loading: command.loading,
+                        canGoBack: command.canGoBack,
+                        canGoForward: command.canGoForward,
+                    },
+                ],
+            };
+        }
+
+        case "TabLoadFailed": {
+            const next = replaceTab(state, command.tabId, (t) => ({
+                ...t,
+                loading: false,
+                error: command.error,
+            }));
+            if (next == null) return { state, events: [] };
+            return {
+                state: next,
+                events: [
+                    { type: "tab-load-failed", tabId: command.tabId, error: command.error },
+                ],
+            };
+        }
+
+        case "TabBackendCreated": {
+            const idx = findTabIndex(state, command.tabId);
+            if (idx < 0) return { state, events: [] };
+            const tab = state.tabs[idx];
+            if (tab.backendCreated) return { state, events: [] };
+            const nextTab: BrowserTab = { ...tab, backendCreated: true };
+            const nextTabs = [
+                ...state.tabs.slice(0, idx),
+                nextTab,
+                ...state.tabs.slice(idx + 1),
+            ];
+            return {
+                state: { ...state, tabs: nextTabs },
+                events: [{ type: "tab-backend-created", tabId: command.tabId }],
+            };
+        }
+
+        case "ReopenLastClosed": {
+            if (state.recentlyClosed.length === 0) {
+                return { state, events: [] };
+            }
+            const last = state.recentlyClosed[state.recentlyClosed.length - 1];
+            const trimmed = state.recentlyClosed.slice(0, -1);
+            // Pop the entry BEFORE delegating to OpenTab so a tab that
+            // somehow already exists at that URL just opens fresh.
+            const sub = update(
+                { ...state, recentlyClosed: trimmed },
+                { type: "OpenTab", url: last.url, source: command.source },
+            );
+            return sub;
+        }
+
+        case "HydrateFromMeta": {
+            const tabs: BrowserTab[] = command.tabs.map((t) => ({
+                id: t.id,
+                url: t.url,
+                title: t.title ?? (deriveTitlePlaceholder(t.url) || TITLE_FALLBACK),
+                faviconUrl: t.faviconUrl ?? deriveFaviconUrl(t.url),
+                loading: false,
+                error: null,
+                canGoBack: false,
+                canGoForward: false,
+                titleOverridden: false,
+                faviconOverridden: false,
+                isPreview: t.isPreview ?? false,
+                backendCreated: false,
+            }));
+            const activeStillPresent =
+                command.activeTabId != null &&
+                tabs.some((t) => t.id === command.activeTabId);
+            const activeId = activeStillPresent
+                ? command.activeTabId
+                : tabs.length > 0
+                  ? tabs[0].id
+                  : null;
+            const nextState: BrowserPaneState = {
+                ...state,
+                tabs,
+                activeTabId: activeId,
+            };
+            return {
+                state: nextState,
+                events: [
+                    {
+                        type: "tabs-restored",
+                        tabIds: tabs.map((t) => t.id),
+                        activeTabId: activeId,
+                    },
+                ],
+            };
+        }
+
+        // ─── Existing commands — operate on the active tab ─────────
+        case "Navigate": {
+            const active = getActiveTab(state);
+            if (active == null) return { state, events: [] };
+            // Optimistic header (carried per-tab in Phase 1A).
+            const placeholder = deriveTitlePlaceholder(command.url);
+            const title = placeholder !== "" ? placeholder : TITLE_FALLBACK;
+            const nextActive: BrowserTab = {
+                ...active,
+                loading: true,
+                error: null,
+                url: command.url,
+                faviconUrl: deriveFaviconUrl(command.url),
+                faviconOverridden: false,
+                title,
+                titleOverridden: false,
+            };
+            const idx = findTabIndex(state, active.id);
+            const nextTabs = [
+                ...state.tabs.slice(0, idx),
+                nextActive,
+                ...state.tabs.slice(idx + 1),
+            ];
+            return {
+                state: { ...state, tabs: nextTabs },
                 events: [{ type: "navigate", url: command.url }],
             };
         }
 
         case "LoadStarted": {
+            const active = getActiveTab(state);
+            if (active == null) return { state, events: [] };
+            const idx = findTabIndex(state, active.id);
+            const nextActive: BrowserTab = {
+                ...active,
+                loading: true,
+                error: null,
+            };
+            const nextTabs = [
+                ...state.tabs.slice(0, idx),
+                nextActive,
+                ...state.tabs.slice(idx + 1),
+            ];
             return {
-                state: { ...state, loading: true, error: null },
+                state: { ...state, tabs: nextTabs },
                 events: [{ type: "load-started" }],
             };
         }
 
         case "LoadFinished": {
-            if (!state.loading && state.error === null) {
+            const active = getActiveTab(state);
+            if (active == null) return { state, events: [] };
+            if (!active.loading && active.error === null) {
                 return { state, events: [] };
             }
+            const idx = findTabIndex(state, active.id);
+            const nextActive: BrowserTab = {
+                ...active,
+                loading: false,
+                error: null,
+            };
+            const nextTabs = [
+                ...state.tabs.slice(0, idx),
+                nextActive,
+                ...state.tabs.slice(idx + 1),
+            ];
             return {
-                state: { ...state, loading: false, error: null },
+                state: { ...state, tabs: nextTabs },
                 events: [{ type: "load-finished" }],
             };
         }
 
         case "LoadFailed": {
+            const active = getActiveTab(state);
+            if (active == null) return { state, events: [] };
+            const idx = findTabIndex(state, active.id);
+            const nextActive: BrowserTab = {
+                ...active,
+                loading: false,
+                error: command.reason,
+            };
+            const nextTabs = [
+                ...state.tabs.slice(0, idx),
+                nextActive,
+                ...state.tabs.slice(idx + 1),
+            ];
             return {
-                state: { ...state, loading: false, error: command.reason },
+                state: { ...state, tabs: nextTabs },
                 events: [{ type: "load-failed", reason: command.reason }],
             };
         }
 
         case "HistoryUpdated": {
+            const active = getActiveTab(state);
+            if (active == null) return { state, events: [] };
             const nextBack =
                 command.canGoBack !== undefined
                     ? command.canGoBack
-                    : state.canGoBack;
+                    : active.canGoBack;
             const nextForward =
                 command.canGoForward !== undefined
                     ? command.canGoForward
-                    : state.canGoForward;
+                    : active.canGoForward;
             if (
-                nextBack === state.canGoBack &&
-                nextForward === state.canGoForward
+                nextBack === active.canGoBack &&
+                nextForward === active.canGoForward
             ) {
                 return { state, events: [] };
             }
+            const idx = findTabIndex(state, active.id);
+            const nextActive: BrowserTab = {
+                ...active,
+                canGoBack: nextBack,
+                canGoForward: nextForward,
+            };
+            const nextTabs = [
+                ...state.tabs.slice(0, idx),
+                nextActive,
+                ...state.tabs.slice(idx + 1),
+            ];
             return {
-                state: {
-                    ...state,
-                    canGoBack: nextBack,
-                    canGoForward: nextForward,
-                },
+                state: { ...state, tabs: nextTabs },
                 events: [
                     {
                         type: "history-updated",
@@ -152,130 +591,119 @@ export function update(
             };
         }
 
+        case "TitleChanged": {
+            const active = getActiveTab(state);
+            if (active == null) return { state, events: [] };
+            const trimmed = command.title.trim();
+            const next = trimmed === "" ? TITLE_FALLBACK : command.title;
+            const overridden = trimmed !== "";
+            if (next === active.title && overridden === active.titleOverridden) {
+                return { state, events: [] };
+            }
+            const idx = findTabIndex(state, active.id);
+            const nextActive: BrowserTab = {
+                ...active,
+                title: next,
+                titleOverridden: overridden,
+            };
+            const nextTabs = [
+                ...state.tabs.slice(0, idx),
+                nextActive,
+                ...state.tabs.slice(idx + 1),
+            ];
+            return {
+                state: { ...state, tabs: nextTabs },
+                events: [{ type: "title-changed", title: next }],
+            };
+        }
+
         case "UrlConfirmed": {
-            if (state.url === command.url) return { state, events: [] };
-            // Origin-aware favicon preservation:
-            //
-            // - Same-origin URL change (in-page redirect, hash change,
-            //   querystring update) keeps the CEF-reported favicon to
-            //   avoid the real favicon flashing back to the heuristic
-            //   on every nav event (reagent P2 on #876).
-            // - Cross-origin navigation resets the override so a stale
-            //   favicon from the previous site doesn't carry over —
-            //   bug found 2026-05-18, the old code preserved
-            //   faviconOverridden across all URL changes, so
-            //   navigating from agentmux.ai → bing.com → x.com would
-            //   keep bing's favicon when CEF was silent about x.com.
-            //   The new derived favicon may still flash briefly, but a
-            //   subsequent FaviconUrlsReceived from CEF will replace
-            //   it. That's a better default than retaining a foreign
-            //   favicon indefinitely.
-            const originChanged = sameOriginUrl(state.url, command.url) === false;
-            // Race guard (reagent + codex P2 on #905 v1): if
-            // `FaviconUrlsReceived` for the destination page beat
-            // `UrlConfirmed` here, `state.faviconUrl` is already from
-            // the new origin even though `state.url` still points at
-            // the previous page. Resetting based purely on
-            // `originChanged` would overwrite that real favicon with
-            // the derived one. So: also keep the override when the
-            // current favicon's origin already matches the incoming
-            // URL's origin.
-            const faviconAlreadyForNewOrigin = state.faviconOverridden
-                && sameOriginUrl(state.faviconUrl, command.url);
-            const keepOverride = state.faviconOverridden
+            const active = getActiveTab(state);
+            if (active == null) return { state, events: [] };
+            if (active.url === command.url) return { state, events: [] };
+            const originChanged = sameOriginUrl(active.url, command.url) === false;
+            const faviconAlreadyForNewOrigin = active.faviconOverridden
+                && sameOriginUrl(active.faviconUrl, command.url);
+            const keepOverride = active.faviconOverridden
                 && (!originChanged || faviconAlreadyForNewOrigin);
             const faviconUrl = keepOverride
-                ? state.faviconUrl
+                ? active.faviconUrl
                 : deriveFaviconUrl(command.url);
-            const faviconOverridden = keepOverride ? state.faviconOverridden : false;
-            // Title placeholder for cross-origin transitions. Simpler
-            // than favicon because title carries no origin information
-            // to disambiguate "real-title-from-new-page beat
-            // UrlConfirmed" vs "stale-real-title-from-old-page".
-            //
-            //   - Same-origin: keep state.title (real title for this
-            //     page; no flash to placeholder).
-            //   - Cross-origin: reset to hostname placeholder so the
-            //     header shows instant feedback for in-page link
-            //     clicks to new domains (the primary win).
-            //
-            // Trade-off (reagent + codex P2 on #905 v2): if CEF's
-            // TitleChanged for the new page beat UrlConfirmed in a
-            // race, state.title already holds the real title with
-            // titleOverridden=true — we overwrite it with the
-            // placeholder here and never recover (CEF doesn't
-            // re-emit TitleChanged for the same page). Accepted
-            // because the common path (in-page link → new domain
-            // with no race) dominates, and the rare race produces a
-            // less-bad outcome than the original bug (real-title-of-
-            // PREVIOUS-page sticking forever).
+            const faviconOverridden = keepOverride
+                ? active.faviconOverridden
+                : false;
             const title = originChanged
                 ? (deriveTitlePlaceholder(command.url) || TITLE_FALLBACK)
-                : state.title;
-            const titleOverridden = originChanged ? false : state.titleOverridden;
+                : active.title;
+            const titleOverridden = originChanged ? false : active.titleOverridden;
+            const idx = findTabIndex(state, active.id);
+            const nextActive: BrowserTab = {
+                ...active,
+                url: command.url,
+                faviconUrl,
+                faviconOverridden,
+                title,
+                titleOverridden,
+            };
+            const nextTabs = [
+                ...state.tabs.slice(0, idx),
+                nextActive,
+                ...state.tabs.slice(idx + 1),
+            ];
             return {
-                state: {
-                    ...state,
-                    url: command.url,
-                    faviconUrl,
-                    faviconOverridden,
-                    title,
-                    titleOverridden,
-                },
+                state: { ...state, tabs: nextTabs },
                 events: [{ type: "url-confirmed", url: command.url }],
             };
         }
 
         case "UrlCleared": {
-            if (state.url === "") return { state, events: [] };
+            const active = getActiveTab(state);
+            if (active == null) return { state, events: [] };
+            if (active.url === "") return { state, events: [] };
+            const idx = findTabIndex(state, active.id);
+            const nextActive: BrowserTab = {
+                ...active,
+                url: "",
+                faviconUrl: "",
+            };
+            const nextTabs = [
+                ...state.tabs.slice(0, idx),
+                nextActive,
+                ...state.tabs.slice(idx + 1),
+            ];
             return {
-                state: { ...state, url: "", faviconUrl: "" },
+                state: { ...state, tabs: nextTabs },
                 events: [{ type: "url-cleared" }],
             };
         }
 
         case "PaneClicked": {
-            // Pure event — no state change. The reducer doesn't track
-            // DOM/Win32 focus (catalog rule §3); the view's event
-            // sink performs the blur+refocus side-effect when the
-            // `pane-clicked` event is delivered. Recording through
-            // dispatch lands the click in the audit ring.
+            // Pure event — no state change.
             return { state, events: [{ type: "pane-clicked" }] };
         }
 
-        case "TitleChanged": {
-            // CEF emitted a real <title>. Empty / whitespace folds to
-            // TITLE_FALLBACK and is treated as NOT-overridden (no real
-            // title yet) so a subsequent UrlConfirmed cross-origin
-            // can still replace it with a hostname placeholder.
-            const trimmed = command.title.trim();
-            const next = trimmed === "" ? TITLE_FALLBACK : command.title;
-            const overridden = trimmed !== "";
-            if (next === state.title && overridden === state.titleOverridden) {
-                return { state, events: [] };
-            }
-            return {
-                state: { ...state, title: next, titleOverridden: overridden },
-                events: [{ type: "title-changed", title: next }],
-            };
-        }
-
         case "FaviconUrlsReceived": {
-            // Reagent P2 on #876: when CEF reports an empty favicon-URL list
-            // (page has no <link rel="icon"> tags), fall back to the
-            // heuristic-derived favicon from the page URL rather than ""
-            // — matches the types.ts doc comment for FaviconUrlsReceived
-            // and the page-navigation paths above that already derive on
-            // navigation. The override flag stays false so a later real
-            // favicon report can replace it.
+            const active = getActiveTab(state);
+            if (active == null) return { state, events: [] };
             const cefUrl = command.urls[0];
-            const next = cefUrl ?? deriveFaviconUrl(state.url);
+            const next = cefUrl ?? deriveFaviconUrl(active.url);
             const overridden = cefUrl !== undefined;
-            if (next === state.faviconUrl && state.faviconOverridden === overridden) {
+            if (next === active.faviconUrl && active.faviconOverridden === overridden) {
                 return { state, events: [] };
             }
+            const idx = findTabIndex(state, active.id);
+            const nextActive: BrowserTab = {
+                ...active,
+                faviconUrl: next,
+                faviconOverridden: overridden,
+            };
+            const nextTabs = [
+                ...state.tabs.slice(0, idx),
+                nextActive,
+                ...state.tabs.slice(idx + 1),
+            ];
             return {
-                state: { ...state, faviconUrl: next, faviconOverridden: overridden },
+                state: { ...state, tabs: nextTabs },
                 events: [{ type: "favicon-urls-received", url: next }],
             };
         }
@@ -289,3 +717,9 @@ export function update(
         }
     }
 }
+
+// Keep an unused-import escape hatch for `isBackendSource` — Phase 1A
+// reserves it for the slot store layer (echo-loop guard at projection
+// time), but the reducer doesn't currently call it. Exporting keeps
+// it available without an unused-symbol lint.
+export { isBackendSource };

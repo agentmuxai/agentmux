@@ -225,6 +225,17 @@ export class BrowserViewModel implements ViewModel {
         // ring); registering here covers every code path that calls
         // `_dispatch` after construction. Re-registering on hot reload
         // is fine — `registerPane` resets the state to initial.
+        //
+        // TODO(Phase 1B — multi-tab): the slice's `BrowserPaneProjections`
+        // shape gained `tabs` and `activeTabId` setters in Phase 1A
+        // (specs/SPEC_BROWSER_PANE_TABS_2026-05-27.md). The model needs to
+        // expose `tabsAtom` / `activeTabIdAtom` signals and wire them in
+        // here, plus derive the existing url/title/etc. accessors from the
+        // active tab. The constructor also needs to dispatch an initial
+        // `OpenTab` so per-tab fields (Navigate, LoadFinished, etc.) have
+        // a tab to mutate — without it those commands are now no-ops.
+        //
+        // TS error TS2739 below is expected until Phase 1B lands.
         const projections: BrowserPaneProjections = {
             closed: (next) => {
                 this.diag(`state-write key=closed value=${next}`);
