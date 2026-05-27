@@ -71,8 +71,33 @@ async function loadLanguage(lang: string): Promise<Extension | null> {
 export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>): JSX.Element {
     const model = props.model;
     let containerRef: HTMLDivElement | undefined;
+    let rootRef: HTMLDivElement | undefined;
     let cmView: EditorView | null = null;
     const [fileInput, setFileInput] = createSignal("");
+
+    // Ctrl+Wheel zoom — plugs into the universal zoom system (term:zoom on
+    // block meta, same path used by terminal/agent/swarm). Capture phase so
+    // we intercept before CodeMirror's bubble-phase wheel; preventDefault
+    // suppresses CEF's native Ctrl+Scroll page zoom. The view's CSS var
+    // `--editor-zoom` (bound below) drives both the CodeMirror font-size
+    // and the file-tree font-size, so both resize in lockstep.
+    onMount(() => {
+        if (!rootRef) return;
+        const handleCtrlWheel = (ev: WheelEvent) => {
+            if (!ev.ctrlKey) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            const STEP = 0.1;
+            const current = model.zoomAtom();
+            const next = Math.max(0.5, Math.min(2.0, Math.round((current + (ev.deltaY > 0 ? -STEP : STEP)) * 100) / 100));
+            void RpcApi.SetMetaCommand(TabRpcClient, {
+                oref: `block:${model.blockId}`,
+                meta: { "term:zoom": next === 1.0 ? null : next },
+            });
+        };
+        rootRef.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
+        onCleanup(() => rootRef?.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
+    });
 
     // ── LSP integration (Phase 1 — diagnostics for TS/JS) ────────────
     // One LspClient per (pane, file) — replaced when the file changes
@@ -425,8 +450,10 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
 
     return (
         <div
+            ref={(el) => { rootRef = el; }}
             class="editor-view"
             classList={{ "editor-view--tree-collapsed": !model.treeExpandedAtom() }}
+            style={{ "--editor-zoom": String(model.zoomAtom()) }}
         >
             <Show when={model.treeExpandedAtom()}>
                 <div

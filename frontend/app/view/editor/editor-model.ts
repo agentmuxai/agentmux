@@ -55,6 +55,21 @@ async function sha256Hex(s: string): Promise<string> {
         .join("");
 }
 
+// ── Module-level event-sink fan-out ───────────────────────────────────────
+// The slice's setEventSink is a singleton — a per-instance call would
+// last-writer-wins and silently disable earlier panes' subscriptions. We
+// install the sink ONCE at module load and dispatch every slice event to
+// each registered EditorViewModel instance. Add/remove on construct/dispose.
+const _instanceHandlers = new Set<(events: EditorPaneEvent[]) => void>();
+let _sinkInstalled = false;
+function installGlobalSinkOnce(): void {
+    if (_sinkInstalled) return;
+    setEventSink((events: EditorPaneEvent[]) => {
+        for (const handler of _instanceHandlers) handler(events);
+    });
+    _sinkInstalled = true;
+}
+
 export class EditorViewModel implements ViewModel {
     viewType = "editor";
     blockId: string;
@@ -123,6 +138,10 @@ export class EditorViewModel implements ViewModel {
      *  CodeMirror state, dirty-confirm modal, LSP didOpen/didClose). */
     private _eventSubscribers = new Set<(event: EditorPaneEvent) => void>();
 
+    /** Per-instance handler registered into the module-level fan-out.
+     *  Removed on dispose. */
+    private _globalHandler: (events: EditorPaneEvent[]) => void;
+
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
@@ -132,17 +151,16 @@ export class EditorViewModel implements ViewModel {
         // Register this pane's slot in the slice.
         registerEditorPane(blockId);
 
-        // Wire the slice's global event sink so we re-render when any pane's
-        // dispatch mutates state. Since the sink is a singleton, multiple
-        // editor panes co-exist by all bumping their own version on EVERY
-        // event — cheap and correct.
-        //
-        // We use setEventSink rather than per-instance subscription because
-        // the slice's API is global; the cost is negligible (one signal bump
-        // per dispatch). View-level subscribers (LSP, CodeMirror state
-        // snapshot/restore) attach via `onSliceEvent` below.
-        setEventSink((events: EditorPaneEvent[]) => {
-            // Bump version → all accessors below re-evaluate.
+        // Install the module-level event-sink fan-out the first time any
+        // editor pane is constructed; subsequent panes share it.
+        installGlobalSinkOnce();
+
+        // Register this instance's handler in the fan-out. Bumps our local
+        // sliceVersion signal so all projections re-evaluate, then mirrors
+        // events to view-side subscribers (CodeMirror snapshot/restore,
+        // future dirty-confirm modal, LSP coupling). Removed on dispose so
+        // no closure over a disposed model survives.
+        this._globalHandler = (events: EditorPaneEvent[]) => {
             this._sliceVersion[1]((v) => v + 1);
             for (const ev of events) {
                 if (ev.type === "TabClosed") {
@@ -150,7 +168,8 @@ export class EditorViewModel implements ViewModel {
                 }
                 for (const sub of this._eventSubscribers) sub(ev);
             }
-        });
+        };
+        _instanceHandlers.add(this._globalHandler);
 
         // Projections from the slice's slot cell. Reading sliceVersionAtom
         // creates the Solid dependency that makes these re-evaluate.
@@ -188,6 +207,17 @@ export class EditorViewModel implements ViewModel {
             return id ? this._contentByTab.get(id) ?? "" : "";
         });
 
+        // Per-pane zoom (PR #1084). Wrapped in useBlockAtom (which calls
+        // createRoot under the hood) — a bare createMemo here wouldn't have
+        // a tracking owner and would snapshot once.
+        this.zoomAtom = useBlockAtom(blockId, "editor-zoom", () =>
+            createMemo<number>(() => {
+                const z = this.blockAtom()?.meta?.["term:zoom"];
+                if (typeof z !== "number" || isNaN(z)) return 1.0;
+                return Math.max(0.5, Math.min(2.0, z));
+            }),
+        );
+
         // Pane title — full file path of active tab, with `*` for dirty.
         this.viewName = createMemo(() => {
             const fp = this.filePathAtom();
@@ -207,15 +237,6 @@ export class EditorViewModel implements ViewModel {
         });
 
         this.viewText = () => [];
-
-        // Per-pane zoom (PR #1084).
-        this.zoomAtom = useBlockAtom(blockId, "editor-zoom", () =>
-            createMemo<number>(() => {
-                const z = this.blockAtom()?.meta?.["term:zoom"];
-                if (typeof z !== "number" || isNaN(z)) return 1.0;
-                return Math.max(0.5, Math.min(2.0, z));
-            }),
-        );
 
         // Restore persisted tree state from block meta.
         const meta = this.blockAtom()?.meta;
@@ -250,10 +271,16 @@ export class EditorViewModel implements ViewModel {
     // ── Tab actions (dispatched into the slice) ──────────────────────
     async openFile(filePath: string): Promise<void> {
         const canonical = canonicalizePath(filePath);
+        // Claim the loading slot BEFORE dispatching so two synchronous calls
+        // for the same path don't both issue ReadEditorFileCommand. Without
+        // this, the second call would pass _loadingPaths.has() (still empty)
+        // and the .add() below would fire after the first call's RPC already
+        // returned, racing the content write.
         if (this._loadingPaths.has(canonical)) return;
+        this._loadingPaths.add(canonical);
 
-        // First: dispatch OpenFile. The slice either activates an existing
-        // tab (and emits only TabActivated) or appends a new one (TabOpened +
+        // Dispatch OpenFile. The slice either activates an existing tab (and
+        // emits only TabActivated) or appends a new one (TabOpened +
         // TabActivated). We then load content if the tab hasn't loaded yet.
         const events = dispatch(this.blockId, {
             type: "OpenFile",
@@ -265,13 +292,17 @@ export class EditorViewModel implements ViewModel {
         const opened = events.find(
             (e) => e.type === "TabOpened" || e.type === "TabActivated",
         );
-        if (!opened || (opened.type !== "TabOpened" && opened.type !== "TabActivated")) return;
+        if (!opened || (opened.type !== "TabOpened" && opened.type !== "TabActivated")) {
+            this._loadingPaths.delete(canonical);
+            return;
+        }
         const tabId = opened.tabId;
 
         // If content's already loaded for this tab, we're done.
-        if (this._contentByTab.has(tabId)) return;
-
-        this._loadingPaths.add(canonical);
+        if (this._contentByTab.has(tabId)) {
+            this._loadingPaths.delete(canonical);
+            return;
+        }
         try {
             const result = await RpcApi.ReadEditorFileCommand(TabRpcClient, {
                 path: filePath,
@@ -416,6 +447,7 @@ export class EditorViewModel implements ViewModel {
     }
 
     dispose(): void {
+        _instanceHandlers.delete(this._globalHandler);
         this._eventSubscribers.clear();
         this._contentByTab.clear();
         unregisterEditorPane(this.blockId);
