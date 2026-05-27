@@ -46,24 +46,25 @@ pub fn set_zoom_factor(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 }
 
 /// Close the window. Args: optional `{ "label": string }`; defaults to "main".
-/// (Linux/macOS need the label to act on the right window when called from
-/// a non-main window. Windows resolves per-process via find_own_top_level_window.)
+/// Routes by label via `resolve_window_hwnd` — without that the floater
+/// (owned, drawn above its owner in Z-order) would always swallow the
+/// close because `find_own_top_level_window` returns the topmost-Z
+/// visible top-level of the process.
 pub fn close_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+
     #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
-        let hwnd = find_own_top_level_window();
+        let hwnd = resolve_window_hwnd(state, label);
         if !hwnd.is_null() {
             PostMessageW(hwnd, WM_CLOSE, 0, 0);
             return Ok(serde_json::Value::Null);
         }
     }
     #[cfg(not(target_os = "windows"))]
-    {
-        let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
-        crate::ui_tasks::post_close_window(state, label);
-    }
-    let _ = (state, args);
+    crate::ui_tasks::post_close_window(state, label);
+    let _ = (state, label);
     Ok(serde_json::Value::Null)
 }
 
@@ -182,15 +183,47 @@ unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> *mut std::f
     if !label.is_empty() {
         if let Some(browser) = state.get_browser(label) {
             if let Some(host) = browser.host() {
-                let hwnd = host.window_handle().0 as *mut std::ffi::c_void;
-                if !hwnd.is_null() {
-                    let root = GetAncestor(hwnd, GA_ROOT);
-                    return if root.is_null() { hwnd } else { root };
+                let raw = host.window_handle().0 as *mut std::ffi::c_void;
+                if !raw.is_null() {
+                    let root = GetAncestor(raw, GA_ROOT);
+                    let resolved = if root.is_null() { raw } else { root };
+                    tracing::debug!(
+                        target: "win-resolve",
+                        label = %label,
+                        host_hwnd = ?raw,
+                        root_hwnd = ?resolved,
+                        "[win-resolve] resolved via reducer registry"
+                    );
+                    return resolved;
                 }
+                tracing::warn!(
+                    target: "win-resolve",
+                    label = %label,
+                    "[win-resolve] host.window_handle() returned NULL — falling back to EnumWindows"
+                );
+            } else {
+                tracing::warn!(
+                    target: "win-resolve",
+                    label = %label,
+                    "[win-resolve] browser.host() returned None — falling back to EnumWindows"
+                );
             }
+        } else {
+            tracing::warn!(
+                target: "win-resolve",
+                label = %label,
+                "[win-resolve] state.get_browser(label) returned None — falling back to EnumWindows"
+            );
         }
     }
-    find_own_top_level_window()
+    let fallback = find_own_top_level_window();
+    tracing::debug!(
+        target: "win-resolve",
+        label = %label,
+        fallback_hwnd = ?fallback,
+        "[win-resolve] EnumWindows fallback"
+    );
+    fallback
 }
 
 /// Get the current window position on screen.
