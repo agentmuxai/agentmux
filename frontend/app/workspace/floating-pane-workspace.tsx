@@ -32,6 +32,7 @@ import { CenteredDiv } from "@/app/element/quickelems";
 import { ModalsRenderer } from "@/app/modals/modalsrenderer";
 import { TabContent } from "@/app/tab/tabcontent";
 import { atoms, getApi } from "@/store/global";
+import * as WOS from "@/store/wos";
 import { Show, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js";
 
 function FloatingPaneWorkspaceElem(): JSX.Element {
@@ -43,18 +44,26 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         return params.get("windowLabel") ?? "";
     });
 
-    // Auto-close the floating window when its workspace becomes empty —
-    // a floater wraps exactly one pane today (single-block workspace),
-    // so closing that pane via the standard BlockFrame_Header × button
-    // should also dismiss the now-purposeless outer window. We watch
-    // `workspace.blockids` and trigger close as soon as it transitions
-    // from non-empty → empty (the `hadBlocks` latch avoids closing on
-    // the brief empty state during initial workspace load).
+    // Auto-close the floating window when its only pane is closed.
+    // The Workspace WaveObj has `tabids` but NO `blockids` field — the
+    // block-membership signal lives on the Tab (`tab.blockids`, see
+    // `frontend/types/gotypes.d.ts:1491`). We subscribe to the active
+    // tab and trigger close as soon as its blockids array transitions
+    // from non-empty → empty. The `hadBlocks` latch avoids closing on
+    // the brief empty state during initial workspace load.
+    //
+    // useWaveObjectValue installs an onCleanup tied to the surrounding
+    // reactive owner — calling it inside createEffect refreshes the
+    // subscription whenever tabId changes (the prior effect run's
+    // cleanup decrements the previous refcount).
     let hadBlocks = false;
     createEffect(() => {
-        const w = ws();
-        if (!w) return;
-        const blockids = (w as { blockids?: string[] }).blockids ?? [];
+        const tid = tabId();
+        if (!tid) return;
+        const [tab] = WOS.useWaveObjectValue<Tab>(WOS.makeORef("tab", tid));
+        const t = tab();
+        if (!t) return;
+        const blockids = t.blockids ?? [];
         if (blockids.length > 0) {
             hadBlocks = true;
         } else if (hadBlocks) {
@@ -64,7 +73,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     .closeWindowByLabel(label)
                     .catch((e) =>
                         console.error(
-                            "[floating-pane] auto-close on empty workspace failed",
+                            "[floating-pane] auto-close on empty tab failed",
                             e,
                         ),
                     );
