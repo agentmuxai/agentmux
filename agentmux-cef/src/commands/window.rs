@@ -598,9 +598,23 @@ pub fn inspect_element_at(state: &Arc<AppState>, args: &serde_json::Value) -> Re
     Ok(serde_json::Value::Null)
 }
 
+/// Resolve the dev Vite port. Honors `AGENTMUX_VITE_PORT` (set by
+/// `Taskfile.yml`'s `dev:serve` task when the per-clone deterministic
+/// port differs from 5173); falls back to 5173 otherwise. Without this,
+/// every child window (pool warmups, tab tear-off, floating pane) loads
+/// `localhost:5173` and hits `ERR_CONNECTION_REFUSED` on any other port —
+/// only the main window survives because the launcher passes `--url=…`
+/// on the CLI. See `docs/analyses/ANALYSIS_DEV_VITE_PORT_HARDCODE_2026-05-26.md`.
+fn dev_vite_port() -> u16 {
+    std::env::var("AGENTMUX_VITE_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(5173)
+}
+
 /// Resolve the base URL for the frontend.
 /// Production: IPC server serves static files from `frontend/` next to the exe.
-/// Dev: Vite dev server at `http://localhost:5173`.
+/// Dev: Vite dev server at `http://localhost:<AGENTMUX_VITE_PORT or 5173>`.
 pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> String {
     // Detect dev mode. Two reachable scenarios:
     //   a) Launcher-managed: AGENTMUX_RUNTIME_MODE is set, from_env()
@@ -616,7 +630,7 @@ pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> String {
             .map(|d| agentmux_common::RuntimeMode::current(&d))
     });
     if matches!(mode, Some(agentmux_common::RuntimeMode::Dev { .. })) {
-        return "http://localhost:5173".to_string();
+        return format!("http://localhost:{}", dev_vite_port());
     }
     let exe_dir = std::env::current_exe()
         .ok()
@@ -628,7 +642,7 @@ pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> String {
     if has_frontend {
         format!("http://127.0.0.1:{}", ipc_port)
     } else {
-        "http://localhost:5173".to_string()
+        format!("http://localhost:{}", dev_vite_port())
     }
 }
 
