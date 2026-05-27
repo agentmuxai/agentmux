@@ -159,7 +159,14 @@ function getViewIconElem(viewIconUnion: string | IconButtonDecl, blockData: Bloc
         const viewIcon = viewIconUnion as string;
         return <div class="block-frame-view-icon">{getBlockHeaderIcon(viewIcon, blockData)}</div>;
     } else {
-        return <IconButton decl={viewIconUnion} className="block-frame-view-icon" />;
+        // Swallow dblclick so fast clicking on a clickable view icon (e.g.
+        // the editor's tree-toggle) doesn't bubble up to the header's
+        // toggleMagnify handler.
+        return (
+            <span onDblClick={(e) => e.stopPropagation()}>
+                <IconButton decl={viewIconUnion} className="block-frame-view-icon" />
+            </span>
+        );
     }
 }
 

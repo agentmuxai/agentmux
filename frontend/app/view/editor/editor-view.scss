@@ -80,7 +80,9 @@
     flex-direction: column;
     flex: 1;
     min-height: 0;
-    font-size: 12px;
+    // Tree text follows the per-pane zoom factor (set on .editor-view as
+    // --editor-zoom by editor-view.tsx). Toolbar chrome below is NOT zoomed.
+    font-size: calc(12px * var(--editor-zoom, 1));
     color: var(--main-text-color);
 }
 
@@ -322,7 +324,10 @@
 
     .cm-scroller {
         font-family: var(--termfontfamily, "JetBrains Mono", monospace);
-        font-size: 13px;
+        // CodeMirror text follows the per-pane zoom factor — same source
+        // (--editor-zoom on .editor-view) the file tree uses, so both
+        // resize together.
+        font-size: calc(13px * var(--editor-zoom, 1));
     }
 }
 
