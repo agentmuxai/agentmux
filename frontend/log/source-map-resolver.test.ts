@@ -152,4 +152,51 @@ describe("source-map-resolver", () => {
         // Middle line is non-conforming; we keep it as-is.
         expect(resolved).toContain("weird frame [no parens]");
     });
+
+    it("converts V8's 1-based column to 0-based before source-map lookup", async () => {
+        // Codex P2 on PR #1090: V8 `error.stack` columns are 1-based,
+        // source-map-js `originalPositionFor` expects 0-based. Without
+        // the conversion, every lookup shifts one character right.
+        // Strategy: spy on the consumer to capture the column actually
+        // passed into `originalPositionFor`.
+        const consumer = await buildConsumer();
+        const opfSpy = vi.spyOn(consumer, "originalPositionFor");
+        _seedConsumerForTests("index-Hash.js", consumer);
+
+        const stack = [
+            "Error: c",
+            // V8 reports col 7 (1-based). Resolver must call into
+            // source-map-js with column 6 (0-based).
+            "    at bpe (http://x/assets/index-Hash.js:3:7)",
+        ].join("\n");
+        resolveStackSync(stack);
+
+        expect(opfSpy).toHaveBeenCalledWith({ line: 3, column: 6 });
+
+        // Edge: col 0 must not become -1; floor at 0.
+        opfSpy.mockClear();
+        resolveStackSync("Error: c\n    at f (http://x/assets/index-Hash.js:3:0)");
+        expect(opfSpy).toHaveBeenCalledWith({ line: 3, column: 0 });
+    });
+
+    it("failed chunks are terminal — resolveStackSync returns partial: false", async () => {
+        // Codex P2 on PR #1090: after a chunk's `.map` is marked
+        // failed, the sync resolver must NOT treat its frames as
+        // pending — otherwise the forwarder fires another async
+        // follow-up that re-runs the same failed lookup and emits a
+        // duplicate `(stack-resolved)` log line with the still-raw
+        // stack. The failure cache must be terminal.
+        vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 404 }) as Response));
+        vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+        const stack = "Error: z\n    at f (http://x/assets/gone-Hash.js:1:0)";
+
+        // First trip: async load fails; chunk cached as failed.
+        await resolveStack(stack);
+
+        // Second trip: pure sync — chunk should be terminal-failed,
+        // NOT counted as partial.
+        const { partial } = resolveStackSync(stack);
+        expect(partial).toBe(false);
+    });
 });

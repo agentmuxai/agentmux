@@ -96,30 +96,44 @@ function loadMap(jsUrl: string): Promise<SourceMapConsumer | "failed"> {
 }
 
 /**
- * Resolve a single frame line. Returns the rewritten line, or the
- * original line if no resolution is possible right now.
+ * Resolve a single frame line. Returns the rewritten line and a status:
+ *   - `resolved` — frame was rewritten against a ready consumer.
+ *   - `pending`  — chunk's map isn't loaded yet; async path can retry.
+ *   - `failed`   — chunk's map is permanently unavailable; do NOT retry.
+ *   - `not-a-frame` — line didn't match the V8 frame regex.
  *
- * `consumer` is optional — when omitted, only frames whose chunk is
- * already in the synchronous-ready cache get resolved.
+ * Callers (see `resolveStackSync`) treat `pending` as a reason to fire
+ * the async follow-up, but treat `failed` as terminal — retrying buys
+ * nothing and produces duplicate `(stack-resolved)` log lines for the
+ * same raw stack (codex P2 on PR #1090).
  */
-function resolveFrameSync(line: string): { line: string; resolved: boolean } {
+type FrameStatus = "resolved" | "pending" | "failed" | "not-a-frame";
+
+function resolveFrameSync(line: string): { line: string; status: FrameStatus } {
     const m = line.match(FRAME_RE);
-    if (!m) return { line, resolved: false };
+    if (!m) return { line, status: "not-a-frame" };
     const [, prefix, funcName, url, lineStr, colStr] = m;
     const chunk = chunkOf(url);
     const entry = cache.get(chunk);
-    if (entry?.kind !== "ready") return { line, resolved: false };
+    if (entry == null || entry.kind === "pending") return { line, status: "pending" };
+    if (entry.kind === "failed") return { line, status: "failed" };
 
+    // V8's `error.stack` columns are 1-based; source-map-js's
+    // `originalPositionFor` expects 0-based generated columns. Without
+    // the `-1`, every lookup shifts one character right and at token
+    // boundaries can map to the wrong identifier — defeating the
+    // purpose of the resolver (codex P2 on PR #1090). Floor at 0 to
+    // tolerate any stack format that already gives a 0 column.
     const pos = entry.consumer.originalPositionFor({
         line: Number(lineStr),
-        column: Number(colStr),
+        column: Math.max(0, Number(colStr) - 1),
     });
-    if (pos.source == null || pos.line == null) return { line, resolved: false };
+    if (pos.source == null || pos.line == null) return { line, status: "failed" };
 
     const displayName = pos.name ?? funcName ?? "<anonymous>";
     return {
         line: `${prefix}${displayName} (${pos.source}:${pos.line}${pos.column != null ? `:${pos.column}` : ""})`,
-        resolved: true,
+        status: "resolved",
     };
 }
 
@@ -134,21 +148,19 @@ export function resolveStackSync(stack: string): {
     partial: boolean;
 } {
     const lines = stack.split("\n");
-    let anyUnresolved = false;
-    let anyFrameTouched = false;
+    let anyPending = false;
     const out = lines.map((line) => {
         if (!line.includes(" at ")) return line;
-        anyFrameTouched = true;
-        const { line: next, resolved } = resolveFrameSync(line);
-        if (!resolved) anyUnresolved = true;
+        const { line: next, status } = resolveFrameSync(line);
+        // Only `pending` frames warrant an async follow-up — a `failed`
+        // chunk has already been ruled out by `loadMap` (404 or
+        // unparseable map). Treating failed as partial would loop the
+        // forwarder into emitting duplicate `(stack-resolved)` lines
+        // with the still-raw stack each time (codex P2 on PR #1090).
+        if (status === "pending") anyPending = true;
         return next;
     });
-    return {
-        resolved: out.join("\n"),
-        // `partial` only matters when there was at least one frame
-        // to look at. A stackless string returns partial: false.
-        partial: anyFrameTouched && anyUnresolved,
-    };
+    return { resolved: out.join("\n"), partial: anyPending };
 }
 
 /**
