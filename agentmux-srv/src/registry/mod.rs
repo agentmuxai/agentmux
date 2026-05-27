@@ -5,7 +5,7 @@
 //! tree at `<shared_home>/agents/registry/`. See
 //! `docs/specs/SPEC_SHARED_AGENT_REGISTRY_2026_05_12.md`.
 //!
-//! PR A — Parallel-write only. The `WaveStore` `instance_*` mutators
+//! PR A — Parallel-write only. The `Store` `instance_*` mutators
 //! call `Registry::{upsert,retire,unretire,hard_delete}` after their
 //! SQL execute() succeeds. Frontend RPCs still source rows from
 //! SQLite; the registry files are populated but not yet read.

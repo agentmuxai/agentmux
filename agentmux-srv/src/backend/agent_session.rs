@@ -41,7 +41,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::backend::obj::Block;
 use crate::backend::storage::filestore::{FileMeta, FileOpts, FileStore};
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 
 // ---------------------------------------------------------------------------
 // File names within an agent session zone (mirrors per-block zone shape)
@@ -451,7 +451,7 @@ pub struct MigrationStats {
 /// so we don't retry indefinitely — operators can delete the marker
 /// to force a re-run.
 pub fn migrate_block_zones_v1(
-    wstore: &Arc<WaveStore>,
+    wstore: &Arc<Store>,
     filestore: &Arc<FileStore>,
     data_dir: &Path,
 ) -> MigrationStats {
@@ -712,7 +712,7 @@ pub struct TemplatePromoteStats {
 /// leave its zones in place; the next startup retries (no marker
 /// gate to block retry).
 pub fn migrate_promote_template_sessions_v1(
-    wstore: &Arc<WaveStore>,
+    wstore: &Arc<Store>,
     filestore: &Arc<FileStore>,
     _data_dir: &Path,
 ) -> TemplatePromoteStats {
@@ -877,7 +877,7 @@ pub fn migrate_promote_template_sessions_v1(
             // at the deterministic id. Field copies mirror
             // `agent_def_create_from_template`.
             let now = now_ms() as i64;
-            let mut new_def = crate::backend::storage::wstore::AgentDefinition {
+            let mut new_def = crate::backend::storage::store::AgentDefinition {
                 id: promote_target_id.clone(),
                 slug: String::new(),
                 name: new_name.clone(),
@@ -1211,7 +1211,7 @@ mod tests {
     use super::*;
     use crate::backend::obj::MetaMapType;
     use crate::backend::storage::filestore::FileStore;
-    use crate::backend::storage::wstore::WaveStore;
+    use crate::backend::storage::store::Store;
     use std::sync::Arc;
     use tempfile::tempdir;
 
@@ -1420,12 +1420,12 @@ mod tests {
 
     // ---- Migration tests ----
 
-    fn open_temp_wstore(dir: &Path) -> Arc<WaveStore> {
+    fn open_temp_wstore(dir: &Path) -> Arc<Store> {
         let path = dir.join("objects.db");
-        Arc::new(WaveStore::open(&path).expect("open wstore"))
+        Arc::new(Store::open(&path).expect("open wstore"))
     }
 
-    fn insert_agent_block(wstore: &Arc<WaveStore>, def_id: &str) -> String {
+    fn insert_agent_block(wstore: &Arc<Store>, def_id: &str) -> String {
         let oid = uuid::Uuid::new_v4().to_string();
         let mut meta = MetaMapType::new();
         meta.insert("view".to_string(), serde_json::json!("agent"));
@@ -1537,10 +1537,10 @@ mod tests {
 
     // ---- Two-tier picker Phase 1 migration tests ----
 
-    use crate::backend::storage::wstore::{AgentDefinition, AgentInstance, InstanceStatus};
+    use crate::backend::storage::store::{AgentDefinition, AgentInstance, InstanceStatus};
 
     fn insert_template(
-        wstore: &Arc<WaveStore>,
+        wstore: &Arc<Store>,
         id: &str,
         name: &str,
         provider: &str,
@@ -1574,7 +1574,7 @@ mod tests {
     }
 
     fn insert_named_instance(
-        wstore: &Arc<WaveStore>,
+        wstore: &Arc<Store>,
         id: &str,
         def_id: &str,
         instance_name: &str,
@@ -1774,7 +1774,7 @@ mod tests {
         // template" — it has its OWN active conversation in its
         // own zone.
         let now = now_ms() as i64;
-        let mut user_clone = crate::backend::storage::wstore::AgentDefinition {
+        let mut user_clone = crate::backend::storage::store::AgentDefinition {
             id: "user-made-clone".to_string(),
             slug: String::new(),
             name: "MyAgent".to_string(),
@@ -1877,7 +1877,7 @@ mod tests {
         // exists.
         let promote_target_id = format!("template-promote-v1-{}", template.id);
         let now = now_ms() as i64;
-        let mut prior_target = crate::backend::storage::wstore::AgentDefinition {
+        let mut prior_target = crate::backend::storage::store::AgentDefinition {
             id: promote_target_id.clone(),
             slug: String::new(),
             name: "Claude Code".to_string(),
@@ -1972,7 +1972,7 @@ mod tests {
         // clone def.
         let promote_target_id = format!("template-promote-v1-{}", template.id);
         let now = now_ms() as i64;
-        let mut prior_target = crate::backend::storage::wstore::AgentDefinition {
+        let mut prior_target = crate::backend::storage::store::AgentDefinition {
             id: promote_target_id.clone(),
             slug: String::new(),
             name: "Claude Code".to_string(),
@@ -2069,7 +2069,7 @@ mod tests {
         let template = insert_template(&wstore, "tpl-claude", "Claude Code", "claude");
         let promote_target_id = format!("template-promote-v1-{}", template.id);
         let now = now_ms() as i64;
-        let mut prior_target = crate::backend::storage::wstore::AgentDefinition {
+        let mut prior_target = crate::backend::storage::store::AgentDefinition {
             id: promote_target_id.clone(),
             slug: String::new(),
             name: "Claude Code".to_string(),
@@ -2185,7 +2185,7 @@ mod tests {
         // :archive:* zone (still on the seeded id).
         let promote_target_id = format!("template-promote-v1-{}", template.id);
         let now = now_ms() as i64;
-        let mut prior_target = crate::backend::storage::wstore::AgentDefinition {
+        let mut prior_target = crate::backend::storage::store::AgentDefinition {
             id: promote_target_id.clone(),
             slug: String::new(),
             name: "Maks".to_string(),

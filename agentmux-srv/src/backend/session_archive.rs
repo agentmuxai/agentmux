@@ -28,7 +28,7 @@ use crate::backend::blockcontroller::session_stats::{
 };
 use crate::backend::obj::{Block, MetaMapType};
 use crate::backend::storage::filestore::{FileStore, FileMeta, FileOpts};
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 
 // ---- Meta key constants for archival state ----
 
@@ -95,7 +95,7 @@ fn ensure_archive_dir(archive_dir: &Path) -> Result<(), String> {
 /// Returns `(archived_bytes, archived_at_ms)`.
 /// If the FileStore entry is missing or empty, returns `(0, now_ms)` — no-op.
 pub fn archive_session_output(
-    wstore: &Arc<WaveStore>,
+    wstore: &Arc<Store>,
     filestore: &Arc<FileStore>,
     block_id: &str,
     archive_dir: &Path,
@@ -166,7 +166,7 @@ pub fn archive_session_output(
 ///   2. Decompress and write bytes back via `make_file` + `append_data`.
 ///   3. Clear archive meta keys (keep the .gz file as backup).
 pub fn restore_session_output(
-    wstore: &Arc<WaveStore>,
+    wstore: &Arc<Store>,
     filestore: &Arc<FileStore>,
     block_id: &str,
 ) -> Result<u64, String> {
@@ -223,7 +223,7 @@ pub fn restore_session_output(
 /// Read the raw session output bytes, whether from FileStore (live) or archive.
 /// Returns `(bytes, line_count)`.
 pub fn read_session_output(
-    wstore: &Arc<WaveStore>,
+    wstore: &Arc<Store>,
     filestore: &Arc<FileStore>,
     block_id: &str,
 ) -> Result<(Vec<u8>, u64), String> {
@@ -280,7 +280,7 @@ pub fn default_archive_dir() -> Option<PathBuf> {
 
 /// Periodic session archival + storage cap enforcement.
 pub struct SessionArchiver {
-    wstore: Arc<WaveStore>,
+    wstore: Arc<Store>,
     filestore: Arc<FileStore>,
     /// Sessions with no activity for this many days get archived.
     pub inactive_days: u64,
@@ -300,7 +300,7 @@ pub struct SessionArchiverStats {
 
 impl SessionArchiver {
     pub fn new(
-        wstore: Arc<WaveStore>,
+        wstore: Arc<Store>,
         filestore: Arc<FileStore>,
         inactive_days: u64,
         max_total_bytes: u64,
@@ -464,7 +464,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use crate::backend::storage::filestore::FileStore;
-    use crate::backend::storage::wstore::WaveStore;
+    use crate::backend::storage::store::Store;
 
     /// Verify that a block with old last_activity gets archived by the sweeper.
     /// Uses in-memory stores — no disk I/O needed for this unit test.
@@ -494,11 +494,11 @@ mod tests {
             .append_data(block_id, OUTPUT_FILENAME, b"line1\nline2\n")
             .expect("append_data");
 
-        // In-memory WaveStore
+        // In-memory Store
         let db_dir = tmp_dir.path().join("wdb");
         std::fs::create_dir_all(&db_dir).unwrap();
         let wstore = Arc::new(
-            WaveStore::open(&db_dir.join("objects.db")).expect("wstore"),
+            Store::open(&db_dir.join("objects.db")).expect("wstore"),
         );
 
         // Insert a fake Block object with required meta

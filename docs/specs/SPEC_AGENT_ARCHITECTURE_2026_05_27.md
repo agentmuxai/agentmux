@@ -221,6 +221,6 @@ When all of the following hold:
 - `docs/specs/SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md` — original design spec.
 - `docs/specs/SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md` — Phase 1 (shipped).
 - `agentmux-srv/src/backend/storage/agents_consolidate.rs` — Phase 3a backfill code.
-- `agentmux-srv/src/backend/storage/wstore.rs` — all SQL read/write sites.
+- `agentmux-srv/src/backend/storage/store.rs` — all SQL read/write sites.
 - `agentmux-srv/src/registry/` — JSON registry module (sunset target).
 - Discussion #1095 — long-term tracking thread; link every related PR there.

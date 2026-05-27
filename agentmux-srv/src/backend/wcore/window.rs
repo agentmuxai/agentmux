@@ -5,7 +5,7 @@
 
 use uuid::Uuid;
 
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 use crate::backend::storage::StoreError;
 use crate::backend::obj::*;
 
@@ -16,7 +16,7 @@ use super::workspace::create_workspace;
 /// Create a new window pointing to a workspace.
 /// If workspace_id is empty, auto-creates a new workspace + default tab (matches Go behavior).
 pub fn create_window(
-    store: &WaveStore,
+    store: &Store,
     workspace_id: &str,
 ) -> Result<Window, StoreError> {
     let ws_id = if workspace_id.is_empty() {
@@ -49,7 +49,7 @@ pub fn create_window(
 ///
 /// Returns the created Window.
 pub fn create_window_full(
-    store: &WaveStore,
+    store: &Store,
     workspace_id: &str,
 ) -> Result<Window, StoreError> {
     store.with_tx(|tx| {
@@ -136,7 +136,7 @@ pub fn create_window_full(
 
 /// Close a window and remove from client's window list.
 /// Cascades cleanup through workspace → tabs → blocks, killing all shell processes.
-pub fn close_window(store: &WaveStore, window_id: &str) -> Result<(), StoreError> {
+pub fn close_window(store: &Store, window_id: &str) -> Result<(), StoreError> {
     // Cascade: kill all shell processes in this window's workspace
     if let Ok(window) = store.must_get::<Window>(window_id) {
         if let Ok(workspace) = store.must_get::<Workspace>(&window.workspaceid) {
@@ -161,7 +161,7 @@ pub fn close_window(store: &WaveStore, window_id: &str) -> Result<(), StoreError
 }
 
 /// Focus a window (move to front of client's window list).
-pub fn focus_window(store: &WaveStore, window_id: &str) -> Result<(), StoreError> {
+pub fn focus_window(store: &Store, window_id: &str) -> Result<(), StoreError> {
     let mut client = get_client(store)?;
     if let Some(pos) = client.windowids.iter().position(|id| id == window_id) {
         let id = client.windowids.remove(pos);
@@ -173,7 +173,7 @@ pub fn focus_window(store: &WaveStore, window_id: &str) -> Result<(), StoreError
 
 /// Switch a window to a different workspace.
 pub fn switch_workspace(
-    store: &WaveStore,
+    store: &Store,
     window_id: &str,
     ws_id: &str,
 ) -> Result<(), StoreError> {
@@ -187,7 +187,7 @@ pub fn switch_workspace(
 }
 
 /// Check and fix a window — ensure it has a valid workspace with tabs.
-pub(super) fn check_and_fix_window(store: &WaveStore, window_id: &str) -> Result<(), StoreError> {
+pub(super) fn check_and_fix_window(store: &Store, window_id: &str) -> Result<(), StoreError> {
     let window = match store.get::<Window>(window_id)? {
         Some(w) => w,
         None => return Ok(()), // window doesn't exist, nothing to fix

@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::backend::storage::error::StoreError;
-use crate::backend::storage::wstore::{SecretRef, WaveStore};
+use crate::backend::storage::store::{SecretRef, Store};
 use crate::backend::wps::{Broker, WaveEvent};
 
 /// Canonical-value enumeration for OAuth-class `IdentityAccount.status`.
@@ -351,7 +351,7 @@ pub fn resolve_secret(secret_ref: &SecretRef) -> Result<String, ResolverError> {
 /// for every per-binding error. The spawn never aborts because a
 /// secret didn't resolve.
 pub fn inject_identity_env(
-    wstore: Arc<WaveStore>,
+    wstore: Arc<Store>,
     block_id: &str,
     env_vars: &mut HashMap<String, String>,
 ) {
@@ -367,7 +367,7 @@ pub fn inject_identity_env(
 /// pass `Some(broker.clone())` so the IdentityManager's bindings table
 /// flips its status badge without a reload. Per spec §4.4.
 pub fn inject_identity_env_with_broker(
-    wstore: Arc<WaveStore>,
+    wstore: Arc<Store>,
     broker: Option<Arc<Broker>>,
     block_id: &str,
     env_vars: &mut HashMap<String, String>,
@@ -593,12 +593,12 @@ pub fn inject_identity_env_with_broker(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::storage::wstore::{
+    use crate::backend::storage::store::{
         AgentInstance, Identity, IdentityAccount, InstanceStatus, SecretRef,
     };
 
-    fn make_store() -> Arc<WaveStore> {
-        Arc::new(WaveStore::open_in_memory().unwrap())
+    fn make_store() -> Arc<Store> {
+        Arc::new(Store::open_in_memory().unwrap())
     }
 
     fn make_account(
@@ -711,7 +711,7 @@ mod tests {
     fn inject_oauth_class_sets_config_dir_env_var() {
         let store = make_store();
 
-        let mut def = crate::backend::storage::wstore::AgentDefinition {
+        let mut def = crate::backend::storage::store::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),
             name: "T".to_string(),
@@ -784,7 +784,7 @@ mod tests {
         // wrong secret as if it were a config-dir.
         let store = make_store();
 
-        let mut def = crate::backend::storage::wstore::AgentDefinition {
+        let mut def = crate::backend::storage::store::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),
             name: "T".to_string(),
@@ -870,7 +870,7 @@ mod tests {
     fn inject_blank_identity_does_nothing() {
         let store = make_store();
         // Need a definition for the FK on db_agent_instances.
-        let mut def = crate::backend::storage::wstore::AgentDefinition {
+        let mut def = crate::backend::storage::store::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),
             name: "T".to_string(),
@@ -911,7 +911,7 @@ mod tests {
         let store = make_store();
 
         // Agent definition.
-        let mut def = crate::backend::storage::wstore::AgentDefinition {
+        let mut def = crate::backend::storage::store::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),
             name: "T".to_string(),
@@ -996,7 +996,7 @@ mod tests {
     fn inject_partial_success_skips_failed_bindings() {
         let store = make_store();
 
-        let mut def = crate::backend::storage::wstore::AgentDefinition {
+        let mut def = crate::backend::storage::store::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),
             name: "T".to_string(),
@@ -1076,7 +1076,7 @@ mod tests {
     fn inject_unknown_provider_is_skipped() {
         let store = make_store();
 
-        let mut def = crate::backend::storage::wstore::AgentDefinition {
+        let mut def = crate::backend::storage::store::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),
             name: "T".to_string(),
@@ -1240,7 +1240,7 @@ mod tests {
         // with the new status. Spec §4.4.
         let store = make_store();
 
-        let mut def = crate::backend::storage::wstore::AgentDefinition {
+        let mut def = crate::backend::storage::store::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),
             name: "T".to_string(),
@@ -1325,7 +1325,7 @@ mod tests {
         // didn't misclassify a working session.
         let store = make_store();
 
-        let mut def = crate::backend::storage::wstore::AgentDefinition {
+        let mut def = crate::backend::storage::store::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),
             name: "T".to_string(),

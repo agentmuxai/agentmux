@@ -78,7 +78,7 @@ use crate::backend::rpc_types::{
     CommandGetMemoryData, CommandDeleteMemoryData,
 };
 use crate::backend::storage::{AgentDefinition, AgentContent, AgentSkill};
-use crate::backend::storage::wstore::{
+use crate::backend::storage::store::{
     AgentInstance, Identity, IdentityAccount, InstanceStatus, Memory,
 };
 
@@ -1918,7 +1918,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let branch_slug_part = if cmd.branch_label.is_empty() {
                     "fork".to_string()
                 } else {
-                    crate::backend::storage::wstore::derive_slug(&cmd.branch_label)
+                    crate::backend::storage::store::derive_slug(&cmd.branch_label)
                 };
                 let mut fork = AgentDefinition {
                     id: uuid::Uuid::new_v4().to_string(),
@@ -2654,8 +2654,8 @@ mod recent_sessions_tests {
     // and the cross-version "no snapshot" fallback. This is the
     // backend correctness gate for the AgentPicker's Recent Sessions
     // surface (cascade follow-up 2026-05-23).
-    use crate::backend::storage::wstore::{
-        AgentDefinition, AgentInstance, Identity, InstanceStatus, Memory, WaveStore,
+    use crate::backend::storage::store::{
+        AgentDefinition, AgentInstance, Identity, InstanceStatus, Memory, Store,
     };
     use crate::backend::rpc::engine::WshRpcEngine;
     use crate::server::AppState;
@@ -2692,7 +2692,7 @@ mod recent_sessions_tests {
         Arc<WshRpcEngine>,
         tokio::sync::mpsc::UnboundedReceiver<crate::backend::rpc_types::RpcMessage>,
     ) {
-        let wstore = Arc::new(WaveStore::open_in_memory().unwrap());
+        let wstore = Arc::new(Store::open_in_memory().unwrap());
         let filestore = Arc::new(FileStore::open_in_memory().unwrap());
         let event_bus = Arc::new(crate::backend::eventbus::EventBus::new());
         let broker = Arc::new(crate::backend::wps::Broker::new());
@@ -2973,7 +2973,7 @@ mod recent_sessions_tests {
         Arc<WshRpcEngine>,
         tokio::sync::mpsc::UnboundedReceiver<crate::backend::rpc_types::RpcMessage>,
     ) {
-        let wstore = Arc::new(WaveStore::open_in_memory().unwrap());
+        let wstore = Arc::new(Store::open_in_memory().unwrap());
         let filestore = Arc::new(FileStore::open_in_memory().unwrap());
         let event_bus = Arc::new(crate::backend::eventbus::EventBus::new());
         let broker = Arc::new(crate::backend::wps::Broker::new());

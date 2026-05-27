@@ -7,7 +7,7 @@ use serde_json::json;
 
 use crate::backend::blockcontroller;
 use crate::backend::service::{self, CloseTabRtnType, WebCallType, WebReturnType};
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 use crate::backend::obj::*;
 use crate::backend::wcore;
 
@@ -2138,7 +2138,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
 /// write." Linear scan over all tabs; acceptable here because the
 /// layout-update path is low-frequency relative to drag-resize and
 /// the reducer mutex itself is held for sub-millisecond intervals.
-fn find_tab_for_layout(store: &WaveStore, layout_oid: &str) -> Option<String> {
+fn find_tab_for_layout(store: &Store, layout_oid: &str) -> Option<String> {
     let tabs = store.get_all::<Tab>().ok()?;
     tabs.into_iter()
         .find(|t| t.layoutstate == layout_oid)
@@ -2146,7 +2146,7 @@ fn find_tab_for_layout(store: &WaveStore, layout_oid: &str) -> Option<String> {
 }
 
 /// Resolve an "otype:oid" string to the corresponding wave object JSON.
-fn get_object_by_oref(store: &WaveStore, oref_str: &str) -> Result<serde_json::Value, String> {
+fn get_object_by_oref(store: &Store, oref_str: &str) -> Result<serde_json::Value, String> {
     let oref = crate::backend::ORef::parse(oref_str).map_err(|e| e.to_string())?;
 
     // Validate otype is known
@@ -2169,7 +2169,7 @@ fn get_object_by_oref(store: &WaveStore, oref_str: &str) -> Result<serde_json::V
 /// Matches Go's ObjectService.UpdateObject behavior.
 /// Returns (otype, oid, updated_value_with_new_version) on success.
 fn update_object(
-    store: &WaveStore,
+    store: &Store,
     mut value: serde_json::Value,
 ) -> Result<(String, String, serde_json::Value), String> {
     let otype = value
@@ -2206,7 +2206,7 @@ fn update_object(
 
 /// Update object meta by oref string. Merges meta into existing object.
 pub(crate) fn update_object_meta(
-    store: &WaveStore,
+    store: &Store,
     oref_str: &str,
     meta_update: &MetaMapType,
 ) -> Result<(), String> {
@@ -2284,7 +2284,7 @@ pub(crate) fn publish_events(state: &AppState, events: &[agentmux_common::ipc::E
 async fn compensate_via_reducer(
     state: &AppState,
     cmd: agentmux_common::ipc::Command,
-    store: &WaveStore,
+    store: &Store,
 ) {
     let events = dispatch_to_reducer(state, cmd).await;
     for ev in &events {
@@ -2310,7 +2310,7 @@ async fn compensate_via_reducer(
 /// leaves the new tab with the moved block but a malformed layout;
 /// the user-visible symptom is an empty render in the new window.
 fn setup_torn_off_block_layout(
-    store: &WaveStore,
+    store: &Store,
     new_tab_id: &str,
     block_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -2343,7 +2343,7 @@ fn setup_torn_off_block_layout(
 /// poll. Mirrors the action-queueing portion of
 /// `wcore::tear_off_block`. Layout migration is E.4.
 fn queue_source_layout_delete(
-    store: &WaveStore,
+    store: &Store,
     source_tab_id: &str,
     block_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -2376,7 +2376,7 @@ fn queue_source_layout_delete(
 /// delete its own copy and report success while the disk row was
 /// never touched).
 fn wstore_workspace_exists(
-    store: &WaveStore,
+    store: &Store,
     workspace_id: &str,
 ) -> Result<bool, crate::backend::storage::StoreError> {
     Ok(store.get::<Workspace>(workspace_id)?.is_some())

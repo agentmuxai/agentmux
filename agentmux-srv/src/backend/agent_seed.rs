@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
-use super::storage::wstore::{AgentDefinition, AgentContent, AgentSkill, WaveStore};
+use super::storage::store::{AgentDefinition, AgentContent, AgentSkill, Store};
 use super::storage::StoreError;
 
 /// Report returned after seeding.
@@ -116,7 +116,7 @@ const SEED_MANIFEST: &str = include_str!("../../agent-seed.json");
 
 /// Seed agent definitions from the embedded manifest.
 /// Skips agents whose ID already exists in the database.
-pub fn seed_agents(wstore: &Arc<WaveStore>) -> Result<SeedReport, StoreError> {
+pub fn seed_agents(wstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
     let manifest: SeedManifest = serde_json::from_str(SEED_MANIFEST)
         .map_err(|e| StoreError::Other(format!("agent seed: parse manifest: {e}")))?;
 
@@ -216,7 +216,7 @@ pub fn seed_agents(wstore: &Arc<WaveStore>) -> Result<SeedReport, StoreError> {
 
 /// Run auto-seed on startup. Seeds if empty, or re-seeds if manifest version changed.
 /// Re-seeding updates existing seeded agents and removes seeded agents not in the manifest.
-pub fn auto_seed_on_startup(wstore: &Arc<WaveStore>) {
+pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
     let manifest: SeedManifest = match serde_json::from_str(SEED_MANIFEST) {
         Ok(m) => m,
         Err(e) => {
@@ -268,7 +268,7 @@ pub struct ReseedReport {
 /// Re-seed if the manifest version is newer than what's in the DB.
 /// Updates seeded agents, adds new ones, removes seeded agents not in the manifest.
 fn reseed_if_needed(
-    wstore: &Arc<WaveStore>,
+    wstore: &Arc<Store>,
     manifest: &SeedManifest,
 ) -> Result<Option<ReseedReport>, StoreError> {
     let existing = wstore.agent_def_list()?;
@@ -395,7 +395,7 @@ fn reseed_if_needed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::storage::wstore::{AgentDefinition, WaveStore};
+    use crate::backend::storage::store::{AgentDefinition, Store};
 
     /// Helper to build a manifest in-memory with a fixed set of agents.
     /// `reseed_if_needed` reads `manifest.agents`; we construct the
@@ -425,7 +425,7 @@ mod tests {
         }
     }
 
-    fn insert_tpl(wstore: &Arc<WaveStore>, id: &str, name: &str, hidden: i64) {
+    fn insert_tpl(wstore: &Arc<Store>, id: &str, name: &str, hidden: i64) {
         let mut def = AgentDefinition {
             id: id.to_string(),
             slug: id.to_string(),
@@ -458,7 +458,7 @@ mod tests {
         // The user previously hid `tpl-claude`. A description-only
         // manifest change triggers a re-seed; the user's hide preference
         // MUST survive (it's a per-user UI flag, not manifest-managed).
-        let wstore = Arc::new(WaveStore::open_in_memory().unwrap());
+        let wstore = Arc::new(Store::open_in_memory().unwrap());
         insert_tpl(&wstore, "tpl-claude", "Claude", 1);
         // Manifest carries a *different* description so reseed_if_needed
         // sees a change and runs the upsert path.
@@ -482,7 +482,7 @@ mod tests {
         // introduces a brand-new id `tpl-codex`. The new id MUST land
         // with user_hidden = 0 — Phase 2 spec invariant so users always
         // see new templates at least once.
-        let wstore = Arc::new(WaveStore::open_in_memory().unwrap());
+        let wstore = Arc::new(Store::open_in_memory().unwrap());
         insert_tpl(&wstore, "tpl-claude", "Claude", 1);
         let manifest = manifest_with(&[
             ("tpl-claude", "v1 desc"), // unchanged — won't fire upsert on its own

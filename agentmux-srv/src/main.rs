@@ -32,7 +32,7 @@ use backend::reactive::{self, Poller, PollerConfig};
 use backend::storage::filestore::FileStore;
 use backend::storage::migrations::OBJECT_SCHEMA_VERSION;
 use backend::storage::snapshot::maybe_snapshot_pre_migration;
-use backend::storage::wstore::WaveStore;
+use backend::storage::store::Store;
 use backend::wps::Broker;
 use backend::wconfig;
 use backend::{docsite, sysinfo, base, wcore};
@@ -320,9 +320,9 @@ async fn main() {
     let db_dir = base::get_wave_db_dir();
 
     // Pre-migration snapshot (Increment B.2 lean cut from
-    // SPEC_DATA_CHANNELS §3.4). Run BEFORE WaveStore::open so the
+    // SPEC_DATA_CHANNELS §3.4). Run BEFORE Store::open so the
     // backup is taken before any DDL or table rename touches the DB.
-    // The safety lock inside WaveStore::open is the upgrade-direction
+    // The safety lock inside Store::open is the upgrade-direction
     // guard; this snapshot is the rollback aid for the much rarer case
     // of a buggy forward migration.
     //
@@ -355,7 +355,7 @@ async fn main() {
         Err(e) => tracing::warn!("pre-migration snapshot failed (continuing without backup): {}", e),
     }
 
-    let wstore_raw = WaveStore::open(&db_dir.join("objects.db")).unwrap_or_else(|e| {
+    let wstore_raw = Store::open(&db_dir.join("objects.db")).unwrap_or_else(|e| {
         tracing::error!("Failed to open object store: {}", e);
         std::process::exit(1);
     });
@@ -1102,7 +1102,7 @@ fn cleanup_old_logs(log_dir: &std::path::Path, days: u64) {
 }
 
 /// Walk all tabs and heal their layouts by removing orphaned block references.
-fn heal_all_layouts(store: &WaveStore) {
+fn heal_all_layouts(store: &Store) {
     use backend::obj::Tab;
 
     let tabs: Vec<Tab> = match store.get_all::<Tab>() {

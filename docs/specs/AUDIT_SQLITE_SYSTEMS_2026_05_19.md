@@ -215,7 +215,7 @@ Roughly 20+ test files open `WaveStore::open_in_memory()` or `Connection::open_i
 | Site | Purpose |
 |---|---|
 | `agentmux-srv/src/backend/storage/migrations.rs:905-1612` | Unit tests for every migration version |
-| `agentmux-srv/src/backend/storage/wstore.rs:2238-3060` | Multiple test fixtures |
+| `agentmux-srv/src/backend/storage/store.rs:2238-3060` | Multiple test fixtures |
 | `agentmux-srv/src/identity/resolver.rs:242` | Stub for non-binding-coverage code paths |
 | `agentmux-srv/src/backend/blockcontroller/session_recovery.rs:134` | Session-recovery test fixture |
 | `agentmux-srv/src/backend/session_archive.rs:479` | Session archive test fixture |

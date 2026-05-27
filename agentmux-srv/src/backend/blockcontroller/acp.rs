@@ -36,7 +36,7 @@ use super::{
 use super::health::HealthMonitor;
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 use crate::backend::wps;
 
 /// WPS file subject name for ACP output.
@@ -66,7 +66,7 @@ pub struct AcpController {
     inner: Arc<Mutex<AcpInner>>,
     broker: Option<Arc<wps::Broker>>,
     event_bus: Option<Arc<EventBus>>,
-    wstore: Option<Arc<WaveStore>>,
+    wstore: Option<Arc<Store>>,
     filestore: Option<Arc<FileStore>>,
     health_monitor: Arc<HealthMonitor>,
     /// Monotonically increasing JSON-RPC request ID.
@@ -79,7 +79,7 @@ impl AcpController {
         block_id: String,
         broker: Option<Arc<wps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
-        wstore: Option<Arc<WaveStore>>,
+        wstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
     ) -> Self {
         let health_monitor = Arc::new(HealthMonitor::new(

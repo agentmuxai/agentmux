@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use super::eventbus::EventBus;
 use super::storage::filestore::FileStore;
-use super::storage::wstore::WaveStore;
+use super::storage::store::Store;
 use super::obj::{Block, MetaMapType, TermSize};
 use super::wps::Broker;
 
@@ -291,7 +291,7 @@ pub fn resync_controller(
     force: bool,
     broker: Option<Arc<Broker>>,
     event_bus: Option<Arc<EventBus>>,
-    wstore: Option<Arc<WaveStore>>,
+    wstore: Option<Arc<Store>>,
     filestore: Option<Arc<FileStore>>,
 ) -> Result<(), String> {
     let block_id = &block.oid;

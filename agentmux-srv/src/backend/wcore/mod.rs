@@ -5,7 +5,7 @@
 //! Wave Core: application coordinator for storage + pub/sub.
 //! Port of Go's pkg/wcore/wcore.go + window.go + workspace.go + block.go.
 //!
-//! Orchestrates WaveStore mutations with WPS event publishing.
+//! Orchestrates Store mutations with WPS event publishing.
 
 mod block;
 mod dnd;
@@ -25,7 +25,7 @@ pub use workspace::*;
 
 use uuid::Uuid;
 
-use super::storage::wstore::WaveStore;
+use super::storage::store::Store;
 use super::storage::StoreError;
 use super::obj::*;
 
@@ -44,7 +44,7 @@ pub const LAYOUT_ACTION_SPLIT_VERTICAL: &str = "splitvertical";
 /// Ensure initial data is present in the store.
 /// Creates a default Client, Window, Workspace, Tab if the store is empty.
 /// Returns `true` if this is a first launch (client was just created).
-pub fn ensure_initial_data(store: &WaveStore) -> Result<bool, StoreError> {
+pub fn ensure_initial_data(store: &Store) -> Result<bool, StoreError> {
     let clients = store.get_all::<Client>()?;
 
     if !clients.is_empty() {
@@ -198,7 +198,7 @@ pub fn ensure_initial_data(store: &WaveStore) -> Result<bool, StoreError> {
 }
 
 /// Get the singleton client record.
-pub fn get_client(store: &WaveStore) -> Result<Client, StoreError> {
+pub fn get_client(store: &Store) -> Result<Client, StoreError> {
     let clients = store.get_all::<Client>()?;
     clients.into_iter().next().ok_or(StoreError::NotFound)
 }
@@ -211,8 +211,8 @@ pub fn get_client(store: &WaveStore) -> Result<Client, StoreError> {
 mod tests {
     use super::*;
 
-    fn make_store() -> WaveStore {
-        WaveStore::open_in_memory().unwrap()
+    fn make_store() -> Store {
+        Store::open_in_memory().unwrap()
     }
 
     #[test]

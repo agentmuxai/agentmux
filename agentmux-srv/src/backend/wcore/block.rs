@@ -6,13 +6,13 @@
 
 use uuid::Uuid;
 
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 use crate::backend::storage::StoreError;
 use crate::backend::obj::*;
 
 /// Create a new block in a tab.
 pub fn create_block(
-    store: &WaveStore,
+    store: &Store,
     tab_id: &str,
     meta: MetaMapType,
 ) -> Result<Block, StoreError> {
@@ -34,7 +34,7 @@ pub fn create_block(
 
 /// Delete a block from its parent tab and prune it from the layout tree.
 pub fn delete_block(
-    store: &WaveStore,
+    store: &Store,
     tab_id: &str,
     block_id: &str,
 ) -> Result<(), StoreError> {
@@ -120,7 +120,7 @@ fn prune_node(node: &mut LayoutNode, block_id: &str) {
 /// Validate a layout against the set of existing block IDs, removing any
 /// orphaned leaf nodes. Called on tab activation as a self-healing pass.
 pub fn heal_layout(
-    store: &WaveStore,
+    store: &Store,
     tab_id: &str,
 ) -> Result<bool, StoreError> {
     let tab = store.must_get::<Tab>(tab_id)?;
@@ -379,7 +379,7 @@ mod tests {
 
 /// Resolve a block ID from an 8-character prefix within a tab.
 pub fn resolve_block_id_from_prefix(
-    store: &WaveStore,
+    store: &Store,
     tab_id: &str,
     prefix: &str,
 ) -> Result<String, StoreError> {

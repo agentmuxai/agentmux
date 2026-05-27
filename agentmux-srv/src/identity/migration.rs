@@ -42,8 +42,8 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::backend::providers::{get_provider, get_provider_list};
-use crate::backend::storage::wstore::{
-    Identity, IdentityAccount, SecretRef, WaveStore,
+use crate::backend::storage::store::{
+    Identity, IdentityAccount, SecretRef, Store,
 };
 use crate::backend::wps::{Broker, WaveEvent};
 use crate::identity::resolver::{
@@ -81,7 +81,7 @@ pub struct MigrationStats {
     pub instances_backfilled: usize,
 }
 
-/// Entry point — call once on srv startup, after WaveStore is open and
+/// Entry point — call once on srv startup, after Store is open and
 /// before the srv begins accepting requests. `home_dir_override` is
 /// `None` in production (resolves `dirs::home_dir()`); tests use
 /// `Some(tempdir)` so they can plant fake `~/.<auth_dir_name>/.credentials.json`
@@ -90,7 +90,7 @@ pub struct MigrationStats {
 /// Returns the [`MigrationStats`] for logging. Never panics; every
 /// internal failure path logs at `warn` and continues.
 pub fn run_default_bundle_migration(
-    wstore: &Arc<WaveStore>,
+    wstore: &Arc<Store>,
     broker: Option<&Arc<Broker>>,
     home_dir_override: Option<PathBuf>,
 ) -> MigrationStats {
@@ -370,7 +370,7 @@ pub fn run_default_bundle_migration(
 /// Collect the set of providers that are bound in ANY identity bundle
 /// today. The migration's idempotency gate — if a provider is already
 /// in here, the ambient-creds seed is a no-op for that provider.
-fn bound_providers(wstore: &Arc<WaveStore>) -> std::collections::HashSet<String> {
+fn bound_providers(wstore: &Arc<Store>) -> std::collections::HashSet<String> {
     let mut out = std::collections::HashSet::new();
     let bundles = match wstore.bundle_identity_list() {
         Ok(b) => b,
@@ -407,7 +407,7 @@ fn bound_providers(wstore: &Arc<WaveStore>) -> std::collections::HashSet<String>
 /// `bundle_identity_upsert`) if missing. Returns `true` when a new row
 /// was inserted, `false` when an existing row was reused.
 fn ensure_default_bundle(
-    wstore: &Arc<WaveStore>,
+    wstore: &Arc<Store>,
     now_ms: i64,
 ) -> Result<bool, crate::backend::storage::error::StoreError> {
     if let Some(existing) = wstore.bundle_identity_get(DEFAULT_BUNDLE_ID)? {
@@ -447,12 +447,12 @@ impl OAuthProbeStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::storage::wstore::{IdentityAccount, SecretRef};
+    use crate::backend::storage::store::{IdentityAccount, SecretRef};
 
     /// Create a fresh in-memory store. The seeded blank-singleton +
-    /// schema are already wired up by `WaveStore::open_in_memory`.
-    fn make_store() -> Arc<WaveStore> {
-        Arc::new(WaveStore::open_in_memory().unwrap())
+    /// schema are already wired up by `Store::open_in_memory`.
+    fn make_store() -> Arc<Store> {
+        Arc::new(Store::open_in_memory().unwrap())
     }
 
     /// Plant a Claude-shape ambient credentials file at
@@ -631,7 +631,7 @@ mod tests {
         plant_ambient_claude_creds(tmp.path());
 
         // Need an agent definition for the FK on db_agent_instances.
-        let mut def = crate::backend::storage::wstore::AgentDefinition {
+        let mut def = crate::backend::storage::store::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),
             name: "T".to_string(),
@@ -660,7 +660,7 @@ mod tests {
         // Plant two legacy rows — one with empty identity_id, one
         // with the legacy "blank" sentinel. Both should be
         // back-filled.
-        let inst_empty = crate::backend::storage::wstore::AgentInstance {
+        let inst_empty = crate::backend::storage::store::AgentInstance {
             id: "inst-empty".to_string(),
             definition_id: "def-1".to_string(),
             parent_instance_id: String::new(),
@@ -679,7 +679,7 @@ mod tests {
         };
         store.instance_create(&inst_empty).unwrap();
 
-        let inst_blank = crate::backend::storage::wstore::AgentInstance {
+        let inst_blank = crate::backend::storage::store::AgentInstance {
             id: "inst-blank".to_string(),
             definition_id: "def-1".to_string(),
             parent_instance_id: String::new(),
@@ -700,7 +700,7 @@ mod tests {
 
         // Plant a row that ALREADY has a real identity_id — must NOT
         // be touched by the back-fill.
-        let inst_set = crate::backend::storage::wstore::AgentInstance {
+        let inst_set = crate::backend::storage::store::AgentInstance {
             id: "inst-set".to_string(),
             definition_id: "def-1".to_string(),
             parent_instance_id: String::new(),
@@ -749,7 +749,7 @@ mod tests {
         plant_ambient_claude_creds(tmp.path());
 
         // Agent def + initial run that creates Default.
-        let mut def = crate::backend::storage::wstore::AgentDefinition {
+        let mut def = crate::backend::storage::store::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),
             name: "T".to_string(),
@@ -781,7 +781,7 @@ mod tests {
 
         // Between runs: a code path adds a legacy row with empty
         // identity_id (simulates an older spawn path lingering).
-        let inst_late = crate::backend::storage::wstore::AgentInstance {
+        let inst_late = crate::backend::storage::store::AgentInstance {
             id: "inst-late".to_string(),
             definition_id: "def-1".to_string(),
             parent_instance_id: String::new(),
@@ -823,7 +823,7 @@ mod tests {
         // NO `plant_ambient_claude_creds` — empty home.
 
         // Plant a row with empty identity_id.
-        let mut def = crate::backend::storage::wstore::AgentDefinition {
+        let mut def = crate::backend::storage::store::AgentDefinition {
             id: "def-1".to_string(),
             slug: String::new(),
             name: "T".to_string(),
@@ -848,7 +848,7 @@ mod tests {
             user_hidden: 0,
         };
         store.agent_def_insert(&mut def).unwrap();
-        let inst = crate::backend::storage::wstore::AgentInstance {
+        let inst = crate::backend::storage::store::AgentInstance {
             id: "inst-empty".to_string(),
             definition_id: "def-1".to_string(),
             parent_instance_id: String::new(),

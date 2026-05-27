@@ -18,7 +18,7 @@ use crate::backend::providers;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::*;
 use crate::backend::session_archive;
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 
 use super::AppState;
 use crate::server::cli_handlers::resolve_cli_on_path;
@@ -1669,7 +1669,7 @@ async fn invoke_cli_for_digest(
 // ---------------------------------------------------------------------------
 
 /// Resolve a tab ID: use the provided one, or fall back to the first workspace's active tab.
-fn resolve_tab_id(wstore: &WaveStore, explicit: Option<&str>) -> Result<String, String> {
+fn resolve_tab_id(wstore: &Store, explicit: Option<&str>) -> Result<String, String> {
     if let Some(tid) = explicit {
         return Ok(tid.to_string());
     }
@@ -1691,7 +1691,7 @@ fn resolve_tab_id(wstore: &WaveStore, explicit: Option<&str>) -> Result<String, 
 }
 
 /// Find an existing agent block in a tab by agent ID.
-fn find_agent_block(wstore: &WaveStore, tab_id: &str, agent_id: &str) -> Result<Option<Block>, String> {
+fn find_agent_block(wstore: &Store, tab_id: &str, agent_id: &str) -> Result<Option<Block>, String> {
     let tab: Tab = wstore.must_get(tab_id)
         .map_err(|e| format!("TAB_NOT_FOUND: {e}"))?;
 
@@ -1748,7 +1748,7 @@ pub fn allocate_agent_workdir(desired: &str) -> Result<String, String> {
 
 /// Write agent config files (CLAUDE.md, .mcp.json, etc.) to the working directory.
 fn write_agent_config_files(
-    wstore: &WaveStore,
+    wstore: &Store,
     agent: &crate::backend::storage::AgentDefinition,
     agent_slug: &str,
     work_dir: &str,

@@ -24,7 +24,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::backend::obj::{Block, Tab, Window, Workspace};
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 use crate::state::{BlockRecord, State, TabRecord, WindowRecord, WorkspaceRecord};
 
 /// Phase E.2 / E.2b — load workspaces and their tabs from SQLite
@@ -38,7 +38,7 @@ use crate::state::{BlockRecord, State, TabRecord, WindowRecord, WorkspaceRecord}
 /// independent — a workspace-load failure does not prevent the tab
 /// load from being attempted (and vice versa), since pipe commands
 /// later in the session can populate either map.
-pub async fn bootstrap_state_from_wstore(state: &Arc<Mutex<State>>, wstore: &WaveStore) {
+pub async fn bootstrap_state_from_wstore(state: &Arc<Mutex<State>>, wstore: &Store) {
     let workspaces = wstore.get_all::<Workspace>().unwrap_or_else(|e| {
         tracing::warn!(
             target: "srv-persist",

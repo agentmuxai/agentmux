@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! SQL schema setup for WaveStore, FileStore, and the saga log.
+//! SQL schema setup for Store, FileStore, and the saga log.
 //!
 //! `objects.db` uses a **flat schema**: `run_object_schema` defines the
 //! final table set directly in one idempotent `CREATE TABLE IF NOT EXISTS`
@@ -103,7 +103,7 @@ const DEAD_TABLE_DROPS: &[&str] = &[
 pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
     adopt_legacy_table_names(conn)?;
 
-    // ---- Generic WaveObj object tables ----
+    // ---- Generic StoreObj object tables ----
     for otype in WSTORE_OTYPES {
         conn.execute_batch(&format!(
             "CREATE TABLE IF NOT EXISTS db_{otype} (

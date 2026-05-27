@@ -43,7 +43,7 @@ WaveWindow
 Plus module/file/function names:
 
 - `frontend/app/store/wos.ts` (module — `WOS` namespace import everywhere)
-- `agentmux-srv/src/backend/storage/wstore.rs`
+- `agentmux-srv/src/backend/storage/store.rs`
 - `wave_obj_to_value()` (helper function)
 - `getWaveObjectAtom`, `getWaveObjectValue` (frontend helpers)
 - `wpsSubscribeToObject` (the `wps` prefix — possibly "wave pub/sub")
@@ -58,7 +58,7 @@ Plus module/file/function names:
 | **Type definitions (Rust + TS)** | | |
 | `WaveObj` (trait, Rust) | `MuxObj` | `agentmux-srv/src/backend/obj.rs:121-138` |
 | `WaveObjUpdate` (struct, Rust + TS wire type) | `MuxObjUpdate` | The wire format; both sides must match in the same PR |
-| `WaveStore` (Rust) | `MuxStore` | `agentmux-srv/src/backend/storage/wstore.rs` |
+| `WaveStore` (Rust) | `MuxStore` | `agentmux-srv/src/backend/storage/store.rs` |
 | `WaveWindow` (TS type) | `MuxWindow` | In `frontend/types/gotypes.d.ts` |
 | `WaveEvent`, `WaveEvents` | `MuxEvent`, `MuxEvents` | |
 | `WaveFile`, `WaveFiles` | `MuxFile`, `MuxFiles` | |
@@ -76,7 +76,7 @@ Plus module/file/function names:
 | **Module / file names** | | |
 | `frontend/app/store/wos.ts` | `frontend/app/store/mos.ts` | All importers update path |
 | `WOS` namespace import (`import * as WOS from ...`) | `MOS` | 19 importers |
-| `agentmux-srv/src/backend/storage/wstore.rs` | `agentmux-srv/src/backend/storage/mstore.rs` | Module declaration + 50+ `use` statements |
+| `agentmux-srv/src/backend/storage/store.rs` | `agentmux-srv/src/backend/storage/mstore.rs` | Module declaration + 50+ `use` statements |
 | `agentmux-srv/src/backend/wps.rs` | `agentmux-srv/src/backend/mps.rs` | Wave PubSub module → Mux PubSub. Sweep `use ...::wps::...` across crate |
 | `frontend/app/store/wps.ts` | `frontend/app/store/mps.ts` | Same; 6 frontend importers |
 | `frontend/types/gotypes.d.ts` | `frontend/types/srv-types.d.ts` | 2074-line type bindings file; the filename used to reference the (now-defunct) Go source. New name describes where the types come from today: the `agentmux-srv` sidecar. The file is in the global ambient-type lookup (`declare global { ... }`), so renaming doesn't require import updates anywhere — just rename the file. `tsconfig.json` uses `include: ["frontend/**/*"]` so it auto-discovers. |
@@ -107,8 +107,8 @@ Plus module/file/function names:
 | Old path | New path |
 |---|---|
 | `frontend/app/store/wos.ts` | `frontend/app/store/mos.ts` |
-| `agentmux-srv/src/backend/storage/wstore.rs` | `agentmux-srv/src/backend/storage/mstore.rs` |
-| `agentmux-srv/src/backend/storage/wstore.test.rs` (if exists) | `mstore.test.rs` |
+| `agentmux-srv/src/backend/storage/store.rs` | `agentmux-srv/src/backend/storage/mstore.rs` |
+| `agentmux-srv/src/backend/storage/store.test.rs` (if exists) | `mstore.test.rs` |
 
 Use `git mv` so the rename history is preserved across blame.
 
@@ -322,7 +322,7 @@ Safe to:
 | `WaveNotificationOptions` | `agentmux-srv/src/backend/rpc_types.rs:1145` |
 | `WaveObj` (trait) | `agentmux-srv/src/backend/obj.rs:121` |
 | `WaveObjUpdate` (struct) | `agentmux-srv/src/backend/obj.rs:468` |
-| `WaveStore` | `agentmux-srv/src/backend/storage/wstore.rs:24` |
+| `WaveStore` | `agentmux-srv/src/backend/storage/store.rs:24` |
 | `WaveWindow` (TS) | `frontend/types/gotypes.d.ts` (global) |
 
 All 9 accounted for, each with a single definition site (no duplicate-define traps).

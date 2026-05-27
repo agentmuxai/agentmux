@@ -6,12 +6,12 @@
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 use crate::backend::storage::StoreError;
 use crate::backend::obj::*;
 
 /// Create a new workspace with the given name.
-pub fn create_workspace(store: &WaveStore, name: &str) -> Result<Workspace, StoreError> {
+pub fn create_workspace(store: &Store, name: &str) -> Result<Workspace, StoreError> {
     let mut ws = Workspace {
         oid: Uuid::new_v4().to_string(),
         name: name.to_string(),
@@ -29,7 +29,7 @@ pub fn create_workspace(store: &WaveStore, name: &str) -> Result<Workspace, Stor
 ///
 /// Cascades through BOTH `tabids` and `pinnedtabids` — pinned tabs
 /// were silently leaked to disk before this fix (codex P1 #614).
-pub fn delete_workspace(store: &WaveStore, ws_id: &str) -> Result<(), StoreError> {
+pub fn delete_workspace(store: &Store, ws_id: &str) -> Result<(), StoreError> {
     let ws = store.must_get::<Workspace>(ws_id)?;
 
     // Delete all tabs in the workspace (regular + pinned).
@@ -42,13 +42,13 @@ pub fn delete_workspace(store: &WaveStore, ws_id: &str) -> Result<(), StoreError
 }
 
 /// Get a workspace by ID.
-pub fn get_workspace(store: &WaveStore, ws_id: &str) -> Result<Workspace, StoreError> {
+pub fn get_workspace(store: &Store, ws_id: &str) -> Result<Workspace, StoreError> {
     store.must_get::<Workspace>(ws_id)
 }
 
 /// List all workspaces as WorkspaceListEntry (matching Go's behavior).
 /// Returns [{workspaceid, windowid}] — filters out unnamed workspaces.
-pub fn list_workspaces(store: &WaveStore) -> Result<Vec<WorkspaceListEntry>, StoreError> {
+pub fn list_workspaces(store: &Store) -> Result<Vec<WorkspaceListEntry>, StoreError> {
     let workspaces = store.get_all::<Workspace>()?;
     let windows = store.get_all::<Window>()?;
 

@@ -90,7 +90,7 @@ A fresh portable currently opens to an empty single-pane shell. First-time users
 
 ### Implementation path
 
-The backend seeds the initial workspace/tab/layout in `agentmux-srv`'s first-launch bootstrap. Grep for where the default window/tab is created (likely `backend/storage/wstore.rs` or a dedicated seed helper alongside `forge-seed.json`). The frontend layout reducer already handles arbitrary nested row/column splits — we just need to insert the right tree.
+The backend seeds the initial workspace/tab/layout in `agentmux-srv`'s first-launch bootstrap. Grep for where the default window/tab is created (likely `backend/storage/store.rs` or a dedicated seed helper alongside `forge-seed.json`). The frontend layout reducer already handles arbitrary nested row/column splits — we just need to insert the right tree.
 
 Blocks needed at seed time:
 1. BlockDef `{ meta: { view: "agent" } }` — picker defaults

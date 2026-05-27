@@ -409,7 +409,7 @@ async fn delete_tab_force_true_via_direct_dispatch_simulates_compensation_path()
 /// Helper: wstore + saga_log are shared between two `AppState`s in a
 /// crash-recovery test. Build a fresh `AppState` that reuses both.
 fn state_with_shared_saga_log(
-    wstore: std::sync::Arc<crate::backend::storage::wstore::WaveStore>,
+    wstore: std::sync::Arc<crate::backend::storage::store::Store>,
     saga_log: std::sync::Arc<crate::sagas::log::SagaLog>,
 ) -> AppState {
     let mut s = test_state();
