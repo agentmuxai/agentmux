@@ -44,8 +44,23 @@ function WorkspaceElem(): JSX.Element {
                                         // unmounting children. Lifted by `tab-reveal.ts`'s
                                         // frame-budget detector. Only applies to the active
                                         // tab — inactive tabs are `display: none` already.
+                                        //
+                                        // Plus an opacity-fade on lift: even after the gate
+                                        // releases, the first paint frame can briefly show
+                                        // un-cascaded theme colors / unstyled content (the
+                                        // "negative-of-a-photo" flash users reported on
+                                        // 2026-05-27). The opacity transition from 0 → 1
+                                        // over 120ms blends those frames into invisibility.
+                                        // visibility doesn't animate so it flips instantly
+                                        // when the gate lifts; opacity carries the perceived
+                                        // smoothness.
+                                        // Spec:
+                                        // SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md.
                                         visibility:
                                             tid === tabId() && tabSwitching() ? "hidden" : null,
+                                        opacity:
+                                            tid === tabId() && tabSwitching() ? "0" : "1",
+                                        transition: "opacity 120ms ease-out",
                                     }}
                                 >
                                     <ErrorBoundary>
