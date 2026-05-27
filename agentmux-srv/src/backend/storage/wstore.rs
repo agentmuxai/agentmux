@@ -2026,9 +2026,15 @@ impl WaveStore {
         &self,
         limit: usize,
         definition_id: Option<&str>,
+        identity_id: Option<&str>,
         include_continuations: bool,
     ) -> Result<Vec<AgentInstance>, StoreError> {
         let conn = self.conn.lock().unwrap();
+
+        // Dynamic bind-index assignment. We accumulate optional
+        // string params into `extra_params` in the same order they
+        // appear in the SQL, then bind the limit last.
+        let mut extra_params: Vec<&str> = Vec::with_capacity(2);
 
         if !include_continuations {
             // Legacy "dropdown" mode: only chain heads (no parent).
@@ -2046,21 +2052,30 @@ impl WaveStore {
                    AND instance_name <> ''
                    AND parent_instance_id = ''",
             );
-            let limit_param_idx = if definition_id.is_some() {
-                sql.push_str("\n                   AND definition_id = ?1");
-                2
-            } else {
-                1
-            };
+            let mut next_idx = 1usize;
+            if let Some(id) = identity_id {
+                sql.push_str(&format!("\n                   AND identity_id = ?{}", next_idx));
+                extra_params.push(id);
+                next_idx += 1;
+            }
+            if let Some(def) = definition_id {
+                sql.push_str(&format!("\n                   AND definition_id = ?{}", next_idx));
+                extra_params.push(def);
+                next_idx += 1;
+            }
             sql.push_str(&format!(
                 "\n                 ORDER BY started_at DESC\n                 LIMIT ?{}",
-                limit_param_idx
+                next_idx
             ));
             let mut stmt = conn.prepare(&sql)?;
-            let iter = match definition_id {
-                Some(def) => stmt.query_map(params![def, limit as i64], map_instance_row)?,
-                None => stmt.query_map(params![limit as i64], map_instance_row)?,
-            };
+            let limit_i64 = limit as i64;
+            let mut bindings: Vec<&dyn rusqlite::ToSql> =
+                Vec::with_capacity(extra_params.len() + 1);
+            for s in &extra_params {
+                bindings.push(s);
+            }
+            bindings.push(&limit_i64);
+            let iter = stmt.query_map(bindings.as_slice(), map_instance_row)?;
             let mut out = Vec::new();
             for r in iter {
                 out.push(r?);
@@ -2147,7 +2162,23 @@ impl WaveStore {
                            ORDER BY started_at DESC, id DESC
                        ) AS rn
                 FROM roots
-                WHERE instance_name <> ''
+                WHERE instance_name <> ''"#
+                .to_string(),
+        );
+        // Identity filter MUST run inside the `ranked` CTE (i.e.,
+        // before ROW_NUMBER) so the newest row matching the requested
+        // identity per chain wins. If we filtered identity in the
+        // outer SELECT instead, a chain whose newest row uses a
+        // different identity would be dropped even if an older row in
+        // the chain matched. Codex P2 #3 on PR #1096 0c4c8c46.
+        let mut next_idx = 1usize;
+        if let Some(id) = identity_id {
+            sql.push_str(&format!("\n                  AND identity_id = ?{}", next_idx));
+            extra_params.push(id);
+            next_idx += 1;
+        }
+        sql.push_str(
+            r#"
             )
             SELECT id, definition_id, parent_instance_id, block_id, session_id,
                    status, github_context, started_at, ended_at, created_at,
@@ -2155,24 +2186,26 @@ impl WaveStore {
                    display_hidden
             FROM ranked
             WHERE rn = 1
-              AND display_hidden = 0"#
-                .to_string(),
+              AND display_hidden = 0"#,
         );
-        let limit_param_idx = if definition_id.is_some() {
-            sql.push_str("\n              AND definition_id = ?1");
-            2
-        } else {
-            1
-        };
+        if let Some(def) = definition_id {
+            sql.push_str(&format!("\n              AND definition_id = ?{}", next_idx));
+            extra_params.push(def);
+            next_idx += 1;
+        }
         sql.push_str(&format!(
             "\n            ORDER BY started_at DESC\n            LIMIT ?{}",
-            limit_param_idx
+            next_idx
         ));
         let mut stmt = conn.prepare(&sql)?;
-        let iter = match definition_id {
-            Some(def) => stmt.query_map(params![def, limit as i64], map_instance_row)?,
-            None => stmt.query_map(params![limit as i64], map_instance_row)?,
-        };
+        let limit_i64 = limit as i64;
+        let mut bindings: Vec<&dyn rusqlite::ToSql> =
+            Vec::with_capacity(extra_params.len() + 1);
+        for s in &extra_params {
+            bindings.push(s);
+        }
+        bindings.push(&limit_i64);
+        let iter = stmt.query_map(bindings.as_slice(), map_instance_row)?;
         let mut out = Vec::new();
         for r in iter {
             out.push(r?);
@@ -4345,7 +4378,7 @@ mod tests {
         cont.started_at = 200;
         store.instance_create(&cont).unwrap();
 
-        let picker_rows = store.instance_list_named(10, None, true).unwrap();
+        let picker_rows = store.instance_list_named(10, None, None, true).unwrap();
         assert_eq!(
             picker_rows.len(),
             1,
@@ -4359,7 +4392,7 @@ mod tests {
 
         // Definition-scoped picker mode — same dedup behavior.
         let scoped = store
-            .instance_list_named(10, Some("def-mirror"), true)
+            .instance_list_named(10, Some("def-mirror"), None, true)
             .unwrap();
         assert_eq!(scoped.len(), 1);
         assert_eq!(scoped[0].id, "inst-cont");
@@ -4386,7 +4419,7 @@ mod tests {
             store.instance_create(&c).unwrap();
         }
 
-        let picker_rows = store.instance_list_named(10, None, true).unwrap();
+        let picker_rows = store.instance_list_named(10, None, None, true).unwrap();
         assert_eq!(
             picker_rows.len(),
             1,
@@ -4414,7 +4447,7 @@ mod tests {
         head_b.started_at = 200;
         store.instance_create(&head_b).unwrap();
 
-        let rows = store.instance_list_named(10, None, true).unwrap();
+        let rows = store.instance_list_named(10, None, None, true).unwrap();
         assert_eq!(rows.len(), 2);
         // MRU order: b-head (200) before a-cont (150).
         assert_eq!(rows[0].id, "b-head");
@@ -4458,7 +4491,7 @@ mod tests {
         // deleted head; cont2 still has a valid parent).
         store.instance_delete("inst-deleted-head").unwrap();
 
-        let rows = store.instance_list_named(10, None, true).unwrap();
+        let rows = store.instance_list_named(10, None, None, true).unwrap();
         // The orphan chain (cont1 → cont2) must surface as ONE row:
         // cont1 becomes a root (its parent is gone); cont2 chains
         // off cont1. Newest in chain (cont2) wins.
@@ -4501,7 +4534,7 @@ mod tests {
         store.instance_create(&cont2).unwrap();
 
         // Before forget: chain surfaces as cont2 (newest).
-        let before = store.instance_list_named(10, None, true).unwrap();
+        let before = store.instance_list_named(10, None, None, true).unwrap();
         assert_eq!(before.len(), 1);
         assert_eq!(before[0].id, "inst-cont2");
 
@@ -4510,7 +4543,7 @@ mod tests {
 
         // After forget: the whole chain must stay forgotten — older
         // visible rows in the chain (head, cont1) must NOT bubble up.
-        let after = store.instance_list_named(10, None, true).unwrap();
+        let after = store.instance_list_named(10, None, None, true).unwrap();
         assert_eq!(
             after.len(),
             0,
@@ -4547,9 +4580,94 @@ mod tests {
         hidden_cont.display_hidden = true;
         store.instance_create(&hidden_cont).unwrap();
 
-        let rows = store.instance_list_named(10, None, true).unwrap();
+        let rows = store.instance_list_named(10, None, None, true).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "v-cont");
+    }
+
+    #[test]
+    fn instance_list_named_picker_mode_identity_filter_in_ranking() {
+        // Codex P2 #3 on PR #1096 0c4c8c46: identity_id filter must
+        // participate in the dedup ranking. If we returned the newest
+        // row in a chain and then filtered identity, a chain whose
+        // newest row used a different identity would disappear from
+        // the picker — even if an older row in the chain matched the
+        // requested identity. Push the filter INTO the CTE so the
+        // newest IDENTITY-MATCHING row per chain wins.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        // Chain: head with identity-a, cont with identity-b, then
+        // another cont with identity-a (the user switched back).
+        let mut head = make_named_inst("inst-head", "Claude", &agents_root);
+        head.identity_id = "identity-a".to_string();
+        head.started_at = 100;
+        store.instance_create(&head).unwrap();
+
+        let mut cont_b = make_named_inst("inst-cont-b", "Claude", &agents_root);
+        cont_b.parent_instance_id = "inst-head".to_string();
+        cont_b.identity_id = "identity-b".to_string();
+        cont_b.started_at = 200;
+        store.instance_create(&cont_b).unwrap();
+
+        let mut cont_a2 = make_named_inst("inst-cont-a2", "Claude", &agents_root);
+        cont_a2.parent_instance_id = "inst-cont-b".to_string();
+        cont_a2.identity_id = "identity-a".to_string();
+        cont_a2.started_at = 300;
+        store.instance_create(&cont_a2).unwrap();
+
+        // Filter by identity-a → newest identity-a row wins (cont-a2).
+        let rows_a = store
+            .instance_list_named(10, None, Some("identity-a"), true)
+            .unwrap();
+        assert_eq!(rows_a.len(), 1);
+        assert_eq!(rows_a[0].id, "inst-cont-a2");
+
+        // Filter by identity-b → only cont-b matches.
+        let rows_b = store
+            .instance_list_named(10, None, Some("identity-b"), true)
+            .unwrap();
+        assert_eq!(rows_b.len(), 1);
+        assert_eq!(rows_b[0].id, "inst-cont-b");
+
+        // No filter → newest in chain wins (cont-a2, started_at=300).
+        let rows_all = store.instance_list_named(10, None, None, true).unwrap();
+        assert_eq!(rows_all.len(), 1);
+        assert_eq!(rows_all[0].id, "inst-cont-a2");
+    }
+
+    #[test]
+    fn instance_list_named_picker_mode_identity_filter_recovers_older_match() {
+        // Concrete repro for the bug codex described: chain where the
+        // newest row uses identity-b but only older rows match the
+        // requested identity-a. Without the in-ranking filter, the
+        // chain would disappear when filtering by identity-a (newest
+        // row is identity-b, gets ranked first, then post-filter
+        // drops it). With the in-ranking filter, identity-a's older
+        // row survives because it's the only candidate.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let mut head = make_named_inst("inst-head", "Claude", &agents_root);
+        head.identity_id = "identity-a".to_string();
+        head.started_at = 100;
+        store.instance_create(&head).unwrap();
+
+        let mut cont_newer_b = make_named_inst("inst-cont-newer-b", "Claude", &agents_root);
+        cont_newer_b.parent_instance_id = "inst-head".to_string();
+        cont_newer_b.identity_id = "identity-b".to_string();
+        cont_newer_b.started_at = 200;
+        store.instance_create(&cont_newer_b).unwrap();
+
+        let rows = store
+            .instance_list_named(10, None, Some("identity-a"), true)
+            .unwrap();
+        assert_eq!(
+            rows.len(),
+            1,
+            "older identity-a row must survive even though the newest row uses identity-b"
+        );
+        assert_eq!(rows[0].id, "inst-head");
     }
 
     #[test]
@@ -4573,7 +4691,7 @@ mod tests {
         cont.started_at = 200;
         store.instance_create(&cont).unwrap();
 
-        let dropdown_rows = store.instance_list_named(10, None, false).unwrap();
+        let dropdown_rows = store.instance_list_named(10, None, None, false).unwrap();
         assert_eq!(
             dropdown_rows.len(),
             1,
@@ -4583,7 +4701,7 @@ mod tests {
 
         // Definition-scoped dropdown mode — head only.
         let scoped_dropdown = store
-            .instance_list_named(10, Some("def-mirror"), false)
+            .instance_list_named(10, Some("def-mirror"), None, false)
             .unwrap();
         assert_eq!(scoped_dropdown.len(), 1);
         assert_eq!(scoped_dropdown[0].id, "inst-head");
