@@ -283,19 +283,26 @@ fn escape_query_value(s: &str) -> String {
 }
 
 /// WndProc for the floating-pane class. Removes the system non-client
-/// area (no native title bar / borders drawn) and maps the frontend's
-/// 30 CSS-px title bar to `HTCAPTION` so the OS handles the drag loop
-/// natively. The close button on the right side of the title bar is
-/// excluded from the drag region so React can receive its click.
+/// area (no native title bar / borders drawn) and maps the docked-pane
+/// standard `BlockFrame_Header` (rendered by the frontend at the top of
+/// the floater) to `HTCAPTION` so the OS handles the drag loop
+/// natively. The per-pane action buttons on the right side of the
+/// header (close, magnify, mic, endIconButtons) are excluded from the
+/// drag region so React can receive their clicks.
 ///
-/// CSS reference (must stay in sync with `frontend/app/workspace/floating-pane-workspace.tsx`):
-///   - title-bar height: 30 CSS px
-///   - close button: 28 CSS px wide, right-anchored; allow 36 CSS px
-///     of click-through to be safe (covers padding-right + button width).
+/// CSS reference (must stay in sync with the docked-pane header):
+///   - pane header height: 33 CSS px (`--header-height` in
+///     `frontend/app/theme.scss:97`)
+///   - action button cluster: right-anchored; reserve 130 CSS px of
+///     click-through to cover the typical button set (close ~28,
+///     magnify ~28, plus padding + extras). Buttons sit at the right
+///     edge per `BlockFrame_Header_End` in
+///     `frontend/app/block/blockframe.tsx`.
 ///
-/// Edge resize zones (6 physical px) take precedence over `HTCAPTION`
-/// so the corner resize cursors still work when the cursor is in the
-/// title-bar band near a corner.
+/// Edge resize zones take precedence over `HTCAPTION` so the corner
+/// resize cursors still work when the cursor is in the header band
+/// near a corner. All CSS-px constants are DPI-scaled via
+/// `GetDpiForWindow`.
 ///
 /// This mirrors the agentmux frameless-window pattern in
 /// `agentmux-cef/src/client/wndproc.rs::install_frameless_resize_hook`
@@ -319,9 +326,15 @@ unsafe extern "system" fn floating_pane_wndproc(
     // coded physical-pixel constants here would shrink the hit zones on
     // HiDPI monitors — a 6-physical-px resize border is 3 CSS px at 200%
     // DPI and effectively unreachable.
+    //
+    // PANE_HEADER_HEIGHT_CSS matches `--header-height` in
+    // `frontend/app/theme.scss:97`. ACTION_BUTTON_ZONE_CSS is empirical
+    // — large enough to cover the docked-pane action cluster (close,
+    // magnify, mic, view-specific endIconButtons) without intruding on
+    // the title-text area where window drag should be live.
     const RESIZE_BORDER_CSS: i32 = 6;
-    const TITLEBAR_HEIGHT_CSS: i32 = 30;
-    const CLOSE_BUTTON_ZONE_CSS: i32 = 36;
+    const PANE_HEADER_HEIGHT_CSS: i32 = 33;
+    const ACTION_BUTTON_ZONE_CSS: i32 = 130;
 
     match msg {
         // Claim the entire window rect as client area — no system title
@@ -343,8 +356,8 @@ unsafe extern "system" fn floating_pane_wndproc(
             let dpi = GetDpiForWindow(hwnd) as i32;
             let dpi = if dpi > 0 { dpi } else { 96 };
             let resize_border_px = (RESIZE_BORDER_CSS * dpi / 96).max(1);
-            let titlebar_px = TITLEBAR_HEIGHT_CSS * dpi / 96;
-            let close_zone_px = CLOSE_BUTTON_ZONE_CSS * dpi / 96;
+            let header_px = PANE_HEADER_HEIGHT_CSS * dpi / 96;
+            let action_zone_px = ACTION_BUTTON_ZONE_CSS * dpi / 96;
 
             let left = x - rect.left < resize_border_px;
             let right = rect.right - x < resize_border_px;
@@ -375,8 +388,10 @@ unsafe extern "system" fn floating_pane_wndproc(
                 return HTBOTTOM as isize;
             }
 
-            // Title bar drag zone (excluding close-button click-through).
-            if y - rect.top < titlebar_px && rect.right - x > close_zone_px {
+            // Pane-header drag zone (excluding the right-anchored action
+            // button cluster so close / magnify / mic / endIconButtons
+            // remain clickable).
+            if y - rect.top < header_px && rect.right - x > action_zone_px {
                 return HTCAPTION as isize;
             }
         }
@@ -487,6 +502,32 @@ fn create_owned_popup(
     if hwnd.is_null() {
         let err = unsafe { windows_sys::Win32::Foundation::GetLastError() };
         return Err(format!("CreateWindowExW returned NULL (GetLastError={err})"));
+    }
+
+    // Tell DWM to extend the entire frame into the client area. Without
+    // this, DWM keeps drawing the standard Win32 title bar (and the
+    // minimize/maximize/close caption buttons that come with it) on top
+    // of our client area, even though our `WM_NCCALCSIZE → 0` says the
+    // client area fills the window. Mirrors the main-window setup in
+    // `client/wndproc.rs::setup_native_frameless` — combined with our
+    // WndProc's `WM_NCCALCSIZE`/`WM_NCACTIVATE`/`WM_NCHITTEST`, this
+    // gives a truly chrome-free outer HWND. Only the frontend's 30 CSS-px
+    // header remains, and it's the sole drag/close UI.
+    unsafe {
+        use windows_sys::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea;
+        use windows_sys::Win32::UI::Controls::MARGINS;
+        let margins = MARGINS {
+            cxLeftWidth: -1,
+            cxRightWidth: -1,
+            cyTopHeight: -1,
+            cyBottomHeight: -1,
+        };
+        let hr = DwmExtendFrameIntoClientArea(hwnd, &margins);
+        if hr != 0 {
+            tracing::warn!(
+                "[floating-pane] DwmExtendFrameIntoClientArea failed hr=0x{hr:08x} — system title bar may still be drawn",
+            );
+        }
     }
 
     unsafe {
