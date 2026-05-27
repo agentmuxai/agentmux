@@ -8,7 +8,7 @@ import { CenteredDiv } from "@/element/quickelems";
 import logoUrl from "@/app/asset/logo-brain.svg?url";
 import { ContentRenderer, NodeModel, PreviewRenderer, TileLayout } from "@/layout/index";
 import { TileLayoutContents } from "@/layout/lib/types";
-import { atoms, createBlock, getApi } from "@/store/global";
+import { atoms, createBlock, getApi, getHostName, getUserName, isDev } from "@/store/global";
 import * as services from "@/store/services";
 import * as WOS from "@/store/wos";
 import { createMemo, Show } from "solid-js";
@@ -118,20 +118,45 @@ function TabContent(props: { tabId: string }): JSX.Element {
                         </ModalLayer>
                     }
                 >
-                    <img
-                        src={logoUrl}
-                        alt="AgentMux"
-                        class="empty-tab-logo"
-                        style={{
-                            "max-width": "160px",
-                            "max-height": "160px",
-                            opacity: "0.4",
-                            "pointer-events": "none",
-                            "user-select": "none",
-                        }}
-                    />
+                    <EmptyTabIdentity />
                 </Show>
             </Show>
+        </div>
+    );
+}
+
+/**
+ * Identity panel shown on an empty tab — logo + the standard "who/what/where"
+ * line every desktop app shows during a quiet startup screen: `user@host`,
+ * version, git hash. Pulled from cached globals (`getUserName` / `getHostName`)
+ * and the host's about-details payload, no IPC on render.
+ */
+function EmptyTabIdentity(): JSX.Element {
+    const details = getApi().getAboutModalDetails();
+    const version = details?.version ?? "";
+    const gitHash = details?.gitHash ?? "";
+    const buildLabel = gitHash ? `${isDev() ? "dev-" : ""}${gitHash}` : "";
+
+    return (
+        <div
+            class="flex flex-col items-center gap-3 select-none pointer-events-none"
+            style={{ opacity: "0.4" }}
+        >
+            <img
+                src={logoUrl}
+                alt="AgentMux"
+                class="empty-tab-logo"
+                style={{ "max-width": "160px", "max-height": "160px" }}
+            />
+            <div class="flex flex-col items-center gap-1 text-secondary text-[11px] leading-4 text-center">
+                <div>{getUserName()}@{getHostName()}</div>
+                <Show when={version}>
+                    <div>
+                        v{version}
+                        <Show when={buildLabel}>{" "}({buildLabel})</Show>
+                    </div>
+                </Show>
+            </div>
         </div>
     );
 }
