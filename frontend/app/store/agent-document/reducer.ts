@@ -68,7 +68,14 @@ function scrubOrphanedInProgress(
         }
         if (n.type === "tool" && n.status === "running") {
             if (!next) next = nodes.slice();
-            next[i] = { ...n, status: "canceled" };
+            // Close the streaming log alongside the status flip.
+            // `log.open === true` makes ToolBlock / ToolOverlayLog
+            // render the live-tail "↳ latest stream output" branch,
+            // which keeps a canceled orphan looking like an actively-
+            // streaming tool — defeats the spec's "never with a
+            // spinner" goal. Codex + reagent P2 on PR #1104.
+            const closedLog = n.log != null ? { ...n.log, open: false } : n.log;
+            next[i] = { ...n, status: "canceled", log: closedLog };
             toolsCanceled++;
             continue;
         }

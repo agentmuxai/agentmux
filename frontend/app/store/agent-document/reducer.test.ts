@@ -719,6 +719,26 @@ describe("agent document reducer", () => {
             ]);
         });
 
+        // Codex + reagent P2 on #1104: scrubbing must also close
+        // the streaming log. Otherwise ToolBlock's live-tail branch
+        // (gated on log.open) keeps rendering a canceled tool as
+        // streaming.
+        it("closes log.open when canceling a streamed-into running tool", () => {
+            const t1: ToolNode = {
+                ...tool("t1", { status: "running" }),
+                log: { chunks: [chunk("partial output")], open: true },
+            };
+            const r = update(seed([t1]), {
+                type: "ScrubOrphanedInProgress",
+                at: 1000,
+            });
+            const scrubbed = r.state.nodes[0] as ToolNode;
+            expect(scrubbed.status).toBe("canceled");
+            expect(scrubbed.log?.open).toBe(false);
+            // Chunks preserved — historical output stays visible.
+            expect(scrubbed.log?.chunks.length).toBe(1);
+        });
+
         it("leaves pending_approval tools alone (decision still in flight)", () => {
             const t = tool("t1", { status: "pending_approval" });
             const r = update(seed([t]), {
