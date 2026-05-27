@@ -238,20 +238,27 @@ const DEFAULT_FLOATER_HEIGHT = 480;
 const MIN_FLOATER_WIDTH = 200;
 const MIN_FLOATER_HEIGHT = 120;
 
-/// Measure the source pane's rendered size and convert to physical pixels
-/// (Win32 host expects physical px; `getBoundingClientRect` returns CSS px).
-/// Must be called BEFORE `TearOffBlock` — that mutation removes the source
-/// pane from the layout and unmounts its DOM element.
+/// Measure the source pane's rendered size in CSS / DIP pixels.
+/// `getBoundingClientRect` returns CSS px regardless of DPR; we deliberately
+/// do NOT multiply by `window.devicePixelRatio` here because that's the
+/// SOURCE monitor's scale, and the floater may spawn on a DIFFERENT
+/// monitor (different DPI). Cross-monitor scaling MUST happen on the host
+/// using `GetDpiForMonitor(MonitorFromPoint(x, y))` against the destination
+/// — see `agentmux-cef/src/commands/floating_pane.rs` and the matching
+/// pattern in `agentmux-cef/src/commands/window_pool.rs:684-701` (tab
+/// tear-off).
+///
+/// Must be called BEFORE `TearOffBlock` — that mutation removes the
+/// source pane from the layout and unmounts its DOM element.
 function measureSourcePaneSize(blockId: string): { width: number; height: number } {
     const el = document.querySelector(`[data-blockid="${blockId}"]`) as HTMLElement | null;
     if (!el) {
         return { width: DEFAULT_FLOATER_WIDTH, height: DEFAULT_FLOATER_HEIGHT };
     }
     const rect = el.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
     return {
-        width: Math.max(MIN_FLOATER_WIDTH, Math.round(rect.width * dpr)),
-        height: Math.max(MIN_FLOATER_HEIGHT, Math.round(rect.height * dpr)),
+        width: Math.max(MIN_FLOATER_WIDTH, Math.round(rect.width)),
+        height: Math.max(MIN_FLOATER_HEIGHT, Math.round(rect.height)),
     };
 }
 
