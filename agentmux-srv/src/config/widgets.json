@@ -32,7 +32,7 @@
     },
     "defwidget@browser": {
         "display:order": 7,
-        "display:pinned": true,
+        "display:pinned": false,
         "icon": "globe",
         "label": "Browser",
         "description": "Embedded web browser",
@@ -45,7 +45,7 @@
     },
     "defwidget@editor": {
         "display:order": 6,
-        "display:pinned": true,
+        "display:pinned": false,
         "icon": "file-code",
         "label": "Editor",
         "description": "Code editor with syntax highlighting",
@@ -58,7 +58,7 @@
     },
     "defwidget@terminal": {
         "display:order": 5,
-        "display:pinned": true,
+        "display:pinned": false,
         "icon": "square-terminal",
         "label": "Terminal",
         "blockdef": {
@@ -70,7 +70,7 @@
     },
     "defwidget@sysinfo": {
         "display:order": 8,
-        "display:pinned": true,
+        "display:pinned": false,
         "icon": "chart-line",
         "label": "Sysinfo",
         "blockdef": {
@@ -94,7 +94,7 @@
     },
     "defwidget@help": {
         "display:order": 9,
-        "display:pinned": true,
+        "display:pinned": false,
         "icon": "circle-question",
         "label": "Help",
         "description": "Help and documentation",
