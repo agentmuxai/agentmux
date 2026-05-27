@@ -2100,6 +2100,26 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                     obj: Some(wave_obj_to_value(&dst_tab)),
                 });
             }
+            // CRITICAL: WaveObjUpdates in the response only reach the
+            // CALLING renderer (the floater that's about to close). The
+            // TARGET window's renderer is a different process and won't
+            // see the layout change unless we explicitly broadcast on
+            // the event bus. Mirrors the pattern in `app_api.rs:399-410`.
+            // Without this the target tab.blockids includes the new
+            // block but its layout.leaforder doesn't → block invisible.
+            for update in &updates {
+                let oref = format!("{}:{}", update.otype, update.oid);
+                if let Ok(data) = serde_json::to_value(update) {
+                    state.event_bus.broadcast_event(
+                        &crate::backend::eventbus::WSEventType {
+                            eventtype: "waveobj:update".to_string(),
+                            oref,
+                            data: Some(data),
+                        },
+                    );
+                }
+            }
+
             WebReturnType::success_data_updates(
                 serde_json::json!({
                     "redocked": true,
