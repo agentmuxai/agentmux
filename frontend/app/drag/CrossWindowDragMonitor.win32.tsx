@@ -228,12 +228,32 @@ async function performCrossWindowDrop(
     // The target window handles the actual move when it receives the cross-drag-end event.
 }
 
-// Default floating-pane size when we don't have a captured source rect
-// (the tearoff-pane-size spec — agenta/feat-tearoff-match-source-size —
-// will refine this to use the source pane's measured dimensions). 720×480
-// is a comfortable single-block working area without dominating the screen.
+// Fallback floating-pane size if we can't read the source pane's rect
+// (block element not in the DOM for any reason). 720×480 is a comfortable
+// single-block working area without dominating the screen.
 const DEFAULT_FLOATER_WIDTH = 720;
 const DEFAULT_FLOATER_HEIGHT = 480;
+// Defensive lower bounds — protect against degenerate (0-width/height)
+// rects yielding an unusable floater.
+const MIN_FLOATER_WIDTH = 200;
+const MIN_FLOATER_HEIGHT = 120;
+
+/// Measure the source pane's rendered size and convert to physical pixels
+/// (Win32 host expects physical px; `getBoundingClientRect` returns CSS px).
+/// Must be called BEFORE `TearOffBlock` — that mutation removes the source
+/// pane from the layout and unmounts its DOM element.
+function measureSourcePaneSize(blockId: string): { width: number; height: number } {
+    const el = document.querySelector(`[data-blockid="${blockId}"]`) as HTMLElement | null;
+    if (!el) {
+        return { width: DEFAULT_FLOATER_WIDTH, height: DEFAULT_FLOATER_HEIGHT };
+    }
+    const rect = el.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    return {
+        width: Math.max(MIN_FLOATER_WIDTH, Math.round(rect.width * dpr)),
+        height: Math.max(MIN_FLOATER_HEIGHT, Math.round(rect.height * dpr)),
+    };
+}
 
 async function performTearOff(
     dragType: "pane" | "tab",
@@ -258,6 +278,15 @@ async function performTearOff(
         //
         // Tab tear-off (branch below) is unchanged — tabs continue
         // to spawn a brand-new instance with its own taskbar entry.
+
+        // Snapshot the source pane's rendered size BEFORE TearOffBlock —
+        // that mutation removes the block from the source layout and the
+        // DOM element disappears. The floater opens at the same size as
+        // the source pane (Win32 physical px).
+        const { width: floaterWidth, height: floaterHeight } = measureSourcePaneSize(
+            payload.blockId,
+        );
+
         const newWsId = await WorkspaceService.TearOffBlock(
             payload.blockId,
             sourceTabId,
@@ -284,8 +313,8 @@ async function performTearOff(
                 workspace_id: newWsId,
                 x: screenX,
                 y: screenY,
-                width: DEFAULT_FLOATER_WIDTH,
-                height: DEFAULT_FLOATER_HEIGHT,
+                width: floaterWidth,
+                height: floaterHeight,
             });
             Logger.info("dnd:cross", "floating pane spawned", {
                 blockId: payload.blockId,

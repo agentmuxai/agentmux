@@ -52,11 +52,13 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     return (
         <div class="flex flex-col w-full flex-grow overflow-hidden">
             {/* Slim title bar.
-                `-webkit-app-region: drag` lets the OS move the floater when
-                the user drags any non-button area. On Windows the agentmux
-                NCHITTEST shim returns HTCAPTION here, so the standard Win32
-                drag loop kicks in (cross-monitor, cross-DPI safe). Buttons
-                opt out via `-webkit-app-region: no-drag`. */}
+                Drag is handled by the host's `floating_pane_wndproc`
+                (agentmux-cef/src/floating_pane.rs): it returns HTCAPTION
+                for the top 30 CSS px (excluding the right 36 CSS px so the
+                close button click passes through). The OS handles the drag
+                loop natively — cross-monitor, cross-DPI safe. The CSS
+                `-webkit-app-region` properties below are kept for
+                documentation/electron-compat, but are no-ops in CEF. */}
             <div
                 class="floating-pane-titlebar"
                 style={{
