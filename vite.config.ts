@@ -95,7 +95,14 @@ export default defineConfig({
     root: ".",
     build: {
         target: ["es2021", "chrome97", "safari13"],
-        sourcemap: process.env.NODE_ENV === "development",
+        // Always emit `.map` files so the runtime source-map resolver
+        // (frontend/log/source-map-resolver.ts) can rewrite raw
+        // `error.stack` positions into original-file frames before
+        // piping to the host log. Adds ~30MB to a portable but the
+        // pay-off — readable stacks for every crash without needing
+        // DevTools — is worth it for an internal tool. Spec:
+        // SPEC_FE_SOURCE_MAP_RESOLVER_2026_05_27.md §7.1.
+        sourcemap: true,
         cssCodeSplit: false,
         outDir: "dist/frontend",
         rollupOptions: {
