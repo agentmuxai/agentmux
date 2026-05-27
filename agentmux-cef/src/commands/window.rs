@@ -585,9 +585,11 @@ pub fn update_floating_redock_hover(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    let cursor_x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0);
+    let cursor_y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0);
     let resolve_args = serde_json::json!({
-        "x": args.get("x").cloned().unwrap_or(serde_json::Value::Null),
-        "y": args.get("y").cloned().unwrap_or(serde_json::Value::Null),
+        "x": cursor_x,
+        "y": cursor_y,
         "exclude_label": source_label,
     });
     let resolved = resolve_window_at_cursor(state, &resolve_args)?;
@@ -596,24 +598,23 @@ pub fn update_floating_redock_hover(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    let prev_target = {
-        let mut guard = state.active_redock_target.lock();
-        let prev = guard.clone();
-        *guard = new_target.clone();
-        prev
-    };
+    *state.active_redock_target.lock() = new_target.clone();
 
-    if prev_target != new_target {
-        let payload = serde_json::json!({
-            "target_label": new_target.clone(),
-            "source_label": source_label,
-        });
-        crate::events::emit_event_to_top_level_windows(
-            state,
-            "floating-redock:hover-state",
-            &payload,
-        );
-    }
+    // Emit on every call (frontend throttles ~50 ms upstream). The
+    // event must carry the cursor position so target renderers can
+    // compute which TILE the cursor is over and highlight just that
+    // leaf (not the whole window). Cursor is in physical screen px.
+    let payload = serde_json::json!({
+        "target_label": new_target.clone(),
+        "source_label": source_label,
+        "cursor_x": cursor_x,
+        "cursor_y": cursor_y,
+    });
+    crate::events::emit_event_to_top_level_windows(
+        state,
+        "floating-redock:hover-state",
+        &payload,
+    );
 
     Ok(serde_json::json!({ "target_label": new_target }))
 }

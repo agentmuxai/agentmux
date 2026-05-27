@@ -80,36 +80,69 @@ const RPC_TIMEOUT = 5_000; // 5 seconds for individual RPC calls
 
 /**
  * Subscribe to the host's `floating-redock:hover-state` event so this
- * window paints the redock highlight overlay when a floater is being
- * dragged over it. The host computes the target window via the same
- * Z-order walk `resolve_window_at_cursor` uses, with the dragged
- * floater excluded, so the highlight appears on whatever real window
- * the cursor is over (not the floater itself).
+ * window paints a per-tile highlight when a floater is being dragged
+ * over it. The host computes the target window via the same Z-order
+ * walk `resolve_window_at_cursor` uses (with the dragged floater
+ * excluded) and emits this event on every mousemove update; payload
+ * includes the cursor position in physical screen px.
  *
- * Each window's renderer runs this in its own JS context (separate
- * renderer process per CEF browser), so the toggle is local — the
- * host fans the same event out to every top-level renderer and each
- * decides whether the event targets it.
+ * Each window's renderer runs this in its own JS context. When the
+ * event targets our window:
+ *   1. Convert cursor screen-physical-px → client CSS px using DPR +
+ *      `window.screenX/screenY` (matches `tabbar.tsx`'s
+ *      `physicalToClientX/Y` pattern).
+ *   2. `document.elementFromPoint(clientX, clientY)` → walk to the
+ *      nearest `[data-blockid]` ancestor (the block frame root —
+ *      `frontend/app/block/blockframe.tsx:755`).
+ *   3. Toggle `.floating-redock-target-leaf` on that block; remove
+ *      from any other previously-highlighted block.
  *
- * The visual rule lives in `app/app.scss::body.floating-redock-hover-target`.
- * Implementation matches the tear-off hover pattern in
- * `app/tab/tabbar.tsx::listenEvent("tearoff:hover-*")`.
+ * The visual rule lives in `app/app.scss::.floating-redock-target-leaf`.
  */
 function installFloatingRedockHoverListener(): void {
     const myLabel =
         new URLSearchParams(window.location.search).get("windowLabel") || "main";
+    let highlighted: HTMLElement | null = null;
+    const clearHighlight = () => {
+        if (highlighted) {
+            highlighted.classList.remove("floating-redock-target-leaf");
+            highlighted = null;
+        }
+    };
     fireAndForget(async () => {
         const { listenEvent } = await import("@/app/platform/ipc");
-        await listenEvent<{ target_label: string | null; source_label?: string }>(
-            "floating-redock:hover-state",
-            (payload) => {
-                if (payload?.target_label === myLabel) {
-                    document.body.classList.add("floating-redock-hover-target");
-                } else {
-                    document.body.classList.remove("floating-redock-hover-target");
-                }
-            },
-        );
+        await listenEvent<{
+            target_label: string | null;
+            source_label?: string;
+            cursor_x?: number;
+            cursor_y?: number;
+        }>("floating-redock:hover-state", (payload) => {
+            if (!payload || payload.target_label !== myLabel) {
+                clearHighlight();
+                return;
+            }
+            const cursorPxX = payload.cursor_x;
+            const cursorPxY = payload.cursor_y;
+            if (typeof cursorPxX !== "number" || typeof cursorPxY !== "number") {
+                clearHighlight();
+                return;
+            }
+            // Physical screen → CSS client (matches tabbar.tsx pattern).
+            const dpr = window.devicePixelRatio || 1;
+            const clientX = cursorPxX / dpr - window.screenX;
+            const clientY = cursorPxY / dpr - window.screenY;
+            const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+            const leaf = el?.closest("[data-blockid]") as HTMLElement | null;
+            if (!leaf) {
+                clearHighlight();
+                return;
+            }
+            if (leaf !== highlighted) {
+                clearHighlight();
+                leaf.classList.add("floating-redock-target-leaf");
+                highlighted = leaf;
+            }
+        });
     });
 }
 

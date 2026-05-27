@@ -34,21 +34,28 @@ body {
     background-color: transparent;
 }
 
-// Highlight overlay rendered when a floating pane is being dragged
-// over this window — host emits `floating-redock:hover-state` with
-// our window's label as `target_label`, app-init's listener toggles
-// this class on body. Visual cue: a thick accent-colored inner ring
-// + a subtle backdrop tint so the user knows where the block will
-// land on release. Pointer-events:none on the ring so the user's
-// drag still flows through to the host's mouseup.
-body.floating-redock-hover-target::after {
+// Per-tile highlight rendered when a floating pane is being dragged
+// over this window AND the cursor is over a specific block. The host
+// emits `floating-redock:hover-state` with our window's label as
+// `target_label` and the cursor in physical screen px; app-init's
+// listener finds the leaf under the cursor and toggles this class on
+// the block frame.
+//
+// Visual cue: an inset 4 CSS-px accent ring + subtle accent tint on
+// the targeted block ONLY (not the whole window). Pointer-events
+// none so the in-flight drag still flows through to mouseup.
+.block.floating-redock-target-leaf {
+    position: relative;
+}
+.block.floating-redock-target-leaf::after {
     content: "";
-    position: fixed;
+    position: absolute;
     inset: 0;
     pointer-events: none;
     z-index: 9999;
     box-shadow: inset 0 0 0 4px var(--accent-color);
-    background-color: rgba(from var(--accent-color) r g b / 0.08);
+    background-color: rgba(from var(--accent-color) r g b / 0.12);
+    border-radius: var(--block-border-radius);
 }
 
 a.plain-link {
