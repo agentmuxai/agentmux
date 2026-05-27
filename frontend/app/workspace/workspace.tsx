@@ -15,6 +15,7 @@ import type { JSX } from "solid-js";
 function WorkspaceElem(): JSX.Element {
     const tabId = atoms.activeTabId;
     const ws = atoms.workspace;
+    const prefersReducedMotion = atoms.prefersReducedMotionAtom;
 
     // All tab IDs (pinned + regular). Keep every tab mounted so terminals
     // preserve their xterm.js instance and scrollback across tab switches.
@@ -54,13 +55,21 @@ function WorkspaceElem(): JSX.Element {
                                         // visibility doesn't animate so it flips instantly
                                         // when the gate lifts; opacity carries the perceived
                                         // smoothness.
+                                        //
+                                        // Reduced-motion users get the visibility gate
+                                        // without the fade — they still need the FOUC
+                                        // suppression, just not the animation. Codex P2
+                                        // on PR #1108.
                                         // Spec:
                                         // SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md.
                                         visibility:
                                             tid === tabId() && tabSwitching() ? "hidden" : null,
-                                        opacity:
-                                            tid === tabId() && tabSwitching() ? "0" : "1",
-                                        transition: "opacity 120ms ease-out",
+                                        opacity: prefersReducedMotion()
+                                            ? "1"
+                                            : tid === tabId() && tabSwitching() ? "0" : "1",
+                                        transition: prefersReducedMotion()
+                                            ? "none"
+                                            : "opacity 120ms ease-out",
                                     }}
                                 >
                                     <ErrorBoundary>
