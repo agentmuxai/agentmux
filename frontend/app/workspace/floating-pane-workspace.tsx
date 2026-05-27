@@ -15,12 +15,17 @@
  *  - no `<WindowHeader>` (which carries the tab bar + action widgets)
  *  - no `<StatusBar>`
  *  - no extra title bar — the floater renders the block's standard
- *    pane header (from `BlockFrame_Header` in `block/blockframe.tsx`)
- *    as its sole chrome. Dragging the pane header's title area moves
- *    the floating window via the host's `floating_pane_wndproc` →
- *    `WM_NCHITTEST → HTCAPTION` shim (excluding the rightmost ~130 CSS
- *    px where the per-pane action buttons live, so close / magnify /
- *    mic / endIconButtons remain clickable).
+ *    `BlockFrame_Header` (33 CSS px, `--header-height` in
+ *    `theme.scss:97`) as its sole chrome.
+ *  - window drag is **JS-driven**, installed by the `onMount` below:
+ *    a targeted document mousedown listener scoped to
+ *    `[data-role="block-header"]` (and skipping interactive elements
+ *    via `target.closest('button, a, input, ...')`) drives
+ *    `get/set_window_position` IPC. `preventDefault` on mousedown
+ *    blocks the HTML5 dragstart pragmatic-dnd would otherwise have
+ *    used, suppressing a "double tear-off" regression. See
+ *    `docs/analyses/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md`
+ *    for why we use JS-driven drag rather than OS HTCAPTION.
  *
  * The frontend code path is otherwise identical to the docked case:
  * Block / view-model / RPC subscriptions all behave the same.
