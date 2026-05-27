@@ -18,7 +18,7 @@
         }
     },
     "defwidget@swarm": {
-        "display:order": 4,
+        "display:order": 2,
         "display:pinned": true,
         "icon": "bee",
         "color": "#f59e0b",
@@ -31,8 +31,8 @@
         }
     },
     "defwidget@browser": {
-        "display:order": 2,
-        "display:pinned": true,
+        "display:order": 7,
+        "display:pinned": false,
         "icon": "globe",
         "label": "Browser",
         "description": "Embedded web browser",
@@ -44,8 +44,8 @@
         }
     },
     "defwidget@editor": {
-        "display:order": 3,
-        "display:pinned": true,
+        "display:order": 6,
+        "display:pinned": false,
         "icon": "file-code",
         "label": "Editor",
         "description": "Code editor with syntax highlighting",
@@ -58,7 +58,7 @@
     },
     "defwidget@terminal": {
         "display:order": 5,
-        "display:pinned": true,
+        "display:pinned": false,
         "icon": "square-terminal",
         "label": "Terminal",
         "blockdef": {
@@ -69,8 +69,8 @@
         }
     },
     "defwidget@sysinfo": {
-        "display:order": 6,
-        "display:pinned": true,
+        "display:order": 8,
+        "display:pinned": false,
         "icon": "chart-line",
         "label": "Sysinfo",
         "blockdef": {
@@ -80,7 +80,7 @@
         }
     },
     "defwidget@drone": {
-        "display:order": 9,
+        "display:order": 3,
         "display:pinned": true,
         "icon": "diagram-project",
         "color": "#06b6d4",
@@ -93,8 +93,8 @@
         }
     },
     "defwidget@help": {
-        "display:order": 7,
-        "display:pinned": true,
+        "display:order": 9,
+        "display:pinned": false,
         "icon": "circle-question",
         "label": "Help",
         "description": "Help and documentation",
@@ -105,7 +105,7 @@
         }
     },
     "defwidget@warden": {
-        "display:order": 10,
+        "display:order": 4,
         "display:pinned": true,
         "icon": "shield-halved",
         "color": "#8b5cf6",
