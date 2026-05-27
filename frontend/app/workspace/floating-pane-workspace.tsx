@@ -36,6 +36,7 @@ import { ErrorBoundary } from "@/app/element/errorboundary";
 import { CenteredDiv } from "@/app/element/quickelems";
 import { ModalsRenderer } from "@/app/modals/modalsrenderer";
 import { TabContent } from "@/app/tab/tabcontent";
+import { WorkspaceService } from "@/store/services";
 import { atoms, getApi } from "@/store/global";
 import * as WOS from "@/store/wos";
 import { Show, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js";
@@ -216,16 +217,118 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             sendPos(tx, ty);
         };
 
-        const onMouseUp = () => {
+        const onMouseUp = (e: MouseEvent) => {
             // Invalidate any in-flight mousedown handler — incrementing
             // the id ensures their `myId !== currentMouseDownId` check
             // fires when they resolve.
             currentMouseDownId += 1;
+            const wasDragging = dragging;
             dragging = false;
             // Do NOT clear pendingPos — that would discard the FINAL
             // queued position (the cursor's location at release time).
             // Let the in-flight set_window_position complete; its
             // `.finally` drains pendingPos to the correct end state.
+
+            // Floating-pane re-dock (Phase 4a MVP): if we just finished
+            // a drag and the cursor landed over another agentmux window
+            // in this process, fire RedockFloatingPane to move our
+            // single block into that window's active tab. The source
+            // workspace's tab.blockids becomes empty → the createEffect
+            // above auto-closes this floater.
+            //
+            // Cross-instance / cross-version safety is free: the host's
+            // `resolve_window_at_cursor` looks up HWND in this process's
+            // `window_hwnds` map — another agentmux version's HWNDs
+            // aren't in it, so cross-process drops silently no-op.
+            if (wasDragging) {
+                void tryRedockAtCursor(e.screenX, e.screenY);
+            }
+        };
+
+        const tryRedockAtCursor = async (screenX: number, screenY: number) => {
+            const ourLabel = windowLabel();
+            if (!ourLabel) return;
+            // `mouseup.screenX/Y` are CSS pixels; host expects physical.
+            const dpr = window.devicePixelRatio || 1;
+            const px = Math.round(screenX * dpr);
+            const py = Math.round(screenY * dpr);
+
+            let target: { label: string | null; window_id: string | null };
+            try {
+                target = await invokeCommand<{
+                    label: string | null;
+                    window_id: string | null;
+                }>("resolve_window_at_cursor", { x: px, y: py });
+            } catch (e) {
+                console.error("[floating-pane] resolve_window_at_cursor failed", e);
+                return;
+            }
+            if (
+                !target.label ||
+                !target.window_id ||
+                target.label === ourLabel
+            ) {
+                // Cursor over desktop, external app, or our own floater
+                // — leave floater at the dropped position.
+                return;
+            }
+
+            // Resolve target's active tab via the WaveObj graph:
+            // window → workspace.activetabid.
+            let targetWs: Workspace;
+            try {
+                const targetWindow = await WOS.loadAndPinWaveObject<WaveWindow>(
+                    WOS.makeORef("window", target.window_id),
+                );
+                targetWs = await WOS.loadAndPinWaveObject<Workspace>(
+                    WOS.makeORef("workspace", targetWindow.workspaceid),
+                );
+            } catch (e) {
+                console.error(
+                    "[floating-pane] failed to resolve target window's workspace",
+                    e,
+                );
+                return;
+            }
+            const targetTabId = targetWs.activetabid;
+            const targetWsId = targetWs.oid;
+            if (!targetTabId || !targetWsId) {
+                console.warn(
+                    "[floating-pane] target window has no active tab — skipping redock",
+                );
+                return;
+            }
+
+            // Source identifiers — the floater's only-tab + only-block.
+            const sourceTabId = tabId();
+            const sourceWs = ws();
+            if (!sourceTabId || !sourceWs) return;
+            const sourceWsId = sourceWs.oid;
+            const [sourceTab] = WOS.useWaveObjectValue<Tab>(
+                WOS.makeORef("tab", sourceTabId),
+            );
+            const sourceTabObj = sourceTab();
+            const sourceBlockId = sourceTabObj?.blockids?.[0];
+            if (!sourceBlockId) {
+                console.warn(
+                    "[floating-pane] floater has no block to redock — skipping",
+                );
+                return;
+            }
+
+            try {
+                await WorkspaceService.RedockFloatingPane(
+                    sourceBlockId,
+                    sourceTabId,
+                    sourceWsId,
+                    targetTabId,
+                    targetWsId,
+                );
+                // After successful redock, source tab.blockids empties
+                // → the auto-close watcher dismisses the floater.
+            } catch (e) {
+                console.error("[floating-pane] RedockFloatingPane failed", e);
+            }
         };
 
         // Capture-phase listeners so we run BEFORE pragmatic-dnd's

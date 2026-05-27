@@ -1987,6 +1987,105 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 updates,
             )
         }
+        // Floating-pane Phase 4a — re-dock a floater's block back into
+        // an existing tab in another workspace. Same shape as
+        // TearOffBlock's RPC handler: saga handles the reducer-state
+        // move (MoveBlock); layout writes are wcore-direct (the
+        // target's layout grows a leaf; the source's layout enqueues
+        // a delete action). Source floater closes via PR #1089's
+        // empty-tab watcher once its tab.blockids is empty.
+        // Spec: docs/specs/SPEC_FLOATING_PANE_REDOCK_2026-05-27.md
+        ("workspace", "RedockFloatingPane") => {
+            let block_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let source_tab_id: String = match service::get_arg(args, 1) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let source_ws_id: String = match service::get_arg(args, 2) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let target_tab_id: String = match service::get_arg(args, 3) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let target_ws_id: String = match service::get_arg(args, 4) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            tracing::info!(
+                block_id = %block_id,
+                source_tab = %source_tab_id,
+                source_ws = %source_ws_id,
+                target_tab = %target_tab_id,
+                target_ws = %target_ws_id,
+                "[dnd:svc] RedockFloatingPane via saga"
+            );
+            let saga_result = crate::sagas::redock_floating_pane::run(
+                state,
+                block_id.clone(),
+                source_tab_id.clone(),
+                source_ws_id.clone(),
+                target_tab_id.clone(),
+                target_ws_id.clone(),
+                None,
+            )
+            .await;
+            if let Err(reason) = saga_result {
+                return WebReturnType::error(reason);
+            }
+
+            // Layout setup for the target tab — grow a leaf for the
+            // moved block. Best-effort, mirrors the TearOffBlock pattern.
+            if let Err(e) = append_block_to_target_layout(store, &target_tab_id, &block_id) {
+                tracing::warn!(
+                    target_tab = %target_tab_id,
+                    "RedockFloatingPane: target layout setup failed: {} (block in tab but layout malformed)",
+                    e
+                );
+            }
+            // Source tab: queue a layout-delete action so the source
+            // floater's frontend removes the leaf from its tree. The
+            // tab will then have empty blockids → PR #1089's auto-close
+            // watcher fires → floater window dismisses.
+            if let Err(e) = queue_source_layout_delete(store, &source_tab_id, &block_id) {
+                tracing::warn!(
+                    source_tab = %source_tab_id,
+                    "RedockFloatingPane: source layout delete-action enqueue failed: {}",
+                    e
+                );
+            }
+
+            let mut updates = Vec::new();
+            if let Ok(src_tab) = store.must_get::<Tab>(&source_tab_id) {
+                updates.push(WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_TAB.to_string(),
+                    oid: source_tab_id.clone(),
+                    obj: Some(wave_obj_to_value(&src_tab)),
+                });
+            }
+            if let Ok(dst_tab) = store.must_get::<Tab>(&target_tab_id) {
+                updates.push(WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_TAB.to_string(),
+                    oid: target_tab_id.clone(),
+                    obj: Some(wave_obj_to_value(&dst_tab)),
+                });
+            }
+            WebReturnType::success_data_updates(
+                serde_json::json!({
+                    "redocked": true,
+                    "block_id": block_id,
+                    "target_tab_id": target_tab_id,
+                }),
+                updates,
+            )
+        }
+
         // Phase E.5.5 — TearOffTab migrated to saga. Closes the
         // smoke regression where wcore::tear_off_tab created the new
         // workspace bypassing the reducer, leaving the new window's
@@ -2333,6 +2432,76 @@ fn setup_torn_off_block_layout(
         nodeid: node_id,
         blockid: block_id.to_string(),
     }]);
+    store.update(&mut layout)?;
+    Ok(())
+}
+
+/// Floating-pane re-dock — grow the target tab's layout tree to
+/// include a new leaf for the redocked block. Three cases:
+///
+/// * Empty target layout (no rootnode) → same as
+///   `setup_torn_off_block_layout`: the new leaf becomes the root.
+/// * Existing root is a leaf → wrap both in a flex-row container so
+///   the new leaf sits beside the existing one.
+/// * Existing root is a container → append the new leaf as a child.
+///
+/// Best-effort, mirrors `setup_torn_off_block_layout`'s contract:
+/// failure leaves the block in the target tab's `blockids` but with
+/// no leaf in the layout tree (the frontend would render an "empty
+/// pane" until manually fixed). Layout migration to the reducer is
+/// E.4 territory.
+fn append_block_to_target_layout(
+    store: &Store,
+    target_tab_id: &str,
+    block_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let target_tab = store.must_get::<Tab>(target_tab_id)?;
+    let mut layout = store.must_get::<LayoutState>(&target_tab.layoutstate)?;
+
+    let new_node_id = uuid::Uuid::new_v4().to_string();
+    let new_leaf = LayoutNode {
+        id: new_node_id.clone(),
+        flex_direction: FlexDirection::Row,
+        size: 1.0,
+        children: Vec::new(),
+        data: Some(LayoutNodeData {
+            block_id: block_id.to_string(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    match layout.rootnode.take() {
+        None => {
+            layout.rootnode = Some(new_leaf);
+        }
+        Some(existing_root) if existing_root.data.is_some() => {
+            // Existing root is a leaf — wrap in a flex-row container.
+            let container_id = uuid::Uuid::new_v4().to_string();
+            layout.rootnode = Some(LayoutNode {
+                id: container_id,
+                flex_direction: FlexDirection::Row,
+                size: 1.0,
+                children: vec![existing_root, new_leaf],
+                data: None,
+                ..Default::default()
+            });
+        }
+        Some(mut existing_container) => {
+            // Existing root is a container — append the new leaf as
+            // an additional child.
+            existing_container.children.push(new_leaf);
+            layout.rootnode = Some(existing_container);
+        }
+    }
+
+    let mut leaforder = layout.leaforder.take().unwrap_or_default();
+    leaforder.push(LeafOrderEntry {
+        nodeid: new_node_id,
+        blockid: block_id.to_string(),
+    });
+    layout.leaforder = Some(leaforder);
+
     store.update(&mut layout)?;
     Ok(())
 }

@@ -445,6 +445,79 @@ pub fn start_window_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Res
     Ok(serde_json::Value::Null)
 }
 
+/// Resolve which agentmux window is under the cursor. Used by the
+/// floating-pane re-dock flow: on the floater's mouseup, the
+/// frontend asks "what window is the cursor over now?" and, if
+/// the answer is another agentmux window in the same process,
+/// kicks off `RedockFloatingPane`.
+///
+/// Args: `{ "x": int, "y": int }` — cursor position in physical px
+/// (whatever `get_cursor_point` returned).
+///
+/// Returns: `{ "label": string|null, "window_id": string|null }`. Both
+/// null means no agentmux window of this process is under the cursor
+/// (cursor is over the desktop, an external app, etc.). `window_id`
+/// is the backend windowId mapped via the launcher's
+/// `BackendWindowIdRegistered` projection — frontend uses it to
+/// load the WaveWindow / Workspace and figure out the active tab.
+///
+/// Instance / version isolation is free: another agentmux instance's
+/// HWNDs are NOT in this process's `window_hwnds` map, so cross-
+/// process drag-over-then-drop won't accidentally re-dock there.
+pub fn resolve_window_at_cursor(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::Foundation::POINT;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetAncestor, WindowFromPoint, GA_ROOT,
+        };
+
+        let pt = POINT { x, y };
+        let mut hwnd = WindowFromPoint(pt);
+        if hwnd.is_null() {
+            return Ok(serde_json::json!({ "label": null, "window_id": null }));
+        }
+        // Walk to the top-level root — `WindowFromPoint` returns the
+        // deepest child window at the point, but we want the top-level
+        // owner for the label lookup.
+        let root = GetAncestor(hwnd, GA_ROOT);
+        if !root.is_null() {
+            hwnd = root;
+        }
+        let hwnd_isize = hwnd as isize;
+
+        // Reverse-lookup label in the per-label HWND cache populated
+        // by `capture_hwnd_for_label`. Same cache that
+        // `resolve_window_hwnd` consults — keeps both directions in
+        // sync.
+        let label = {
+            let map = state.window_hwnds.lock();
+            map.iter()
+                .find_map(|(k, v)| if *v == hwnd_isize { Some(k.clone()) } else { None })
+        };
+
+        match label {
+            Some(l) => {
+                let wid = state.backend_window_id(&l);
+                Ok(serde_json::json!({ "label": l, "window_id": wid }))
+            }
+            None => Ok(serde_json::json!({ "label": null, "window_id": null })),
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (state, args, x, y);
+        Ok(serde_json::json!({ "label": null, "window_id": null }))
+    }
+}
+
 /// Set window transparency/blur effects for a single window.
 ///
 /// Targets exactly the window identified by `label` (from the frontend's URL

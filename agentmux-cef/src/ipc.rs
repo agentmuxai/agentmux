@@ -249,6 +249,7 @@ async fn route_command(
         "get_window_opacity" => commands::window::get_window_opacity(state, args),
         "start_window_drag" => commands::window::start_window_drag(state, args),
         "get_window_position" => commands::window::get_window_position(state, args),
+        "resolve_window_at_cursor" => commands::window::resolve_window_at_cursor(state, args),
         "move_window_by" => commands::window::move_window_by(state, args),
         "set_window_position" => commands::window::set_window_position(state, args),
         "toggle_devtools" => commands::window::toggle_devtools(state, args),
