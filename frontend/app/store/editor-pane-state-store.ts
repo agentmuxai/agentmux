@@ -49,6 +49,11 @@ export interface EditorTab {
     loadError: string | null;
     /** Transient — true once the lazy fetch resolved. Not persisted. */
     contentLoaded: boolean;
+    /** Preview tab — at most one per pane. A single-click in the tree
+     *  opens into the preview slot (replacing the current preview's file).
+     *  Double-click opens as pinned. Editing or explicit pin promotes a
+     *  preview to pinned. Matches VS Code semantics. */
+    isPreview: boolean;
 }
 
 export interface ClosedTab {
@@ -96,8 +101,20 @@ export interface HydratedTab {
 export type EditorCommandSource = "user" | "system" | "cm-update" | "hydrate";
 
 export type EditorPaneCommand =
-    | { type: "OpenFile"; path: string; language?: string; source?: EditorCommandSource }
+    | {
+          type: "OpenFile";
+          path: string;
+          language?: string;
+          /** "preview" (default for tree single-click) → replaces the
+           *  current preview tab if any, else creates a new preview.
+           *  "pinned" (tree double-click, programmatic open) → always
+           *  appends a non-preview tab. Activating an already-open tab
+           *  is unchanged regardless of mode. */
+          mode?: "preview" | "pinned";
+          source?: EditorCommandSource;
+      }
     | { type: "CloseTab"; tabId: string; force?: boolean; source?: EditorCommandSource }
+    | { type: "PinTab"; tabId: string; source?: EditorCommandSource }
     | { type: "SwitchTab"; tabId: string; source?: EditorCommandSource }
     | { type: "ReorderTab"; tabId: string; toIndex: number; source?: EditorCommandSource }
     | { type: "MarkDirty"; tabId: string; source?: EditorCommandSource }
@@ -221,7 +238,7 @@ function findTabByPath(
 }
 
 /** Build a fresh tab record for the given path/language. */
-function makeTab(path: string, language?: string): EditorTab {
+function makeTab(path: string, language?: string, isPreview = false): EditorTab {
     const canon = canonicalizePath(path);
     return {
         id: newTabId(),
@@ -232,6 +249,7 @@ function makeTab(path: string, language?: string): EditorTab {
         contentHash: "",
         loadError: null,
         contentLoaded: false,
+        isPreview,
     };
 }
 
@@ -294,12 +312,27 @@ export function update(
         case "OpenFile": {
             const canon = canonicalizePath(command.path);
             const existing = findTabByPath(state, canon);
+            const requestedMode = command.mode ?? "pinned";
             if (existing) {
-                if (state.activeTabId === existing.id) {
-                    // Already active → still emit TabActivated so the
-                    // view (LSP didOpen, file-tree highlight) has a
-                    // single uniform signal to bind to. No state
-                    // change.
+                // If the existing tab is a preview and the caller asked
+                // for a pinned open (e.g. tree double-click on the file
+                // that's currently in preview), pin it as part of the
+                // activation. Other transitions (preview→preview,
+                // pinned→pinned, pinned→preview) are no-ops for isPreview.
+                const shouldPin = existing.isPreview && requestedMode === "pinned";
+                const existingIdx = state.tabs.findIndex((t) => t.id === existing.id);
+                const updatedTab = shouldPin
+                    ? { ...existing, isPreview: false }
+                    : existing;
+                const nextTabs = shouldPin
+                    ? [
+                          ...state.tabs.slice(0, existingIdx),
+                          updatedTab,
+                          ...state.tabs.slice(existingIdx + 1),
+                      ]
+                    : state.tabs;
+                if (state.activeTabId === existing.id && !shouldPin) {
+                    // Already active and no pin transition → no state change.
                     return {
                         state,
                         events: [
@@ -312,7 +345,11 @@ export function update(
                     };
                 }
                 return {
-                    state: { ...state, activeTabId: existing.id },
+                    state: {
+                        ...state,
+                        tabs: nextTabs,
+                        activeTabId: existing.id,
+                    },
                     events: [
                         {
                             type: "TabActivated",
@@ -322,7 +359,54 @@ export function update(
                     ],
                 };
             }
-            const tab = makeTab(command.path, command.language);
+
+            // New tab. In preview mode, replace the existing preview tab if
+            // one exists — only ONE preview tab per pane. Pinned mode always
+            // appends. Default is "pinned" — that's the safe choice for
+            // programmatic callers (ReopenLastClosed, tests, future drag-
+            // drop). Tree single-click is the only caller that should pass
+            // `mode: "preview"` explicitly.
+            if (requestedMode === "preview") {
+                const previewIdx = state.tabs.findIndex((t) => t.isPreview);
+                if (previewIdx >= 0) {
+                    // Replace the preview slot's contents in place. Reset
+                    // load state so the view re-fetches. The tab id stays
+                    // the same so view-side CodeMirror state for OTHER
+                    // tabs is unaffected.
+                    const newPreview: EditorTab = {
+                        ...state.tabs[previewIdx],
+                        filePath: canon,
+                        language: command.language ?? deriveLanguage(canon),
+                        readOnly: false,
+                        dirty: false,
+                        contentHash: "",
+                        loadError: null,
+                        contentLoaded: false,
+                        isPreview: true,
+                    };
+                    const nextTabs = [
+                        ...state.tabs.slice(0, previewIdx),
+                        newPreview,
+                        ...state.tabs.slice(previewIdx + 1),
+                    ];
+                    return {
+                        state: {
+                            ...state,
+                            tabs: nextTabs,
+                            activeTabId: newPreview.id,
+                        },
+                        events: [
+                            {
+                                type: "TabActivated",
+                                tabId: newPreview.id,
+                                filePath: newPreview.filePath,
+                            },
+                        ],
+                    };
+                }
+            }
+
+            const tab = makeTab(command.path, command.language, requestedMode === "preview");
             const nextTabs = [...state.tabs, tab];
             return {
                 state: {
@@ -339,6 +423,21 @@ export function update(
                     },
                 ],
             };
+        }
+
+        case "PinTab": {
+            const idx = findTabIndex(state, command.tabId);
+            if (idx < 0 || !state.tabs[idx].isPreview) {
+                // Defensive: pinning a non-preview tab is a no-op.
+                return { state, events: [] };
+            }
+            const nextTab = { ...state.tabs[idx], isPreview: false };
+            const nextTabs = [
+                ...state.tabs.slice(0, idx),
+                nextTab,
+                ...state.tabs.slice(idx + 1),
+            ];
+            return { state: { ...state, tabs: nextTabs }, events: [] };
         }
 
         case "CloseTab": {
@@ -436,7 +535,10 @@ export function update(
                 // a redundant signal.
                 return { state, events: [] };
             }
-            const nextTab: EditorTab = { ...tab, dirty: true };
+            // Editing a preview tab promotes it to pinned (matches
+            // VS Code's behavior — once you've started editing, the
+            // tab should survive the next preview-mode tree click).
+            const nextTab: EditorTab = { ...tab, dirty: true, isPreview: false };
             const nextTabs = [
                 ...state.tabs.slice(0, idx),
                 nextTab,
@@ -534,6 +636,10 @@ export function update(
                 contentHash: "",
                 loadError: null,
                 contentLoaded: false,
+                // Hydrated tabs are always pinned — a persisted preview
+                // wouldn't survive the round-trip semantically (the user
+                // committed by closing/reopening the session).
+                isPreview: false,
             }));
             // Enforce invariant 1 — activeTabId must point at a tab
             // in the list, or be null when empty.

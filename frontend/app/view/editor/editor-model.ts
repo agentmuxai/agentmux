@@ -160,6 +160,7 @@ export class EditorViewModel implements ViewModel {
         // future dirty-confirm modal, LSP coupling). Removed on dispose so
         // no closure over a disposed model survives.
         this._globalHandler = (events: EditorPaneEvent[]) => {
+            console.log("[editor-tabs] _globalHandler called events=", events.map((e) => e.type));
             this._sliceVersion[1]((v) => v + 1);
             for (const ev of events) {
                 if (ev.type === "TabClosed") {
@@ -172,19 +173,32 @@ export class EditorViewModel implements ViewModel {
 
         // Projections from the slice's slot cell. Reading sliceVersionAtom
         // creates the Solid dependency that makes these re-evaluate.
-        this.tabsAtom = createMemo<EditorTab[]>(() => {
-            this.sliceVersionAtom();
-            return snapshot(this.blockId)?.tabs ?? [];
-        });
-        this.activeIdAtom = createMemo<string | null>(() => {
-            this.sliceVersionAtom();
-            return snapshot(this.blockId)?.activeTabId ?? null;
-        });
-        this.activeTabAtom = createMemo<EditorTab | null>(() => {
-            const id = this.activeIdAtom();
-            const tabs = this.tabsAtom();
-            return tabs.find((t) => t.id === id) ?? null;
-        });
+        //
+        // Wrapped in `useBlockAtom` (which calls createRoot under the hood) —
+        // a bare createMemo here would be created in the constructor's
+        // non-reactive scope. It'd compute its initial value but downstream
+        // subscribers (createEffect in editor-view) wouldn't reliably re-run
+        // when the source signals change. Same fix as the zoomAtom in
+        // PR #1084 — see that comment for context.
+        this.tabsAtom = useBlockAtom(blockId, "editor-tabs-list", () =>
+            createMemo<EditorTab[]>(() => {
+                this.sliceVersionAtom();
+                return snapshot(this.blockId)?.tabs ?? [];
+            }),
+        );
+        this.activeIdAtom = useBlockAtom(blockId, "editor-tabs-active-id", () =>
+            createMemo<string | null>(() => {
+                this.sliceVersionAtom();
+                return snapshot(this.blockId)?.activeTabId ?? null;
+            }),
+        );
+        this.activeTabAtom = useBlockAtom(blockId, "editor-tabs-active-tab", () =>
+            createMemo<EditorTab | null>(() => {
+                const id = this.activeIdAtom();
+                const tabs = this.tabsAtom();
+                return tabs.find((t) => t.id === id) ?? null;
+            }),
+        );
 
         // Derived: per-active-tab signals. Existing consumers see the same
         // shape as before — they just track whichever tab is active.
@@ -200,11 +214,13 @@ export class EditorViewModel implements ViewModel {
             return tab != null && !tab.contentLoaded && tab.loadError == null;
         };
 
-        this.contentAtom = createMemo<string>(() => {
-            this._contentVersion[0](); // dep on content bumps
-            const id = this.activeIdAtom();
-            return id ? this._contentByTab.get(id) ?? "" : "";
-        });
+        this.contentAtom = useBlockAtom(blockId, "editor-tabs-content", () =>
+            createMemo<string>(() => {
+                this._contentVersion[0](); // dep on content bumps
+                const id = this.activeIdAtom();
+                return id ? this._contentByTab.get(id) ?? "" : "";
+            }),
+        );
 
         // Per-pane zoom (PR #1084). Wrapped in useBlockAtom (which calls
         // createRoot under the hood) — a bare createMemo here wouldn't have
@@ -268,14 +284,41 @@ export class EditorViewModel implements ViewModel {
     }
 
     // ── Tab actions (dispatched into the slice) ──────────────────────
+    /** Open a file as a *pinned* tab (the default). Use for explicit-open
+     *  paths like double-click in the tree, path-input submit, drag-drop,
+     *  programmatic open. The pinned tab survives subsequent tree clicks. */
     async openFile(filePath: string): Promise<void> {
+        return this._openFileWithMode(filePath, "pinned");
+    }
+
+    /** Open a file as a *preview* tab (VS Code-style). Use for tree single-
+     *  click: at most ONE preview tab per pane; subsequent single-clicks
+     *  replace its file. Editing the preview promotes it to pinned. */
+    async openFilePreview(filePath: string): Promise<void> {
+        return this._openFileWithMode(filePath, "preview");
+    }
+
+    /** Convert the active tab from preview → pinned. The view calls this
+     *  when the user double-clicks the preview tab in the strip. No-op if
+     *  the tab is already pinned. */
+    pinActiveTab(): void {
+        const tab = this.activeTabAtom();
+        if (!tab || !tab.isPreview) return;
+        dispatch(this.blockId, { type: "PinTab", tabId: tab.id, source: "user" });
+    }
+
+    private async _openFileWithMode(filePath: string, mode: "preview" | "pinned"): Promise<void> {
+        console.log("[editor-tabs] openFile entry path=", filePath, "mode=", mode);
         const canonical = canonicalizePath(filePath);
         // Claim the loading slot BEFORE dispatching so two synchronous calls
         // for the same path don't both issue ReadEditorFileCommand. Without
         // this, the second call would pass _loadingPaths.has() (still empty)
         // and the .add() below would fire after the first call's RPC already
         // returned, racing the content write.
-        if (this._loadingPaths.has(canonical)) return;
+        if (this._loadingPaths.has(canonical)) {
+            console.log("[editor-tabs] openFile early-return: loading in progress for", canonical);
+            return;
+        }
         this._loadingPaths.add(canonical);
 
         // Dispatch OpenFile. The slice either activates an existing tab (and
@@ -288,33 +331,68 @@ export class EditorViewModel implements ViewModel {
             type: "OpenFile",
             path: filePath,
             language: detectLanguage(filePath),
+            mode,
             source: "user",
         });
+        console.log("[editor-tabs] openFile dispatched, events=", events.map((e) => e.type));
 
         // Find the tab id (just-opened or pre-existing).
         const opened = events.find(
             (e) => e.type === "TabOpened" || e.type === "TabActivated",
         );
         if (!opened || (opened.type !== "TabOpened" && opened.type !== "TabActivated")) {
+            console.log("[editor-tabs] openFile: no TabOpened/TabActivated event — aborting");
             this._loadingPaths.delete(canonical);
             return;
         }
         const tabId = opened.tabId;
+        console.log("[editor-tabs] openFile: tabId=", tabId.slice(0, 8));
 
-        // If content's already loaded for this tab, we're done.
-        if (this._contentByTab.has(tabId)) {
+        // If the slice considers content loaded for this tab AND we have it
+        // in the view-local cache, we're done. The slice's contentLoaded
+        // flag is the source of truth: it's reset to false when a preview
+        // tab's file is swapped (same tabId, different path) so we
+        // correctly force a reload in that case.
+        const sliceTab = snapshot(this.blockId)?.tabs.find((t) => t.id === tabId);
+        if (sliceTab?.contentLoaded && this._contentByTab.has(tabId)) {
+            console.log("[editor-tabs] openFile: content already loaded for", tabId.slice(0, 8));
             this._loadingPaths.delete(canonical);
             return;
         }
+        // Stale view-local content (preview-swap left it behind) — evict
+        // so the about-to-fire RPC populates the new file's content.
+        this._contentByTab.delete(tabId);
         try {
             const result = await RpcApi.ReadEditorFileCommand(TabRpcClient, {
                 path: filePath,
             });
             const content = result?.content ?? "";
+            console.log("[editor-tabs] readeditorfile resolved, contentLen=", content.length);
+
+            // Refuse content that looks binary or that would freeze the
+            // renderer in CodeMirror. Specifically:
+            //   1. Any NUL byte → binary (text files don't contain U+0000).
+            //   2. Single line over 100K chars → would block the layout
+            //      thread laying out a half-megabyte-wide line (real-world
+            //      hit: Windows NTUSER.DAT regtrans-ms files come through
+            //      as 512KB of one line).
+            // Both fast checks; bail before stashing content or hashing.
+            const refusal = sniffUnopenable(content);
+            if (refusal) {
+                dispatch(this.blockId, {
+                    type: "TabContentLoadFailed",
+                    tabId,
+                    error: refusal,
+                    source: "system",
+                });
+                return;
+            }
+
             this._contentByTab.set(tabId, content);
             this._contentVersion[1]((v) => v + 1);
 
             const hash = await sha256Hex(content);
+            console.log("[editor-tabs] dispatching TabContentLoaded for", tabId.slice(0, 8));
             dispatch(this.blockId, {
                 type: "TabContentLoaded",
                 tabId,
@@ -460,6 +538,36 @@ export class EditorViewModel implements ViewModel {
 function clampTreeWidth(w: number): number {
     if (!Number.isFinite(w)) return TREE_WIDTH_DEFAULT;
     return Math.max(TREE_WIDTH_MIN, Math.min(TREE_WIDTH_MAX, Math.round(w)));
+}
+
+/** Sniff content that's unsafe to hand to CodeMirror. Returns a human-readable
+ *  refusal message (used as the tab's loadError) or null when the content is
+ *  fine to render. Cheap — scans up to the first 4096 bytes for NUL.
+ *
+ *  Why this lives in the model: CodeMirror will faithfully try to lay out
+ *  half-a-megabyte of binary on one line (the trigger case was a Windows
+ *  NTUSER.DAT regtrans-ms file at 512KB) and block the renderer indefinitely.
+ *  The 10MB read cap doesn't catch it because the file is small. */
+const MAX_BYTES_FOR_NUL_SNIFF = 4096;
+const MAX_SINGLE_LINE_CHARS = 100_000;
+
+function sniffUnopenable(content: string): string | null {
+    // NUL-byte sniff — any U+0000 in the first few KB means binary.
+    const sniffLen = Math.min(content.length, MAX_BYTES_FOR_NUL_SNIFF);
+    for (let i = 0; i < sniffLen; i++) {
+        if (content.charCodeAt(i) === 0) {
+            return "This file looks binary (contains NUL bytes) and can't be displayed in the editor.";
+        }
+    }
+    // Single-line-too-long sniff — even a "text" file is unsafe to render if
+    // it has no newline within the first 100K chars. CodeMirror's layout
+    // engine handles long files line-by-line; a single 100K+ line stalls it.
+    const firstNewline = content.indexOf("\n");
+    const lineLen = firstNewline === -1 ? content.length : firstNewline;
+    if (lineLen > MAX_SINGLE_LINE_CHARS) {
+        return `This file's first line is ${lineLen.toLocaleString()} characters long — too wide to render. Open it in an external editor.`;
+    }
+    return null;
 }
 
 // ── Language detection ──────────────────────────────────────────────────────
