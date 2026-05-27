@@ -481,28 +481,10 @@ describe("browser-pane-state reducer (Phase 1A — multi-tab)", () => {
         });
 
         it("cross-origin resets title to hostname placeholder", () => {
-            let s = bootOneTab();
-            s = update(s, {
-                type: "TitleChanged",
-                title: "Wikipedia, the free encyclopedia",
-            }).state;
-            // Manually set active tab url to wikipedia for the test
-            // setup (a real navigation would clear titleOverridden).
-            s = update(s, {
-                type: "UrlConfirmed",
-                url: "https://wikipedia.org/",
-            }).state;
-            // titleOverridden should still be true (UrlConfirmed
-            // preserves real title same-origin; from initial empty
-            // URL the "same-origin" path goes to wikipedia.org. The
-            // active tab's url was "" before this; sameOriginUrl("",
-            // url) === false, so titleOverridden resets… wait the
-            // test setup needs care. Re-do the setup deliberately:
-            // start with wikipedia loaded + real title, then
-            // UrlConfirm to google.
-            //
-            // Easier: bootOneTab("https://wikipedia.org/") + title
-            // change, then confirm to google.
+            // Boot with wikipedia loaded, set a real title (titleOverridden=true),
+            // then UrlConfirm to a different origin. The cross-origin transition
+            // must clear titleOverridden and fall back to the new origin's
+            // hostname placeholder.
             const s2 = update(
                 update(bootOneTab("https://wikipedia.org/"), {
                     type: "TitleChanged",
