@@ -1,5 +1,10 @@
 # AgentMux Version History
 
+## 0.38.15 — 2026-05-26
+
+- (no semantic content — internal portable-build counter increment from `task package`; auto-appended by `scripts/bump-wrapper.sh` to satisfy the release-consistency invariant)
+
+
 ## 0.38.14 — 2026-05-26
 
 - (no semantic content — internal portable-build counter increment from `task package`; the build itself failed mid-Vite-transpile from an SCSS import error introduced by #1069, so the bump landed without a portable; #1072 fixes the import. Backfilled to satisfy the release-consistency invariant)
