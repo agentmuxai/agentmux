@@ -158,20 +158,63 @@ pub fn maximize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
     Ok(serde_json::Value::Null)
 }
 
+/// Resolve a top-level HWND for the given label. Prefer the reducer
+/// registry (`state.get_browser(label)` → host → window_handle → walk
+/// to root) over the process-wide `find_own_top_level_window` fallback.
+///
+/// Why the label matters: `find_own_top_level_window` does an
+/// `EnumWindows` and returns the *first* visible top-level of the
+/// current process. Z-order puts **owned** windows ABOVE their owner,
+/// so as soon as a floating-pane window exists, every label-less
+/// `get/set_window_position` call (e.g. the main window's
+/// `useWindowDrag`) accidentally targets the floater — dragging the
+/// main window moves the floater instead.
+///
+/// `GetAncestor(hwnd, GA_ROOT)` guard handles the case where CEF
+/// returns the embedded browser's WS_CHILD HWND rather than our
+/// outer top-level — without it, `SetWindowPos` would only shift the
+/// child within its parent, not move the outer floater.
+#[cfg(target_os = "windows")]
+unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> *mut std::ffi::c_void {
+    use cef::ImplBrowser;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
+
+    if !label.is_empty() {
+        if let Some(browser) = state.get_browser(label) {
+            if let Some(host) = browser.host() {
+                let hwnd = host.window_handle().0 as *mut std::ffi::c_void;
+                if !hwnd.is_null() {
+                    let root = GetAncestor(hwnd, GA_ROOT);
+                    return if root.is_null() { hwnd } else { root };
+                }
+            }
+        }
+    }
+    find_own_top_level_window()
+}
+
 /// Get the current window position on screen.
-pub fn get_window_position(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+///
+/// Accepts `{ "label": string }` to disambiguate when the process has
+/// multiple top-level windows (e.g. main + floating panes). Without a
+/// label we fall back to `find_own_top_level_window`, which returns
+/// the topmost-Z top-level of the process — wrong when the caller is
+/// the main window but a floater (owned, drawn above) exists.
+pub fn get_window_position(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("");
+
     #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
         use windows_sys::Win32::Foundation::RECT;
-        let hwnd = find_own_top_level_window();
+        let hwnd = resolve_window_hwnd(state, label);
         if !hwnd.is_null() {
             let mut rect: RECT = std::mem::zeroed();
             GetWindowRect(hwnd, &mut rect);
             return Ok(serde_json::json!({ "x": rect.left, "y": rect.top }));
         }
     }
-    let _ = state;
+    let _ = (state, label);
     Ok(serde_json::json!({ "x": 0, "y": 0 }))
 }
 
@@ -229,7 +272,7 @@ pub fn set_window_position(state: &Arc<AppState>, args: &serde_json::Value) -> R
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
         use windows_sys::Win32::Foundation::RECT;
-        let hwnd = find_own_top_level_window();
+        let hwnd = resolve_window_hwnd(state, label);
         if !hwnd.is_null() {
             let mut rect: RECT = std::mem::zeroed();
             GetWindowRect(hwnd, &mut rect);
