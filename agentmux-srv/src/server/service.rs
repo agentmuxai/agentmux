@@ -2038,12 +2038,17 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 return WebReturnType::error(reason);
             }
 
-            // Layout setup for the target tab — grow a leaf for the
-            // moved block. Best-effort, mirrors the TearOffBlock pattern.
-            if let Err(e) = append_block_to_target_layout(store, &target_tab_id, &block_id) {
+            // Target layout: enqueue an "insert" action on its
+            // `pendingbackendactions` so the target window's frontend
+            // grows a new leaf for the redocked block through its
+            // standard LayoutTreeActionType.InsertNode reducer.
+            // Direct rootnode writes don't propagate because the
+            // LayoutModel doesn't auto-sync from external WaveObj
+            // updates — see `queue_target_layout_insert`'s docstring.
+            if let Err(e) = queue_target_layout_insert(store, &target_tab_id, &block_id) {
                 tracing::warn!(
                     target_tab = %target_tab_id,
-                    "RedockFloatingPane: target layout setup failed: {} (block in tab but layout malformed)",
+                    "RedockFloatingPane: target layout insert-action enqueue failed: {}",
                     e
                 );
             }
@@ -2480,73 +2485,46 @@ fn setup_torn_off_block_layout(
     Ok(())
 }
 
-/// Floating-pane re-dock — grow the target tab's layout tree to
-/// include a new leaf for the redocked block. Three cases:
+/// Floating-pane re-dock — enqueue an "insert" action on the TARGET
+/// tab's `LayoutState.pendingbackendactions` so the target window's
+/// frontend adds a new leaf for the redocked block through its
+/// `LayoutTreeActionType.InsertNode` reducer pathway.
 ///
-/// * Empty target layout (no rootnode) → same as
-///   `setup_torn_off_block_layout`: the new leaf becomes the root.
-/// * Existing root is a leaf → wrap both in a flex-row container so
-///   the new leaf sits beside the existing one.
-/// * Existing root is a container → append the new leaf as a child.
-///
-/// Best-effort, mirrors `setup_torn_off_block_layout`'s contract:
-/// failure leaves the block in the target tab's `blockids` but with
-/// no leaf in the layout tree (the frontend would render an "empty
-/// pane" until manually fixed). Layout migration to the reducer is
-/// E.4 territory.
-fn append_block_to_target_layout(
+/// Why this and not direct rootnode/leaforder writes? The frontend's
+/// LayoutModel maintains its own in-memory tree state and doesn't
+/// auto-sync from external `LayoutState` WaveObj updates — so a
+/// backend `store.update` to the rootnode lands in the WOS cache
+/// but the LayoutModel never picks it up, and the next frontend-
+/// initiated `object.UpdateObject` overwrites the backend version
+/// with the LayoutModel's stale tree. The pending-actions queue
+/// (`onBackendUpdate` in `layoutPersistence.ts:50`) is the canonical
+/// channel for "backend wants the frontend to mutate its layout
+/// tree". Source-delete on tear-off uses the same channel via
+/// `queue_source_layout_delete`.
+fn queue_target_layout_insert(
     store: &Store,
     target_tab_id: &str,
     block_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let target_tab = store.must_get::<Tab>(target_tab_id)?;
-    let mut layout = store.must_get::<LayoutState>(&target_tab.layoutstate)?;
-
-    let new_node_id = uuid::Uuid::new_v4().to_string();
-    let new_leaf = LayoutNode {
-        id: new_node_id.clone(),
-        flex_direction: FlexDirection::Row,
-        size: 1.0,
-        children: Vec::new(),
-        data: Some(LayoutNodeData {
-            block_id: block_id.to_string(),
-            ..Default::default()
-        }),
-        ..Default::default()
-    };
-
-    match layout.rootnode.take() {
-        None => {
-            layout.rootnode = Some(new_leaf);
-        }
-        Some(existing_root) if existing_root.data.is_some() => {
-            // Existing root is a leaf — wrap in a flex-row container.
-            let container_id = uuid::Uuid::new_v4().to_string();
-            layout.rootnode = Some(LayoutNode {
-                id: container_id,
-                flex_direction: FlexDirection::Row,
-                size: 1.0,
-                children: vec![existing_root, new_leaf],
-                data: None,
-                ..Default::default()
-            });
-        }
-        Some(mut existing_container) => {
-            // Existing root is a container — append the new leaf as
-            // an additional child.
-            existing_container.children.push(new_leaf);
-            layout.rootnode = Some(existing_container);
-        }
-    }
-
-    let mut leaforder = layout.leaforder.take().unwrap_or_default();
-    leaforder.push(LeafOrderEntry {
-        nodeid: new_node_id,
+    let mut target_layout = store.must_get::<LayoutState>(&target_tab.layoutstate)?;
+    let mut actions = target_layout.pendingbackendactions.take().unwrap_or_default();
+    actions.push(LayoutActionData {
+        // Matches `LayoutTreeActionType.InsertNode = "insert"` in
+        // `frontend/layout/lib/types.ts:73`.
+        actiontype: "insert".to_string(),
+        actionid: uuid::Uuid::new_v4().to_string(),
         blockid: block_id.to_string(),
+        nodesize: None,
+        indexarr: None,
+        focused: true,
+        magnified: false,
+        ephemeral: false,
+        targetblockid: String::new(),
+        position: String::new(),
     });
-    layout.leaforder = Some(leaforder);
-
-    store.update(&mut layout)?;
+    target_layout.pendingbackendactions = Some(actions);
+    store.update(&mut target_layout)?;
     Ok(())
 }
 

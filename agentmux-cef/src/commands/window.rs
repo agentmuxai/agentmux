@@ -627,14 +627,18 @@ pub fn clear_floating_redock_hover(
     state: &Arc<AppState>,
     _args: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let prev = state.active_redock_target.lock().take();
-    if prev.is_some() {
-        crate::events::emit_event_to_top_level_windows(
-            state,
-            "floating-redock:hover-state",
-            &serde_json::json!({ "target_label": serde_json::Value::Null }),
-        );
-    }
+    state.active_redock_target.lock().take();
+    // Always emit on clear, even if prev was None. The frontend
+    // listener uses target_label as a sentinel and removing the
+    // placeholder unconditionally on null is cheap; emitting
+    // unconditionally guarantees the cleanup fires even if the
+    // last mousemove resolved to None (cursor over the floater
+    // itself between an in/out boundary) and so `prev` was None.
+    crate::events::emit_event_to_top_level_windows(
+        state,
+        "floating-redock:hover-state",
+        &serde_json::json!({ "target_label": serde_json::Value::Null }),
+    );
     Ok(serde_json::Value::Null)
 }
 
