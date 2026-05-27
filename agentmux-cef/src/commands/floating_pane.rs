@@ -47,11 +47,19 @@ pub struct OpenFloatingPaneArgs {
     #[serde(default)]
     pub workspace_id: Option<String>,
     /// Screen-space top-left coordinates where the new floating window
-    /// should appear. Typically the cursor position at drop time.
+    /// should appear, in Win32 PHYSICAL pixels. Typically the cursor
+    /// position at drop time (frontend reads from host
+    /// `get_cursor_point` which uses `GetCursorPos`).
     pub x: i32,
     pub y: i32,
-    /// Initial window size. Phase 6 will memo the source pane's last
-    /// docked size; Phase 1 accepts a caller-provided default.
+    /// Initial window size in CSS / DIP pixels (NOT physical). The host
+    /// scales to physical px using the destination monitor's DPI via
+    /// `MonitorFromPoint(x, y)` + `GetDpiForMonitor`. Passing DIP here
+    /// (rather than physical, which would need the frontend to know the
+    /// destination monitor's DPI) lets us correctly cross-DPI handoff —
+    /// e.g. drag from a 100% monitor onto a 150% monitor and the floater
+    /// matches the source pane's visual size on the destination.
+    /// Mirrors the pattern in `commands/window_pool.rs:684-701`.
     pub width: i32,
     pub height: i32,
 }
@@ -99,6 +107,34 @@ pub fn open_floating_pane_window(
 
     let window_id = uuid::Uuid::new_v4();
     let window_label = format!("floating-{}", window_id.simple());
+
+    // Scale incoming CSS / DIP size to PHYSICAL pixels using the
+    // DESTINATION monitor's DPI. The frontend can't do this — it only
+    // knows its own (source) monitor's DPR. The destination monitor is
+    // wherever (x, y) lands. Mirrors `commands/window_pool.rs:684-701`.
+    #[cfg(target_os = "windows")]
+    let parsed = {
+        use windows_sys::Win32::Foundation::POINT;
+        use windows_sys::Win32::Graphics::Gdi::{MonitorFromPoint, MONITOR_DEFAULTTONEAREST};
+        use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+        let pt = POINT { x: parsed.x, y: parsed.y };
+        let dpi_scale: f32 = unsafe {
+            let monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+            let mut dpi_x: u32 = 0;
+            let mut dpi_y: u32 = 0;
+            let hr = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y);
+            if hr != 0 || dpi_x == 0 {
+                1.0
+            } else {
+                dpi_x as f32 / 96.0
+            }
+        };
+        OpenFloatingPaneArgs {
+            width: (parsed.width as f32 * dpi_scale).round() as i32,
+            height: (parsed.height as f32 * dpi_scale).round() as i32,
+            ..parsed
+        }
+    };
 
     tracing::info!(
         pane_id = %parsed.pane_id,

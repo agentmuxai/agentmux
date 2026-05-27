@@ -314,7 +314,12 @@ unsafe extern "system" fn floating_pane_wndproc(
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-    const RESIZE_BORDER: i32 = 6;
+    // All zone constants are in CSS / DIP pixels and scaled to physical
+    // pixels per the HWND's DPI inside the WM_NCHITTEST branch. Hard-
+    // coded physical-pixel constants here would shrink the hit zones on
+    // HiDPI monitors — a 6-physical-px resize border is 3 CSS px at 200%
+    // DPI and effectively unreachable.
+    const RESIZE_BORDER_CSS: i32 = 6;
     const TITLEBAR_HEIGHT_CSS: i32 = 30;
     const CLOSE_BUTTON_ZONE_CSS: i32 = 36;
 
@@ -332,10 +337,19 @@ unsafe extern "system" fn floating_pane_wndproc(
             let mut rect = std::mem::zeroed::<windows_sys::Win32::Foundation::RECT>();
             GetWindowRect(hwnd, &mut rect);
 
-            let left = x - rect.left < RESIZE_BORDER;
-            let right = rect.right - x < RESIZE_BORDER;
-            let top = y - rect.top < RESIZE_BORDER;
-            let bottom = rect.bottom - y < RESIZE_BORDER;
+            // Scale all CSS-px zones to physical px against THIS HWND's
+            // current monitor — handles mid-life monitor changes (the
+            // window can move between monitors at different DPIs).
+            let dpi = GetDpiForWindow(hwnd) as i32;
+            let dpi = if dpi > 0 { dpi } else { 96 };
+            let resize_border_px = (RESIZE_BORDER_CSS * dpi / 96).max(1);
+            let titlebar_px = TITLEBAR_HEIGHT_CSS * dpi / 96;
+            let close_zone_px = CLOSE_BUTTON_ZONE_CSS * dpi / 96;
+
+            let left = x - rect.left < resize_border_px;
+            let right = rect.right - x < resize_border_px;
+            let top = y - rect.top < resize_border_px;
+            let bottom = rect.bottom - y < resize_border_px;
             if top && left {
                 return HTTOPLEFT as isize;
             }
@@ -362,10 +376,6 @@ unsafe extern "system" fn floating_pane_wndproc(
             }
 
             // Title bar drag zone (excluding close-button click-through).
-            let dpi = GetDpiForWindow(hwnd) as i32;
-            let dpi = if dpi > 0 { dpi } else { 96 };
-            let titlebar_px = TITLEBAR_HEIGHT_CSS * dpi / 96;
-            let close_zone_px = CLOSE_BUTTON_ZONE_CSS * dpi / 96;
             if y - rect.top < titlebar_px && rect.right - x > close_zone_px {
                 return HTCAPTION as isize;
             }
