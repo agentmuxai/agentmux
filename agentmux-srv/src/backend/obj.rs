@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! WaveObj types: Rust equivalents of Go structs from pkg/obj/wtype.go.
+//! StoreObj types: Rust equivalents of Go structs from pkg/obj/wtype.go.
 //! All `#[serde(rename = "...")]` tags match Go JSON tags for wire compatibility.
 
 
@@ -114,11 +114,11 @@ pub fn meta_get_bool(meta: &MetaMapType, key: &str, default: bool) -> bool {
     meta.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
 }
 
-// ---- WaveObj trait ----
+// ---- StoreObj trait ----
 
-/// Rust equivalent of Go's `WaveObj` interface.
+/// Rust equivalent of Go's `StoreObj` interface.
 /// Every wave object has an otype, an OID, a version, and metadata.
-pub trait WaveObj: Serialize + for<'de> Deserialize<'de> {
+pub trait StoreObj: Serialize + for<'de> Deserialize<'de> {
     fn get_otype() -> &'static str;
     fn get_oid(&self) -> &str;
     #[allow(dead_code)]
@@ -137,11 +137,11 @@ pub trait WaveObj: Serialize + for<'de> Deserialize<'de> {
     }
 }
 
-/// Macro that implements `WaveObj` for a struct that has standard fields:
+/// Macro that implements `StoreObj` for a struct that has standard fields:
 /// `oid: String`, `version: i64`, `meta: MetaMapType`.
 macro_rules! impl_wave_obj {
     ($ty:ty, $otype:expr) => {
-        impl WaveObj for $ty {
+        impl StoreObj for $ty {
             fn get_otype() -> &'static str {
                 $otype
             }
@@ -298,7 +298,7 @@ pub struct LeafOrderEntry {
 }
 
 // ====================================================================
-// Core WaveObj types — each matches the Go struct + JSON tags exactly
+// Core StoreObj types — each matches the Go struct + JSON tags exactly
 // ====================================================================
 
 /// Go: `Client` in pkg/obj/wtype.go
@@ -416,7 +416,7 @@ pub struct LayoutState {
 }
 
 // LayoutState has meta as Option<MetaMapType> (Go uses omitempty), so manual impl:
-impl WaveObj for LayoutState {
+impl StoreObj for LayoutState {
     fn get_otype() -> &'static str {
         OTYPE_LAYOUT
     }
@@ -479,9 +479,9 @@ fn is_zero_i64(v: &i64) -> bool {
     *v == 0
 }
 
-/// Serialize any WaveObj to JSON bytes, including the "otype" field.
+/// Serialize any StoreObj to JSON bytes, including the "otype" field.
 /// This matches Go's `obj.ToJson()`.
-pub fn wave_obj_to_json<T: WaveObj>(obj: &T) -> Result<Vec<u8>, serde_json::Error> {
+pub fn wave_obj_to_json<T: StoreObj>(obj: &T) -> Result<Vec<u8>, serde_json::Error> {
     let mut map = serde_json::to_value(obj)?;
     if let Some(m) = map.as_object_mut() {
         m.insert("otype".to_string(), serde_json::Value::String(T::get_otype().to_string()));
@@ -489,9 +489,9 @@ pub fn wave_obj_to_json<T: WaveObj>(obj: &T) -> Result<Vec<u8>, serde_json::Erro
     serde_json::to_vec(&map)
 }
 
-/// Serialize any WaveObj to a serde_json::Value, including the "otype" field.
+/// Serialize any StoreObj to a serde_json::Value, including the "otype" field.
 /// This matches Go's `obj.ToJsonMap()` — used by GetObject/GetObjects responses.
-pub fn wave_obj_to_value<T: WaveObj>(obj: &T) -> serde_json::Value {
+pub fn wave_obj_to_value<T: StoreObj>(obj: &T) -> serde_json::Value {
     let mut map = serde_json::to_value(obj).unwrap_or_default();
     if let Some(m) = map.as_object_mut() {
         m.insert("otype".to_string(), serde_json::Value::String(T::get_otype().to_string()));
@@ -499,9 +499,9 @@ pub fn wave_obj_to_value<T: WaveObj>(obj: &T) -> serde_json::Value {
     map
 }
 
-/// Deserialize JSON bytes to a specific WaveObj type.
+/// Deserialize JSON bytes to a specific StoreObj type.
 /// Does NOT validate the otype field — caller should verify if needed.
-pub fn wave_obj_from_json<T: WaveObj>(data: &[u8]) -> Result<T, serde_json::Error> {
+pub fn wave_obj_from_json<T: StoreObj>(data: &[u8]) -> Result<T, serde_json::Error> {
     serde_json::from_slice(data)
 }
 

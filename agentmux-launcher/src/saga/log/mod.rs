@@ -64,7 +64,7 @@ mod tests;
 /// Errors from the launcher saga log. Wraps the three error sources
 /// the API can encounter: SQLite, JSON serialization, and (for the
 /// public `open(path)` constructor) underlying file IO. Distinct
-/// from srv's `StoreError` because srv's WaveStore wraps additional
+/// from srv's `StoreError` because srv's Store wraps additional
 /// migration-specific variants the launcher log doesn't need.
 #[derive(Debug, thiserror::Error)]
 pub enum LogError {

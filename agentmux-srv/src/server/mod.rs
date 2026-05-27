@@ -38,7 +38,7 @@ use crate::backend::lsp::LspSupervisor;
 use crate::backend::messagebus::MessageBus;
 use crate::backend::reactive::{Poller, ReactiveHandler};
 use crate::backend::storage::filestore::FileStore;
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 use crate::backend::history::HistoryService;
 use crate::backend::subagent_watcher::SubagentWatcher;
 use crate::backend::wconfig;
@@ -51,7 +51,7 @@ pub struct AppState {
     pub auth_key: String,
     pub version: String,
     pub app_path: String,
-    pub wstore: Arc<WaveStore>,
+    pub wstore: Arc<Store>,
     pub filestore: Arc<FileStore>,
     pub event_bus: Arc<EventBus>,
     pub broker: Arc<Broker>,

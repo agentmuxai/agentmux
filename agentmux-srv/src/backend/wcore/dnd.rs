@@ -5,7 +5,7 @@
 
 use uuid::Uuid;
 
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 use crate::backend::storage::StoreError;
 use crate::backend::obj::*;
 
@@ -18,7 +18,7 @@ use super::workspace::create_workspace;
 /// If `auto_close_source` is true, deletes the source tab when it becomes empty
 /// (only if the workspace has other tabs).
 pub fn move_block_to_tab(
-    store: &WaveStore,
+    store: &Store,
     block_id: &str,
     source_tab_id: &str,
     dest_tab_id: &str,
@@ -76,7 +76,7 @@ pub fn move_block_to_tab(
 /// and adds the block to the new tab. Returns the new Tab.
 /// If `auto_close_source` is true, deletes the source tab when it becomes empty.
 pub fn promote_block_to_tab(
-    store: &WaveStore,
+    store: &Store,
     block_id: &str,
     source_tab_id: &str,
     ws_id: &str,
@@ -132,7 +132,7 @@ pub fn promote_block_to_tab(
 /// The tab is always added as unpinned in the destination.
 /// If the tab was the active tab in the source workspace, a new active tab is chosen.
 pub fn move_tab_to_workspace(
-    store: &WaveStore,
+    store: &Store,
     tab_id: &str,
     source_ws_id: &str,
     dest_ws_id: &str,
@@ -193,7 +193,7 @@ pub fn move_tab_to_workspace(
 /// single tab containing the block. Returns the new workspace.
 /// If `auto_close_source` is true, deletes the source tab when it becomes empty.
 pub fn tear_off_block(
-    store: &WaveStore,
+    store: &Store,
     block_id: &str,
     source_tab_id: &str,
     source_ws_id: &str,
@@ -305,7 +305,7 @@ pub fn tear_off_block(
 /// (drop on another window's strip). Both paths produce a single-tab source
 /// workspace whose only purpose is to carry the dragged tab.
 pub fn restore_torn_off_tab(
-    store: &WaveStore,
+    store: &Store,
     tab_id: &str,
     source_ws_id: &str,
     dest_ws_id: &str,
@@ -411,7 +411,7 @@ pub fn restore_torn_off_tab(
 /// containing just that tab. Returns the new workspace.
 /// The source workspace must have more than one tab.
 pub fn tear_off_tab(
-    store: &WaveStore,
+    store: &Store,
     tab_id: &str,
     source_ws_id: &str,
 ) -> Result<Workspace, StoreError> {

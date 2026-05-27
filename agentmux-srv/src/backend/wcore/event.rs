@@ -2,15 +2,15 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Pub/sub event publishing for WaveObj updates.
+//! Pub/sub event publishing for StoreObj updates.
 
 use crate::backend::oref::ORef;
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 use crate::backend::obj::*;
 use crate::backend::wps::{self, Broker, WaveEvent};
 
-/// Publish a WaveObj update event through the broker.
-pub fn send_wave_obj_update(broker: &Broker, store: &WaveStore, oref: &ORef) {
+/// Publish a StoreObj update event through the broker.
+pub fn send_wave_obj_update(broker: &Broker, store: &Store, oref: &ORef) {
     let obj_json = match oref.otype.as_str() {
         OTYPE_CLIENT => store
             .get::<Client>(&oref.oid)

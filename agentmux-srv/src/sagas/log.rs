@@ -10,7 +10,7 @@
 //
 // Why an isolated SQLite file (`sagas.db`) rather than co-locating
 // inside `objects.db`: we want saga writes to commit independently
-// of the WaveStore migration / connection. A separate connection
+// of the Store migration / connection. A separate connection
 // also keeps the saga log's mutex contention isolated from the
 // reducer's persistence path. (The two-store atomicity concern from
 // spec §2.1 is not load-bearing for PR 1; saga steps are written
@@ -123,7 +123,7 @@ pub struct SagaLog {
 
 impl SagaLog {
     /// Open a saga log backed by the given SQLite file. Configures
-    /// WAL mode + 5s busy timeout (mirroring `WaveStore::open`) and
+    /// WAL mode + 5s busy timeout (mirroring `Store::open`) and
     /// applies the schema migration.
     pub fn open(path: &Path) -> Result<Self, StoreError> {
         let conn = Connection::open(path)?;

@@ -11,7 +11,7 @@ use crate::backend::wconfig;
 use crate::backend::wcore;
 
 pub(crate) fn test_state() -> AppState {
-    let wstore = Arc::new(WaveStore::open_in_memory().unwrap());
+    let wstore = Arc::new(Store::open_in_memory().unwrap());
     let filestore = Arc::new(FileStore::open_in_memory().unwrap());
     let event_bus = Arc::new(EventBus::new());
     let broker = Arc::new(Broker::new());

@@ -32,7 +32,7 @@ use super::{
 use super::health::{classify_output_line, HealthMonitor};
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 use crate::backend::wps;
 
 /// WPS file subject name for subprocess output (replaces "term" from PTY).
@@ -126,7 +126,7 @@ pub struct SubprocessController {
     /// Event bus for obj:update broadcasts.
     event_bus: Option<Arc<EventBus>>,
     /// Wave object store for block metadata persistence.
-    wstore: Option<Arc<WaveStore>>,
+    wstore: Option<Arc<Store>>,
     /// FileStore for write-through persistence of output lines (Phase 1.3).
     filestore: Option<Arc<FileStore>>,
     /// Agent health monitor (output activity + error tracking).
@@ -143,7 +143,7 @@ impl SubprocessController {
         block_id: String,
         broker: Option<Arc<wps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
-        wstore: Option<Arc<WaveStore>>,
+        wstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
     ) -> Self {
         let health_monitor = Arc::new(HealthMonitor::new(

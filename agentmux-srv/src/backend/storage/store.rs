@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! WaveStore: generic OID-based CRUD for WaveObj types.
+//! Store: generic OID-based CRUD for StoreObj types.
 //! Port of Go's pkg/wstore/wstore_dbops.go + wstore_dbsetup.go.
 //!
 //! Uses `Mutex<Connection>` matching Go's `MaxOpenConns(1)`.
@@ -14,14 +14,14 @@ use std::sync::{Arc, Mutex};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
-use crate::backend::obj::{wave_obj_from_json, wave_obj_to_json, WaveObj};
+use crate::backend::obj::{wave_obj_from_json, wave_obj_to_json, StoreObj};
 use crate::registry::Registry;
 
 use super::error::StoreError;
 use super::migrations::{check_schema_compat, run_object_schema, stamp_version, OBJECT_SCHEMA_VERSION};
 
-/// SQLite-backed object store for WaveObj types.
-pub struct WaveStore {
+/// SQLite-backed object store for StoreObj types.
+pub struct Store {
     conn: Mutex<Connection>,
     /// Cross-version named-agent registry. `None` for in-memory test
     /// stores; `Some` for production srv. Mutations to
@@ -30,15 +30,15 @@ pub struct WaveStore {
     registry: Mutex<Option<Arc<Registry>>>,
 }
 
-impl WaveStore {
-    /// Open a WaveStore backed by a file on disk.
+impl Store {
+    /// Open a Store backed by a file on disk.
     /// Configures WAL mode and 5s busy timeout (matching Go).
     pub fn open(path: &Path) -> Result<Self, StoreError> {
         let conn = Connection::open(path)?;
         Self::configure_and_migrate(conn)
     }
 
-    /// Open an in-memory WaveStore for testing.
+    /// Open an in-memory Store for testing.
     #[allow(dead_code)]
     pub fn open_in_memory() -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory()?;
@@ -97,7 +97,7 @@ impl WaveStore {
     }
 
     /// Attach a shared cross-version agent registry. Called once on
-    /// srv startup after `WaveStore::open` and before the store is
+    /// srv startup after `Store::open` and before the store is
     /// wrapped in `Arc`. Mutations to `db_agent_instances` will then
     /// parallel-write to the registry; the SQLite table remains the
     /// authoritative read path for PR A.
@@ -120,13 +120,13 @@ impl WaveStore {
         self.registry()
     }
 
-    /// Table name for a WaveObj type: `db_<otype>`.
-    fn table_name<T: WaveObj>() -> String {
+    /// Table name for a StoreObj type: `db_<otype>`.
+    fn table_name<T: StoreObj>() -> String {
         format!("db_{}", T::get_otype())
     }
 
     /// Get a single object by OID. Returns `None` if not found.
-    pub fn get<T: WaveObj>(&self, oid: &str) -> Result<Option<T>, StoreError> {
+    pub fn get<T: StoreObj>(&self, oid: &str) -> Result<Option<T>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let table = Self::table_name::<T>();
         let mut stmt =
@@ -150,7 +150,7 @@ impl WaveStore {
     }
 
     /// Get a single object, returning `StoreError::NotFound` if missing.
-    pub fn must_get<T: WaveObj>(&self, oid: &str) -> Result<T, StoreError> {
+    pub fn must_get<T: StoreObj>(&self, oid: &str) -> Result<T, StoreError> {
         self.get::<T>(oid)?.ok_or(StoreError::NotFound)
     }
 
@@ -197,7 +197,7 @@ impl WaveStore {
     }
 
     /// Insert a new object. Sets version to 1.
-    pub fn insert<T: WaveObj>(&self, obj: &mut T) -> Result<(), StoreError> {
+    pub fn insert<T: StoreObj>(&self, obj: &mut T) -> Result<(), StoreError> {
         let oid = obj.get_oid().to_string();
         if oid.is_empty() {
             return Err(StoreError::EmptyOID);
@@ -218,7 +218,7 @@ impl WaveStore {
 
     /// Update an existing object. Increments version atomically.
     /// Returns the new version number.
-    pub fn update<T: WaveObj>(&self, obj: &mut T) -> Result<i64, StoreError> {
+    pub fn update<T: StoreObj>(&self, obj: &mut T) -> Result<i64, StoreError> {
         let oid = obj.get_oid().to_string();
         if oid.is_empty() {
             return Err(StoreError::EmptyOID);
@@ -265,7 +265,7 @@ impl WaveStore {
 
     /// Delete an object by OID.
     #[allow(dead_code)]
-    pub fn delete<T: WaveObj>(&self, oid: &str) -> Result<(), StoreError> {
+    pub fn delete<T: StoreObj>(&self, oid: &str) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         let table = Self::table_name::<T>();
         conn.execute(
@@ -292,7 +292,7 @@ impl WaveStore {
     }
 
     /// Get all objects of a given type.
-    pub fn get_all<T: WaveObj>(&self) -> Result<Vec<T>, StoreError> {
+    pub fn get_all<T: StoreObj>(&self) -> Result<Vec<T>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let table = Self::table_name::<T>();
         let mut stmt = conn.prepare(&format!("SELECT oid, version, data FROM {table}"))?;
@@ -314,7 +314,7 @@ impl WaveStore {
 
     /// Count objects of a given type.
     #[allow(dead_code)]
-    pub fn count<T: WaveObj>(&self) -> Result<i64, StoreError> {
+    pub fn count<T: StoreObj>(&self) -> Result<i64, StoreError> {
         let conn = self.conn.lock().unwrap();
         let table = Self::table_name::<T>();
         let count: i64 =
@@ -350,19 +350,19 @@ impl WaveStore {
     }
 }
 
-/// A borrowed connection handle for use inside [`WaveStore::with_tx`].
-/// Provides the same CRUD methods as `WaveStore` but operates on the
+/// A borrowed connection handle for use inside [`Store::with_tx`].
+/// Provides the same CRUD methods as `Store` but operates on the
 /// already-locked connection without additional Mutex acquisition.
 pub struct StoreTx<'a> {
     conn: &'a Connection,
 }
 
 impl<'a> StoreTx<'a> {
-    fn table_name<T: WaveObj>() -> String {
+    fn table_name<T: StoreObj>() -> String {
         format!("db_{}", T::get_otype())
     }
 
-    pub fn get<T: WaveObj>(&self, oid: &str) -> Result<Option<T>, StoreError> {
+    pub fn get<T: StoreObj>(&self, oid: &str) -> Result<Option<T>, StoreError> {
         let table = Self::table_name::<T>();
         let mut stmt =
             self.conn.prepare(&format!("SELECT version, data FROM {table} WHERE oid = ?1"))?;
@@ -384,11 +384,11 @@ impl<'a> StoreTx<'a> {
         }
     }
 
-    pub fn must_get<T: WaveObj>(&self, oid: &str) -> Result<T, StoreError> {
+    pub fn must_get<T: StoreObj>(&self, oid: &str) -> Result<T, StoreError> {
         self.get::<T>(oid)?.ok_or(StoreError::NotFound)
     }
 
-    pub fn insert<T: WaveObj>(&self, obj: &mut T) -> Result<(), StoreError> {
+    pub fn insert<T: StoreObj>(&self, obj: &mut T) -> Result<(), StoreError> {
         let oid = obj.get_oid().to_string();
         if oid.is_empty() {
             return Err(StoreError::EmptyOID);
@@ -406,7 +406,7 @@ impl<'a> StoreTx<'a> {
         Ok(())
     }
 
-    pub fn update<T: WaveObj>(&self, obj: &mut T) -> Result<i64, StoreError> {
+    pub fn update<T: StoreObj>(&self, obj: &mut T) -> Result<i64, StoreError> {
         let oid = obj.get_oid().to_string();
         if oid.is_empty() {
             return Err(StoreError::EmptyOID);
@@ -427,7 +427,7 @@ impl<'a> StoreTx<'a> {
         Ok(new_version)
     }
 
-    pub fn get_all<T: WaveObj>(&self) -> Result<Vec<T>, StoreError> {
+    pub fn get_all<T: StoreObj>(&self) -> Result<Vec<T>, StoreError> {
         let table = Self::table_name::<T>();
         let mut stmt = self.conn.prepare(&format!("SELECT oid, version, data FROM {table}"))?;
         let rows = stmt.query_map([], |row| {
@@ -447,7 +447,7 @@ impl<'a> StoreTx<'a> {
     }
 
     #[allow(dead_code)]
-    pub fn delete<T: WaveObj>(&self, oid: &str) -> Result<(), StoreError> {
+    pub fn delete<T: StoreObj>(&self, oid: &str) -> Result<(), StoreError> {
         let table = Self::table_name::<T>();
         self.conn.execute(
             &format!("DELETE FROM {table} WHERE oid = ?1"),
@@ -601,7 +601,7 @@ pub struct AgentHistory {
     pub timestamp: i64,
 }
 
-impl WaveStore {
+impl Store {
     /// List all agent definitions, **most-recently-used first**.
     ///
     /// Phase 3b: read from the consolidated `db_agents` table. Order is
@@ -1625,7 +1625,7 @@ fn relative_workdir(abs: &str, agents_root: &Path) -> Option<String> {
     Some(s)
 }
 
-impl WaveStore {
+impl Store {
     // ---- Identity account CRUD ----
 
     /// List identity accounts. If `provider` is `Some`, filter to that
@@ -3354,8 +3354,8 @@ mod tests {
     use super::*;
     use crate::backend::obj::*;
 
-    fn make_store() -> WaveStore {
-        WaveStore::open_in_memory().unwrap()
+    fn make_store() -> Store {
+        Store::open_in_memory().unwrap()
     }
 
     #[test]
@@ -3745,8 +3745,8 @@ mod tests {
 
     // ---- v6 identity / instance CRUD ----
 
-    fn v6_test_store() -> WaveStore {
-        WaveStore::open_in_memory().unwrap()
+    fn v6_test_store() -> Store {
+        Store::open_in_memory().unwrap()
     }
 
     fn sample_account(id: &str, provider: &str) -> IdentityAccount {
@@ -3942,7 +3942,7 @@ mod tests {
         store.instance_create(&mk("i-a", "def-a", 500)).unwrap();
         store.instance_create(&mk("i-b", "def-b", 600)).unwrap();
 
-        let ids = |s: &WaveStore| -> Vec<String> {
+        let ids = |s: &Store| -> Vec<String> {
             s.agent_def_list().unwrap().into_iter().map(|d| d.id).collect()
         };
         // Most-recently-launched first; never-launched (def-c) last.
@@ -4220,13 +4220,13 @@ mod tests {
         }
     }
 
-    fn store_with_registry() -> (tempfile::TempDir, WaveStore, Arc<crate::registry::Registry>) {
+    fn store_with_registry() -> (tempfile::TempDir, Store, Arc<crate::registry::Registry>) {
         let tmp = tempfile::tempdir().unwrap();
         let agents_root = tmp.path().join("agents");
         std::fs::create_dir_all(&agents_root).unwrap();
         let reg_root = agents_root.join("registry");
         let reg = Arc::new(crate::registry::Registry::open(reg_root).unwrap());
-        let store = WaveStore::open_in_memory().unwrap();
+        let store = Store::open_in_memory().unwrap();
         store.set_registry(reg.clone());
         // Satisfy the FK from db_agent_instances.definition_id.
         let mut agent = sample_agent("def-mirror", "mirror");
@@ -4826,13 +4826,13 @@ mod tests {
     // Phase 3a — db_agents dual-write coverage
     // ----------------------------------------------------------------
 
-    fn count_agents(store: &WaveStore, where_clause: &str) -> i64 {
+    fn count_agents(store: &Store, where_clause: &str) -> i64 {
         let conn = store.conn.lock().unwrap();
         let sql = format!("SELECT COUNT(*) FROM db_agents WHERE {where_clause}");
         conn.query_row(&sql, [], |row| row.get(0)).unwrap()
     }
 
-    fn read_agent_field(store: &WaveStore, id: &str, field: &str) -> Option<String> {
+    fn read_agent_field(store: &Store, id: &str, field: &str) -> Option<String> {
         let conn = store.conn.lock().unwrap();
         let sql = format!("SELECT {field} FROM db_agents WHERE id = ?1");
         let mut stmt = conn.prepare(&sql).unwrap();
@@ -4844,7 +4844,7 @@ mod tests {
         }
     }
 
-    fn read_agent_int(store: &WaveStore, id: &str, field: &str) -> Option<i64> {
+    fn read_agent_int(store: &Store, id: &str, field: &str) -> Option<i64> {
         let conn = store.conn.lock().unwrap();
         let sql = format!("SELECT {field} FROM db_agents WHERE id = ?1");
         let mut stmt = conn.prepare(&sql).unwrap();

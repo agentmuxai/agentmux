@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::backend::obj::MetaMapType;
-use crate::backend::storage::wstore::WaveStore;
+use crate::backend::storage::store::Store;
 
 /// Keys used for session stats in block metadata.
 pub const META_SESSION_START_TS_MS: &str = "session:start_ts_ms";
@@ -26,7 +26,7 @@ pub const META_SESSION_LAST_ACTIVITY_MS: &str = "session:last_activity_ms";
 pub const META_SESSION_LINE_COUNT: &str = "session:line_count";
 pub const META_SESSION_TOKEN_ESTIMATE: &str = "session:token_estimate";
 
-/// Debounce interval: at most one WaveStore write per second.
+/// Debounce interval: at most one Store write per second.
 const FLUSH_DEBOUNCE: Duration = Duration::from_secs(1);
 
 /// Returns the current Unix timestamp in milliseconds.
@@ -71,10 +71,10 @@ impl SessionStatsAccumulator {
 
     /// Record one output line of `line_len` bytes.
     ///
-    /// Updates in-memory counters.  Flushes to the WaveStore if the debounce
+    /// Updates in-memory counters.  Flushes to the Store if the debounce
     /// interval has elapsed *or* if this is the very first line (so the
     /// frontend sees `session:start_ts_ms` promptly).
-    pub fn record_line(&mut self, line_len: usize, wstore: &Option<Arc<WaveStore>>) {
+    pub fn record_line(&mut self, line_len: usize, wstore: &Option<Arc<Store>>) {
         let ts = now_ms();
         let is_first = self.start_ts_ms == 0;
 
@@ -98,10 +98,10 @@ impl SessionStatsAccumulator {
         }
     }
 
-    /// Force-flush all accumulated stats to the WaveStore right now.
+    /// Force-flush all accumulated stats to the Store right now.
     ///
     /// Called by `record_line` when the debounce window has elapsed.
-    fn flush(&mut self, wstore: &Arc<WaveStore>) {
+    fn flush(&mut self, wstore: &Arc<Store>) {
         let oref_str = format!("block:{}", self.block_id);
         let mut meta_update = MetaMapType::new();
 

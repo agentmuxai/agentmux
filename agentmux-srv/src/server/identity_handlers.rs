@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::providers::get_provider;
 use crate::backend::rpc::engine::WshRpcEngine;
-use crate::backend::storage::wstore::{IdentityAccount, SecretRef, WaveStore};
+use crate::backend::storage::store::{IdentityAccount, SecretRef, Store};
 use crate::backend::wps::Broker;
 
 use super::AppState;
@@ -295,7 +295,7 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
 #[allow(clippy::too_many_arguments)]
 fn spawn_auth_cli(
     mgr: Arc<crate::identity::auth_session::AuthSessionManager>,
-    wstore: Arc<WaveStore>,
+    wstore: Arc<Store>,
     broker: Arc<Broker>,
     session_id: String,
     provider_id: String,
@@ -594,7 +594,7 @@ fn spawn_auth_cli(
 #[allow(clippy::too_many_arguments)]
 fn spawn_auth_cli_pty(
     mgr: Arc<crate::identity::auth_session::AuthSessionManager>,
-    wstore: Arc<WaveStore>,
+    wstore: Arc<Store>,
     broker: Arc<Broker>,
     session_id: String,
     provider_id: String,
@@ -1071,7 +1071,7 @@ fn compute_and_ensure_bundle_dir(
 /// the synthetic placeholder unchanged — the legacy ambient path
 /// (PR A behaviour) is preserved.
 fn persist_oauth_binding_or_synthetic(
-    wstore: &Arc<WaveStore>,
+    wstore: &Arc<Store>,
     broker: &Arc<Broker>,
     into_bundle_id: Option<&str>,
     provider_id: &str,
@@ -1201,7 +1201,7 @@ async fn confirm_authenticated(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::storage::wstore::Identity;
+    use crate::backend::storage::store::Identity;
 
     // Request shape parsing tests — verify the wire contract matches
     // what the frontend (PR B) will send. The end-to-end RPC-engine
@@ -1333,7 +1333,7 @@ mod tests {
             std::env::set_var(k, v);
         }
 
-        let wstore = Arc::new(WaveStore::open_in_memory().unwrap());
+        let wstore = Arc::new(Store::open_in_memory().unwrap());
         let broker = Arc::new(crate::backend::wps::Broker::new());
 
         // Seed the bundle that the OAuth flow targets (PR 1 #969
@@ -1476,7 +1476,7 @@ mod tests {
 
     #[test]
     fn persist_returns_synthetic_when_no_bundle_id() {
-        let wstore = Arc::new(WaveStore::open_in_memory().unwrap());
+        let wstore = Arc::new(Store::open_in_memory().unwrap());
         let broker = Arc::new(crate::backend::wps::Broker::new());
         let r = persist_oauth_binding_or_synthetic(
             &wstore,
@@ -1491,7 +1491,7 @@ mod tests {
 
     #[test]
     fn persist_returns_synthetic_when_no_bundle_dir() {
-        let wstore = Arc::new(WaveStore::open_in_memory().unwrap());
+        let wstore = Arc::new(Store::open_in_memory().unwrap());
         let broker = Arc::new(crate::backend::wps::Broker::new());
         let r = persist_oauth_binding_or_synthetic(
             &wstore,

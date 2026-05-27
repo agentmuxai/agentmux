@@ -266,7 +266,7 @@ Recommended ship order: F.0 → F.2 → F.1 → F.3 → G. F.0 first because it 
 ### PR-F.0 (schema + resolver reshape)
 
 - `agentmux-srv/src/backend/storage/migrations.rs` — v8 migration
-- `agentmux-srv/src/backend/storage/wstore.rs` — new accessors for db_identities, db_memories, blank singletons
+- `agentmux-srv/src/backend/storage/store.rs` — new accessors for db_identities, db_memories, blank singletons
 - `agentmux-srv/src/identity/resolver.rs` — read from new tables
 - `agentmux-srv/src/identity/mod.rs` — `inject_identity_env` reads `identity_id` instead of JSON
 - `agentmux-srv/src/server/app_api.rs` — RPC commands for Identity/Memory CRUD

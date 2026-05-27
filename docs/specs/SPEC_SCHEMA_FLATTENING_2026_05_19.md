@@ -571,7 +571,7 @@ The de-forge rename touches every `forge`-named SQL string + identifier:
 
 | File | Approx. sites |
 |---|---|
-| `backend/storage/wstore.rs` | ~25 SQL strings + ~17 method renames + 5 struct renames |
+| `backend/storage/store.rs` | ~25 SQL strings + ~17 method renames + 5 struct renames |
 | `server/forge_handlers.rs` → `agent_handlers.rs` | ~35 method-call sites |
 | `backend/forge_seed.rs` → `agent_seed.rs` | ~8 sites |
 | `backend/storage/migrations.rs` | replaced wholesale |
