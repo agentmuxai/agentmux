@@ -504,8 +504,16 @@ const EXTENSION_MAP: Record<string, string> = {
 };
 
 export function detectLanguage(filePath: string): string {
-    const i = filePath.lastIndexOf(".");
-    if (i < 0) return "text";
-    const ext = filePath.slice(i).toLowerCase();
-    return EXTENSION_MAP[ext] ?? "text";
+    const lower = filePath.toLowerCase();
+    // Extension lookup. Use endsWith so multi-segment extensions like
+    // `.test.tsx` still resolve via the trailing component.
+    for (const [ext, lang] of Object.entries(EXTENSION_MAP)) {
+        if (lower.endsWith(ext)) return lang;
+    }
+    // Special bareword filenames (no extension or unusual conventions).
+    const name = lower.split(/[\\/]/).pop() ?? "";
+    if (name === "dockerfile") return "shell";
+    if (name === "makefile") return "shell";
+    if (name === "cargo.toml" || name === "cargo.lock") return "toml";
+    return "text";
 }
