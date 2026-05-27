@@ -311,9 +311,12 @@ describe("reset", () => {
         parser.parseStreamEvent({ type: "text", content: "hello" });
         parser.reset();
 
-        // After reset, a new text event should get a fresh node_0 ID
+        // After reset, a new text event starts a fresh node — id format
+        // is `node_${prefix}_${counter}` where the prefix is rotated on
+        // reset, so we can't pin the exact value. Just assert the shape
+        // and that content is the fresh string.
         const node = parser.parseStreamEvent({ type: "text", content: "fresh" });
-        expect(node!.id).toBe("node_0");
+        expect(node!.id).toMatch(/^node_[a-z0-9]+_0$/);
         expect((node as MarkdownNode).content).toBe("fresh");
     });
 });

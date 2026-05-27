@@ -10,6 +10,7 @@
 import { getFileSubject, waveEventSubscribe } from "@/app/store/wps";
 import * as WOS from "@/app/store/wos";
 import { base64ToArray } from "@/util/util";
+import { trail } from "@/log/render-trail";
 import { createEffect, onCleanup, onMount } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import type { PendingMessage, SignalPair } from "./state";
@@ -322,7 +323,9 @@ export function useAgentStream({
                     // it back, leaving the status line stuck on "Worked"
                     // with no running animation even though the CLI is
                     // processing the next message).
+                    trail("agent:dispatch:TurnStart", { messageId });
                     model.dispatchPane({ type: "TurnStart", at: Date.now() });
+                    trail("agent:dispatch:TurnStart:done", { messageId });
                     // Append as a normal user_message so it joins the
                     // conversation stream. Keeps the same id so the new
                     // node ties back to the pending entry 1:1.

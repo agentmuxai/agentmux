@@ -43,6 +43,24 @@ export const STARTUP_HEADING_RE = /^# Session Context\b/;
 export class ClaudeCodeStreamParser {
     private buffer: string = "";
     private nodeIdCounter: number = 0;
+    /**
+     * Per-instance random prefix to make generated node ids globally
+     * unique. Without this, every new parser instance would generate
+     * `node_0` for its first markdown chunk, colliding with the
+     * `node_0` already in the document from a resumed-session
+     * snapshot. The document store treats id collisions as
+     * "merge into existing node" — so the agent's response text
+     * would be silently merged into the OLD `node_0` (which lives
+     * far up in the virtualized history), making the response
+     * invisible to the user.
+     *
+     * Render-gap bug discovered 2026-05-27 via `[stream-flush-diag]`
+     * + `[partition-diag]` host-log taps.
+     *
+     * 36^6 ≈ 2.2B combinations — collision against snapshot ids of
+     * the same form is vanishingly small.
+     */
+    private idPrefix: string = Math.random().toString(36).slice(2, 8);
     private pendingToolCalls: Map<string, ToolCallEvent> = new Map();
     private currentAgentId?: string;
     // Mutable node objects for accumulated text/thinking — content is appended in-place
@@ -184,7 +202,7 @@ export class ClaudeCodeStreamParser {
     private textToNode(event: TextEvent): DocumentNode {
         this.currentThinkingNode = null;
         if (!this.currentTextNode) {
-            this.currentTextNode = { type: "markdown", id: `node_${this.nodeIdCounter++}`, content: event.content };
+            this.currentTextNode = { type: "markdown", id: `node_${this.idPrefix}_${this.nodeIdCounter++}`, content: event.content };
         } else {
             this.currentTextNode = { ...this.currentTextNode, content: this.currentTextNode.content + event.content };
         }
@@ -199,7 +217,7 @@ export class ClaudeCodeStreamParser {
     private thinkingToNode(event: ThinkingEvent): DocumentNode {
         this.currentTextNode = null;
         if (!this.currentThinkingNode) {
-            this.currentThinkingNode = { type: "markdown", id: `node_${this.nodeIdCounter++}`, content: event.content, metadata: { thinking: true } };
+            this.currentThinkingNode = { type: "markdown", id: `node_${this.idPrefix}_${this.nodeIdCounter++}`, content: event.content, metadata: { thinking: true } };
         } else {
             this.currentThinkingNode = { ...this.currentThinkingNode, content: this.currentThinkingNode.content + event.content };
         }
@@ -317,7 +335,7 @@ export class ClaudeCodeStreamParser {
 
         return {
             type: "agent_message",
-            id: `msg_${this.nodeIdCounter++}`,
+            id: `msg_${this.idPrefix}_${this.nodeIdCounter++}`,
             from: event.from,
             to: event.to,
             message: event.message,
@@ -348,7 +366,7 @@ export class ClaudeCodeStreamParser {
         const isStartup = STARTUP_HEADING_RE.test(event.message);
         return {
             type: "user_message",
-            id: `user_${this.nodeIdCounter++}`,
+            id: `user_${this.idPrefix}_${this.nodeIdCounter++}`,
             message: event.message,
             timestamp: event.timestamp || Date.now(),
             isStartup,
@@ -418,6 +436,11 @@ export class ClaudeCodeStreamParser {
     reset(): void {
         this.buffer = "";
         this.nodeIdCounter = 0;
+        // Rotate the prefix on reset so the new counter sequence
+        // can't collide with ids the parser already emitted before
+        // the reset (e.g., on a stream truncate that didn't take
+        // the existing nodes out of the document).
+        this.idPrefix = Math.random().toString(36).slice(2, 8);
         this.pendingToolCalls.clear();
         this.currentTextNode = null;
         this.currentThinkingNode = null;

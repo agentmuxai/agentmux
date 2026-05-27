@@ -30,6 +30,7 @@
 
 import { createVirtualizer } from "@tanstack/solid-virtual";
 import { createEffect, createMemo, For, Index, onMount, type Accessor, type JSX } from "solid-js";
+import { trail } from "@/log/render-trail";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import { agentPerfStore, startAgentLayoutShiftObserver } from "./perf-probe";
@@ -42,7 +43,11 @@ import {
 import { DocumentRow } from "./DocumentRow";
 import { estimateNode } from "./renderers";
 import type { AgentViewState } from "./state";
-import { partitionForVirtualization } from "./streaming-buffer";
+import {
+    initialStickyFrontierId,
+    partitionForVirtualization,
+    STREAMING_BUFFER_SIZE,
+} from "./streaming-buffer";
 
 export interface AgentDocumentVirtualListProps {
     viewState: AgentViewState;
@@ -74,6 +79,23 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // Guard against concurrent older-history fetches triggered by scroll.
     let loadingOlderInFlight = false;
 
+    // Sticky frontier id — once the document crosses
+    // STREAMING_BUFFER_SIZE, this freezes to the id of the first node
+    // in the streaming buffer. After that, every appended node lands
+    // in `streamingNodes` and the virtualized head stays fixed; no
+    // node ever migrates from one subtree to the other on a simple
+    // append. That migration was the root cause of the SolidJS
+    // `replaceChild` crash on send-message
+    // (docs/analysis/AGENT_PANE_REPLACECHILD_CRASH_ON_SEND_2026_05_27.md).
+    //
+    // Cleared whenever the anchor node is truncated away (e.g.,
+    // history reset / pane re-mount); the next partition recompute
+    // re-anchors against the new tail.
+    //
+    // Plain `let` rather than a Solid signal: mutating the variable
+    // must NOT trigger another memo run while we're inside one.
+    let stickyFrontierId: string | null = null;
+
     // Memoized — partition is read inside virtualizer's reactive
     // count getter, estimateSize, getItemKey, the streaming buffer
     // <For>, and each virtual item's nodeAccessor. Without
@@ -81,7 +103,43 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // token of streaming, defeating the streaming buffer's purpose.
     // (reagent P1 on #784.)
     const partition = createMemo(() => {
-        return partitionForVirtualization(props.viewState.nodes());
+        const nodes = props.viewState.nodes();
+
+        // First time the document exceeds the streaming buffer, lock
+        // the frontier. Subsequent appends grow `streamingNodes`.
+        if (stickyFrontierId == null) {
+            stickyFrontierId = initialStickyFrontierId(nodes, STREAMING_BUFFER_SIZE);
+        }
+
+        let result = partitionForVirtualization(
+            nodes,
+            STREAMING_BUFFER_SIZE,
+            stickyFrontierId,
+        );
+
+        // Stale frontier (anchor node was truncated). Re-anchor and
+        // recompute once. The re-anchor is the ONLY place a node
+        // crosses subtrees, and it happens only on
+        // truncate/clear/reset — never during normal streaming.
+        if (result.splitIndex === -1) {
+            stickyFrontierId = initialStickyFrontierId(nodes, STREAMING_BUFFER_SIZE);
+            result = partitionForVirtualization(
+                nodes,
+                STREAMING_BUFFER_SIZE,
+                stickyFrontierId,
+            );
+        }
+
+        // Crash-trace: every partition recompute is a candidate trigger
+        // for the reconciler's <For> reconcile pass. The render-trail
+        // ring buffer dump from the boundary will show how many of
+        // these landed just before the throw.
+        trail("agent:virt:partition", {
+            virtCount: result.virtualizedNodes.length,
+            streamCount: result.streamingNodes.length,
+            frontier: stickyFrontierId?.slice(0, 8) ?? null,
+        });
+        return result;
     });
 
     // Virtualizer over the virtualized head only — streaming buffer is

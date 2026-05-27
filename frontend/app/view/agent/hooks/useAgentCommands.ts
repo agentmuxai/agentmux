@@ -24,6 +24,7 @@
  */
 
 import { type Accessor, createMemo, createSignal, onCleanup } from "solid-js";
+import { trail } from "@/log/render-trail";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
@@ -226,6 +227,13 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     };
 
     const sendMessage = async (message: string): Promise<void> => {
+        // Crash trace: this is the entry point for "user pressed send."
+        // The boundary dumps this trail when a renderer fault catches —
+        // see frontend/log/render-trail.ts + BlockErrorBoundary.
+        trail("agent:send-message:enter", {
+            blockId: opts.blockId,
+            len: message.length,
+        });
         // Intercept slash commands FIRST — some (/clear, /login) are
         // handled client-side and must not touch the backend queue at
         // all. Unknown `/foo` falls through to a real turn.
@@ -264,6 +272,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // Soft variant — cascade-during-dispatch could dispose the pane
         // before this fires; retro 2026-05-23 (agent-pane cascade →
         // replaceChild quick-win).
+        trail("agent:dispatch:PendingMessageQueued", { messageId });
         opts.model.dispatchPane(
             {
                 type: "PendingMessageQueued",
@@ -273,6 +282,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             },
             "user",
         );
+        trail("agent:dispatch:PendingMessageQueued:done", { messageId });
 
         // Defer the scroll-to-bottom by one animation frame so the
         // pending row has a chance to mount before the scroll math runs.
