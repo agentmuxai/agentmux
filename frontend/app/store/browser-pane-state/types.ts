@@ -2,106 +2,128 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Type definitions for the browser-pane-state reducer (slice #9 in
- * docs/specs/frontend-reducer-architecture-2026-05-03.md and the
- * roadmap at docs/specs/browser-pane-reducer-roadmap.md).
+ * Type definitions for the browser-pane-state reducer.
  *
- * **Phases 3a + 3b + 3c + 3d + 3e (complete).** This reducer owns
- * eight cells today — every per-pane data cell from the catalog is
- * now reducer-backed. Slot store + `recordDispatch` audit (Phase 4)
- * is the next milestone.
- *   - `closed` — terminal flag set by `dispose()`. All post-close
- *     commands are no-ops.
- *   - `loading` — page-load-in-flight flag. Mutually exclusive with
- *     `error` (one or the other; never both).
- *   - `error` — page-load failure message. Mutually exclusive with
- *     `loading`.
- *   - `canGoBack` / `canGoForward` — history navigability flags
- *     mirrored from CEF's `on_loading_state_change_pane` events
- *     (forwarded as `browser-pane-nav-state` with `url_only=false`).
- *   - `title` — page title. Falls back to `"Browser"` when the host
- *     emits empty/whitespace (mirrors the per-catalog rule that the
- *     view should never display a blank pane title).
- *   - `url` — committed/loading URL (NOT the address-bar's
- *     unsubmitted typing buffer — that stays in the view). The
- *     **danger cell** that broke PR #737 — six downstream consumers
- *     (reload's clear+restore, view-mount diag, initial addressBar,
- *     the sync createEffect that syncs urlAtom→addressBar, onMount's
- *     createPane, the placeholder `<Show>` gate); migration must
- *     preserve every consumer's semantics verbatim.
+ * **Phase 1A — multi-tab scaffolding (slice #9 extension).**
+ * See `specs/SPEC_BROWSER_PANE_TABS_2026-05-27.md` §"State management".
  *
- * The `faviconUrl` cell is a **derived projection** of `url` — its
- * value is computed inside every transition that touches `url`, so
- * there's no `FaviconChanged` command. The address-bar typing buffer
- * stays in the view (the catalog rule: DOM is the source of truth
- * for live-typing UX).
+ * The slice was originally per-pane single-URL — `url`, `title`,
+ * `loading`, `error`, `canGoBack`, `canGoForward`, `faviconUrl` all
+ * lived directly on `BrowserPaneState`. Phase 1A moves those into a
+ * `BrowserTab` record and introduces a list of tabs per pane, modelled
+ * on the slice #10 (editor-tabs) shape.
  *
- * Note: Phase 6 of the roadmap is when host-side title-change events
- * (`browser-pane-title-change`) actually start emitting. Until then,
- * the reducer's `title` cell stays at its initial fallback.
+ * Pane-level state retained:
+ *   - `closed` — terminal flag from `dispose()`. Once true every command
+ *     is a no-op. (Existing invariant; preserved verbatim.)
+ *
+ * Per-tab state (was pane-level pre-Phase-1A):
+ *   - `url` / `title` / `faviconUrl` — display + identity
+ *   - `loading` / `error` — page-load tracking
+ *   - `canGoBack` / `canGoForward` — history navigability
+ *   - `titleOverridden` / `faviconOverridden` — optimistic-header
+ *     placeholder vs. real-CEF-value tracking flags (carried per-tab
+ *     so each tab keeps its own placeholder/real-value distinction)
+ *
+ * New per-tab state (Phase 1A introductions):
+ *   - `id` — uuid, stable across reorders
+ *   - `isPreview` — VS Code-style preview slot; all tabs pinned in
+ *     Phase 1 but the field is reserved for Phase 2 "middle-click
+ *     opens preview" semantics
+ *   - `backendCreated` — tracker; flips true once the BrowserView
+ *     has been created backend-side. Set by the view via
+ *     `TabBackendCreated`; defaults false so hydrated tabs are
+ *     lazy-created on first activation.
+ *
+ * Backend-driven commands carry `source: "backend"` so the reducer
+ * can suppress the `navigate` event emission and prevent the
+ * OnAddressChange-becomes-Navigate echo loop documented in slice #10.
  */
 
-/** Reducer state. Mutually-exclusive invariant on (loading, error). */
-export interface BrowserPaneState {
-    /** Terminal flag — `dispose()` sets this. After it flips true,
-     *  every subsequent command is a no-op. The model checks this
-     *  to gate late IPC handlers (a nav-state event arriving after
-     *  the user closed the pane shouldn't write into a torn-down
-     *  signal). */
-    closed: boolean;
-    /** Page load in flight. Set by `Navigate`, cleared by
-     *  `LoadFinished` and `LoadFailed`. */
-    loading: boolean;
-    /** Most recent page-load failure. Set by `LoadFailed`, cleared
-     *  by `Navigate` (kicking off a fresh attempt) and `LoadFinished`
-     *  (success path). Mutually exclusive with `loading` per
-     *  Invariant 2. */
-    error: string | null;
-    /** Whether the embedded browser has back-history. Mirror of
-     *  CEF's `can_go_back` from `on_loading_state_change_pane`,
-     *  delivered to the renderer via the `browser-pane-nav-state`
-     *  event with `url_only=false`. CEF is the source of truth; the
-     *  reducer only persists the latest mirrored value. */
-    canGoBack: boolean;
-    /** Whether the embedded browser has forward-history. Mirror of
-     *  CEF's `can_go_forward`, same delivery + ownership notes as
-     *  `canGoBack`. */
-    canGoForward: boolean;
-    /** Page title. Always non-empty — empty/whitespace input from
-     *  `TitleChanged` is folded to `TITLE_FALLBACK` so the view
-     *  never has to know about the empty case. */
-    title: string;
-    /** True once a `TitleChanged` command has applied a non-fallback
-     *  title — used by `UrlConfirmed` to avoid overwriting the real
-     *  title with a hostname placeholder during the race where CEF's
-     *  title-change beats its nav-state event. Cleared by `Navigate`
-     *  so each new page starts fresh. Parallel to `faviconOverridden`.
-     *  See SPEC_BROWSER_PANE_OPTIMISTIC_HEADER_2026_05_18.md §3. */
-    titleOverridden: boolean;
-    /** Committed/loading URL. Distinct from the address-bar `<input>`
-     *  typing buffer (which stays in `browser-view.tsx` per the
-     *  catalog — DOM is the source of truth for live-typing UX).
-     *  Initial `""` matches the prior signal initial value. Set by
-     *  `Navigate` (intent-bearing user/programmatic nav), cleared
-     *  transiently by `UrlCleared` (reload's force-reload pattern),
-     *  and superseded by `UrlConfirmed` (host's `browser-pane-nav-state`
-     *  reporting the post-redirect final URL). */
+/** A single browsing context within a Browser pane. */
+export interface BrowserTab {
+    /** Stable per-pane uuid. Survives reorders. */
+    id: string;
+    /** Last loaded URL. Initial value `""` matches the prior
+     *  pane-level signal initial value. */
     url: string;
-    /** Pane favicon URL. Initially derived from `url`'s origin via
+    /** Page title. Always non-empty — empty/whitespace input from
+     *  `TabTitleChanged` (or the legacy `TitleChanged`) is folded to
+     *  `TITLE_FALLBACK` so the view never has to know about the empty
+     *  case. */
+    title: string;
+    /** Page favicon URL. Initially derived from `url`'s origin via
      *  `${origin}/favicon.ico`; overridden by a real URL when CEF
-     *  fires `on_favicon_urlchange` (command `FaviconUrlsReceived`).
-     *  Empty string when `url` is empty or unparseable; the view
-     *  falls back to the globe icon in that case. */
+     *  fires `on_favicon_urlchange` (commands `FaviconUrlsReceived`
+     *  on the active tab, or `TabFaviconChanged` keyed by id). Empty
+     *  string when `url` is empty or unparseable; the view falls back
+     *  to the globe icon in that case. */
     faviconUrl: string;
-    /** True once a `FaviconUrlsReceived` command with a non-empty
-     *  URL has been applied — prevents the derived-from-URL heuristic
-     *  from overwriting a real favicon. Cleared by `Navigate` so each
-     *  new page starts fresh from the heuristic until CEF reports. */
+    /** Page load in flight. Set by `Navigate` / `TabUrlChanged` (with
+     *  non-backend source) / `LoadStarted`, cleared by `LoadFinished`
+     *  / `LoadFailed` / `TabLoadingChanged`. Mutually exclusive with
+     *  `error` per Invariant 2. */
+    loading: boolean;
+    /** Most recent page-load failure for this tab. Cleared on the
+     *  next navigation; set by `LoadFailed` / `TabLoadFailed`. */
+    error: string | null;
+    /** Mirror of CEF's `can_go_back` for this tab. */
+    canGoBack: boolean;
+    /** Mirror of CEF's `can_go_forward` for this tab. */
+    canGoForward: boolean;
+    /** True once a real `TabTitleChanged` (or legacy `TitleChanged`)
+     *  has applied a non-fallback title — used by `UrlConfirmed`'s
+     *  cross-origin guard to avoid overwriting the real title with a
+     *  hostname placeholder during the race where CEF's title-change
+     *  beats its nav-state event. Cleared on each navigate so each
+     *  new page starts fresh. Parallel to `faviconOverridden`. */
+    titleOverridden: boolean;
+    /** True once a `FaviconUrlsReceived` / `TabFaviconChanged` with
+     *  a non-empty URL has been applied — prevents the derived-from-
+     *  URL heuristic from overwriting a real favicon. Cleared on
+     *  each navigate. */
     faviconOverridden: boolean;
+    /** VS Code-style preview slot. All tabs pinned (`isPreview: false`)
+     *  in Phase 1; the field exists for Phase 2's middle-click /
+     *  background-tab semantics. */
+    isPreview: boolean;
+    /** True once the backend `browser_pane_tab_create` IPC has
+     *  resolved. The view uses this in Phase 1B/1C to decide between
+     *  `tab_create` and `tab_show` on activation. Hydrated tabs
+     *  start `false`. */
+    backendCreated: boolean;
 }
 
+/** Entry in the per-pane recently-closed stack. Bounded by
+ *  `MAX_RECENTLY_CLOSED` (10). Older entries evicted on overflow. */
+export interface ClosedBrowserTab {
+    url: string;
+    title: string;
+    closedAt: number;
+}
+
+/** Pane-level reducer state. Per-tab fields live in `tabs[i]`. */
+export interface BrowserPaneState {
+    /** Terminal flag — `dispose()` sets this. After it flips true,
+     *  every subsequent command is a no-op (emits
+     *  `post-close-command-dropped` instead of mutating). The model
+     *  reads this to gate late IPC handlers. */
+    closed: boolean;
+    /** Ordered list of tabs. Empty until the view dispatches the
+     *  initial `OpenTab`. */
+    tabs: BrowserTab[];
+    /** Id of the currently active tab, or `null` when `tabs.length === 0`.
+     *  Invariant 1: always points at a tab in `tabs[]` or is null. */
+    activeTabId: string | null;
+    /** Stack of recently-closed tabs, capped at `MAX_RECENTLY_CLOSED`.
+     *  Newest entry at the end; `ReopenLastClosed` pops from the end. */
+    recentlyClosed: ClosedBrowserTab[];
+}
+
+export const MAX_RECENTLY_CLOSED = 10;
+
 /**
- * Derive the favicon URL from a pane URL. Empty string when the URL
+ * Derive the favicon URL from a tab URL. Empty string when the URL
  * is empty or unparseable — the view interprets that as "no favicon,
  * show the globe icon" per the catalog. Pure function so it's safe to
  * call inside reducer transitions and from tests directly.
@@ -126,11 +148,6 @@ export function deriveFaviconUrl(url: string): string {
  * `https://www.x.com/foo` → `"x.com"`). Empty for unparseable URLs or
  * `null`-origin schemes (about:blank, file://) so the existing
  * `TITLE_FALLBACK` ("Browser") rule takes over.
- *
- * Used by the reducer's `Navigate` + `UrlConfirmed` cases to give the
- * header an instant title at navigation time, replaced by the real
- * `<title>` once CEF emits `TitleChanged`. See
- * SPEC_BROWSER_PANE_OPTIMISTIC_HEADER_2026_05_18.md.
  */
 export function deriveTitlePlaceholder(url: string): string {
     if (url === "") return "";
@@ -146,10 +163,7 @@ export function deriveTitlePlaceholder(url: string): string {
 /**
  * True iff `a` and `b` resolve to the same `URL.origin`. Empty strings,
  * unparseable URLs, and `null`-origin schemes (about:blank, file://)
- * compare as same-origin only with themselves. Used by the reducer to
- * decide whether a URL change is an in-page redirect (preserve the
- * real favicon) vs. a cross-origin navigation (reset the override and
- * fall back to the derived favicon for the new origin).
+ * compare as same-origin only with themselves.
  */
 export function sameOriginUrl(a: string, b: string): boolean {
     if (a === b) return true;
@@ -157,66 +171,178 @@ export function sameOriginUrl(a: string, b: string): boolean {
     let originB: string | null = null;
     try { originA = new URL(a).origin; } catch { originA = null; }
     try { originB = new URL(b).origin; } catch { originB = null; }
-    // Unparseable or null-origin schemes (about:blank, file:, data:)
-    // are only same-origin with their own literal URL, never with
-    // each other or with regular http(s) origins — codex P3 on #905.
     if (originA == null || originB == null) return false;
     if (originA === "null" || originB === "null") return false;
     return originA === originB;
 }
 
-/** The string the reducer projects when `TitleChanged` arrives with
- *  empty or whitespace-only content. The view binds to `state.title`
- *  directly, so the fallback is enforced at write time, not at read
- *  time. Matches the catalog's "falls back to 'Browser' when empty"
- *  rule (`docs/specs/browser-pane-state-catalog.md` row 1.titleAtom). */
+/** The string projected when a tab's title arrives empty/whitespace.
+ *  The view binds to `tab.title` directly, so the fallback is enforced
+ *  at write time, not at read time. */
 export const TITLE_FALLBACK = "Browser";
 
 export const initialState = (): BrowserPaneState => ({
     closed: false,
-    loading: false,
-    error: null,
-    canGoBack: false,
-    canGoForward: false,
-    title: TITLE_FALLBACK,
-    titleOverridden: false,
-    url: "",
-    faviconUrl: "",
-    faviconOverridden: false,
+    tabs: [],
+    activeTabId: null,
+    recentlyClosed: [],
 });
 
+/**
+ * Build a fresh tab record for the given URL. Title / favicon derive
+ * from the URL; loading defaults to `true` because the view treats
+ * `OpenTab` as the start of a navigation.
+ */
+export function makeTab(url: string, isPreview = false): BrowserTab {
+    const placeholder = deriveTitlePlaceholder(url);
+    return {
+        id: newTabId(),
+        url,
+        title: placeholder !== "" ? placeholder : TITLE_FALLBACK,
+        faviconUrl: deriveFaviconUrl(url),
+        loading: url !== "",
+        error: null,
+        canGoBack: false,
+        canGoForward: false,
+        titleOverridden: false,
+        faviconOverridden: false,
+        isPreview,
+        backendCreated: false,
+    };
+}
+
+/** uuid generator with a deterministic-fallback for older Node test
+ *  runners. */
+export function newTabId(): string {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+        return crypto.randomUUID();
+    }
+    return `tab-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+}
+
+/** Source-tag carried on every dispatch. Backend-driven events use
+ *  `"backend"` to suppress the `navigate` event emission and prevent
+ *  the echo loop. Defaults to `"frontend"`. */
+export type BrowserCommandSource = "frontend" | "backend" | "system" | "hydrate";
+
+/** Hydration shape — input to `HydrateFromMeta`. Carries only the
+ *  identity + URL needed to re-create the tab record; everything
+ *  else (loading, error, backendCreated, titleOverridden, ...)
+ *  resets to its initial value. */
+export interface HydratedBrowserTab {
+    id: string;
+    url: string;
+    title?: string;
+    faviconUrl?: string;
+    isPreview?: boolean;
+}
+
 export type BrowserPaneCommand =
+    // ─── Tab list management (new in Phase 1A) ─────────────────────
+    /**
+     * Append a new tab and (by default) activate it. `mode: "background"`
+     * appends without activating — used for Phase 2 middle-click-link
+     * semantics. Emits `TabOpened` plus `TabActivated` when the tab
+     * becomes active.
+     */
+    | {
+          type: "OpenTab";
+          url: string;
+          mode?: "foreground" | "background";
+          source?: BrowserCommandSource;
+      }
+    /**
+     * Remove the tab. If it was active, activate its right neighbour
+     * (or the new last tab when it was the rightmost). Pushes a
+     * `ClosedBrowserTab` entry onto the `recentlyClosed` stack.
+     * Emits `LastTabClosed` when the pane becomes tabless.
+     */
+    | { type: "CloseTab"; tabId: string; source?: BrowserCommandSource }
+    /**
+     * Activate a tab. No-op when the id is unknown or already active.
+     */
+    | { type: "SwitchTab"; tabId: string; source?: BrowserCommandSource }
+    /**
+     * Move a tab to `toIndex`. Index is clamped to `[0, tabs.length-1]`.
+     * No-op when only one tab exists.
+     */
+    | {
+          type: "ReorderTab";
+          tabId: string;
+          toIndex: number;
+          source?: BrowserCommandSource;
+      }
+    // ─── Per-tab backend-driven updates (new in Phase 1A) ──────────
+    /** Backend reported a URL change (typically `OnAddressChange`). */
+    | {
+          type: "TabUrlChanged";
+          tabId: string;
+          url: string;
+          source?: BrowserCommandSource;
+      }
+    /** Backend reported a title change (`OnTitleChange`). */
+    | { type: "TabTitleChanged"; tabId: string; title: string; source?: BrowserCommandSource }
+    /** Backend reported a favicon-URL change (`OnFaviconURLChange`). */
+    | {
+          type: "TabFaviconChanged";
+          tabId: string;
+          faviconUrl: string;
+          source?: BrowserCommandSource;
+      }
+    /** Backend reported a loading-state change (`OnLoadingStateChange`).
+     *  Updates loading, canGoBack, and canGoForward atomically. */
+    | {
+          type: "TabLoadingChanged";
+          tabId: string;
+          loading: boolean;
+          canGoBack: boolean;
+          canGoForward: boolean;
+          source?: BrowserCommandSource;
+      }
+    /** Backend reported a page-load failure (`OnLoadError`). */
+    | {
+          type: "TabLoadFailed";
+          tabId: string;
+          error: string;
+          source?: BrowserCommandSource;
+      }
+    /** The view confirmed that `browser_pane_tab_create` resolved. */
+    | { type: "TabBackendCreated"; tabId: string; source?: BrowserCommandSource }
+    /** Pop the newest entry off `recentlyClosed` and re-open it as a
+     *  new tab. No-op when the stack is empty. */
+    | { type: "ReopenLastClosed"; source?: BrowserCommandSource }
+    /** Bulk-restore from persisted block meta. Each tab starts with
+     *  `backendCreated: false`, `loading: false`, `error: null`. */
+    | {
+          type: "HydrateFromMeta";
+          tabs: HydratedBrowserTab[];
+          activeTabId: string | null;
+          source?: BrowserCommandSource;
+      }
+    // ─── Existing commands (pre-Phase-1A) — now operate on active tab
     /**
      * The user (or the host's link-click forwarding) initiated a
-     * navigation with a known target URL. Sets loading=true, clears
-     * error. After dispose, a no-op.
+     * navigation in the active tab. Sets loading=true, clears error.
+     * After dispose, a no-op. No-op when `activeTabId === null`.
      */
-    | { type: "Navigate"; url: string }
+    | { type: "Navigate"; url: string; source?: BrowserCommandSource }
     /**
      * A load began but the destination URL isn't known yet (e.g.
-     * `goBack` / `goForward` — CEF owns the history, we just fire
-     * the IPC and wait for `nav-state` to tell us what we landed on).
-     * Same state-shape effect as `Navigate` but expresses different
-     * intent for the audit ring. After dispose, a no-op.
+     * `goBack` / `goForward`). Same shape-effect as `Navigate` for
+     * the active tab's loading flag.
      */
     | { type: "LoadStarted" }
     /**
      * Host's `browser-pane-nav-state` event arrived with `url_only=false`,
-     * meaning the page finished loading (not just an in-page hash
-     * update). Clears loading and error. After dispose, a no-op.
+     * meaning the active tab finished loading.
      */
     | { type: "LoadFinished" }
     /**
-     * The page-load failed (SSL error, navigation aborted, network
-     * down). Sets error, clears loading. After dispose, a no-op.
+     * The active tab's page-load failed. Sets error, clears loading.
      */
     | { type: "LoadFailed"; reason: string }
     /**
-     * Co-update of the history-navigability flags. Either field may
-     * be omitted — the host emits whichever values its
-     * `on_loading_state_change_pane` hook gave us, and the reducer
-     * leaves an undefined field alone. Identical-to-state values
-     * yield no event (idempotent). After dispose, a no-op.
+     * Co-update of the active tab's history-navigability flags.
      */
     | {
           type: "HistoryUpdated";
@@ -224,56 +350,77 @@ export type BrowserPaneCommand =
           canGoForward?: boolean;
       }
     /**
-     * Host emitted a title change for this pane. The reducer folds
-     * empty/whitespace input to `TITLE_FALLBACK` so the view never
-     * sees a blank title. Idempotent — same title yields no event.
-     * After dispose, a no-op.
+     * Host emitted a title change for the active tab. Empty/whitespace
+     * folds to `TITLE_FALLBACK`.
      */
     | { type: "TitleChanged"; title: string }
     /**
      * Host's `browser-pane-nav-state` reported the post-redirect
-     * confirmed URL. Updates `state.url` only; does NOT touch
-     * loading/error (those transition via `LoadFinished`/`LoadFailed`
-     * in the same event handler). Idempotent on identical values.
-     * After dispose, a no-op.
+     * confirmed URL for the active tab. Updates active tab's `url`
+     * only; does NOT touch loading/error.
      */
     | { type: "UrlConfirmed"; url: string }
     /**
      * Transient URL clear used by `reload()` to force an iframe
-     * reload via clear-then-restore across one frame. Sets
-     * `state.url = ""` without touching loading/error/title.
-     * Idempotent (already-empty url yields no event). After dispose,
-     * a no-op.
+     * reload via clear-then-restore across one frame. Sets the
+     * active tab's `url = ""`.
      */
     | { type: "UrlCleared" }
     /**
-     * The pane HWND captured a click at the Win32 level (the
-     * `browser-pane-clicked` IPC fired). Doesn't change any reducer
-     * state — DOM focus and Win32 OS focus are owned outside the
-     * reducer per the catalog rule. Emits a `pane-clicked` event
-     * whose handler performs the side-effects we ship today: blur
-     * any stale main-window input that holds DOM focus, then call
-     * `refocusNode(blockId)`. Routing through the reducer makes the
-     * click visible in the audit ring (Phase 4) so multi-pane focus
-     * investigations can see the exact sequence of clicks vs other
-     * dispatches. After dispose, a no-op (the generic post-close
-     * gate handles this).
+     * The pane HWND captured a click at the Win32 level. Pure event
+     * — no state change. Side-effects handled by the slot store's
+     * event sink (blur+refocus).
      */
     | { type: "PaneClicked" }
     /**
-     * CEF fired `on_favicon_urlchange` with the page's real favicon URL list.
-     * The first URL is used; an empty array clears the override and falls back
-     * to the heuristic derivation. Idempotent on identical URL.
+     * CEF fired `on_favicon_urlchange` for the active tab.
      */
     | { type: "FaviconUrlsReceived"; urls: string[] }
     /**
      * The pane is being torn down. After this command runs, every
-     * subsequent command on this state is a no-op. Idempotent —
-     * dispatching `Disposed` twice is a no-op the second time.
+     * subsequent command on this state is a no-op. Idempotent.
      */
     | { type: "Disposed" };
 
 export type BrowserPaneEvent =
+    // ─── Tab list events (new in Phase 1A) ────────────────────────
+    | { type: "tab-opened"; tabId: string; url: string; atIndex: number }
+    | { type: "tab-closed"; tabId: string; url: string }
+    | { type: "tab-activated"; tabId: string }
+    | { type: "tab-reordered"; tabId: string; toIndex: number }
+    | { type: "tab-url-changed"; tabId: string; url: string }
+    | { type: "tab-title-changed"; tabId: string; title: string }
+    | { type: "tab-favicon-changed"; tabId: string; faviconUrl: string }
+    | {
+          type: "tab-loading-changed";
+          tabId: string;
+          loading: boolean;
+          canGoBack: boolean;
+          canGoForward: boolean;
+      }
+    | { type: "tab-load-failed"; tabId: string; error: string }
+    | { type: "tab-backend-created"; tabId: string }
+    | { type: "last-tab-closed" }
+    | { type: "tabs-restored"; tabIds: string[]; activeTabId: string | null }
+    // ─── Suppression events (convention §2: "Suppressed/dropped commands
+    //     MUST emit a 'negative' event"). Surfaced to the diagnostics
+    //     ring so a late IPC or buggy caller is visible in audit rather
+    //     than swallowed.
+    | { type: "close-suppressed"; tabId: string; reason: "unknown-tab" }
+    | { type: "switch-suppressed"; tabId: string; reason: "unknown-tab" }
+    | {
+          type: "reorder-suppressed";
+          tabId: string;
+          reason: "unknown-tab" | "noop" | "single-tab";
+      }
+    | { type: "reopen-empty" }
+    | {
+          type: "hydrate-suppressed";
+          reason: "duplicate-tab-ids" | "empty-tabs-with-active-id";
+      }
+    // ─── Existing events (pre-Phase-1A) ───────────────────────────
+    /** Active-tab navigate intent. Suppressed when the originating
+     *  command carried `source: "backend"` (echo-loop guard). */
     | { type: "navigate"; url: string }
     | { type: "load-started" }
     | { type: "load-finished" }
@@ -290,9 +437,7 @@ export type BrowserPaneEvent =
     | { type: "favicon-urls-received"; url: string }
     | { type: "disposed" }
     /** Invariant fire — emitted instead of mutating state when a
-     *  command targets a closed pane. Surfaced for diagnostics so
-     *  late IPC handlers can be traced rather than failing
-     *  silently. */
+     *  command targets a closed pane. */
     | { type: "post-close-command-dropped"; commandType: string };
 
 export interface ReducerResult {
