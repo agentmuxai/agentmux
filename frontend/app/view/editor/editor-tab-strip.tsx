@@ -53,6 +53,17 @@ function Tab(props: { tab: EditorTab; active: boolean; model: EditorViewModel })
         if (!props.active) props.model.switchTab(props.tab.id);
     };
 
+    const onDblClick = (e: MouseEvent) => {
+        e.stopPropagation();
+        // Double-clicking a preview tab pins it (matches VS Code). For an
+        // already-pinned tab, dblclick is a no-op at the strip layer
+        // (.editor-tab-strip already stops the dblclick from reaching the
+        // pane header, so the pane won't maximize either).
+        if (props.tab.isPreview) {
+            props.model.pinActiveTab();
+        }
+    };
+
     const onCloseClick = (e: MouseEvent) => {
         e.stopPropagation();
         props.model.closeTab(props.tab.id);
@@ -64,10 +75,12 @@ function Tab(props: { tab: EditorTab; active: boolean; model: EditorViewModel })
             classList={{
                 "editor-tab--active": props.active,
                 "editor-tab--dirty": props.tab.dirty,
+                "editor-tab--preview": props.tab.isPreview,
             }}
-            title={props.tab.filePath}
+            title={props.tab.isPreview ? `${props.tab.filePath} (preview — double-click to pin)` : props.tab.filePath}
             onMouseDown={onMouseDown}
             onClick={onClick}
+            onDblClick={onDblClick}
         >
             <span class="editor-tab-label">{basename()}</span>
             <button

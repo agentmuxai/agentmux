@@ -467,7 +467,8 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                         model={model.treeModel}
                         activeFilePath={model.filePathAtom()}
                         showHidden={model.showHiddenAtom()}
-                        onFileClick={(path) => void model.openFile(path)}
+                        onFileClick={(path) => void model.openFilePreview(path)}
+                        onFileDblClick={(path) => void model.openFile(path)}
                         onToggleHidden={() => void model.toggleShowHidden()}
                     />
                     <Show when={!model.filePathAtom()}>
@@ -508,7 +509,31 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                     <div class="editor-loading">Loading...</div>
                 </Show>
 
-                <Show when={model.errorAtom()}>
+                {/* Full-pane error panel when a file failed to load (e.g.
+                    invalid path, permission denied, binary). Replaces the
+                    CodeMirror body for the active tab while the error sticks.
+                    Operational errors that occur with content already loaded
+                    (e.g. save failures) still surface via the top banner
+                    below. */}
+                <Show when={model.errorAtom() && model.activeTabAtom() && !model.activeTabAtom()?.contentLoaded}>
+                    <div class="editor-error-panel" role="alert">
+                        <div class="editor-error-panel-icon" aria-hidden="true">⚠</div>
+                        <div class="editor-error-panel-title">Couldn't open file</div>
+                        <div class="editor-error-panel-path">{model.filePathAtom()}</div>
+                        <div class="editor-error-panel-message">{model.errorAtom()}</div>
+                        <button
+                            class="editor-error-panel-close"
+                            onClick={() => {
+                                const tab = model.activeTabAtom();
+                                if (tab) model.closeTab(tab.id);
+                            }}
+                        >
+                            Close tab
+                        </button>
+                    </div>
+                </Show>
+
+                <Show when={model.errorAtom() && model.activeTabAtom()?.contentLoaded}>
                     <div class="editor-error">{model.errorAtom()}</div>
                 </Show>
 
@@ -562,7 +587,13 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                 </Show>
 
                 <Show
-                    when={model.filePathAtom() && !model.loadingAtom()}
+                    when={
+                        model.filePathAtom() &&
+                        !model.loadingAtom() &&
+                        // Don't render CodeMirror when the active tab failed
+                        // to load — the centered error panel takes the body.
+                        !(model.errorAtom() && model.activeTabAtom() && !model.activeTabAtom()?.contentLoaded)
+                    }
                     fallback={
                         <Show when={!model.treeExpandedAtom()}>
                             <div class="editor-open-prompt">
