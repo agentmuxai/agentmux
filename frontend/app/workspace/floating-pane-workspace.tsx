@@ -50,7 +50,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     };
 
     return (
-        <div class="flex flex-col w-full flex-grow overflow-hidden">
+        <div class="floating-pane-workspace flex flex-col w-full flex-grow overflow-hidden">
             {/* Slim title bar.
                 Drag is handled by the host's `floating_pane_wndproc`
                 (agentmux-cef/src/floating_pane.rs): it returns HTCAPTION

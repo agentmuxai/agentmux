@@ -500,7 +500,19 @@
                 border-color: var(--block-agent-color);
             }
         }
+    }
+}
 
+// Inside a floating pane window, the single block is always the focused
+// block (it's the only one), so the accent-color ring would be permanent
+// chrome. Suppress it — the slim title bar already provides the visual
+// container; a focus ring on a one-block window is redundant.
+.floating-pane-workspace {
+    .block.block-focused .block-mask {
+        border-color: transparent;
+    }
+    .block.block-focused.has-agent-color .block-mask {
+        border-color: transparent;
     }
 }
 

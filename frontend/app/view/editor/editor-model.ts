@@ -160,6 +160,7 @@ export class EditorViewModel implements ViewModel {
         // future dirty-confirm modal, LSP coupling). Removed on dispose so
         // no closure over a disposed model survives.
         this._globalHandler = (events: EditorPaneEvent[]) => {
+            console.log("[editor-tabs] _globalHandler called events=", events.map((e) => e.type));
             this._sliceVersion[1]((v) => v + 1);
             for (const ev of events) {
                 if (ev.type === "TabClosed") {
@@ -269,13 +270,17 @@ export class EditorViewModel implements ViewModel {
 
     // ── Tab actions (dispatched into the slice) ──────────────────────
     async openFile(filePath: string): Promise<void> {
+        console.log("[editor-tabs] openFile entry path=", filePath);
         const canonical = canonicalizePath(filePath);
         // Claim the loading slot BEFORE dispatching so two synchronous calls
         // for the same path don't both issue ReadEditorFileCommand. Without
         // this, the second call would pass _loadingPaths.has() (still empty)
         // and the .add() below would fire after the first call's RPC already
         // returned, racing the content write.
-        if (this._loadingPaths.has(canonical)) return;
+        if (this._loadingPaths.has(canonical)) {
+            console.log("[editor-tabs] openFile early-return: loading in progress for", canonical);
+            return;
+        }
         this._loadingPaths.add(canonical);
 
         // Dispatch OpenFile. The slice either activates an existing tab (and
@@ -290,19 +295,23 @@ export class EditorViewModel implements ViewModel {
             language: detectLanguage(filePath),
             source: "user",
         });
+        console.log("[editor-tabs] openFile dispatched, events=", events.map((e) => e.type));
 
         // Find the tab id (just-opened or pre-existing).
         const opened = events.find(
             (e) => e.type === "TabOpened" || e.type === "TabActivated",
         );
         if (!opened || (opened.type !== "TabOpened" && opened.type !== "TabActivated")) {
+            console.log("[editor-tabs] openFile: no TabOpened/TabActivated event — aborting");
             this._loadingPaths.delete(canonical);
             return;
         }
         const tabId = opened.tabId;
+        console.log("[editor-tabs] openFile: tabId=", tabId.slice(0, 8));
 
         // If content's already loaded for this tab, we're done.
         if (this._contentByTab.has(tabId)) {
+            console.log("[editor-tabs] openFile: content already cached for", tabId.slice(0, 8));
             this._loadingPaths.delete(canonical);
             return;
         }
@@ -311,10 +320,12 @@ export class EditorViewModel implements ViewModel {
                 path: filePath,
             });
             const content = result?.content ?? "";
+            console.log("[editor-tabs] readeditorfile resolved, contentLen=", content.length);
             this._contentByTab.set(tabId, content);
             this._contentVersion[1]((v) => v + 1);
 
             const hash = await sha256Hex(content);
+            console.log("[editor-tabs] dispatching TabContentLoaded for", tabId.slice(0, 8));
             dispatch(this.blockId, {
                 type: "TabContentLoaded",
                 tabId,
