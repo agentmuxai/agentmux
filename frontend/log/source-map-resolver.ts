@@ -143,32 +143,60 @@ function resolveFrameSync(line: string): { line: string; status: FrameStatus } {
  * indicating whether any frame couldn't be resolved (caller can
  * then call {@link resolveStack} for the async follow-up).
  */
+/**
+ * Outcome of a stack resolve.
+ *   - `"resolved"` — every frame was rewritten (or there were no
+ *     frames). Caller can trust the resolved string as fully decoded.
+ *   - `"partial"` — at least one frame's chunk is pending an async
+ *     map load. Caller should fire the async follow-up.
+ *   - `"failed"`  — at least one frame's chunk is terminally failed
+ *     (404, malformed, or in-map miss). Async retry buys nothing;
+ *     the resolved string still contains raw minified positions.
+ *
+ * Priority: pending dominates failed dominates resolved — so a stack
+ * with both pending and failed frames reports `"partial"` (the async
+ * follow-up will eventually re-report as `"failed"` once the pending
+ * loads finish).
+ */
+export type ResolveStatus = "resolved" | "partial" | "failed";
+
 export function resolveStackSync(stack: string): {
     resolved: string;
-    partial: boolean;
+    status: ResolveStatus;
 } {
     const lines = stack.split("\n");
     let anyPending = false;
+    let anyFailed = false;
     const out = lines.map((line) => {
         if (!line.includes(" at ")) return line;
         const { line: next, status } = resolveFrameSync(line);
-        // Only `pending` frames warrant an async follow-up — a `failed`
-        // chunk has already been ruled out by `loadMap` (404 or
-        // unparseable map). Treating failed as partial would loop the
-        // forwarder into emitting duplicate `(stack-resolved)` lines
-        // with the still-raw stack each time (codex P2 on PR #1090).
+        // Track "needs async retry" (pending) separately from
+        // "tried and gave up" (failed). Conflating them either
+        // re-runs the resolver for nothing or — if we ignored
+        // failure — falsely labels a still-raw stack as fully
+        // resolved (codex P2 on PR #1090 b80a2ed6).
         if (status === "pending") anyPending = true;
+        else if (status === "failed") anyFailed = true;
         return next;
     });
-    return { resolved: out.join("\n"), partial: anyPending };
+    return {
+        resolved: out.join("\n"),
+        status: anyPending ? "partial" : anyFailed ? "failed" : "resolved",
+    };
 }
 
 /**
  * Async resolve: ensures every chunk's `.map` is loaded (or marked
  * failed), then runs the synchronous resolver against the stack.
  * Used by the forwarder as a follow-up after the primary emit.
+ *
+ * After awaiting every load, no chunk is `pending` — so the returned
+ * status is always `"resolved"` or `"failed"`, never `"partial"`.
  */
-export async function resolveStack(stack: string): Promise<string> {
+export async function resolveStack(stack: string): Promise<{
+    resolved: string;
+    status: ResolveStatus;
+}> {
     const lines = stack.split("\n");
     const urls = new Set<string>();
     for (const line of lines) {
@@ -179,7 +207,7 @@ export async function resolveStack(stack: string): Promise<string> {
     // resolveFrameSync handles the "failed" sentinel by passing the
     // raw line through.
     await Promise.allSettled(Array.from(urls).map(loadMap));
-    return resolveStackSync(stack).resolved;
+    return resolveStackSync(stack);
 }
 
 /** Test-only helper. Clears all cached maps + failure marks. */

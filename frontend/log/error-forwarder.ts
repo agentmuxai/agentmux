@@ -25,7 +25,7 @@
 // initLogPipe() so any errors during the rest of bootstrap are caught.
 
 import { invokeCommand } from "@/app/platform/ipc";
-import { resolveStack, resolveStackSync } from "./source-map-resolver";
+import { resolveStack, resolveStackSync, type ResolveStatus } from "./source-map-resolver";
 
 let initialized = false;
 
@@ -63,18 +63,25 @@ function forward(tag: string, payload: ForwardedErrorPayload): void {
         // pays a one-time async fetch (deferred to the follow-up below);
         // subsequent errors in cached chunks resolve fully right here.
         // See SPEC_FE_SOURCE_MAP_RESOLVER_2026_05_27.md.
+        //
+        // `stack_resolved` is a tri-state:
+        //   "resolved" — fully rewritten; trust `stack`.
+        //   "partial"  — pending map load; async follow-up will fire.
+        //   "failed"   — terminal failure; some/all frames still raw,
+        //                no retry coming. (Distinct from "resolved" —
+        //                codex P2 on PR #1090 b80a2ed6.)
         let stackForLog: string | null = payload.stack;
-        let stackResolved: true | false | "partial" = false;
+        let stackResolved: ResolveStatus = "failed";
         if (payload.stack) {
             try {
                 const sync = resolveStackSync(payload.stack);
                 stackForLog = sync.resolved;
-                stackResolved = sync.partial ? "partial" : true;
+                stackResolved = sync.status;
             } catch {
                 // Resolver itself failed — fall back to the raw stack.
                 // Never break the log pipe.
                 stackForLog = payload.stack;
-                stackResolved = false;
+                stackResolved = "failed";
             }
         }
 
@@ -113,9 +120,14 @@ function forward(tag: string, payload: ForwardedErrorPayload): void {
                                 tag,
                                 name: payload.name,
                                 message: payload.message,
-                                stack: fullyResolved,
+                                stack: fullyResolved.resolved,
                                 stack_raw: stackToResolve,
-                                stack_resolved: true,
+                                // After async, the status is either
+                                // "resolved" (everything mapped) or
+                                // "failed" (some chunks terminally
+                                // failed). It cannot be "partial" —
+                                // resolveStack awaits every load.
+                                stack_resolved: fullyResolved.status,
                                 source: payload.source,
                             },
                         }).catch(() => {});

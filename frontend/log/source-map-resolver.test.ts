@@ -58,8 +58,8 @@ describe("source-map-resolver", () => {
             "    at bpe (http://127.0.0.1:50000/assets/index-Hash.js:3:0)",
         ].join("\n");
 
-        const { resolved, partial } = resolveStackSync(rawStack);
-        expect(partial).toBe(false);
+        const { resolved, status } = resolveStackSync(rawStack);
+        expect(status).toBe("resolved");
         expect(resolved).toContain("src/orig.ts:11");
         // Name from the map (myFn) overrides the runtime funcName (bpe).
         expect(resolved).toContain("myFn");
@@ -71,8 +71,8 @@ describe("source-map-resolver", () => {
             "    at fn (http://127.0.0.1:50000/assets/unknown-Hash.js:3:0)",
         ].join("\n");
 
-        const { resolved, partial } = resolveStackSync(rawStack);
-        expect(partial).toBe(true);
+        const { resolved, status } = resolveStackSync(rawStack);
+        expect(status).toBe("partial");
         expect(resolved).toContain("unknown-Hash.js");
     });
 
@@ -81,10 +81,10 @@ describe("source-map-resolver", () => {
         _seedConsumerForTests("index-Hash.js", consumer);
 
         const raw = "TypeError: bang";
-        const { resolved, partial } = resolveStackSync(raw);
+        const { resolved, status } = resolveStackSync(raw);
         expect(resolved).toBe(raw);
-        // No frames touched ⇒ no partial flag.
-        expect(partial).toBe(false);
+        // No frames touched ⇒ trivially resolved.
+        expect(status).toBe("resolved");
     });
 
     it("resolveStack fetches missing maps async, then resolves", async () => {
@@ -110,12 +110,13 @@ describe("source-map-resolver", () => {
             "    at bpe (http://127.0.0.1:50000/assets/index-Hash.js:3:0)",
         ].join("\n");
 
-        const out = await resolveStack(rawStack);
+        const { resolved, status } = await resolveStack(rawStack);
         // Source-map-js may or may not honor names depending on the
         // exact encoding — assert on the source position, which is
         // the load-bearing part.
-        expect(out).toContain("src/orig.ts");
-        expect(out).toMatch(/src\/orig\.ts:1[0-9]/);
+        expect(resolved).toContain("src/orig.ts");
+        expect(resolved).toMatch(/src\/orig\.ts:1[0-9]/);
+        expect(status).toBe("resolved");
         // Consumer is now silently used; suppress unused-warning.
         void consumer;
     });
@@ -132,12 +133,14 @@ describe("source-map-resolver", () => {
 
         const stack = "Error: y\n    at f (http://x/assets/gone-Hash.js:1:0)";
 
-        const r1 = await resolveStack(stack);
-        const r2 = await resolveStack(stack);
+        const { resolved: r1, status: s1 } = await resolveStack(stack);
+        const { resolved: r2, status: s2 } = await resolveStack(stack);
 
         expect(fetchMock).toHaveBeenCalledTimes(1);
         expect(r1).toContain("gone-Hash.js");
         expect(r2).toContain("gone-Hash.js");
+        expect(s1).toBe("failed");
+        expect(s2).toBe("failed");
         // Single one-shot WARN per failing chunk.
         expect(warnSpy).toHaveBeenCalledTimes(1);
     });
@@ -179,13 +182,13 @@ describe("source-map-resolver", () => {
         expect(opfSpy).toHaveBeenCalledWith({ line: 3, column: 0 });
     });
 
-    it("failed chunks are terminal — resolveStackSync returns partial: false", async () => {
-        // Codex P2 on PR #1090: after a chunk's `.map` is marked
-        // failed, the sync resolver must NOT treat its frames as
-        // pending — otherwise the forwarder fires another async
-        // follow-up that re-runs the same failed lookup and emits a
-        // duplicate `(stack-resolved)` log line with the still-raw
-        // stack. The failure cache must be terminal.
+    it("failed chunks are terminal — resolveStackSync returns status: 'failed'", async () => {
+        // Codex P2 on PR #1090 (commit 55e1a14d): after a chunk's
+        // `.map` is marked failed, the sync resolver must NOT treat
+        // its frames as pending — otherwise the forwarder fires
+        // another async follow-up that re-runs the same failed lookup
+        // and emits a duplicate `(stack-resolved)` log line with the
+        // still-raw stack. The failure cache must be terminal.
         vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 404 }) as Response));
         vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
@@ -195,8 +198,29 @@ describe("source-map-resolver", () => {
         await resolveStack(stack);
 
         // Second trip: pure sync — chunk should be terminal-failed,
-        // NOT counted as partial.
-        const { partial } = resolveStackSync(stack);
-        expect(partial).toBe(false);
+        // distinct from both "resolved" and "partial".
+        const { status } = resolveStackSync(stack);
+        expect(status).toBe("failed");
+    });
+
+    it("'failed' is distinct from 'resolved' — codex P2 on b80a2ed6", async () => {
+        // Codex P2 on PR #1090 commit b80a2ed6: when a chunk's map
+        // permanently fails, the resolver's sync return previously
+        // collapsed back to `partial: false` which the forwarder
+        // emitted as `stack_resolved: true` — a lie, since the
+        // frames are still raw minified positions. Status must
+        // discriminate "fully resolved" from "tried and failed."
+        vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 404 }) as Response));
+        vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+        const stack = "Error: w\n    at f (http://x/assets/lost-Hash.js:1:0)";
+        await resolveStack(stack); // cache as failed
+
+        const { status, resolved } = resolveStackSync(stack);
+        expect(status).not.toBe("resolved");
+        expect(status).toBe("failed");
+        // Frame stays raw — log readers must be able to see that
+        // from the status alone.
+        expect(resolved).toContain("lost-Hash.js");
     });
 });
