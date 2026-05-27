@@ -255,19 +255,23 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
 
             let target: { label: string | null; window_id: string | null };
             try {
+                // exclude_label = our own floater's label. Without this,
+                // the host's Z-order walk would return the floater itself
+                // — it's at the cursor (the JS-driven drag follows the
+                // cursor), so it's always topmost where the cursor is.
                 target = await invokeCommand<{
                     label: string | null;
                     window_id: string | null;
-                }>("resolve_window_at_cursor", { x: px, y: py });
+                }>("resolve_window_at_cursor", {
+                    x: px,
+                    y: py,
+                    exclude_label: ourLabel,
+                });
             } catch (e) {
                 console.error("[floating-pane] resolve_window_at_cursor failed", e);
                 return;
             }
-            if (
-                !target.label ||
-                !target.window_id ||
-                target.label === ourLabel
-            ) {
+            if (!target.label || !target.window_id) {
                 // Cursor over desktop, external app, or our own floater
                 // — leave floater at the dropped position.
                 return;

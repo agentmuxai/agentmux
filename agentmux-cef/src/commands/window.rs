@@ -451,8 +451,13 @@ pub fn start_window_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Res
 /// the answer is another agentmux window in the same process,
 /// kicks off `RedockFloatingPane`.
 ///
-/// Args: `{ "x": int, "y": int }` — cursor position in physical px
-/// (whatever `get_cursor_point` returned).
+/// Args: `{ "x": int, "y": int, "exclude_label": string|null }` —
+/// cursor position in physical px (whatever `get_cursor_point`
+/// returned). `exclude_label` is the source floater's label; without
+/// it, `WindowFromPoint` returns the floater itself (the floater
+/// follows the cursor during drag, so it's always at the cursor in
+/// Z-order). We walk top-levels in Z-order from front to back and
+/// return the first match that ISN'T the excluded source.
 ///
 /// Returns: `{ "label": string|null, "window_id": string|null }`. Both
 /// null means no agentmux window of this process is under the cursor
@@ -470,50 +475,91 @@ pub fn resolve_window_at_cursor(
 ) -> Result<serde_json::Value, String> {
     let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let exclude_label = args
+        .get("exclude_label")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     #[cfg(target_os = "windows")]
     unsafe {
-        use windows_sys::Win32::Foundation::POINT;
+        use windows_sys::Win32::Foundation::{POINT, RECT};
+        use windows_sys::Win32::System::Threading::GetCurrentProcessId;
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            GetAncestor, WindowFromPoint, GA_ROOT,
+            GetTopWindow, GetWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId,
+            IsWindowVisible, GWL_EXSTYLE, GW_HWNDNEXT, WS_EX_TRANSPARENT,
         };
 
-        let pt = POINT { x, y };
-        let mut hwnd = WindowFromPoint(pt);
-        if hwnd.is_null() {
-            return Ok(serde_json::json!({ "label": null, "window_id": null }));
-        }
-        // Walk to the top-level root — `WindowFromPoint` returns the
-        // deepest child window at the point, but we want the top-level
-        // owner for the label lookup.
-        let root = GetAncestor(hwnd, GA_ROOT);
-        if !root.is_null() {
-            hwnd = root;
-        }
-        let hwnd_isize = hwnd as isize;
-
-        // Reverse-lookup label in the per-label HWND cache populated
-        // by `capture_hwnd_for_label`. Same cache that
-        // `resolve_window_hwnd` consults — keeps both directions in
-        // sync.
-        let label = {
-            let map = state.window_hwnds.lock();
-            map.iter()
-                .find_map(|(k, v)| if *v == hwnd_isize { Some(k.clone()) } else { None })
+        // Snapshot the label↔HWND map once, then walk top-level
+        // windows in Z-order (front to back) until we find a visible
+        // same-process window whose rect contains the cursor AND
+        // whose label isn't the excluded source.
+        let hwnds_by_label: std::collections::HashMap<String, isize> = {
+            state.window_hwnds.lock().clone()
+        };
+        // Reverse map for O(1) HWND → label lookup.
+        let label_by_hwnd: std::collections::HashMap<isize, String> = hwnds_by_label
+            .iter()
+            .map(|(k, v)| (*v, k.clone()))
+            .collect();
+        let exclude_hwnd: Option<isize> = if exclude_label.is_empty() {
+            None
+        } else {
+            hwnds_by_label.get(exclude_label).copied()
         };
 
-        match label {
-            Some(l) => {
-                let wid = state.backend_window_id(&l);
-                Ok(serde_json::json!({ "label": l, "window_id": wid }))
+        let our_pid = GetCurrentProcessId();
+        let mut hwnd = GetTopWindow(std::ptr::null_mut());
+        while !hwnd.is_null() {
+            if IsWindowVisible(hwnd) != 0 {
+                let mut window_pid: u32 = 0;
+                GetWindowThreadProcessId(hwnd, &mut window_pid);
+                if window_pid == our_pid {
+                    let h_isize = hwnd as isize;
+                    let is_excluded = exclude_hwnd == Some(h_isize);
+                    // Skip click-through / transparent windows
+                    // (defensive — agentmux doesn't currently create
+                    // any, but we don't want a hypothetical overlay
+                    // to swallow the hit-test).
+                    let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+                    let is_transparent = (ex_style & WS_EX_TRANSPARENT) != 0;
+                    if !is_excluded && !is_transparent {
+                        let mut rect: RECT = std::mem::zeroed();
+                        if GetWindowRect(hwnd, &mut rect) != 0
+                            && x >= rect.left
+                            && x < rect.right
+                            && y >= rect.top
+                            && y < rect.bottom
+                        {
+                            if let Some(label) = label_by_hwnd.get(&h_isize) {
+                                let wid = state.backend_window_id(label);
+                                return Ok(serde_json::json!({
+                                    "label": label,
+                                    "window_id": wid,
+                                }));
+                            }
+                            // Found a window we own but it isn't in
+                            // window_hwnds yet (very early startup or
+                            // a window we don't track). Treat as "no
+                            // agentmux match" and continue Z-order
+                            // walk in case a tracked window sits
+                            // behind it.
+                        }
+                    }
+                }
             }
-            None => Ok(serde_json::json!({ "label": null, "window_id": null })),
+            hwnd = GetWindow(hwnd, GW_HWNDNEXT);
+            // Bound the walk defensively against EnumWindow loops on
+            // pathological window managers (shouldn't happen on Win32
+            // but cheap).
+            let _ = POINT { x, y };
         }
+        let _ = exclude_label;
+        Ok(serde_json::json!({ "label": null, "window_id": null }))
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (state, args, x, y);
+        let _ = (state, args, x, y, exclude_label);
         Ok(serde_json::json!({ "label": null, "window_id": null }))
     }
 }
