@@ -1,5 +1,49 @@
 # AgentMux Version History
 
+## 0.39.0 — 2026-05-27
+
+- docs(menu): spec for menu positioning framework + paintable-area guard
+- feat(menu): useMenuPosition framework primitive (Phase 1)
+- feat(menu): route FlyoutMenu + Popover through useMenuPosition (Phase 2)
+- feat(menu): migrate More dropdown + TokenBreakdownPopover to useMenuPosition (Phase 3)
+- feat(menu): paintable-area guard — dev assertion + CI grep gate (Phase 4)
+- fix(menu): preserve crossAxis/alignmentAxis offset semantics in Popover
+- fix(menu): route the right-click context menu through computeMenuPosition
+- feat(editor): file-tree explorer rooted at $HOME with header chevron + toolbar (show hidden / collapse all / refresh)
+- fix(agent): show agent name in composer placeholder instead of UUID hash
+- feat(editor): multi-root file tree (HOME + drives/mounts) and draggable resize handle between tree and editor
+- feat(agent-pane-state): reducer state + commands for composer details panel
+- feat(agent-pane): slim composer status strip replaces AgentStatusLine
+- feat(editor): pane icon toggles the file-tree (replacing the separate chevron); title bar now shows the full file path
+- fix(composer-strip): correct SCSS mixins path (build broke after #1069)
+- feat(floating-pane): Phase 3 — pane tear-off routes to floating child window, not new instance
+- feat(editor): LSP integration Phase 1 — TypeScript diagnostics via typescript-language-server, with install banner + status chip
+- fix(agent-pane): wrap user input + smooth tool-block collapse + 3s hold
+- feat(toggle): square thumbs + tracks (canonical Toggle + status-bar LAN discovery)
+- feat(floating-pane): Phase 2 — real Block renderer via initApp + chromeless workspace
+- feat(build): task package auto-appends VERSION_HISTORY entry to fix recurring reagent drift
+- fix(dev): respect AGENTMUX_VITE_PORT in child windows so tab/pane tear-off works on non-5173 dev clones
+- feat(floating-pane): native title-bar drag via WM_NCHITTEST + size matches source pane
+- feat(editor): per-pane zoom + decouple icon-as-toggle from header dblclick
+- feat(editor): slice #10 editor-pane-state — Phase 1A scaffolding
+- feat(floating-pane): floater renders as a free-floating docked pane — no extra chrome, no OS controls
+- feat(editor): tabs Phase 1B — view + tab strip
+- feat(fe-log): runtime source-map resolver for piped error stacks
+- fix(editor-pane-state): call eventSink whenever state changes, not only when events array is non-empty
+- feat(editor): preview tabs + centered error panel + binary-file guard + memo reactivity fix
+- feat(agents): dedupe continuation chains in My Agents picker (Phase 3b.1) + tracking spec
+- perf(pane-overlay): short-circuit IPC + coalesce on rAF + drop class observation (Agent2 #1097)
+- fix(ui): title-case widget bar and pane labels
+- refactor(store): rename wstore → store (Wave-fork relic) + modularization spec (R.0)
+- fix(agent-pane): render-gap (stream-parser id collision) + replaceChild crash (sticky-frontier partition)
+- fix(floating-pane): suppress focus-ring border + route window-drag/close by label
+- feat(widgets): reorder + slim default widget bar — pinned: Agent, Swarm, Drone, Warden; in More: Terminal, Editor, Browser, Sysinfo, Help
+- feat(browser): slice #9 extension — Phase 1A multi-tab scaffolding
+- feat(tabs): workspace tabs adopt editor-style basis + shrink + ellipsis (160/64/220 px)
+- feat(empty-tab): show user@host + version on the empty-tab logo panel
+- feat(agent-picker): install ribbon green instead of yellow (forward action, not warning)
+
+
 ## 0.38.14 — 2026-05-26
 
 - (no semantic content — internal portable-build counter increment from `task package`; the build itself failed mid-Vite-transpile from an SCSS import error introduced by #1069, so the bump landed without a portable; #1072 fixes the import. Backfilled to satisfy the release-consistency invariant)
