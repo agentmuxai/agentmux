@@ -238,6 +238,95 @@
     overflow: hidden;
 }
 
+// ── Tab strip (Phase 1B of SPEC_EDITOR_TABS_2026-05-26.md) ─────────────────
+// Chrome above CodeMirror — not zoomed by --editor-zoom. Tabs flex 80–140px;
+// overflow chip lands in Phase 2.
+
+.editor-tab-strip {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    height: 28px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--secondary-bg-color, var(--block-bg-color));
+    overflow-x: hidden;
+}
+
+.editor-tab {
+    flex: 1 1 140px;
+    min-width: 80px;
+    max-width: 200px;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 0 var(--space-1) 0 var(--space-2);
+    border-right: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--secondary-text-color);
+    cursor: pointer;
+    user-select: none;
+    font-size: 11px;
+    overflow: hidden;
+    transition: background 80ms ease, color 80ms ease;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.03);
+        color: var(--main-text-color);
+
+        .editor-tab-close {
+            opacity: 1;
+        }
+    }
+
+    &--active {
+        background: var(--block-bg-color);
+        color: var(--main-text-color);
+        // Subtle bottom-border that visually connects the active tab to the
+        // editor area below (the strip's own border-bottom is hidden under
+        // the active tab via the negative margin trick).
+        box-shadow: inset 0 -2px 0 0 var(--accent-color);
+    }
+
+    &--dirty {
+        // Dirty tabs always show their × so the user knows close requires
+        // confirmation (modal lands in a follow-up commit).
+        .editor-tab-close {
+            opacity: 1;
+        }
+    }
+}
+
+.editor-tab-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.editor-tab-close {
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    opacity: 0;
+    transition: opacity 80ms ease, background 80ms ease;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
+}
+
 .editor-open-prompt {
     display: flex;
     flex-direction: column;
