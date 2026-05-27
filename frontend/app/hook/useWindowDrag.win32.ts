@@ -21,6 +21,21 @@ function isInDragRegion(target: HTMLElement | null): boolean {
     return false;
 }
 
+/// Identify which top-level window we're running in so the host can
+/// route `get/set_window_position` IPC to the right HWND. The renderer
+/// URL carries `windowLabel=…` for every non-main window (the launcher
+/// doesn't add it for `main`); falling back to `"main"` keeps the
+/// main-window's drag pointing at itself.
+///
+/// Necessary because `find_own_top_level_window` on the host walks
+/// process-wide windows in Z-order, and owned floating-pane windows
+/// sit ABOVE their owner — so without a label, the main window's drag
+/// would accidentally move whichever floater is currently topmost.
+function ownWindowLabel(): string {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("windowLabel") || "main";
+}
+
 function installCefDragListener() {
     if (cefDragListenerInstalled || detectHost() !== "cef") return;
     cefDragListenerInstalled = true;
@@ -62,7 +77,9 @@ function installCefDragListener() {
         latestScreenX = e.screenX;
         latestScreenY = e.screenY;
         try {
-            const pos = await invokeCommand<{ x: number; y: number }>("get_window_position");
+            const pos = await invokeCommand<{ x: number; y: number }>("get_window_position", {
+                label: ownWindowLabel(),
+            });
             // Race guard: bail if a mouseup or a newer mousedown has
             // happened during the IPC round-trip.
             if (myId !== currentMouseDownId) return;
@@ -112,7 +129,7 @@ function installCefDragListener() {
             return;
         }
         setPosInFlight = true;
-        invokeCommand("set_window_position", { x, y })
+        invokeCommand("set_window_position", { x, y, label: ownWindowLabel() })
             .catch(() => {})
             .finally(() => {
                 setPosInFlight = false;
