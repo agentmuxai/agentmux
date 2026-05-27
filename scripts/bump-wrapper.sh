@@ -33,10 +33,23 @@ fi
 
 # Detect whether --commit was requested — controls whether we amend.
 DO_COMMIT=0
+# Detect whether this invocation came from `task package` (portable
+# build bump). bump-wrapper.sh is also called by `scripts/release.sh`
+# for the real release pipeline; release.sh handles VERSION_HISTORY
+# itself, so we only want to auto-append for the task-package path.
+# Signal: `-m "build"` — the exact message string `task package`
+# passes (see Taskfile.yml `package:`). release.sh uses a no-message
+# bump and a later explicit commit.
+IS_PORTABLE_BUMP=0
+prev_arg=""
 for arg in "$@"; do
     if [ "$arg" = "--commit" ]; then
         DO_COMMIT=1
     fi
+    if [ "$prev_arg" = "-m" ] && [ "$arg" = "build" ]; then
+        IS_PORTABLE_BUMP=1
+    fi
+    prev_arg="$arg"
 done
 
 # Remember HEAD so we can detect whether bump actually created a commit.
@@ -66,14 +79,75 @@ if [ "$PKG_VER" != "$LOCK_VER" ]; then
 fi
 echo "bump-wrapper: package-lock.json synced to $LOCK_VER"
 
-# If bump committed, amend the lockfile into that same commit.
+# Did bump actually create a commit? Both amend paths below need this
+# guard so neither rewrites an unrelated previous HEAD when bump was a
+# no-op or didn't commit. Codex P2 on PR #1080 caught the missing
+# guard on the VERSION_HISTORY amend path.
+BUMP_CREATED_COMMIT=0
 if [ "$DO_COMMIT" -eq 1 ]; then
     AFTER_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
     if [ -n "$BEFORE_HEAD" ] && [ "$BEFORE_HEAD" != "$AFTER_HEAD" ]; then
-        if ! git diff --quiet package-lock.json 2>/dev/null; then
-            git add package-lock.json
+        BUMP_CREATED_COMMIT=1
+    fi
+fi
+
+# If bump committed, amend the lockfile into that same commit.
+if [ "$BUMP_CREATED_COMMIT" -eq 1 ]; then
+    if ! git diff --quiet package-lock.json 2>/dev/null; then
+        git add package-lock.json
+        git commit --amend --no-edit >/dev/null
+        echo "bump-wrapper: folded lockfile into bump commit $(git rev-parse --short HEAD)"
+    fi
+fi
+
+# Portable-bump auto-append: when invoked from `task package`, also
+# fold a no-semantic-content VERSION_HISTORY.md entry into the same
+# bump commit. Reason: `task package` is a build-counter increment,
+# not a release — but reagent's release-consistency invariant
+# requires VERSION_HISTORY.md's top heading to match package.json.
+# Without this, every PR opened after a `task package` run gets a
+# reagent P0 about the drift, and authors hand-backfill the entry
+# (see e.g. PRs #1057 / #1060 / #1068 / #1072 / #1075 from 2026-05-26).
+#
+# `task release` does NOT take this path — it calls bump-wrapper.sh
+# without `-m "build"` and appends a real release entry from the
+# consumed changesets. So the auto-append fires ONLY for portable
+# builds, which is exactly where the drift comes from.
+if [ "$BUMP_CREATED_COMMIT" -eq 1 ] && [ "$IS_PORTABLE_BUMP" -eq 1 ]; then
+    if [ -f VERSION_HISTORY.md ]; then
+        NEW_HEADING="## $PKG_VER — $(date +%Y-%m-%d)"
+        # Skip if a matching entry was already written for this version
+        # (e.g. a hand-backfill in the same commit, or a retry).
+        if ! grep -q "^## $PKG_VER " VERSION_HISTORY.md; then
+            # Insert AFTER the top-of-file `# AgentMux Version History`
+            # heading. Use a temp file + mv to keep the edit atomic and
+            # to preserve trailing newlines / encoding.
+            VH_TMP="$(mktemp)"
+            # Insert the new section right after the H1. We print our
+            # own blank+heading+blank+content, then a trailing blank
+            # (separator), then `next` to consume the H1. The original
+            # blank-after-H1 (line 2) is preserved by the catch-all
+            # `{ print }`, producing two blanks between our entry and
+            # the previous-top heading — which markdown collapses to
+            # one blank in render, so it reads identically to a hand-
+            # backfilled entry.
+            awk -v heading="$NEW_HEADING" '
+                NR == 1 && /^# / {
+                    print
+                    print ""
+                    print heading
+                    print ""
+                    print "- (no semantic content — internal portable-build counter increment from `task package`; auto-appended by `scripts/bump-wrapper.sh` to satisfy the release-consistency invariant)"
+                    print ""
+                    next
+                }
+                { print }
+            ' VERSION_HISTORY.md > "$VH_TMP"
+            mv "$VH_TMP" VERSION_HISTORY.md
+
+            git add VERSION_HISTORY.md
             git commit --amend --no-edit >/dev/null
-            echo "bump-wrapper: folded lockfile into bump commit $(git rev-parse --short HEAD)"
+            echo "bump-wrapper: appended VERSION_HISTORY entry for $PKG_VER (portable bump auto-fill)"
         fi
     fi
 fi
