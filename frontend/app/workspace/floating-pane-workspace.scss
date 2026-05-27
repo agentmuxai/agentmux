@@ -1,0 +1,21 @@
+// Suppress the docked-pane focus ring inside a floating-pane window.
+// The standard block-frame draws a 2 CSS-px colored ring (accent or
+// agent color, see `frontend/app/block/block.scss:488,500`) when the
+// block is `.block-focused`. In a single-pane floater the block is
+// always the focused one, so the ring is always visible — which
+// reads as an unwanted "colored border" around the window. The
+// floater wraps a single pane and there's nothing to distinguish
+// "focused" from "unfocused" against, so the ring carries no signal.
+//
+// `!important` is needed: the rules we override are
+// `.block.block-frame-default.block-focused .block-mask` (specificity
+// 0,4,0) and the agent-color variant (0,5,0). Matching those
+// specificities here would require restating the block-frame chain
+// and would still tie on the agent-color rule, where source order
+// would matter. `!important` is the right escape hatch for a scoped
+// view-level override.
+.floating-pane-workspace {
+    .block-mask {
+        border-color: transparent !important;
+    }
+}
