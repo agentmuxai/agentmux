@@ -46,24 +46,25 @@ pub fn set_zoom_factor(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 }
 
 /// Close the window. Args: optional `{ "label": string }`; defaults to "main".
-/// (Linux/macOS need the label to act on the right window when called from
-/// a non-main window. Windows resolves per-process via find_own_top_level_window.)
+/// Routes by label via `resolve_window_hwnd` — without that the floater
+/// (owned, drawn above its owner in Z-order) would always swallow the
+/// close because `find_own_top_level_window` returns the topmost-Z
+/// visible top-level of the process.
 pub fn close_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+
     #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
-        let hwnd = find_own_top_level_window();
+        let hwnd = resolve_window_hwnd(state, label);
         if !hwnd.is_null() {
             PostMessageW(hwnd, WM_CLOSE, 0, 0);
             return Ok(serde_json::Value::Null);
         }
     }
     #[cfg(not(target_os = "windows"))]
-    {
-        let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
-        crate::ui_tasks::post_close_window(state, label);
-    }
-    let _ = (state, args);
+    crate::ui_tasks::post_close_window(state, label);
+    let _ = (state, label);
     Ok(serde_json::Value::Null)
 }
 
@@ -158,20 +159,180 @@ pub fn maximize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
     Ok(serde_json::Value::Null)
 }
 
+/// Resolve a top-level HWND for the given label. Prefer the reducer
+/// registry (`state.get_browser(label)` → host → window_handle → walk
+/// to root) over the process-wide `find_own_top_level_window` fallback.
+///
+/// Why the label matters: `find_own_top_level_window` does an
+/// `EnumWindows` and returns the *first* visible top-level of the
+/// current process. Z-order puts **owned** windows ABOVE their owner,
+/// so as soon as a floating-pane window exists, every label-less
+/// `get/set_window_position` call (e.g. the main window's
+/// `useWindowDrag`) accidentally targets the floater — dragging the
+/// main window moves the floater instead.
+///
+/// `GetAncestor(hwnd, GA_ROOT)` guard handles the case where CEF
+/// returns the embedded browser's WS_CHILD HWND rather than our
+/// outer top-level — without it, `SetWindowPos` would only shift the
+/// child within its parent, not move the outer floater.
+/// Class name of the floating-pane outer HWND
+/// (`agentmux-cef/src/floating_pane.rs::CLASS_NAME`). Kept in sync so
+/// `find_main_window` can EnumWindows-skip floaters when CEF Views
+/// hides the main window's HWND.
+#[cfg(target_os = "windows")]
+const FLOATING_PANE_CLASS_NAME: &str = "AgentMuxFloatingPane";
+
+/// Like `find_own_top_level_window` but skips floating-pane windows.
+/// Used when the label points at the main window but the reducer-
+/// registry path failed (CEF Views' `BrowserHost::window_handle()`
+/// returns NULL on Win32 for Views-based browsers). Without the
+/// skip, the floater (owned, drawn ABOVE its owner) would be
+/// enumerated first and we'd target it instead.
+#[cfg(target_os = "windows")]
+unsafe fn find_main_window() -> *mut std::ffi::c_void {
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+    let _pid = GetCurrentProcessId();
+    let mut result: *mut std::ffi::c_void = std::ptr::null_mut();
+
+    unsafe extern "system" fn enum_callback(
+        hwnd: *mut std::ffi::c_void,
+        lparam: isize,
+    ) -> i32 {
+        use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+        let mut window_pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut window_pid);
+        if window_pid != GetCurrentProcessId() {
+            return 1;
+        }
+        if IsWindowVisible(hwnd) == 0 {
+            return 1;
+        }
+        // Read the window class name; skip if it matches the floating-
+        // pane class. `GetClassNameW` writes up to `cchClassMaxCount`
+        // UTF-16 code units (excluding the null terminator).
+        let mut buf: [u16; 64] = [0; 64];
+        let len = GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
+        if len > 0 {
+            let class = String::from_utf16_lossy(&buf[..len as usize]);
+            if class == FLOATING_PANE_CLASS_NAME {
+                return 1;
+            }
+        }
+        let result_ptr = lparam as *mut *mut std::ffi::c_void;
+        *result_ptr = hwnd;
+        0
+    }
+
+    EnumWindows(Some(enum_callback), &mut result as *mut _ as isize);
+    result
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> *mut std::ffi::c_void {
+    use cef::ImplBrowser;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
+
+    if !label.is_empty() {
+        // 1. Try the CEF reducer registry — works for any label whose
+        //    `host.window_handle()` exposes the OS HWND (notably our
+        //    floating-pane windows created via CreateWindowExW +
+        //    set_as_child). For CEF Views (main window) this returns
+        //    NULL on Win32 and we fall through.
+        if let Some(browser) = state.get_browser(label) {
+            if let Some(host) = browser.host() {
+                let raw = host.window_handle().0 as *mut std::ffi::c_void;
+                if !raw.is_null() {
+                    let root = GetAncestor(raw, GA_ROOT);
+                    let resolved = if root.is_null() { raw } else { root };
+                    tracing::info!(
+                        target: "win-resolve",
+                        label = %label,
+                        host_hwnd = ?raw,
+                        root_hwnd = ?resolved,
+                        "[win-resolve] resolved via reducer registry"
+                    );
+                    return resolved;
+                }
+            }
+        }
+
+        // 2. Consult the authoritative per-label HWND cache populated
+        //    by `capture_hwnd_for_label` (triggered when the frontend
+        //    signals init-complete via `set_window_init_status`). This
+        //    is the same source `set_window_transparency` uses
+        //    (line 447) and covers the case where `host.window_handle()`
+        //    returns NULL but we'd previously stamped the HWND.
+        let cached = state.window_hwnds.lock().get(label).copied();
+        if let Some(raw_isize) = cached {
+            let raw = raw_isize as *mut std::ffi::c_void;
+            if !raw.is_null() {
+                let root = GetAncestor(raw, GA_ROOT);
+                let resolved = if root.is_null() { raw } else { root };
+                tracing::info!(
+                    target: "win-resolve",
+                    label = %label,
+                    cache_hwnd = ?raw,
+                    root_hwnd = ?resolved,
+                    "[win-resolve] resolved via window_hwnds cache"
+                );
+                return resolved;
+            }
+        }
+
+        tracing::warn!(
+            target: "win-resolve",
+            label = %label,
+            "[win-resolve] reducer-registry + cache both empty — using class-aware EnumWindows fallback"
+        );
+    }
+
+    // 3. EnumWindows last resort. CEF Views (main window) hides its
+    //    HWND behind a Views container, so this branch fires for
+    //    "main" before the user has triggered the init-status path
+    //    (e.g. cold-boot drag attempts). Z-order returns the floater
+    //    first (owned windows draw ABOVE their owner), so for "main"
+    //    we use a class-aware enumerator that skips the floating-pane
+    //    window class — deterministic regardless of Z-order. For
+    //    non-"main" labels with neither cache nor registry entry,
+    //    plain `find_own_top_level_window` is the best we can do.
+    let fallback = if label == "main" {
+        find_main_window()
+    } else {
+        find_own_top_level_window()
+    };
+    tracing::info!(
+        target: "win-resolve",
+        label = %label,
+        fallback_hwnd = ?fallback,
+        "[win-resolve] class-aware EnumWindows fallback"
+    );
+    fallback
+}
+
 /// Get the current window position on screen.
-pub fn get_window_position(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+///
+/// Accepts `{ "label": string }` to disambiguate when the process has
+/// multiple top-level windows (e.g. main + floating panes). Without a
+/// label we fall back to `find_own_top_level_window`, which returns
+/// the topmost-Z top-level of the process — wrong when the caller is
+/// the main window but a floater (owned, drawn above) exists.
+pub fn get_window_position(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("");
+
     #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
         use windows_sys::Win32::Foundation::RECT;
-        let hwnd = find_own_top_level_window();
+        let hwnd = resolve_window_hwnd(state, label);
         if !hwnd.is_null() {
             let mut rect: RECT = std::mem::zeroed();
             GetWindowRect(hwnd, &mut rect);
             return Ok(serde_json::json!({ "x": rect.left, "y": rect.top }));
         }
     }
-    let _ = state;
+    let _ = (state, label);
     Ok(serde_json::json!({ "x": 0, "y": 0 }))
 }
 
@@ -229,7 +390,7 @@ pub fn set_window_position(state: &Arc<AppState>, args: &serde_json::Value) -> R
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
         use windows_sys::Win32::Foundation::RECT;
-        let hwnd = find_own_top_level_window();
+        let hwnd = resolve_window_hwnd(state, label);
         if !hwnd.is_null() {
             let mut rect: RECT = std::mem::zeroed();
             GetWindowRect(hwnd, &mut rect);

@@ -40,6 +40,8 @@ import { atoms, getApi } from "@/store/global";
 import * as WOS from "@/store/wos";
 import { Show, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js";
 
+import "./floating-pane-workspace.scss";
+
 function FloatingPaneWorkspaceElem(): JSX.Element {
     const tabId = atoms.activeTabId;
     const ws = atoms.workspace;
@@ -117,13 +119,19 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         let setPosInFlight = false;
         let pendingPos: { x: number; y: number } | null = null;
 
+        // Capture once per mount — windowLabel is fixed for the
+        // floater's lifetime. Used to route `get/set_window_position`
+        // IPC to OUR HWND (not whichever top-level the OS happens to
+        // enumerate first in Z-order).
+        const label = windowLabel();
+
         const sendPos = (x: number, y: number): void => {
             if (setPosInFlight) {
                 pendingPos = { x, y };
                 return;
             }
             setPosInFlight = true;
-            invokeCommand("set_window_position", { x, y })
+            invokeCommand("set_window_position", { x, y, label })
                 .catch(() => {})
                 .finally(() => {
                     setPosInFlight = false;
@@ -160,6 +168,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             try {
                 const pos = await invokeCommand<{ x: number; y: number }>(
                     "get_window_position",
+                    { label },
                 );
                 // Race guard: bail if mouseup or a newer mousedown
                 // happened during the IPC round-trip
@@ -234,7 +243,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     });
 
     return (
-        <div class="flex flex-col w-full flex-grow overflow-hidden">
+        <div class="floating-pane-workspace flex flex-col w-full flex-grow overflow-hidden">
             {/* The torn-off block lives in the new workspace's active
                 tab. Render that tab's TabContent only — no per-tab loop
                 (there's exactly one tab) and no tab bar / widgets bar /
