@@ -2026,40 +2026,186 @@ impl WaveStore {
         &self,
         limit: usize,
         definition_id: Option<&str>,
+        identity_id: Option<&str>,
         include_continuations: bool,
     ) -> Result<Vec<AgentInstance>, StoreError> {
         let conn = self.conn.lock().unwrap();
-        // Build SQL in pieces so the (definition_id × continuations)
-        // matrix doesn't produce four copy-paste strings. Parameters
-        // are positional: `?1` is definition_id when present, `?N`
-        // is the limit (N = 2 if def filter present, else 1).
-        let mut sql = String::from(
-            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
-                    status, github_context, started_at, ended_at, created_at,
-                    identity_id, memory_id, instance_name, working_directory,
-                    display_hidden
-             FROM db_agent_instances
-             WHERE display_hidden = 0
-               AND instance_name <> ''",
-        );
+
+        // Dynamic bind-index assignment. We accumulate optional
+        // string params into `extra_params` in the same order they
+        // appear in the SQL, then bind the limit last.
+        let mut extra_params: Vec<&str> = Vec::with_capacity(2);
+
         if !include_continuations {
-            sql.push_str("\n               AND parent_instance_id = ''");
+            // Legacy "dropdown" mode: only chain heads (no parent).
+            // Used by the launch modal's `Continue agent` dropdown +
+            // the registry-enrichment path. Symmetric with
+            // `registry_upsert_if_named` — chains show up as one
+            // head entry, not N entries per resume.
+            let mut sql = String::from(
+                "SELECT id, definition_id, parent_instance_id, block_id, session_id,
+                        status, github_context, started_at, ended_at, created_at,
+                        identity_id, memory_id, instance_name, working_directory,
+                        display_hidden
+                 FROM db_agent_instances
+                 WHERE display_hidden = 0
+                   AND instance_name <> ''
+                   AND parent_instance_id = ''",
+            );
+            let mut next_idx = 1usize;
+            if let Some(id) = identity_id {
+                sql.push_str(&format!("\n                   AND identity_id = ?{}", next_idx));
+                extra_params.push(id);
+                next_idx += 1;
+            }
+            if let Some(def) = definition_id {
+                sql.push_str(&format!("\n                   AND definition_id = ?{}", next_idx));
+                extra_params.push(def);
+                next_idx += 1;
+            }
+            sql.push_str(&format!(
+                "\n                 ORDER BY started_at DESC\n                 LIMIT ?{}",
+                next_idx
+            ));
+            let mut stmt = conn.prepare(&sql)?;
+            let limit_i64 = limit as i64;
+            let mut bindings: Vec<&dyn rusqlite::ToSql> =
+                Vec::with_capacity(extra_params.len() + 1);
+            for s in &extra_params {
+                bindings.push(s);
+            }
+            bindings.push(&limit_i64);
+            let iter = stmt.query_map(bindings.as_slice(), map_instance_row)?;
+            let mut out = Vec::new();
+            for r in iter {
+                out.push(r?);
+            }
+            return Ok(out);
         }
-        let limit_param_idx = if definition_id.is_some() {
-            sql.push_str("\n               AND definition_id = ?1");
-            2
-        } else {
-            1
-        };
+
+        // Picker ("My Agents") mode: dedupe continuation chains so
+        // each logical agent surfaces as exactly one row — the most
+        // recent in its chain (by `started_at`, tiebreaker `id`).
+        //
+        // Before this dedup, a user with 5 continuations of one
+        // logical agent saw 5 entries in My Agents. See discussion
+        // #1095 / `docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md`
+        // Phase 3b.1.
+        //
+        // Mechanics:
+        //   - A recursive CTE walks `parent_instance_id` from each
+        //     head (parent_instance_id = '') down to its
+        //     descendants, stamping every row with the head's
+        //     `root_id`.
+        //   - `ROW_NUMBER() OVER (PARTITION BY root_id ORDER BY
+        //     started_at DESC, id DESC)` picks the latest row per
+        //     chain. The id tiebreaker keeps the ordering
+        //     deterministic when two rows share `started_at` (only
+        //     happens in tests / on adjacent inserts).
+        //   - **Hidden filter must run AFTER ranking.** Otherwise
+        //     `hidenamedagent` becomes a no-op for any chain with
+        //     older visible siblings: the SQL excludes the hidden
+        //     row before ranking, so the next-newest visible row
+        //     inherits `rn = 1` and the "forgotten" agent
+        //     immediately reappears in the picker. Codex P2 on PR
+        //     #1096. By ranking first and filtering
+        //     `display_hidden` last, hiding the surfaced row
+        //     suppresses the whole chain — exactly what the user's
+        //     forget action means.
+        //   - The unnamed-row filter (`instance_name <> ''`) stays
+        //     pre-rank: an unnamed continuation row should never
+        //     win, but also shouldn't influence chain ranking — it
+        //     simply isn't a candidate.
+        let mut sql = String::from(
+            r#"WITH RECURSIVE
+            roots(id, definition_id, parent_instance_id, block_id, session_id,
+                  status, github_context, started_at, ended_at, created_at,
+                  identity_id, memory_id, instance_name, working_directory,
+                  display_hidden, root_id) AS (
+                -- Anchor: a row is its own root if it has no parent OR
+                -- its parent no longer exists in the table. The latter
+                -- case (orphan continuation) happens when
+                -- `deleteagentinstance` hard-deletes a chain head —
+                -- there's no FK cascade, so descendant rows remain. If
+                -- we seeded only from `parent_instance_id = ''`,
+                -- orphans would be unreachable by the recursive walk
+                -- and disappear from My Agents even though they're
+                -- recoverable sessions. Codex P2 on PR #1096
+                -- bbe897cc → orphan-as-root anchor.
+                SELECT id, definition_id, parent_instance_id, block_id, session_id,
+                       status, github_context, started_at, ended_at, created_at,
+                       identity_id, memory_id, instance_name, working_directory,
+                       display_hidden,
+                       id
+                FROM db_agent_instances p
+                WHERE p.parent_instance_id = ''
+                   OR NOT EXISTS (
+                       SELECT 1 FROM db_agent_instances q
+                       WHERE q.id = p.parent_instance_id
+                   )
+                UNION ALL
+                SELECT c.id, c.definition_id, c.parent_instance_id, c.block_id,
+                       c.session_id, c.status, c.github_context, c.started_at,
+                       c.ended_at, c.created_at, c.identity_id, c.memory_id,
+                       c.instance_name, c.working_directory, c.display_hidden,
+                       r.root_id
+                FROM db_agent_instances c
+                JOIN roots r ON c.parent_instance_id = r.id
+            ),
+            ranked AS (
+                SELECT id, definition_id, parent_instance_id, block_id, session_id,
+                       status, github_context, started_at, ended_at, created_at,
+                       identity_id, memory_id, instance_name, working_directory,
+                       display_hidden, root_id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY root_id
+                           ORDER BY started_at DESC, id DESC
+                       ) AS rn
+                FROM roots
+                WHERE instance_name <> ''"#
+                .to_string(),
+        );
+        // Identity filter MUST run inside the `ranked` CTE (i.e.,
+        // before ROW_NUMBER) so the newest row matching the requested
+        // identity per chain wins. If we filtered identity in the
+        // outer SELECT instead, a chain whose newest row uses a
+        // different identity would be dropped even if an older row in
+        // the chain matched. Codex P2 #3 on PR #1096 0c4c8c46.
+        let mut next_idx = 1usize;
+        if let Some(id) = identity_id {
+            sql.push_str(&format!("\n                  AND identity_id = ?{}", next_idx));
+            extra_params.push(id);
+            next_idx += 1;
+        }
+        sql.push_str(
+            r#"
+            )
+            SELECT id, definition_id, parent_instance_id, block_id, session_id,
+                   status, github_context, started_at, ended_at, created_at,
+                   identity_id, memory_id, instance_name, working_directory,
+                   display_hidden
+            FROM ranked
+            WHERE rn = 1
+              AND display_hidden = 0"#,
+        );
+        if let Some(def) = definition_id {
+            sql.push_str(&format!("\n              AND definition_id = ?{}", next_idx));
+            extra_params.push(def);
+            next_idx += 1;
+        }
         sql.push_str(&format!(
-            "\n             ORDER BY started_at DESC\n             LIMIT ?{}",
-            limit_param_idx
+            "\n            ORDER BY started_at DESC\n            LIMIT ?{}",
+            next_idx
         ));
         let mut stmt = conn.prepare(&sql)?;
-        let iter = match definition_id {
-            Some(def) => stmt.query_map(params![def, limit as i64], map_instance_row)?,
-            None => stmt.query_map(params![limit as i64], map_instance_row)?,
-        };
+        let limit_i64 = limit as i64;
+        let mut bindings: Vec<&dyn rusqlite::ToSql> =
+            Vec::with_capacity(extra_params.len() + 1);
+        for s in &extra_params {
+            bindings.push(s);
+        }
+        bindings.push(&limit_i64);
+        let iter = stmt.query_map(bindings.as_slice(), map_instance_row)?;
         let mut out = Vec::new();
         for r in iter {
             out.push(r?);
@@ -4209,18 +4355,17 @@ mod tests {
     }
 
     #[test]
-    fn instance_list_named_picker_mode_includes_continuations() {
-        // Regression test for the 2026-05-24 "Maks not under My
-        // Agents" report. Pre-Option-E `instance_list_named` always
-        // filtered `parent_instance_id = ''`, hiding every
-        // continuation row. Under Option E the session zone is
-        // anchored on definition_id, so a continuation row IS the
-        // most-recent named instance — exactly what the picker
-        // needs to surface. The function now has two modes:
-        // `include_continuations = true` (picker path) returns
-        // everything; `include_continuations = false` (legacy
-        // launch-modal / registry-enrichment path) keeps the head-
-        // of-chain semantics.
+    fn instance_list_named_picker_mode_dedupes_continuation_chain() {
+        // Discussion #1095 / SPEC_AGENT_ARCHITECTURE Phase 3b.1.
+        // Before this dedup, a user with N continuations of one
+        // logical agent saw N rows in "My Agents" (the user-visible
+        // "4 Claudes" bug). Picker mode now collapses every chain
+        // to its most-recent row.
+        //
+        // Test shape: head + one continuation, same name. Picker
+        // returns ONE row — the continuation (latest started_at).
+        // The chain's identity is preserved via `parent_instance_id`
+        // on the surviving row.
         let (tmp, store, _reg) = store_with_registry();
         let agents_root = tmp.path().join("agents");
 
@@ -4233,22 +4378,296 @@ mod tests {
         cont.started_at = 200;
         store.instance_create(&cont).unwrap();
 
-        // Picker mode — both rows surface, most-recent-first.
-        let picker_rows = store.instance_list_named(10, None, true).unwrap();
-        assert_eq!(picker_rows.len(), 2);
+        let picker_rows = store.instance_list_named(10, None, None, true).unwrap();
+        assert_eq!(
+            picker_rows.len(),
+            1,
+            "picker mode must collapse continuation chain to ONE entry"
+        );
         assert_eq!(picker_rows[0].id, "inst-cont");
-        assert_eq!(picker_rows[1].id, "inst-head");
-        // Continuation row preserves its parent linkage (just not
-        // used as an exclusion gate in picker mode).
+        // The surviving row keeps its real parent_instance_id —
+        // callers needing to reconstruct the chain can still do so
+        // by walking up from this row.
         assert_eq!(picker_rows[0].parent_instance_id, "inst-head");
-        assert_eq!(picker_rows[1].parent_instance_id, "");
 
-        // Definition-scoped picker mode — same rows.
-        let scoped_picker = store
-            .instance_list_named(10, Some("def-mirror"), true)
+        // Definition-scoped picker mode — same dedup behavior.
+        let scoped = store
+            .instance_list_named(10, Some("def-mirror"), None, true)
             .unwrap();
-        assert_eq!(scoped_picker.len(), 2);
-        assert_eq!(scoped_picker[0].id, "inst-cont");
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].id, "inst-cont");
+    }
+
+    #[test]
+    fn instance_list_named_picker_mode_dedupes_long_chain() {
+        // Regression for the 2026-05-27 "4 Claudes" report
+        // (discussion #1095). The user's `db_agent_instances` had
+        // 1 head + 4 continuations of the same agent. Picker mode
+        // must return exactly 1 row — the most recent.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let mut head = make_named_inst("inst-root", "Claude", &agents_root);
+        head.started_at = 100;
+        store.instance_create(&head).unwrap();
+
+        // 4 continuations chaining linearly off the head.
+        for (i, parent) in [("c1", "inst-root"), ("c2", "c1"), ("c3", "c2"), ("c4", "c3")] {
+            let mut c = make_named_inst(i, "Claude", &agents_root);
+            c.parent_instance_id = parent.to_string();
+            c.started_at = 100 + (i.chars().last().unwrap().to_digit(10).unwrap() as i64) * 100;
+            store.instance_create(&c).unwrap();
+        }
+
+        let picker_rows = store.instance_list_named(10, None, None, true).unwrap();
+        assert_eq!(
+            picker_rows.len(),
+            1,
+            "five-row chain (1 head + 4 continuations) must collapse to one entry"
+        );
+        assert_eq!(picker_rows[0].id, "c4", "newest continuation wins");
+    }
+
+    #[test]
+    fn instance_list_named_picker_mode_keeps_distinct_agents_separate() {
+        // Two unrelated chains (different agents, different names)
+        // remain as two rows. The dedup is per-chain, not per-name.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let mut head_a = make_named_inst("a-head", "AgentA", &agents_root);
+        head_a.started_at = 100;
+        store.instance_create(&head_a).unwrap();
+        let mut cont_a = make_named_inst("a-cont", "AgentA", &agents_root);
+        cont_a.parent_instance_id = "a-head".to_string();
+        cont_a.started_at = 150;
+        store.instance_create(&cont_a).unwrap();
+
+        let mut head_b = make_named_inst("b-head", "AgentB", &agents_root);
+        head_b.started_at = 200;
+        store.instance_create(&head_b).unwrap();
+
+        let rows = store.instance_list_named(10, None, None, true).unwrap();
+        assert_eq!(rows.len(), 2);
+        // MRU order: b-head (200) before a-cont (150).
+        assert_eq!(rows[0].id, "b-head");
+        assert_eq!(rows[1].id, "a-cont");
+    }
+
+    #[test]
+    fn instance_list_named_picker_mode_orphan_continuation_surfaces() {
+        // Regression for codex P2 on PR #1096 bbe897cc: when a chain
+        // head is hard-deleted via `deleteagentinstance` (no FK
+        // cascade on `parent_instance_id`), descendant continuation
+        // rows are orphaned — `parent_instance_id` points at an id
+        // that no longer exists.
+        //
+        // The recursive CTE anchor must seed from BOTH (a) real
+        // heads (`parent_instance_id = ''`) and (b) orphans (parent
+        // doesn't exist in the table). Without the orphan anchor,
+        // the recursive walk can't reach them and they disappear
+        // from My Agents — even though they're recoverable sessions
+        // the previous (buggy) query surfaced.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        // Seed a chain: head + 2 continuations.
+        let mut head = make_named_inst("inst-deleted-head", "Claude", &agents_root);
+        head.started_at = 100;
+        store.instance_create(&head).unwrap();
+
+        let mut cont1 = make_named_inst("inst-orphan-cont1", "Claude", &agents_root);
+        cont1.parent_instance_id = "inst-deleted-head".to_string();
+        cont1.started_at = 200;
+        store.instance_create(&cont1).unwrap();
+
+        let mut cont2 = make_named_inst("inst-orphan-cont2", "Claude", &agents_root);
+        cont2.parent_instance_id = "inst-orphan-cont1".to_string();
+        cont2.started_at = 300;
+        store.instance_create(&cont2).unwrap();
+
+        // Hard-delete the head — no cascade, so cont1 + cont2 are
+        // now orphaned (cont1.parent_instance_id points at the
+        // deleted head; cont2 still has a valid parent).
+        store.instance_delete("inst-deleted-head").unwrap();
+
+        let rows = store.instance_list_named(10, None, None, true).unwrap();
+        // The orphan chain (cont1 → cont2) must surface as ONE row:
+        // cont1 becomes a root (its parent is gone); cont2 chains
+        // off cont1. Newest in chain (cont2) wins.
+        assert_eq!(
+            rows.len(),
+            1,
+            "orphan chain must remain reachable after head deletion"
+        );
+        assert_eq!(rows[0].id, "inst-orphan-cont2");
+    }
+
+    #[test]
+    fn instance_list_named_picker_mode_forget_suppresses_whole_chain() {
+        // Regression for codex P2 on PR #1096: when the user clicks
+        // "Forget" on a continuation row that's currently the picker's
+        // surfaced entry, `hidenamedagent` flips `display_hidden=1`
+        // only on that one row. If the dedup query filtered hidden
+        // BEFORE ranking, the next-newest visible row in the same
+        // chain would inherit `rn = 1` and the "forgotten" agent
+        // would immediately reappear — making forget a no-op.
+        //
+        // Correct behavior: filter hidden AFTER ranking. When the
+        // surfaced row is hidden, the entire chain disappears from
+        // the picker until the user explicitly unhides one.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let mut head = make_named_inst("inst-head", "Claude", &agents_root);
+        head.started_at = 100;
+        store.instance_create(&head).unwrap();
+
+        let mut cont1 = make_named_inst("inst-cont1", "Claude", &agents_root);
+        cont1.parent_instance_id = "inst-head".to_string();
+        cont1.started_at = 200;
+        store.instance_create(&cont1).unwrap();
+
+        let mut cont2 = make_named_inst("inst-cont2", "Claude", &agents_root);
+        cont2.parent_instance_id = "inst-cont1".to_string();
+        cont2.started_at = 300;
+        store.instance_create(&cont2).unwrap();
+
+        // Before forget: chain surfaces as cont2 (newest).
+        let before = store.instance_list_named(10, None, None, true).unwrap();
+        assert_eq!(before.len(), 1);
+        assert_eq!(before[0].id, "inst-cont2");
+
+        // User clicks "Forget" on the surfaced row.
+        store.instance_set_hidden("inst-cont2", true).unwrap();
+
+        // After forget: the whole chain must stay forgotten — older
+        // visible rows in the chain (head, cont1) must NOT bubble up.
+        let after = store.instance_list_named(10, None, None, true).unwrap();
+        assert_eq!(
+            after.len(),
+            0,
+            "hiding the surfaced row must suppress the entire chain — \
+             older visible siblings must NOT be promoted to rn=1"
+        );
+    }
+
+    #[test]
+    fn instance_list_named_picker_mode_skips_hidden_chains() {
+        // A hidden continuation should not win the ranking; its
+        // sibling (if any) does. If the entire chain is hidden,
+        // it disappears entirely.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        // Chain 1: head + cont, both visible.
+        let mut head = make_named_inst("v-head", "Visible", &agents_root);
+        head.started_at = 100;
+        store.instance_create(&head).unwrap();
+        let mut cont = make_named_inst("v-cont", "Visible", &agents_root);
+        cont.parent_instance_id = "v-head".to_string();
+        cont.started_at = 200;
+        store.instance_create(&cont).unwrap();
+
+        // Chain 2: head + cont, both hidden.
+        let mut hidden_head = make_named_inst("h-head", "Hidden", &agents_root);
+        hidden_head.started_at = 50;
+        hidden_head.display_hidden = true;
+        store.instance_create(&hidden_head).unwrap();
+        let mut hidden_cont = make_named_inst("h-cont", "Hidden", &agents_root);
+        hidden_cont.parent_instance_id = "h-head".to_string();
+        hidden_cont.started_at = 60;
+        hidden_cont.display_hidden = true;
+        store.instance_create(&hidden_cont).unwrap();
+
+        let rows = store.instance_list_named(10, None, None, true).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "v-cont");
+    }
+
+    #[test]
+    fn instance_list_named_picker_mode_identity_filter_in_ranking() {
+        // Codex P2 #3 on PR #1096 0c4c8c46: identity_id filter must
+        // participate in the dedup ranking. If we returned the newest
+        // row in a chain and then filtered identity, a chain whose
+        // newest row used a different identity would disappear from
+        // the picker — even if an older row in the chain matched the
+        // requested identity. Push the filter INTO the CTE so the
+        // newest IDENTITY-MATCHING row per chain wins.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        // Chain: head with identity-a, cont with identity-b, then
+        // another cont with identity-a (the user switched back).
+        let mut head = make_named_inst("inst-head", "Claude", &agents_root);
+        head.identity_id = "identity-a".to_string();
+        head.started_at = 100;
+        store.instance_create(&head).unwrap();
+
+        let mut cont_b = make_named_inst("inst-cont-b", "Claude", &agents_root);
+        cont_b.parent_instance_id = "inst-head".to_string();
+        cont_b.identity_id = "identity-b".to_string();
+        cont_b.started_at = 200;
+        store.instance_create(&cont_b).unwrap();
+
+        let mut cont_a2 = make_named_inst("inst-cont-a2", "Claude", &agents_root);
+        cont_a2.parent_instance_id = "inst-cont-b".to_string();
+        cont_a2.identity_id = "identity-a".to_string();
+        cont_a2.started_at = 300;
+        store.instance_create(&cont_a2).unwrap();
+
+        // Filter by identity-a → newest identity-a row wins (cont-a2).
+        let rows_a = store
+            .instance_list_named(10, None, Some("identity-a"), true)
+            .unwrap();
+        assert_eq!(rows_a.len(), 1);
+        assert_eq!(rows_a[0].id, "inst-cont-a2");
+
+        // Filter by identity-b → only cont-b matches.
+        let rows_b = store
+            .instance_list_named(10, None, Some("identity-b"), true)
+            .unwrap();
+        assert_eq!(rows_b.len(), 1);
+        assert_eq!(rows_b[0].id, "inst-cont-b");
+
+        // No filter → newest in chain wins (cont-a2, started_at=300).
+        let rows_all = store.instance_list_named(10, None, None, true).unwrap();
+        assert_eq!(rows_all.len(), 1);
+        assert_eq!(rows_all[0].id, "inst-cont-a2");
+    }
+
+    #[test]
+    fn instance_list_named_picker_mode_identity_filter_recovers_older_match() {
+        // Concrete repro for the bug codex described: chain where the
+        // newest row uses identity-b but only older rows match the
+        // requested identity-a. Without the in-ranking filter, the
+        // chain would disappear when filtering by identity-a (newest
+        // row is identity-b, gets ranked first, then post-filter
+        // drops it). With the in-ranking filter, identity-a's older
+        // row survives because it's the only candidate.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let mut head = make_named_inst("inst-head", "Claude", &agents_root);
+        head.identity_id = "identity-a".to_string();
+        head.started_at = 100;
+        store.instance_create(&head).unwrap();
+
+        let mut cont_newer_b = make_named_inst("inst-cont-newer-b", "Claude", &agents_root);
+        cont_newer_b.parent_instance_id = "inst-head".to_string();
+        cont_newer_b.identity_id = "identity-b".to_string();
+        cont_newer_b.started_at = 200;
+        store.instance_create(&cont_newer_b).unwrap();
+
+        let rows = store
+            .instance_list_named(10, None, Some("identity-a"), true)
+            .unwrap();
+        assert_eq!(
+            rows.len(),
+            1,
+            "older identity-a row must survive even though the newest row uses identity-b"
+        );
+        assert_eq!(rows[0].id, "inst-head");
     }
 
     #[test]
@@ -4272,7 +4691,7 @@ mod tests {
         cont.started_at = 200;
         store.instance_create(&cont).unwrap();
 
-        let dropdown_rows = store.instance_list_named(10, None, false).unwrap();
+        let dropdown_rows = store.instance_list_named(10, None, None, false).unwrap();
         assert_eq!(
             dropdown_rows.len(),
             1,
@@ -4282,7 +4701,7 @@ mod tests {
 
         // Definition-scoped dropdown mode — head only.
         let scoped_dropdown = store
-            .instance_list_named(10, Some("def-mirror"), false)
+            .instance_list_named(10, Some("def-mirror"), None, false)
             .unwrap();
         assert_eq!(scoped_dropdown.len(), 1);
         assert_eq!(scoped_dropdown[0].id, "inst-head");

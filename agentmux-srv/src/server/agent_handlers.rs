@@ -1546,6 +1546,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             .instance_list_named(
                                 records.len().max(1),
                                 cmd.definition_id.as_deref(),
+                                /* identity_id */ None,
                                 /* include_continuations */ false,
                             )
                             .unwrap_or_default();
@@ -1634,6 +1635,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             .instance_list_named(
                                 limit,
                                 cmd.definition_id.as_deref(),
+                                /* identity_id */ None,
                                 /* include_continuations */ false,
                             )
                             .map_err(|e| format!("listnamedagents: {e}"))?;
@@ -1753,12 +1755,31 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // and stays well inside the 200 default of
                 // instance_list_named.
                 let raw_limit = (limit * 10).max(50).min(500);
+
+                // Identity filter is pushed INTO `instance_list_named`
+                // (codex P2 #3 on PR #1096): when a chain has
+                // continuations with different identity bundles, the
+                // ranking must run on identity-matching rows so the
+                // newest match wins. Post-query filtering would drop
+                // the chain entirely if the newest row used a
+                // different identity, even when older rows match.
+                let identity_filter = cmd
+                    .identity_id
+                    .as_deref()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty());
+
                 let instances = wstore
                     // Picker "My Agents": include continuations.
                     // Under Option E a continuation row is the most-
                     // recent named instance of an agent the user
                     // actively used — exactly what we want surfaced.
-                    .instance_list_named(raw_limit, None, /* include_continuations */ true)
+                    .instance_list_named(
+                        raw_limit,
+                        None,
+                        identity_filter,
+                        /* include_continuations */ true,
+                    )
                     .map_err(|e| format!("listrecentsessions: {e}"))?;
 
                 let defs = wstore
@@ -1771,25 +1792,12 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .bundle_memory_list()
                     .map_err(|e| format!("listrecentsessions: memories: {e}"))?;
 
-                let identity_filter = cmd
-                    .identity_id
-                    .as_deref()
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty());
-
                 // Build rows. Hits filestore once per instance; with
                 // raw_limit ≤ 500 and stat() being a single indexed
                 // SQLite query, the per-call cost is dominated by
                 // the eventual snapshot read for the top-20.
                 let mut rows: Vec<RecentSessionRow> = Vec::with_capacity(instances.len());
                 for inst in instances {
-                    // Identity filter — applied before any filestore
-                    // I/O so the rejected rows don't pay for a stat.
-                    if let Some(filter) = identity_filter {
-                        if inst.identity_id != filter {
-                            continue;
-                        }
-                    }
                     let def = defs.iter().find(|d| d.id == inst.definition_id);
                     let identity_name = if inst.identity_id.is_empty() {
                         "(ambient creds)".to_string()
