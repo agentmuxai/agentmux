@@ -644,7 +644,14 @@ export function dispatch(
     const result = update(prev, command);
     slot.state = result.state;
 
-    if (eventSink && result.events.length > 0) {
+    // Call the sink whenever STATE changed, even if no semantic events were
+    // emitted (e.g. TabContentLoaded mutates the tab record but doesn't
+    // currently emit an event). Subscribers use this as the cue to re-read
+    // their projections; without it, view-side derivations bound to slice
+    // state (active-tab `contentLoaded`, `loadError`, etc.) silently miss
+    // the update and the UI looks frozen. The empty-events case is a no-op
+    // for code that iterates `events` and a wake-up for code that doesn't.
+    if (eventSink && result.state !== prev) {
         eventSink(result.events);
     }
 
