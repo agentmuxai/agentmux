@@ -235,6 +235,11 @@ unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> *mut std::f
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
 
     if !label.is_empty() {
+        // 1. Try the CEF reducer registry — works for any label whose
+        //    `host.window_handle()` exposes the OS HWND (notably our
+        //    floating-pane windows created via CreateWindowExW +
+        //    set_as_child). For CEF Views (main window) this returns
+        //    NULL on Win32 and we fall through.
         if let Some(browser) = state.get_browser(label) {
             if let Some(host) = browser.host() {
                 let raw = host.window_handle().0 as *mut std::ffi::c_void;
@@ -250,38 +255,48 @@ unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> *mut std::f
                     );
                     return resolved;
                 }
-                tracing::warn!(
-                    target: "win-resolve",
-                    label = %label,
-                    "[win-resolve] host.window_handle() returned NULL — using class-aware EnumWindows fallback"
-                );
-            } else {
-                tracing::warn!(
-                    target: "win-resolve",
-                    label = %label,
-                    "[win-resolve] browser.host() returned None — using class-aware EnumWindows fallback"
-                );
             }
-        } else {
-            tracing::warn!(
-                target: "win-resolve",
-                label = %label,
-                "[win-resolve] state.get_browser(label) returned None — using class-aware EnumWindows fallback"
-            );
         }
+
+        // 2. Consult the authoritative per-label HWND cache populated
+        //    by `capture_hwnd_for_label` (triggered when the frontend
+        //    signals init-complete via `set_window_init_status`). This
+        //    is the same source `set_window_transparency` uses
+        //    (line 447) and covers the case where `host.window_handle()`
+        //    returns NULL but we'd previously stamped the HWND.
+        let cached = state.window_hwnds.lock().get(label).copied();
+        if let Some(raw_isize) = cached {
+            let raw = raw_isize as *mut std::ffi::c_void;
+            if !raw.is_null() {
+                let root = GetAncestor(raw, GA_ROOT);
+                let resolved = if root.is_null() { raw } else { root };
+                tracing::info!(
+                    target: "win-resolve",
+                    label = %label,
+                    cache_hwnd = ?raw,
+                    root_hwnd = ?resolved,
+                    "[win-resolve] resolved via window_hwnds cache"
+                );
+                return resolved;
+            }
+        }
+
+        tracing::warn!(
+            target: "win-resolve",
+            label = %label,
+            "[win-resolve] reducer-registry + cache both empty — using class-aware EnumWindows fallback"
+        );
     }
 
-    // CEF Views (main window) hides the HWND behind a Views container,
-    // so `BrowserHost::window_handle()` returns NULL on Win32 for the
-    // main browser. Z-order-based `find_own_top_level_window` returns
-    // the floater first (owned windows draw ABOVE their owner). For
-    // the "main" label specifically, enumerate top-levels while
-    // skipping the floating-pane class — gives us a deterministic
-    // main-window HWND regardless of Z-order. For non-"main" labels
-    // we still fall through to the plain EnumWindows (this is rare —
-    // it means a label whose browser is registered but whose host has
-    // no HWND, which shouldn't happen today but keeps the fallback
-    // useful).
+    // 3. EnumWindows last resort. CEF Views (main window) hides its
+    //    HWND behind a Views container, so this branch fires for
+    //    "main" before the user has triggered the init-status path
+    //    (e.g. cold-boot drag attempts). Z-order returns the floater
+    //    first (owned windows draw ABOVE their owner), so for "main"
+    //    we use a class-aware enumerator that skips the floating-pane
+    //    window class — deterministic regardless of Z-order. For
+    //    non-"main" labels with neither cache nor registry entry,
+    //    plain `find_own_top_level_window` is the best we can do.
     let fallback = if label == "main" {
         find_main_window()
     } else {
