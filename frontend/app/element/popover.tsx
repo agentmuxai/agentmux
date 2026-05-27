@@ -3,9 +3,12 @@
 
 import { Button } from "@/element/button";
 import {
+    assertMenuInPaintableArea,
+    computeMenuPosition,
+    type MenuPositionResult,
+} from "@/app/util/menu-position";
+import {
     autoUpdate,
-    computePosition,
-    offset as offsetMiddleware,
     type Middleware,
     type OffsetOptions,
     type Placement,
@@ -56,12 +59,52 @@ const Popover = (props: PopoverProps): JSX.Element => {
     let floatingEl: HTMLElement | null = null;
     let cleanupAutoUpdate: (() => void) | null = null;
 
-    const middleware: Middleware[] = [...(props.middleware ?? []), offsetMiddleware(offsetVal as any)];
+    // props.middleware is still accepted for backward-compat (no caller passes
+    // it today), but flip + shift + size + the paintable-area boundary are now
+    // applied unconditionally via computeMenuPosition — they are no longer
+    // caller-optional. props.offset keeps full Floating UI `offset()` object
+    // semantics: a bare number is the gutter; an object form maps mainAxis →
+    // gutter and preserves crossAxis/alignmentAxis (NotificationPopover relies
+    // on crossAxis to nudge its caret-aligned popover).
+    const resolveOffset = (): {
+        gutter: number;
+        crossAxis: number;
+        alignmentAxis: number | undefined;
+    } => {
+        if (typeof offsetVal === "number") {
+            return { gutter: offsetVal, crossAxis: 0, alignmentAxis: undefined };
+        }
+        if (offsetVal && typeof offsetVal === "object") {
+            const num = (v: unknown): number | undefined =>
+                typeof v === "number" ? v : undefined;
+            return {
+                gutter: num((offsetVal as { mainAxis?: unknown }).mainAxis) ?? 3,
+                crossAxis: num((offsetVal as { crossAxis?: unknown }).crossAxis) ?? 0,
+                alignmentAxis: num(
+                    (offsetVal as { alignmentAxis?: unknown }).alignmentAxis,
+                ),
+            };
+        }
+        return { gutter: 3, crossAxis: 0, alignmentAxis: undefined };
+    };
+
+    const styleToString = (s: MenuPositionResult["style"]): string =>
+        `position:${s.position};left:${s.left};top:${s.top}`;
 
     const updatePosition = async () => {
         if (!referenceEl || !floatingEl) return;
-        const pos = await computePosition(referenceEl, floatingEl, { placement, middleware });
-        setFloatingStyle(`position:absolute;left:${pos.x}px;top:${pos.y}px`);
+        const off = resolveOffset();
+        const pos = await computeMenuPosition(
+            {
+                anchor: referenceEl,
+                placement,
+                gutter: off.gutter,
+                offsetCrossAxis: off.crossAxis,
+                offsetAlignmentAxis: off.alignmentAxis,
+            },
+            floatingEl,
+        );
+        setFloatingStyle(styleToString(pos.style));
     };
 
     const openPopover = () => {
@@ -88,6 +131,9 @@ const Popover = (props: PopoverProps): JSX.Element => {
             if (referenceEl instanceof Element && floatingEl instanceof Element) {
                 cleanupAutoUpdate?.();
                 cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
+                // Dev-only paintable-area guard (spec §6.1); gated so it is
+                // zero-cost in release builds.
+                assertMenuInPaintableArea(el, "popover");
             }
         });
     };

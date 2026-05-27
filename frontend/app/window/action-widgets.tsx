@@ -20,6 +20,11 @@ import { atoms, createBlock, getApi } from "@/store/global";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import { invokeCommand } from "@/app/platform/ipc";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
+import {
+    assertMenuInPaintableArea,
+    computeMenuPosition,
+} from "@/app/util/menu-position";
+import { autoUpdate } from "@floating-ui/dom";
 import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import "./action-widgets.scss";
@@ -133,14 +138,14 @@ ActionWidget.displayName = "ActionWidget";
 const MoreDropdown = ({
     widgets,
     onClose,
-    pos,
+    anchor,
     settings,
     wmap,
     ref,
 }: {
     widgets: () => { key: string; widget: WidgetConfigType }[];
     onClose: () => void;
-    pos: () => { top: number; right: number };
+    anchor: () => HTMLElement | null;
     settings: () => Record<string, any>;
     wmap: () => Record<string, WidgetConfigType>;
     ref?: (el: HTMLDivElement) => void;
@@ -150,6 +155,41 @@ const MoreDropdown = ({
     // dropdown so DOM renders above the pane in this rect.
     // See `frontend/app/platform/pane-overlay.ts`.
     usePaneOverlay(() => overlayEl);
+
+    // Positioning routes through the shared primitive (Phase 3): anchored to
+    // the More button, preferred placement bottom-end (right-aligned, as
+    // before). flip/shift/size + the paintable-area boundary replace the old
+    // hand-rolled `window.innerWidth - rect.right` clamp.
+    const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
+        position: "fixed",
+        left: "0px",
+        top: "0px",
+    });
+    let cleanupAutoUpdate: (() => void) | null = null;
+
+    const registerFloating = (el: HTMLDivElement) => {
+        overlayEl = el;
+        ref?.(el);
+        requestAnimationFrame(() => {
+            const anchorEl = anchor();
+            if (!(anchorEl instanceof Element) || !(el instanceof Element)) return;
+            const update = async () => {
+                const a = anchor();
+                if (!a) return;
+                const pos = await computeMenuPosition(
+                    { anchor: a, placement: "bottom-end", gutter: 4 },
+                    el,
+                );
+                setFloatingStyle(pos.style);
+            };
+            cleanupAutoUpdate?.();
+            cleanupAutoUpdate = autoUpdate(anchorEl, el, update);
+            // Dev-only paintable-area guard (spec §6.1).
+            assertMenuInPaintableArea(el, "more-dropdown");
+        });
+    };
+
+    onCleanup(() => cleanupAutoUpdate?.());
 
     const handleItemClick = (widget: WidgetConfigType) => {
         handleWidgetSelect(widget);
@@ -177,12 +217,10 @@ const MoreDropdown = ({
 
     return (
         <div
-            ref={(el) => {
-                overlayEl = el;
-                ref?.(el);
-            }}
+            ref={registerFloating}
             class="action-widget-more-dropdown"
-            style={{ position: "fixed", top: `${pos().top}px`, right: `${pos().right}px` }}
+            style={floatingStyle()}
+            data-pane-overlay
         >
             <For each={widgets()}>
                 {({ key, widget }) => (
@@ -233,18 +271,11 @@ const ActionWidgets = (): JSX.Element => {
 
     // More dropdown state
     const [moreOpen, setMoreOpen] = createSignal(false);
-    const [morePos, setMorePos] = createSignal<{ top: number; right: number }>({ top: 0, right: 0 });
     let moreButtonRef!: HTMLDivElement;
     let moreDropdownRef: HTMLDivElement | undefined;
 
-    const openMore = (e: MouseEvent) => {
-        if (moreOpen()) {
-            setMoreOpen(false);
-            return;
-        }
-        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        setMorePos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
-        setMoreOpen(true);
+    const openMore = (_e: MouseEvent) => {
+        setMoreOpen(!moreOpen());
     };
 
     const closeMore = () => setMoreOpen(false);
@@ -499,7 +530,7 @@ const ActionWidgets = (): JSX.Element => {
                     <MoreDropdown
                         widgets={moreWidgets}
                         onClose={closeMore}
-                        pos={morePos}
+                        anchor={() => moreButtonRef ?? null}
                         settings={settings}
                         wmap={wmap}
                         ref={(el) => (moreDropdownRef = el)}

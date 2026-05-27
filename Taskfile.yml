@@ -140,11 +140,19 @@ tasks:
             - task: bundle
             - bash scripts/build-appimage-linux.sh
 
+    check:menu-positioning:
+        desc: >-
+            Grep gate — fails if computePosition() is called outside the
+            sanctioned menu positioning files (SPEC_MENU_PAINTABLE_AREA_GUARD
+            §6.2). Forces new menus through useMenuPosition.
+        cmd: bash scripts/check-menu-positioning.sh
+
     build:frontend:
         desc: Build the frontend (production mode).
         cmd: bash scripts/vite-build.sh --mode production --config vite.config.ts
         deps:
             - npm:install
+            - check:menu-positioning
         env:
             VITE_PLATFORM: "{{OS}}"
 
