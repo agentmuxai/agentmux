@@ -592,10 +592,19 @@ export function update(
             const idx = findTabIndex(state, command.tabId);
             if (idx < 0) return { state, events: [] };
             const tab = state.tabs[idx];
+            // Preserve contentLoaded if it was already true — only the
+            // initial-load failure path needs to flip it to false. For
+            // operational failures (e.g. save errors), the disk-side
+            // content the view holds is still valid and the centered
+            // error panel must NOT replace CodeMirror; the small top
+            // banner picks the error up via the loadError accessor.
             const nextTab: EditorTab = {
                 ...tab,
                 loadError: command.error,
-                contentLoaded: false,
+                // Stay loaded if we already were; only flip to false
+                // for never-loaded tabs (where contentLoaded is already
+                // false anyway, so this is a no-op for that case).
+                contentLoaded: tab.contentLoaded,
             };
             const nextTabs = [
                 ...state.tabs.slice(0, idx),

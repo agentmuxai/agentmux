@@ -160,7 +160,6 @@ export class EditorViewModel implements ViewModel {
         // future dirty-confirm modal, LSP coupling). Removed on dispose so
         // no closure over a disposed model survives.
         this._globalHandler = (events: EditorPaneEvent[]) => {
-            console.log("[editor-tabs] _globalHandler called events=", events.map((e) => e.type));
             this._sliceVersion[1]((v) => v + 1);
             for (const ev of events) {
                 if (ev.type === "TabClosed") {
@@ -316,15 +315,22 @@ export class EditorViewModel implements ViewModel {
     }
 
     private async _openFileWithMode(filePath: string, mode: "preview" | "pinned"): Promise<void> {
-        console.log("[editor-tabs] openFile entry path=", filePath, "mode=", mode);
         const canonical = canonicalizePath(filePath);
-        // Claim the loading slot BEFORE dispatching so two synchronous calls
-        // for the same path don't both issue ReadEditorFileCommand. Without
-        // this, the second call would pass _loadingPaths.has() (still empty)
-        // and the .add() below would fire after the first call's RPC already
-        // returned, racing the content write.
+        // If a load is already in flight for this path, we still need to
+        // honor a preview→pinned transition (rapid dbl-click on a tree
+        // row: the single-click added canonical to _loadingPaths, then
+        // the dblclick's pinned-open would early-return and never pin).
+        // Dispatch OpenFile so the slice runs the pin-if-existing logic,
+        // then bail (the RPC's continuation will populate content as
+        // usual).
         if (this._loadingPaths.has(canonical)) {
-            console.log("[editor-tabs] openFile early-return: loading in progress for", canonical);
+            dispatch(this.blockId, {
+                type: "OpenFile",
+                path: filePath,
+                language: detectLanguage(filePath),
+                mode,
+                source: "user",
+            });
             return;
         }
         this._loadingPaths.add(canonical);
@@ -342,19 +348,16 @@ export class EditorViewModel implements ViewModel {
             mode,
             source: "user",
         });
-        console.log("[editor-tabs] openFile dispatched, events=", events.map((e) => e.type));
 
         // Find the tab id (just-opened or pre-existing).
         const opened = events.find(
             (e) => e.type === "TabOpened" || e.type === "TabActivated",
         );
         if (!opened || (opened.type !== "TabOpened" && opened.type !== "TabActivated")) {
-            console.log("[editor-tabs] openFile: no TabOpened/TabActivated event — aborting");
             this._loadingPaths.delete(canonical);
             return;
         }
         const tabId = opened.tabId;
-        console.log("[editor-tabs] openFile: tabId=", tabId.slice(0, 8));
 
         // If the slice considers content loaded for this tab AND we have it
         // in the view-local cache, we're done. The slice's contentLoaded
@@ -363,7 +366,6 @@ export class EditorViewModel implements ViewModel {
         // correctly force a reload in that case.
         const sliceTab = snapshot(this.blockId)?.tabs.find((t) => t.id === tabId);
         if (sliceTab?.contentLoaded && this._contentByTab.has(tabId)) {
-            console.log("[editor-tabs] openFile: content already loaded for", tabId.slice(0, 8));
             this._loadingPaths.delete(canonical);
             return;
         }
@@ -375,7 +377,16 @@ export class EditorViewModel implements ViewModel {
                 path: filePath,
             });
             const content = result?.content ?? "";
-            console.log("[editor-tabs] readeditorfile resolved, contentLen=", content.length);
+
+            // Re-check the slice: the preview slot's path may have been
+            // swapped out from under us by a faster click while this RPC
+            // was in flight. Without this check we'd write THIS file's
+            // content into a tab now showing a DIFFERENT file. Validate
+            // by canonicalized path because the slice canonicalizes too.
+            const tabNow = snapshot(this.blockId)?.tabs.find((t) => t.id === tabId);
+            if (!tabNow || tabNow.filePath !== canonical) {
+                return;
+            }
 
             // Refuse content that looks binary or that would freeze the
             // renderer in CodeMirror. Specifically:
@@ -400,7 +411,6 @@ export class EditorViewModel implements ViewModel {
             this._contentVersion[1]((v) => v + 1);
 
             const hash = await sha256Hex(content);
-            console.log("[editor-tabs] dispatching TabContentLoaded for", tabId.slice(0, 8));
             dispatch(this.blockId, {
                 type: "TabContentLoaded",
                 tabId,

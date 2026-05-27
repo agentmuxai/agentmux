@@ -243,7 +243,6 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
 
     // Build or rebuild CodeMirror when the active tab changes
     const setupEditor = async (content: string, language: string, readOnly: boolean) => {
-        console.log("[editor-tabs] setupEditor entry language=", language, "contentLen=", content.length, "containerRef=", !!containerRef);
         if (!containerRef) return;
 
         // Destroy previous instance
@@ -298,7 +297,6 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             }),
             parent: containerRef,
         });
-        console.log("[editor-tabs] setupEditor built cmView, doc lines=", cmView.state.doc.lines);
     };
 
     onMount(() => {
@@ -349,7 +347,6 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     createEffect(() => {
         const activeId = model.activeIdAtom(); // reactive: tab change
         const loading = model.loadingAtom(); // reactive: wait for content
-        console.log("[editor-tabs] createEffect run activeId=", activeId?.slice(0, 8), "loading=", loading, "containerRef=", !!containerRef);
         if (!activeId || loading || !containerRef) return;
 
         untrack(() => {
@@ -357,7 +354,6 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             const content = model.contentAtom();
             const lang = model.languageAtom();
             const readOnly = model.readOnlyAtom();
-            console.log("[editor-tabs] createEffect proceeding path=", path, "lang=", lang, "contentLen=", content.length);
 
             // Snapshot outgoing tab's CodeMirror state for cursor/scroll/
             // undo preservation. Skipped on first mount (no prevId).
