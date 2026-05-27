@@ -27,7 +27,8 @@ import { CenteredDiv } from "@/app/element/quickelems";
 import { ModalsRenderer } from "@/app/modals/modalsrenderer";
 import { TabContent } from "@/app/tab/tabcontent";
 import { atoms, getApi } from "@/store/global";
-import { Show, createMemo, type JSX } from "solid-js";
+import * as WOS from "@/app/store/wos";
+import { Show, createEffect, createMemo, type JSX } from "solid-js";
 
 function FloatingPaneWorkspaceElem(): JSX.Element {
     const tabId = atoms.activeTabId;
@@ -48,6 +49,50 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             .closeWindowByLabel(label)
             .catch((e) => console.error("[floating-pane] closeWindowByLabel failed", e));
     };
+
+    // Auto-close when the floating window's tab becomes empty. A floating
+    // window's purpose is to host ONE torn-off pane; when that pane's block
+    // is closed (× in its header, or programmatic close), the window is left
+    // with an empty tab + the AgentMux logo, which is dead chrome. Detect
+    // the empty-tab transition and close the window via the host IPC the
+    // title-bar × already uses. Guarded on a brief 50ms delay so the
+    // unwinding of nested reducers (block deleted → layout updated → tab
+    // blockids array re-emitted) settles before we send the close.
+    const tabAtom = createMemo(() => {
+        const id = tabId();
+        return id ? WOS.getWaveObjectAtom<Tab>(WOS.makeORef("tab", id)) : null;
+    });
+    let pendingAutoCloseTimer: ReturnType<typeof setTimeout> | null = null;
+    let autoCloseArmed = false;
+    createEffect(() => {
+        const t = tabAtom()?.();
+        if (!t) return;
+        const blockCount = t.blockids?.length ?? 0;
+
+        // Arm the auto-close only AFTER we've observed at least one block
+        // in this tab. Otherwise an early load tick (tab fetched before
+        // blockids arrived) would trip the close immediately on mount.
+        if (blockCount > 0) {
+            autoCloseArmed = true;
+            if (pendingAutoCloseTimer) {
+                clearTimeout(pendingAutoCloseTimer);
+                pendingAutoCloseTimer = null;
+            }
+            return;
+        }
+        if (!autoCloseArmed) return;
+
+        if (pendingAutoCloseTimer) clearTimeout(pendingAutoCloseTimer);
+        pendingAutoCloseTimer = setTimeout(() => {
+            const label = windowLabel();
+            if (!label) return;
+            getApi()
+                .closeWindowByLabel(label)
+                .catch((e) =>
+                    console.error("[floating-pane] auto-close failed", e),
+                );
+        }, 50);
+    });
 
     return (
         <div class="floating-pane-workspace flex flex-col w-full flex-grow overflow-hidden">
