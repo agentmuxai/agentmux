@@ -187,7 +187,7 @@ unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> *mut std::f
                 if !raw.is_null() {
                     let root = GetAncestor(raw, GA_ROOT);
                     let resolved = if root.is_null() { raw } else { root };
-                    tracing::debug!(
+                    tracing::info!(
                         target: "win-resolve",
                         label = %label,
                         host_hwnd = ?raw,
@@ -217,7 +217,7 @@ unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> *mut std::f
         }
     }
     let fallback = find_own_top_level_window();
-    tracing::debug!(
+    tracing::info!(
         target: "win-resolve",
         label = %label,
         fallback_hwnd = ?fallback,
