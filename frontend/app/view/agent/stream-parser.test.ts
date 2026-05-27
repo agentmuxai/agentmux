@@ -311,13 +311,53 @@ describe("reset", () => {
         parser.parseStreamEvent({ type: "text", content: "hello" });
         parser.reset();
 
-        // After reset, a new text event starts a fresh node — id format
-        // is `node_${prefix}_${counter}` where the prefix is rotated on
-        // reset, so we can't pin the exact value. Just assert the shape
-        // and that content is the fresh string.
+        // After reset, a new text event should get a fresh node_0 ID.
+        // Deterministic counter is the dedup contract — see
+        // `parseHistoryLines` and the codex P1 on PR #1101.
         const node = parser.parseStreamEvent({ type: "text", content: "fresh" });
-        expect(node!.id).toMatch(/^node_[a-z0-9]+_0$/);
+        expect(node!.id).toBe("node_0");
         expect((node as MarkdownNode).content).toBe("fresh");
+    });
+});
+
+// ── skipIds (snapshot-collision avoidance) ─────────────────────────────────
+// Render-gap fix on PR #1101: a fresh parser mounting against a resumed-
+// session snapshot would generate `node_0` for its first text chunk, which
+// the document reducer treats as "merge into existing node" — the response
+// gets silently merged into the snapshot's old `node_0` 100+ positions
+// back. The parser now accepts a `skipIds` set (the snapshot's id set) and
+// advances its counter past anything already present.
+
+describe("skipIds — snapshot-collision avoidance", () => {
+    test("skips ids present in the snapshot set on first event", () => {
+        const skip = new Set<string>(["node_0", "node_1", "node_2"]);
+        const p = new ClaudeCodeStreamParser({ skipIds: skip });
+        const node = p.parseStreamEvent({ type: "text", content: "first new" });
+        expect(node!.id).toBe("node_3");
+    });
+
+    test("skip-set only affects matching id prefixes (msg_/user_ unaffected)", () => {
+        // Snapshot has node_0..node_2; a new user_message should still
+        // start its own `user_*` sequence at 0 because the counter is
+        // shared but the prefix is different and only matching ids
+        // are skipped. (Counter actually advances past node_*, so
+        // user_3 is what we'd see if the agent already emitted three
+        // `node_*` events first.)
+        const p = new ClaudeCodeStreamParser({ skipIds: new Set(["user_0", "user_1"]) });
+        const um = p.parseStreamEvent({
+            type: "user_message",
+            message: "hi",
+        });
+        expect(um!.id).toBe("user_2");
+    });
+
+    test("no skipIds → original counter-from-0 behavior preserved", () => {
+        const p = new ClaudeCodeStreamParser();
+        const a = p.parseStreamEvent({ type: "text", content: "a" });
+        p.reset();
+        const b = p.parseStreamEvent({ type: "text", content: "b" });
+        expect(a!.id).toBe("node_0");
+        expect(b!.id).toBe("node_0");
     });
 });
 

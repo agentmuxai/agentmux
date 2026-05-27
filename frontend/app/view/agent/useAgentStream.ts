@@ -362,6 +362,20 @@ export function useAgentStream({
         // with `nodes[]` so this read is always current.
         nodeIdSet = new Set(getNodeIdSet(blockId));
 
+        // Pass the snapshot's id set into the parser as a skip-set
+        // so the parser's deterministic counter-based ids advance
+        // past anything already in the document. Without this, the
+        // parser's first `node_0` collides with the snapshot's
+        // `node_0` and the agent's response is silently merged
+        // into the old position instead of appended (render-gap
+        // bug, codex P1 on PR #1101). `parseHistoryLines` doesn't
+        // get a skip-set — its counter-from-0 sequence is the
+        // dedup contract for history-pagination overlap with the
+        // live stream (the live parser will *also* emit those ids
+        // at the start of its own sequence if the snapshot doesn't
+        // already cover them).
+        parser = new ClaudeCodeStreamParser({ skipIds: nodeIdSet });
+
         // Two reducers signaled in lockstep: pane-state owns the streaming
         // metadata (active flag), agent-document owns the session phase
         // gate that drives truncate suppression.
