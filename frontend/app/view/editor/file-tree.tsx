@@ -17,7 +17,12 @@ interface FileTreeProps {
     model: FileTreeModel;
     activeFilePath: string;
     showHidden: boolean;
+    /** Called on file row single-click — VS Code-style "preview" open
+     *  (replaces the current preview tab if any). */
     onFileClick: (path: string) => void;
+    /** Called on file row double-click — pins the tab so subsequent
+     *  preview-opens don't replace it. */
+    onFileDblClick?: (path: string) => void;
     onToggleHidden: () => void;
 }
 
@@ -42,6 +47,7 @@ export function FileTree(props: FileTreeProps): JSX.Element {
                             activeFilePath={props.activeFilePath}
                             showHidden={props.showHidden}
                             onFileClick={props.onFileClick}
+                            onFileDblClick={props.onFileDblClick}
                         />
                     )}
                 </For>
@@ -101,6 +107,7 @@ interface TreeNodeProps {
     activeFilePath: string;
     showHidden: boolean;
     onFileClick: (path: string) => void;
+    onFileDblClick?: (path: string) => void;
 }
 
 function TreeNode(props: TreeNodeProps): JSX.Element {
@@ -120,7 +127,20 @@ function TreeNode(props: TreeNodeProps): JSX.Element {
         if (props.isDir) {
             void props.model.toggleExpand(props.path);
         } else {
+            // Single-click → preview-open (VS Code-style). The browser will
+            // also fire `dblclick` separately when it's a double-click —
+            // that path handles pinning. We don't try to suppress this
+            // first click: if it preview-opens then dblclick pins the same
+            // tab, the user sees the file load once and the tab persist.
             props.onFileClick(props.path);
+        }
+    };
+
+    const handleDblClick = (e: MouseEvent) => {
+        if (props.isDir) return;
+        e.stopPropagation();
+        if (props.onFileDblClick) {
+            props.onFileDblClick(props.path);
         }
     };
 
@@ -134,6 +154,7 @@ function TreeNode(props: TreeNodeProps): JSX.Element {
                 }}
                 style={{ "padding-left": `${4 + props.depth * 16}px` }}
                 onClick={handleClick}
+                onDblClick={handleDblClick}
                 title={props.path}
             >
                 <Show
@@ -179,6 +200,7 @@ function TreeNode(props: TreeNodeProps): JSX.Element {
                             activeFilePath={props.activeFilePath}
                             showHidden={props.showHidden}
                             onFileClick={props.onFileClick}
+                            onFileDblClick={props.onFileDblClick}
                         />
                     )}
                 </For>
