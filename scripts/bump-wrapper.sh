@@ -79,15 +79,24 @@ if [ "$PKG_VER" != "$LOCK_VER" ]; then
 fi
 echo "bump-wrapper: package-lock.json synced to $LOCK_VER"
 
-# If bump committed, amend the lockfile into that same commit.
+# Did bump actually create a commit? Both amend paths below need this
+# guard so neither rewrites an unrelated previous HEAD when bump was a
+# no-op or didn't commit. Codex P2 on PR #1080 caught the missing
+# guard on the VERSION_HISTORY amend path.
+BUMP_CREATED_COMMIT=0
 if [ "$DO_COMMIT" -eq 1 ]; then
     AFTER_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
     if [ -n "$BEFORE_HEAD" ] && [ "$BEFORE_HEAD" != "$AFTER_HEAD" ]; then
-        if ! git diff --quiet package-lock.json 2>/dev/null; then
-            git add package-lock.json
-            git commit --amend --no-edit >/dev/null
-            echo "bump-wrapper: folded lockfile into bump commit $(git rev-parse --short HEAD)"
-        fi
+        BUMP_CREATED_COMMIT=1
+    fi
+fi
+
+# If bump committed, amend the lockfile into that same commit.
+if [ "$BUMP_CREATED_COMMIT" -eq 1 ]; then
+    if ! git diff --quiet package-lock.json 2>/dev/null; then
+        git add package-lock.json
+        git commit --amend --no-edit >/dev/null
+        echo "bump-wrapper: folded lockfile into bump commit $(git rev-parse --short HEAD)"
     fi
 fi
 
@@ -104,7 +113,7 @@ fi
 # without `-m "build"` and appends a real release entry from the
 # consumed changesets. So the auto-append fires ONLY for portable
 # builds, which is exactly where the drift comes from.
-if [ "$DO_COMMIT" -eq 1 ] && [ "$IS_PORTABLE_BUMP" -eq 1 ]; then
+if [ "$BUMP_CREATED_COMMIT" -eq 1 ] && [ "$IS_PORTABLE_BUMP" -eq 1 ]; then
     if [ -f VERSION_HISTORY.md ]; then
         NEW_HEADING="## $PKG_VER — $(date +%Y-%m-%d)"
         # Skip if a matching entry was already written for this version
