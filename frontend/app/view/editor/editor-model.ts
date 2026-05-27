@@ -234,22 +234,30 @@ export class EditorViewModel implements ViewModel {
         );
 
         // Pane title — full file path of active tab, with `*` for dirty.
-        this.viewName = createMemo(() => {
-            const fp = this.filePathAtom();
-            if (!fp) return "Editor";
-            return this.dirtyAtom() ? `${fp} *` : fp;
-        });
+        // Wrap in useBlockAtom for the same reason as tabsAtom/activeIdAtom —
+        // a bare createMemo in the constructor doesn't sit inside a tracking
+        // owner, so block-frame subscribers reading `viewName()` wouldn't
+        // always see updates when the active tab changes.
+        this.viewName = useBlockAtom(blockId, "editor-view-name", () =>
+            createMemo<string>(() => {
+                const fp = this.filePathAtom();
+                if (!fp) return "Editor";
+                return this.dirtyAtom() ? `${fp} *` : fp;
+            }),
+        );
 
         // Pane icon doubles as the file-tree expand/collapse toggle.
-        this.viewIcon = createMemo<IconButtonDecl>(() => {
-            const expanded = this.treeExpandedAtom();
-            return {
-                elemtype: "iconbutton",
-                icon: expanded ? "folder-tree" : "folder",
-                title: expanded ? "Hide file tree" : "Show file tree",
-                click: () => void this.toggleTreeExpanded(),
-            };
-        });
+        this.viewIcon = useBlockAtom(blockId, "editor-view-icon", () =>
+            createMemo<IconButtonDecl>(() => {
+                const expanded = this.treeExpandedAtom();
+                return {
+                    elemtype: "iconbutton",
+                    icon: expanded ? "folder-tree" : "folder",
+                    title: expanded ? "Hide file tree" : "Show file tree",
+                    click: () => void this.toggleTreeExpanded(),
+                };
+            }),
+        );
 
         this.viewText = () => [];
 
