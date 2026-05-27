@@ -359,6 +359,25 @@ describe("skipIds — snapshot-collision avoidance", () => {
         expect(a!.id).toBe("node_0");
         expect(b!.id).toBe("node_0");
     });
+
+    test("skipIds callback is read ON-DEMAND, not at construction (async snapshot race)", () => {
+        // Codex P1 #2 on PR #1101: in resumed sessions the snapshot
+        // restore is async — `HistoryLoaded` lands AFTER the parser
+        // is constructed. A static skip-set captured at construction
+        // would be empty, leaving the parser to collide with the
+        // restored snapshot's ids. The callback form must read the
+        // live set at each id generation.
+        const liveSet = new Set<string>(); // initially empty
+        const p = new ClaudeCodeStreamParser({ skipIds: () => liveSet });
+
+        // Simulate: snapshot restore lands AFTER the parser was
+        // constructed but BEFORE the first id is generated.
+        liveSet.add("node_0");
+        liveSet.add("node_1");
+
+        const node = p.parseStreamEvent({ type: "text", content: "live" });
+        expect(node!.id).toBe("node_2");
+    });
 });
 
 // ── startup-injection detection (SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24) ─

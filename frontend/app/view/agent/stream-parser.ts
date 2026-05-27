@@ -40,52 +40,78 @@ import {
  */
 export const STARTUP_HEADING_RE = /^# Session Context\b/;
 
+/**
+ * Shared default skip-callback — returns the same empty `Set`
+ * reference each call so the no-op path stays allocation-free.
+ */
+const EMPTY_SKIP_SET: ReadonlySet<string> = new Set<string>();
+const STATIC_EMPTY_SKIP_SET_FN = (): ReadonlySet<string> => EMPTY_SKIP_SET;
+
 export class ClaudeCodeStreamParser {
     private buffer: string = "";
     private nodeIdCounter: number = 0;
     /**
-     * Optional set of ids the parser must avoid when generating new
-     * ones — typically the ids already present in the loaded
-     * snapshot of a resumed session. Without it, a fresh parser
-     * mounting against a snapshot of `node_0..N` would re-emit
-     * `node_0` for its first text chunk, which the document
-     * reducer treats as "merge into existing node" (same-id
-     * dedup). The agent's response would then be silently merged
-     * into the OLD `node_0` far up in the virtualized history,
-     * making the response invisible (render-gap bug discovered
-     * 2026-05-27).
+     * Optional callback returning the set of ids the parser must
+     * avoid when generating new ones — typically the document
+     * store's current `nodeIdSet`. Called **on-demand at each id
+     * generation**, NOT captured at construction time.
+     *
+     * Why on-demand: resumed-session snapshots are restored
+     * **asynchronously** (`useHistoryPagination` dispatches
+     * `HistoryLoaded` after an RPC round-trip). Capturing a static
+     * set at parser construction leaves the parser with an empty
+     * skip-set even though the document IS populated by the time
+     * the first live event arrives. Codex P1 #2 on PR #1101
+     * caught that race after the static-Set version was pushed.
      *
      * **Counter-based ids stay deterministic across instances** so
      * that `parseHistoryLines` (in `useHistoryPagination`) and the
      * live `useAgentStream` parser produce matching ids for the
      * same NDJSON line — that's the contract the
      * `agent-document-store` reducer's `HistoryLoaded` /
-     * `StreamFlush` dedup relies on (codex P1 on PR #1101). The
-     * skip-set is the only deviation: the live parser skips over
-     * ids already in the snapshot. `parseHistoryLines` doesn't
-     * supply a skip-set, so its counter sequence is unchanged.
+     * `StreamFlush` dedup relies on. The skip-callback is the
+     * only deviation: the live parser skips over ids that happen
+     * to be in the document at id-generation time.
+     * `parseHistoryLines` doesn't supply a callback so its
+     * counter sequence is unchanged.
      */
-    private skipIds: ReadonlySet<string> = new Set();
+    private skipIdsFn: () => ReadonlySet<string> = STATIC_EMPTY_SKIP_SET_FN;
     private pendingToolCalls: Map<string, ToolCallEvent> = new Map();
     private currentAgentId?: string;
     // Mutable node objects for accumulated text/thinking — content is appended in-place
     private currentTextNode: { type: "markdown"; id: string; content: string } | null = null;
     private currentThinkingNode: { type: "markdown"; id: string; content: string; metadata: { thinking: true } } | null = null;
 
-    constructor(opts?: { skipIds?: ReadonlySet<string> }) {
-        if (opts?.skipIds) this.skipIds = opts.skipIds;
+    /**
+     * `skipIds` accepts either a static `ReadonlySet<string>` (for
+     * tests and single-pass uses where the document doesn't grow
+     * out-of-band) OR a `() => ReadonlySet<string>` callback (for
+     * the live `useAgentStream` parser that needs to observe
+     * async snapshot restore). The callback form is the
+     * production path.
+     */
+    constructor(opts?: {
+        skipIds?: ReadonlySet<string> | (() => ReadonlySet<string>);
+    }) {
+        if (opts?.skipIds) {
+            this.skipIdsFn = typeof opts.skipIds === "function"
+                ? opts.skipIds
+                : ((s) => () => s)(opts.skipIds);
+        }
     }
 
     /**
      * Generate the next node id of the given form (`node_N` /
-     * `msg_N` / `user_N`), skipping any value that's already in the
-     * snapshot. The skip-loop advances the counter past collisions
-     * so that subsequent ids don't repeat work. Pure increment when
-     * no skip-set is supplied.
+     * `msg_N` / `user_N`), skipping any value that's already in
+     * the document **as of right now** (per `skipIdsFn()`). The
+     * skip-loop advances the counter past collisions so
+     * subsequent ids don't repeat work. Pure increment when no
+     * skip callback is supplied.
      */
     private nextIdOf(prefix: string): string {
+        const skip = this.skipIdsFn();
         let id = `${prefix}_${this.nodeIdCounter++}`;
-        while (this.skipIds.has(id)) {
+        while (skip.has(id)) {
             id = `${prefix}_${this.nodeIdCounter++}`;
         }
         return id;

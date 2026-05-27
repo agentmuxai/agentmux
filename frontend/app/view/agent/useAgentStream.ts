@@ -362,19 +362,24 @@ export function useAgentStream({
         // with `nodes[]` so this read is always current.
         nodeIdSet = new Set(getNodeIdSet(blockId));
 
-        // Pass the snapshot's id set into the parser as a skip-set
-        // so the parser's deterministic counter-based ids advance
-        // past anything already in the document. Without this, the
-        // parser's first `node_0` collides with the snapshot's
-        // `node_0` and the agent's response is silently merged
-        // into the old position instead of appended (render-gap
-        // bug, codex P1 on PR #1101). `parseHistoryLines` doesn't
-        // get a skip-set — its counter-from-0 sequence is the
-        // dedup contract for history-pagination overlap with the
-        // live stream (the live parser will *also* emit those ids
-        // at the start of its own sequence if the snapshot doesn't
-        // already cover them).
-        parser = new ClaudeCodeStreamParser({ skipIds: nodeIdSet });
+        // Pass a callback (NOT a static snapshot) so the parser's
+        // skip-set tracks the live document's `nodeIdSet`.
+        //
+        // Why a callback: resumed-session snapshots are restored
+        // **asynchronously** via `useHistoryPagination` →
+        // `HistoryLoaded`. A static snapshot captured at mount
+        // would be empty (history hasn't landed yet), and the
+        // parser's first `node_0` would collide with the
+        // restored `node_0` from the snapshot — the very bug
+        // this PR fixes. The callback reads the reducer's live
+        // index at id-generation time, so by the time the agent
+        // emits its first text event, the snapshot's ids are
+        // already in the index and get skipped.
+        //
+        // Codex P1 #2 on PR #1101.
+        parser = new ClaudeCodeStreamParser({
+            skipIds: () => getNodeIdSet(blockId),
+        });
 
         // Two reducers signaled in lockstep: pane-state owns the streaming
         // metadata (active flag), agent-document owns the session phase
