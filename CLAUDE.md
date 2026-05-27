@@ -97,15 +97,15 @@ The widget bar's visibility logic is in `frontend/app/window/action-widgets.tsx`
 
 | Widget Key | View | Label | Tier |
 |------------|------|-------|------|
-| `defwidget@agent` | `agent` | agent | Pinned |
-| `defwidget@browser` | `browser` | browser | Pinned |
-| `defwidget@terminal` | `term` | terminal | Pinned |
-| `defwidget@sysinfo` | `sysinfo` | sysinfo | Pinned |
-| `defwidget@editor` | `editor` | editor | Pinned |
-| `defwidget@drone` | `drone` | drone | Pinned |
-| `defwidget@help` | `help` | help | Pinned |
-| `defwidget@swarm` | `swarm` | swarm | Pinned |
-| `defwidget@warden` | `warden` | warden | Pinned |
+| `defwidget@agent` | `agent` | Agent | Pinned |
+| `defwidget@browser` | `browser` | Browser | Pinned |
+| `defwidget@terminal` | `term` | Terminal | Pinned |
+| `defwidget@sysinfo` | `sysinfo` | Sysinfo | Pinned |
+| `defwidget@editor` | `editor` | Editor | Pinned |
+| `defwidget@drone` | `drone` | Drone | Pinned |
+| `defwidget@help` | `help` | Help | Pinned |
+| `defwidget@swarm` | `swarm` | Swarm | Pinned |
+| `defwidget@warden` | `warden` | Warden | Pinned |
 
 ### Not widgets
 

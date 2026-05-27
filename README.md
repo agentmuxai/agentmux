@@ -28,7 +28,7 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF ho
 - **Live agent monitoring** — Watch every tool call and decision step as it happens. Catch an agent undoing correct work mid-task and redirect it before the damage compounds.
 - **Multi-agent orchestration** — Run parallel agents and see all of them at once. Spot conflicts before synthesis. Redirect any agent without killing the others.
 - **Guardrail observability** — See which constraints are active and firing. Tune your agent system from live signal, not post-mortem guesswork.
-- **Multi-provider agent support** — Claude Code, Codex CLI, Gemini CLI, OpenClaw, Kimi Code CLI, GitHub Copilot CLI, and Pi as first-class providers, alongside terminals, editor, browser, and system metrics.
+- **Multi-provider agent support** — Claude Code, Codex CLI, Gemini CLI, OpenClaw, Kimi Code CLI, GitHub Copilot CLI, and Pi as first-class providers, alongside **Terminal**, **Editor**, **Browser**, and **Sysinfo** panes.
 - **Identity bundles** — Named credential sets (GitHub PAT, AWS profile, Anthropic key, etc.) that you assign per agent at launch. Survives renames; swappable without restart.
 - **Memory bundles** — Reusable agent personality + capability stacks (provider, model, instructions, MCP, skills). Manage via the Memory pane inside an Agent pane's settings; launch-modal selection arrives with the spawn-time content-injection layer (PR-F.4).
 - **Browser pane** — Native `CefBrowserView` embedded as a child window of the AgentMux frame — full Chromium fidelity (links, popups, DRM) without iframe limitations.
