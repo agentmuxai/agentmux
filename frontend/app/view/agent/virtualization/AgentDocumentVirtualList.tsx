@@ -29,7 +29,7 @@
  */
 
 import { createVirtualizer } from "@tanstack/solid-virtual";
-import { createEffect, createMemo, For, Index, onMount, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, Index, onMount, type Accessor, type JSX } from "solid-js";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import { agentPerfStore, startAgentLayoutShiftObserver } from "./perf-probe";
@@ -294,10 +294,34 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                     width: "100%",
                 }}
             >
-                <For each={virtualizer.getVirtualItems()}>
+                {/* `<Index>`, not `<For>` — Solid's `<For>` keys items
+                    by REFERENTIAL identity, and TanStack Virtual's
+                    `getVirtualItems()` returns a freshly-allocated
+                    array of VirtualItem objects on every render. With
+                    `<For>` the items all appear "new" each time the
+                    virtualizer recomputes (every StreamFlush, every
+                    scroll), which forces Solid to fully re-key the
+                    rendered rows. Solid's `reconcileArrays` then
+                    races with TanStack's async `measureElement`
+                    ResizeObserver — a row gets DOM-mutated under
+                    TanStack's stored ref, the `data-index={index}`
+                    warning fires, and `replaceChild` throws when the
+                    diff loop reaches a row whose `parentNode` is no
+                    longer the virtualizer container. Crash class
+                    documented in
+                    `docs/analysis/AGENT_PANE_REPLACECHILD_CRASH_ON_SEND_2026_05_27.md`.
+
+                    `<Index>` keys positionally — slot N's accessor
+                    re-reads the item value when content changes, but
+                    the slot DOM is stable. The streaming-buffer
+                    `<Index>` below uses the same pattern for
+                    streaming tokens (different cause, same shape:
+                    same item.id but new object identity on every
+                    update). */}
+                <Index each={virtualizer.getVirtualItems()}>
                     {(virtualItem) => {
                         const nodeAccessor = (): DocumentNode => {
-                            return partition().virtualizedNodes[virtualItem.index];
+                            return partition().virtualizedNodes[virtualItem().index];
                         };
                         return (
                             <DocumentRow
@@ -310,18 +334,18 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                 onToggleCollapse={props.onToggleCollapse}
                                 onTogglePin={props.onTogglePin}
                                 ref={virtualizer.measureElement}
-                                dataIndex={virtualItem.index}
+                                dataIndex={virtualItem().index}
                                 style={{
                                     position: "absolute",
                                     top: "0",
                                     left: "0",
                                     width: "100%",
-                                    transform: `translateY(${virtualItem.start - (virtualContainerRef?.offsetTop ?? 0)}px)`,
+                                    transform: `translateY(${virtualItem().start - (virtualContainerRef?.offsetTop ?? 0)}px)`,
                                 }}
                             />
                         );
                     }}
-                </For>
+                </Index>
             </div>
 
             {/* Streaming buffer — always-mounted trailing nodes.
