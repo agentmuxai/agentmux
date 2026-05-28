@@ -33,7 +33,7 @@ tasks:
             - bash scripts/release.sh {{.CLI_ARGS}}
 
     package:local:
-        desc: 'DEPRECATED — alias of `task package`. `package` now auto-bumps every build, so the old ephemeral-label variant is gone: it kept no memory of the last build number and so reused the same version every run.'
+        desc: 'Alias of `task package` (which is now itself ephemeral — no bump, no git mutation, unique stamped label per build). Kept for muscle memory.'
         cmds:
             - task: package
 
@@ -89,32 +89,14 @@ tasks:
               platforms: [linux, darwin]
 
     package:
-        desc: 'Bump the patch version (committed), then build + package a portable to ~/Desktop. The bump is automatic, so EVERY portable gets a unique, monotonic version — two builds never collide on version or data dir.'
+        desc: 'Build + package a LOCAL portable to ~/Desktop with an ephemeral, traceable label. Does NOT bump the version and does NOT touch git — the release version moves only via `task release`. Every build gets a unique stamped folder (no lock collision) and a branch-scoped data dir (your session persists across rebuilds). Pass `-- --fresh` for a throwaway data dir, or `-- <dir>` for an alternate output dir. See SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md.'
         platforms: [windows]
-        env:
-            # Locally-built portables land on the `dev-portable` channel
-            # (see SPEC_DATA_CHANNELS_2026_05_24.md §2.2). Release CI
-            # does NOT call `task package`, so this env never leaks
-            # into a release build — release builds get the default
-            # `stable` channel via the fallback in
-            # agentmux-common/src/data_paths.rs.
-            #
-            # The Rust crate reads this at compile time via
-            # `option_env!("AGENTMUX_BUILD_CHANNEL_DEFAULT")`, so the
-            # value must be set BEFORE the Rust build runs (which is
-            # what the env block does — it covers every cmd below).
-            AGENTMUX_BUILD_CHANNEL_DEFAULT: dev-portable
         cmds:
-            # Auto-bump FIRST: makes a stale-versioned portable structurally
-            # impossible. The committed version is the durable monotonic
-            # counter — each build advances it for real (CI/release do not
-            # call `task package`, so this is safe).
-            - bash scripts/bump-wrapper.sh patch -m "build" --commit
-            - task: build:frontend
-            - task: build:backend
-            - task: build:host
-            - task: bundle
-            - bash scripts/package-portable.sh
+            # All build-label + channel logic lives in the orchestrator so
+            # the build stamp is computed ONCE and shared between the cargo
+            # builds (channel bake) and package-portable.sh (artifact name).
+            # No version bump, no git mutation.
+            - bash scripts/package.sh {{.CLI_ARGS}}
 
     package:msix:
         desc: "[TODO] Package for Windows Store (MSIX)."
