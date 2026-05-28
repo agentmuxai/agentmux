@@ -27,6 +27,29 @@ for f in target/release/agentmux-cef.exe dist/cef/libcef.dll dist/bin/agentmux-s
     fi
 done
 
+# Refuse to wipe a portable that's currently running. Without this guard,
+# `rm -rf "$PORTABLE"` will silently delete the on-disk files of a live
+# install — NTFS lets you unlink mapped exe/dll files, so the process
+# keeps running on its mapped pages but its asset paths become a
+# gravestone. Any subsequent code path that resolves an asset relative
+# to current_exe (e.g. resolve_frontend_base_url's frontend/index.html
+# check) then fails. See docs/retro/retro-portable-rm-running-install-2026-05-28.md.
+if [ -d "$PORTABLE" ] && command -v powershell.exe >/dev/null 2>&1; then
+    # Normalize to a backslashed path Get-Process can match against.
+    portable_win=$(cygpath -w "$PORTABLE" 2>/dev/null || echo "$PORTABLE")
+    running_pid=$(powershell.exe -NoProfile -Command "
+        Get-Process -ErrorAction SilentlyContinue |
+            Where-Object { \$_.Path -and \$_.Path -like '${portable_win}\\*' } |
+            Select-Object -First 1 -ExpandProperty Id
+    " 2>/dev/null | tr -d '\r\n ')
+    if [ -n "$running_pid" ]; then
+        echo "ERROR: a process (PID $running_pid) is running from $PORTABLE" >&2
+        echo "       quit that AgentMux instance, or pass an alternate output dir:" >&2
+        echo "       bash scripts/package-portable.sh ~/Desktop/staging" >&2
+        exit 1
+    fi
+fi
+
 # Clean previous
 rm -rf "$PORTABLE" "$ZIPPATH"
 
