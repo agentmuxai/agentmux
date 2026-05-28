@@ -1894,9 +1894,33 @@ impl Store {
             filter_clause.push_str("\n               AND id = ?1");
             param_vals.push(d.to_string());
         }
+        // Projection for `definition_id`: use the row's own id.
+        //
+        // Reagent P2 on PR #1111 round 2: the earlier "parent_template_id
+        // with id fallback" projection diverged from legacy for
+        // user-clones derived from a template — those rows have
+        // `parent_template_id` SET (the lineage), but their legacy
+        // `db_agent_instances.definition_id` was the clone's own def
+        // id, not the template's. Template-instance projections and
+        // user-clone projections aren't schema-distinguishable in
+        // db_agents (both `is_template = 0`, `is_seeded = 0`), so any
+        // consistent projection must pick one rule. The consolidated
+        // model treats the row's `id` as the agent's identity (== legacy
+        // `definition_id` for the user-clone case), so use that. The
+        // template-instance case yields the inst.id instead of the
+        // template id, but no live caller depends on this field — it's
+        // a back-compat surface for the AgentInstance struct shape.
+        //
+        // `ORDER BY updated_at DESC`: reagent P2 on PR #1111 round 2.
+        // Continuation chains keep the head's `created_at` (the row is
+        // never re-inserted) while the dual-write bumps `updated_at` on
+        // every launch / continuation. So `created_at DESC` would rank
+        // a brand-new agent ahead of an actively-continued older one,
+        // violating "most recent activity first". `updated_at` tracks
+        // recency correctly and matches the ordering `agent_def_list`
+        // uses elsewhere in this file.
         let mut sql = String::from(
-            "SELECT id,
-                    CASE WHEN parent_template_id = '' THEN id ELSE parent_template_id END AS def_id,
+            "SELECT id, id AS def_id,
                     github_context, created_at,
                     identity_id, memory_id, instance_name, working_directory
              FROM db_agents
@@ -1904,7 +1928,7 @@ impl Store {
                AND user_hidden = 0",
         );
         sql.push_str(&filter_clause);
-        sql.push_str("\n             ORDER BY created_at DESC");
+        sql.push_str("\n             ORDER BY updated_at DESC, created_at DESC");
         let mut stmt = conn.prepare(&sql)?;
         let iter = stmt.query_map(rusqlite::params_from_iter(param_vals.iter()), |row| {
             Ok(AgentInstance {
@@ -2345,17 +2369,20 @@ impl Store {
             return Ok(None);
         }
         let conn = self.conn.lock().unwrap();
-        // `definition_id` mapping: db_agents folds the def and the
-        // user-clone instance into ONE row (keyed by def.id) for
-        // is_seeded=0 agents. For seeded-template projections,
-        // parent_template_id points at the template. Either way, the
-        // consolidated row's "definition" is `COALESCE(parent_template_id,
-        // id)` — the legacy `definition_id` semantics from the caller's
-        // perspective. Empty parent_template_id (folded user-clone)
-        // resolves to the row's own id.
+        // `definition_id` projection: use the row's own `id`.
+        //
+        // The earlier "parent_template_id with id fallback" rule
+        // misrendered the legacy semantics for user-clones derived
+        // from a template — those rows have `parent_template_id` SET
+        // (lineage record) but their legacy `definition_id` was the
+        // clone's own def id, NOT the template's. Template-instance
+        // and user-clone projections aren't schema-distinguishable in
+        // db_agents, so any consistent rule must pick one. The
+        // consolidated model treats `id` as the agent's identity, so
+        // that's what we expose — matches `instance_list` (3b.3a)
+        // after the same fix. Reagent P2 on PR #1111 round 2.
         let mut stmt = conn.prepare(
-            "SELECT id,
-                    CASE WHEN parent_template_id = '' THEN id ELSE parent_template_id END AS def_id,
+            "SELECT id, id AS def_id,
                     github_context, created_at,
                     identity_id, memory_id, instance_name, working_directory,
                     user_hidden
@@ -4887,6 +4914,69 @@ mod tests {
         // Filter by non-existent id returns empty.
         let none = store.instance_list(Some("does-not-exist"), None).unwrap();
         assert!(none.is_empty());
+    }
+
+    #[test]
+    fn instance_list_phase_3b3a_orders_by_updated_at_for_continuations() {
+        // Reagent P2 on PR #1111 round 2: continuations bump
+        // `db_agents.updated_at` but leave `created_at` at the chain
+        // head's original timestamp. `ORDER BY created_at` would rank
+        // a fresh agent ahead of an actively-continued older one;
+        // `ORDER BY updated_at` preserves "most recent activity
+        // first".
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        // Older agent, first.
+        let older_head = make_named_inst("inst-old-head", "Older", &agents_root);
+        store.instance_create(&older_head).unwrap();
+
+        // Newer agent (different def so different db_agents row).
+        let mut def2 = sample_agent("def-newer", "newer");
+        store.agent_def_insert(&mut def2).unwrap();
+        let mut newer = make_named_inst("inst-newer", "Newer", &agents_root);
+        newer.definition_id = "def-newer".to_string();
+        store.instance_create(&newer).unwrap();
+
+        // Continue the OLDER agent — bumps its updated_at past
+        // the newer agent's.
+        let mut cont = make_named_inst("inst-old-cont", "Older", &agents_root);
+        cont.parent_instance_id = "inst-old-head".to_string();
+        store.instance_create(&cont).unwrap();
+
+        let rows = store.instance_list(None, None).unwrap();
+        assert_eq!(rows.len(), 2);
+        // Older's continuation made it most recent → it ranks first.
+        assert_eq!(rows[0].instance_name, "Older");
+        assert_eq!(rows[1].instance_name, "Newer");
+    }
+
+    #[test]
+    fn instance_list_phase_3b3a_definition_id_projects_row_id_for_user_clones_with_template_lineage() {
+        // Reagent P2 on PR #1111 round 2: user-clones derived from a
+        // template have `parent_template_id` SET (lineage), but their
+        // legacy `definition_id` was the clone's OWN def id, not the
+        // template's. The projection must yield the row's id, not
+        // walk parent_template_id.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        // A user-clone def whose parent_id points at a (non-existent)
+        // template — what matters is that parent_template_id ends up
+        // SET on the db_agents row.
+        let mut clone = sample_agent("clone-from-tpl", "clone-from-tpl");
+        clone.parent_id = "tpl-some-template".to_string();
+        store.agent_def_insert(&mut clone).unwrap();
+        let mut launch = make_named_inst("inst-1", "ClonedAgent", &agents_root);
+        launch.definition_id = "clone-from-tpl".to_string();
+        store.instance_create(&launch).unwrap();
+
+        let rows = store.instance_list(None, None).unwrap();
+        let row = rows.iter().find(|r| r.instance_name == "ClonedAgent").unwrap();
+        // definition_id is the CLONE's id, not the template id —
+        // even though parent_template_id on the underlying row is set.
+        assert_eq!(row.definition_id, "clone-from-tpl");
+        assert_eq!(row.id, "clone-from-tpl");
     }
 
     #[test]
