@@ -484,7 +484,7 @@ pub fn resolve_window_at_cursor(
 
     #[cfg(target_os = "windows")]
     unsafe {
-        use windows_sys::Win32::Foundation::{POINT, RECT};
+        use windows_sys::Win32::Foundation::RECT;
         use windows_sys::Win32::System::Threading::GetCurrentProcessId;
         use windows_sys::Win32::UI::WindowsAndMessaging::{
             GetTopWindow, GetWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId,
@@ -550,10 +550,6 @@ pub fn resolve_window_at_cursor(
                 }
             }
             hwnd = GetWindow(hwnd, GW_HWNDNEXT);
-            // Bound the walk defensively against EnumWindow loops on
-            // pathological window managers (shouldn't happen on Win32
-            // but cheap).
-            let _ = POINT { x, y };
         }
         let _ = exclude_label;
         Ok(serde_json::json!({ "label": null, "window_id": null }))
@@ -567,13 +563,13 @@ pub fn resolve_window_at_cursor(
 }
 
 /// Update the host's "active floating-pane redock hover" state.
-/// Called from the dragged floater's mousemove (throttled) so target
-/// windows can render a highlight overlay while the floater hovers
-/// over them. The host computes the resolved target via the same
-/// Z-order walk as `resolve_window_at_cursor` (with the dragged
-/// floater excluded), and emits the `floating-redock:hover-state`
-/// event ONLY when the target changes — mousemove fires at high
-/// frequency but the visual highlight only cares about transitions.
+/// Called from the dragged floater's mousemove (throttled ~50ms upstream)
+/// so target windows can render a per-tile drop preview while the floater
+/// hovers over them. The host resolves the target window via the same
+/// Z-order walk as `resolve_window_at_cursor` (with the dragged floater
+/// excluded) and emits `floating-redock:hover-state` on every call —
+/// the target renderer needs the live cursor position to pick which
+/// LEAF the cursor is over (not just transitions between windows).
 ///
 /// Args: `{ "source_label": string, "x": int, "y": int }`. Returns
 /// `{ "target_label": string|null }` for callers that want to
@@ -599,8 +595,6 @@ pub fn update_floating_redock_hover(
         .get("label")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
-
-    *state.active_redock_target.lock() = new_target.clone();
 
     // Emit on every call (frontend throttles ~50 ms upstream). The
     // event must carry the cursor position so target renderers can
@@ -629,13 +623,12 @@ pub fn clear_floating_redock_hover(
     state: &Arc<AppState>,
     _args: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    state.active_redock_target.lock().take();
-    // Always emit on clear, even if prev was None. The frontend
-    // listener uses target_label as a sentinel and removing the
-    // placeholder unconditionally on null is cheap; emitting
-    // unconditionally guarantees the cleanup fires even if the
-    // last mousemove resolved to None (cursor over the floater
-    // itself between an in/out boundary) and so `prev` was None.
+    // Always emit, even if no prior hover was active. The frontend
+    // listener uses target_label=null as a teardown sentinel and
+    // removing a non-existent placeholder is a cheap no-op; emitting
+    // unconditionally guarantees cleanup fires even if the last
+    // mousemove resolved to None (cursor over the floater itself
+    // between in/out boundaries).
     crate::events::emit_event_to_top_level_windows(
         state,
         "floating-redock:hover-state",

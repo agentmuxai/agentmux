@@ -690,14 +690,6 @@ pub struct AppState {
     #[cfg(target_os = "windows")]
     pub window_hwnds: Mutex<HashMap<String, isize>>,
 
-    /// Active floating-pane redock target label, if any. Set by
-    /// `update_floating_redock_hover` (called from the dragged
-    /// floater's mousemove) and cleared by `clear_floating_redock_hover`
-    /// on drop. Used to throttle event emissions — only emit
-    /// `floating-redock:hover-state` when the target window actually
-    /// changes (mousemove fires at high frequency; the rendered
-    /// highlight overlay only cares about target transitions).
-    pub active_redock_target: Mutex<Option<String>>,
 }
 
 impl Default for AppState {
@@ -713,7 +705,6 @@ impl Default for AppState {
             window_id: Mutex::new(None),
             active_tab_id: Mutex::new(None),
             window_init_status: Mutex::new(String::new()),
-            active_redock_target: Mutex::new(None),
             shadow_backend_window_ids: Mutex::new(HashMap::new()),
             shadow_window_meta: Mutex::new(HashMap::new()),
             shadow_instance_registry: Mutex::new({

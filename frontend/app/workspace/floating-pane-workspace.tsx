@@ -336,10 +336,13 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             const sourceWs = ws();
             if (!sourceTabId || !sourceWs) return;
             const sourceWsId = sourceWs.oid;
-            const [sourceTab] = WOS.useWaveObjectValue<Tab>(
+            // Non-reactive read: `useWaveObjectValue` would register an
+            // `onCleanup` against the current reactive owner, but we're inside
+            // an async mouseup callback with no owner — the refCount would
+            // never get decremented and we'd leak a Tab subscription per drop.
+            const sourceTabObj = WOS.getObjectValue<Tab>(
                 WOS.makeORef("tab", sourceTabId),
             );
-            const sourceTabObj = sourceTab();
             const sourceBlockId = sourceTabObj?.blockids?.[0];
             if (!sourceBlockId) {
                 console.warn(
