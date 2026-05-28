@@ -28,7 +28,16 @@ export function parseHistoryLines(
     const translator = createTranslator(outputFormat);
     const parser = new ClaudeCodeStreamParser();
     const nodes: DocumentNode[] = [];
-    const seen = new Set<string>();
+    // Same-id events update IN PLACE rather than first-wins.
+    // The previous "skip if seen" rule dropped legitimate state
+    // transitions during replay — most importantly, a `tool_result`
+    // arriving after its `tool_call` would be discarded, leaving the
+    // tool stuck at `status: "running"` on the rendered page even
+    // though it completed successfully. Codex P1 on PR #1104. Streaming
+    // markdown/thinking deltas also share an id; same rule means the
+    // accumulated tail (the last delta containing the full text) wins,
+    // which is the same end state the live stream produces.
+    const indexById = new Map<string, number>();
 
     for (const line of lines) {
         const trimmed = line.trim();
@@ -51,9 +60,16 @@ export function parseHistoryLines(
         for (const event of streamEvents) {
             const node = parser.parseLine(JSON.stringify(event));
             if (!node) continue;
-            if (seen.has(node.id)) continue;
-            seen.add(node.id);
-            nodes.push(node);
+            const existing = indexById.get(node.id);
+            if (existing != null) {
+                // Replace at the original position so insertion order
+                // tracks where the id first appeared (which is where
+                // the live render would have placed it).
+                nodes[existing] = node;
+            } else {
+                indexById.set(node.id, nodes.length);
+                nodes.push(node);
+            }
         }
     }
 
