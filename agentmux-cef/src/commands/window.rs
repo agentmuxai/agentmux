@@ -85,17 +85,17 @@ pub fn close_window_by_label(
 
     #[cfg(target_os = "windows")]
     unsafe {
-        use cef::{ImplBrowser, ImplBrowserHost};
         use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
-        // Phase H.2.b — reducer-aware lookup with fallback.
-        if let Some(browser) = state.get_browser(&label) {
-            if let Some(host) = browser.host() {
-                let hwnd = host.window_handle();
-                if !hwnd.0.is_null() {
-                    PostMessageW(hwnd.0 as *mut std::ffi::c_void, WM_CLOSE, 0, 0);
-                    return Ok(serde_json::Value::Null);
-                }
-            }
+        // Route through resolve_window_hwnd so we hit the cached OUTER
+        // top-level HWND. The reducer registry returns CEF's inner
+        // WS_CHILD for `set_as_child` browsers (and for floaters our
+        // outer popup HWND is only in the cache), so going straight to
+        // `host.window_handle()` would WM_CLOSE the embedded child —
+        // after a redock that leaves the outer popup as an empty shell.
+        let hwnd = resolve_window_hwnd(state, &label);
+        if !hwnd.is_null() {
+            PostMessageW(hwnd, WM_CLOSE, 0, 0);
+            return Ok(serde_json::Value::Null);
         }
         return Err(format!("no top-level HWND for label {}", label));
     }
@@ -551,7 +551,6 @@ pub fn resolve_window_at_cursor(
             }
             hwnd = GetWindow(hwnd, GW_HWNDNEXT);
         }
-        let _ = exclude_label;
         Ok(serde_json::json!({ "label": null, "window_id": null }))
     }
 

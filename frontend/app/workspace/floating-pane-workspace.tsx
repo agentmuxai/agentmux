@@ -306,13 +306,18 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             }
 
             // Resolve target's active tab via the WaveObj graph:
-            // window → workspace.activetabid.
+            // window → workspace.activetabid. Use the non-pinning
+            // `reloadWaveObject` — `loadAndPinWaveObject` would bump
+            // `refCount` with no matching unpin in this async flow,
+            // leaking one ref on each of the target Window + Workspace
+            // per successful redock so the cache cleanup never evicts
+            // them.
             let targetWs: Workspace;
             try {
-                const targetWindow = await WOS.loadAndPinWaveObject<WaveWindow>(
+                const targetWindow = await WOS.reloadWaveObject<WaveWindow>(
                     WOS.makeORef("window", target.window_id),
                 );
-                targetWs = await WOS.loadAndPinWaveObject<Workspace>(
+                targetWs = await WOS.reloadWaveObject<Workspace>(
                     WOS.makeORef("workspace", targetWindow.workspaceid),
                 );
             } catch (e) {
