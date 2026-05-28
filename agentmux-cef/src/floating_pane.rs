@@ -367,9 +367,17 @@ unsafe extern "system" fn floating_pane_wndproc(
         // Enforce min size + clamp the maximized rect to the current
         // monitor's WORK area (taskbar respected). Without the work-
         // area clamp, WS_POPUP defaults to full-monitor on maximize
-        // and covers the taskbar. ptMaxPosition is documented as
-        // relative to the window's CURRENT position, hence the
-        // GetWindowRect delta math.
+        // and covers the taskbar.
+        //
+        // ptMaxPosition is the maximized window's screen-space
+        // position (left/top corner), NOT a delta from the current
+        // window rect. An earlier version of this handler did
+        // `work.left - wr.left`, which made the maximized origin
+        // depend on the window's pre-maximize position — a floater
+        // at wr.left=500 on a primary monitor (work.left=0) reported
+        // ptMaxPosition.x=-500 and shifted off-screen on maximize.
+        // The correct value is the work-area origin directly.
+        // Codex P2 on PR #1132.
         WM_GETMINMAXINFO => {
             use windows_sys::Win32::Foundation::POINT;
             use windows_sys::Win32::Graphics::Gdi::{
@@ -392,12 +400,10 @@ unsafe extern "system" fn floating_pane_wndproc(
                 let mut mi: MONITORINFO = std::mem::zeroed();
                 mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
                 if GetMonitorInfoW(monitor, &mut mi) != 0 {
-                    let mut wr = std::mem::zeroed::<windows_sys::Win32::Foundation::RECT>();
-                    GetWindowRect(hwnd, &mut wr);
                     let work = mi.rcWork;
                     (*mmi).ptMaxPosition = POINT {
-                        x: work.left - wr.left,
-                        y: work.top - wr.top,
+                        x: work.left,
+                        y: work.top,
                     };
                     (*mmi).ptMaxSize = POINT {
                         x: work.right - work.left,
