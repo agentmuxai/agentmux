@@ -214,6 +214,60 @@ describe("agent document reducer", () => {
             expect(r.state).toBe(start);
             expect(r.events).toEqual([]);
         });
+
+        it("applies a same-batch update on top of a same-batch new node (text-delta race)", () => {
+            // Regression: Mazs agent showed "Y" instead of "Yep, still here…"
+            // because the parser pre-merged the second text_delta and the
+            // reducer processed updatedNodes before newNodes — so the update
+            // was dropped as orphan and the un-merged first-delta node was
+            // appended. See reports/agentmux/PLAN_AGENT_PANE_TEXT_TRUNCATION_
+            // FIX_2026-05-28.md.
+            const r = update(initialState(), {
+                type: "StreamFlush",
+                newNodes:     [md("n1", "Y")],
+                updatedNodes: [md("n1", "Yep, still here. What do you need?")],
+            });
+            expect(r.state.nodes).toHaveLength(1);
+            expect((r.state.nodes[0] as any).content).toBe(
+                "Yep, still here. What do you need?",
+            );
+            expect(r.events[0]).toMatchObject({
+                appendedNew: 1,
+                updateApplied: 1,
+                updateDropped: 0,
+            });
+        });
+
+        it("same-batch new node + update preserves new-node order", () => {
+            // Two new nodes plus an update to one of them, all in one batch.
+            // The appended order is still newNodes order; the update lands
+            // on whichever node it targets without disturbing layout.
+            const r = update(initialState(), {
+                type: "StreamFlush",
+                newNodes:     [md("a", "first"), md("b", "second")],
+                updatedNodes: [md("a", "first-updated")],
+            });
+            expect(r.state.nodes.map((n) => n.id)).toEqual(["a", "b"]);
+            expect((r.state.nodes[0] as any).content).toBe("first-updated");
+            expect((r.state.nodes[1] as any).content).toBe("second");
+        });
+
+        it("orphan update (no same-batch new node, no prior state) is still dropped", () => {
+            // Locks down the existing orphan-update contract: the fix must
+            // NOT materialize ghost nodes from updates that have nothing
+            // to anchor to.
+            const r = update(initialState(), {
+                type: "StreamFlush",
+                newNodes:     [md("a", "anchor")],
+                updatedNodes: [md("ghost", "drifts away")],
+            });
+            expect(r.state.nodes.map((n) => n.id)).toEqual(["a"]);
+            expect(r.events[0]).toMatchObject({
+                appendedNew: 1,
+                updateApplied: 0,
+                updateDropped: 1,
+            });
+        });
     });
 
     describe("StreamTruncate suppression", () => {

@@ -317,28 +317,23 @@ export function update(
                 return next;
             };
 
-            // Updates first — they target IDs that are expected to exist.
-            let updateApplied = 0;
-            let updateDropped = 0;
-            for (const upd of command.updatedNodes) {
-                const idx = indexById.get(upd.id);
-                if (idx == null) {
-                    updateDropped++;
-                    continue;
-                }
-                const arr = ensureClone();
-                const existing = arr[idx];
-                if (existing.type === "markdown" && upd.type === "markdown") {
-                    arr[idx] = { ...existing, content: upd.content };
-                } else {
-                    arr[idx] = mergeReplacement(existing, upd);
-                }
-                updateApplied++;
-            }
-
-            // New nodes: dedup against existing IDs; collisions → in-place
-            // update (same protection the original `flushPendingNodes` had
-            // against the rebuild-while-pending race).
+            // New nodes first. useAgentStream decides "new vs update"
+            // by checking its local nodeIdSet as events arrive, but
+            // events that share an animation frame can produce a
+            // newNode AND an updatedNode for the same id — the parser
+            // pre-merges text deltas, so the LATER delta becomes an
+            // update of an id that doesn't exist yet in state. By
+            // appending newNodes first (and registering them in
+            // indexById), a same-batch update can find its target
+            // instead of being dropped as orphan and leaving the
+            // un-merged first-delta version in state. Truly orphan
+            // updates — those with no matching new node in this batch
+            // AND no prior state entry — still drop, preserving the
+            // existing contract (see "drops updates targeting unknown
+            // IDs" test). See REPORT_AGENT_PANE_TEXT_TRUNCATION_2026-
+            // 05-28.md for the user-visible symptom (assistant
+            // response "Yep, still here. What do you need?" rendered
+            // as "Y").
             let appendedNew = 0;
             let collidedAndUpdated = 0;
             let nextIdSet: Set<string> | null = null;
@@ -356,6 +351,27 @@ export function update(
                 if (!nextIdSet) nextIdSet = new Set(state.nodeIdSet);
                 nextIdSet.add(n.id);
                 appendedNew++;
+            }
+
+            // Updates second — indexById now includes both prior
+            // state AND same-batch newNodes, so an update can target
+            // either. Anything still missing is a genuine orphan.
+            let updateApplied = 0;
+            let updateDropped = 0;
+            for (const upd of command.updatedNodes) {
+                const idx = indexById.get(upd.id);
+                if (idx == null) {
+                    updateDropped++;
+                    continue;
+                }
+                const arr = ensureClone();
+                const existing = arr[idx];
+                if (existing.type === "markdown" && upd.type === "markdown") {
+                    arr[idx] = { ...existing, content: upd.content };
+                } else {
+                    arr[idx] = mergeReplacement(existing, upd);
+                }
+                updateApplied++;
             }
 
             if (!next) {
