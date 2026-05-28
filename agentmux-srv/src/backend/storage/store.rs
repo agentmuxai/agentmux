@@ -665,11 +665,18 @@ impl Store {
         Ok(out)
     }
 
-    /// Fetch a single agent definition by primary key. Reads
-    /// `db_agent_definitions` directly (not the `db_agents`
-    /// consolidated view that `agent_def_list` reads), so it
-    /// returns user-clone definitions and seeded templates, never
-    /// template-instance projection rows.
+    /// Fetch a single agent definition by primary key.
+    ///
+    /// Phase 3b.5: reads from the consolidated `db_agents` table.
+    /// Both seeded templates (`is_template = 1`) and user-clone
+    /// projections (`is_template = 0` with the row keyed by the
+    /// def's id) surface. Template-instance projections — which
+    /// share the `is_template = 0` flag but are keyed by an
+    /// instance UUID — are filtered out by callers via the
+    /// well-known id formats they query (the sole production
+    /// caller, `template_promote`, looks up `template-promote-v1-<tpl_id>`
+    /// which collides with neither template nor instance id
+    /// shapes).
     ///
     /// Used by the `template_promote` migration's deterministic-id
     /// idempotency check (see
@@ -683,9 +690,9 @@ impl Store {
                     working_directory, shell, provider_flags, auto_start,
                     restart_on_crash, idle_timeout_minutes, created_at,
                     agent_type, environment, agent_bus_id, is_seeded,
-                    accounts, parent_id, branch_label, updated_at,
+                    accounts, parent_template_id, branch_label, updated_at,
                     user_hidden
-             FROM db_agent_definitions
+             FROM db_agents
              WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![id], map_agent_definition_row)?;
@@ -4804,6 +4811,40 @@ mod tests {
         // continuations updated its bindings.
         assert_eq!(got.id, "def-mirror");
         assert_eq!(got.instance_name, "Maks");
+    }
+
+    #[test]
+    fn agent_def_get_phase_3b5_reads_from_db_agents_for_template() {
+        // Phase 3b.5: agent_def_get now reads from the consolidated
+        // db_agents view. Seeded templates surface as is_template=1
+        // rows.
+        let (_tmp, store, _reg) = store_with_registry();
+        let mut tpl = sample_agent("tpl-promote", "tpl-promote");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+
+        let got = store.agent_def_get("tpl-promote").unwrap().expect("found");
+        assert_eq!(got.id, "tpl-promote");
+        assert_eq!(got.is_seeded, 1);
+    }
+
+    #[test]
+    fn agent_def_get_phase_3b5_reads_user_clone_def() {
+        // The `template_promote` idempotency check looks for a
+        // deterministic-id row representing the cloned-from-template
+        // user definition. The folded user-clone projection in
+        // db_agents (is_template=0, keyed by def.id) must surface.
+        let (_tmp, store, _reg) = store_with_registry();
+        // store_with_registry already inserts def-mirror (is_seeded=0).
+        let got = store.agent_def_get("def-mirror").unwrap().expect("found");
+        assert_eq!(got.id, "def-mirror");
+        assert_eq!(got.is_seeded, 0);
+    }
+
+    #[test]
+    fn agent_def_get_phase_3b5_returns_none_for_missing() {
+        let (_tmp, store, _reg) = store_with_registry();
+        assert!(store.agent_def_get("does-not-exist").unwrap().is_none());
     }
 
     #[test]
