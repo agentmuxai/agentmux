@@ -2638,39 +2638,37 @@ impl Store {
 
     /// Resolve the agent bindings tied to a block.
     ///
-    /// Phase 3b.4: follow the block→agent reference directly via
-    /// the block's meta. There are two id keys to consider:
+    /// Phase 3b.4: resolve through `block.meta.agentId` (or legacy
+    /// `agent:id`) against `db_agents` for the user-clone case;
+    /// fall back to the legacy `db_agent_instances` lookup by
+    /// `block_id` for seeded-template launches and any other block
+    /// the consolidated path can't satisfy.
     ///
-    /// - `agentInstanceId`: stamped onto the block AFTER
-    ///   `CreateAgentInstanceCommand` returns (frontend
-    ///   `agent-model.ts`). For seeded-template launches this is
-    ///   the new `db_agents` row's id (the template-instance
-    ///   projection keyed by inst.id). For user-clone launches
-    ///   `instance_create` folds the bindings into the existing
-    ///   user-clone def projection, so there's no separate row
-    ///   keyed by inst.id and this lookup misses.
-    /// - `agentId` (legacy `agent:id`): the agent the user picked
-    ///   in the launch modal. For user-clone defs this is the def's
-    ///   id, which matches the folded `db_agents` row. For seeded
-    ///   templates this is the template's id, which has
-    ///   `is_template = 1` and is filtered out by the WHERE clause
-    ///   — the agentInstanceId path is the correct route for that
-    ///   case.
-    ///
-    /// Strategy: prefer `agentInstanceId` (covers template-instance
-    /// launches), fall back to `agentId` (covers user-clone launches
-    /// + legacy blocks predating `agentInstanceId`). Either path
-    /// requires `is_template = 0` so templates can't bleed through.
-    /// Codex P1 on PR #1114 surfaced the template-launch miss.
+    /// We deliberately do NOT consult `block.meta.agentInstanceId`:
+    /// codex P1 on PR #1114 round 3 surfaced that pane reuse
+    /// (`backToPicker` clears `agentId` but not `agentInstanceId`)
+    /// and quick-launch (no instance-id stamp) leave the key stale.
+    /// Trusting it would silently bleed the prior agent's identity
+    /// across reopens — exactly the regression the legacy active-
+    /// instance query avoided. The agentId-then-legacy path covers
+    /// every launch shape without needing instance-id stamping:
+    ///   - User-clone: db_agents.id == def.id, hits is_template=0.
+    ///   - Template direct-launch: agentId points at a template
+    ///     (is_template=1, filtered out). Legacy fallback finds the
+    ///     active instance row keyed on block_id.
+    ///   - Pane reuse: stale `agentInstanceId` is ignored; current
+    ///     `agentId` wins.
     ///
     /// Replaces the legacy "find most recent active instance for
-    /// this block" query, which existed because `db_agent_instances`
-    /// had multiple rows per pane (one per launch/reopen). The
-    /// consolidated `db_agents` table has ONE row per logical
-    /// agent, and the dual-write continuously folds the newest
-    /// bindings into that row — so "active" status filtering is no
-    /// longer needed to avoid stale creds.
+    /// this block" as the PRIMARY path for user-clones; the legacy
+    /// query remains as fallback for templates + edge cases.
+    /// Retires fully when Phase 3c drops the legacy table.
     /// Spec: docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md §3b.
+    ///
+    /// `user_hidden` is NOT filtered — hiding a named agent
+    /// ("forget") is a picker-visibility concept; the pane bound to
+    /// that agent must keep resolving credentials. Codex P2 on PR
+    /// #1114 round 2.
     ///
     /// Used by the identity resolver to pull `identity_id` /
     /// `memory_id` for environment injection on every command
@@ -2687,15 +2685,6 @@ impl Store {
             Some(b) => b,
             None => return Ok(None),
         };
-        // Candidate ids, in priority order: instance row (template
-        // launches), then the agent the user picked (user-clone
-        // launches + legacy blocks without `agentInstanceId`).
-        let instance_id = block
-            .meta
-            .get("agentInstanceId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
         let agent_id = block
             .meta
             .get("agentId")
@@ -2703,35 +2692,17 @@ impl Store {
             .or_else(|| block.meta.get("agent:id").and_then(|v| v.as_str()))
             .unwrap_or("")
             .to_string();
-        let mut candidates: Vec<String> = Vec::with_capacity(2);
-        if !instance_id.is_empty() {
-            candidates.push(instance_id);
-        }
-        if !agent_id.is_empty() && !candidates.contains(&agent_id) {
-            candidates.push(agent_id);
-        }
-        if candidates.is_empty() {
-            return Ok(None);
-        }
         let conn = self.conn.lock().unwrap();
-        // Do NOT filter `user_hidden`. Hiding a named agent
-        // ("forget") is a picker-visibility concept — it removes the
-        // row from the launch modal's dropdown, but the resolver
-        // must keep returning bindings for any pane still tied to
-        // that agent so commands don't silently degrade to ambient
-        // creds. Codex P2 on PR #1114. `display_hidden` on the
-        // returned AgentInstance stays `false` to match the legacy
-        // resolver's behavior (the field is never consumed here).
-        let mut stmt = conn.prepare(
-            "SELECT id, github_context, created_at,
-                    identity_id, memory_id, instance_name, working_directory
-             FROM db_agents
-             WHERE id = ?1
-               AND is_template = 0",
-        )?;
-        let block_id_owned = block_id.to_string();
-        for candidate in &candidates {
-            let result = stmt.query_row(params![candidate], |row| {
+        if !agent_id.is_empty() {
+            let mut stmt = conn.prepare(
+                "SELECT id, github_context, created_at,
+                        identity_id, memory_id, instance_name, working_directory
+                 FROM db_agents
+                 WHERE id = ?1
+                   AND is_template = 0",
+            )?;
+            let block_id_owned = block_id.to_string();
+            let result = stmt.query_row(params![agent_id], |row| {
                 Ok(AgentInstance {
                     id: row.get(0)?,
                     definition_id: row.get(0)?, // consolidated model — see 3b.3a
@@ -2752,20 +2723,15 @@ impl Store {
             });
             match result {
                 Ok(a) => return Ok(Some(a)),
-                Err(rusqlite::Error::QueryReturnedNoRows) => continue,
+                Err(rusqlite::Error::QueryReturnedNoRows) => {}
                 Err(e) => return Err(e.into()),
             }
         }
-        drop(stmt);
-        // Legacy-block fallback: panes launched before
-        // `agentInstanceId` started being stamped on block meta
-        // (and seeded-template launches predating that wiring) only
-        // carry `agentId = <template id>`, which gets filtered out
-        // above by `is_template = 0`. Fall back to the legacy
-        // `db_agent_instances` lookup by `block_id` to keep those
-        // panes resolving their selected identity. Codex P2 on PR
-        // #1114 round 2. Retires when Phase 3c drops the legacy
-        // table — by then every pane should be re-stamped.
+        // Legacy-block fallback: seeded-template launches and any
+        // block whose agentId references a row that doesn't exist
+        // in the consolidated view. The active-instance query is
+        // robust to pane reuse (it picks the most recent active
+        // row keyed on block_id).
         let mut legacy_stmt = conn.prepare(
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
                     status, github_context, started_at, ended_at, created_at,
@@ -4995,32 +4961,24 @@ mod tests {
     }
 
     #[test]
-    fn instance_get_active_for_block_phase_3b4_resolves_template_launch_via_instance_id() {
-        // Codex P1 on PR #1114: when launched from a seeded template
-        // the frontend sets `agentId = template.id` (is_template=1,
-        // filtered out by the WHERE clause) but ALSO stamps
-        // `agentInstanceId = inst.id` after CreateAgentInstanceCommand
-        // returns. The query must prefer the instance id so template
-        // launches with selected identity/memory bindings resolve.
+    fn instance_get_active_for_block_phase_3b4_resolves_template_launch_via_legacy_fallback() {
+        // Template launches store `agentId = template.id` in block
+        // meta. Templates have `is_template = 1` and are filtered
+        // out of the consolidated lookup, so the function falls back
+        // to the legacy `db_agent_instances` query to find the inst
+        // row that was created for this block.
         let (tmp, store, _reg) = store_with_registry();
         let agents_root = tmp.path().join("agents");
 
-        // Create a seeded template.
         let mut tpl = sample_agent("tpl-coder", "tpl-coder");
         tpl.is_seeded = 1;
         store.agent_def_insert(&mut tpl).unwrap();
-
-        // Launch an instance off the template — dual-write inserts a
-        // NEW db_agents row keyed by inst.id, with parent_template_id
-        // pointing at tpl-coder.
         let mut inst = make_named_inst("inst-tpl", "FromTemplate", &agents_root);
         inst.definition_id = "tpl-coder".to_string();
         inst.identity_id = "id-template-launch".to_string();
+        inst.block_id = "block-tpl".to_string();
         store.instance_create(&inst).unwrap();
 
-        // Block records BOTH ids — template id as agentId, instance
-        // id as agentInstanceId (matching the frontend's
-        // SetMetaCommand sequence).
         let mut block = crate::backend::obj::Block {
             oid: "block-tpl".to_string(),
             parentoref: String::new(),
@@ -5029,9 +4987,7 @@ mod tests {
             stickers: None,
             meta: {
                 let mut m = crate::backend::obj::MetaMapType::new();
-                m.insert("view".to_string(), serde_json::json!("agent"));
                 m.insert("agentId".to_string(), serde_json::json!("tpl-coder"));
-                m.insert("agentInstanceId".to_string(), serde_json::json!("inst-tpl"));
                 m
             },
             subblockids: None,
@@ -5041,25 +4997,39 @@ mod tests {
         let got = store
             .instance_get_active_for_block("block-tpl")
             .unwrap()
-            .expect("template-launched block must resolve through instance id");
-        assert_eq!(got.id, "inst-tpl");
+            .expect("template-launched block resolves via legacy fallback");
         assert_eq!(got.identity_id, "id-template-launch");
     }
 
     #[test]
-    fn instance_get_active_for_block_phase_3b4_falls_back_to_agent_id_when_no_instance_id() {
-        // Legacy blocks predating `agentInstanceId` stamping should
-        // still resolve via the user-clone `agentId` path. Also covers
-        // the user-clone launch case where instance_create folds into
-        // the existing def row and no separate inst.id row is created.
+    fn instance_get_active_for_block_phase_3b4_ignores_stale_agent_instance_id() {
+        // Codex P1 on PR #1114 round 3: pane reuse leaves
+        // `agentInstanceId` stale (only `agentId` is cleared by
+        // `backToPicker`). The resolver MUST NOT consult that key —
+        // otherwise the prior agent's identity bleeds into the new
+        // launch. We don't read `agentInstanceId` at all; the
+        // current `agentId` is the source of truth.
         let (tmp, store, _reg) = store_with_registry();
         let agents_root = tmp.path().join("agents");
-        let mut inst = make_named_inst("inst-clone", "Maks", &agents_root);
-        inst.identity_id = "id-clone-bindings".to_string();
-        store.instance_create(&inst).unwrap();
 
+        // Set up two distinct agents on different defs.
+        let mut prior_def = sample_agent("def-prior", "prior");
+        store.agent_def_insert(&mut prior_def).unwrap();
+        let mut prior_inst = make_named_inst("inst-prior", "Prior", &agents_root);
+        prior_inst.definition_id = "def-prior".to_string();
+        prior_inst.identity_id = "id-PRIOR-DO-NOT-USE".to_string();
+        store.instance_create(&prior_inst).unwrap();
+
+        // Current agent (the one the user just launched in the
+        // reused pane). def-mirror is the fixture's pre-created def.
+        let mut current_inst = make_named_inst("inst-current", "Current", &agents_root);
+        current_inst.identity_id = "id-current-correct".to_string();
+        store.instance_create(&current_inst).unwrap();
+
+        // Block has stale agentInstanceId pointing at the prior
+        // agent, but current agentId. The resolver must use agentId.
         let mut block = crate::backend::obj::Block {
-            oid: "block-clone".to_string(),
+            oid: "block-reused".to_string(),
             parentoref: String::new(),
             version: 0,
             runtimeopts: None,
@@ -5067,7 +5037,10 @@ mod tests {
             meta: {
                 let mut m = crate::backend::obj::MetaMapType::new();
                 m.insert("agentId".to_string(), serde_json::json!("def-mirror"));
-                // NO agentInstanceId — fallback path.
+                m.insert(
+                    "agentInstanceId".to_string(),
+                    serde_json::json!("inst-prior"),
+                );
                 m
             },
             subblockids: None,
@@ -5075,11 +5048,11 @@ mod tests {
         store.insert(&mut block).unwrap();
 
         let got = store
-            .instance_get_active_for_block("block-clone")
+            .instance_get_active_for_block("block-reused")
             .unwrap()
-            .expect("user-clone block without instance-id must still resolve");
-        assert_eq!(got.id, "def-mirror");
-        assert_eq!(got.identity_id, "id-clone-bindings");
+            .expect("must resolve to the current agent, not the stale instance id");
+        assert_eq!(got.identity_id, "id-current-correct");
+        assert_ne!(got.identity_id, "id-PRIOR-DO-NOT-USE");
     }
 
     #[test]
