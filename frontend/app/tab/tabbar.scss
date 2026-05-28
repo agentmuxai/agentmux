@@ -12,9 +12,16 @@
     // as the safety net (no tabs are hidden — workspace tabs are
     // unrecoverable from the bar today, unlike editor tabs which clip).
     // Spec: specs/SPEC_WORKSPACE_TAB_SIZING_2026-05-27.md.
-    --ws-tab-basis: 160px;
-    --ws-tab-min: 64px;
-    --ws-tab-max: 220px;
+    // Basis ~ VS Code "fit" mode default (~240px) — enough room for
+    // ~25 chars of file/title before ellipsis. Floor at 100px keeps
+    // a crowded tab readable rather than collapsing into a pill. Cap
+    // at 320px so a near-empty bar with one or two tabs still gives
+    // each tab a generous ~30-char window. Editor tabs run narrower
+    // (140 basis) because the editor pane itself is narrower than
+    // the workspace title bar.
+    --ws-tab-basis: 240px;
+    --ws-tab-min: 100px;
+    --ws-tab-max: 320px;
 
     display: flex;
     flex-direction: row;
@@ -51,13 +58,15 @@
         }
 
         // Override tab.scss absolute positioning — render tabs in flex flow.
-        // `flex: 0 1 basis` lets each tab shrink (so the inner `.name`'s
-        // existing `text-overflow: ellipsis` finally trips) but never grow
-        // past basis — the `.tab-bar-fill` filler absorbs slack on the right.
+        // grow=1 so tabs fill the bar's available width when there's
+        // room (matches VS Code "fit" mode with few tabs); shrink=1
+        // lets `.name`'s `text-overflow: ellipsis` trip once the bar
+        // gets crowded. Width is bounded by `--ws-tab-max` so a near-
+        // empty bar still doesn't blow tabs up absurdly wide.
         .tab {
             position: relative;
             opacity: 1;
-            flex: 0 1 var(--ws-tab-basis);
+            flex: 1 1 var(--ws-tab-basis);
             min-width: var(--ws-tab-min);
             max-width: var(--ws-tab-max);
             overflow: hidden;
@@ -115,13 +124,25 @@
     }
 
     // --- Drag-and-drop wrapper for each tab ---
-    // `flex: 0 1 auto` + `min-width: 0` is the critical pair: without
-    // `min-width: 0` the flex engine treats this wrapper's content width as
-    // an implicit floor and the inner `.tab`'s shrink never engages.
+    // Wrapper floor MUST match the inner `.tab` floor. With
+    // `min-width: 0` here, the wrapper would shrink below the .tab's
+    // `--ws-tab-min` under crowding — the .tab can't follow (it's at
+    // its own min-width clamp), so it stuck out past the wrapper into
+    // the next separator/tab. Result: collapsed visual gaps, no scroll
+    // engagement (the bar thinks wrappers fit), and ellipsis never
+    // tripping because the .tab itself never narrowed. Pinning the
+    // wrapper floor to `--ws-tab-min` lets the .tab and wrapper shrink
+    // in lockstep, so `.tab-bar-scroll`'s `overflow-x: auto` engages
+    // once all tabs hit the floor and there's still overflow.
     .tab-drop-wrapper {
         position: relative;
-        flex: 0 1 auto;
-        min-width: 0;
+        // grow=1 so tabs fill the bar when there's room (matches VS
+        // Code's "fit" mode behavior with few tabs). Cap at
+        // `--ws-tab-max` so a near-empty bar still doesn't blow tabs
+        // up absurdly wide.
+        flex: 1 1 var(--ws-tab-basis);
+        min-width: var(--ws-tab-min);
+        max-width: var(--ws-tab-max);
         display: flex;
         align-items: flex-end;
         height: 100%;
