@@ -123,7 +123,7 @@ These views exist in the codebase but are **not** widget-bar entries — do not 
 
 ## Log Access
 
-All logs land in `~/.agentmux/logs/` (`$AGENTMUX_LOG_DIR` in terminals). Pointer files resolve the current filename.
+Each running instance writes logs under its own per-channel data dir (`$AGENTMUX_LOG_DIR` in AgentMux terminals). The shared `~/.agentmux/logs/` holds pointer files (`current-host-v<v>.path`, `current-srv-v<v>.path`) so `muxlog` can resolve the right log from any context.
 
 | What | Command |
 |------|---------|

@@ -74,7 +74,7 @@ task package:linux     # Linux AppImage (writes to ~/Desktop)
 
 ### Logs
 
-All logs land in `~/.agentmux/logs/` (also exposed as `$AGENTMUX_LOG_DIR` inside AgentMux terminals). From any AgentMux terminal, the shipped `muxlog` shell helper resolves the right log file for the running instance:
+Each running instance writes its host and sidecar logs under its own per-channel data dir (`$AGENTMUX_LOG_DIR` inside AgentMux terminals). The shared `~/.agentmux/logs/` directory holds **pointer files** so the shipped `muxlog` shell helper can resolve the right log from any context:
 
 | What | Command |
 |------|---------|
@@ -83,7 +83,7 @@ All logs land in `~/.agentmux/logs/` (also exposed as `$AGENTMUX_LOG_DIR` inside
 | Frontend lines only | `muxlog host '\[fe\]'` |
 | Full host log | `muxlog host cat` |
 
-Works identically across `task dev`, portable, and installed builds. Logs auto-rotate daily and are retained for 7 days. Full per-process layout, pointer-file mechanics, and recipes: [docs.agentmux.ai/internals/debugging](https://docs.agentmux.ai/internals/debugging/).
+Works identically across `task dev`, portable, and installed builds. Logs auto-rotate daily and are retained for 7 days. Full per-process layout and pointer-file mechanics: [docs.agentmux.ai/internals/data-layout](https://docs.agentmux.ai/internals/data-layout/) and [/internals/debugging](https://docs.agentmux.ai/internals/debugging/).
 
 ## Widgets
 
