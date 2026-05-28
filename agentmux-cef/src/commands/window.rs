@@ -234,7 +234,7 @@ unsafe fn find_main_window() -> *mut std::ffi::c_void {
 #[cfg(target_os = "windows")]
 unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> *mut std::ffi::c_void {
     use cef::ImplBrowser;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, IsWindow, GA_ROOT};
 
     if !label.is_empty() {
         // 1. Consult the authoritative per-label HWND cache FIRST —
@@ -247,17 +247,34 @@ unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> *mut std::f
         //    on a different owner (e.g. main, for floaters owned by
         //    main) and cause `close_window_by_label` to post WM_CLOSE
         //    to the wrong window.
+        //
+        // Liveness guard: `capture_hwnd_for_label` has no eviction
+        // path, and CEF Views can swap the outer HWND on window
+        // recreate. A cache hit pointing at a dead HWND silently
+        // posts WM_CLOSE into the void (broken title-bar close
+        // button observed v0.39.1 → SPEC_WINDOW_HWND_CACHE_STALE_FIX_2026_05_28.md).
+        // Validate via IsWindow before trusting; on stale, evict
+        // and fall through to the registry/EnumWindows paths.
         let cached = state.window_hwnds.lock().get(label).copied();
         if let Some(raw_isize) = cached {
             let raw = raw_isize as *mut std::ffi::c_void;
             if !raw.is_null() {
-                tracing::info!(
+                if IsWindow(raw) != 0 {
+                    tracing::info!(
+                        target: "win-resolve",
+                        label = %label,
+                        cache_hwnd = ?raw,
+                        "[win-resolve] resolved via window_hwnds cache"
+                    );
+                    return raw;
+                }
+                tracing::warn!(
                     target: "win-resolve",
                     label = %label,
-                    cache_hwnd = ?raw,
-                    "[win-resolve] resolved via window_hwnds cache"
+                    stale_hwnd = ?raw,
+                    "[win-resolve] cache hit was stale (IsWindow=false); evicting"
                 );
-                return raw;
+                state.window_hwnds.lock().remove(label);
             }
         }
 
