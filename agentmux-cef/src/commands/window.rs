@@ -135,30 +135,241 @@ pub fn minimize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 /// defaults to "main" (preserves single-window-build behavior). The frontend
 /// reads its own label from the `?windowLabel=…` URL query and passes it
 /// here so non-main windows act on the right CEF window.
+///
+/// For floating-pane labels (`floating-…`), stashes the pre-maximize outer
+/// rect into `state.floating_restored_rects` so a subsequent restore (whether
+/// via this IPC or `restore_window_and_move` from the drag-from-maximized
+/// branch) can replay it. See SPEC_FLOATING_PANE_RESIZE_AND_MAXIMIZE
+/// 2026-05-28 §5.3.
+///
+/// Returns `{ "state": "maximized" | "normal" }` so the frontend can update
+/// its icon without round-tripping through `get_window_state`. The label-
+/// routing replaces the legacy `find_own_top_level_window` path that
+/// accidentally targeted whichever top-level was first in Z-order — for
+/// floaters, that was the floater itself (owned windows draw above their
+/// owner), so a "main" maximize would hit the floater. PR #1094 set up the
+/// `window_hwnds` cache that makes `resolve_window_hwnd` reliable.
 pub fn maximize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+
     #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
-        let hwnd = find_own_top_level_window();
+        use windows_sys::Win32::Foundation::RECT;
+
+        let hwnd = resolve_window_hwnd(state, label);
         if !hwnd.is_null() {
             let mut placement: WINDOWPLACEMENT = std::mem::zeroed();
             placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
             GetWindowPlacement(hwnd, &mut placement);
-            if placement.showCmd == SW_MAXIMIZE as u32 {
+            let is_max = placement.showCmd == SW_MAXIMIZE as u32;
+
+            if is_max {
+                // Prefer the explicit stash for floaters; the stash is the
+                // rect the user last had before the maximize. If the OS-
+                // owned restore rect (`rcNormalPosition`) is stale (which
+                // can happen if the floater was moved while maximized via
+                // future code paths), the stash is still the right
+                // target. Falls back to plain SW_RESTORE otherwise.
+                let stashed = if label.starts_with("floating-") {
+                    state.floating_restored_rects.lock().remove(label)
+                } else {
+                    None
+                };
                 ShowWindow(hwnd, SW_RESTORE);
+                if let Some((l, t, r, b)) = stashed {
+                    SetWindowPos(
+                        hwnd,
+                        std::ptr::null_mut(),
+                        l,
+                        t,
+                        r - l,
+                        b - t,
+                        SWP_NOZORDER | SWP_NOACTIVATE,
+                    );
+                }
+                return Ok(serde_json::json!({ "state": "normal" }));
             } else {
+                // Stash the current rect for floaters so the next restore
+                // (via this same IPC, or via the drag-from-maximized
+                // `restore_window_and_move` path) lands on the same
+                // geometry. Other window kinds rely on Win32's own
+                // `rcNormalPosition` which `SW_RESTORE` honours.
+                if label.starts_with("floating-") {
+                    let mut rect: RECT = std::mem::zeroed();
+                    GetWindowRect(hwnd, &mut rect);
+                    state.floating_restored_rects.lock().insert(
+                        label.to_string(),
+                        (rect.left, rect.top, rect.right, rect.bottom),
+                    );
+                }
                 ShowWindow(hwnd, SW_MAXIMIZE);
+                return Ok(serde_json::json!({ "state": "maximized" }));
             }
-            return Ok(serde_json::Value::Null);
         }
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
         crate::ui_tasks::post_maximize_window(state, label);
     }
     let _ = (state, args);
+    Ok(serde_json::json!({ "state": "normal" }))
+}
+
+/// Resize the window to (w, h) in CSS pixels.
+///
+/// Companion to `set_window_position`. Resolves HWND via the same
+/// `resolve_window_hwnd` cache-first path, so floaters are reached by their
+/// `floating-…` label rather than Z-order luck. CSS-to-physical scaling
+/// uses the window's CURRENT monitor (matters when the floater spans two
+/// monitors at different DPIs — Win32 picks the largest-intersection
+/// monitor as the "current" one).
+///
+/// Args: `{ label, w, h }` — w/h in CSS px, both > 0.
+pub fn set_window_size(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+    let w = args.get("w").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let h = args.get("h").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    if w <= 0 || h <= 0 {
+        return Err(format!("set_window_size: w/h must be positive (got {w}×{h})"));
+    }
+
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::Foundation::RECT;
+        use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+        let hwnd = resolve_window_hwnd(state, label);
+        if !hwnd.is_null() {
+            let dpi = GetDpiForWindow(hwnd) as i32;
+            let dpi = if dpi > 0 { dpi } else { 96 };
+            let w_phys = (w * dpi / 96).max(1);
+            let h_phys = (h * dpi / 96).max(1);
+
+            let mut rect: RECT = std::mem::zeroed();
+            GetWindowRect(hwnd, &mut rect);
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                rect.left,
+                rect.top,
+                w_phys,
+                h_phys,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            return Ok(serde_json::Value::Null);
+        }
+    }
+    let _ = (state, label, w, h);
     Ok(serde_json::Value::Null)
+}
+
+/// Return the window's current state: `"normal" | "maximized" | "minimized"`.
+///
+/// Read from `GetWindowPlacement().showCmd` so it reflects the OS's
+/// authoritative view (covers programmatic `ShowWindow` calls as well as
+/// the toggle done via `maximize_window`). The frontend polls this on
+/// mount to render the right header glyph, and reads it during the
+/// drag-from-maximized branch to decide whether to restore-before-drag.
+pub fn get_window_state(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        let hwnd = resolve_window_hwnd(state, label);
+        if !hwnd.is_null() {
+            let mut placement: WINDOWPLACEMENT = std::mem::zeroed();
+            placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+            GetWindowPlacement(hwnd, &mut placement);
+            let s = match placement.showCmd as u32 {
+                x if x == SW_MAXIMIZE as u32 => "maximized",
+                x if x == SW_MINIMIZE as u32 || x == SW_SHOWMINIMIZED as u32 => "minimized",
+                _ => "normal",
+            };
+            return Ok(serde_json::json!({ "state": s }));
+        }
+    }
+    let _ = (state, label);
+    Ok(serde_json::json!({ "state": "normal" }))
+}
+
+/// Atomic restore + reposition + resize, used by the drag-from-maximized
+/// branch in `floating-pane-workspace.tsx`. Three Win32 calls — `ShowWindow
+/// (SW_RESTORE)` followed by `SetWindowPos(x, y, w, h)` — issued without
+/// returning to the renderer between them. Doing this as two IPCs would
+/// cost a round-trip mid-drag and let the user see a brief flash of the
+/// restored rect at its old origin before the move applies. Also drops
+/// the floater's stash entry (the stashed rect is now superseded by the
+/// drag's chosen origin).
+///
+/// Args: `{ label, x, y, w, h }`. x/y in PHYSICAL px (the FE already
+/// devicePixelRatio-scales for drag); w/h in PHYSICAL px (read from the
+/// stashed rect via `consume_restored_rect`).
+pub fn restore_window_and_move(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+    let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let w = args.get("w").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let h = args.get("h").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    if w <= 0 || h <= 0 {
+        return Err(format!("restore_window_and_move: w/h must be positive (got {w}×{h})"));
+    }
+
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        let hwnd = resolve_window_hwnd(state, label);
+        if !hwnd.is_null() {
+            ShowWindow(hwnd, SW_RESTORE);
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                x,
+                y,
+                w,
+                h,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            // Stash is consumed by `consume_restored_rect` before this
+            // call. Defensive remove() in case the FE skipped the
+            // consume step.
+            state.floating_restored_rects.lock().remove(label);
+            return Ok(serde_json::Value::Null);
+        }
+    }
+    let _ = (state, label, x, y, w, h);
+    Ok(serde_json::Value::Null)
+}
+
+/// Drain the floater's pre-maximize rect from `state.floating_restored_rects`
+/// and return it. Caller is expected to either replay it via
+/// `restore_window_and_move` (drag-from-maximized) or via a plain
+/// `maximize_window` toggle (header button / dblclick — which also drains
+/// the entry).
+///
+/// Returns `{ left, top, right, bottom, w, h }`. All values PHYSICAL px.
+/// Returns `null` if no stashed rect exists for the label — the FE should
+/// then skip the restore-before-drag branch and let `maximize_window`'s
+/// own SW_RESTORE put the window wherever Win32 thinks it should land.
+pub fn consume_restored_rect(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("");
+    if label.is_empty() {
+        return Err("consume_restored_rect: label is required".to_string());
+    }
+    let entry = state.floating_restored_rects.lock().remove(label);
+    match entry {
+        Some((l, t, r, b)) => Ok(serde_json::json!({
+            "left": l,
+            "top": t,
+            "right": r,
+            "bottom": b,
+            "w": r - l,
+            "h": b - t,
+        })),
+        None => Ok(serde_json::Value::Null),
+    }
 }
 
 /// Resolve a top-level HWND for the given label. Prefer the reducer

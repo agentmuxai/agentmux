@@ -254,6 +254,10 @@ async fn route_command(
         "clear_floating_redock_hover" => commands::window::clear_floating_redock_hover(state, args),
         "move_window_by" => commands::window::move_window_by(state, args),
         "set_window_position" => commands::window::set_window_position(state, args),
+        "set_window_size" => commands::window::set_window_size(state, args),
+        "get_window_state" => commands::window::get_window_state(state, args),
+        "consume_restored_rect" => commands::window::consume_restored_rect(state, args),
+        "restore_window_and_move" => commands::window::restore_window_and_move(state, args),
         "toggle_devtools" => commands::window::toggle_devtools(state, args),
         "inspect_element_at" => commands::window::inspect_element_at(state, args),
         "show_context_menu" => {
