@@ -4,15 +4,12 @@
 /**
  * ToolBlock — panel-mode render tests.
  *
- * Covers the hover-anchor extension landed alongside
- * `SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24.md` §5.10:
- *   - hover-only state → overlay positioning.
- *   - pinned / running / pending_approval → in-flow positioning.
- *   - hidden state → `--hidden` class.
- *
- * Pre-existing behaviors (status-icon mapping, live-tail, etc.)
- * are exercised by the integration tests in `renderers.test.ts`
- * and the broader agent-pane fixtures.
+ * Post-SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28: hover is no longer a
+ * trigger for expansion. Tests assert the two surviving render modes
+ * (`--flow` when pinned or auto-expanded, `--hidden` otherwise) and the
+ * negative case that `mouseenter` does not flip the panel open. The
+ * older hover-anchor overlay variants (`--overlay-above/below`) were
+ * removed alongside the hover trigger.
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
@@ -43,8 +40,6 @@ describe("ToolBlock — panel mode", () => {
         const panel = container.querySelector(".agent-tool-panel");
         expect(panel).not.toBeNull();
         expect(panel!.classList.contains("agent-tool-panel--hidden")).toBe(true);
-        expect(panel!.classList.contains("agent-tool-panel--overlay-below")).toBe(false);
-        expect(panel!.classList.contains("agent-tool-panel--overlay-above")).toBe(false);
         expect(panel!.classList.contains("agent-tool-panel--flow")).toBe(false);
     });
 
@@ -59,9 +54,6 @@ describe("ToolBlock — panel mode", () => {
     });
 
     it("running (auto-expanded) → panel is in-flow (`--flow`)", () => {
-        // Running tools stay in flow because their content streams
-        // and we don't want the row jumping around with overlay
-        // positioning while a CLI is mid-output.
         const running: ToolNode = { ...baseTool, status: "running" };
         const { container } = render(() => (
             <ToolBlock node={running} pinned={false} onTogglePin={() => {}} />
@@ -81,14 +73,11 @@ describe("ToolBlock — panel mode", () => {
         expect(panel!.classList.contains("agent-tool-panel--flow")).toBe(true);
     });
 
-    it("hover only (post-completion, not pinned, not running) → panel is an overlay", () => {
-        // Drive the 150ms enter timer to flip `hovering` on. With
-        // a completed (success/failed) tool + no pin, hover puts
-        // the panel into overlay mode — direction picked from
-        // `getBoundingClientRect()` + the scroll container. jsdom
-        // gives zeros for both, so the direction picker falls
-        // through to "below" (tie-break) which is fine for
-        // asserting the class FAMILY.
+    // ── Hover is not a trigger ────────────────────────────────────────
+    // Asserts the core invariant of SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28:
+    // hovering a completed tool row produces zero visible state change.
+    // No expansion, no overlay class, no inline max-height.
+    it("mouseenter on a completed tool does NOT expand the panel", () => {
         vi.useFakeTimers();
         try {
             const { container } = render(() => (
@@ -96,43 +85,34 @@ describe("ToolBlock — panel mode", () => {
             ));
             const root = container.querySelector(".agent-tool-block") as HTMLElement;
             fireEvent.mouseEnter(root);
-            vi.advanceTimersByTime(200);
-            const panel = container.querySelector(".agent-tool-panel");
-            expect(panel).not.toBeNull();
-            // Exactly one of the overlay classes is present.
-            const isOverlay =
-                panel!.classList.contains("agent-tool-panel--overlay-below") ||
-                panel!.classList.contains("agent-tool-panel--overlay-above");
-            expect(isOverlay).toBe(true);
-            // Not in flow simultaneously.
-            expect(panel!.classList.contains("agent-tool-panel--flow")).toBe(false);
-            // Hidden modifier is gone too.
-            expect(panel!.classList.contains("agent-tool-panel--hidden")).toBe(false);
-        } finally {
-            vi.useRealTimers();
-        }
-    });
-
-    it("hover-mode overlay has an inline `max-height` (per-hover cap)", () => {
-        // Same shape as UserMessageBlock — the cap is computed
-        // from container space and set inline so the overlay's
-        // own overflow-y operates inside the pane bounds.
-        vi.useFakeTimers();
-        try {
-            const { container } = render(() => (
-                <ToolBlock node={baseTool} pinned={false} onTogglePin={() => {}} />
-            ));
-            const root = container.querySelector(".agent-tool-block") as HTMLElement;
-            fireEvent.mouseEnter(root);
-            vi.advanceTimersByTime(200);
+            // Wait well past the old 150ms hover-enter delay so we
+            // catch a regression where the hover timer creeps back in.
+            vi.advanceTimersByTime(1000);
             const panel = container.querySelector(".agent-tool-panel") as HTMLElement;
-            expect(panel.style.maxHeight).toMatch(/^\d+px$/);
+            expect(panel.classList.contains("agent-tool-panel--hidden")).toBe(true);
+            expect(panel.classList.contains("agent-tool-panel--flow")).toBe(false);
+            expect(panel.style.maxHeight).toBe("");
         } finally {
             vi.useRealTimers();
         }
     });
 
-    it("pinned panel has no inline `max-height` (in-flow uses SCSS default)", () => {
+    it("mouseenter on a running tool keeps the panel in flow (no change)", () => {
+        // Auto-expand keeps the panel open for running tools regardless
+        // of hover state. Verifying the in-flow render survives the
+        // mouseenter event guards against an over-zealous hover-trigger
+        // removal that would also drop the auto-expand path.
+        const running: ToolNode = { ...baseTool, status: "running" };
+        const { container } = render(() => (
+            <ToolBlock node={running} pinned={false} onTogglePin={() => {}} />
+        ));
+        const root = container.querySelector(".agent-tool-block") as HTMLElement;
+        fireEvent.mouseEnter(root);
+        const panel = container.querySelector(".agent-tool-panel") as HTMLElement;
+        expect(panel.classList.contains("agent-tool-panel--flow")).toBe(true);
+    });
+
+    it("pinned panel has no inline `max-height`", () => {
         const { container } = render(() => (
             <ToolBlock node={baseTool} pinned={true} onTogglePin={() => {}} />
         ));
