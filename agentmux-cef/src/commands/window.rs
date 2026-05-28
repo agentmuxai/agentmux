@@ -6,10 +6,12 @@
 //
 // Phase 2: Single-window only. Multi-window commands are stubbed.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use cef::{ImplBrowser, ImplBrowserHost};
 
+use crate::client::helpers::{html_escape, js_string_literal};
 use crate::state::AppState;
 
 /// Get the current zoom factor.
@@ -964,10 +966,60 @@ fn dev_vite_port() -> u16 {
         .unwrap_or(5173)
 }
 
+/// Why `resolve_frontend_base_url` could not return a usable URL.
+///
+/// Returned by `resolve_frontend_base_url` instead of the old silent
+/// fallback to `http://localhost:<vite_port>`, which masked broken
+/// installs as renderer-crash loops in production (see
+/// `docs/retro/retro-portable-rm-running-install-2026-05-28.md`).
+#[derive(Debug)]
+pub(crate) enum FrontendUrlError {
+    /// `std::env::current_exe()` failed. Extraordinarily rare; on
+    /// Windows it would mean we couldn't even resolve our own module
+    /// path, which usually only happens for truly corrupted installs.
+    ExeUnresolvable(std::io::Error),
+    /// We resolved a production install dir but `frontend/index.html`
+    /// is not next to the exe. Either the bundle was never built, was
+    /// deleted (e.g. by an external `rm -rf` of a running portable —
+    /// see retro), or the install layout is otherwise wrong.
+    AssetsMissing { checked_path: PathBuf },
+}
+
+impl std::fmt::Display for FrontendUrlError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ExeUnresolvable(e) => write!(f, "could not resolve current_exe: {}", e),
+            Self::AssetsMissing { checked_path } => {
+                write!(f, "frontend assets missing at {}", checked_path.display())
+            }
+        }
+    }
+}
+
+impl std::error::Error for FrontendUrlError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ExeUnresolvable(e) => Some(e),
+            Self::AssetsMissing { .. } => None,
+        }
+    }
+}
+
 /// Resolve the base URL for the frontend.
-/// Production: IPC server serves static files from `frontend/` next to the exe.
-/// Dev: Vite dev server at `http://localhost:<AGENTMUX_VITE_PORT or 5173>`.
-pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> String {
+///
+/// - **Production:** IPC server serves static files from `frontend/`
+///   next to the exe → returns `http://127.0.0.1:<ipc_port>`.
+/// - **Dev:** Vite dev server at
+///   `http://localhost:<AGENTMUX_VITE_PORT or 5173>`.
+/// - **Production with missing assets:** returns
+///   `Err(FrontendUrlError::AssetsMissing)`. Historically this fell
+///   through to `http://localhost:<vite_port>`, which in production
+///   points at nothing and produced silent renderer crash loops
+///   (issue #1117 / retro 2026-05-28). Callers should now translate
+///   the error into a built-in static error page via
+///   `assets_missing_data_url` rather than navigating to a network
+///   URL.
+pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> Result<String, FrontendUrlError> {
     // Detect dev mode. Two reachable scenarios:
     //   a) Launcher-managed: AGENTMUX_RUNTIME_MODE is set, from_env()
     //      returns Some.
@@ -982,20 +1034,86 @@ pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> String {
             .map(|d| agentmux_common::RuntimeMode::current(&d))
     });
     if matches!(mode, Some(agentmux_common::RuntimeMode::Dev { .. })) {
-        return format!("http://localhost:{}", dev_vite_port());
+        return Ok(format!("http://localhost:{}", dev_vite_port()));
     }
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
-    let has_frontend = exe_dir
-        .as_ref()
-        .map(|d| d.join("frontend/index.html").exists())
-        .unwrap_or(false);
-    if has_frontend {
-        format!("http://127.0.0.1:{}", ipc_port)
+    let exe = std::env::current_exe().map_err(FrontendUrlError::ExeUnresolvable)?;
+    let exe_dir = exe
+        .parent()
+        .ok_or_else(|| FrontendUrlError::AssetsMissing { checked_path: exe.clone() })?
+        .to_path_buf();
+    let index = exe_dir.join("frontend").join("index.html");
+    if index.exists() {
+        Ok(format!("http://127.0.0.1:{}", ipc_port))
     } else {
-        format!("http://localhost:{}", dev_vite_port())
+        Err(FrontendUrlError::AssetsMissing { checked_path: index })
     }
+}
+
+/// Build a self-contained `data:` URL that renders a static
+/// "AgentMux install is broken" error page. Used by every caller of
+/// `resolve_frontend_base_url` as the navigation target when the
+/// resolver returns `Err` — instead of falling back to a network URL
+/// that almost certainly points at nothing in production.
+///
+/// The page contains no auto-reload and no link back into the broken
+/// install, so navigating to it can never trigger the crash loop the
+/// old silent fallback produced. Only buttons are "Quit" and "Copy
+/// path" (the missing asset path is shown so the user knows what to
+/// reinstall).
+pub(crate) fn assets_missing_data_url(err: &FrontendUrlError) -> String {
+    let (reason, detail) = match err {
+        FrontendUrlError::ExeUnresolvable(e) => (
+            "Could not determine the install directory".to_string(),
+            e.to_string(),
+        ),
+        FrontendUrlError::AssetsMissing { checked_path } => (
+            "AgentMux frontend assets are missing".to_string(),
+            format!("Expected at: {}", checked_path.display()),
+        ),
+    };
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>AgentMux — Install broken</title>
+<style>
+:root {{ color-scheme: dark; }}
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+       background: #1e1e2e; color: #cdd6f4;
+       display: flex; justify-content: center; align-items: center;
+       min-height: 100vh; margin: 0; padding: 24px; box-sizing: border-box; }}
+.box {{ text-align: center; max-width: 560px; padding: 36px;
+       background: #181825; border: 1px solid #313244; border-radius: 10px;
+       box-shadow: 0 8px 32px rgba(0,0,0,0.4); }}
+.icon {{ font-size: 36px; line-height: 1; margin-bottom: 12px; }}
+h1 {{ color: #f38ba8; font-size: 22px; margin: 0 0 6px 0; }}
+p {{ color: #bac2de; line-height: 1.55; margin: 0 0 12px 0; font-size: 14px; }}
+.detail code {{ display: inline-block; background: #313244; color: #f9e2af;
+               padding: 6px 10px; border-radius: 4px; font-size: 12px;
+               font-family: ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
+               word-break: break-all; text-align: left; max-width: 100%; }}
+.actions {{ display: flex; gap: 10px; justify-content: center; margin-top: 24px; flex-wrap: wrap; }}
+button {{ padding: 10px 22px; border: 1px solid #45475a; border-radius: 6px;
+         background: #313244; color: #cdd6f4; cursor: pointer;
+         font-size: 13px; font-family: inherit; }}
+button:hover {{ background: #45475a; border-color: #585b70; }}
+</style></head>
+<body><div class="box" role="alertdialog">
+<div class="icon">⚠</div>
+<h1>AgentMux install is broken</h1>
+<p>{reason_safe}.</p>
+<p class="detail"><code>{detail_safe}</code></p>
+<p>Reinstall AgentMux from a fresh portable ZIP to recover. Your saved
+sessions and agent state are in <code>~/.agentmux/</code> and are unaffected.</p>
+<div class="actions">
+<button onclick="navigator.clipboard &amp;&amp; navigator.clipboard.writeText({detail_js})">Copy path</button>
+<button onclick="window.close()">Quit</button>
+</div></div></body></html>"#,
+        reason_safe = html_escape(&reason),
+        detail_safe = html_escape(&detail),
+        detail_js = js_string_literal(&detail),
+    );
+    let b64 = cef::base64_encode(Some(html.as_bytes()));
+    let b64_str = cef::CefString::from(&b64).to_string();
+    format!("data:text/html;base64,{}", b64_str)
 }
 
 /// Open a new full AgentMux instance (status-bar version click, Ctrl+Shift+N,
@@ -1075,13 +1193,23 @@ fn open_window_with_kind(
 
     let ipc_port = *state.ipc_port.lock();
     let ipc_token = &state.ipc_token;
-    let base_url = resolve_frontend_base_url(ipc_port);
-
-    let separator = if base_url.contains('?') { "&" } else { "?" };
-    let url = format!(
-        "{}{}ipc_port={}&ipc_token={}&windowLabel={}",
-        base_url, separator, ipc_port, ipc_token, label
-    );
+    let url = match resolve_frontend_base_url(ipc_port) {
+        Ok(base_url) => {
+            let separator = if base_url.contains('?') { "&" } else { "?" };
+            format!(
+                "{}{}ipc_port={}&ipc_token={}&windowLabel={}",
+                base_url, separator, ipc_port, ipc_token, label
+            )
+        }
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                label = %label,
+                "[window] frontend assets unavailable — opening static error page (the new window will display an 'install broken' notice instead of crash-looping)",
+            );
+            assets_missing_data_url(&e)
+        }
+    };
 
     tracing::info!(label = %label, kind = ?kind, parent = ?parent_instance_id, "[window] open window");
 

@@ -428,15 +428,27 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
     // Build URL with IPC credentials and tear-off params
     let ipc_port = *state.ipc_port.lock();
     let ipc_token = &state.ipc_token;
-    let base_url = super::window::resolve_frontend_base_url(ipc_port);
-    let separator = if base_url.contains('?') { "&" } else { "?" };
-    let mut url = format!(
-        "{}{}ipc_port={}&ipc_token={}&windowLabel={}",
-        base_url, separator, ipc_port, ipc_token, label
-    );
-    if !workspace_id.is_empty() {
-        url.push_str(&format!("&workspaceId={}", workspace_id));
-    }
+    let url = match super::window::resolve_frontend_base_url(ipc_port) {
+        Ok(base_url) => {
+            let separator = if base_url.contains('?') { "&" } else { "?" };
+            let mut u = format!(
+                "{}{}ipc_port={}&ipc_token={}&windowLabel={}",
+                base_url, separator, ipc_port, ipc_token, label
+            );
+            if !workspace_id.is_empty() {
+                u.push_str(&format!("&workspaceId={}", workspace_id));
+            }
+            u
+        }
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                label = %label,
+                "[dnd:cef] frontend assets unavailable — opening static error page on tear-off",
+            );
+            super::window::assets_missing_data_url(&e)
+        }
+    };
 
     // Phase B.5 (window_meta step d) — push the pre-create
     // handoff (label + kind + parent). Tear-offs are FullInstance

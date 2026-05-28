@@ -223,8 +223,6 @@ pub fn post_create_floating_window(
     // floating-pane shell instead of the main workspace.
     let ipc_port = *state.ipc_port.lock();
     let ipc_token = &state.ipc_token;
-    let base_url = crate::commands::window::resolve_frontend_base_url(ipc_port);
-    let separator = if base_url.contains('?') { "&" } else { "?" };
     // pane_id is a UUID-ish identifier in current callers — no
     // percent-encoding needed today. Use a minimal escape that handles
     // a few special chars in case future callers pass arbitrary names.
@@ -235,19 +233,33 @@ pub fn post_create_floating_window(
     // and rendered the placeholder shell; Phase 2 callers (#1077) pass
     // the newly-created workspace id so the floater renders the actual
     // `<Block>` via the standard new-window init.
-    let mut url = format!(
-        "{}{}ipc_port={}&ipc_token={}&windowLabel={}&floatingPaneId={}",
-        base_url,
-        separator,
-        ipc_port,
-        ipc_token,
-        window_label,
-        escape_query_value(&args.pane_id),
-    );
-    if let Some(ws_id) = args.workspace_id.as_deref().filter(|s| !s.is_empty()) {
-        url.push_str("&workspaceId=");
-        url.push_str(&escape_query_value(ws_id));
-    }
+    let url = match crate::commands::window::resolve_frontend_base_url(ipc_port) {
+        Ok(base_url) => {
+            let separator = if base_url.contains('?') { "&" } else { "?" };
+            let mut u = format!(
+                "{}{}ipc_port={}&ipc_token={}&windowLabel={}&floatingPaneId={}",
+                base_url,
+                separator,
+                ipc_port,
+                ipc_token,
+                window_label,
+                escape_query_value(&args.pane_id),
+            );
+            if let Some(ws_id) = args.workspace_id.as_deref().filter(|s| !s.is_empty()) {
+                u.push_str("&workspaceId=");
+                u.push_str(&escape_query_value(ws_id));
+            }
+            u
+        }
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                window_label = %window_label,
+                "[floating-pane] frontend assets unavailable — opening static error page",
+            );
+            crate::commands::window::assets_missing_data_url(&e)
+        }
+    };
 
     // Phase B.5 pre-create handoff — same shape as the main
     // open-window path so the existing window_meta plumbing (label →
