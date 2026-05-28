@@ -12,12 +12,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# VERSION is the semver core (from package.json) — drives binary
+# filenames, the in-binary version, and the verification grep below.
+# LABEL is the ephemeral, traceable build label set by scripts/package.sh
+# (`<version>+g<sha>[.dirty].<stamp>`); it names the on-disk artifacts so
+# every local build is unique and tellable-apart. Falls back to VERSION
+# when this script is run directly (e.g. a release build that didn't go
+# through package.sh).
 VERSION=$(node -p "require('./package.json').version")
+LABEL="${AGENTMUX_BUILD_LABEL:-$VERSION}"
 OUTDIR="${1:-$HOME/Desktop}"
-PORTABLE="$OUTDIR/agentmux-$VERSION-x64-portable"
-ZIPPATH="$OUTDIR/agentmux-$VERSION-x64-portable.zip"
+PORTABLE="$OUTDIR/agentmux-$LABEL-x64-portable"
+ZIPPATH="$OUTDIR/agentmux-$LABEL-x64-portable.zip"
 
-echo "Packaging AgentMux v$VERSION Portable..."
+echo "Packaging AgentMux $LABEL Portable..."
 
 # Verify required files
 for f in target/release/agentmux-cef.exe dist/cef/libcef.dll dist/bin/agentmux-srv-$VERSION-windows.x64.exe dist/frontend/index.html target/release/agentmux-launcher.exe target/release/agentmux-bashwrap.exe; do
@@ -44,8 +52,10 @@ if [ -d "$PORTABLE" ] && command -v powershell.exe >/dev/null 2>&1; then
     " 2>/dev/null | tr -d '\r\n ')
     if [ -n "$running_pid" ]; then
         echo "ERROR: a process (PID $running_pid) is running from $PORTABLE" >&2
-        echo "       quit that AgentMux instance, or pass an alternate output dir:" >&2
-        echo "       bash scripts/package-portable.sh ~/Desktop/staging" >&2
+        echo "       This should be impossible now that every local build gets a" >&2
+        echo "       unique stamped folder — if you hit this, two builds collided" >&2
+        echo "       on the same label. Pass an alternate output dir to proceed:" >&2
+        echo "       task package -- ~/Desktop/staging" >&2
         exit 1
     fi
 fi
@@ -66,11 +76,11 @@ cp target/release/agentmux-launcher.exe "$PORTABLE/agentmux.exe"
 # file's contents are advisory; the detection only checks for its
 # presence next to the launcher exe. Mac .app-bundle layouts are
 # also supported (marker can sit at the bundle root).
-printf 'AgentMux portable build %s\n' "$VERSION" > "$PORTABLE/agentmux-portable.marker"
+printf 'AgentMux portable build %s\n' "$LABEL" > "$PORTABLE/agentmux-portable.marker"
 
 # README
 cat > "$PORTABLE/README.txt" <<READMEEOF
-AgentMux v$VERSION - Portable Edition
+AgentMux $LABEL - Portable Edition
 
 Quick Start:
   1. Extract this folder (or ZIP) anywhere
@@ -212,7 +222,7 @@ DIR_SIZE=$(du -sh "$PORTABLE" | cut -f1)
 # is how a broken packaging run used to produce a portable folder on the
 # desktop with no ZIP beside it.
 cd "$OUTDIR"
-ZIP_NAME="agentmux-$VERSION-x64-portable.zip"
+ZIP_NAME="agentmux-$LABEL-x64-portable.zip"
 rm -f "$ZIP_NAME"
 
 portable_basename=$(basename "$PORTABLE")
@@ -253,7 +263,15 @@ ZIP_SIZE=$(du -sh "$ZIP_NAME" 2>/dev/null | cut -f1 || echo "N/A")
 # `cd "$OUTDIR"` above, so it still points at the repo root even though cwd
 # is now the output directory. Skipped silently if the file / section
 # isn't there.
-if [ -f "$REPO_ROOT/VERSION_HISTORY.md" ] && grep -q "^## Sizes " "$REPO_ROOT/VERSION_HISTORY.md" 2>/dev/null; then
+#
+# Skipped entirely for LOCAL labeled builds (AGENTMUX_BUILD_LABEL set):
+# writing to the git-tracked VERSION_HISTORY.md on every smoke build would
+# reintroduce the exact git-mutation-per-build problem this whole scheme
+# exists to eliminate. The size table is release bookkeeping; only the
+# release flow should touch it. (SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md)
+if [ -z "${AGENTMUX_BUILD_LABEL:-}" ] \
+    && [ -f "$REPO_ROOT/VERSION_HISTORY.md" ] \
+    && grep -q "^## Sizes " "$REPO_ROOT/VERSION_HISTORY.md" 2>/dev/null; then
     DIR_BYTES=$(find "$PORTABLE" -type f -printf '%s\n' 2>/dev/null | awk '{s+=$1} END {print s+0}')
     ZIP_BYTES=$(stat -c '%s' "$ZIP_NAME" 2>/dev/null || echo 0)
     DIR_MIB=$(awk "BEGIN {printf \"%.1f\", $DIR_BYTES/1024/1024}")
@@ -275,6 +293,6 @@ if [ -f "$REPO_ROOT/VERSION_HISTORY.md" ] && grep -q "^## Sizes " "$REPO_ROOT/VE
 fi
 
 echo ""
-echo "[SUCCESS] Portable v$VERSION"
+echo "[SUCCESS] Portable $LABEL"
 echo "  Directory: $PORTABLE ($DIR_SIZE)"
 echo "  ZIP: $ZIPPATH ($ZIP_SIZE)"
