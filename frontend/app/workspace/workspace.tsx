@@ -15,6 +15,7 @@ import type { JSX } from "solid-js";
 function WorkspaceElem(): JSX.Element {
     const tabId = atoms.activeTabId;
     const ws = atoms.workspace;
+    const prefersReducedMotion = atoms.prefersReducedMotionAtom;
 
     // All tab IDs (pinned + regular). Keep every tab mounted so terminals
     // preserve their xterm.js instance and scrollback across tab switches.
@@ -44,8 +45,31 @@ function WorkspaceElem(): JSX.Element {
                                         // unmounting children. Lifted by `tab-reveal.ts`'s
                                         // frame-budget detector. Only applies to the active
                                         // tab — inactive tabs are `display: none` already.
+                                        //
+                                        // Plus an opacity-fade on lift: even after the gate
+                                        // releases, the first paint frame can briefly show
+                                        // un-cascaded theme colors / unstyled content (the
+                                        // "negative-of-a-photo" flash users reported on
+                                        // 2026-05-27). The opacity transition from 0 → 1
+                                        // over 120ms blends those frames into invisibility.
+                                        // visibility doesn't animate so it flips instantly
+                                        // when the gate lifts; opacity carries the perceived
+                                        // smoothness.
+                                        //
+                                        // Reduced-motion users get the visibility gate
+                                        // without the fade — they still need the FOUC
+                                        // suppression, just not the animation. Codex P2
+                                        // on PR #1108.
+                                        // Spec:
+                                        // SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md.
                                         visibility:
                                             tid === tabId() && tabSwitching() ? "hidden" : null,
+                                        opacity: prefersReducedMotion()
+                                            ? "1"
+                                            : tid === tabId() && tabSwitching() ? "0" : "1",
+                                        transition: prefersReducedMotion()
+                                            ? "none"
+                                            : "opacity 120ms ease-out",
                                     }}
                                 >
                                     <ErrorBoundary>
