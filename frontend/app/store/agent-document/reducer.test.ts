@@ -883,6 +883,28 @@ describe("agent document reducer", () => {
             expect(r.events.some((e: any) => e.type === "orphans-scrubbed")).toBe(false);
         });
 
+        // Codex P2 r3 on #1104: HistoryRestored represents the
+        // COMPLETE pre-close history. If the snapshot's own tail is
+        // mid-thought, it's the orphan candidate even when live
+        // arrivals have populated state.nodes during the async read
+        // window. (The pagination guard belongs to HistoryLoaded
+        // only, where `fresh` is a sub-range of a larger doc.)
+        it("scrubs snapshot-tail thinking even after live arrivals", () => {
+            const live = md("live-text", "live content");
+            const base = seed([live]);
+            const r = update(base, {
+                type: "HistoryRestored",
+                fromSnapshot: true,
+                nodes: [md("snap-1"), thinkingMd("snap-tail")],
+            });
+            const snapTail = r.state.nodes.find((n) => n.id === "snap-tail") as any;
+            expect(snapTail.metadata.canceled).toBe(true);
+            // Live node untouched.
+            const liveAfter = r.state.nodes.find((n) => n.id === "live-text") as any;
+            expect(liveAfter.metadata).toBeUndefined();
+            expect(r.events.some((e: any) => e.type === "orphans-scrubbed")).toBe(true);
+        });
+
         // Codex P2 on #1104: HistoryRestored arriving AFTER live
         // stream events have populated state.nodes must not flip
         // those live nodes to canceled — only the snapshot replay

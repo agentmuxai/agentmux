@@ -267,13 +267,14 @@ export function update(
             // content, not metadata). Live nodes pass through
             // untouched; only the replay gets sanitized.
             //
-            // `hasContentAfter` — codex P2 r2: if state.nodes already
-            // has live content, a thinking node at the end of fresh
-            // is not the merged tail and must not be canceled. Tools
-            // unaffected (status field is independent of position).
-            const scrubResult = scrubOrphanedInProgress(fresh, nowMs, {
-                hasContentAfter: state.nodes.length > 0,
-            });
+            // Do NOT pass `hasContentAfter` here — codex P2 r3 on
+            // #1104. A snapshot represents the COMPLETE pre-close
+            // history; its own tail IS the orphan candidate if it's
+            // mid-thought, regardless of any live arrivals that may
+            // have slipped in during the async read window. (The
+            // pagination guard belongs to HistoryLoaded only, where
+            // `fresh` is a sub-range of a larger doc.)
+            const scrubResult = scrubOrphanedInProgress(fresh, nowMs);
             const scrubbedFresh = scrubResult ? scrubResult.nodes : fresh;
             const mergedNodes = [...scrubbedFresh, ...state.nodes];
             const restoreEvents: ReducerResult["events"] = [
