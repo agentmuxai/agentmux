@@ -448,7 +448,7 @@ All logs land in `$AGENTMUX_LOG_DIR` (`~/.agentmux/logs/`). Pointer files resolv
 | Current sidecar log path | `cat "$AGENTMUX_LOG_DIR/current-srv.path"` |
 | Tail host log | `muxlog host` or `tail -f "$AGENTMUX_LOG_DIR/$(cat "$AGENTMUX_LOG_DIR/current-host.path")"` |
 | Tail sidecar log | `muxlog srv` |
-| Frontend logs | `muxlog host '[fe]'` |
+| Frontend logs | `muxlog host '\[fe\]'` |
 | Memory heartbeat | `muxlog host mem_heartbeat` |
 | Dump full host log | `muxlog host cat` |
 | Launcher log (portable/install only) | `cat "$AGENTMUX_LOG_DIR/agentmux-launcher.log"` |
