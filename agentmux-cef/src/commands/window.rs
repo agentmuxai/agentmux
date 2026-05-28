@@ -1028,25 +1028,52 @@ pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> Result<String, Fronten
     //      same `dist/cef-dev/` build dir → Dev classification fires
     //      that the launcher would have used.
     let mode = agentmux_common::RuntimeMode::from_env().or_else(|| {
-        std::env::current_exe()
+        resolve_host_runtime_dir()
             .ok()
-            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
             .map(|d| agentmux_common::RuntimeMode::current(&d))
     });
     if matches!(mode, Some(agentmux_common::RuntimeMode::Dev { .. })) {
         return Ok(format!("http://localhost:{}", dev_vite_port()));
     }
-    let exe = std::env::current_exe().map_err(FrontendUrlError::ExeUnresolvable)?;
-    let exe_dir = exe
-        .parent()
-        .ok_or_else(|| FrontendUrlError::AssetsMissing { checked_path: exe.clone() })?
-        .to_path_buf();
-    let index = exe_dir.join("frontend").join("index.html");
+    let runtime_dir = resolve_host_runtime_dir()?;
+    let index = runtime_dir.join("frontend").join("index.html");
     if index.exists() {
         Ok(format!("http://127.0.0.1:{}", ipc_port))
     } else {
         Err(FrontendUrlError::AssetsMissing { checked_path: index })
     }
+}
+
+/// Resolve the directory that contains this host build's runtime
+/// assets (`frontend/`, the CEF DLLs, locales, etc.).
+///
+/// Preference order:
+///
+/// 1. **`AGENTMUX_HOME` env var** — set by `agentmux-launcher` from
+///    *its* resolved `real_exe` path at host-spawn time. This is the
+///    authoritative anchor: the launcher always finds the runtime
+///    dir by walking from its own current_exe, so the path it
+///    exports always points at the on-disk files that actually
+///    exist, even if those files were moved or unlinked after host
+///    process startup. See
+///    `docs/retro/retro-portable-rm-running-install-2026-05-28.md`
+///    for why current_exe() is not safe to use directly on Windows.
+/// 2. **Fallback to `std::env::current_exe().parent()`** — used in
+///    dev mode (`task dev` without the launcher) and any other
+///    invocation where AGENTMUX_HOME isn't set. Carries the old
+///    Windows-rename hazard, but those invocations don't survive
+///    a directory move in the same way (dev mode is short-lived).
+fn resolve_host_runtime_dir() -> Result<PathBuf, FrontendUrlError> {
+    if let Some(val) = std::env::var_os("AGENTMUX_HOME") {
+        let path = PathBuf::from(val);
+        if !path.as_os_str().is_empty() {
+            return Ok(path);
+        }
+    }
+    let exe = std::env::current_exe().map_err(FrontendUrlError::ExeUnresolvable)?;
+    exe.parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| FrontendUrlError::AssetsMissing { checked_path: exe })
 }
 
 /// Build a self-contained `data:` URL that renders a static
