@@ -234,6 +234,18 @@ fn spawn_host_supervised(
 ) -> Option<tokio::process::Child> {
     use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
 
+    // The launcher's resolved `real_exe` lives in `runtime/`; pass its
+    // parent dir as AGENTMUX_HOME so the host can anchor asset lookups
+    // (frontend/index.html, etc.) on something stable rather than
+    // `std::env::current_exe()`. Windows's GetModuleFileName keeps
+    // returning the original load-time path even after the parent dir
+    // is renamed or unlinked out from under it — the 2026-05-28
+    // incident pattern. AGENTMUX_HOME is whatever path *we* (the
+    // launcher) successfully resolved real_exe through, so it always
+    // points at the runtime dir that actually contains the binaries.
+    // See docs/retro/retro-portable-rm-running-install-2026-05-28.md.
+    let host_runtime_dir = real_exe.parent().map(|p| p.to_path_buf());
+
     let mut host_cmd = tokio::process::Command::new(real_exe);
     host_cmd
         .args(args)
@@ -246,6 +258,9 @@ fn spawn_host_supervised(
         .env("AGENTMUX_LAUNCHER_PIPE", pipe_path)
         .creation_flags(CREATE_SUSPENDED)
         .kill_on_drop(false); // J0 handles cleanup.
+    if let Some(dir) = host_runtime_dir {
+        host_cmd.env("AGENTMUX_HOME", dir);
+    }
     if let Some(name) = splash_event {
         host_cmd.env("AGENTMUX_SPLASH_EVENT", name);
     }
