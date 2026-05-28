@@ -389,16 +389,18 @@ unsafe extern "system" fn floating_pane_wndproc(
         WM_NCCALCSIZE if wparam == 1 => return 0,
         // Suppress the DWM activation border repaint.
         WM_NCACTIVATE => return 1,
-        // Fill the inset strip (the `resize_border_px` ring around the
-        // CEF child) with the AgentMux dark-theme background color
-        // instead of the default white DWM frame. Without this,
-        // hbrBackground=NULL leaves DWM's default light fill visible
-        // in the strip, producing a thick white border around the
-        // floating window. Hard-coded to (34, 34, 34) — matches
-        // `frontend/app/app.scss`'s `background: rgba(34, 34, 34, …)`
-        // default. Light-theme support is a follow-up; the FE can
-        // ship a `set_floater_chrome_color({label, rgb})` IPC later.
-        // User-reported regression after the round-3 inset fix.
+        // DIAGNOSTIC: paint the inset strip MAGENTA so we can visually
+        // distinguish "my handler reached the pixels" vs "something
+        // else (DWM, WS_THICKFRAME chrome) is overpainting". The
+        // earlier dark-(34,34,34) attempt produced a thick WHITE
+        // border per user feedback, so either:
+        //   (a) the handler isn't being called at all
+        //   (b) the handler IS called but DWM repaints in white
+        //   (c) the white is actually from a different source
+        //       (the CEF child's initial paint, WS_THICKFRAME's
+        //       resize-border decoration, etc.)
+        // Magenta paint + tracing distinguish all three. Reverts
+        // to the dark color once we know which case we're in.
         WM_ERASEBKGND => {
             use windows_sys::Win32::Foundation::RECT;
             use windows_sys::Win32::Graphics::Gdi::{
@@ -407,12 +409,47 @@ unsafe extern "system" fn floating_pane_wndproc(
             let hdc = wparam as *mut std::ffi::c_void;
             let mut rect: RECT = std::mem::zeroed();
             GetClientRect(hwnd, &mut rect);
-            let brush = CreateSolidBrush(0x00222222u32);  // BGR(0x22, 0x22, 0x22) = RGB(34,34,34)
+            // BGR encoding for COLORREF: 0x00BBGGRR — so 0x00FF00FF
+            // is BGR(0xFF, 0x00, 0xFF) = RGB(255, 0, 255) = magenta.
+            let brush = CreateSolidBrush(0x00FF00FFu32);
             if !brush.is_null() {
                 FillRect(hdc, &rect, brush);
                 DeleteObject(brush as *mut _);
             }
+            tracing::info!(
+                target: "floating-pane-diag",
+                hwnd = ?hwnd,
+                rect_w = rect.right - rect.left,
+                rect_h = rect.bottom - rect.top,
+                "[floating-pane-diag] WM_ERASEBKGND fired — painted MAGENTA"
+            );
             return 1; // signal "we handled it" — OS skips its own erase
+        }
+        // DIAGNOSTIC: trace WM_PAINT and WM_NCPAINT so we know if
+        // the OS is sending paint requests for the outer (which our
+        // handler would then potentially repaint). Helps narrow down
+        // whether the white is from a WM_PAINT we're not handling.
+        WM_PAINT => {
+            tracing::info!(
+                target: "floating-pane-diag",
+                hwnd = ?hwnd,
+                "[floating-pane-diag] WM_PAINT fired (falling through to DefWindowProc)"
+            );
+            // Fall through to default — let the OS validate the
+            // update region. Returning here without BeginPaint/
+            // EndPaint would leave the window dirty and burn CPU.
+        }
+        WM_NCPAINT => {
+            tracing::info!(
+                target: "floating-pane-diag",
+                hwnd = ?hwnd,
+                "[floating-pane-diag] WM_NCPAINT fired (suppressing default frame paint)"
+            );
+            // Return 0 to suppress the OS's default non-client frame
+            // paint (which for WS_THICKFRAME draws a thin border at
+            // the window edge). If the white we're seeing is from
+            // here, this should kill it.
+            return 0;
         }
         // Enforce min size + clamp the maximized rect to the current
         // monitor's WORK area (taskbar respected). Without the work-
