@@ -66,9 +66,12 @@ task dev           # CEF host + Vite hot reload
 ### Production Build
 
 ```bash
-task package           # Portable ZIP for the host platform
-task package:linux     # Linux AppImage (writes to ~/Desktop)
+task package            # Portable ZIP for the host platform
+task package -- --fresh # …with a throwaway data dir (clean-slate session)
+task package:linux      # Linux AppImage (writes to ~/Desktop)
 ```
+
+`task package` builds a **local** portable with an ephemeral, traceable label — it does **not** bump the version and does **not** touch git. Each build lands in a uniquely-stamped folder (`agentmux-<version>+g<sha>[.dirty].<stamp>-x64-portable`) so builds never collide on disk, and shares a per-branch data dir so your test session survives rebuilds. The committed version moves only via `task release` (changesets). See [docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md](./docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md).
 
 `task package:macos` and `task package:msix` are TODO stubs in `Taskfile.yml`. The full release artifact set is produced by `agentmuxai/agentmux-builder` — see §Releases below.
 
@@ -214,7 +217,7 @@ Local build outputs from `task package` on the host platform:
 
 | Platform | Task | Artifact |
 |----------|------|----------|
-| **Windows** | `task package` | `dist/agentmux-cef-*-x64-portable.zip` |
+| **Windows** | `task package` | `~/Desktop/agentmux-<version>+g<sha>[.dirty].<stamp>-x64-portable/` and `.zip` |
 | **Linux** | `task package:linux` | `~/Desktop/AgentMux_*_amd64.AppImage` |
 
 Other platform tasks (`task package:macos`, `task package:msix`) are TODO stubs in `Taskfile.yml`. The full release artifact set (macOS DMG, Windows installer, Windows MSIX, Linux .deb) is produced by [`agentmuxai/agentmux-builder`](https://github.com/agentmuxai/agentmux-builder) — see [§Releases](#releases) for the artifact catalog.

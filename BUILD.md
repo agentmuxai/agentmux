@@ -147,13 +147,17 @@ This rebuilds:
 
 ### Production Build
 
-Create a portable build (Windows):
+Create a local portable build (Windows):
 
 ```bash
-task package
+task package             # branch-scoped data dir (session persists across rebuilds)
+task package -- --fresh  # throwaway data dir for a clean-slate test
+task package -- ~/Desktop/staging   # alternate output dir
 ```
 
-Output: `~/Desktop/agentmux-{version}-x64-portable/` and `.zip`
+Output: `~/Desktop/agentmux-<version>+g<sha>[.dirty].<stamp>-x64-portable/` and `.zip`
+
+`task package` is for **local** builds. It does **not** bump the version and does **not** touch git — the artifact carries an ephemeral build *label* (the part after `+` is semver build metadata, ignored for precedence), not a new release version. Every build gets a unique stamped folder (so a running instance never locks the next build) and a per-branch data dir keyed on the `dev-portable-<branch>` channel (so agents/panes/auth survive an iterate-rebuild loop). `--fresh` suffixes the channel with the build stamp for a one-off clean dir. The committed version moves only through `task release` (changesets, below). Full rationale: [docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md](./docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md).
 
 ---
 
