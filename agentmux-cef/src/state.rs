@@ -690,6 +690,17 @@ pub struct AppState {
     #[cfg(target_os = "windows")]
     pub window_hwnds: Mutex<HashMap<String, isize>>,
 
+    /// Floater label → pre-maximize outer window rect, captured just before
+    /// `ShowWindow(SW_MAXIMIZE)` so the post-restore origin can be replayed
+    /// either implicitly (`ShowWindow(SW_RESTORE)`) or atomically via
+    /// `restore_window_and_move` during a drag-from-maximized gesture.
+    ///
+    /// Stored as `(left, top, right, bottom)` (i32 tuple) to avoid carrying
+    /// the Win32-only `RECT` type in cross-platform state. Floater labels are
+    /// UUID-tagged (`floating-<uuid>`) so collisions are not a concern.
+    ///
+    /// See SPEC_FLOATING_PANE_RESIZE_AND_MAXIMIZE_2026-05-28.md §5.3.
+    pub floating_restored_rects: Mutex<HashMap<String, (i32, i32, i32, i32)>>,
 }
 
 impl Default for AppState {
@@ -746,6 +757,7 @@ impl Default for AppState {
             debug_port: Mutex::new(0),
             #[cfg(target_os = "windows")]
             window_hwnds: Mutex::new(HashMap::new()),
+            floating_restored_rects: Mutex::new(HashMap::new()),
         }
     }
 }

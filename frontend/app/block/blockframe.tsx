@@ -35,6 +35,8 @@ import { buildPaneContextMenu } from "./pane-actions";
 import { BlockFrameProps } from "./blocktypes";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
+import { useFloatingPaneInfo, setFloatingPaneInfo } from "@/app/store/floating-pane-context";
+import { invokeCommand } from "@/app/platform/ipc";
 
 const NumActiveConnColors = 8;
 
@@ -203,6 +205,38 @@ function EndIcons(props: {
         click: props.nodeModel.onClose,
     };
 
+    // Maximize / restore is only meaningful when this block is the single
+    // tenant of a floating-pane window. Docked panes (the floating-pane
+    // signal is null) skip this entirely. Toggling routes through
+    // `maximize_window({label})`; its return value drives the icon swap
+    // without round-tripping through `get_window_state`. See spec §5.4.
+    const floatingInfo = useFloatingPaneInfo;
+    const toggleFloatingMaximize = async () => {
+        const info = floatingInfo();
+        if (!info) return;
+        try {
+            const res = await invokeCommand<{ state: "maximized" | "normal" }>(
+                "maximize_window",
+                { label: info.windowLabel },
+            );
+            setFloatingPaneInfo({
+                windowLabel: info.windowLabel,
+                state: res?.state === "maximized" ? "maximized" : "normal",
+            });
+        } catch (e) {
+            console.error("[floating-pane] maximize_window failed", e);
+        }
+    };
+    const maximizeDecl = createMemo<IconButtonDecl>(() => {
+        const isMax = floatingInfo()?.state === "maximized";
+        return {
+            elemtype: "iconbutton",
+            icon: isMax ? "window-restore" : "window-maximize",
+            title: isMax ? "Restore" : "Maximize",
+            click: toggleFloatingMaximize,
+        };
+    });
+
     return (
         <>
             <Show when={(endIconButtons()?.length ?? 0) > 0}>
@@ -236,6 +270,9 @@ function EndIcons(props: {
                     title: "Add to Layout",
                     click: () => { props.nodeModel.addEphemeralNodeToLayout(); },
                 }} />
+            </Show>
+            <Show when={floatingInfo() != null}>
+                <IconButton decl={maximizeDecl()} className="block-frame-default-maximize" />
             </Show>
             <IconButton decl={closeDecl} className="block-frame-default-close" />
         </>

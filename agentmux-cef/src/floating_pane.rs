@@ -312,7 +312,7 @@ fn escape_query_value(s: &str) -> String {
 }
 
 /// WndProc for the floating-pane class. Removes the system non-client
-/// area (no native title bar / borders drawn) and maps the 6 CSS-px
+/// area (no native title bar / borders drawn) and maps the 8 CSS-px
 /// edge bands to `HT{LEFT,RIGHT,...}` so the window remains resizable.
 ///
 /// Window-drag is intentionally NOT handled here. We tried HTCAPTION
@@ -347,8 +347,15 @@ unsafe extern "system" fn floating_pane_wndproc(
     // per the HWND's DPI inside the WM_NCHITTEST branch. A hard-coded
     // physical-pixel constant would shrink the hit zone on HiDPI —
     // a 6-physical-px resize border is 3 CSS px at 200% DPI and
-    // effectively unreachable.
-    const RESIZE_BORDER_CSS: i32 = 6;
+    // effectively unreachable. Bumped 6 → 8 per resize+maximize spec
+    // §4.1 — 6 px was undiscoverable; 8 px stays clear of header
+    // buttons at the 320-px min width.
+    const RESIZE_BORDER_CSS: i32 = 8;
+
+    // Floor for the maximized rect — clamps the resize handle and the
+    // OS maximize geometry to a usable minimum. See spec §4.1.
+    const MIN_WIDTH_CSS: i32 = 320;
+    const MIN_HEIGHT_CSS: i32 = 180;
 
     match msg {
         // Claim the entire window rect as client area — no system title
@@ -357,6 +364,73 @@ unsafe extern "system" fn floating_pane_wndproc(
         WM_NCCALCSIZE if wparam == 1 => return 0,
         // Suppress the DWM activation border repaint.
         WM_NCACTIVATE => return 1,
+        // Enforce min size + clamp the maximized rect to the current
+        // monitor's WORK area (taskbar respected). Without the work-
+        // area clamp, WS_POPUP defaults to full-monitor on maximize
+        // and covers the taskbar. ptMaxPosition is documented as
+        // relative to the window's CURRENT position, hence the
+        // GetWindowRect delta math.
+        WM_GETMINMAXINFO => {
+            use windows_sys::Win32::Foundation::POINT;
+            use windows_sys::Win32::Graphics::Gdi::{
+                GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+            };
+
+            let mmi = lparam as *mut MINMAXINFO;
+            if mmi.is_null() {
+                return 0;
+            }
+
+            let dpi = GetDpiForWindow(hwnd) as i32;
+            let dpi = if dpi > 0 { dpi } else { 96 };
+            let min_w = (MIN_WIDTH_CSS * dpi / 96).max(1);
+            let min_h = (MIN_HEIGHT_CSS * dpi / 96).max(1);
+            (*mmi).ptMinTrackSize = POINT { x: min_w, y: min_h };
+
+            let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            if !monitor.is_null() {
+                let mut mi: MONITORINFO = std::mem::zeroed();
+                mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+                if GetMonitorInfoW(monitor, &mut mi) != 0 {
+                    let mut wr = std::mem::zeroed::<windows_sys::Win32::Foundation::RECT>();
+                    GetWindowRect(hwnd, &mut wr);
+                    let work = mi.rcWork;
+                    (*mmi).ptMaxPosition = POINT {
+                        x: work.left - wr.left,
+                        y: work.top - wr.top,
+                    };
+                    (*mmi).ptMaxSize = POINT {
+                        x: work.right - work.left,
+                        y: work.bottom - work.top,
+                    };
+                }
+            }
+            return 0;
+        }
+        // Track the outer's client size onto the embedded CEF browser's
+        // WS_CHILD — a child of WS_POPUP does NOT auto-track parent
+        // size, so without this the rendered content stays at the
+        // initial (W, H) and a resize leaves empty space (or clips).
+        WM_SIZE => {
+            if wparam as u32 != SIZE_MINIMIZED {
+                let w = (lparam & 0xFFFF) as i16 as i32;
+                let h = ((lparam >> 16) & 0xFFFF) as i16 as i32;
+                if w > 0 && h > 0 {
+                    let child = GetWindow(hwnd, GW_CHILD);
+                    if !child.is_null() {
+                        SetWindowPos(
+                            child,
+                            std::ptr::null_mut(),
+                            0,
+                            0,
+                            w,
+                            h,
+                            SWP_NOZORDER | SWP_NOACTIVATE,
+                        );
+                    }
+                }
+            }
+        }
         WM_NCHITTEST => {
             let x = (lparam & 0xFFFF) as i16 as i32;
             let y = ((lparam >> 16) & 0xFFFF) as i16 as i32;

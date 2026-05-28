@@ -39,6 +39,10 @@ import { TabContent } from "@/app/tab/tabcontent";
 import { WorkspaceService } from "@/store/services";
 import { atoms, getApi } from "@/store/global";
 import * as WOS from "@/store/wos";
+import {
+    setFloatingPaneInfo,
+    useFloatingPaneInfo,
+} from "@/app/store/floating-pane-context";
 import { Show, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js";
 
 import "./floating-pane-workspace.scss";
@@ -126,6 +130,30 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         // enumerate first in Z-order).
         const label = windowLabel();
 
+        // Publish floating-pane context so BlockFrame's EndIcons renders
+        // the maximize button + read-back can answer "are we maximized
+        // right now" for the drag-from-maximized branch below. State is
+        // seeded from a one-shot `get_window_state` query so a fresh
+        // floater (or one that was already maximized via a programmatic
+        // ShowWindow elsewhere) starts with the right icon glyph.
+        if (label) {
+            setFloatingPaneInfo({ windowLabel: label, state: "normal" });
+            invokeCommand<{ state: "normal" | "maximized" | "minimized" }>(
+                "get_window_state",
+                { label },
+            )
+                .then((res) => {
+                    if (res?.state === "maximized") {
+                        setFloatingPaneInfo({
+                            windowLabel: label,
+                            state: "maximized",
+                        });
+                    }
+                })
+                .catch(() => {});
+        }
+        onCleanup(() => setFloatingPaneInfo(null));
+
         const sendPos = (x: number, y: number): void => {
             if (setPosInFlight) {
                 pendingPos = { x, y };
@@ -165,6 +193,74 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             clickScreenY = e.screenY;
             latestScreenX = e.screenX;
             latestScreenY = e.screenY;
+
+            // Drag-from-maximized restore. Windows Explorer-style: dragging
+            // a maximized window's "title" restores it under the cursor.
+            // We replicate manually because the JS-driven drag suppresses
+            // the OS WM_NCLBUTTONDOWN/HTCAPTION path that would otherwise
+            // do this for free. The host's `restore_window_and_move` is
+            // atomic — no flash of the maximized rect at its old origin
+            // between SW_RESTORE and SetWindowPos. See spec §4.2 / §5.4.
+            const currentState = useFloatingPaneInfo()?.state;
+            if (currentState === "maximized") {
+                let stash: {
+                    left: number;
+                    top: number;
+                    w: number;
+                    h: number;
+                } | null = null;
+                try {
+                    stash = await invokeCommand<{
+                        left: number;
+                        top: number;
+                        w: number;
+                        h: number;
+                    } | null>("consume_restored_rect", { label });
+                } catch {
+                    stash = null;
+                }
+                if (myId !== currentMouseDownId) return;
+                const dpr = window.devicePixelRatio || 1;
+                // Anchor the restored rect under the cursor. Centre the
+                // header width on the cursor (matches the Explorer feel)
+                // and place the cursor ~16 px below the top edge so it
+                // lands in the middle of the pane header. Fall back to a
+                // reasonable default size if no stash existed (shouldn't
+                // happen — maximize_window stashes — but defensive).
+                const restoredW = stash?.w ?? Math.round(800 * dpr);
+                const restoredH = stash?.h ?? Math.round(600 * dpr);
+                const cursorPhysX = Math.round(e.screenX * dpr);
+                const cursorPhysY = Math.round(e.screenY * dpr);
+                const restoredX = cursorPhysX - Math.round(restoredW / 2);
+                const restoredY = cursorPhysY - 16;
+                try {
+                    await invokeCommand("restore_window_and_move", {
+                        label,
+                        x: restoredX,
+                        y: restoredY,
+                        w: restoredW,
+                        h: restoredH,
+                    });
+                } catch (err) {
+                    console.error(
+                        "[floating-pane] restore_window_and_move failed",
+                        err,
+                    );
+                    return;
+                }
+                if (myId !== currentMouseDownId) return;
+                setFloatingPaneInfo({
+                    windowLabel: label,
+                    state: "normal",
+                });
+                // Baseline the drag loop on the post-restore origin so
+                // mousemove deltas land relative to where the floater now
+                // sits, not where the maximized rect used to be.
+                initWinX = restoredX;
+                initWinY = restoredY;
+                dragging = true;
+                return;
+            }
 
             try {
                 const pos = await invokeCommand<{ x: number; y: number }>(
@@ -371,17 +467,58 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             }
         };
 
+        // Double-click on the pane header toggles maximize, same
+        // affordance as the explicit header button. Mirrors the main-
+        // window pattern in `frontend/app/hook/useWindowDrag.win32.ts`
+        // (PR #315): dblclick capture-phase listener gated on header
+        // scope + non-interactive target. The toggle's return value
+        // drives the icon state so no extra IPC is needed. See spec
+        // §4.2.
+        const onDblClick = async (e: MouseEvent) => {
+            if (e.button !== 0) return;
+            const target = e.target as HTMLElement | null;
+            if (!target) return;
+            if (!target.closest(HEADER_SELECTOR)) return;
+            if (target.closest(INTERACTIVE_SELECTOR)) return;
+            e.preventDefault();
+            // Suppress the header's bubble-phase onDblClick that toggles
+            // pane magnify (`blockframe.tsx:405`). Inside the floating
+            // shell, dblclick on the header should ONLY maximize the
+            // window — magnifying a pane that already fills the entire
+            // floater is meaningless and visually broken (the magnify
+            // overlay tries to ride alongside the tile, but the floater
+            // has no other tile).
+            e.stopPropagation();
+            // Cancel any in-flight mousedown drag so the dblclick's
+            // second mousedown doesn't leave `dragging=true` behind.
+            currentMouseDownId += 1;
+            dragging = false;
+            try {
+                const res = await invokeCommand<{
+                    state: "maximized" | "normal";
+                }>("maximize_window", { label });
+                setFloatingPaneInfo({
+                    windowLabel: label,
+                    state: res?.state === "maximized" ? "maximized" : "normal",
+                });
+            } catch (err) {
+                console.error("[floating-pane] dblclick maximize_window failed", err);
+            }
+        };
+
         // Capture-phase listeners so we run BEFORE pragmatic-dnd's
         // bubble-phase mousedown handler — preventDefault here blocks
         // the HTML5 dragstart it would have triggered.
         document.addEventListener("mousedown", onMouseDown, true);
         document.addEventListener("mousemove", onMouseMove);
         document.addEventListener("mouseup", onMouseUp);
+        document.addEventListener("dblclick", onDblClick, true);
 
         onCleanup(() => {
             document.removeEventListener("mousedown", onMouseDown, true);
             document.removeEventListener("mousemove", onMouseMove);
             document.removeEventListener("mouseup", onMouseUp);
+            document.removeEventListener("dblclick", onDblClick, true);
         });
     });
 
