@@ -1871,11 +1871,28 @@ impl Store {
             return self.instance_list_legacy(definition_id, status);
         }
         let conn = self.conn.lock().unwrap();
-        // `definition_id` mapping: for user-clone defs the consolidated
-        // row's id IS the def.id (so id-matched rows project as
-        // definition_id = id). For template-instance projections,
-        // parent_template_id points at the seeded template's def.id.
-        // Match against EITHER so the filter honors both lineages.
+        // `definition_id` filter: match the agent's own `id` only.
+        //
+        // In the consolidated model every `is_template = 0` row IS an
+        // agent identifiable by its `id`:
+        //   - User-clone def projection: `id` = the clone def's id.
+        //   - Template-instance projection: `id` = the original inst.id.
+        //
+        // The legacy `definition_id` filter conflated "agent identity"
+        // with "parent template" because the old schema split them
+        // across two tables. The new model has no such split. A
+        // template-id filter would over-match (user-clones of X share
+        // `parent_template_id` with template-instances of X — see
+        // codex P2 on PR #1111), so we route template-id callers to
+        // an empty result. No live caller exercises that path; the
+        // only frontend consumer (`listagentinstances` RPC via
+        // swarm-model) passes empty filters.
+        let mut filter_clause = String::new();
+        let mut param_vals: Vec<String> = Vec::new();
+        if let Some(d) = definition_id {
+            filter_clause.push_str("\n               AND id = ?1");
+            param_vals.push(d.to_string());
+        }
         let mut sql = String::from(
             "SELECT id,
                     CASE WHEN parent_template_id = '' THEN id ELSE parent_template_id END AS def_id,
@@ -1885,11 +1902,7 @@ impl Store {
              WHERE is_template = 0
                AND user_hidden = 0",
         );
-        let mut param_vals: Vec<String> = Vec::new();
-        if let Some(d) = definition_id {
-            sql.push_str("\n               AND (id = ?1 OR parent_template_id = ?1)");
-            param_vals.push(d.to_string());
-        }
+        sql.push_str(&filter_clause);
         sql.push_str("\n             ORDER BY created_at DESC");
         let mut stmt = conn.prepare(&sql)?;
         let iter = stmt.query_map(rusqlite::params_from_iter(param_vals.iter()), |row| {
@@ -4827,6 +4840,52 @@ mod tests {
         let filtered = store.instance_list(Some("def-other"), None).unwrap();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].instance_name, "Other");
+    }
+
+    #[test]
+    fn instance_list_phase_3b3a_definition_id_filter_matches_agent_id_only() {
+        // Codex P2 on PR #1111: the legacy `definition_id` filter
+        // conflated "agent identity" with "parent template" because of
+        // the old schema split. In the consolidated model the filter
+        // matches the agent's own id only — templates aren't agents
+        // (they have `is_template = 1`, which is excluded by the
+        // outer WHERE) and user-clones of a template are SEPARATE
+        // agents with their own id, NOT children of the template.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        // A seeded template + a user-clone derived from it + a
+        // template-instance launched directly off the template.
+        let mut tpl = sample_agent("tpl-coder", "tpl-coder");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let mut clone = sample_agent("clone-of-tpl", "clone-of-tpl");
+        clone.parent_id = "tpl-coder".to_string();
+        store.agent_def_insert(&mut clone).unwrap();
+        let mut tpl_inst = make_named_inst("inst-direct", "DirectTpl", &agents_root);
+        tpl_inst.definition_id = "tpl-coder".to_string();
+        store.instance_create(&tpl_inst).unwrap();
+
+        // Filter by the template's id returns empty — templates are
+        // not agents, and we no longer follow the parent_template_id
+        // backlink (which would over-match).
+        let by_tpl = store.instance_list(Some("tpl-coder"), None).unwrap();
+        assert!(by_tpl.is_empty(), "template id should not surface any agent");
+
+        // Filter by the user-clone's id returns just the clone row.
+        let by_clone = store.instance_list(Some("clone-of-tpl"), None).unwrap();
+        assert_eq!(by_clone.len(), 1);
+        assert_eq!(by_clone[0].id, "clone-of-tpl");
+
+        // Filter by the template-instance id returns just that inst.
+        let by_inst = store.instance_list(Some("inst-direct"), None).unwrap();
+        assert_eq!(by_inst.len(), 1);
+        assert_eq!(by_inst[0].id, "inst-direct");
+        assert_eq!(by_inst[0].instance_name, "DirectTpl");
+
+        // Filter by non-existent id returns empty.
+        let none = store.instance_list(Some("does-not-exist"), None).unwrap();
+        assert!(none.is_empty());
     }
 
     #[test]
