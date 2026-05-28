@@ -176,7 +176,6 @@ function Tab(props: TabProps): JSX.Element {
             selectEditableText();
             return;
         }
-        const curLen = Array.from(editableRef.innerText).length;
         if (event.key === "Enter") {
             event.preventDefault();
             event.stopPropagation();
@@ -187,9 +186,6 @@ function Tab(props: TabProps): JSX.Element {
         } else if (event.key === "Escape") {
             editableRef.innerText = originalName();
             editableRef.blur();
-            event.preventDefault();
-            event.stopPropagation();
-        } else if (curLen >= 14 && !["Backspace", "Delete", "ArrowLeft", "ArrowRight"].includes(event.key)) {
             event.preventDefault();
             event.stopPropagation();
         }
