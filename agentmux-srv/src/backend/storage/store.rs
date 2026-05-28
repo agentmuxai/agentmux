@@ -1839,9 +1839,10 @@ impl Store {
     /// Phase 3b.3a (no-status case): reads from the consolidated
     /// `db_agents` table (`is_template = 0`, `user_hidden = 0`).
     /// Continuation chains pre-collapse — one row per logical agent.
-    /// The `definition_id` filter, when supplied, matches against
-    /// `parent_template_id` (the lineage the legacy `definition_id`
-    /// column points at).
+    /// The `definition_id` filter, when supplied, matches the agent's
+    /// own `id` only (templates aren't agents and user-clones derived
+    /// from a template are SEPARATE agents — see the implementation
+    /// note below for why `parent_template_id` traversal was dropped).
     ///
     /// Field mapping for fields with no consolidated-row analog:
     /// - `block_id`, `session_id`, `status`, `ended_at`,
