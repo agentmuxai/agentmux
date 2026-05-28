@@ -193,14 +193,25 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
 
     let ipc_port = *state.ipc_port.lock();
     let ipc_token = &state.ipc_token;
-    let base_url = super::window::resolve_frontend_base_url(ipc_port);
-    let separator = if base_url.contains('?') { "&" } else { "?" };
     // The `pool=1` flag tells the frontend to skip its standard
     // workspace init and wait for a `pool:promote` event.
-    let url = format!(
-        "{}{}ipc_port={}&ipc_token={}&windowLabel={}&pool=1",
-        base_url, separator, ipc_port, ipc_token, label
-    );
+    let url = match super::window::resolve_frontend_base_url(ipc_port) {
+        Ok(base_url) => {
+            let separator = if base_url.contains('?') { "&" } else { "?" };
+            format!(
+                "{}{}ipc_port={}&ipc_token={}&windowLabel={}&pool=1",
+                base_url, separator, ipc_port, ipc_token, label
+            )
+        }
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                label = %label,
+                "[pool] frontend assets unavailable — pool warmup will load static error page (tear-off targets will surface the install-broken notice instead of crash-looping)",
+            );
+            super::window::assets_missing_data_url(&e)
+        }
+    };
 
     // Phase B.5 (window_meta step d) — combined pre-create handoff.
     // Pool windows graduate to tear-off destinations, which are
