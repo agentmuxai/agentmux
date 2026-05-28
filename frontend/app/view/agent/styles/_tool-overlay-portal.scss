@@ -10,10 +10,15 @@
     display: contents;
 }
 
+// Simplified header per SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28: only
+// the timestamp (left) and status label (right) — everything that used
+// to live here (status icon, tool name, summary, duration) is on the
+// collapsed row above the panel and was pure duplication.
 .agent-tool-overlay-header {
     flex: 0 0 auto;
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: var(--space-1);
     padding: var(--space-1) var(--space-2);
     border-bottom: 1px solid var(--border-color);
@@ -21,21 +26,8 @@
     font-size: 11px;
     color: var(--secondary-text-color);
 
-    .agent-tool-overlay-tool {
-        font-weight: 600;
-        color: var(--main-text-color);
-    }
-    .agent-tool-overlay-summary {
-        flex: 1 1 auto;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .agent-tool-overlay-meta {
-        display: flex;
-        gap: var(--space-1);
-        flex-shrink: 0;
+    .agent-tool-overlay-time {
+        font-variant-numeric: tabular-nums;
     }
     .agent-tool-overlay-status-label {
         text-transform: lowercase;

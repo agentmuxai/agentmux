@@ -258,9 +258,6 @@
             background: var(--surface-elevated, rgba(255, 255, 255, 0.02));
             border-radius: 0;
             padding: 6px 8px;
-            // `max-height` here is the in-flow default. The
-            // overlay variants below override it with an inline
-            // px value computed per hover.
             max-height: 50vh;
             min-height: 0;
             overflow: hidden;
@@ -282,69 +279,21 @@
                 opacity 100ms ease-out;
 
             &--hidden {
-                // `!important` retained — the `--overlay-*` modifiers
-                // below set a max-height via inline style; if --hidden
-                // is applied AFTER overlay (the hover-departure path),
-                // the inline value would otherwise win until the next
-                // render cycle, blocking the transition to 0.
-                max-height: 0 !important;
-                padding-top: 0 !important;
-                padding-bottom: 0 !important;
-                margin-top: 0 !important;
-                margin-bottom: 0 !important;
+                max-height: 0;
+                padding-top: 0;
+                padding-bottom: 0;
+                margin-top: 0;
+                margin-bottom: 0;
                 opacity: 0;
             }
 
-            // Hover-anchor overlay variants
-            // (SPEC_STARTUP_HOVER_EXPANSION_ANCHOR_2026_05_24.md
-            // §5.10 — generalized to tools per 2026-05-24 user
-            // request). When the panel is in hover-only mode (not
-            // pinned, not auto-expanded by status), it floats
-            // absolute above or below the summary so a tool near
-            // the pane's bottom expands upward instead of being
-            // clipped.
-            //
-            // The `--overlay-*` modifiers OVERRIDE the in-flow
-            // defaults (margin / max-height). Specificity is
-            // boosted by the row-elevation `:has()` rule in
-            // `_document.scss` so the overlay sits above sibling
-            // rows.
-            //
-            // The in-flow render path stays unchanged for pinned
-            // and auto-expanded states — that's where running
-            // tools live, and we don't want them moving.
-            &--overlay-below,
-            &--overlay-above {
-                position: absolute;
-                left: 24px;   // match the in-flow `margin-left: 24px`
-                right: 0;
-                z-index: 10;
-                margin: 0;
-                // Opaque background — overlay covers other rows so
-                // transparency would let neighbor content bleed
-                // through. No color-mix here (predictability).
-                background-color: var(--block-bg-solid-color, #1c1c1c);
-                border: 2px solid var(--accent-color, #2bd4a8);
-                border-radius: 0;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-                overflow-y: auto;
-                // `max-height` is set inline by ToolBlock from the
-                // chosen-side container space — keeps `overflow-y`
-                // operating within the scroll container bounds.
-            }
-            &--overlay-below {
-                top: 100%;
-            }
-            &--overlay-above {
-                bottom: 100%;
-            }
-
-            // In-flow variant — the existing default. Explicit
-            // class for symmetry with --overlay-* (no behavioral
-            // change vs un-classed).
+            // In-flow variant — the only visible mode now that the
+            // hover-only `--overlay-{above,below}` modifiers were
+            // removed in SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28.
+            // The base `.agent-tool-panel` styling already lays this
+            // out; the class exists for symmetry with `--hidden`.
             &--flow {
-                // (No overrides — the base `.agent-tool-panel`
-                // styling is already the in-flow layout.)
+                // (No overrides.)
             }
         }
 
