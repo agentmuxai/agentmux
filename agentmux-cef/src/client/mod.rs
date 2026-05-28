@@ -1692,8 +1692,18 @@ impl AgentMuxHandler {
 /// page, this one has NO reload button and NO `frame.load_url` target — it
 /// only offers Quit. That's the whole point: navigating away from it cannot
 /// re-enter `on_render_process_terminated` and restart the loop.
+///
+/// Auto-closes after `CRASH_LOOP_AUTO_CLOSE_SECS` so the dead window doesn't
+/// linger in the host's window registry indefinitely. When `window.close()`
+/// fires, the existing `on_before_close` path runs and `ReportWindowClosed`
+/// → launcher → `Event::WindowInstanceReleased` chain decrements the
+/// user-visible window count (fix for #1117 follow-up "decouple window count
+/// from window lifecycle"). A visible countdown gives the user time to read
+/// the message; clicking "Close this window" (or any keystroke / mouse
+/// activity) cancels the auto-close so it's never surprising.
 fn crash_loop_terminal_page(reason: &str, error_code: i32, crashes_in_window: usize) -> String {
     use crate::client::helpers::html_escape;
+    const CRASH_LOOP_AUTO_CLOSE_SECS: u32 = 30;
     format!(
         r#"<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>AgentMux — Crash loop</title>
@@ -1710,13 +1720,11 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans
 h1 {{ color: #f38ba8; font-size: 22px; margin: 0 0 6px 0; }}
 .reason {{ color: #a6adc8; font-size: 14px; margin: 0 0 20px 0; font-style: italic; }}
 p {{ color: #bac2de; line-height: 1.55; margin: 0 0 12px 0; font-size: 14px; }}
-.detail code {{ display: inline-block; background: #313244; color: #f9e2af;
-               padding: 6px 10px; border-radius: 4px; font-size: 12px;
-               font-family: ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
-               word-break: break-all; }}
+.countdown {{ color: #a6adc8; font-size: 13px; margin-top: 16px; }}
+.countdown span {{ color: #f9e2af; font-weight: 600; }}
 button {{ padding: 10px 22px; border: 1px solid #45475a; border-radius: 6px;
          background: #313244; color: #cdd6f4; cursor: pointer;
-         font-size: 13px; font-family: inherit; margin-top: 24px; }}
+         font-size: 13px; font-family: inherit; margin-top: 16px; }}
 button:hover {{ background: #45475a; border-color: #585b70; }}
 .footer {{ color: #6c7086; font-size: 11px; margin-top: 18px;
           font-family: ui-monospace, monospace; }}
@@ -1730,12 +1738,37 @@ Auto-recovery is disabled to prevent a crash loop.</p>
 <p>Your other AgentMux windows and your saved sessions are not affected —
 they remain available. Close this window and open a fresh one to continue.</p>
 <button onclick="window.close()">Close this window</button>
+<p class="countdown">Auto-closing in <span id="countdown">{auto_close_secs}</span> s
+(any keypress or click cancels)</p>
 <div class="footer">error_code={error_code}</div>
-</div></body></html>"#,
+</div>
+<script>
+// Auto-close so the dead window doesn't linger in the host window
+// registry — when window.close() fires, on_before_close runs the
+// normal ReportWindowClosed → WindowInstanceReleased chain and the
+// UI window count snaps to the live count. Any user interaction
+// cancels (so the message stays readable as long as the user wants).
+let secs = {auto_close_secs};
+const el = document.getElementById('countdown');
+let cancelled = false;
+const cancel = () => {{ cancelled = true; el.parentElement.style.display = 'none'; }};
+document.addEventListener('keydown', cancel, {{ once: true }});
+document.addEventListener('mousedown', cancel, {{ once: true }});
+const tick = () => {{
+    if (cancelled) return;
+    secs -= 1;
+    if (secs <= 0) {{ window.close(); return; }}
+    el.textContent = String(secs);
+    setTimeout(tick, 1000);
+}};
+setTimeout(tick, 1000);
+</script>
+</body></html>"#,
         reason_safe = html_escape(reason),
         window_secs = CRASH_BUDGET_WINDOW.as_secs(),
         crashes_in_window = crashes_in_window,
         error_code = error_code,
+        auto_close_secs = CRASH_LOOP_AUTO_CLOSE_SECS,
     )
 }
 
