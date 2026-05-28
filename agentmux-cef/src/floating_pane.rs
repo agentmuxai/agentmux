@@ -144,37 +144,22 @@ wrap_task! {
                 .lock()
                 .insert(self.window_label.clone(), outer_hwnd as isize);
 
-            // CEF embed — the browser is a WS_CHILD of the outer HWND.
-            //
-            // Inset by `resize_border_px` on each edge so the outer
-            // wndproc's WM_NCHITTEST sees cursor events in the edge
-            // bands and can return HT{LEFT,...} for resize. Without
-            // this initial inset, the child is created at
-            // (0, 0, width, height) and covers the resize bands until
-            // the user resizes once and triggers the WM_SIZE inset
-            // path. The first WM_SIZE on this HWND fires from inside
-            // `create_owned_popup` (`ShowWindow(SW_SHOWNOACTIVATE)`)
-            // BEFORE the CEF child exists — `GetWindow(GW_CHILD)`
-            // returns null and the WM_SIZE branch does nothing.
-            // Codex P2 PR #1132 (round 3).
-            //
-            // CSS→physical scaling: `RESIZE_BORDER_CSS` is the same
-            // 8 CSS-px constant used in the wndproc's WM_NCHITTEST
-            // computation; pull DPI from the outer HWND we just
-            // created (DPI is honored by Win32 immediately after
-            // CreateWindowExW per PMv2).
-            let inset = unsafe {
-                use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
-                const RESIZE_BORDER_CSS: i32 = 8;
-                let dpi = GetDpiForWindow(outer_hwnd as *mut std::ffi::c_void) as i32;
-                let dpi = if dpi > 0 { dpi } else { 96 };
-                (RESIZE_BORDER_CSS * dpi / 96).max(1)
-            };
+            // CEF embed — the browser is a WS_CHILD of the outer HWND,
+            // covering the full client area. Edge-band resize hits are
+            // routed to the outer's WM_NCHITTEST via the wndproc
+            // subclass installed on the child below
+            // (`install_child_nchittest_forwarder`), so there's no
+            // visible inset strip. The round-3 "inset the CEF child by
+            // 8 px" approach exposed an 8-CSS-px ring of the outer's
+            // client area around the child; even with a custom
+            // WM_ERASEBKGND painting it dark, DWM kept overpainting
+            // the ring white. The subclass-forward approach has zero
+            // visible strip and works regardless of DWM behavior.
             let rect = Rect {
-                x: inset,
-                y: inset,
-                width: (self.width - 2 * inset).max(1),
-                height: (self.height - 2 * inset).max(1),
+                x: 0,
+                y: 0,
+                width: self.width,
+                height: self.height,
             };
 
             let handler = crate::client::AgentMuxHandler::new_with_browser_pane(
@@ -231,8 +216,150 @@ wrap_task! {
                 label = %self.window_label,
                 "[floating-pane] CEF browser embedded in floating HWND",
             );
+
+            // Subclass the CEF child's wndproc to forward edge
+            // WM_NCHITTEST to the outer. Without this, the child
+            // fills the whole outer client area and returns HTCLIENT
+            // for every cursor position — the outer's WM_NCHITTEST
+            // (which maps edge bands to HT{LEFT,RIGHT,...}) never
+            // fires, so resize doesn't work. The forwarder returns
+            // HTTRANSPARENT for cursor positions within the edge
+            // band, which makes the OS dispatch the hit-test to the
+            // parent (= outer) wndproc. Non-edge hits fall through
+            // to the original wndproc (= HTCLIENT). See
+            // `install_child_nchittest_forwarder` doc-comment.
+            unsafe {
+                use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindow, GW_CHILD};
+                let child = GetWindow(outer_hwnd as *mut std::ffi::c_void, GW_CHILD);
+                if !child.is_null() {
+                    install_child_nchittest_forwarder(child);
+                } else {
+                    tracing::warn!(
+                        pane_id = %self.pane_id,
+                        label = %self.window_label,
+                        "[floating-pane] could not find CEF child HWND after create — resize disabled",
+                    );
+                }
+            }
         }
     }
+}
+
+/// Subclass a CEF child window's `WndProc` so its `WM_NCHITTEST`
+/// returns `HTTRANSPARENT` for cursor positions within
+/// `RESIZE_BORDER_CSS` of any edge of the OUTER (parent) window.
+///
+/// Why: a CEF browser embedded as `WS_CHILD` covers the entire client
+/// area of its parent. The OS dispatches `WM_NCHITTEST` to the
+/// topmost window under the cursor — the child — which returns
+/// `HTCLIENT`. The outer's `floating_pane_wndproc` `WM_NCHITTEST`
+/// branch (which maps edge bands to `HT{LEFT,RIGHT,...}` for resize)
+/// never fires.
+///
+/// `HTTRANSPARENT` is the spec-blessed escape hatch: per
+/// MSDN, returning it from a child's `WM_NCHITTEST` tells the OS
+/// "this window doesn't process this hit-test; check the window
+/// beneath", and for a `WS_CHILD` of a top-level popup that means
+/// the parent's wndproc gets the message.
+///
+/// Non-edge cursor positions fall through to the original (CEF)
+/// wndproc via `CallWindowProcW` so click handling, focus, and
+/// every other CEF behavior is unchanged.
+///
+/// Original wndprocs are tracked in a process-global `Mutex<HashMap>`
+/// keyed by child HWND. The subclass installer is idempotent — if a
+/// given child is already subclassed it's a no-op.
+#[cfg(target_os = "windows")]
+unsafe fn install_child_nchittest_forwarder(child_hwnd: *mut std::ffi::c_void) {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CallWindowProcW, GetWindowLongPtrW, SetWindowLongPtrW, GWLP_WNDPROC,
+    };
+
+    /// Edge band the OUTER's wndproc treats as resize. Must match
+    /// the `RESIZE_BORDER_CSS` in `floating_pane_wndproc` so the
+    /// transparent zone aligns with the resize zone.
+    const RESIZE_BORDER_CSS: i32 = 8;
+
+    static ORIGINAL_WNDPROCS: Mutex<Option<HashMap<usize, isize>>> = Mutex::new(None);
+
+    unsafe extern "system" fn forwarder(
+        hwnd: *mut std::ffi::c_void,
+        msg: u32,
+        wparam: usize,
+        lparam: isize,
+    ) -> isize {
+        use windows_sys::Win32::Foundation::RECT;
+        use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+        if msg == WM_NCHITTEST {
+            // The lparam x/y for WM_NCHITTEST are in SCREEN coords.
+            let x = (lparam & 0xFFFF) as i16 as i32;
+            let y = ((lparam >> 16) & 0xFFFF) as i16 as i32;
+
+            // Use the PARENT's rect so the edge band is computed
+            // against the visible window — the child's own rect is
+            // the same in practice (it fills the parent) but going
+            // through the parent makes the intent explicit and
+            // avoids any off-by-one if the child were ever resized
+            // independently.
+            let parent = GetParent(hwnd);
+            let measure_hwnd = if parent.is_null() { hwnd } else { parent };
+
+            let mut rect: RECT = std::mem::zeroed();
+            GetWindowRect(measure_hwnd, &mut rect);
+
+            let dpi = GetDpiForWindow(measure_hwnd) as i32;
+            let dpi = if dpi > 0 { dpi } else { 96 };
+            let band = (RESIZE_BORDER_CSS * dpi / 96).max(1);
+
+            let on_edge = x - rect.left < band
+                || rect.right - x < band
+                || y - rect.top < band
+                || rect.bottom - y < band;
+
+            if on_edge {
+                return HTTRANSPARENT as isize;
+            }
+        }
+
+        // Anything else (including non-edge WM_NCHITTEST) goes to
+        // the original wndproc.
+        let original_isize = {
+            let guard = ORIGINAL_WNDPROCS.lock().unwrap_or_else(|e| e.into_inner());
+            guard
+                .as_ref()
+                .and_then(|m| m.get(&(hwnd as usize)).copied())
+                .unwrap_or(0)
+        };
+        if original_isize != 0 {
+            let proc_fn: extern "system" fn(
+                *mut std::ffi::c_void,
+                u32,
+                usize,
+                isize,
+            ) -> isize = std::mem::transmute(original_isize);
+            return CallWindowProcW(Some(proc_fn), hwnd, msg, wparam, lparam);
+        }
+        DefWindowProcW(hwnd, msg, wparam, lparam)
+    }
+
+    let mut guard = ORIGINAL_WNDPROCS.lock().unwrap_or_else(|e| e.into_inner());
+    let map = guard.get_or_insert_with(HashMap::new);
+    if map.contains_key(&(child_hwnd as usize)) {
+        // Already subclassed — idempotent re-call.
+        return;
+    }
+    let original = GetWindowLongPtrW(child_hwnd, GWLP_WNDPROC);
+    map.insert(child_hwnd as usize, original);
+    SetWindowLongPtrW(child_hwnd, GWLP_WNDPROC, forwarder as isize);
+    tracing::info!(
+        target: "floating-pane-diag",
+        child_hwnd = ?child_hwnd,
+        "[floating-pane-diag] installed WM_NCHITTEST forwarder on CEF child"
+    );
 }
 
 /// Posts the create-floating-window task to the CEF UI thread. Returns
@@ -389,68 +516,6 @@ unsafe extern "system" fn floating_pane_wndproc(
         WM_NCCALCSIZE if wparam == 1 => return 0,
         // Suppress the DWM activation border repaint.
         WM_NCACTIVATE => return 1,
-        // DIAGNOSTIC: paint the inset strip MAGENTA so we can visually
-        // distinguish "my handler reached the pixels" vs "something
-        // else (DWM, WS_THICKFRAME chrome) is overpainting". The
-        // earlier dark-(34,34,34) attempt produced a thick WHITE
-        // border per user feedback, so either:
-        //   (a) the handler isn't being called at all
-        //   (b) the handler IS called but DWM repaints in white
-        //   (c) the white is actually from a different source
-        //       (the CEF child's initial paint, WS_THICKFRAME's
-        //       resize-border decoration, etc.)
-        // Magenta paint + tracing distinguish all three. Reverts
-        // to the dark color once we know which case we're in.
-        WM_ERASEBKGND => {
-            use windows_sys::Win32::Foundation::RECT;
-            use windows_sys::Win32::Graphics::Gdi::{
-                CreateSolidBrush, DeleteObject, FillRect,
-            };
-            let hdc = wparam as *mut std::ffi::c_void;
-            let mut rect: RECT = std::mem::zeroed();
-            GetClientRect(hwnd, &mut rect);
-            // BGR encoding for COLORREF: 0x00BBGGRR — so 0x00FF00FF
-            // is BGR(0xFF, 0x00, 0xFF) = RGB(255, 0, 255) = magenta.
-            let brush = CreateSolidBrush(0x00FF00FFu32);
-            if !brush.is_null() {
-                FillRect(hdc, &rect, brush);
-                DeleteObject(brush as *mut _);
-            }
-            tracing::info!(
-                target: "floating-pane-diag",
-                hwnd = ?hwnd,
-                rect_w = rect.right - rect.left,
-                rect_h = rect.bottom - rect.top,
-                "[floating-pane-diag] WM_ERASEBKGND fired — painted MAGENTA"
-            );
-            return 1; // signal "we handled it" — OS skips its own erase
-        }
-        // DIAGNOSTIC: trace WM_PAINT and WM_NCPAINT so we know if
-        // the OS is sending paint requests for the outer (which our
-        // handler would then potentially repaint). Helps narrow down
-        // whether the white is from a WM_PAINT we're not handling.
-        WM_PAINT => {
-            tracing::info!(
-                target: "floating-pane-diag",
-                hwnd = ?hwnd,
-                "[floating-pane-diag] WM_PAINT fired (falling through to DefWindowProc)"
-            );
-            // Fall through to default — let the OS validate the
-            // update region. Returning here without BeginPaint/
-            // EndPaint would leave the window dirty and burn CPU.
-        }
-        WM_NCPAINT => {
-            tracing::info!(
-                target: "floating-pane-diag",
-                hwnd = ?hwnd,
-                "[floating-pane-diag] WM_NCPAINT fired (suppressing default frame paint)"
-            );
-            // Return 0 to suppress the OS's default non-client frame
-            // paint (which for WS_THICKFRAME draws a thin border at
-            // the window edge). If the white we're seeing is from
-            // here, this should kill it.
-            return 0;
-        }
         // Enforce min size + clamp the maximized rect to the current
         // monitor's WORK area (taskbar respected). Without the work-
         // area clamp, WS_POPUP defaults to full-monitor on maximize
@@ -518,15 +583,17 @@ unsafe extern "system" fn floating_pane_wndproc(
         // size, so without this the rendered content stays at the
         // initial (W, H) and a resize leaves empty space (or clips).
         //
-        // The CEF child is inset by `resize_border_px` on each edge.
-        // Without the inset, the child covers the outer window's edge
-        // bands; the OS dispatches `WM_NCHITTEST` to the topmost window
-        // under the cursor (the CEF child), which returns HTCLIENT and
-        // never bubbles to the outer's WM_NCHITTEST below. Result: no
-        // resize cursor, no resize. The 8 CSS-px inset matches the
-        // edge band we map to HT{LEFT,RIGHT,...} and is visually
-        // indistinguishable from a system resize border. User-reported
-        // regression on PR #1132 dev smoke test.
+        // The CEF child fills the entire client area now. Edge-band
+        // resize hits are still routed to this wndproc's WM_NCHITTEST
+        // below because we subclass the child's wndproc (see
+        // `install_child_nchittest_forwarder`) to return HTTRANSPARENT
+        // for cursor positions within `RESIZE_BORDER_CSS` of any edge,
+        // bubbling the hit-test to the parent. The previous
+        // "inset the child by 8 CSS px" approach exposed a strip of
+        // the outer's client area around the child — even with a
+        // custom WM_ERASEBKGND painting it dark, DWM kept overpainting
+        // it white. The subclass-forward approach has zero visible
+        // strip and works regardless of DWM behavior.
         WM_SIZE => {
             if wparam as u32 != SIZE_MINIMIZED {
                 let w = (lparam & 0xFFFF) as i16 as i32;
@@ -534,22 +601,13 @@ unsafe extern "system" fn floating_pane_wndproc(
                 if w > 0 && h > 0 {
                     let child = GetWindow(hwnd, GW_CHILD);
                     if !child.is_null() {
-                        // Scale CSS resize-border to physical px against
-                        // THIS HWND's monitor — mirrors the WM_NCHITTEST
-                        // calculation so the inset and the hit-band stay
-                        // in lockstep across DPI changes.
-                        let dpi = GetDpiForWindow(hwnd) as i32;
-                        let dpi = if dpi > 0 { dpi } else { 96 };
-                        let inset = (RESIZE_BORDER_CSS * dpi / 96).max(1);
-                        let child_w = (w - 2 * inset).max(1);
-                        let child_h = (h - 2 * inset).max(1);
                         SetWindowPos(
                             child,
                             std::ptr::null_mut(),
-                            inset,
-                            inset,
-                            child_w,
-                            child_h,
+                            0,
+                            0,
+                            w,
+                            h,
                             SWP_NOZORDER | SWP_NOACTIVATE,
                         );
                     }
