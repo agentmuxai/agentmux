@@ -389,6 +389,31 @@ unsafe extern "system" fn floating_pane_wndproc(
         WM_NCCALCSIZE if wparam == 1 => return 0,
         // Suppress the DWM activation border repaint.
         WM_NCACTIVATE => return 1,
+        // Fill the inset strip (the `resize_border_px` ring around the
+        // CEF child) with the AgentMux dark-theme background color
+        // instead of the default white DWM frame. Without this,
+        // hbrBackground=NULL leaves DWM's default light fill visible
+        // in the strip, producing a thick white border around the
+        // floating window. Hard-coded to (34, 34, 34) — matches
+        // `frontend/app/app.scss`'s `background: rgba(34, 34, 34, …)`
+        // default. Light-theme support is a follow-up; the FE can
+        // ship a `set_floater_chrome_color({label, rgb})` IPC later.
+        // User-reported regression after the round-3 inset fix.
+        WM_ERASEBKGND => {
+            use windows_sys::Win32::Foundation::RECT;
+            use windows_sys::Win32::Graphics::Gdi::{
+                CreateSolidBrush, DeleteObject, FillRect,
+            };
+            let hdc = wparam as *mut std::ffi::c_void;
+            let mut rect: RECT = std::mem::zeroed();
+            GetClientRect(hwnd, &mut rect);
+            let brush = CreateSolidBrush(0x00222222u32);  // BGR(0x22, 0x22, 0x22) = RGB(34,34,34)
+            if !brush.is_null() {
+                FillRect(hdc, &rect, brush);
+                DeleteObject(brush as *mut _);
+            }
+            return 1; // signal "we handled it" — OS skips its own erase
+        }
         // Enforce min size + clamp the maximized rect to the current
         // monitor's WORK area (taskbar respected). Without the work-
         // area clamp, WS_POPUP defaults to full-monitor on maximize
