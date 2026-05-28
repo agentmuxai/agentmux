@@ -123,13 +123,13 @@ These views exist in the codebase but are **not** widget-bar entries — do not 
 
 ## Log Access
 
-All logs land in `~/.agentmux/logs/` (`$AGENTMUX_LOG_DIR` in terminals). Pointer files resolve the current filename.
+`$AGENTMUX_LOG_DIR` in AgentMux terminals is the shared `~/.agentmux/logs/` directory. The sidecar log lives there directly; the host log lives in the per-instance data dir and registers a pointer (`current-host-v<v>.path`) in the shared dir so `muxlog host` can resolve it.
 
 | What | Command |
 |------|---------|
 | Tail host log | `muxlog host` |
 | Tail sidecar log | `muxlog srv` |
-| Frontend logs | `muxlog host '[fe]'` |
+| Frontend logs | `muxlog host '\[fe\]'` |
 | Memory heartbeat | `muxlog host mem_heartbeat` |
 | Full host log | `muxlog host cat` |
 | Launcher log | `cat "$AGENTMUX_LOG_DIR/agentmux-launcher.log"` |

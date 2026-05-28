@@ -72,6 +72,19 @@ task package:linux     # Linux AppImage (writes to ~/Desktop)
 
 `task package:macos` and `task package:msix` are TODO stubs in `Taskfile.yml`. The full release artifact set is produced by `agentmuxai/agentmux-builder` — see §Releases below.
 
+### Logs
+
+Inside AgentMux terminals, `$AGENTMUX_LOG_DIR` is set to the shared `~/.agentmux/logs/` directory. That directory holds the sidecar log directly, plus pointer files (`current-host-v<v>.path`, `current-srv-v<v>.path`) for both processes — the host log itself lives in the per-instance data dir, but its pointer here lets `muxlog host` find it from any context. The shipped `muxlog` shell helper handles the indirection:
+
+| What | Command |
+|------|---------|
+| Tail host log | `muxlog host` |
+| Tail sidecar log | `muxlog srv` |
+| Frontend lines only | `muxlog host '\[fe\]'` |
+| Full host log | `muxlog host cat` |
+
+Works identically across `task dev`, portable, and installed builds. Logs auto-rotate daily and are retained for 7 days. Full per-process layout and pointer-file mechanics: [docs.agentmux.ai/internals/data-layout](https://docs.agentmux.ai/internals/data-layout/) and [/internals/debugging](https://docs.agentmux.ai/internals/debugging/).
+
 ## Widgets
 
 Every widget is pinned by default — the widget bar shows the full set directly, collapsing to icon-only when the title bar is narrow. The canonical list is `agentmux-srv/src/config/widgets.json`.
