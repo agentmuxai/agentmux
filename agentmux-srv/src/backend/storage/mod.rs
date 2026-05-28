@@ -5,17 +5,20 @@
 //! Port of Go's pkg/wstore and pkg/filestore.
 
 pub mod agents_consolidate;
+pub mod content;
 pub mod error;
 pub mod filestore;
+pub mod history;
 pub mod memory_bundles;
 pub mod migrations;
+pub mod skills;
 pub mod snapshot;
 pub mod store;
 
+pub use content::AgentContent;
 pub use error::StoreError;
-pub use memory_bundles::Memory;
-pub use store::AgentDefinition;
-pub use store::AgentContent;
 #[allow(unused_imports)]
-pub use store::AgentHistory;
-pub use store::AgentSkill;
+pub use history::AgentHistory;
+pub use memory_bundles::Memory;
+pub use skills::AgentSkill;
+pub use store::AgentDefinition;
