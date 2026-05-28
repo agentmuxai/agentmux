@@ -683,16 +683,45 @@ impl Store {
     /// `migrate_promote_template_sessions_v1`): every retry asks
     /// "does the promote-target clone for this template already
     /// exist?" and either reuses it or inserts it.
+    ///
+    /// Legacy-table fallback: if `db_agents` doesn't have the row,
+    /// also check `db_agent_definitions`. Without this, a partial
+    /// dual-write state (legacy insert succeeded, db_agents mirror
+    /// failed) would permanently wedge migration retries — the
+    /// retry sees `None` and tries to re-insert, hitting the legacy
+    /// PK. Codex P2 on PR #1113. The fallback retires once Phase 3c
+    /// drops `db_agent_definitions` entirely.
     pub fn agent_def_get(&self, id: &str) -> Result<Option<AgentDefinition>, StoreError> {
         let conn = self.conn.lock().unwrap();
+        let primary = {
+            let mut stmt = conn.prepare(
+                "SELECT id, slug, name, icon, provider, description,
+                        working_directory, shell, provider_flags, auto_start,
+                        restart_on_crash, idle_timeout_minutes, created_at,
+                        agent_type, environment, agent_bus_id, is_seeded,
+                        accounts, parent_template_id, branch_label, updated_at,
+                        user_hidden
+                 FROM db_agents
+                 WHERE id = ?1",
+            )?;
+            let mut rows = stmt.query_map(params![id], map_agent_definition_row)?;
+            match rows.next() {
+                Some(row) => Some(row?),
+                None => None,
+            }
+        };
+        if primary.is_some() {
+            return Ok(primary);
+        }
+        // Fallback: legacy table. Partial dual-write recovery.
         let mut stmt = conn.prepare(
             "SELECT id, slug, name, icon, provider, description,
                     working_directory, shell, provider_flags, auto_start,
                     restart_on_crash, idle_timeout_minutes, created_at,
                     agent_type, environment, agent_bus_id, is_seeded,
-                    accounts, parent_template_id, branch_label, updated_at,
+                    accounts, parent_id, branch_label, updated_at,
                     user_hidden
-             FROM db_agents
+             FROM db_agent_definitions
              WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![id], map_agent_definition_row)?;
@@ -4845,6 +4874,45 @@ mod tests {
     fn agent_def_get_phase_3b5_returns_none_for_missing() {
         let (_tmp, store, _reg) = store_with_registry();
         assert!(store.agent_def_get("does-not-exist").unwrap().is_none());
+    }
+
+    #[test]
+    fn agent_def_get_phase_3b5_legacy_fallback_recovers_partial_dual_write() {
+        // Codex P2 on PR #1113: if `agent_def_insert`'s legacy
+        // INSERT succeeded but the db_agents mirror failed, the
+        // template_promote migration's retry must still find the
+        // existing row instead of trying to re-insert (which would
+        // hit a PK collision and wedge the migration permanently).
+        // Simulate the partial state by inserting directly into
+        // db_agent_definitions, bypassing the dual-write helper.
+        let (_tmp, store, _reg) = store_with_registry();
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO db_agent_definitions (
+                id, slug, name, icon, provider, description, working_directory,
+                shell, provider_flags, auto_start, restart_on_crash,
+                idle_timeout_minutes, created_at, agent_type, environment,
+                agent_bus_id, is_seeded, accounts, parent_id, branch_label,
+                updated_at, user_hidden)
+             VALUES (?1, ?2, ?3, '', '', '', '', '', '', 0, 0, 0, 0,
+                     'host', '', '', 0, '', '', '', 0, 0)",
+            params![
+                "template-promote-v1-tpl",
+                "promoted",
+                "Promoted Clone"
+            ],
+        )
+        .unwrap();
+        drop(conn);
+
+        // db_agents intentionally NOT populated. The fallback must
+        // surface the row from db_agent_definitions.
+        let got = store
+            .agent_def_get("template-promote-v1-tpl")
+            .unwrap()
+            .expect("legacy fallback must recover partial dual-write state");
+        assert_eq!(got.id, "template-promote-v1-tpl");
+        assert_eq!(got.name, "Promoted Clone");
     }
 
     #[test]
