@@ -9,12 +9,15 @@
 // children would see 100vw/factor² and the close/min/max buttons drift left.
 
 .window-header {
-    // Traffic-light buttons (window-controls.darwin.tsx) provide the left
-    // visual anchor on macOS; the WindowDrag spacer between them and the
-    // first tab can be zero. Without this the 10 px indent stacks with the
-    // traffic-lights' 8 px padding-right and the leftmost tab is pushed
-    // away from the buttons.
-    --default-indent: 0px;
+    // Keep the WindowDrag spacer between the traffic-light cluster and the
+    // first tab. The visible 10 px area is what users grab to move the
+    // borderless window — Cocoa's NSWindow.setMovableByWindowBackground
+    // routes drag through any non-control region in the title bar, and
+    // this spacer is the most natural target right of the traffic lights.
+    // Collapsing it to 0 px (as PR #444 originally proposed) makes drag
+    // feel broken because the lights themselves are -webkit-app-region:
+    // no-drag and clicks fall through to the tab bar otherwise.
+    --default-indent: 10px;
 }
 
 .config-error-message {
