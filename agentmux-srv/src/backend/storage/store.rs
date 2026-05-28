@@ -1832,16 +1832,146 @@ impl Store {
 
     // ---- Agent instance CRUD ----
 
-    /// List instances. Both filters are optional — pass `None` to scan all
-    /// instances. Ordered by `created_at` descending (most recent first).
+    /// List instances. Both filters are optional — pass `None` to scan
+    /// all instances. Ordered by `updated_at` descending, with
+    /// `created_at` as a tiebreaker (most recent activity first; the
+    /// dual-write bumps `updated_at` on every launch / continuation,
+    /// so a continued older agent ranks ahead of a brand-new untouched
+    /// one).
+    ///
+    /// Phase 3b.3a (no-status case): reads from the consolidated
+    /// `db_agents` table (`is_template = 0`, `user_hidden = 0`).
+    /// Continuation chains pre-collapse — one row per logical agent.
+    /// The `definition_id` filter, when supplied, matches the agent's
+    /// own `id` only (templates aren't agents and user-clones derived
+    /// from a template are SEPARATE agents — see the implementation
+    /// note below for why `parent_template_id` traversal was dropped).
+    ///
+    /// Field mapping for fields with no consolidated-row analog:
+    /// - `block_id`, `session_id`, `status`, `ended_at`,
+    ///   `parent_instance_id` → type defaults (`""` / `0`). Truly
+    ///   transient per-launch state; not modelled on `db_agents`.
+    /// - `started_at` → `db_agents.created_at`. Same proxy used by
+    ///   `instance_get_by_name` (3b.2); the consolidated row's
+    ///   creation IS the agent's launch moment in the new model.
+    /// - `display_hidden` → always `false`. The WHERE clause filters
+    ///   `user_hidden = 0`, so hidden rows never surface here.
+    ///
+    /// Phase 3b.3b (deferred — status filter case): callers passing a
+    /// `status` filter need transient runtime state that `db_agents`
+    /// doesn't model. Route those to the legacy `db_agent_instances`
+    /// path so existing semantics are preserved until the
+    /// updateagentinstance handler's "fetch + merge transient fields"
+    /// pattern is refactored. (Currently no production caller passes
+    /// `status` — `listagentinstances` RPC frontends call with empty
+    /// filters — so the legacy path is exercised only by tests.)
+    /// Spec: docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md §3b.3.
     pub fn instance_list(
         &self,
         definition_id: Option<&str>,
         status: Option<&str>,
     ) -> Result<Vec<AgentInstance>, StoreError> {
+        if status.is_some() {
+            return self.instance_list_legacy(definition_id, status);
+        }
         let conn = self.conn.lock().unwrap();
-        // Build the query dynamically. The parameter count varies, so we
-        // can't reuse a single prepared statement across filter combos.
+        // `definition_id` filter: match the agent's own `id` only.
+        //
+        // In the consolidated model every `is_template = 0` row IS an
+        // agent identifiable by its `id`:
+        //   - User-clone def projection: `id` = the clone def's id.
+        //   - Template-instance projection: `id` = the original inst.id.
+        //
+        // The legacy `definition_id` filter conflated "agent identity"
+        // with "parent template" because the old schema split them
+        // across two tables. The new model has no such split. A
+        // template-id filter would over-match (user-clones of X share
+        // `parent_template_id` with template-instances of X — see
+        // codex P2 on PR #1111), so we route template-id callers to
+        // an empty result. No live caller exercises that path; the
+        // only frontend consumer (`listagentinstances` RPC via
+        // swarm-model) passes empty filters.
+        let mut filter_clause = String::new();
+        let mut param_vals: Vec<String> = Vec::new();
+        if let Some(d) = definition_id {
+            filter_clause.push_str("\n               AND id = ?1");
+            param_vals.push(d.to_string());
+        }
+        // Projection for `definition_id`: use the row's own id.
+        //
+        // Reagent P2 on PR #1111 round 2: the earlier "parent_template_id
+        // with id fallback" projection diverged from legacy for
+        // user-clones derived from a template — those rows have
+        // `parent_template_id` SET (the lineage), but their legacy
+        // `db_agent_instances.definition_id` was the clone's own def
+        // id, not the template's. Template-instance projections and
+        // user-clone projections aren't schema-distinguishable in
+        // db_agents (both `is_template = 0`, `is_seeded = 0`), so any
+        // consistent projection must pick one rule. The consolidated
+        // model treats the row's `id` as the agent's identity (== legacy
+        // `definition_id` for the user-clone case), so use that. The
+        // template-instance case yields the inst.id instead of the
+        // template id, but no live caller depends on this field — it's
+        // a back-compat surface for the AgentInstance struct shape.
+        //
+        // `ORDER BY updated_at DESC`: reagent P2 on PR #1111 round 2.
+        // Continuation chains keep the head's `created_at` (the row is
+        // never re-inserted) while the dual-write bumps `updated_at` on
+        // every launch / continuation. So `created_at DESC` would rank
+        // a brand-new agent ahead of an actively-continued older one,
+        // violating "most recent activity first". `updated_at` tracks
+        // recency correctly and matches the ordering `agent_def_list`
+        // uses elsewhere in this file.
+        let mut sql = String::from(
+            "SELECT id, id AS def_id,
+                    github_context, created_at,
+                    identity_id, memory_id, instance_name, working_directory
+             FROM db_agents
+             WHERE is_template = 0
+               AND user_hidden = 0",
+        );
+        sql.push_str(&filter_clause);
+        sql.push_str("\n             ORDER BY updated_at DESC, created_at DESC");
+        let mut stmt = conn.prepare(&sql)?;
+        let iter = stmt.query_map(rusqlite::params_from_iter(param_vals.iter()), |row| {
+            Ok(AgentInstance {
+                id: row.get(0)?,
+                definition_id: row.get(1)?,
+                parent_instance_id: String::new(),
+                block_id: String::new(),
+                session_id: String::new(),
+                status: String::new(),
+                github_context: row.get(2)?,
+                started_at: row.get(3)?,
+                ended_at: 0,
+                created_at: row.get(3)?,
+                identity_id: row.get(4)?,
+                memory_id: row.get(5)?,
+                instance_name: row.get(6)?,
+                working_directory: row.get(7)?,
+                // Filter above guarantees the row is visible; column
+                // omitted from SELECT to match. Reagent P2 on PR #1111.
+                display_hidden: false,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in iter {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Legacy `db_agent_instances` read — preserved for the
+    /// status-filter case (transient state). Will retire when the
+    /// updateagentinstance handler's fetch-and-merge pattern is
+    /// refactored (Phase 3b.3b). Do NOT add new callers; use
+    /// `instance_list` instead.
+    fn instance_list_legacy(
+        &self,
+        definition_id: Option<&str>,
+        status: Option<&str>,
+    ) -> Result<Vec<AgentInstance>, StoreError> {
+        let conn = self.conn.lock().unwrap();
         let mut sql = String::from(
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
                     status, github_context, started_at, ended_at, created_at,
@@ -1863,9 +1993,6 @@ impl Store {
         sql.push_str(" ORDER BY created_at DESC");
 
         let mut stmt = conn.prepare(&sql)?;
-        // Build a Vec<String> so parameter lifetimes outlive the query call.
-        // Borrowing the `&str` args directly caused E0597 because they're
-        // bound to the match arms, not the outer scope.
         let mut param_vals: Vec<String> = Vec::new();
         if let Some(d) = definition_id {
             param_vals.push(d.to_string());
@@ -2245,17 +2372,20 @@ impl Store {
             return Ok(None);
         }
         let conn = self.conn.lock().unwrap();
-        // `definition_id` mapping: db_agents folds the def and the
-        // user-clone instance into ONE row (keyed by def.id) for
-        // is_seeded=0 agents. For seeded-template projections,
-        // parent_template_id points at the template. Either way, the
-        // consolidated row's "definition" is `COALESCE(parent_template_id,
-        // id)` — the legacy `definition_id` semantics from the caller's
-        // perspective. Empty parent_template_id (folded user-clone)
-        // resolves to the row's own id.
+        // `definition_id` projection: use the row's own `id`.
+        //
+        // The earlier "parent_template_id with id fallback" rule
+        // misrendered the legacy semantics for user-clones derived
+        // from a template — those rows have `parent_template_id` SET
+        // (lineage record) but their legacy `definition_id` was the
+        // clone's own def id, NOT the template's. Template-instance
+        // and user-clone projections aren't schema-distinguishable in
+        // db_agents, so any consistent rule must pick one. The
+        // consolidated model treats `id` as the agent's identity, so
+        // that's what we expose — matches `instance_list` (3b.3a)
+        // after the same fix. Reagent P2 on PR #1111 round 2.
         let mut stmt = conn.prepare(
-            "SELECT id,
-                    CASE WHEN parent_template_id = '' THEN id ELSE parent_template_id END AS def_id,
+            "SELECT id, id AS def_id,
                     github_context, created_at,
                     identity_id, memory_id, instance_name, working_directory,
                     user_hidden
@@ -4674,6 +4804,215 @@ mod tests {
         // continuations updated its bindings.
         assert_eq!(got.id, "def-mirror");
         assert_eq!(got.instance_name, "Maks");
+    }
+
+    #[test]
+    fn instance_list_phase_3b3a_reads_from_db_agents_no_status_filter() {
+        // Phase 3b.3a: with no status filter, `instance_list` reads
+        // the consolidated `db_agents` table — continuation chains
+        // pre-collapse to one row per logical agent, hidden rows
+        // excluded.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        // Two distinct named agents on the same folded def. Each
+        // should surface ONCE (one db_agents row each).
+        let a = make_named_inst("inst-a", "Maks", &agents_root);
+        store.instance_create(&a).unwrap();
+        let b = {
+            // Different def so the rows don't collide on def.id.
+            let mut def2 = sample_agent("def-mirror-2", "mirror-2");
+            store.agent_def_insert(&mut def2).unwrap();
+            let mut x = make_named_inst("inst-b", "DSad", &agents_root);
+            x.definition_id = "def-mirror-2".to_string();
+            x
+        };
+        store.instance_create(&b).unwrap();
+        // Continuation of "Maks" — should NOT add a row.
+        let mut cont = make_named_inst("inst-cont", "Maks", &agents_root);
+        cont.parent_instance_id = "inst-a".to_string();
+        store.instance_create(&cont).unwrap();
+
+        let rows = store.instance_list(None, None).unwrap();
+        let names: Vec<&str> = rows.iter().map(|r| r.instance_name.as_str()).collect();
+        assert_eq!(rows.len(), 2);
+        assert!(names.contains(&"Maks"));
+        assert!(names.contains(&"DSad"));
+        // Transient fields default — see doc comment on instance_list.
+        for row in &rows {
+            assert_eq!(row.status, "");
+            assert_eq!(row.block_id, "");
+            assert_eq!(row.session_id, "");
+        }
+    }
+
+    #[test]
+    fn instance_list_phase_3b3a_filters_by_definition_lineage() {
+        // The legacy `definition_id` filter matches against
+        // `parent_template_id` in the consolidated view. For folded
+        // user-clones (where the db_agents id IS the def.id), also
+        // match the row's own id — both should resolve the def.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let a = make_named_inst("inst-a", "Maks", &agents_root);
+        store.instance_create(&a).unwrap();
+        let mut def2 = sample_agent("def-other", "other");
+        store.agent_def_insert(&mut def2).unwrap();
+        let mut b = make_named_inst("inst-b", "Other", &agents_root);
+        b.definition_id = "def-other".to_string();
+        store.instance_create(&b).unwrap();
+
+        // Filter by def-mirror — only the Maks row matches.
+        let filtered = store.instance_list(Some("def-mirror"), None).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].instance_name, "Maks");
+
+        let filtered = store.instance_list(Some("def-other"), None).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].instance_name, "Other");
+    }
+
+    #[test]
+    fn instance_list_phase_3b3a_definition_id_filter_matches_agent_id_only() {
+        // Codex P2 on PR #1111: the legacy `definition_id` filter
+        // conflated "agent identity" with "parent template" because of
+        // the old schema split. In the consolidated model the filter
+        // matches the agent's own id only — templates aren't agents
+        // (they have `is_template = 1`, which is excluded by the
+        // outer WHERE) and user-clones of a template are SEPARATE
+        // agents with their own id, NOT children of the template.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        // A seeded template + a user-clone derived from it + a
+        // template-instance launched directly off the template.
+        let mut tpl = sample_agent("tpl-coder", "tpl-coder");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let mut clone = sample_agent("clone-of-tpl", "clone-of-tpl");
+        clone.parent_id = "tpl-coder".to_string();
+        store.agent_def_insert(&mut clone).unwrap();
+        let mut tpl_inst = make_named_inst("inst-direct", "DirectTpl", &agents_root);
+        tpl_inst.definition_id = "tpl-coder".to_string();
+        store.instance_create(&tpl_inst).unwrap();
+
+        // Filter by the template's id returns empty — templates are
+        // not agents, and we no longer follow the parent_template_id
+        // backlink (which would over-match).
+        let by_tpl = store.instance_list(Some("tpl-coder"), None).unwrap();
+        assert!(by_tpl.is_empty(), "template id should not surface any agent");
+
+        // Filter by the user-clone's id returns just the clone row.
+        let by_clone = store.instance_list(Some("clone-of-tpl"), None).unwrap();
+        assert_eq!(by_clone.len(), 1);
+        assert_eq!(by_clone[0].id, "clone-of-tpl");
+
+        // Filter by the template-instance id returns just that inst.
+        let by_inst = store.instance_list(Some("inst-direct"), None).unwrap();
+        assert_eq!(by_inst.len(), 1);
+        assert_eq!(by_inst[0].id, "inst-direct");
+        assert_eq!(by_inst[0].instance_name, "DirectTpl");
+
+        // Filter by non-existent id returns empty.
+        let none = store.instance_list(Some("does-not-exist"), None).unwrap();
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn instance_list_phase_3b3a_orders_by_updated_at_for_continuations() {
+        // Reagent P2 on PR #1111 round 2: continuations bump
+        // `db_agents.updated_at` but leave `created_at` at the chain
+        // head's original timestamp. `ORDER BY created_at` would rank
+        // a fresh agent ahead of an actively-continued older one;
+        // `ORDER BY updated_at` preserves "most recent activity
+        // first".
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        // Older agent, first.
+        let older_head = make_named_inst("inst-old-head", "Older", &agents_root);
+        store.instance_create(&older_head).unwrap();
+
+        // Newer agent (different def so different db_agents row).
+        let mut def2 = sample_agent("def-newer", "newer");
+        store.agent_def_insert(&mut def2).unwrap();
+        let mut newer = make_named_inst("inst-newer", "Newer", &agents_root);
+        newer.definition_id = "def-newer".to_string();
+        store.instance_create(&newer).unwrap();
+
+        // Continue the OLDER agent — bumps its updated_at past
+        // the newer agent's.
+        let mut cont = make_named_inst("inst-old-cont", "Older", &agents_root);
+        cont.parent_instance_id = "inst-old-head".to_string();
+        store.instance_create(&cont).unwrap();
+
+        let rows = store.instance_list(None, None).unwrap();
+        assert_eq!(rows.len(), 2);
+        // Older's continuation made it most recent → it ranks first.
+        assert_eq!(rows[0].instance_name, "Older");
+        assert_eq!(rows[1].instance_name, "Newer");
+    }
+
+    #[test]
+    fn instance_list_phase_3b3a_definition_id_projects_row_id_for_user_clones_with_template_lineage() {
+        // Reagent P2 on PR #1111 round 2: user-clones derived from a
+        // template have `parent_template_id` SET (lineage), but their
+        // legacy `definition_id` was the clone's OWN def id, not the
+        // template's. The projection must yield the row's id, not
+        // walk parent_template_id.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        // A user-clone def whose parent_id points at a (non-existent)
+        // template — what matters is that parent_template_id ends up
+        // SET on the db_agents row.
+        let mut clone = sample_agent("clone-from-tpl", "clone-from-tpl");
+        clone.parent_id = "tpl-some-template".to_string();
+        store.agent_def_insert(&mut clone).unwrap();
+        let mut launch = make_named_inst("inst-1", "ClonedAgent", &agents_root);
+        launch.definition_id = "clone-from-tpl".to_string();
+        store.instance_create(&launch).unwrap();
+
+        let rows = store.instance_list(None, None).unwrap();
+        let row = rows.iter().find(|r| r.instance_name == "ClonedAgent").unwrap();
+        // definition_id is the CLONE's id, not the template id —
+        // even though parent_template_id on the underlying row is set.
+        assert_eq!(row.definition_id, "clone-from-tpl");
+        assert_eq!(row.id, "clone-from-tpl");
+    }
+
+    #[test]
+    fn instance_list_phase_3b3a_excludes_hidden() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut inst = make_named_inst("inst-h", "Ghost", &agents_root);
+        inst.display_hidden = true;
+        store.instance_create(&inst).unwrap();
+        let rows = store.instance_list(None, None).unwrap();
+        assert!(rows.is_empty(), "hidden rows must not surface");
+    }
+
+    #[test]
+    fn instance_list_phase_3b3b_status_filter_falls_back_to_legacy() {
+        // Status filter implies the caller needs transient runtime
+        // state. Until the updateagentinstance fetch+merge pattern is
+        // refactored, that read must come from db_agent_instances.
+        // Verify the legacy path is exercised end-to-end (rows include
+        // status field populated from the raw instance row).
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut a = make_named_inst("inst-a", "Maks", &agents_root);
+        a.status = "running".to_string();
+        store.instance_create(&a).unwrap();
+
+        let running = store.instance_list(None, Some("running")).unwrap();
+        assert_eq!(running.len(), 1);
+        assert_eq!(running[0].status, "running");
+        assert_eq!(running[0].id, "inst-a"); // raw inst id, NOT the folded def.id
+
+        let stopped = store.instance_list(None, Some("stopped")).unwrap();
+        assert!(stopped.is_empty());
     }
 
     #[test]
