@@ -64,6 +64,23 @@ export interface MarkdownNode {
     timestamp?: number; // Unix ms — when this node was first received
     metadata?: {
         thinking?: boolean; // Whether this is a thinking block
+        /**
+         * Set when the node was a thinking block whose stream
+         * ended before completion (pane closed, app killed, etc.).
+         * On the next session open, the orphan-scrub pass on
+         * SessionEnd / HistoryLoaded flips this to `true` and
+         * clears `thinking` — so the UI can render the partial
+         * content as historical-canceled (collapsed by default,
+         * "⏹ Canceled — partial thought" label) instead of
+         * misleadingly showing a live "Thinking..." spinner on
+         * something the agent will never finish.
+         *
+         * Spec: docs/specs/SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
+         */
+        canceled?: boolean;
+        /** Unix ms when the orphan-scrub pass marked this node
+         *  canceled. Optional; primarily for future audit/tooltip. */
+        canceledAt?: number;
     };
 }
 
@@ -201,9 +218,15 @@ export interface ToolNode {
      *  - `success`           — completed without error
      *  - `failed`            — completed with error
      *  - `denied`            — user denied the call via the decision panel
+     *  - `canceled`          — was running when the session ended;
+     *                          the orphan-scrub pass on SessionEnd /
+     *                          HistoryLoaded transitioned it. Render
+     *                          collapsed with the ⏹ icon, never with a
+     *                          spinner. Spec:
+     *                          SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
      *  Spec: docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §4.2.
      */
-    status: "running" | "pending_approval" | "success" | "failed" | "denied";
+    status: "running" | "pending_approval" | "success" | "failed" | "denied" | "canceled";
     duration?: number; // Seconds
     result?: ToolResult;
     /** Live streaming buffer. Populated when the provider emits
@@ -529,6 +552,7 @@ export const STATUS_ICONS: Record<string, string> = {
     running: "⏳",
     success: "✓",
     failed: "✗",
+    canceled: "⏹",
 };
 
 /**

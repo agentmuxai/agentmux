@@ -41,6 +41,63 @@
             margin-block: 4px;
         }
 
+        // Canceled thinking — orphan-scrub flipped metadata.canceled
+        // on at SessionEnd / HistoryRestored / HistoryLoaded. Render
+        // collapsed by default with a "⏹ Canceled — partial thought"
+        // header; click expands the body. Mirrors thinking-block
+        // chrome (muted border + dim background) so the visual lineage
+        // is clear, but no italic — this content is no longer "in
+        // flight". Spec: SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
+        &.markdown-canceled {
+            opacity: 0.7;
+            border-left: 2px solid var(--secondary-text-color);
+            padding-left: var(--space-2);
+            background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+            margin-block: 4px;
+
+            .markdown-canceled-header {
+                display: flex;
+                align-items: center;
+                gap: var(--space-1);
+                padding: var(--space-0-5) 0;
+                background: transparent;
+                border: none;
+                color: var(--secondary-text-color);
+                font-size: 11px;
+                font-family: var(--fixed-font, monospace);
+                cursor: pointer;
+                width: 100%;
+                text-align: left;
+
+                &:hover {
+                    color: var(--main-text-color);
+                }
+            }
+
+            .markdown-canceled-icon {
+                flex-shrink: 0;
+                width: 12px;
+                text-align: center;
+            }
+
+            .markdown-canceled-label {
+                flex: 1 1 auto;
+                font-style: italic;
+            }
+
+            .markdown-canceled-chevron {
+                flex-shrink: 0;
+                width: 12px;
+                text-align: center;
+                font-size: 10px;
+            }
+
+            .markdown-canceled-body {
+                padding-top: var(--space-1);
+                font-style: italic;
+            }
+        }
+
         p {
             margin: 1px 0;
         }
@@ -86,6 +143,18 @@
 
         &.failed {
             border-left: 2px solid var(--error-color);
+        }
+
+        // Canceled — orphan-scrub flipped status from "running" on
+        // SessionEnd / HistoryRestored / HistoryLoaded. Muted border
+        // (same hue as the canceled markdown chrome) + dimmed surface
+        // so the ⏹ icon row reads as terminal-but-incomplete, not
+        // success/failed. Body is hidden by default (no `.expanded`)
+        // per the existing collapse contract.
+        // Spec: SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
+        &.canceled {
+            border-left: 2px solid var(--secondary-text-color);
+            opacity: 0.7;
         }
 
         // Single-line collapsed summary — see docs/specs/tool-collapse.md.
@@ -159,9 +228,10 @@
         }
 
         // Status icon color variants for the collapsed row
-        &.success .agent-tool-status-icon { color: var(--success-color); }
-        &.failed  .agent-tool-status-icon { color: var(--error-color); }
-        &.running .agent-tool-status-icon { color: var(--warning-color); }
+        &.success  .agent-tool-status-icon { color: var(--success-color); }
+        &.failed   .agent-tool-status-icon { color: var(--error-color); }
+        &.running  .agent-tool-status-icon { color: var(--warning-color); }
+        &.canceled .agent-tool-status-icon { color: var(--secondary-text-color); }
 
         .agent-tool-content {
             padding: 0 var(--space-1) var(--space-1) var(--space-4);

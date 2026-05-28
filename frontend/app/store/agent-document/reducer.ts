@@ -22,6 +22,99 @@ import {
     TRUNCATE_GRACE_MS,
 } from "./types";
 
+/**
+ * Walk the document and mark orphaned in-progress nodes as canceled.
+ *
+ * Returns `null` if nothing changed (so the caller can skip the
+ * state allocation), otherwise an object with the rewritten nodes +
+ * counts for the audit event. Idempotent — re-running over an
+ * already-scrubbed document returns `null`.
+ *
+ * Two transformations:
+ *   - Markdown nodes with `metadata.thinking === true` → flip
+ *     `thinking` off and set `canceled: true` (+ `canceledAt`).
+ *   - Tool nodes with `status === "running"` → set
+ *     `status: "canceled"`.
+ *
+ * `pending_approval` tools are left alone: they represent a user
+ * decision still in flight, not an interrupted stream. The user
+ * sees the decision panel on next open and can decide explicitly.
+ *
+ * Spec: docs/specs/SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
+ */
+function scrubOrphanedInProgress(
+    nodes: DocumentNode[],
+    at: number,
+    opts?: {
+        /**
+         * True when `nodes` is a prepended sub-range of the merged
+         * document (older history page or restored snapshot, with
+         * other content already in `state.nodes` following it).
+         * In that case `nodes[last]` is NOT the merged tail, so the
+         * last-node thinking heuristic must not fire. Tools are
+         * still scrubbed by their explicit status field. Codex P2
+         * on PR #1104 (HistoryLoaded.loadOlder pagination case).
+         */
+        hasContentAfter?: boolean;
+    },
+): { nodes: DocumentNode[]; markdownCanceled: number; toolsCanceled: number } | null {
+    let next: DocumentNode[] | null = null;
+    let markdownCanceled = 0;
+    let toolsCanceled = 0;
+
+    // Spec's "simple heuristic" (SPEC_ORPHAN_THINKING_NODES §Design):
+    // a thinking markdown is orphaned only when it's the document's
+    // last node. Historical thinking blocks keep metadata.thinking
+    // forever (the stream-parser closes its local pointer on the
+    // next non-thinking event but never writes thinking:false onto
+    // the stored node, and StreamFlush markdown updates replace
+    // content only, not metadata). Without the last-node guard we'd
+    // relabel every prior turn's reasoning as "⏹ Canceled — partial
+    // thought" on session reopen. Codex + reagent P1 on PR #1104.
+    // Tools have an explicit status field so scrub them anywhere
+    // they appear with status:"running".
+    const hasContentAfter = opts?.hasContentAfter === true;
+    const lastIdx = hasContentAfter ? -1 : nodes.length - 1;
+
+    for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        if (
+            n.type === "markdown" &&
+            n.metadata?.thinking === true &&
+            i === lastIdx
+        ) {
+            if (!next) next = nodes.slice();
+            next[i] = {
+                ...n,
+                metadata: {
+                    ...n.metadata,
+                    thinking: false,
+                    canceled: true,
+                    canceledAt: at,
+                },
+            };
+            markdownCanceled++;
+            continue;
+        }
+        if (n.type === "tool" && n.status === "running") {
+            if (!next) next = nodes.slice();
+            // Close the streaming log alongside the status flip.
+            // `log.open === true` makes ToolBlock / ToolOverlayLog
+            // render the live-tail "↳ latest stream output" branch,
+            // which keeps a canceled orphan looking like an actively-
+            // streaming tool — defeats the spec's "never with a
+            // spinner" goal. Codex + reagent P2 on PR #1104.
+            const closedLog = n.log != null ? { ...n.log, open: false } : n.log;
+            next[i] = { ...n, status: "canceled", log: closedLog };
+            toolsCanceled++;
+            continue;
+        }
+    }
+
+    if (!next) return null;
+    return { nodes: next, markdownCanceled, toolsCanceled };
+}
+
 export function update(
     state: AgentDocumentState,
     command: AgentDocumentCommand,
@@ -41,11 +134,34 @@ export function update(
                 events: [{ type: "session-started", at: command.at }],
             };
 
-        case "SessionEnd":
+        case "SessionEnd": {
+            // SessionEnd is the natural moment to mark any nodes
+            // left in-progress as canceled — the stream is over,
+            // they're never going to complete. Cleanup runs here
+            // (clean exits) AND on HistoryRestored / HistoryLoaded
+            // (covers the app-kill case where SessionEnd never
+            // fired and a dirty snapshot lives on disk).
+            // Spec: docs/specs/SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
+            const scrub = scrubOrphanedInProgress(state.nodes, command.at);
+            const events: ReducerResult["events"] = [
+                { type: "session-ended", at: command.at },
+            ];
+            if (scrub) {
+                events.push({
+                    type: "orphans-scrubbed",
+                    markdownCanceled: scrub.markdownCanceled,
+                    toolsCanceled: scrub.toolsCanceled,
+                });
+                return {
+                    state: { ...state, sessionPhase: "ended", nodes: scrub.nodes },
+                    events,
+                };
+            }
             return {
                 state: { ...state, sessionPhase: "ended" },
-                events: [{ type: "session-ended", at: command.at }],
+                events,
             };
+        }
 
         case "HistoryLoaded": {
             if (command.nodes.length === 0) {
@@ -70,19 +186,49 @@ export function update(
                     ],
                 };
             }
+            // Scrub orphans in the freshly-loaded replay. Same reason
+            // as HistoryRestored: the legacy/NDJSON fallback path
+            // (useHistoryPagination, no-snapshot path) can replay a
+            // session that ended with a thinking block or a
+            // `status:"running"` tool — those must not render as live
+            // on reopen. Codex P2 on #1104: the command contract
+            // already says HistoryLoaded scrubs, but the reducer
+            // wasn't doing it. Scrub only `fresh` (same fix as
+            // HistoryRestored — keep live nodes untouched).
+            //
+            // `hasContentAfter: state.nodes.length > 0` — see codex
+            // P2 r2 on #1104. `useHistoryPagination.loadOlder`
+            // dispatches HistoryLoaded with an OLDER page while
+            // newer nodes are already in state.nodes; in that case
+            // `fresh.last` is not the merged tail and a completed
+            // thinking block at the end of the page must not be
+            // canceled. Tools are still scrubbed by status field.
+            // Spec: SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
+            const scrubResult = scrubOrphanedInProgress(fresh, nowMs, {
+                hasContentAfter: state.nodes.length > 0,
+            });
+            const scrubbedFresh = scrubResult ? scrubResult.nodes : fresh;
+            const loadEvents: ReducerResult["events"] = [
+                {
+                    type: "history-loaded",
+                    addedCount: fresh.length,
+                    duplicatesDropped: duplicates,
+                },
+            ];
+            if (scrubResult) {
+                loadEvents.push({
+                    type: "orphans-scrubbed",
+                    markdownCanceled: scrubResult.markdownCanceled,
+                    toolsCanceled: scrubResult.toolsCanceled,
+                });
+            }
             return {
                 state: {
                     ...state,
-                    nodes: [...fresh, ...state.nodes],
+                    nodes: [...scrubbedFresh, ...state.nodes],
                     nodeIdSet: nextIdSet,
                 },
-                events: [
-                    {
-                        type: "history-loaded",
-                        addedCount: fresh.length,
-                        duplicatesDropped: duplicates,
-                    },
-                ],
+                events: loadEvents,
             };
         }
 
@@ -105,20 +251,54 @@ export function update(
                 nextIdSet.add(n.id);
                 fresh.push(n);
             }
+            // Scrub orphans in the freshly-restored snapshot. The
+            // snapshot was saved while the prior session was running
+            // and could contain a thinking node mid-stream or a
+            // tool stuck at `status="running"`. The user shouldn't
+            // see those as live on next open. Spec:
+            // SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
+            //
+            // Scrub ONLY `fresh` (the historical snapshot). Codex P2
+            // on #1104: scrubbing the merged array would also cancel
+            // live nodes that landed in state.nodes during the async
+            // snapshot-read window — a thinking markdown still being
+            // streamed would get flipped to canceled and stay rendered
+            // that way (StreamFlush markdown updates only replace
+            // content, not metadata). Live nodes pass through
+            // untouched; only the replay gets sanitized.
+            //
+            // Do NOT pass `hasContentAfter` here — codex P2 r3 on
+            // #1104. A snapshot represents the COMPLETE pre-close
+            // history; its own tail IS the orphan candidate if it's
+            // mid-thought, regardless of any live arrivals that may
+            // have slipped in during the async read window. (The
+            // pagination guard belongs to HistoryLoaded only, where
+            // `fresh` is a sub-range of a larger doc.)
+            const scrubResult = scrubOrphanedInProgress(fresh, nowMs);
+            const scrubbedFresh = scrubResult ? scrubResult.nodes : fresh;
+            const mergedNodes = [...scrubbedFresh, ...state.nodes];
+            const restoreEvents: ReducerResult["events"] = [
+                {
+                    type: "history-restored",
+                    restoredCount: fresh.length,
+                    fromSnapshot: true,
+                },
+            ];
+            if (scrubResult) {
+                restoreEvents.push({
+                    type: "orphans-scrubbed",
+                    markdownCanceled: scrubResult.markdownCanceled,
+                    toolsCanceled: scrubResult.toolsCanceled,
+                });
+            }
             return {
                 state: {
                     ...state,
-                    nodes: [...fresh, ...state.nodes],
+                    nodes: mergedNodes,
                     nodeIdSet: nextIdSet,
                     sessionPhase: "active",
                 },
-                events: [
-                    {
-                        type: "history-restored",
-                        restoredCount: fresh.length,
-                        fromSnapshot: true,
-                    },
-                ],
+                events: restoreEvents,
             };
         }
 
@@ -288,6 +468,29 @@ export function update(
                         ? state
                         : { ...state, nodes: [], nodeIdSet: new Set<string>() },
                 events: [{ type: "user-cleared", clearedCount: cleared }],
+            };
+        }
+
+        case "ScrubOrphanedInProgress": {
+            // Standalone entry point — callers that want to scrub
+            // without crossing a session boundary (e.g., a follow-up
+            // pass triggered by external state). The SessionEnd and
+            // HistoryRestored handlers above also call the same
+            // `scrubOrphanedInProgress` helper directly; this case
+            // exists for explicit dispatchers and for testability.
+            // Idempotent: returns state unchanged if nothing's
+            // in-progress.
+            const scrub = scrubOrphanedInProgress(state.nodes, command.at);
+            if (!scrub) return { state, events: [] };
+            return {
+                state: { ...state, nodes: scrub.nodes },
+                events: [
+                    {
+                        type: "orphans-scrubbed",
+                        markdownCanceled: scrub.markdownCanceled,
+                        toolsCanceled: scrub.toolsCanceled,
+                    },
+                ],
             };
         }
     }

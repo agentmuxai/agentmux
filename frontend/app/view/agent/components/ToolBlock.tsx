@@ -66,6 +66,7 @@ const STATUS_ICON: Record<ToolNode["status"], string> = {
     success: "✓",
     failed: "✗",
     denied: "⊘",
+    canceled: "⏹",
 };
 
 // 150ms enter delay prevents accidental expansions while scrolling past
@@ -233,6 +234,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 running: props.node.status === "running",
                 success: props.node.status === "success",
                 failed: props.node.status === "failed",
+                canceled: props.node.status === "canceled",
             })}
         >
             <div class="agent-tool-summary" onClick={props.onTogglePin}>

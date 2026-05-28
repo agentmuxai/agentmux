@@ -670,4 +670,337 @@ describe("agent document reducer", () => {
             expect((r.state.nodes[0] as any).content).toBe("hello world");
         });
     });
+
+    // ── ScrubOrphanedInProgress ───────────────────────────────────
+    // Spec: docs/specs/SPEC_ORPHAN_THINKING_NODES_2026_05_27.md
+    //
+    // The scrub runs on three triggers:
+    //   - SessionEnd (clean exit) — folded into the SessionEnd handler.
+    //   - HistoryRestored (snapshot load after app-kill) — folded in.
+    //   - Standalone ScrubOrphanedInProgress command — explicit dispatch.
+    // All three pass through the same helper.
+    describe("ScrubOrphanedInProgress", () => {
+        const thinkingMd = (id: string, content = id): DocumentNode => ({
+            type: "markdown",
+            id,
+            content,
+            timestamp: 0,
+            metadata: { thinking: true },
+        });
+
+        it("flips thinking markdown to canceled when it's the last node", () => {
+            // Spec's simple heuristic: thinking is orphaned only when
+            // it's the document's tail (parser was mid-thought when
+            // the session ended). Historical thinking nodes followed
+            // by anything else completed normally and stay untouched.
+            const s0 = seed([md("m1"), thinkingMd("t1", "mid-thought")]);
+            const r = update(s0, { type: "ScrubOrphanedInProgress", at: 9999 });
+            const t1 = r.state.nodes[1] as any;
+            expect(t1.metadata.canceled).toBe(true);
+            expect(t1.metadata.thinking).toBe(false);
+            expect(t1.metadata.canceledAt).toBe(9999);
+            // Original content preserved.
+            expect(t1.content).toBe("mid-thought");
+            // Non-thinking node untouched.
+            expect((r.state.nodes[0] as any).metadata).toBeUndefined();
+            expect(r.events).toEqual([
+                { type: "orphans-scrubbed", markdownCanceled: 1, toolsCanceled: 0 },
+            ]);
+        });
+
+        // Codex + reagent P1 on PR #1104: stream-parser never writes
+        // `thinking: false` onto a completed thinking node (it only
+        // clears its local pointer). So in any multi-turn session
+        // — thinking → tool → text → thinking → text … — every
+        // prior thinking block keeps `metadata.thinking === true`
+        // forever. Scrub MUST guard against that or every reopen
+        // relabels all reasoning as canceled.
+        it("does NOT scrub thinking markdown followed by other nodes", () => {
+            const s0 = seed([
+                thinkingMd("turn1-think", "reasoned about X"),
+                md("turn1-text", "answer for X"),
+                thinkingMd("turn2-think", "reasoned about Y"),
+                md("turn2-text", "answer for Y"),
+            ]);
+            const r = update(s0, { type: "ScrubOrphanedInProgress", at: 9999 });
+            // No allocation, no events — both historical thinking
+            // blocks were completed (text follows each one).
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([]);
+        });
+
+        it("scrubs tool-running anywhere in doc but leaves prior thinking alone", () => {
+            // Realistic snapshot of an app-killed session: prior
+            // turn's thinking → text → new turn's tool started but
+            // never finished. Only the running tool is orphan.
+            const s0 = seed([
+                thinkingMd("prior-think", "prior reasoning"),
+                md("prior-text", "prior answer"),
+                tool("t1", { status: "running" }),
+            ]);
+            const r = update(s0, { type: "ScrubOrphanedInProgress", at: 9999 });
+            expect((r.state.nodes[0] as any).metadata.canceled).toBeUndefined();
+            expect((r.state.nodes[0] as any).metadata.thinking).toBe(true);
+            expect((r.state.nodes[2] as ToolNode).status).toBe("canceled");
+            expect(r.events).toEqual([
+                { type: "orphans-scrubbed", markdownCanceled: 0, toolsCanceled: 1 },
+            ]);
+        });
+
+        it("flips running tools to canceled status", () => {
+            const t1 = tool("t1", { status: "running" });
+            const t2 = tool("t2", { status: "success" });
+            const r = update(seed([t1, t2]), {
+                type: "ScrubOrphanedInProgress",
+                at: 1000,
+            });
+            expect((r.state.nodes[0] as ToolNode).status).toBe("canceled");
+            // Already-completed tool stays as-is.
+            expect((r.state.nodes[1] as ToolNode).status).toBe("success");
+            expect(r.events).toEqual([
+                { type: "orphans-scrubbed", markdownCanceled: 0, toolsCanceled: 1 },
+            ]);
+        });
+
+        // Codex + reagent P2 on #1104: scrubbing must also close
+        // the streaming log. Otherwise ToolBlock's live-tail branch
+        // (gated on log.open) keeps rendering a canceled tool as
+        // streaming.
+        it("closes log.open when canceling a streamed-into running tool", () => {
+            const t1: ToolNode = {
+                ...tool("t1", { status: "running" }),
+                log: { chunks: [chunk("partial output")], open: true },
+            };
+            const r = update(seed([t1]), {
+                type: "ScrubOrphanedInProgress",
+                at: 1000,
+            });
+            const scrubbed = r.state.nodes[0] as ToolNode;
+            expect(scrubbed.status).toBe("canceled");
+            expect(scrubbed.log?.open).toBe(false);
+            // Chunks preserved — historical output stays visible.
+            expect(scrubbed.log?.chunks.length).toBe(1);
+        });
+
+        it("leaves pending_approval tools alone (decision still in flight)", () => {
+            const t = tool("t1", { status: "pending_approval" });
+            const r = update(seed([t]), {
+                type: "ScrubOrphanedInProgress",
+                at: 1000,
+            });
+            expect((r.state.nodes[0] as ToolNode).status).toBe("pending_approval");
+            expect(r.events).toEqual([]);
+        });
+
+        it("is a no-op when nothing's in progress", () => {
+            const s0 = seed([md("m1"), tool("t1", { status: "success" })]);
+            const r = update(s0, { type: "ScrubOrphanedInProgress", at: 9999 });
+            expect(r.state).toBe(s0); // identity — no allocation
+            expect(r.events).toEqual([]);
+        });
+
+        it("is idempotent — running twice doesn't double-modify", () => {
+            // Thinking must be at the tail to be scrubbed under the
+            // last-node heuristic.
+            const s0 = seed([tool("k1", { status: "running" }), thinkingMd("t1")]);
+            const r1 = update(s0, { type: "ScrubOrphanedInProgress", at: 1000 });
+            const r2 = update(r1.state, { type: "ScrubOrphanedInProgress", at: 2000 });
+            // Second run is a no-op against the already-scrubbed state.
+            expect(r2.state).toBe(r1.state);
+            expect(r2.events).toEqual([]);
+            // canceledAt was set by the FIRST run and never overwritten
+            // — important: re-scrubbing must not bump the timestamp.
+            const t1 = r1.state.nodes[1] as any;
+            expect(t1.metadata.canceledAt).toBe(1000);
+        });
+    });
+
+    describe("SessionEnd scrubs orphans", () => {
+        const thinkingMd = (id: string): DocumentNode => ({
+            type: "markdown",
+            id,
+            content: id,
+            timestamp: 0,
+            metadata: { thinking: true },
+        });
+
+        it("emits session-ended AND orphans-scrubbed when nodes were dirty", () => {
+            // Last-node thinking + running tool earlier in the doc.
+            const s0 = seed([tool("k1", { status: "running" }), thinkingMd("t1")]);
+            const r = update(s0, { type: "SessionEnd", at: 5000 });
+            expect(r.state.sessionPhase).toBe("ended");
+            expect((r.state.nodes[0] as ToolNode).status).toBe("canceled");
+            expect((r.state.nodes[1] as any).metadata.canceled).toBe(true);
+            expect(r.events).toEqual([
+                { type: "session-ended", at: 5000 },
+                { type: "orphans-scrubbed", markdownCanceled: 1, toolsCanceled: 1 },
+            ]);
+        });
+
+        it("only emits session-ended when nothing was in progress", () => {
+            const s0 = seed([md("m1")]);
+            const r = update(s0, { type: "SessionEnd", at: 5000 });
+            expect(r.events).toEqual([{ type: "session-ended", at: 5000 }]);
+        });
+    });
+
+    describe("HistoryRestored scrubs orphans in the snapshot", () => {
+        const thinkingMd = (id: string): DocumentNode => ({
+            type: "markdown",
+            id,
+            content: id,
+            timestamp: 0,
+            metadata: { thinking: true },
+        });
+
+        it("scrubs dirty nodes that arrived via snapshot restore", () => {
+            // Snapshot from a prior session was saved mid-thinking;
+            // on resume, the new pane mounts and HistoryRestored
+            // brings in the dirty nodes. Scrub flips them before
+            // the user ever sees a misleading spinner.
+            // Thinking has to be tail-of-doc to qualify as orphan
+            // under the simple heuristic (anything after it means
+            // the parser had already transitioned away).
+            const r = update(initialState(), {
+                type: "HistoryRestored",
+                nodes: [tool("orphan-tool", { status: "running" }), thinkingMd("orphan-think")],
+                fromSnapshot: true,
+            });
+            expect((r.state.nodes[0] as ToolNode).status).toBe("canceled");
+            expect((r.state.nodes[1] as any).metadata.canceled).toBe(true);
+            // session-phase still flips to "active" per the original
+            // contract — we're restoring, not ending.
+            expect(r.state.sessionPhase).toBe("active");
+            expect(r.events.some((e: any) => e.type === "orphans-scrubbed")).toBe(true);
+        });
+
+        it("doesn't emit orphans-scrubbed when the snapshot is clean", () => {
+            const r = update(initialState(), {
+                type: "HistoryRestored",
+                nodes: [md("m1"), md("m2")],
+                fromSnapshot: true,
+            });
+            expect(r.events.some((e: any) => e.type === "orphans-scrubbed")).toBe(false);
+        });
+
+        // Codex P2 r3 on #1104: HistoryRestored represents the
+        // COMPLETE pre-close history. If the snapshot's own tail is
+        // mid-thought, it's the orphan candidate even when live
+        // arrivals have populated state.nodes during the async read
+        // window. (The pagination guard belongs to HistoryLoaded
+        // only, where `fresh` is a sub-range of a larger doc.)
+        it("scrubs snapshot-tail thinking even after live arrivals", () => {
+            const live = md("live-text", "live content");
+            const base = seed([live]);
+            const r = update(base, {
+                type: "HistoryRestored",
+                fromSnapshot: true,
+                nodes: [md("snap-1"), thinkingMd("snap-tail")],
+            });
+            const snapTail = r.state.nodes.find((n) => n.id === "snap-tail") as any;
+            expect(snapTail.metadata.canceled).toBe(true);
+            // Live node untouched.
+            const liveAfter = r.state.nodes.find((n) => n.id === "live-text") as any;
+            expect(liveAfter.metadata).toBeUndefined();
+            expect(r.events.some((e: any) => e.type === "orphans-scrubbed")).toBe(true);
+        });
+
+        // Codex P2 on #1104: HistoryRestored arriving AFTER live
+        // stream events have populated state.nodes must not flip
+        // those live nodes to canceled — only the snapshot replay
+        // gets sanitized.
+        it("does NOT scrub live thinking nodes already in state.nodes", () => {
+            // Live event landed first: an actively-streaming thinking
+            // markdown is in state.nodes.
+            const live = thinkingMd("live-think");
+            const base = seed([live]);
+            // Now the snapshot read returns — bringing only a clean
+            // historical node. The live thinking should stay thinking.
+            const r = update(base, {
+                type: "HistoryRestored",
+                nodes: [md("snap-1")],
+                fromSnapshot: true,
+            });
+            // No orphans event — fresh was clean and live was untouched.
+            expect(r.events.some((e: any) => e.type === "orphans-scrubbed")).toBe(false);
+            const liveAfter = r.state.nodes.find((n) => n.id === "live-think") as any;
+            expect(liveAfter.metadata.thinking).toBe(true);
+            expect(liveAfter.metadata.canceled).toBeUndefined();
+        });
+    });
+
+    // Codex P2 on #1104 (gap 2): HistoryLoaded is the legacy/NDJSON
+    // fallback path. Contract said it scrubs; reducer wasn't doing it.
+    describe("HistoryLoaded scrubs orphans in the replay", () => {
+        const thinkingMd = (id: string): DocumentNode => ({
+            type: "markdown",
+            id,
+            content: id,
+            timestamp: 0,
+            metadata: { thinking: true },
+        });
+
+        it("flips dirty nodes from the legacy/NDJSON replay", () => {
+            const r = update(initialState(), {
+                type: "HistoryLoaded",
+                nodes: [tool("orphan-tool", { status: "running" }), thinkingMd("orphan-think")],
+            });
+            expect((r.state.nodes[0] as ToolNode).status).toBe("canceled");
+            expect((r.state.nodes[1] as any).metadata.canceled).toBe(true);
+            expect(r.events.some((e: any) => e.type === "orphans-scrubbed")).toBe(true);
+        });
+
+        it("doesn't emit orphans-scrubbed when the replay is clean", () => {
+            const r = update(initialState(), {
+                type: "HistoryLoaded",
+                nodes: [md("m1"), md("m2")],
+            });
+            expect(r.events.some((e: any) => e.type === "orphans-scrubbed")).toBe(false);
+        });
+
+        it("leaves live thinking nodes already in state.nodes untouched", () => {
+            const live = thinkingMd("live-think");
+            const base = seed([live]);
+            const r = update(base, {
+                type: "HistoryLoaded",
+                nodes: [md("hist-1")],
+            });
+            const liveAfter = r.state.nodes.find((n) => n.id === "live-think") as any;
+            expect(liveAfter.metadata.thinking).toBe(true);
+            expect(liveAfter.metadata.canceled).toBeUndefined();
+        });
+
+        // Codex P2 round 2 on #1104: useHistoryPagination.loadOlder
+        // dispatches HistoryLoaded with an OLDER page while newer
+        // nodes are already in state.nodes. fresh.last is the page's
+        // tail but NOT the merged document's tail — a completed
+        // thinking block at the end of the page must stay alive.
+        it("does NOT scrub a thinking tail when older page prepends to existing state", () => {
+            const newer = seed([md("text-3"), tool("tool-4", { status: "success" })]);
+            const r = update(newer, {
+                type: "HistoryLoaded",
+                nodes: [md("text-1"), thinkingMd("think-2")],
+            });
+            // Merge order: [text-1, think-2, text-3, tool-4]
+            // think-2 is mid-doc in the merged view; it completed.
+            const think2 = r.state.nodes.find((n) => n.id === "think-2") as any;
+            expect(think2.metadata.thinking).toBe(true);
+            expect(think2.metadata.canceled).toBeUndefined();
+            expect(r.events.some((e: any) => e.type === "orphans-scrubbed")).toBe(false);
+        });
+
+        // Even with `hasContentAfter`, a running tool in the older
+        // page IS orphan (status field is positional-independent —
+        // running means tool_result never arrived).
+        it("still scrubs running tools in older pages", () => {
+            const newer = seed([md("text-3")]);
+            const r = update(newer, {
+                type: "HistoryLoaded",
+                nodes: [tool("old-tool", { status: "running" }), md("text-1")],
+            });
+            const oldTool = r.state.nodes.find((n) => n.id === "old-tool") as ToolNode;
+            expect(oldTool.status).toBe("canceled");
+            expect(r.events.some((e: any) => e.type === "orphans-scrubbed")).toBe(true);
+        });
+    });
 });
