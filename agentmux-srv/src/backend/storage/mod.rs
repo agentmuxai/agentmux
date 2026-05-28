@@ -9,6 +9,7 @@ pub mod content;
 pub mod error;
 pub mod filestore;
 pub mod history;
+pub mod identities;
 pub mod memory_bundles;
 pub mod migrations;
 pub mod skills;
@@ -19,6 +20,7 @@ pub use content::AgentContent;
 pub use error::StoreError;
 #[allow(unused_imports)]
 pub use history::AgentHistory;
+pub use identities::{AgentIdentityLink, Identity, IdentityAccount, IdentityBinding, SecretRef};
 pub use memory_bundles::Memory;
 pub use skills::AgentSkill;
 pub use store::AgentDefinition;
