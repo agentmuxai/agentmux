@@ -1841,10 +1841,17 @@ impl Store {
     /// Continuation chains pre-collapse — one row per logical agent.
     /// The `definition_id` filter, when supplied, matches against
     /// `parent_template_id` (the lineage the legacy `definition_id`
-    /// column points at). Per-launch transient fields (block_id,
-    /// session_id, status, started_at as launch moment, ended_at,
-    /// parent_instance_id) come back as type defaults — they have no
-    /// analog on the consolidated row.
+    /// column points at).
+    ///
+    /// Field mapping for fields with no consolidated-row analog:
+    /// - `block_id`, `session_id`, `status`, `ended_at`,
+    ///   `parent_instance_id` → type defaults (`""` / `0`). Truly
+    ///   transient per-launch state; not modelled on `db_agents`.
+    /// - `started_at` → `db_agents.created_at`. Same proxy used by
+    ///   `instance_get_by_name` (3b.2); the consolidated row's
+    ///   creation IS the agent's launch moment in the new model.
+    /// - `display_hidden` → always `false`. The WHERE clause filters
+    ///   `user_hidden = 0`, so hidden rows never surface here.
     ///
     /// Phase 3b.3b (deferred — status filter case): callers passing a
     /// `status` filter need transient runtime state that `db_agents`
@@ -1873,8 +1880,7 @@ impl Store {
             "SELECT id,
                     CASE WHEN parent_template_id = '' THEN id ELSE parent_template_id END AS def_id,
                     github_context, created_at,
-                    identity_id, memory_id, instance_name, working_directory,
-                    user_hidden
+                    identity_id, memory_id, instance_name, working_directory
              FROM db_agents
              WHERE is_template = 0
                AND user_hidden = 0",
@@ -1902,7 +1908,9 @@ impl Store {
                 memory_id: row.get(5)?,
                 instance_name: row.get(6)?,
                 working_directory: row.get(7)?,
-                display_hidden: row.get::<_, i64>(8)? != 0,
+                // Filter above guarantees the row is visible; column
+                // omitted from SELECT to match. Reagent P2 on PR #1111.
+                display_hidden: false,
             })
         })?;
         let mut out = Vec::new();
