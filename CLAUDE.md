@@ -123,7 +123,7 @@ These views exist in the codebase but are **not** widget-bar entries — do not 
 
 ## Log Access
 
-Each running instance writes logs under its own per-channel data dir (`$AGENTMUX_LOG_DIR` in AgentMux terminals). The shared `~/.agentmux/logs/` holds pointer files (`current-host-v<v>.path`, `current-srv-v<v>.path`) so `muxlog` can resolve the right log from any context.
+`$AGENTMUX_LOG_DIR` in AgentMux terminals is the shared `~/.agentmux/logs/` directory. The sidecar log lives there directly; the host log lives in the per-instance data dir and registers a pointer (`current-host-v<v>.path`) in the shared dir so `muxlog host` can resolve it.
 
 | What | Command |
 |------|---------|

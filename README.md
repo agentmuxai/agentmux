@@ -74,7 +74,7 @@ task package:linux     # Linux AppImage (writes to ~/Desktop)
 
 ### Logs
 
-Each running instance writes its host and sidecar logs under its own per-channel data dir (`$AGENTMUX_LOG_DIR` inside AgentMux terminals). The shared `~/.agentmux/logs/` directory holds **pointer files** so the shipped `muxlog` shell helper can resolve the right log from any context:
+Inside AgentMux terminals, `$AGENTMUX_LOG_DIR` is set to the shared `~/.agentmux/logs/` directory. That directory holds the sidecar log directly, plus pointer files (`current-host-v<v>.path`, `current-srv-v<v>.path`) for both processes — the host log itself lives in the per-instance data dir, but its pointer here lets `muxlog host` find it from any context. The shipped `muxlog` shell helper handles the indirection:
 
 | What | Command |
 |------|---------|
