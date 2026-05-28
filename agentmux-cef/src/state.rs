@@ -689,6 +689,7 @@ pub struct AppState {
     /// enumerating all process windows. See SPEC_PER_WINDOW_OPACITY_2026-05-14.md §5.
     #[cfg(target_os = "windows")]
     pub window_hwnds: Mutex<HashMap<String, isize>>,
+
 }
 
 impl Default for AppState {

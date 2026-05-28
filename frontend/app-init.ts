@@ -48,6 +48,7 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 import { isHostApp } from "@/app/init/host-detect";
 import { showStartupError } from "@/app/init/error-display";
 import { withTimeout } from "@/app/init/timeout";
+import { fireAndForget } from "@/util/util";
 import { scheduleRevealLift } from "@/store/tab-reveal";
 import { installLauncherEventBridge } from "@/util/launcher-events";
 import { installSrvEventBridge } from "@/util/srv-events";
@@ -76,6 +77,140 @@ window.removeNotificationById = removeNotificationById;
 window.modalsModel = modalsModel;
 
 const RPC_TIMEOUT = 5_000; // 5 seconds for individual RPC calls
+
+/**
+ * Subscribe to the host's `floating-redock:hover-state` event so this
+ * window paints a drop-slot preview when a floater is being dragged
+ * over it. The host computes the target window via the same Z-order
+ * walk `resolve_window_at_cursor` uses (with the dragged floater
+ * excluded) and emits this event on every mousemove update; payload
+ * includes the cursor position in physical screen px.
+ *
+ * Each window's renderer runs this in its own JS context. When the
+ * event targets our window:
+ *   1. Convert cursor screen-physical-px → client CSS px (DPR +
+ *      `window.screenX/Y`, same pattern as `tabbar.tsx`).
+ *   2. `document.elementFromPoint(clientX, clientY)` → walk to the
+ *      nearest `[data-blockid]` ancestor.
+ *   3. Run `determineDropDirection` (from `@/layout/lib/utils`) on
+ *      the cursor's position within the leaf — same helper as
+ *      within-window pane drag — to classify the drop as
+ *      Center / Top / Right / Bottom / Left (and Outer variants).
+ *   4. Render a singleton overlay div positioned over the
+ *      half/quadrant/full-leaf that maps to that direction (e.g. Top
+ *      → top half of leaf; Center → full leaf; OuterRight → right
+ *      fifth of leaf).
+ *
+ * The block STILL lands as a sibling in the target tab's layout for
+ * MVP (backend ignores the direction). Phase 4b will wire the
+ * direction through `RedockFloatingPane` so the block lands in the
+ * exact slot the user previewed.
+ */
+function installFloatingRedockHoverListener(): void {
+    const myLabel =
+        new URLSearchParams(window.location.search).get("windowLabel") || "main";
+    let placeholderEl: HTMLDivElement | null = null;
+
+    const ensurePlaceholder = (): HTMLDivElement => {
+        if (!placeholderEl) {
+            placeholderEl = document.createElement("div");
+            placeholderEl.className = "floating-redock-drop-placeholder";
+            document.body.appendChild(placeholderEl);
+        }
+        return placeholderEl;
+    };
+    const clearPlaceholder = () => {
+        if (placeholderEl) {
+            placeholderEl.remove();
+            placeholderEl = null;
+        }
+    };
+
+    // Map a DropDirection to a sub-rect (top, left, width, height in
+    // client CSS px) within the leaf rect. Mirrors the visual the
+    // within-window pane drag's `.placeholder` provides:
+    //   Center      → full leaf
+    //   Top/Bottom  → half along that axis
+    //   Left/Right  → half along that axis
+    //   Outer*      → thin (1/5) band against that edge
+    const rectForDirection = (leaf: DOMRect, dir: number): { top: number; left: number; width: number; height: number } => {
+        // DropDirection enum: Top=0, Right=1, Bottom=2, Left=3,
+        //   OuterTop=4, OuterRight=5, OuterBottom=6, OuterLeft=7,
+        //   Center=8.
+        switch (dir) {
+            case 0: // Top
+                return { top: leaf.top, left: leaf.left, width: leaf.width, height: leaf.height / 2 };
+            case 1: // Right
+                return { top: leaf.top, left: leaf.left + leaf.width / 2, width: leaf.width / 2, height: leaf.height };
+            case 2: // Bottom
+                return { top: leaf.top + leaf.height / 2, left: leaf.left, width: leaf.width, height: leaf.height / 2 };
+            case 3: // Left
+                return { top: leaf.top, left: leaf.left, width: leaf.width / 2, height: leaf.height };
+            case 4: // OuterTop
+                return { top: leaf.top, left: leaf.left, width: leaf.width, height: leaf.height / 5 };
+            case 5: // OuterRight
+                return { top: leaf.top, left: leaf.left + (4 * leaf.width) / 5, width: leaf.width / 5, height: leaf.height };
+            case 6: // OuterBottom
+                return { top: leaf.top + (4 * leaf.height) / 5, left: leaf.left, width: leaf.width, height: leaf.height / 5 };
+            case 7: // OuterLeft
+                return { top: leaf.top, left: leaf.left, width: leaf.width / 5, height: leaf.height };
+            case 8: // Center
+            default:
+                return { top: leaf.top, left: leaf.left, width: leaf.width, height: leaf.height };
+        }
+    };
+
+    fireAndForget(async () => {
+        const { listenEvent } = await import("@/app/platform/ipc");
+        const { determineDropDirection } = await import("@/layout/lib/utils");
+        await listenEvent<{
+            target_label: string | null;
+            source_label?: string;
+            cursor_x?: number;
+            cursor_y?: number;
+        }>("floating-redock:hover-state", (payload) => {
+            if (!payload || payload.target_label !== myLabel) {
+                clearPlaceholder();
+                return;
+            }
+            const cursorPxX = payload.cursor_x;
+            const cursorPxY = payload.cursor_y;
+            if (typeof cursorPxX !== "number" || typeof cursorPxY !== "number") {
+                clearPlaceholder();
+                return;
+            }
+            const dpr = window.devicePixelRatio || 1;
+            const clientX = cursorPxX / dpr - window.screenX;
+            const clientY = cursorPxY / dpr - window.screenY;
+            const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+            const leafEl = el?.closest("[data-blockid]") as HTMLElement | null;
+            if (!leafEl) {
+                clearPlaceholder();
+                return;
+            }
+            const leafRect = leafEl.getBoundingClientRect();
+            const dir = determineDropDirection(
+                {
+                    width: leafRect.width,
+                    height: leafRect.height,
+                    left: leafRect.left,
+                    top: leafRect.top,
+                },
+                { x: clientX, y: clientY },
+            );
+            if (dir === undefined) {
+                clearPlaceholder();
+                return;
+            }
+            const slot = rectForDirection(leafRect, dir);
+            const ph = ensurePlaceholder();
+            ph.style.top = `${slot.top}px`;
+            ph.style.left = `${slot.left}px`;
+            ph.style.width = `${slot.width}px`;
+            ph.style.height = `${slot.height}px`;
+        });
+    });
+}
 
 /**
  * Initialize the window-instance-number atom and seed the reducer
@@ -692,6 +827,7 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     t = performance.now();
     initGlobalEventSubs(initOpts);
     subscribeToConnEvents();
+    installFloatingRedockHoverListener();
     tlog("initEventSubs", t);
 
     // Prime the identity-account cache from the DB so synchronous callers

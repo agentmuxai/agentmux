@@ -127,6 +127,23 @@ wrap_task! {
                 "[floating-pane] outer HWND created",
             );
 
+            // Register the outer HWND in `state.window_hwnds` under the
+            // floater's label. Without this, `resolve_window_hwnd(label)`
+            // falls through to the reducer-registry path which goes
+            // host.window_handle() (returns the CEF inner WS_CHILD) →
+            // GetAncestor(GA_ROOT), and in our setup GA_ROOT lands on
+            // MAIN's HWND (not the outer floater), so any
+            // close_window_by_label("floating-…") would actually post
+            // WM_CLOSE to MAIN and cascade-destroy every owned floater.
+            //
+            // Capturing the known-good outer HWND here ensures the
+            // cache lookup (added to resolve_window_hwnd) returns the
+            // right window for floater-targeted IPCs.
+            self.state
+                .window_hwnds
+                .lock()
+                .insert(self.window_label.clone(), outer_hwnd as isize);
+
             // CEF embed — the browser is a WS_CHILD of the outer HWND.
             let rect = Rect {
                 x: 0,

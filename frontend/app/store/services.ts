@@ -218,6 +218,22 @@ class WorkspaceServiceType {
     TearOffTab(tabId: string, sourceWsId: string): Promise<string> {
         return WOS.callBackendService("workspace", "TearOffTab", Array.from(arguments))
     }
+
+    // Re-dock a floating pane's block into an existing tab in another
+    // workspace. The inverse of TearOffBlock. Source floater auto-closes
+    // via the empty-tab watcher in floating-pane-workspace.tsx (PR #1089)
+    // once its tab.blockids becomes empty.
+    //
+    // @returns { redocked: true, block_id, target_tab_id } (and object updates)
+    RedockFloatingPane(
+        blockId: string,
+        sourceTabId: string,
+        sourceWsId: string,
+        targetTabId: string,
+        targetWsId: string,
+    ): Promise<{ redocked: boolean; block_id?: string; target_tab_id?: string }> {
+        return WOS.callBackendService("workspace", "RedockFloatingPane", Array.from(arguments))
+    }
 }
 
 export const WorkspaceService = new WorkspaceServiceType();

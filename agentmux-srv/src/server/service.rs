@@ -1987,6 +1987,154 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 updates,
             )
         }
+        // Floating-pane Phase 4a — re-dock a floater's block back into
+        // an existing tab in another workspace. Same shape as
+        // TearOffBlock's RPC handler: saga handles the reducer-state
+        // move (MoveBlock); layout writes are wcore-direct (the
+        // target's layout grows a leaf; the source's layout enqueues
+        // a delete action). Source floater closes via PR #1089's
+        // empty-tab watcher once its tab.blockids is empty.
+        // Spec: docs/specs/SPEC_FLOATING_PANE_REDOCK_2026-05-27.md
+        ("workspace", "RedockFloatingPane") => {
+            let block_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let source_tab_id: String = match service::get_arg(args, 1) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let source_ws_id: String = match service::get_arg(args, 2) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let target_tab_id: String = match service::get_arg(args, 3) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let target_ws_id: String = match service::get_arg(args, 4) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            tracing::info!(
+                block_id = %block_id,
+                source_tab = %source_tab_id,
+                source_ws = %source_ws_id,
+                target_tab = %target_tab_id,
+                target_ws = %target_ws_id,
+                "[dnd:svc] RedockFloatingPane via saga"
+            );
+            let saga_result = crate::sagas::redock_floating_pane::run(
+                state,
+                block_id.clone(),
+                source_tab_id.clone(),
+                source_ws_id.clone(),
+                target_tab_id.clone(),
+                target_ws_id.clone(),
+                None,
+            )
+            .await;
+            if let Err(reason) = saga_result {
+                return WebReturnType::error(reason);
+            }
+
+            // Target layout: enqueue an "insert" action on its
+            // `pendingbackendactions` so the target window's frontend
+            // grows a new leaf for the redocked block through its
+            // standard LayoutTreeActionType.InsertNode reducer.
+            // Direct rootnode writes don't propagate because the
+            // LayoutModel doesn't auto-sync from external WaveObj
+            // updates — see `queue_target_layout_insert`'s docstring.
+            if let Err(e) = queue_target_layout_insert(store, &target_tab_id, &block_id) {
+                tracing::warn!(
+                    target_tab = %target_tab_id,
+                    "RedockFloatingPane: target layout insert-action enqueue failed: {}",
+                    e
+                );
+            }
+            // Source tab: queue a layout-delete action so the source
+            // floater's frontend removes the leaf from its tree. The
+            // tab will then have empty blockids → PR #1089's auto-close
+            // watcher fires → floater window dismisses.
+            if let Err(e) = queue_source_layout_delete(store, &source_tab_id, &block_id) {
+                tracing::warn!(
+                    source_tab = %source_tab_id,
+                    "RedockFloatingPane: source layout delete-action enqueue failed: {}",
+                    e
+                );
+            }
+
+            let mut updates = Vec::new();
+            // Layout updates MUST come first — `append_block_to_target_layout`
+            // and `queue_source_layout_delete` write straight to wstore via
+            // `store.update`, which is NOT auto-broadcast (only the SQLite
+            // row gets a new version). Without these entries in the response,
+            // the target window's frontend never sees the new leaf and
+            // renders nothing; the source's pending delete action never
+            // gets pulled either. Both layouts are read AFTER the helpers
+            // run so we capture the fresh state.
+            if let Ok(src_tab) = store.must_get::<Tab>(&source_tab_id) {
+                if let Ok(src_layout) = store.must_get::<LayoutState>(&src_tab.layoutstate) {
+                    updates.push(WaveObjUpdate {
+                        updatetype: "update".into(),
+                        otype: OTYPE_LAYOUT.to_string(),
+                        oid: src_tab.layoutstate.clone(),
+                        obj: Some(wave_obj_to_value(&src_layout)),
+                    });
+                }
+                updates.push(WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_TAB.to_string(),
+                    oid: source_tab_id.clone(),
+                    obj: Some(wave_obj_to_value(&src_tab)),
+                });
+            }
+            if let Ok(dst_tab) = store.must_get::<Tab>(&target_tab_id) {
+                if let Ok(dst_layout) = store.must_get::<LayoutState>(&dst_tab.layoutstate) {
+                    updates.push(WaveObjUpdate {
+                        updatetype: "update".into(),
+                        otype: OTYPE_LAYOUT.to_string(),
+                        oid: dst_tab.layoutstate.clone(),
+                        obj: Some(wave_obj_to_value(&dst_layout)),
+                    });
+                }
+                updates.push(WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_TAB.to_string(),
+                    oid: target_tab_id.clone(),
+                    obj: Some(wave_obj_to_value(&dst_tab)),
+                });
+            }
+            // CRITICAL: WaveObjUpdates in the response only reach the
+            // CALLING renderer (the floater that's about to close). The
+            // TARGET window's renderer is a different process and won't
+            // see the layout change unless we explicitly broadcast on
+            // the event bus. Mirrors the pattern in `app_api.rs:399-410`.
+            // Without this the target tab.blockids includes the new
+            // block but its layout.leaforder doesn't → block invisible.
+            for update in &updates {
+                let oref = format!("{}:{}", update.otype, update.oid);
+                if let Ok(data) = serde_json::to_value(update) {
+                    state.event_bus.broadcast_event(
+                        &crate::backend::eventbus::WSEventType {
+                            eventtype: "waveobj:update".to_string(),
+                            oref,
+                            data: Some(data),
+                        },
+                    );
+                }
+            }
+
+            WebReturnType::success_data_updates(
+                serde_json::json!({
+                    "redocked": true,
+                    "block_id": block_id,
+                    "target_tab_id": target_tab_id,
+                }),
+                updates,
+            )
+        }
+
         // Phase E.5.5 — TearOffTab migrated to saga. Closes the
         // smoke regression where wcore::tear_off_tab created the new
         // workspace bypassing the reducer, leaving the new window's
@@ -2334,6 +2482,49 @@ fn setup_torn_off_block_layout(
         blockid: block_id.to_string(),
     }]);
     store.update(&mut layout)?;
+    Ok(())
+}
+
+/// Floating-pane re-dock — enqueue an "insert" action on the TARGET
+/// tab's `LayoutState.pendingbackendactions` so the target window's
+/// frontend adds a new leaf for the redocked block through its
+/// `LayoutTreeActionType.InsertNode` reducer pathway.
+///
+/// Why this and not direct rootnode/leaforder writes? The frontend's
+/// LayoutModel maintains its own in-memory tree state and doesn't
+/// auto-sync from external `LayoutState` WaveObj updates — so a
+/// backend `store.update` to the rootnode lands in the WOS cache
+/// but the LayoutModel never picks it up, and the next frontend-
+/// initiated `object.UpdateObject` overwrites the backend version
+/// with the LayoutModel's stale tree. The pending-actions queue
+/// (`onBackendUpdate` in `layoutPersistence.ts:50`) is the canonical
+/// channel for "backend wants the frontend to mutate its layout
+/// tree". Source-delete on tear-off uses the same channel via
+/// `queue_source_layout_delete`.
+fn queue_target_layout_insert(
+    store: &Store,
+    target_tab_id: &str,
+    block_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let target_tab = store.must_get::<Tab>(target_tab_id)?;
+    let mut target_layout = store.must_get::<LayoutState>(&target_tab.layoutstate)?;
+    let mut actions = target_layout.pendingbackendactions.take().unwrap_or_default();
+    actions.push(LayoutActionData {
+        // Matches `LayoutTreeActionType.InsertNode = "insert"` in
+        // `frontend/layout/lib/types.ts:73`.
+        actiontype: "insert".to_string(),
+        actionid: uuid::Uuid::new_v4().to_string(),
+        blockid: block_id.to_string(),
+        nodesize: None,
+        indexarr: None,
+        focused: true,
+        magnified: false,
+        ephemeral: false,
+        targetblockid: String::new(),
+        position: String::new(),
+    });
+    target_layout.pendingbackendactions = Some(actions);
+    store.update(&mut target_layout)?;
     Ok(())
 }
 
