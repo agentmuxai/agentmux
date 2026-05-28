@@ -7,10 +7,27 @@
 // Phase 2: Stores browser ref in AppState and injects IPC port on page load.
 
 use cef::*;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 
 use crate::state::{AppState, WindowKind};
+
+/// Maximum number of renderer crashes per browser within `CRASH_BUDGET_WINDOW`
+/// before `on_render_process_terminated` stops auto-recovery and loads a
+/// terminal "give up" page instead. Picked at 3 because the normal recovery
+/// path (load a `data:` URL → fresh renderer paints it once) reaches steady
+/// state in one cycle; multiple consecutive crashes always indicate an
+/// unrecoverable state, not transient flakiness. See SPEC_SERVICE_SUPERVISION
+/// prime directive — "bounded recovery; never an infinite restart loop."
+const CRASH_BUDGET: usize = 3;
+
+/// Rolling window over which the crash budget is enforced. 10 s catches the
+/// 2026-05-28 incident pattern (108 crashes/sec for 22 min — would have
+/// tripped on the first batch in <30 ms) without false-positiving on a
+/// renderer that genuinely needed 2 retries to stabilise across a minute.
+const CRASH_BUDGET_WINDOW: Duration = Duration::from_secs(10);
 
 // Phase B.9.3 — close-pool-browser task. Used by Stage 1 to defer
 // `close_browser` onto the CEF UI thread via `cef::post_task`, so
@@ -76,6 +93,13 @@ pub struct AgentMuxHandler {
     state: Arc<AppState>,
     ipc_port: u16,
     is_browser_pane: bool,
+    /// Per-browser ring of renderer-crash timestamps used by
+    /// `on_render_process_terminated` to enforce `CRASH_BUDGET` within
+    /// `CRASH_BUDGET_WINDOW`. Keyed by `Browser::identifier()`. Entries
+    /// are pruned in-place on each crash event (entries older than the
+    /// window are dropped); when a browser closes cleanly its entry is
+    /// removed in `on_before_close`.
+    crash_history: HashMap<i32, VecDeque<Instant>>,
 }
 
 mod handlers;
@@ -101,6 +125,7 @@ impl AgentMuxHandler {
             state,
             ipc_port,
             is_browser_pane,
+            crash_history: HashMap::new(),
         }))
     }
 
@@ -623,6 +648,11 @@ impl AgentMuxHandler {
         dlog(&format!("on_before_close fired; browser_list.len()={}", self.browser_list.len()));
 
         let mut browser = browser.cloned().expect("Browser is None");
+
+        // Drop any crash-history entry for this browser — it's closing
+        // cleanly so its budget is reset. Without this the map would
+        // accumulate one stale entry per closed browser over a session.
+        self.crash_history.remove(&browser.identifier());
 
         // Unregister browser from the reducer's `browsers` map and get its
         // label. Phase H.2.d — legacy `state.browsers.lock().remove` removed;
@@ -1271,6 +1301,55 @@ impl AgentMuxHandler {
             "{}", reason,
         );
 
+        // Crash budget — if this browser has crashed more than
+        // CRASH_BUDGET times in CRASH_BUDGET_WINDOW, abandon
+        // auto-recovery and load a terminal "give up" page that does
+        // NOT call frame.load_url again. This breaks the loop the
+        // 2026-05-28 incident produced: a wedged renderer slot meant
+        // every recovery-page load itself terminated, re-firing this
+        // handler at ~108 events/sec for 22 minutes (139k crashes,
+        // 884 MB log). See SPEC_SERVICE_SUPERVISION prime directive
+        // ("bounded recovery; never an infinite restart loop") and
+        // docs/retro/retro-portable-rm-running-install-2026-05-28.md.
+        //
+        // Pre-budget-check is cheap and runs on every crash; the work
+        // it gates (resolve_frontend_base_url + format! + base64 +
+        // load_url) is several orders of magnitude more expensive,
+        // so even N crashes within budget incur no measurable
+        // overhead from this block.
+        let browser_id = browser.as_ref().map(|b| b.identifier());
+        if let Some(bid) = browser_id {
+            let now = Instant::now();
+            let history = self.crash_history.entry(bid).or_default();
+            // Prune entries outside the window before counting.
+            while history.front().is_some_and(|t| now.duration_since(*t) > CRASH_BUDGET_WINDOW) {
+                history.pop_front();
+            }
+            history.push_back(now);
+            if history.len() > CRASH_BUDGET {
+                let crashes_in_window = history.len();
+                tracing::error!(
+                    target: "crash",
+                    kind = "crash_loop_aborted",
+                    browser_id = bid,
+                    crashes_in_window,
+                    window_secs = CRASH_BUDGET_WINDOW.as_secs(),
+                    "crash budget exceeded — abandoning auto-recovery for this browser",
+                );
+                let html = crash_loop_terminal_page(reason, error_code, crashes_in_window);
+                let b64 = cef::base64_encode(Some(html.as_bytes()));
+                let b64_str = CefString::from(&b64).to_string();
+                let data_uri = format!("data:text/html;base64,{}", b64_str);
+                let uri = CefString::from(data_uri.as_str());
+                if let Some(b) = browser {
+                    if let Some(frame) = b.main_frame() {
+                        frame.load_url(Some(&uri));
+                    }
+                }
+                return;
+            }
+        }
+
         // Resolve the real frontend URL so the Reload button can navigate
         // back to the live app instead of reloading the recovery page
         // itself. Matches the format used by
@@ -1606,6 +1685,58 @@ impl AgentMuxHandler {
 
         1
     }
+}
+
+/// Terminal "give up" page rendered when a browser exceeds `CRASH_BUDGET`
+/// renderer crashes within `CRASH_BUDGET_WINDOW`. Unlike the normal recovery
+/// page, this one has NO reload button and NO `frame.load_url` target — it
+/// only offers Quit. That's the whole point: navigating away from it cannot
+/// re-enter `on_render_process_terminated` and restart the loop.
+fn crash_loop_terminal_page(reason: &str, error_code: i32, crashes_in_window: usize) -> String {
+    use crate::client::helpers::html_escape;
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>AgentMux — Crash loop</title>
+<style>
+:root {{ color-scheme: dark; }}
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+       background: #1e1e2e; color: #cdd6f4;
+       display: flex; justify-content: center; align-items: center;
+       min-height: 100vh; margin: 0; padding: 24px; box-sizing: border-box; }}
+.box {{ text-align: center; max-width: 560px; padding: 36px;
+       background: #181825; border: 1px solid #313244; border-radius: 10px;
+       box-shadow: 0 8px 32px rgba(0,0,0,0.4); }}
+.icon {{ font-size: 36px; line-height: 1; margin-bottom: 12px; }}
+h1 {{ color: #f38ba8; font-size: 22px; margin: 0 0 6px 0; }}
+.reason {{ color: #a6adc8; font-size: 14px; margin: 0 0 20px 0; font-style: italic; }}
+p {{ color: #bac2de; line-height: 1.55; margin: 0 0 12px 0; font-size: 14px; }}
+.detail code {{ display: inline-block; background: #313244; color: #f9e2af;
+               padding: 6px 10px; border-radius: 4px; font-size: 12px;
+               font-family: ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
+               word-break: break-all; }}
+button {{ padding: 10px 22px; border: 1px solid #45475a; border-radius: 6px;
+         background: #313244; color: #cdd6f4; cursor: pointer;
+         font-size: 13px; font-family: inherit; margin-top: 24px; }}
+button:hover {{ background: #45475a; border-color: #585b70; }}
+.footer {{ color: #6c7086; font-size: 11px; margin-top: 18px;
+          font-family: ui-monospace, monospace; }}
+</style></head>
+<body><div class="box" role="alertdialog">
+<div class="icon">🛑</div>
+<h1>Window stopped recovering</h1>
+<p class="reason">Reason: {reason_safe}</p>
+<p>This window crashed {crashes_in_window} times within {window_secs} seconds.
+Auto-recovery is disabled to prevent a crash loop.</p>
+<p>Your other AgentMux windows and your saved sessions are not affected —
+they remain available. Close this window and open a fresh one to continue.</p>
+<button onclick="window.close()">Close this window</button>
+<div class="footer">error_code={error_code}</div>
+</div></body></html>"#,
+        reason_safe = html_escape(reason),
+        window_secs = CRASH_BUDGET_WINDOW.as_secs(),
+        crashes_in_window = crashes_in_window,
+        error_code = error_code,
+    )
 }
 
 
