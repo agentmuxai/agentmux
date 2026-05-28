@@ -1125,13 +1125,6 @@ pub struct AgentInstance {
     pub display_hidden: bool,
 }
 
-/// Build a registry record from an `AgentInstance`. Returns an error
-/// if the working directory can't be expressed as a path relative to
-/// the canonical shared agents root (e.g. user pointed an agent at
-/// `~/projects/foo`, which would also fail a naive `"agents"`
-/// segment-scan that happened to match `~/projects/agents/foo`).
-/// Caller logs + skips — agent stays in SQLite, just not in the
-/// cross-version dropdown.
 // `agent_instance_to_record`, `empty_to_none`, `relative_workdir`,
 // and `Store::registry_upsert_if_named` moved to
 // `super::registry_mirror` in Phase R.6 of the storage modularization
