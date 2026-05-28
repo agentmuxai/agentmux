@@ -177,11 +177,12 @@
         // auto-expanded bodies stay in normal flow so they don't
         // need elevation.
         //
-        // Both block types matched: the startup-injection user
-        // message and the tool panel.
-        &:has(.agent-user-message--expanded.agent-user-message--startup:not(.agent-user-message--pinned)),
-        &:has(.agent-tool-panel--overlay-below),
-        &:has(.agent-tool-panel--overlay-above) {
+        // Only the startup-injection user message uses a transient
+        // overlay now — the tool panel's hover-overlay mode was removed
+        // in SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28 (it only expands
+        // in-flow via pin / auto-expand, which needs no elevation), so
+        // its `--overlay-{below,above}` selectors are gone with it.
+        &:has(.agent-user-message--expanded.agent-user-message--startup:not(.agent-user-message--pinned)) {
             position: relative;
             z-index: 100;
         }
