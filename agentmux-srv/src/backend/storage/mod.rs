@@ -7,11 +7,13 @@
 pub mod agents_consolidate;
 pub mod error;
 pub mod filestore;
+pub mod memory_bundles;
 pub mod migrations;
 pub mod snapshot;
 pub mod store;
 
 pub use error::StoreError;
+pub use memory_bundles::Memory;
 pub use store::AgentDefinition;
 pub use store::AgentContent;
 #[allow(unused_imports)]
