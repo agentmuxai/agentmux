@@ -1,5 +1,10 @@
 # AgentMux Version History
 
+## 0.39.3 — 2026-05-28
+
+- (no semantic content — internal portable-build counter increment from `task package`; auto-appended by `scripts/bump-wrapper.sh` to satisfy the release-consistency invariant)
+
+
 ## 0.39.2 — 2026-05-28
 
 - (no semantic content — internal portable-build counter increment from `task package`; auto-appended by `scripts/bump-wrapper.sh` to satisfy the release-consistency invariant)
