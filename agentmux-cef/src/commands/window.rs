@@ -235,11 +235,36 @@ unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> *mut std::f
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
 
     if !label.is_empty() {
-        // 1. Try the CEF reducer registry — works for any label whose
-        //    `host.window_handle()` exposes the OS HWND (notably our
-        //    floating-pane windows created via CreateWindowExW +
-        //    set_as_child). For CEF Views (main window) this returns
-        //    NULL on Win32 and we fall through.
+        // 1. Consult the authoritative per-label HWND cache FIRST —
+        //    populated by `capture_hwnd_for_label` for main / pool /
+        //    tear-off windows AND by `floating_pane.rs` for our own
+        //    owned-popup floaters at create time. The cache stores
+        //    the actual outer top-level HWND we want to act on.
+        //    We MUST NOT walk GA_ROOT on cache hits: the cached value
+        //    is already the top-level we want; walking up could land
+        //    on a different owner (e.g. main, for floaters owned by
+        //    main) and cause `close_window_by_label` to post WM_CLOSE
+        //    to the wrong window.
+        let cached = state.window_hwnds.lock().get(label).copied();
+        if let Some(raw_isize) = cached {
+            let raw = raw_isize as *mut std::ffi::c_void;
+            if !raw.is_null() {
+                tracing::info!(
+                    target: "win-resolve",
+                    label = %label,
+                    cache_hwnd = ?raw,
+                    "[win-resolve] resolved via window_hwnds cache"
+                );
+                return raw;
+            }
+        }
+
+        // 2. Fall back to the CEF reducer registry. This returns
+        //    `host.window_handle()` which on Win32 is usually a
+        //    WS_CHILD inner HWND for `set_as_child` browsers — so we
+        //    DO need GA_ROOT here to walk up to the top-level. Used
+        //    when capture_hwnd_for_label hasn't run yet (very early
+        //    startup) for non-floater labels.
         if let Some(browser) = state.get_browser(label) {
             if let Some(host) = browser.host() {
                 let raw = host.window_handle().0 as *mut std::ffi::c_void;
@@ -251,40 +276,17 @@ unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> *mut std::f
                         label = %label,
                         host_hwnd = ?raw,
                         root_hwnd = ?resolved,
-                        "[win-resolve] resolved via reducer registry"
+                        "[win-resolve] resolved via reducer registry + GA_ROOT"
                     );
                     return resolved;
                 }
             }
         }
 
-        // 2. Consult the authoritative per-label HWND cache populated
-        //    by `capture_hwnd_for_label` (triggered when the frontend
-        //    signals init-complete via `set_window_init_status`). This
-        //    is the same source `set_window_transparency` uses
-        //    (line 447) and covers the case where `host.window_handle()`
-        //    returns NULL but we'd previously stamped the HWND.
-        let cached = state.window_hwnds.lock().get(label).copied();
-        if let Some(raw_isize) = cached {
-            let raw = raw_isize as *mut std::ffi::c_void;
-            if !raw.is_null() {
-                let root = GetAncestor(raw, GA_ROOT);
-                let resolved = if root.is_null() { raw } else { root };
-                tracing::info!(
-                    target: "win-resolve",
-                    label = %label,
-                    cache_hwnd = ?raw,
-                    root_hwnd = ?resolved,
-                    "[win-resolve] resolved via window_hwnds cache"
-                );
-                return resolved;
-            }
-        }
-
         tracing::warn!(
             target: "win-resolve",
             label = %label,
-            "[win-resolve] reducer-registry + cache both empty — using class-aware EnumWindows fallback"
+            "[win-resolve] cache + reducer-registry both empty — using class-aware EnumWindows fallback"
         );
     }
 
