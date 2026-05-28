@@ -9,7 +9,12 @@
 // children would see 100vw/factor² and the close/min/max buttons drift left.
 
 .window-header {
-    --default-indent: 10px;
+    // Traffic-light buttons (window-controls.darwin.tsx) provide the left
+    // visual anchor on macOS; the WindowDrag spacer between them and the
+    // first tab can be zero. Without this the 10 px indent stacks with the
+    // traffic-lights' 8 px padding-right and the leftmost tab is pushed
+    // away from the buttons.
+    --default-indent: 0px;
 }
 
 .config-error-message {
