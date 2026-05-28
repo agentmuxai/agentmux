@@ -1832,16 +1832,97 @@ impl Store {
 
     // ---- Agent instance CRUD ----
 
-    /// List instances. Both filters are optional — pass `None` to scan all
-    /// instances. Ordered by `created_at` descending (most recent first).
+    /// List instances. Both filters are optional — pass `None` to scan
+    /// all instances. Ordered by `created_at` descending (most recent
+    /// first).
+    ///
+    /// Phase 3b.3a (no-status case): reads from the consolidated
+    /// `db_agents` table (`is_template = 0`, `user_hidden = 0`).
+    /// Continuation chains pre-collapse — one row per logical agent.
+    /// The `definition_id` filter, when supplied, matches against
+    /// `parent_template_id` (the lineage the legacy `definition_id`
+    /// column points at). Per-launch transient fields (block_id,
+    /// session_id, status, started_at as launch moment, ended_at,
+    /// parent_instance_id) come back as type defaults — they have no
+    /// analog on the consolidated row.
+    ///
+    /// Phase 3b.3b (deferred — status filter case): callers passing a
+    /// `status` filter need transient runtime state that `db_agents`
+    /// doesn't model. Route those to the legacy `db_agent_instances`
+    /// path so existing semantics are preserved until the
+    /// updateagentinstance handler's "fetch + merge transient fields"
+    /// pattern is refactored. (Currently no production caller passes
+    /// `status` — `listagentinstances` RPC frontends call with empty
+    /// filters — so the legacy path is exercised only by tests.)
+    /// Spec: docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md §3b.3.
     pub fn instance_list(
         &self,
         definition_id: Option<&str>,
         status: Option<&str>,
     ) -> Result<Vec<AgentInstance>, StoreError> {
+        if status.is_some() {
+            return self.instance_list_legacy(definition_id, status);
+        }
         let conn = self.conn.lock().unwrap();
-        // Build the query dynamically. The parameter count varies, so we
-        // can't reuse a single prepared statement across filter combos.
+        // `definition_id` mapping: for user-clone defs the consolidated
+        // row's id IS the def.id (so id-matched rows project as
+        // definition_id = id). For template-instance projections,
+        // parent_template_id points at the seeded template's def.id.
+        // Match against EITHER so the filter honors both lineages.
+        let mut sql = String::from(
+            "SELECT id,
+                    CASE WHEN parent_template_id = '' THEN id ELSE parent_template_id END AS def_id,
+                    github_context, created_at,
+                    identity_id, memory_id, instance_name, working_directory,
+                    user_hidden
+             FROM db_agents
+             WHERE is_template = 0
+               AND user_hidden = 0",
+        );
+        let mut param_vals: Vec<String> = Vec::new();
+        if let Some(d) = definition_id {
+            sql.push_str("\n               AND (id = ?1 OR parent_template_id = ?1)");
+            param_vals.push(d.to_string());
+        }
+        sql.push_str("\n             ORDER BY created_at DESC");
+        let mut stmt = conn.prepare(&sql)?;
+        let iter = stmt.query_map(rusqlite::params_from_iter(param_vals.iter()), |row| {
+            Ok(AgentInstance {
+                id: row.get(0)?,
+                definition_id: row.get(1)?,
+                parent_instance_id: String::new(),
+                block_id: String::new(),
+                session_id: String::new(),
+                status: String::new(),
+                github_context: row.get(2)?,
+                started_at: row.get(3)?,
+                ended_at: 0,
+                created_at: row.get(3)?,
+                identity_id: row.get(4)?,
+                memory_id: row.get(5)?,
+                instance_name: row.get(6)?,
+                working_directory: row.get(7)?,
+                display_hidden: row.get::<_, i64>(8)? != 0,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in iter {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Legacy `db_agent_instances` read — preserved for the
+    /// status-filter case (transient state). Will retire when the
+    /// updateagentinstance handler's fetch-and-merge pattern is
+    /// refactored (Phase 3b.3b). Do NOT add new callers; use
+    /// `instance_list` instead.
+    fn instance_list_legacy(
+        &self,
+        definition_id: Option<&str>,
+        status: Option<&str>,
+    ) -> Result<Vec<AgentInstance>, StoreError> {
+        let conn = self.conn.lock().unwrap();
         let mut sql = String::from(
             "SELECT id, definition_id, parent_instance_id, block_id, session_id,
                     status, github_context, started_at, ended_at, created_at,
@@ -1863,9 +1944,6 @@ impl Store {
         sql.push_str(" ORDER BY created_at DESC");
 
         let mut stmt = conn.prepare(&sql)?;
-        // Build a Vec<String> so parameter lifetimes outlive the query call.
-        // Borrowing the `&str` args directly caused E0597 because they're
-        // bound to the match arms, not the outer scope.
         let mut param_vals: Vec<String> = Vec::new();
         if let Some(d) = definition_id {
             param_vals.push(d.to_string());
@@ -4674,6 +4752,106 @@ mod tests {
         // continuations updated its bindings.
         assert_eq!(got.id, "def-mirror");
         assert_eq!(got.instance_name, "Maks");
+    }
+
+    #[test]
+    fn instance_list_phase_3b3a_reads_from_db_agents_no_status_filter() {
+        // Phase 3b.3a: with no status filter, `instance_list` reads
+        // the consolidated `db_agents` table — continuation chains
+        // pre-collapse to one row per logical agent, hidden rows
+        // excluded.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        // Two distinct named agents on the same folded def. Each
+        // should surface ONCE (one db_agents row each).
+        let a = make_named_inst("inst-a", "Maks", &agents_root);
+        store.instance_create(&a).unwrap();
+        let b = {
+            // Different def so the rows don't collide on def.id.
+            let mut def2 = sample_agent("def-mirror-2", "mirror-2");
+            store.agent_def_insert(&mut def2).unwrap();
+            let mut x = make_named_inst("inst-b", "DSad", &agents_root);
+            x.definition_id = "def-mirror-2".to_string();
+            x
+        };
+        store.instance_create(&b).unwrap();
+        // Continuation of "Maks" — should NOT add a row.
+        let mut cont = make_named_inst("inst-cont", "Maks", &agents_root);
+        cont.parent_instance_id = "inst-a".to_string();
+        store.instance_create(&cont).unwrap();
+
+        let rows = store.instance_list(None, None).unwrap();
+        let names: Vec<&str> = rows.iter().map(|r| r.instance_name.as_str()).collect();
+        assert_eq!(rows.len(), 2);
+        assert!(names.contains(&"Maks"));
+        assert!(names.contains(&"DSad"));
+        // Transient fields default — see doc comment on instance_list.
+        for row in &rows {
+            assert_eq!(row.status, "");
+            assert_eq!(row.block_id, "");
+            assert_eq!(row.session_id, "");
+        }
+    }
+
+    #[test]
+    fn instance_list_phase_3b3a_filters_by_definition_lineage() {
+        // The legacy `definition_id` filter matches against
+        // `parent_template_id` in the consolidated view. For folded
+        // user-clones (where the db_agents id IS the def.id), also
+        // match the row's own id — both should resolve the def.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let a = make_named_inst("inst-a", "Maks", &agents_root);
+        store.instance_create(&a).unwrap();
+        let mut def2 = sample_agent("def-other", "other");
+        store.agent_def_insert(&mut def2).unwrap();
+        let mut b = make_named_inst("inst-b", "Other", &agents_root);
+        b.definition_id = "def-other".to_string();
+        store.instance_create(&b).unwrap();
+
+        // Filter by def-mirror — only the Maks row matches.
+        let filtered = store.instance_list(Some("def-mirror"), None).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].instance_name, "Maks");
+
+        let filtered = store.instance_list(Some("def-other"), None).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].instance_name, "Other");
+    }
+
+    #[test]
+    fn instance_list_phase_3b3a_excludes_hidden() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut inst = make_named_inst("inst-h", "Ghost", &agents_root);
+        inst.display_hidden = true;
+        store.instance_create(&inst).unwrap();
+        let rows = store.instance_list(None, None).unwrap();
+        assert!(rows.is_empty(), "hidden rows must not surface");
+    }
+
+    #[test]
+    fn instance_list_phase_3b3b_status_filter_falls_back_to_legacy() {
+        // Status filter implies the caller needs transient runtime
+        // state. Until the updateagentinstance fetch+merge pattern is
+        // refactored, that read must come from db_agent_instances.
+        // Verify the legacy path is exercised end-to-end (rows include
+        // status field populated from the raw instance row).
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut a = make_named_inst("inst-a", "Maks", &agents_root);
+        a.status = "running".to_string();
+        store.instance_create(&a).unwrap();
+
+        let running = store.instance_list(None, Some("running")).unwrap();
+        assert_eq!(running.len(), 1);
+        assert_eq!(running[0].status, "running");
+        assert_eq!(running[0].id, "inst-a"); // raw inst id, NOT the folded def.id
+
+        let stopped = store.instance_list(None, Some("stopped")).unwrap();
+        assert!(stopped.is_empty());
     }
 
     #[test]
