@@ -50,9 +50,26 @@ function scrubOrphanedInProgress(
     let markdownCanceled = 0;
     let toolsCanceled = 0;
 
+    // Spec's "simple heuristic" (SPEC_ORPHAN_THINKING_NODES §Design):
+    // a thinking markdown is orphaned only when it's the document's
+    // last node. Historical thinking blocks keep metadata.thinking
+    // forever (the stream-parser closes its local pointer on the
+    // next non-thinking event but never writes thinking:false onto
+    // the stored node, and StreamFlush markdown updates replace
+    // content only, not metadata). Without the last-node guard we'd
+    // relabel every prior turn's reasoning as "⏹ Canceled — partial
+    // thought" on session reopen. Codex + reagent P1 on PR #1104.
+    // Tools have an explicit status field so scrub them anywhere
+    // they appear with status:"running".
+    const lastIdx = nodes.length - 1;
+
     for (let i = 0; i < nodes.length; i++) {
         const n = nodes[i];
-        if (n.type === "markdown" && n.metadata?.thinking === true) {
+        if (
+            n.type === "markdown" &&
+            n.metadata?.thinking === true &&
+            i === lastIdx
+        ) {
             if (!next) next = nodes.slice();
             next[i] = {
                 ...n,

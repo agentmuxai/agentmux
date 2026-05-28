@@ -688,19 +688,62 @@ describe("agent document reducer", () => {
             metadata: { thinking: true },
         });
 
-        it("flips thinking markdown to canceled and clears thinking flag", () => {
-            const s0 = seed([thinkingMd("t1", "mid-thought"), md("m1")]);
+        it("flips thinking markdown to canceled when it's the last node", () => {
+            // Spec's simple heuristic: thinking is orphaned only when
+            // it's the document's tail (parser was mid-thought when
+            // the session ended). Historical thinking nodes followed
+            // by anything else completed normally and stay untouched.
+            const s0 = seed([md("m1"), thinkingMd("t1", "mid-thought")]);
             const r = update(s0, { type: "ScrubOrphanedInProgress", at: 9999 });
-            const t1 = r.state.nodes[0] as any;
+            const t1 = r.state.nodes[1] as any;
             expect(t1.metadata.canceled).toBe(true);
             expect(t1.metadata.thinking).toBe(false);
             expect(t1.metadata.canceledAt).toBe(9999);
             // Original content preserved.
             expect(t1.content).toBe("mid-thought");
-            // Non-thinking nodes untouched.
-            expect((r.state.nodes[1] as any).metadata).toBeUndefined();
+            // Non-thinking node untouched.
+            expect((r.state.nodes[0] as any).metadata).toBeUndefined();
             expect(r.events).toEqual([
                 { type: "orphans-scrubbed", markdownCanceled: 1, toolsCanceled: 0 },
+            ]);
+        });
+
+        // Codex + reagent P1 on PR #1104: stream-parser never writes
+        // `thinking: false` onto a completed thinking node (it only
+        // clears its local pointer). So in any multi-turn session
+        // — thinking → tool → text → thinking → text … — every
+        // prior thinking block keeps `metadata.thinking === true`
+        // forever. Scrub MUST guard against that or every reopen
+        // relabels all reasoning as canceled.
+        it("does NOT scrub thinking markdown followed by other nodes", () => {
+            const s0 = seed([
+                thinkingMd("turn1-think", "reasoned about X"),
+                md("turn1-text", "answer for X"),
+                thinkingMd("turn2-think", "reasoned about Y"),
+                md("turn2-text", "answer for Y"),
+            ]);
+            const r = update(s0, { type: "ScrubOrphanedInProgress", at: 9999 });
+            // No allocation, no events — both historical thinking
+            // blocks were completed (text follows each one).
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([]);
+        });
+
+        it("scrubs tool-running anywhere in doc but leaves prior thinking alone", () => {
+            // Realistic snapshot of an app-killed session: prior
+            // turn's thinking → text → new turn's tool started but
+            // never finished. Only the running tool is orphan.
+            const s0 = seed([
+                thinkingMd("prior-think", "prior reasoning"),
+                md("prior-text", "prior answer"),
+                tool("t1", { status: "running" }),
+            ]);
+            const r = update(s0, { type: "ScrubOrphanedInProgress", at: 9999 });
+            expect((r.state.nodes[0] as any).metadata.canceled).toBeUndefined();
+            expect((r.state.nodes[0] as any).metadata.thinking).toBe(true);
+            expect((r.state.nodes[2] as ToolNode).status).toBe("canceled");
+            expect(r.events).toEqual([
+                { type: "orphans-scrubbed", markdownCanceled: 0, toolsCanceled: 1 },
             ]);
         });
 
@@ -757,7 +800,9 @@ describe("agent document reducer", () => {
         });
 
         it("is idempotent — running twice doesn't double-modify", () => {
-            const s0 = seed([thinkingMd("t1"), tool("k1", { status: "running" })]);
+            // Thinking must be at the tail to be scrubbed under the
+            // last-node heuristic.
+            const s0 = seed([tool("k1", { status: "running" }), thinkingMd("t1")]);
             const r1 = update(s0, { type: "ScrubOrphanedInProgress", at: 1000 });
             const r2 = update(r1.state, { type: "ScrubOrphanedInProgress", at: 2000 });
             // Second run is a no-op against the already-scrubbed state.
@@ -765,7 +810,7 @@ describe("agent document reducer", () => {
             expect(r2.events).toEqual([]);
             // canceledAt was set by the FIRST run and never overwritten
             // — important: re-scrubbing must not bump the timestamp.
-            const t1 = r1.state.nodes[0] as any;
+            const t1 = r1.state.nodes[1] as any;
             expect(t1.metadata.canceledAt).toBe(1000);
         });
     });
@@ -780,11 +825,12 @@ describe("agent document reducer", () => {
         });
 
         it("emits session-ended AND orphans-scrubbed when nodes were dirty", () => {
-            const s0 = seed([thinkingMd("t1"), tool("k1", { status: "running" })]);
+            // Last-node thinking + running tool earlier in the doc.
+            const s0 = seed([tool("k1", { status: "running" }), thinkingMd("t1")]);
             const r = update(s0, { type: "SessionEnd", at: 5000 });
             expect(r.state.sessionPhase).toBe("ended");
-            expect((r.state.nodes[0] as any).metadata.canceled).toBe(true);
-            expect((r.state.nodes[1] as ToolNode).status).toBe("canceled");
+            expect((r.state.nodes[0] as ToolNode).status).toBe("canceled");
+            expect((r.state.nodes[1] as any).metadata.canceled).toBe(true);
             expect(r.events).toEqual([
                 { type: "session-ended", at: 5000 },
                 { type: "orphans-scrubbed", markdownCanceled: 1, toolsCanceled: 1 },
@@ -812,13 +858,16 @@ describe("agent document reducer", () => {
             // on resume, the new pane mounts and HistoryRestored
             // brings in the dirty nodes. Scrub flips them before
             // the user ever sees a misleading spinner.
+            // Thinking has to be tail-of-doc to qualify as orphan
+            // under the simple heuristic (anything after it means
+            // the parser had already transitioned away).
             const r = update(initialState(), {
                 type: "HistoryRestored",
-                nodes: [thinkingMd("orphan-think"), tool("orphan-tool", { status: "running" })],
+                nodes: [tool("orphan-tool", { status: "running" }), thinkingMd("orphan-think")],
                 fromSnapshot: true,
             });
-            expect((r.state.nodes[0] as any).metadata.canceled).toBe(true);
-            expect((r.state.nodes[1] as ToolNode).status).toBe("canceled");
+            expect((r.state.nodes[0] as ToolNode).status).toBe("canceled");
+            expect((r.state.nodes[1] as any).metadata.canceled).toBe(true);
             // session-phase still flips to "active" per the original
             // contract — we're restoring, not ending.
             expect(r.state.sessionPhase).toBe("active");
@@ -872,10 +921,10 @@ describe("agent document reducer", () => {
         it("flips dirty nodes from the legacy/NDJSON replay", () => {
             const r = update(initialState(), {
                 type: "HistoryLoaded",
-                nodes: [thinkingMd("orphan-think"), tool("orphan-tool", { status: "running" })],
+                nodes: [tool("orphan-tool", { status: "running" }), thinkingMd("orphan-think")],
             });
-            expect((r.state.nodes[0] as any).metadata.canceled).toBe(true);
-            expect((r.state.nodes[1] as ToolNode).status).toBe("canceled");
+            expect((r.state.nodes[0] as ToolNode).status).toBe("canceled");
+            expect((r.state.nodes[1] as any).metadata.canceled).toBe(true);
             expect(r.events.some((e: any) => e.type === "orphans-scrubbed")).toBe(true);
         });
 
