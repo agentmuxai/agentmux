@@ -1833,8 +1833,11 @@ impl Store {
     // ---- Agent instance CRUD ----
 
     /// List instances. Both filters are optional — pass `None` to scan
-    /// all instances. Ordered by `created_at` descending (most recent
-    /// first).
+    /// all instances. Ordered by `updated_at` descending, with
+    /// `created_at` as a tiebreaker (most recent activity first; the
+    /// dual-write bumps `updated_at` on every launch / continuation,
+    /// so a continued older agent ranks ahead of a brand-new untouched
+    /// one).
     ///
     /// Phase 3b.3a (no-status case): reads from the consolidated
     /// `db_agents` table (`is_template = 0`, `user_hidden = 0`).
