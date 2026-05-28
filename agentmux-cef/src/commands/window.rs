@@ -1172,6 +1172,22 @@ fn get_secondary_window_size(px: i32, py: i32) -> (i32, i32) {
 #[cfg(target_os = "windows")]
 pub(crate) fn capture_hwnd_for_label(state: &Arc<AppState>, label: &str) {
     use cef::ImplBrowserHost;
+    // If a known-good outer HWND was already inserted by the creator
+    // of this window (e.g. `floating_pane.rs::create_owned_popup`
+    // registers the outer floater HWND it built via CreateWindowExW),
+    // DO NOT overwrite it. The fast path below uses
+    // `host.window_handle()` which for `set_as_child` browsers returns
+    // the CEF inner WS_CHILD HWND — replacing the outer HWND with the
+    // child here breaks any IPC that needs to act on the actual
+    // top-level (SetWindowPos drags the child within the parent,
+    // PostMessage(WM_CLOSE) destroys the child only, etc.).
+    if state.window_hwnds.lock().contains_key(label) {
+        tracing::debug!(
+            "[opacity] capture_hwnd_for_label: label={} already registered, preserving",
+            label
+        );
+        return;
+    }
     // Fast path.
     if let Some(mut browser) = state.get_browser(label) {
         if let Some(host) = browser.host() {
