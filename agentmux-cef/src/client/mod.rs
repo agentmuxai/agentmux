@@ -79,7 +79,7 @@ pub struct AgentMuxHandler {
 }
 
 mod handlers;
-mod helpers;
+pub(crate) mod helpers;
 #[cfg(target_os = "windows")]
 mod wndproc;
 
@@ -1277,12 +1277,37 @@ impl AgentMuxHandler {
         // commands::window::resolve_frontend_base_url and its callers
         // (see window.rs:400, window.rs:430, drag.rs:294 — all use the
         // same ipc_port / ipc_token query params).
-        let base_url = crate::commands::window::resolve_frontend_base_url(self.ipc_port);
-        let separator = if base_url.contains('?') { "&" } else { "?" };
-        let app_url = format!(
-            "{}{}ipc_port={}&ipc_token={}",
-            base_url, separator, self.ipc_port, self.state.ipc_token
-        );
+        //
+        // If the resolver returns Err (frontend assets missing — the
+        // 2026-05-28 incident pattern where an external `rm -rf` of a
+        // running portable left current_exe()'s parent dir empty),
+        // short-circuit to the "install broken" static page instead of
+        // pointing the Reload button at a URL that would itself crash.
+        // See docs/retro/retro-portable-rm-running-install-2026-05-28.md.
+        let app_url = match crate::commands::window::resolve_frontend_base_url(self.ipc_port) {
+            Ok(base_url) => {
+                let separator = if base_url.contains('?') { "&" } else { "?" };
+                format!(
+                    "{}{}ipc_port={}&ipc_token={}",
+                    base_url, separator, self.ipc_port, self.state.ipc_token
+                )
+            }
+            Err(e) => {
+                tracing::error!(
+                    target: "crash",
+                    error = %e,
+                    "renderer crash recovery: frontend assets unavailable — loading static install-broken page instead of an unresolvable network URL",
+                );
+                let url = crate::commands::window::assets_missing_data_url(&e);
+                if let Some(b) = browser {
+                    if let Some(frame) = b.main_frame() {
+                        let uri = CefString::from(url.as_str());
+                        frame.load_url(Some(&uri));
+                    }
+                }
+                return;
+            }
+        };
 
         let detail_block = if detail.is_empty() {
             String::new()

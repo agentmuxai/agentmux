@@ -10,7 +10,7 @@
 /// Reload button's navigation target.
 use super::dlog;
 
-pub(super) fn js_string_literal(s: &str) -> String {
+pub(crate) fn js_string_literal(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
     for c in s.chars() {
@@ -37,7 +37,7 @@ pub(super) fn js_string_literal(s: &str) -> String {
 /// would break the `format!`-templated string need attention; the input
 /// (CEF status enum + cef-provided error string) is trusted but may
 /// contain `&` / `<` / `>` in some failure modes.
-pub(super) fn html_escape(s: &str) -> String {
+pub(crate) fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
