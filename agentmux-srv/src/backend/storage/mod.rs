@@ -6,6 +6,7 @@
 
 pub mod agents_consolidate;
 pub mod content;
+pub mod dual_write;
 pub mod error;
 pub mod filestore;
 pub mod history;
