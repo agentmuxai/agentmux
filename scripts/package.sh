@@ -65,15 +65,26 @@ fi
 # build, even on a dirty rebuild where the sha doesn't change.
 STAMP=$(date -u +%Y%m%dT%H%M%S)
 
-LABEL="${VERSION}+g${SHA}${DIRTY}.${STAMP}"
+# Append the PID so two package jobs for the same commit started within
+# the SAME wall-clock second still produce distinct labels — and thus
+# distinct folders/ZIPs — instead of overwriting each other. Concurrent
+# builds are the normal multi-agent state this script supports. The PID
+# only goes in the LABEL (folder name, unbounded), not the channel, so it
+# can't push the channel past its length cap. Codex P2 on #1141.
+LABEL="${VERSION}+g${SHA}${DIRTY}.${STAMP}.$$"
 
 # Channel = data-dir key. Coerce anything outside [A-Za-z0-9._-] to '-'
-# (git allows '/' in branch names; the data-path sanitizer rejects it) and
-# cap the branch component so `dev-portable-<slug>[-<stamp>]` stays under
-# the 64-char channel limit enforced in data_paths.rs::sanitize_channel_name
-# (13 for "dev-portable-" + up to 30 for the slug + 16 for "-<stamp>" = 59).
-BRANCH_SLUG=$(printf '%s' "$BRANCH" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-30)
-CHANNEL="dev-portable-${BRANCH_SLUG}"
+# (git allows '/' in branch names; the data-path sanitizer rejects it).
+# A 6-char hash of the FULL branch name keeps distinct long branches that
+# share a prefix from aliasing to the same data dir once the human-readable
+# slug is truncated. Budget for the 64-char channel cap enforced in
+# data_paths.rs::sanitize_channel_name:
+#   "dev-portable-" (13) + slug (≤20) + "-" + hash (6) + "-" + stamp (15)
+#   = ≤55  → comfortably under 64 even with the --fresh suffix.
+# Codex P2 on #1141.
+BRANCH_HASH=$(printf '%s' "$BRANCH" | sha1sum | cut -c1-6)
+BRANCH_SLUG=$(printf '%s' "$BRANCH" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-20)
+CHANNEL="dev-portable-${BRANCH_SLUG}-${BRANCH_HASH}"
 if [ "$FRESH" -eq 1 ]; then
     CHANNEL="${CHANNEL}-${STAMP}"
 fi
