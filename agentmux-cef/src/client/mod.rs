@@ -689,13 +689,19 @@ impl AgentMuxHandler {
             // restart) leaves a stale entry that breaks WM_CLOSE
             // routing. See
             // docs/specs/SPEC_WINDOW_HWND_CACHE_STALE_FIX_2026_05_28.md.
-            let removed = self.state.window_hwnds.lock().remove(lbl);
-            if removed.is_some() {
-                tracing::debug!(
-                    target: "win-resolve",
-                    label = %lbl,
-                    "[win-resolve] evicted on close"
-                );
+            // Windows-only because `AppState::window_hwnds` is itself
+            // `#[cfg(target_os = "windows")]` in `state.rs`. Codex P1
+            // on PR #1133.
+            #[cfg(target_os = "windows")]
+            {
+                let removed = self.state.window_hwnds.lock().remove(lbl);
+                if removed.is_some() {
+                    tracing::debug!(
+                        target: "win-resolve",
+                        label = %lbl,
+                        "[win-resolve] evicted on close"
+                    );
+                }
             }
         }
 
