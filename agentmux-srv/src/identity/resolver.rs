@@ -620,6 +620,30 @@ mod tests {
         }
     }
 
+    /// Insert a Block row whose `meta.agentId` points at the agent
+    /// def. Phase 3b.4 made `instance_get_active_for_block` resolve
+    /// via the block→agent reference (instead of filtering instance
+    /// rows by status), so every resolver test that exercises the
+    /// inject path needs a real block in the store.
+    fn insert_block_for_agent(store: &Store, block_id: &str, agent_id: &str) {
+        use crate::backend::obj::{Block, MetaMapType};
+        let mut block = Block {
+            oid: block_id.to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = MetaMapType::new();
+                m.insert("view".to_string(), serde_json::json!("agent"));
+                m.insert("agentId".to_string(), serde_json::json!(agent_id));
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+    }
+
     fn make_instance(block_id: &str, identity_id: &str) -> AgentInstance {
         AgentInstance {
             id: format!("inst-{block_id}"),
@@ -759,6 +783,7 @@ mod tests {
             .bundle_identity_bind("id-oauth", "claude", "acct-claude")
             .unwrap();
 
+        insert_block_for_agent(&store, "block-oauth", "def-1");
         let inst = make_instance("block-oauth", "id-oauth");
         store.instance_create(&inst).unwrap();
 
@@ -832,6 +857,7 @@ mod tests {
             .bundle_identity_bind("id-bad", "claude", "acct-bad")
             .unwrap();
 
+        insert_block_for_agent(&store, "block-bad", "def-1");
         let inst = make_instance("block-bad", "id-bad");
         store.instance_create(&inst).unwrap();
 
@@ -896,6 +922,7 @@ mod tests {
         };
         store.agent_def_insert(&mut def).unwrap();
 
+        insert_block_for_agent(&store, "block-blank", "def-1");
         let mut inst = make_instance("block-blank", "blank");
         store.instance_create(&inst).unwrap();
         let _ = inst; // keep clippy happy
@@ -975,6 +1002,7 @@ mod tests {
             .unwrap();
 
         // Instance for the block, pointing at id-work.
+        insert_block_for_agent(&store, "block-1", "def-1");
         let inst = make_instance("block-1", "id-work");
         store.instance_create(&inst).unwrap();
 
@@ -1058,6 +1086,7 @@ mod tests {
             .bundle_identity_bind("id-mixed", "anthropic", "acct-bad")
             .unwrap();
 
+        insert_block_for_agent(&store, "block-mixed", "def-1");
         let inst = make_instance("block-mixed", "id-mixed");
         store.instance_create(&inst).unwrap();
 
@@ -1124,6 +1153,7 @@ mod tests {
             .bundle_identity_bind("id-future", "custom", "acct-custom")
             .unwrap();
 
+        insert_block_for_agent(&store, "block-future", "def-1");
         let inst = make_instance("block-future", "id-future");
         store.instance_create(&inst).unwrap();
 
@@ -1300,6 +1330,7 @@ mod tests {
             .bundle_identity_bind("id-probe", "claude", "acct-claude")
             .unwrap();
 
+        insert_block_for_agent(&store, "block-probe", "def-1");
         let inst = make_instance("block-probe", "id-probe");
         store.instance_create(&inst).unwrap();
 
@@ -1387,6 +1418,7 @@ mod tests {
             .bundle_identity_bind("id-ok", "claude", "acct-ok")
             .unwrap();
 
+        insert_block_for_agent(&store, "block-ok", "def-1");
         let inst = make_instance("block-ok", "id-ok");
         store.instance_create(&inst).unwrap();
 
