@@ -2636,28 +2636,73 @@ impl Store {
         }
     }
 
-    /// Look up the most-recently-created **active** instance for a
-    /// block — `active` = status in (running, paused). Stopped and
-    /// crashed instances are skipped: when a user closes a pane and
-    /// re-opens it (creating a fresh instance), the resolver should
-    /// see the NEW row's identity_id / memory_id, not bleed creds
-    /// from the prior stopped one. Reagent P2 (PR #751).
+    /// Resolve the agent bindings tied to a block.
+    ///
+    /// Phase 3b.4: follow the block→agent reference directly via
+    /// `block.meta.agentId` (or legacy `agent:id`) and look up the
+    /// agent in `db_agents`. This replaces the legacy "find most
+    /// recent active instance for this block" query, which existed
+    /// because `db_agent_instances` had multiple rows per pane (one
+    /// per launch/reopen). The consolidated `db_agents` table has
+    /// ONE row per logical agent, and the dual-write continuously
+    /// folds the newest bindings into that row — so "active"
+    /// status filtering is no longer needed to avoid stale creds.
+    /// Spec: docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md §3b.
+    ///
+    /// Used by the identity resolver to pull `identity_id` /
+    /// `memory_id` for environment injection on every command
+    /// dispatch. Caller only reads `identity_id` from the returned
+    /// `AgentInstance` — transient per-launch fields (status,
+    /// session_id, started_at, ended_at, parent_instance_id) come
+    /// back as type defaults. `block_id` echoes back the caller's
+    /// argument.
     pub fn instance_get_active_for_block(
         &self,
         block_id: &str,
     ) -> Result<Option<AgentInstance>, StoreError> {
+        let block: crate::backend::obj::Block = match self.get(block_id)? {
+            Some(b) => b,
+            None => return Ok(None),
+        };
+        let agent_id = block
+            .meta
+            .get("agentId")
+            .and_then(|v| v.as_str())
+            .or_else(|| block.meta.get("agent:id").and_then(|v| v.as_str()))
+            .unwrap_or("")
+            .to_string();
+        if agent_id.is_empty() {
+            return Ok(None);
+        }
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
-                    status, github_context, started_at, ended_at, created_at,
-                    identity_id, memory_id, instance_name, working_directory,
-                    display_hidden
-             FROM db_agent_instances
-             WHERE block_id = ?1 AND status IN ('running', 'paused')
-             ORDER BY created_at DESC
-             LIMIT 1",
+            "SELECT id, github_context, created_at,
+                    identity_id, memory_id, instance_name, working_directory
+             FROM db_agents
+             WHERE id = ?1
+               AND is_template = 0
+               AND user_hidden = 0",
         )?;
-        let result = stmt.query_row(params![block_id], map_instance_row);
+        let block_id_owned = block_id.to_string();
+        let result = stmt.query_row(params![agent_id], |row| {
+            Ok(AgentInstance {
+                id: row.get(0)?,
+                definition_id: row.get(0)?, // consolidated model — see 3b.3a
+                parent_instance_id: String::new(),
+                block_id: block_id_owned.clone(),
+                session_id: String::new(),
+                status: String::new(),
+                github_context: row.get(1)?,
+                started_at: row.get(2)?,
+                ended_at: 0,
+                created_at: row.get(2)?,
+                identity_id: row.get(3)?,
+                memory_id: row.get(4)?,
+                instance_name: row.get(5)?,
+                working_directory: row.get(6)?,
+                display_hidden: false,
+            })
+        });
         match result {
             Ok(a) => Ok(Some(a)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -4804,6 +4849,107 @@ mod tests {
         // continuations updated its bindings.
         assert_eq!(got.id, "def-mirror");
         assert_eq!(got.instance_name, "Maks");
+    }
+
+    #[test]
+    fn instance_get_active_for_block_phase_3b4_resolves_via_block_meta() {
+        // Phase 3b.4: instead of filtering db_agent_instances by
+        // status, follow block.meta.agentId → db_agents directly.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        // Create the agent (folds into the def-mirror db_agents row).
+        let mut inst = make_named_inst("inst-x", "Maks", &agents_root);
+        inst.identity_id = "id-resolved".to_string();
+        store.instance_create(&inst).unwrap();
+
+        // Create a Block whose meta points at the agent.
+        let mut block = crate::backend::obj::Block {
+            oid: "block-1".to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = crate::backend::obj::MetaMapType::new();
+                m.insert("view".to_string(), serde_json::json!("agent"));
+                m.insert("agentId".to_string(), serde_json::json!("def-mirror"));
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+
+        let got = store
+            .instance_get_active_for_block("block-1")
+            .unwrap()
+            .expect("expected the block's agent to resolve");
+        assert_eq!(got.id, "def-mirror");
+        assert_eq!(got.identity_id, "id-resolved");
+        assert_eq!(got.block_id, "block-1"); // echoed from arg
+        // Transient fields default — no status filtering needed.
+        assert_eq!(got.status, "");
+    }
+
+    #[test]
+    fn instance_get_active_for_block_phase_3b4_returns_none_when_block_missing() {
+        let (_tmp, store, _reg) = store_with_registry();
+        assert!(store
+            .instance_get_active_for_block("no-such-block")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn instance_get_active_for_block_phase_3b4_returns_none_when_no_agent_id() {
+        // Block exists but has no agentId in meta → resolver should
+        // see None (no agent bound to this block).
+        let (_tmp, store, _reg) = store_with_registry();
+        let mut block = crate::backend::obj::Block {
+            oid: "block-naked".to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: crate::backend::obj::MetaMapType::new(),
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+        assert!(store
+            .instance_get_active_for_block("block-naked")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn instance_get_active_for_block_phase_3b4_honors_legacy_agent_id_meta_key() {
+        // Older blocks may still carry `agent:id` instead of `agentId`.
+        // Both keys should resolve.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut inst = make_named_inst("inst-legacy", "Maks", &agents_root);
+        store.instance_create(&inst).unwrap();
+
+        let mut block = crate::backend::obj::Block {
+            oid: "block-legacy".to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = crate::backend::obj::MetaMapType::new();
+                m.insert("agent:id".to_string(), serde_json::json!("def-mirror"));
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+
+        let got = store
+            .instance_get_active_for_block("block-legacy")
+            .unwrap()
+            .expect("legacy agent:id meta key must resolve");
+        assert_eq!(got.id, "def-mirror");
     }
 
     #[test]
