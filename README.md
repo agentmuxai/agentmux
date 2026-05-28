@@ -80,7 +80,7 @@ All logs land in `~/.agentmux/logs/` (also exposed as `$AGENTMUX_LOG_DIR` inside
 |------|---------|
 | Tail host log | `muxlog host` |
 | Tail sidecar log | `muxlog srv` |
-| Frontend lines only | `muxlog host '[fe]'` |
+| Frontend lines only | `muxlog host '\[fe\]'` |
 | Full host log | `muxlog host cat` |
 
 Works identically across `task dev`, portable, and installed builds. Logs auto-rotate daily and are retained for 7 days. Full per-process layout, pointer-file mechanics, and recipes: [docs.agentmux.ai/internals/debugging](https://docs.agentmux.ai/internals/debugging/).

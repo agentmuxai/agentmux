@@ -129,7 +129,7 @@ All logs land in `~/.agentmux/logs/` (`$AGENTMUX_LOG_DIR` in terminals). Pointer
 |------|---------|
 | Tail host log | `muxlog host` |
 | Tail sidecar log | `muxlog srv` |
-| Frontend logs | `muxlog host '[fe]'` |
+| Frontend logs | `muxlog host '\[fe\]'` |
 | Memory heartbeat | `muxlog host mem_heartbeat` |
 | Full host log | `muxlog host cat` |
 | Launcher log | `cat "$AGENTMUX_LOG_DIR/agentmux-launcher.log"` |
