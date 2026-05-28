@@ -45,6 +45,18 @@ import {
 function scrubOrphanedInProgress(
     nodes: DocumentNode[],
     at: number,
+    opts?: {
+        /**
+         * True when `nodes` is a prepended sub-range of the merged
+         * document (older history page or restored snapshot, with
+         * other content already in `state.nodes` following it).
+         * In that case `nodes[last]` is NOT the merged tail, so the
+         * last-node thinking heuristic must not fire. Tools are
+         * still scrubbed by their explicit status field. Codex P2
+         * on PR #1104 (HistoryLoaded.loadOlder pagination case).
+         */
+        hasContentAfter?: boolean;
+    },
 ): { nodes: DocumentNode[]; markdownCanceled: number; toolsCanceled: number } | null {
     let next: DocumentNode[] | null = null;
     let markdownCanceled = 0;
@@ -61,7 +73,8 @@ function scrubOrphanedInProgress(
     // thought" on session reopen. Codex + reagent P1 on PR #1104.
     // Tools have an explicit status field so scrub them anywhere
     // they appear with status:"running".
-    const lastIdx = nodes.length - 1;
+    const hasContentAfter = opts?.hasContentAfter === true;
+    const lastIdx = hasContentAfter ? -1 : nodes.length - 1;
 
     for (let i = 0; i < nodes.length; i++) {
         const n = nodes[i];
@@ -182,8 +195,18 @@ export function update(
             // already says HistoryLoaded scrubs, but the reducer
             // wasn't doing it. Scrub only `fresh` (same fix as
             // HistoryRestored — keep live nodes untouched).
+            //
+            // `hasContentAfter: state.nodes.length > 0` — see codex
+            // P2 r2 on #1104. `useHistoryPagination.loadOlder`
+            // dispatches HistoryLoaded with an OLDER page while
+            // newer nodes are already in state.nodes; in that case
+            // `fresh.last` is not the merged tail and a completed
+            // thinking block at the end of the page must not be
+            // canceled. Tools are still scrubbed by status field.
             // Spec: SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
-            const scrubResult = scrubOrphanedInProgress(fresh, nowMs);
+            const scrubResult = scrubOrphanedInProgress(fresh, nowMs, {
+                hasContentAfter: state.nodes.length > 0,
+            });
             const scrubbedFresh = scrubResult ? scrubResult.nodes : fresh;
             const loadEvents: ReducerResult["events"] = [
                 {
@@ -243,7 +266,14 @@ export function update(
             // that way (StreamFlush markdown updates only replace
             // content, not metadata). Live nodes pass through
             // untouched; only the replay gets sanitized.
-            const scrubResult = scrubOrphanedInProgress(fresh, nowMs);
+            //
+            // `hasContentAfter` — codex P2 r2: if state.nodes already
+            // has live content, a thinking node at the end of fresh
+            // is not the merged tail and must not be canceled. Tools
+            // unaffected (status field is independent of position).
+            const scrubResult = scrubOrphanedInProgress(fresh, nowMs, {
+                hasContentAfter: state.nodes.length > 0,
+            });
             const scrubbedFresh = scrubResult ? scrubResult.nodes : fresh;
             const mergedNodes = [...scrubbedFresh, ...state.nodes];
             const restoreEvents: ReducerResult["events"] = [

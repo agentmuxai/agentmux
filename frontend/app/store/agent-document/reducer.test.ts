@@ -947,5 +947,38 @@ describe("agent document reducer", () => {
             expect(liveAfter.metadata.thinking).toBe(true);
             expect(liveAfter.metadata.canceled).toBeUndefined();
         });
+
+        // Codex P2 round 2 on #1104: useHistoryPagination.loadOlder
+        // dispatches HistoryLoaded with an OLDER page while newer
+        // nodes are already in state.nodes. fresh.last is the page's
+        // tail but NOT the merged document's tail — a completed
+        // thinking block at the end of the page must stay alive.
+        it("does NOT scrub a thinking tail when older page prepends to existing state", () => {
+            const newer = seed([md("text-3"), tool("tool-4", { status: "success" })]);
+            const r = update(newer, {
+                type: "HistoryLoaded",
+                nodes: [md("text-1"), thinkingMd("think-2")],
+            });
+            // Merge order: [text-1, think-2, text-3, tool-4]
+            // think-2 is mid-doc in the merged view; it completed.
+            const think2 = r.state.nodes.find((n) => n.id === "think-2") as any;
+            expect(think2.metadata.thinking).toBe(true);
+            expect(think2.metadata.canceled).toBeUndefined();
+            expect(r.events.some((e: any) => e.type === "orphans-scrubbed")).toBe(false);
+        });
+
+        // Even with `hasContentAfter`, a running tool in the older
+        // page IS orphan (status field is positional-independent —
+        // running means tool_result never arrived).
+        it("still scrubs running tools in older pages", () => {
+            const newer = seed([md("text-3")]);
+            const r = update(newer, {
+                type: "HistoryLoaded",
+                nodes: [tool("old-tool", { status: "running" }), md("text-1")],
+            });
+            const oldTool = r.state.nodes.find((n) => n.id === "old-tool") as ToolNode;
+            expect(oldTool.status).toBe("canceled");
+            expect(r.events.some((e: any) => e.type === "orphans-scrubbed")).toBe(true);
+        });
     });
 });
