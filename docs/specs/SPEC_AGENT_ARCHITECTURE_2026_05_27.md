@@ -127,13 +127,16 @@ All in `wstore.rs` (2372–2881). Each fires after the corresponding legacy writ
 
 Suggested PR carving (one per row, ~30-80 LOC + tests each):
 
-| Sub-PR | Read path migrated | Risk | Notes |
-|---|---|---|---|
-| 3b.1 | `instance_list_named` → `db_agents WHERE is_template=0` with MRU-first ordering | Low — already grouped by definition in `db_agents` | **Fixes the "4 Claudes" bug as a side effect.** Ship first for user-visible win. |
-| 3b.2 | `instance_get_by_name` → `db_agents WHERE name=? AND is_template=0` | Low | One-row lookup. |
-| 3b.3 | `instance_get` / `instance_list` → `db_agents` (with `is_template=0` filter) | Medium | Many callers; need a compatibility shim if rough corners surface. |
-| 3b.4 | `instance_get_active_for_block` → block.meta.agentId → `db_agents` | Medium | Block now references agent directly; pull credentials from there. |
-| 3b.5 | `agent_def_get`, `user_clone_defs_for_template`, `agent_def_delete_seeded` | Low | Internal helpers — straightforward. |
+| Sub-PR | Read path migrated | Risk | Status | Notes |
+|---|---|---|---|---|
+| 3b.1a | `instance_list_named` picker dedup via CTE on legacy table | Low | ✅ shipped PR #1096 | **Fixes the "4 Claudes" bug.** Reads still come from `db_agent_instances` — see 3b.1b. |
+| 3b.1b | `instance_list_named` → `db_agents` (true flip) | Medium | ⏳ pending | Splitting from 3b.1a: the dedup-via-CTE shipped first to fix the user-visible bug; the actual read flip is deferred until per-launch fields (block_id/session_id/status/started_at/ended_at) have a defined story for callers like `listrecentsessions`. |
+| 3b.2 | `instance_get_by_name` → `db_agents WHERE is_template=0` | Low | ✅ shipped (this PR) | One-row lookup. Function had **zero callers** in the live tree, so blast radius nil. COALESCE on `parent_template_id` resolves the folded user-clone case. |
+| 3b.3 | `instance_get` / `instance_list` → `db_agents` (with `is_template=0` filter) | Medium | ⏳ pending | Many callers; need a compatibility shim if rough corners surface. |
+| 3b.4 | `instance_get_active_for_block` → block.meta.agentId → `db_agents` | Medium | ⏳ pending | Block now references agent directly; pull credentials from there. |
+| 3b.5 | `agent_def_get`, `user_clone_defs_for_template`, `agent_def_delete_seeded` | Low | ⏳ pending | Internal helpers — straightforward. |
+
+**Correction (2026-05-28):** the original 3b.1 row above conflated two pieces of work — the user-visible dedup fix (CTE on the legacy table) and the actual read flip to `db_agents`. PR #1096 shipped the first; the second became 3b.1b. The "true flip" rows (3b.1b, 3b.2, 3b.3, 3b.4) are the only ones that change which table the SQL `FROM` clause names.
 
 Each sub-PR: read swap + targeted handler test that asserts the new behavior + smoke test against the existing handler's existing tests (no regressions). Use feature flag `AGENTMUX_PHASE_3B=1` if any sub-PR needs to dark-launch.
 

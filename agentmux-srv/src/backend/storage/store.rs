@@ -2213,11 +2213,30 @@ impl Store {
         Ok(out)
     }
 
-    /// Look up the most recent (by `started_at`) named instance that
-    /// matches the given `instance_name`. Used by the launch modal to
-    /// detect name collisions ("did you mean to continue?") and by
-    /// `ContinueNamedAgentCommand` to resolve the canonical row when
-    /// the caller only knows the name. Hidden rows are excluded.
+    /// Look up the canonical named-agent row matching `instance_name`.
+    /// Used by the launch modal to detect name collisions ("did you
+    /// mean to continue?") and by `ContinueNamedAgentCommand` to
+    /// resolve the consolidated row when the caller only knows the
+    /// name. Hidden rows are excluded.
+    ///
+    /// Phase 3b.2: reads from the consolidated `db_agents` table —
+    /// `is_template = 0` (named user agent), `instance_name` matches,
+    /// `user_hidden = 0`. Continuation chains are pre-collapsed in
+    /// `db_agents` (one row per logical agent), so this returns the
+    /// canonical agent regardless of how many launches its chain has.
+    /// MRU tiebreak is by `updated_at` (the dual-write touches it on
+    /// every continuation), then `created_at` for stable order.
+    ///
+    /// The legacy `db_agent_instances` carried per-launch runtime
+    /// state (`block_id`, `session_id`, `status`, `started_at`,
+    /// `ended_at`, `parent_instance_id`) that has no analog in
+    /// `db_agents` — those fields are returned as their `AgentInstance`
+    /// defaults (empty strings, 0). Callers wanting transient state
+    /// should consult runtime sources (the controller, the block
+    /// row); none of the documented use cases need it (collision
+    /// detection only cares about identity / cwd; ContinueNamed only
+    /// cares about `id` + bindings).
+    /// Spec: docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md §3b.
     pub fn instance_get_by_name(
         &self,
         instance_name: &str,
@@ -2226,18 +2245,46 @@ impl Store {
             return Ok(None);
         }
         let conn = self.conn.lock().unwrap();
+        // `definition_id` mapping: db_agents folds the def and the
+        // user-clone instance into ONE row (keyed by def.id) for
+        // is_seeded=0 agents. For seeded-template projections,
+        // parent_template_id points at the template. Either way, the
+        // consolidated row's "definition" is `COALESCE(parent_template_id,
+        // id)` — the legacy `definition_id` semantics from the caller's
+        // perspective. Empty parent_template_id (folded user-clone)
+        // resolves to the row's own id.
         let mut stmt = conn.prepare(
-            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
-                    status, github_context, started_at, ended_at, created_at,
+            "SELECT id,
+                    CASE WHEN parent_template_id = '' THEN id ELSE parent_template_id END AS def_id,
+                    github_context, created_at,
                     identity_id, memory_id, instance_name, working_directory,
-                    display_hidden
-             FROM db_agent_instances
+                    user_hidden
+             FROM db_agents
              WHERE instance_name = ?1
-               AND display_hidden = 0
-             ORDER BY started_at DESC
+               AND is_template = 0
+               AND user_hidden = 0
+             ORDER BY updated_at DESC, created_at DESC
              LIMIT 1",
         )?;
-        let result = stmt.query_row(params![instance_name], map_instance_row);
+        let result = stmt.query_row(params![instance_name], |row| {
+            Ok(AgentInstance {
+                id: row.get(0)?,
+                definition_id: row.get(1)?,
+                parent_instance_id: String::new(),
+                block_id: String::new(),
+                session_id: String::new(),
+                status: String::new(),
+                github_context: row.get(2)?,
+                started_at: row.get(3)?, // created_at — best proxy for the consolidated row
+                ended_at: 0,
+                created_at: row.get(3)?,
+                identity_id: row.get(4)?,
+                memory_id: row.get(5)?,
+                instance_name: row.get(6)?,
+                working_directory: row.get(7)?,
+                display_hidden: row.get::<_, i64>(8)? != 0,
+            })
+        });
         match result {
             Ok(a) => Ok(Some(a)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -4426,6 +4473,99 @@ mod tests {
             "five-row chain (1 head + 4 continuations) must collapse to one entry"
         );
         assert_eq!(picker_rows[0].id, "c4", "newest continuation wins");
+    }
+
+    #[test]
+    fn instance_get_by_name_reads_from_db_agents() {
+        // Phase 3b.2 — the consolidated `db_agents` table is the new
+        // authority for named-agent lookups. After `instance_create`'s
+        // dual-write, the helper must surface the agent by name with
+        // the bindings populated from `db_agents`. Transient runtime
+        // fields (block_id, session_id, status, started_at as launch
+        // moment, ended_at, parent_instance_id) have no analog in the
+        // consolidated row and come back as their type defaults.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let mut head = make_named_inst("inst-1", "Maks", &agents_root);
+        head.identity_id = "id-1".to_string();
+        head.memory_id = "mem-1".to_string();
+        head.github_context = "ghctx".to_string();
+        store.instance_create(&head).unwrap();
+
+        let got = store
+            .instance_get_by_name("Maks")
+            .unwrap()
+            .expect("should find by name");
+        // Folded user-clone: the def and the instance share ONE
+        // db_agents row keyed by def.id (def-mirror is_seeded=0 in
+        // the test fixture). The caller still sees `definition_id`
+        // populated — via the COALESCE in the query, an empty
+        // parent_template_id resolves to the row's own id.
+        assert_eq!(got.id, "def-mirror");
+        assert_eq!(got.definition_id, "def-mirror");
+        assert_eq!(got.instance_name, "Maks");
+        assert_eq!(got.identity_id, "id-1");
+        assert_eq!(got.memory_id, "mem-1");
+        assert_eq!(got.github_context, "ghctx");
+        assert!(!got.display_hidden);
+        // Transient fields default to empty / 0 — see doc comment.
+        assert_eq!(got.parent_instance_id, "");
+        assert_eq!(got.block_id, "");
+        assert_eq!(got.session_id, "");
+        assert_eq!(got.status, "");
+        assert_eq!(got.ended_at, 0);
+    }
+
+    #[test]
+    fn instance_get_by_name_returns_none_for_missing_name() {
+        let (_tmp, store, _reg) = store_with_registry();
+        assert!(store.instance_get_by_name("does-not-exist").unwrap().is_none());
+    }
+
+    #[test]
+    fn instance_get_by_name_excludes_hidden_rows() {
+        // user_hidden = 1 (via display_hidden) must filter out — both
+        // the launch modal collision detect and ContinueNamed depend
+        // on "forgotten" agents being invisible.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut inst = make_named_inst("inst-hidden", "Ghost", &agents_root);
+        inst.display_hidden = true;
+        store.instance_create(&inst).unwrap();
+        assert!(store.instance_get_by_name("Ghost").unwrap().is_none());
+    }
+
+    #[test]
+    fn instance_get_by_name_empty_input_returns_none() {
+        let (_tmp, store, _reg) = store_with_registry();
+        assert!(store.instance_get_by_name("").unwrap().is_none());
+    }
+
+    #[test]
+    fn instance_get_by_name_collapses_continuation_chain_to_one_row() {
+        // Continuations live in `db_agent_instances` (each launch =
+        // one row). The Phase 3a dual-write projects them into ONE
+        // canonical row in `db_agents` (keyed on the original head's
+        // id, with bindings updated each continuation). So a 4-deep
+        // chain with the same name surfaces as exactly one row here —
+        // no MRU-row tie-breaking needed at this layer.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let head = make_named_inst("inst-head", "Maks", &agents_root);
+        store.instance_create(&head).unwrap();
+
+        let mut cont = make_named_inst("inst-cont", "Maks", &agents_root);
+        cont.parent_instance_id = "inst-head".to_string();
+        store.instance_create(&cont).unwrap();
+
+        let got = store.instance_get_by_name("Maks").unwrap().expect("found");
+        // Only one db_agents row exists for the whole chain (the
+        // folded user-clone row keyed by def-mirror); both
+        // continuations updated its bindings.
+        assert_eq!(got.id, "def-mirror");
+        assert_eq!(got.instance_name, "Maks");
     }
 
     #[test]
