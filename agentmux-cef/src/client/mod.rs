@@ -9,6 +9,7 @@
 use cef::*;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 
@@ -1292,14 +1293,41 @@ impl AgentMuxHandler {
         };
 
         let detail = error_string.map(CefString::to_string).unwrap_or_default();
-        tracing::error!(
-            target: "crash",
-            kind = "renderer_terminated",
-            reason,
-            error_code,
-            detail = %detail,
-            "{}", reason,
-        );
+        // Rate-limit the renderer_terminated event on the `crash`
+        // target. The crash budget below caps per-browser crashes at
+        // CRASH_BUDGET within CRASH_BUDGET_WINDOW, but if many
+        // browsers crash simultaneously the aggregate write rate to
+        // the host log can still spike. RENDERER_TERMINATED_LOG_MIN_GAP
+        // throttles to at most one full log line per 100 ms across
+        // the whole process; suppressed events are counted and the
+        // count is emitted as a `suppressed` field on the next
+        // un-throttled event so no information is lost. See
+        // docs/retro/retro-portable-rm-running-install-2026-05-28.md
+        // for the original 884 MB / 22 min log spam that motivated
+        // both this and the per-browser budget.
+        const RENDERER_TERMINATED_LOG_MIN_GAP: Duration = Duration::from_millis(100);
+        static LAST_LOGGED_AT_MS: AtomicU64 = AtomicU64::new(0);
+        static SUPPRESSED_SINCE: AtomicU64 = AtomicU64::new(0);
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let last_ms = LAST_LOGGED_AT_MS.load(Ordering::Relaxed);
+        if now_ms.saturating_sub(last_ms) < RENDERER_TERMINATED_LOG_MIN_GAP.as_millis() as u64 {
+            SUPPRESSED_SINCE.fetch_add(1, Ordering::Relaxed);
+        } else {
+            let suppressed = SUPPRESSED_SINCE.swap(0, Ordering::Relaxed);
+            LAST_LOGGED_AT_MS.store(now_ms, Ordering::Relaxed);
+            tracing::error!(
+                target: "crash",
+                kind = "renderer_terminated",
+                reason,
+                error_code,
+                detail = %detail,
+                suppressed_since_last = suppressed,
+                "{}", reason,
+            );
+        }
 
         // Crash budget — if this browser has crashed more than
         // CRASH_BUDGET times in CRASH_BUDGET_WINDOW, abandon
