@@ -681,6 +681,28 @@ impl AgentMuxHandler {
                 lbl,
                 remaining
             );
+
+            // Evict this label's HWND from `window_hwnds`. The cache
+            // has no other cleanup path, and the resolver's hot-path
+            // hits it before walking the registry — without this,
+            // a subsequent open of the same label (e.g. main
+            // restart) leaves a stale entry that breaks WM_CLOSE
+            // routing. See
+            // docs/specs/SPEC_WINDOW_HWND_CACHE_STALE_FIX_2026_05_28.md.
+            // Windows-only because `AppState::window_hwnds` is itself
+            // `#[cfg(target_os = "windows")]` in `state.rs`. Codex P1
+            // on PR #1133.
+            #[cfg(target_os = "windows")]
+            {
+                let removed = self.state.window_hwnds.lock().remove(lbl);
+                if removed.is_some() {
+                    tracing::debug!(
+                        target: "win-resolve",
+                        label = %lbl,
+                        "[win-resolve] evicted on close"
+                    );
+                }
+            }
         }
 
         // Pane-specific on_before_close work (drain lifecycle entry) lives

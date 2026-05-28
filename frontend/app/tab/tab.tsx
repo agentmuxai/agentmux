@@ -189,7 +189,7 @@ function Tab(props: TabProps): JSX.Element {
             editableRef.blur();
             event.preventDefault();
             event.stopPropagation();
-        } else if (curLen >= 14 && !["Backspace", "Delete", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+        } else if (curLen >= 128 && !["Backspace", "Delete", "ArrowLeft", "ArrowRight"].includes(event.key)) {
             event.preventDefault();
             event.stopPropagation();
         }
