@@ -358,6 +358,22 @@ pub fn run_consolidate_migration(
             } else {
                 inst.instance_name.clone()
             };
+            // Stamp `updated_at` with the folded instance's
+            // `created_at` (its launch moment). Without this, the
+            // backfill UPDATE leaves `updated_at` as whatever the
+            // def's edit time was — which makes `db_agents.updated_at`
+            // useless as a "most-recently-used" sort key for migrated
+            // stores, breaking the ordering invariant that the live
+            // dual-write (`agents_dual_write_instance_insert`) maintains
+            // for new launches. Codex P2 on PR #1110 — surfaced via the
+            // first read-flip (`instance_get_by_name`) ordering by
+            // `updated_at DESC`.
+            //
+            // The loop iterates `ORDER BY i.created_at DESC`, so the
+            // FIRST instance per def_id is the most recent, and that's
+            // the one whose `created_at` we want imprinted as
+            // `updated_at`. Collision warns skip subsequent rows for
+            // the same def.
             tx.execute(
                 "UPDATE db_agents SET
                     name = ?1,
@@ -366,8 +382,9 @@ pub fn run_consolidate_migration(
                     working_directory = ?4,
                     github_context = ?5,
                     instance_name = ?6,
-                    user_hidden = ?7
-                 WHERE id = ?8 AND is_template = 0",
+                    user_hidden = ?7,
+                    updated_at = MAX(updated_at, ?8)
+                 WHERE id = ?9 AND is_template = 0",
                 params![
                     name,
                     inst.identity_id,
@@ -376,6 +393,7 @@ pub fn run_consolidate_migration(
                     inst.github_context,
                     inst.instance_name,
                     if inst.display_hidden { 1_i64 } else { 0_i64 },
+                    inst.created_at,
                     inst.definition_id,
                 ],
             )?;
@@ -637,6 +655,81 @@ mod tests {
             )
             .unwrap();
         assert_eq!(identity, "id-RECENT", "most-recent instance's bindings must win");
+    }
+
+    #[test]
+    fn fold_into_user_clone_stamps_updated_at_from_instance_created_at() {
+        // Codex P2 on PR #1110: ordering `db_agents` by `updated_at`
+        // would misbehave on migrated stores if the fold UPDATE
+        // didn't write `updated_at`. After the fix, the folded
+        // user-clone row's `updated_at` equals the most-recent
+        // instance's `created_at` (the launch moment), not the def's
+        // edit time — matching what the live dual-write
+        // (`agents_dual_write_instance_insert`) stamps for new
+        // launches.
+        let mut conn = fresh_conn();
+        // Def created at t=1000 (insert_def uses ?4 for both
+        // created_at and updated_at).
+        insert_def(&conn, "tpl-1", "Coder", 1, "");
+        insert_def(&conn, "def-u1", "User Coder", 0, "tpl-1");
+        // Instance launched at t=5000 — later than the def.
+        insert_instance(
+            &conn, "inst-1", "def-u1", "Maks", "id-1", "mem-1", "/wd/m", 5000, false,
+        );
+
+        run_consolidate_migration(&mut conn, None).unwrap();
+
+        let updated_at: i64 = conn
+            .query_row(
+                "SELECT updated_at FROM db_agents WHERE id = 'def-u1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            updated_at, 5000,
+            "folded user-clone row's updated_at must reflect the instance's launch time, \
+             not the def's edit time, so ORDER BY updated_at picks the right row"
+        );
+    }
+
+    #[test]
+    fn fold_into_user_clone_keeps_higher_updated_at() {
+        // MAX(updated_at, ?) semantics: if the def was edited AFTER
+        // the instance launched, the def's edit time should stay as
+        // updated_at (the def edit IS the most-recent touch).
+        let mut conn = fresh_conn();
+        insert_def(&conn, "tpl-1", "Coder", 1, "");
+        // Def edited at t=8000.
+        conn.execute(
+            "UPDATE db_agent_definitions SET updated_at = 8000 WHERE id = 'tpl-1'",
+            [],
+        )
+        .unwrap();
+        insert_def(&conn, "def-u1", "User Coder", 0, "tpl-1");
+        conn.execute(
+            "UPDATE db_agent_definitions SET updated_at = 8000 WHERE id = 'def-u1'",
+            [],
+        )
+        .unwrap();
+        // Now insert an OLDER instance.
+        insert_instance(
+            &conn, "inst-1", "def-u1", "Maks", "id-1", "mem-1", "/wd/m", 3000, false,
+        );
+
+        run_consolidate_migration(&mut conn, None).unwrap();
+
+        let updated_at: i64 = conn
+            .query_row(
+                "SELECT updated_at FROM db_agents WHERE id = 'def-u1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            updated_at, 8000,
+            "later def edit beats older instance launch — MAX(updated_at, inst.created_at)"
+        );
     }
 
     #[test]
