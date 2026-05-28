@@ -369,15 +369,27 @@ unsafe extern "system" fn floating_pane_wndproc(
         // area clamp, WS_POPUP defaults to full-monitor on maximize
         // and covers the taskbar.
         //
-        // ptMaxPosition is the maximized window's screen-space
-        // position (left/top corner), NOT a delta from the current
-        // window rect. An earlier version of this handler did
-        // `work.left - wr.left`, which made the maximized origin
-        // depend on the window's pre-maximize position — a floater
-        // at wr.left=500 on a primary monitor (work.left=0) reported
-        // ptMaxPosition.x=-500 and shifted off-screen on maximize.
-        // The correct value is the work-area origin directly.
-        // Codex P2 on PR #1132.
+        // ptMaxPosition gotcha: when the OS receives a MINMAXINFO it
+        // treats `ptMaxPosition` as the position the window would
+        // occupy if maximized on the *primary* monitor, then adjusts
+        // by the actual target monitor's offset (Raymond Chen,
+        // devblogs 2015-05-01). So:
+        //   - Writing absolute virtual-screen coords gets offset
+        //     a second time on non-primary monitors and shifts the
+        //     window over.
+        //   - Writing (0, 0) ignores the work-area inset (taskbar
+        //     bleeds in).
+        // Correct value: the work-area offset WITHIN its monitor,
+        // i.e. `work.{left,top} - mon.{left,top}`. On the primary
+        // monitor with a bottom taskbar that's (0, 0); on any other
+        // monitor with the same layout it's also (0, 0) — the OS
+        // then adds the target monitor's virtual-screen origin so
+        // the window lands on the right monitor's work area.
+        // Codex P2 PR #1132 (round 2). Earlier round 1 used
+        // `work.{left,top} - wr.{left,top}` which baked the
+        // window's pre-maximize position into the result and
+        // shifted off-screen for floaters not already at the work-
+        // area origin; that path is also incorrect.
         WM_GETMINMAXINFO => {
             use windows_sys::Win32::Foundation::POINT;
             use windows_sys::Win32::Graphics::Gdi::{
@@ -401,9 +413,10 @@ unsafe extern "system" fn floating_pane_wndproc(
                 mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
                 if GetMonitorInfoW(monitor, &mut mi) != 0 {
                     let work = mi.rcWork;
+                    let mon = mi.rcMonitor;
                     (*mmi).ptMaxPosition = POINT {
-                        x: work.left,
-                        y: work.top,
+                        x: work.left - mon.left,
+                        y: work.top - mon.top,
                     };
                     (*mmi).ptMaxSize = POINT {
                         x: work.right - work.left,
@@ -417,6 +430,16 @@ unsafe extern "system" fn floating_pane_wndproc(
         // WS_CHILD — a child of WS_POPUP does NOT auto-track parent
         // size, so without this the rendered content stays at the
         // initial (W, H) and a resize leaves empty space (or clips).
+        //
+        // The CEF child is inset by `resize_border_px` on each edge.
+        // Without the inset, the child covers the outer window's edge
+        // bands; the OS dispatches `WM_NCHITTEST` to the topmost window
+        // under the cursor (the CEF child), which returns HTCLIENT and
+        // never bubbles to the outer's WM_NCHITTEST below. Result: no
+        // resize cursor, no resize. The 8 CSS-px inset matches the
+        // edge band we map to HT{LEFT,RIGHT,...} and is visually
+        // indistinguishable from a system resize border. User-reported
+        // regression on PR #1132 dev smoke test.
         WM_SIZE => {
             if wparam as u32 != SIZE_MINIMIZED {
                 let w = (lparam & 0xFFFF) as i16 as i32;
@@ -424,13 +447,22 @@ unsafe extern "system" fn floating_pane_wndproc(
                 if w > 0 && h > 0 {
                     let child = GetWindow(hwnd, GW_CHILD);
                     if !child.is_null() {
+                        // Scale CSS resize-border to physical px against
+                        // THIS HWND's monitor — mirrors the WM_NCHITTEST
+                        // calculation so the inset and the hit-band stay
+                        // in lockstep across DPI changes.
+                        let dpi = GetDpiForWindow(hwnd) as i32;
+                        let dpi = if dpi > 0 { dpi } else { 96 };
+                        let inset = (RESIZE_BORDER_CSS * dpi / 96).max(1);
+                        let child_w = (w - 2 * inset).max(1);
+                        let child_h = (h - 2 * inset).max(1);
                         SetWindowPos(
                             child,
                             std::ptr::null_mut(),
-                            0,
-                            0,
-                            w,
-                            h,
+                            inset,
+                            inset,
+                            child_w,
+                            child_h,
                             SWP_NOZORDER | SWP_NOACTIVATE,
                         );
                     }

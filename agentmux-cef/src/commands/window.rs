@@ -157,7 +157,24 @@ pub fn maximize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
         use windows_sys::Win32::Foundation::RECT;
 
-        let hwnd = resolve_window_hwnd(state, label);
+        // Label-strict resolution: `resolve_window_hwnd` falls back to
+        // `find_own_top_level_window()` (Z-order pick) when the per-
+        // label cache misses for non-"main" labels. For floaters that
+        // means a stale `floating-…` label can target some *other*
+        // top-level HWND (e.g. main or another floater) and silently
+        // succeed — the frontend then updates its glyph for a window
+        // it never actually toggled. Consult the per-label cache
+        // directly here for `floating-…` so a cache miss surfaces as
+        // the null-HWND error path below. Codex P2 PR #1132 (round 2).
+        let hwnd = if label.starts_with("floating-") {
+            let cached = state.window_hwnds.lock().get(label).copied();
+            match cached {
+                Some(raw_isize) => raw_isize as *mut std::ffi::c_void,
+                None => std::ptr::null_mut(),
+            }
+        } else {
+            resolve_window_hwnd(state, label)
+        };
         if !hwnd.is_null() {
             let mut placement: WINDOWPLACEMENT = std::mem::zeroed();
             placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
