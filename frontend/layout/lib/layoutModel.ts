@@ -592,7 +592,17 @@ export class LayoutModel {
             this.magnifiedNodeId = this.treeState.magnifiedNodeId;
         }
         if (setState) {
-            this.updateTree();
+            if (action.type !== LayoutTreeActionType.FocusNode) {
+                this.updateTree();
+            } else if (this.treeState.focusedNodeId) {
+                // FocusNode skips updateTree() (topology/transforms unchanged),
+                // but validateFocusedNode — which syncs focusedNodeIdStack with
+                // treeState.focusedNodeId — lives inside updateTree. Inline the
+                // stack update here so the guard in focusNode() doesn't fire
+                // stale on the next click.
+                const newId = this.treeState.focusedNodeId;
+                this.focusedNodeIdStack = [newId, ...this.focusedNodeIdStack.filter((id) => id !== newId)];
+            }
             this.localTreeStateAtom._set({ ...this.treeState });
             this.persistToBackend();
         }
