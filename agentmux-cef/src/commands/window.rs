@@ -166,10 +166,24 @@ pub fn maximize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
         // it never actually toggled. Consult the per-label cache
         // directly here for `floating-…` so a cache miss surfaces as
         // the null-HWND error path below. Codex P2 PR #1132 (round 2).
+        //
+        // Cache entries are not removed on `BrowserUnregistered` or
+        // when a floater is closed/redocked. A stale entry returns a
+        // non-null HWND for a destroyed window — `IsWindow(hwnd) == 0`
+        // detects that and treats it as null so the Err path fires
+        // instead of `GetWindowPlacement`-ing a zombie HWND. Codex P2
+        // PR #1132 (round 3).
         let hwnd = if label.starts_with("floating-") {
             let cached = state.window_hwnds.lock().get(label).copied();
             match cached {
-                Some(raw_isize) => raw_isize as *mut std::ffi::c_void,
+                Some(raw_isize) => {
+                    let raw = raw_isize as *mut std::ffi::c_void;
+                    if !raw.is_null() && IsWindow(raw) != 0 {
+                        raw
+                    } else {
+                        std::ptr::null_mut()
+                    }
+                }
                 None => std::ptr::null_mut(),
             }
         } else {

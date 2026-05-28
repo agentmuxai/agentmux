@@ -145,11 +145,36 @@ wrap_task! {
                 .insert(self.window_label.clone(), outer_hwnd as isize);
 
             // CEF embed — the browser is a WS_CHILD of the outer HWND.
+            //
+            // Inset by `resize_border_px` on each edge so the outer
+            // wndproc's WM_NCHITTEST sees cursor events in the edge
+            // bands and can return HT{LEFT,...} for resize. Without
+            // this initial inset, the child is created at
+            // (0, 0, width, height) and covers the resize bands until
+            // the user resizes once and triggers the WM_SIZE inset
+            // path. The first WM_SIZE on this HWND fires from inside
+            // `create_owned_popup` (`ShowWindow(SW_SHOWNOACTIVATE)`)
+            // BEFORE the CEF child exists — `GetWindow(GW_CHILD)`
+            // returns null and the WM_SIZE branch does nothing.
+            // Codex P2 PR #1132 (round 3).
+            //
+            // CSS→physical scaling: `RESIZE_BORDER_CSS` is the same
+            // 8 CSS-px constant used in the wndproc's WM_NCHITTEST
+            // computation; pull DPI from the outer HWND we just
+            // created (DPI is honored by Win32 immediately after
+            // CreateWindowExW per PMv2).
+            let inset = unsafe {
+                use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+                const RESIZE_BORDER_CSS: i32 = 8;
+                let dpi = GetDpiForWindow(outer_hwnd as *mut std::ffi::c_void) as i32;
+                let dpi = if dpi > 0 { dpi } else { 96 };
+                (RESIZE_BORDER_CSS * dpi / 96).max(1)
+            };
             let rect = Rect {
-                x: 0,
-                y: 0,
-                width: self.width,
-                height: self.height,
+                x: inset,
+                y: inset,
+                width: (self.width - 2 * inset).max(1),
+                height: (self.height - 2 * inset).max(1),
             };
 
             let handler = crate::client::AgentMuxHandler::new_with_browser_pane(
