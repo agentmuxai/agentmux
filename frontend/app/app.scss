@@ -34,6 +34,24 @@ body {
     background-color: transparent;
 }
 
+// Drop-slot preview rendered when a floating pane is being dragged
+// over a specific block in this window. `app-init.ts` runs
+// `determineDropDirection` on the cursor + leaf rect (same helper as
+// within-window pane drag) and positions this singleton overlay
+// over the half/quarter/full-leaf that corresponds to the resolved
+// direction. Same accent visual as the within-window `.placeholder`
+// drop indicator so users see the same affordance whether they're
+// dragging a docked pane or a floater.
+.floating-redock-drop-placeholder {
+    position: fixed;
+    pointer-events: none;
+    z-index: 9999;
+    background-color: rgba(from var(--accent-color) r g b / 0.18);
+    border: 2px solid var(--accent-color);
+    border-radius: var(--block-border-radius);
+    transition: top 120ms ease-out, left 120ms ease-out, width 120ms ease-out, height 120ms ease-out;
+}
+
 a.plain-link {
     color: var(--secondary-text-color);
 }

@@ -85,17 +85,17 @@ pub fn close_window_by_label(
 
     #[cfg(target_os = "windows")]
     unsafe {
-        use cef::{ImplBrowser, ImplBrowserHost};
         use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
-        // Phase H.2.b — reducer-aware lookup with fallback.
-        if let Some(browser) = state.get_browser(&label) {
-            if let Some(host) = browser.host() {
-                let hwnd = host.window_handle();
-                if !hwnd.0.is_null() {
-                    PostMessageW(hwnd.0 as *mut std::ffi::c_void, WM_CLOSE, 0, 0);
-                    return Ok(serde_json::Value::Null);
-                }
-            }
+        // Route through resolve_window_hwnd so we hit the cached OUTER
+        // top-level HWND. The reducer registry returns CEF's inner
+        // WS_CHILD for `set_as_child` browsers (and for floaters our
+        // outer popup HWND is only in the cache), so going straight to
+        // `host.window_handle()` would WM_CLOSE the embedded child —
+        // after a redock that leaves the outer popup as an empty shell.
+        let hwnd = resolve_window_hwnd(state, &label);
+        if !hwnd.is_null() {
+            PostMessageW(hwnd, WM_CLOSE, 0, 0);
+            return Ok(serde_json::Value::Null);
         }
         return Err(format!("no top-level HWND for label {}", label));
     }
@@ -235,11 +235,36 @@ unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> *mut std::f
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
 
     if !label.is_empty() {
-        // 1. Try the CEF reducer registry — works for any label whose
-        //    `host.window_handle()` exposes the OS HWND (notably our
-        //    floating-pane windows created via CreateWindowExW +
-        //    set_as_child). For CEF Views (main window) this returns
-        //    NULL on Win32 and we fall through.
+        // 1. Consult the authoritative per-label HWND cache FIRST —
+        //    populated by `capture_hwnd_for_label` for main / pool /
+        //    tear-off windows AND by `floating_pane.rs` for our own
+        //    owned-popup floaters at create time. The cache stores
+        //    the actual outer top-level HWND we want to act on.
+        //    We MUST NOT walk GA_ROOT on cache hits: the cached value
+        //    is already the top-level we want; walking up could land
+        //    on a different owner (e.g. main, for floaters owned by
+        //    main) and cause `close_window_by_label` to post WM_CLOSE
+        //    to the wrong window.
+        let cached = state.window_hwnds.lock().get(label).copied();
+        if let Some(raw_isize) = cached {
+            let raw = raw_isize as *mut std::ffi::c_void;
+            if !raw.is_null() {
+                tracing::info!(
+                    target: "win-resolve",
+                    label = %label,
+                    cache_hwnd = ?raw,
+                    "[win-resolve] resolved via window_hwnds cache"
+                );
+                return raw;
+            }
+        }
+
+        // 2. Fall back to the CEF reducer registry. This returns
+        //    `host.window_handle()` which on Win32 is usually a
+        //    WS_CHILD inner HWND for `set_as_child` browsers — so we
+        //    DO need GA_ROOT here to walk up to the top-level. Used
+        //    when capture_hwnd_for_label hasn't run yet (very early
+        //    startup) for non-floater labels.
         if let Some(browser) = state.get_browser(label) {
             if let Some(host) = browser.host() {
                 let raw = host.window_handle().0 as *mut std::ffi::c_void;
@@ -251,40 +276,17 @@ unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> *mut std::f
                         label = %label,
                         host_hwnd = ?raw,
                         root_hwnd = ?resolved,
-                        "[win-resolve] resolved via reducer registry"
+                        "[win-resolve] resolved via reducer registry + GA_ROOT"
                     );
                     return resolved;
                 }
             }
         }
 
-        // 2. Consult the authoritative per-label HWND cache populated
-        //    by `capture_hwnd_for_label` (triggered when the frontend
-        //    signals init-complete via `set_window_init_status`). This
-        //    is the same source `set_window_transparency` uses
-        //    (line 447) and covers the case where `host.window_handle()`
-        //    returns NULL but we'd previously stamped the HWND.
-        let cached = state.window_hwnds.lock().get(label).copied();
-        if let Some(raw_isize) = cached {
-            let raw = raw_isize as *mut std::ffi::c_void;
-            if !raw.is_null() {
-                let root = GetAncestor(raw, GA_ROOT);
-                let resolved = if root.is_null() { raw } else { root };
-                tracing::info!(
-                    target: "win-resolve",
-                    label = %label,
-                    cache_hwnd = ?raw,
-                    root_hwnd = ?resolved,
-                    "[win-resolve] resolved via window_hwnds cache"
-                );
-                return resolved;
-            }
-        }
-
         tracing::warn!(
             target: "win-resolve",
             label = %label,
-            "[win-resolve] reducer-registry + cache both empty — using class-aware EnumWindows fallback"
+            "[win-resolve] cache + reducer-registry both empty — using class-aware EnumWindows fallback"
         );
     }
 
@@ -442,6 +444,195 @@ pub fn start_window_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Res
         crate::ui_tasks::post_start_drag(state, label);
     }
     let _ = (state, args);
+    Ok(serde_json::Value::Null)
+}
+
+/// Resolve which agentmux window is under the cursor. Used by the
+/// floating-pane re-dock flow: on the floater's mouseup, the
+/// frontend asks "what window is the cursor over now?" and, if
+/// the answer is another agentmux window in the same process,
+/// kicks off `RedockFloatingPane`.
+///
+/// Args: `{ "x": int, "y": int, "exclude_label": string|null }` —
+/// cursor position in physical px (whatever `get_cursor_point`
+/// returned). `exclude_label` is the source floater's label; without
+/// it, `WindowFromPoint` returns the floater itself (the floater
+/// follows the cursor during drag, so it's always at the cursor in
+/// Z-order). We walk top-levels in Z-order from front to back and
+/// return the first match that ISN'T the excluded source.
+///
+/// Returns: `{ "label": string|null, "window_id": string|null }`. Both
+/// null means no agentmux window of this process is under the cursor
+/// (cursor is over the desktop, an external app, etc.). `window_id`
+/// is the backend windowId mapped via the launcher's
+/// `BackendWindowIdRegistered` projection — frontend uses it to
+/// load the WaveWindow / Workspace and figure out the active tab.
+///
+/// Instance / version isolation is free: another agentmux instance's
+/// HWNDs are NOT in this process's `window_hwnds` map, so cross-
+/// process drag-over-then-drop won't accidentally re-dock there.
+pub fn resolve_window_at_cursor(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let exclude_label = args
+        .get("exclude_label")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::Foundation::RECT;
+        use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetTopWindow, GetWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId,
+            IsWindowVisible, GWL_EXSTYLE, GW_HWNDNEXT, WS_EX_TRANSPARENT,
+        };
+
+        // Snapshot the label↔HWND map once, then walk top-level
+        // windows in Z-order (front to back) until we find a visible
+        // same-process window whose rect contains the cursor AND
+        // whose label isn't the excluded source.
+        let hwnds_by_label: std::collections::HashMap<String, isize> = {
+            state.window_hwnds.lock().clone()
+        };
+        // Reverse map for O(1) HWND → label lookup.
+        let label_by_hwnd: std::collections::HashMap<isize, String> = hwnds_by_label
+            .iter()
+            .map(|(k, v)| (*v, k.clone()))
+            .collect();
+        let exclude_hwnd: Option<isize> = if exclude_label.is_empty() {
+            None
+        } else {
+            hwnds_by_label.get(exclude_label).copied()
+        };
+
+        let our_pid = GetCurrentProcessId();
+        let mut hwnd = GetTopWindow(std::ptr::null_mut());
+        while !hwnd.is_null() {
+            if IsWindowVisible(hwnd) != 0 {
+                let mut window_pid: u32 = 0;
+                GetWindowThreadProcessId(hwnd, &mut window_pid);
+                if window_pid == our_pid {
+                    let h_isize = hwnd as isize;
+                    let is_excluded = exclude_hwnd == Some(h_isize);
+                    // Skip click-through / transparent windows
+                    // (defensive — agentmux doesn't currently create
+                    // any, but we don't want a hypothetical overlay
+                    // to swallow the hit-test).
+                    let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+                    let is_transparent = (ex_style & WS_EX_TRANSPARENT) != 0;
+                    if !is_excluded && !is_transparent {
+                        let mut rect: RECT = std::mem::zeroed();
+                        if GetWindowRect(hwnd, &mut rect) != 0
+                            && x >= rect.left
+                            && x < rect.right
+                            && y >= rect.top
+                            && y < rect.bottom
+                        {
+                            if let Some(label) = label_by_hwnd.get(&h_isize) {
+                                let wid = state.backend_window_id(label);
+                                return Ok(serde_json::json!({
+                                    "label": label,
+                                    "window_id": wid,
+                                }));
+                            }
+                            // Found a window we own but it isn't in
+                            // window_hwnds yet (very early startup or
+                            // a window we don't track). Treat as "no
+                            // agentmux match" and continue Z-order
+                            // walk in case a tracked window sits
+                            // behind it.
+                        }
+                    }
+                }
+            }
+            hwnd = GetWindow(hwnd, GW_HWNDNEXT);
+        }
+        Ok(serde_json::json!({ "label": null, "window_id": null }))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (state, args, x, y, exclude_label);
+        Ok(serde_json::json!({ "label": null, "window_id": null }))
+    }
+}
+
+/// Update the host's "active floating-pane redock hover" state.
+/// Called from the dragged floater's mousemove (throttled ~50ms upstream)
+/// so target windows can render a per-tile drop preview while the floater
+/// hovers over them. The host resolves the target window via the same
+/// Z-order walk as `resolve_window_at_cursor` (with the dragged floater
+/// excluded) and emits `floating-redock:hover-state` on every call —
+/// the target renderer needs the live cursor position to pick which
+/// LEAF the cursor is over (not just transitions between windows).
+///
+/// Args: `{ "source_label": string, "x": int, "y": int }`. Returns
+/// `{ "target_label": string|null }` for callers that want to
+/// piggyback on this for the resolved target.
+pub fn update_floating_redock_hover(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let source_label = args
+        .get("source_label")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let cursor_x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0);
+    let cursor_y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0);
+    let resolve_args = serde_json::json!({
+        "x": cursor_x,
+        "y": cursor_y,
+        "exclude_label": source_label,
+    });
+    let resolved = resolve_window_at_cursor(state, &resolve_args)?;
+    let new_target = resolved
+        .get("label")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    // Emit on every call (frontend throttles ~50 ms upstream). The
+    // event must carry the cursor position so target renderers can
+    // compute which TILE the cursor is over and highlight just that
+    // leaf (not the whole window). Cursor is in physical screen px.
+    let payload = serde_json::json!({
+        "target_label": new_target.clone(),
+        "source_label": source_label,
+        "cursor_x": cursor_x,
+        "cursor_y": cursor_y,
+    });
+    crate::events::emit_event_to_top_level_windows(
+        state,
+        "floating-redock:hover-state",
+        &payload,
+    );
+
+    Ok(serde_json::json!({ "target_label": new_target }))
+}
+
+/// Clear the active floating-pane redock hover state. Called from the
+/// dragged floater's mouseup (and any drag-cancel path). Emits the
+/// `floating-redock:hover-state` event with `target_label: null` so
+/// target windows tear down their highlight overlay.
+pub fn clear_floating_redock_hover(
+    state: &Arc<AppState>,
+    _args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    // Always emit, even if no prior hover was active. The frontend
+    // listener uses target_label=null as a teardown sentinel and
+    // removing a non-existent placeholder is a cheap no-op; emitting
+    // unconditionally guarantees cleanup fires even if the last
+    // mousemove resolved to None (cursor over the floater itself
+    // between in/out boundaries).
+    crate::events::emit_event_to_top_level_windows(
+        state,
+        "floating-redock:hover-state",
+        &serde_json::json!({ "target_label": serde_json::Value::Null }),
+    );
     Ok(serde_json::Value::Null)
 }
 
@@ -973,6 +1164,22 @@ fn get_secondary_window_size(px: i32, py: i32) -> (i32, i32) {
 #[cfg(target_os = "windows")]
 pub(crate) fn capture_hwnd_for_label(state: &Arc<AppState>, label: &str) {
     use cef::ImplBrowserHost;
+    // If a known-good outer HWND was already inserted by the creator
+    // of this window (e.g. `floating_pane.rs::create_owned_popup`
+    // registers the outer floater HWND it built via CreateWindowExW),
+    // DO NOT overwrite it. The fast path below uses
+    // `host.window_handle()` which for `set_as_child` browsers returns
+    // the CEF inner WS_CHILD HWND — replacing the outer HWND with the
+    // child here breaks any IPC that needs to act on the actual
+    // top-level (SetWindowPos drags the child within the parent,
+    // PostMessage(WM_CLOSE) destroys the child only, etc.).
+    if state.window_hwnds.lock().contains_key(label) {
+        tracing::debug!(
+            "[opacity] capture_hwnd_for_label: label={} already registered, preserving",
+            label
+        );
+        return;
+    }
     // Fast path.
     if let Some(mut browser) = state.get_browser(label) {
         if let Some(host) = browser.host() {
