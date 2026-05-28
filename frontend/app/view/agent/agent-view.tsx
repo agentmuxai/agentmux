@@ -23,7 +23,7 @@ import {
     registerActivity as registerAgentActivity,
     unregisterActivity as unregisterAgentActivity,
 } from "@/app/store/agentActivity";
-import { workingFromPhase } from "@/app/store/agent-pane-state/types";
+import { isInterruptibleTurn, workingFromPhase } from "@/app/store/agent-pane-state/types";
 import type { SubagentLinkNode } from "./types";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { useAgentStream } from "./useAgentStream";
@@ -811,12 +811,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             <PendingMessagesPanel
                 pendingMessages={pendingMessagesAtom[0]}
                 showSendNow={() =>
-                    // "Send now" appears whenever the agent is working
-                    // (Submitting / Streaming / Interrupting) and the
-                    // user has at least one queued message. PR G removed
-                    // the legacy `turnActive` boolean — the working set
-                    // is now defined purely by `turnPhase`.
-                    workingFromPhase(agentAtoms().turnPhaseAtom[0]()) &&
+                    // "Send now" appears only when there is an in-flight
+                    // turn that SIGINT can actually interrupt — i.e.
+                    // Streaming / Interrupting. `Submitting` is excluded
+                    // because the message in the queue during Submitting
+                    // IS the would-be turn; there is no CLI process to
+                    // stop yet. Gating on the broader `workingFromPhase`
+                    // caused a brief flash on every send.
+                    // Spec: docs/analysis/ANALYSIS_SEND_NOW_FLASH_2026_05_28.md.
+                    isInterruptibleTurn(agentAtoms().turnPhaseAtom[0]()) &&
                     pendingMessagesAtom[0]().length > 0
                 }
                 onSendImmediately={() => {
