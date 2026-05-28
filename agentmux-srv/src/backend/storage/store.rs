@@ -2714,13 +2714,20 @@ impl Store {
             return Ok(None);
         }
         let conn = self.conn.lock().unwrap();
+        // Do NOT filter `user_hidden`. Hiding a named agent
+        // ("forget") is a picker-visibility concept — it removes the
+        // row from the launch modal's dropdown, but the resolver
+        // must keep returning bindings for any pane still tied to
+        // that agent so commands don't silently degrade to ambient
+        // creds. Codex P2 on PR #1114. `display_hidden` on the
+        // returned AgentInstance stays `false` to match the legacy
+        // resolver's behavior (the field is never consumed here).
         let mut stmt = conn.prepare(
             "SELECT id, github_context, created_at,
                     identity_id, memory_id, instance_name, working_directory
              FROM db_agents
              WHERE id = ?1
-               AND is_template = 0
-               AND user_hidden = 0",
+               AND is_template = 0",
         )?;
         let block_id_owned = block_id.to_string();
         for candidate in &candidates {
@@ -2749,7 +2756,31 @@ impl Store {
                 Err(e) => return Err(e.into()),
             }
         }
-        Ok(None)
+        drop(stmt);
+        // Legacy-block fallback: panes launched before
+        // `agentInstanceId` started being stamped on block meta
+        // (and seeded-template launches predating that wiring) only
+        // carry `agentId = <template id>`, which gets filtered out
+        // above by `is_template = 0`. Fall back to the legacy
+        // `db_agent_instances` lookup by `block_id` to keep those
+        // panes resolving their selected identity. Codex P2 on PR
+        // #1114 round 2. Retires when Phase 3c drops the legacy
+        // table — by then every pane should be re-stamped.
+        let mut legacy_stmt = conn.prepare(
+            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
+                    status, github_context, started_at, ended_at, created_at,
+                    identity_id, memory_id, instance_name, working_directory,
+                    display_hidden
+             FROM db_agent_instances
+             WHERE block_id = ?1 AND status IN ('running', 'paused')
+             ORDER BY created_at DESC
+             LIMIT 1",
+        )?;
+        match legacy_stmt.query_row(params![block_id], map_instance_row) {
+            Ok(a) => Ok(Some(a)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     // ====================================================================
@@ -5049,6 +5080,87 @@ mod tests {
             .expect("user-clone block without instance-id must still resolve");
         assert_eq!(got.id, "def-mirror");
         assert_eq!(got.identity_id, "id-clone-bindings");
+    }
+
+    #[test]
+    fn instance_get_active_for_block_phase_3b4_resolves_hidden_agents_for_existing_panes() {
+        // Codex P2 on PR #1114 round 2: hiding a named agent
+        // ("forget") is a picker-visibility concept — the pane that's
+        // still bound to that agent must keep resolving credentials.
+        // Otherwise the next command would silently fall back to
+        // ambient creds the moment the user hides the agent.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut inst = make_named_inst("inst-hide", "ToBeHidden", &agents_root);
+        inst.identity_id = "id-still-valid".to_string();
+        inst.display_hidden = true; // bound block stays alive
+        store.instance_create(&inst).unwrap();
+
+        let mut block = crate::backend::obj::Block {
+            oid: "block-hidden-agent".to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = crate::backend::obj::MetaMapType::new();
+                m.insert("agentId".to_string(), serde_json::json!("def-mirror"));
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+
+        let got = store
+            .instance_get_active_for_block("block-hidden-agent")
+            .unwrap()
+            .expect("hidden agent must still resolve for existing pane");
+        assert_eq!(got.identity_id, "id-still-valid");
+    }
+
+    #[test]
+    fn instance_get_active_for_block_phase_3b4_legacy_template_block_falls_back_to_instances() {
+        // Codex P2 on PR #1114 round 2: panes launched from a seeded
+        // template BEFORE `agentInstanceId` stamping was wired only
+        // carry `agentId = <template id>`. The db_agents path filters
+        // templates out (is_template = 0), so without a fallback
+        // those panes would silently fall back to ambient creds.
+        // Recovery: legacy `db_agent_instances` lookup by block_id.
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        // Seeded template + an instance launched off it (the way old
+        // launches before agentInstanceId stamping would have done).
+        let mut tpl = sample_agent("tpl-legacy", "tpl-legacy");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let mut inst = make_named_inst("inst-legacy-tpl", "OldTplLaunch", &agents_root);
+        inst.definition_id = "tpl-legacy".to_string();
+        inst.identity_id = "id-legacy-tpl".to_string();
+        inst.block_id = "block-old-tpl".to_string();
+        store.instance_create(&inst).unwrap();
+
+        // Block ONLY records the template id (no agentInstanceId).
+        let mut block = crate::backend::obj::Block {
+            oid: "block-old-tpl".to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = crate::backend::obj::MetaMapType::new();
+                m.insert("agentId".to_string(), serde_json::json!("tpl-legacy"));
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+
+        let got = store
+            .instance_get_active_for_block("block-old-tpl")
+            .unwrap()
+            .expect("legacy template block must resolve via db_agent_instances fallback");
+        assert_eq!(got.identity_id, "id-legacy-tpl");
     }
 
     #[test]
