@@ -4,6 +4,7 @@
 //! Storage layer: SQLite-backed object store and file store.
 //! Port of Go's pkg/wstore and pkg/filestore.
 
+pub mod agents;
 pub mod agents_consolidate;
 pub mod content;
 pub mod dual_write;
@@ -18,6 +19,7 @@ pub mod skills;
 pub mod snapshot;
 pub mod store;
 
+pub use agents::{AgentDefinition, AgentInstance, InstanceStatus};
 pub use content::AgentContent;
 pub use error::StoreError;
 #[allow(unused_imports)]
@@ -25,4 +27,3 @@ pub use history::AgentHistory;
 pub use identities::{AgentIdentityLink, Identity, IdentityAccount, IdentityBinding, SecretRef};
 pub use memory_bundles::Memory;
 pub use skills::AgentSkill;
-pub use store::AgentDefinition;
