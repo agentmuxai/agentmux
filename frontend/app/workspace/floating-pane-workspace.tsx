@@ -123,6 +123,17 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         let latestScreenY = 0;
         let setPosInFlight = false;
         let pendingPos: { x: number; y: number } | null = null;
+        // Gates the maximize→restore-under-cursor branch behind a real
+        // drag intent. Set on mousedown over a maximized header, cleared
+        // either by mouseup (= it was a click) or by mousemove past the
+        // drag threshold (= real drag, kick off the restore). Without
+        // this, a plain click on a maximized header restored + moved the
+        // window before the dblclick handler could re-maximize it (Codex
+        // P2 on PR #1132). 4 CSS px matches the Windows GetSystemMetrics
+        // (SM_CXDRAG) default; same threshold OS-level drag uses.
+        let pendingMaximizedRestore = false;
+        let restoringFromMaximized = false;
+        const DRAG_RESTORE_THRESHOLD_CSS_PX = 4;
 
         // Capture once per mount — windowLabel is fixed for the
         // floater's lifetime. Used to route `get/set_window_position`
@@ -172,6 +183,94 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 });
         };
 
+        // Restore the maximized floater under the cursor, then arm
+        // the drag loop on the restored origin. Called from
+        // `onMouseMove` once the user has moved past
+        // DRAG_RESTORE_THRESHOLD_CSS_PX — confirming this is a real
+        // drag, not a click or a dblclick. Uses the host's atomic
+        // `restore_window_and_move` so there's no flash of the
+        // maximized rect at its old origin between SW_RESTORE and
+        // SetWindowPos. See spec §4.2 / §5.4.
+        const performMaximizedRestoreAndDrag = async (e: MouseEvent) => {
+            if (restoringFromMaximized) return;
+            restoringFromMaximized = true;
+            pendingMaximizedRestore = false;
+            const myId = currentMouseDownId;
+
+            let stash: {
+                left: number;
+                top: number;
+                w: number;
+                h: number;
+            } | null = null;
+            try {
+                stash = await invokeCommand<{
+                    left: number;
+                    top: number;
+                    w: number;
+                    h: number;
+                } | null>("consume_restored_rect", { label });
+            } catch {
+                stash = null;
+            }
+            if (myId !== currentMouseDownId) {
+                restoringFromMaximized = false;
+                return;
+            }
+            const dpr = window.devicePixelRatio || 1;
+            // Anchor the restored rect under the cursor. Centre the
+            // header width on the cursor (Explorer feel) and place the
+            // cursor ~16 CSS px below the top edge so it lands in the
+            // pane header (not the top resize band). The 16-CSS-px
+            // offset is scaled by `dpr` for physical pixels — without
+            // this, at 200% DPI the offset shrinks to 8 CSS px and
+            // lands at the top-edge resize band boundary (ReAgent P2
+            // on PR #1132). Default size is a defensive fallback;
+            // `maximize_window` stashes on the maximize so the stash
+            // is normally present.
+            const restoredW = stash?.w ?? Math.round(800 * dpr);
+            const restoredH = stash?.h ?? Math.round(600 * dpr);
+            const cursorPhysX = Math.round(e.screenX * dpr);
+            const cursorPhysY = Math.round(e.screenY * dpr);
+            const restoredX = cursorPhysX - Math.round(restoredW / 2);
+            const restoredY = cursorPhysY - Math.round(16 * dpr);
+            try {
+                await invokeCommand("restore_window_and_move", {
+                    label,
+                    x: restoredX,
+                    y: restoredY,
+                    w: restoredW,
+                    h: restoredH,
+                });
+            } catch (err) {
+                console.error(
+                    "[floating-pane] restore_window_and_move failed",
+                    err,
+                );
+                restoringFromMaximized = false;
+                return;
+            }
+            if (myId !== currentMouseDownId) {
+                restoringFromMaximized = false;
+                return;
+            }
+            setFloatingPaneInfo({
+                windowLabel: label,
+                state: "normal",
+            });
+            // Baseline the drag loop on the post-restore origin AND
+            // rebase the click anchor to the CURRENT cursor — so the
+            // next mousemove delta is computed against where the
+            // window now sits (just under the cursor), not where the
+            // original mousedown landed up in the maximized title bar.
+            initWinX = restoredX;
+            initWinY = restoredY;
+            clickScreenX = e.screenX;
+            clickScreenY = e.screenY;
+            dragging = true;
+            restoringFromMaximized = false;
+        };
+
         const onMouseDown = async (e: MouseEvent) => {
             if (e.button !== 0) return;
             const target = e.target as HTMLElement | null;
@@ -194,71 +293,18 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             latestScreenX = e.screenX;
             latestScreenY = e.screenY;
 
-            // Drag-from-maximized restore. Windows Explorer-style: dragging
-            // a maximized window's "title" restores it under the cursor.
-            // We replicate manually because the JS-driven drag suppresses
-            // the OS WM_NCLBUTTONDOWN/HTCAPTION path that would otherwise
-            // do this for free. The host's `restore_window_and_move` is
-            // atomic — no flash of the maximized rect at its old origin
-            // between SW_RESTORE and SetWindowPos. See spec §4.2 / §5.4.
+            // Drag-from-maximized: defer the actual restore until the
+            // cursor has moved past DRAG_RESTORE_THRESHOLD_CSS_PX. A
+            // plain click (or the mousedown half of a dblclick) lands
+            // here too, and previously kicked off `restore_window_and_move`
+            // immediately — restoring + repositioning the window on what
+            // turned out to be a click, and racing the dblclick handler
+            // that wanted to toggle maximize back on. The helper below
+            // (`performMaximizedRestoreAndDrag`) runs when mousemove
+            // confirms drag intent. Codex P2 on PR #1132.
             const currentState = useFloatingPaneInfo()?.state;
             if (currentState === "maximized") {
-                let stash: {
-                    left: number;
-                    top: number;
-                    w: number;
-                    h: number;
-                } | null = null;
-                try {
-                    stash = await invokeCommand<{
-                        left: number;
-                        top: number;
-                        w: number;
-                        h: number;
-                    } | null>("consume_restored_rect", { label });
-                } catch {
-                    stash = null;
-                }
-                if (myId !== currentMouseDownId) return;
-                const dpr = window.devicePixelRatio || 1;
-                // Anchor the restored rect under the cursor. Centre the
-                // header width on the cursor (matches the Explorer feel)
-                // and place the cursor ~16 px below the top edge so it
-                // lands in the middle of the pane header. Fall back to a
-                // reasonable default size if no stash existed (shouldn't
-                // happen — maximize_window stashes — but defensive).
-                const restoredW = stash?.w ?? Math.round(800 * dpr);
-                const restoredH = stash?.h ?? Math.round(600 * dpr);
-                const cursorPhysX = Math.round(e.screenX * dpr);
-                const cursorPhysY = Math.round(e.screenY * dpr);
-                const restoredX = cursorPhysX - Math.round(restoredW / 2);
-                const restoredY = cursorPhysY - 16;
-                try {
-                    await invokeCommand("restore_window_and_move", {
-                        label,
-                        x: restoredX,
-                        y: restoredY,
-                        w: restoredW,
-                        h: restoredH,
-                    });
-                } catch (err) {
-                    console.error(
-                        "[floating-pane] restore_window_and_move failed",
-                        err,
-                    );
-                    return;
-                }
-                if (myId !== currentMouseDownId) return;
-                setFloatingPaneInfo({
-                    windowLabel: label,
-                    state: "normal",
-                });
-                // Baseline the drag loop on the post-restore origin so
-                // mousemove deltas land relative to where the floater now
-                // sits, not where the maximized rect used to be.
-                initWinX = restoredX;
-                initWinY = restoredY;
-                dragging = true;
+                pendingMaximizedRestore = true;
                 return;
             }
 
@@ -322,6 +368,23 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             // most recent value
             latestScreenX = e.screenX;
             latestScreenY = e.screenY;
+            // Drag-from-maximized trigger: if a mousedown landed on
+            // a maximized header and the cursor has now moved past
+            // the drag threshold, kick off the restore-under-cursor
+            // dance. Until the threshold is crossed, clicks and
+            // dblclicks fall through harmlessly (Codex P2 on
+            // PR #1132).
+            if (pendingMaximizedRestore && !restoringFromMaximized) {
+                const dx = e.screenX - clickScreenX;
+                const dy = e.screenY - clickScreenY;
+                if (
+                    Math.abs(dx) > DRAG_RESTORE_THRESHOLD_CSS_PX ||
+                    Math.abs(dy) > DRAG_RESTORE_THRESHOLD_CSS_PX
+                ) {
+                    void performMaximizedRestoreAndDrag(e);
+                }
+                return;
+            }
             if (!dragging) return;
             // CSS-px delta * devicePixelRatio = physical-px delta added
             // to the physical-px baseline from get_window_position. Re-
@@ -343,6 +406,11 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             currentMouseDownId += 1;
             const wasDragging = dragging;
             dragging = false;
+            // Clear the deferred-restore arm if it was set: mouseup
+            // before threshold means the gesture was a click (or the
+            // mousedown half of a dblclick), so the maximized state
+            // should stay put.
+            pendingMaximizedRestore = false;
             // Do NOT clear pendingPos — that would discard the FINAL
             // queued position (the cursor's location at release time).
             // Let the in-flight set_window_position complete; its

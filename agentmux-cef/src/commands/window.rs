@@ -207,6 +207,13 @@ pub fn maximize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
                 return Ok(serde_json::json!({ "state": "maximized" }));
             }
         }
+        // Windows path with a null HWND: the caller passed a label
+        // that didn't resolve. Returning `{state:"normal"}` here
+        // would let the frontend update its glyph for a window it
+        // never actually toggled (stale-restore-glyph regression).
+        // Surface as an Err so the FE can keep the old glyph and
+        // surface the failure. ReAgent P2 on PR #1132.
+        return Err(format!("maximize_window: label '{}' not resolved to a window", label));
     }
     #[cfg(not(target_os = "windows"))]
     {
