@@ -489,14 +489,35 @@ fn main() {
     // mode the CEF host is IN runtime/, so resources are flat
     // alongside it. In dev mode they are also flat in dist/cef-dev/.
     // Reuses `host_exe_dir` from the startup mode-detection block.
+    //
+    // macOS is the exception: Chromium ships icudtl.dat + the .pak
+    // files + locales inside the framework bundle's `Resources/`
+    // directory, not flat next to the binary. cef-rs's LibraryLoader
+    // already finds the framework via `../Frameworks/...`; we point
+    // CefSettings at the same place so Chromium's icu_util loader,
+    // pack loader, and locale loader resolve correctly. See
+    // docs/specs/SPEC_MACOS_CEF_FRAMEWORK_BUNDLING_2026_05_28.md.
     let runtime_dir = host_exe_dir.join("runtime");
     let base_dir = if runtime_dir.exists() {
         runtime_dir
     } else {
         host_exe_dir.clone()
     };
-    let resources_dir = CefString::from(base_dir.to_str().unwrap_or(""));
-    let locales_dir = CefString::from(base_dir.join("locales").to_str().unwrap_or(""));
+    #[cfg(not(target_os = "macos"))]
+    let (resources_path, locales_path) = (base_dir.clone(), base_dir.join("locales"));
+    #[cfg(target_os = "macos")]
+    let (framework_path, resources_path, locales_path) = {
+        let framework = base_dir
+            .join("..")
+            .join("Frameworks")
+            .join("Chromium Embedded Framework.framework");
+        let resources = framework.join("Resources");
+        (framework, resources.clone(), resources)
+    };
+    let resources_dir = CefString::from(resources_path.to_str().unwrap_or(""));
+    let locales_dir = CefString::from(locales_path.to_str().unwrap_or(""));
+    #[cfg(target_os = "macos")]
+    let framework_dir = CefString::from(framework_path.to_str().unwrap_or(""));
 
     // Reuse data_dir from single-instance check as CEF cache path.
     // Remove stale lockfile from a previous killed run.
@@ -535,6 +556,13 @@ fn main() {
         root_cache_path: cache_dir,
         resources_dir_path: resources_dir,
         locales_dir_path: locales_dir,
+        // macOS-only: tell CEF where the framework bundle lives so it can
+        // resolve icudtl.dat, *.pak, and helper-process binaries through
+        // NSBundle. Without this, Chromium's icu_util loader looks via
+        // [NSBundle mainBundle] (the host exe's pseudo-bundle) which has
+        // no Resources/ and fails with "icudtl.dat not found in bundle".
+        #[cfg(target_os = "macos")]
+        framework_dir_path: framework_dir,
         log_file: cef_log_file,
         log_severity: LogSeverity::INFO,
         // CEF subprocess (renderer, GPU) uses the same exe

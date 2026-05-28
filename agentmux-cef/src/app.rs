@@ -423,6 +423,29 @@ wrap_app! {
                 // Upstream: https://github.com/chromiumembedded/cef/issues/3603
                 cmd.append_switch(Some(&CefString::from("disable-chrome-login-prompt")));
 
+                // Suppress OS credential prompts on startup.
+                //
+                // `--password-store=basic` swaps Chromium's password backend
+                // from the platform-native store (Keychain on macOS,
+                // gnome-keyring/kwallet on Linux, CredVault on Windows) to
+                // an in-process unencrypted store. The native backends will
+                // pop an "AgentMux wants to use your confidential information
+                // stored in Login" Keychain prompt the first time Chromium
+                // touches them, even if AgentMux never actually saves a
+                // password.
+                let ps_key = CefString::from("password-store");
+                let ps_val = CefString::from("basic");
+                cmd.append_switch_with_value(Some(&ps_key), Some(&ps_val));
+
+                // macOS belt-and-suspenders: `--use-mock-keychain` redirects
+                // EVERY keychain call to an in-process mock, including code
+                // paths that bypass the password store (e.g. AutoFill, OS
+                // crypt key derivation for cookie encryption). Without this,
+                // Chromium still surfaces a Keychain auth dialog on first
+                // run as the OSCrypt subsystem fetches its encryption key.
+                #[cfg(target_os = "macos")]
+                cmd.append_switch(Some(&CefString::from("use-mock-keychain")));
+
                 // GPU compositing runs in a separate process (Chromium default).
                 // This allows Chromium to restart the GPU process transparently
                 // after driver resets (TDR, DXGI device removal, display power
