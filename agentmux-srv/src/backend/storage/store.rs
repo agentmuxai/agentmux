@@ -2864,7 +2864,7 @@ mod tests {
             icon: "✦".to_string(),
             provider: "claude".to_string(),
             description: "desc".to_string(),
-            working_directory: String::new(),
+            working_directory: "/wd/tpl-cfg".to_string(),
             shell: "bash".to_string(),
             provider_flags: String::new(),
             auto_start: 0,
@@ -2911,7 +2911,10 @@ mod tests {
         assert_eq!(read_agent_field(&store, "inst-dw", "name"), Some("Maks".to_string()));
         assert_eq!(read_agent_field(&store, "inst-dw", "identity_id"), Some("id-1".to_string()));
         assert_eq!(read_agent_field(&store, "inst-dw", "memory_id"), Some("mem-1".to_string()));
-        assert_eq!(read_agent_field(&store, "inst-dw", "working_directory"), Some("/wd/maks".to_string()));
+        // working_directory mirrors the DEFINITION's configured cwd, NOT the
+        // instance's resolved workdir ("/wd/maks"). db_agents holds durable
+        // agent config; the per-launch resolved cwd lives on the block.
+        assert_eq!(read_agent_field(&store, "inst-dw", "working_directory"), Some("/wd/tpl-cfg".to_string()));
         // Continuation rows skipped.
         let cont = AgentInstance {
             id: "inst-cont".to_string(),
@@ -2965,6 +2968,7 @@ mod tests {
             name: "Maks".to_string(),
             is_seeded: 0,
             parent_id: "tpl-folded".to_string(),
+            working_directory: "/wd/clone-cfg".to_string(),
             created_at: 1500,
             updated_at: 1500,
             ..tpl.clone()
@@ -3004,7 +3008,10 @@ mod tests {
         // Bindings folded onto the user-clone-1 row.
         assert_eq!(read_agent_field(&store, "user-clone-1", "identity_id"), Some("id-folded".to_string()));
         assert_eq!(read_agent_field(&store, "user-clone-1", "memory_id"), Some("mem-folded".to_string()));
-        assert_eq!(read_agent_field(&store, "user-clone-1", "working_directory"), Some("/wd/folded".to_string()));
+        // identity_id / memory_id DO fold (per-instance bindings), but
+        // working_directory does NOT — it stays the clone def's configured
+        // cwd, not the instance's resolved workdir ("/wd/folded").
+        assert_eq!(read_agent_field(&store, "user-clone-1", "working_directory"), Some("/wd/clone-cfg".to_string()));
         assert_eq!(read_agent_field(&store, "user-clone-1", "github_context"), Some("gh-ctx-A".to_string()));
         assert_eq!(read_agent_field(&store, "user-clone-1", "instance_name"), Some("Maks v2".to_string()));
         assert_eq!(read_agent_field(&store, "user-clone-1", "name"), Some("Maks v2".to_string()));
