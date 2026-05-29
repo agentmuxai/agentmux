@@ -7,6 +7,13 @@
 // Glyphs are hidden at rest and fade in when the mouse enters the group,
 // matching the standard macOS Sequoia / Sonoma behaviour.
 
+/* stylelint-disable color-no-hex --
+   The macOS traffic-light colours (#FF5F57 / #FFBD2E / #28CA41) are OS
+   brand values that must match Apple's HIG exactly. They are not
+   theme-relative and don't map to any semantic token. Sibling
+   window-controls.win32.scss scopes the same exception for the
+   Windows close-button red. */
+
 .traffic-lights {
     display: flex;
     flex-direction: row;
