@@ -12,7 +12,7 @@ import {
     compareToBaseline, verdictExitCode, VERDICT,
 } from "./bench-stats.mjs";
 
-test("percentile: nearest-rank + edge cases", () => {
+test("percentile: floored-index + edge cases", () => {
     assert.equal(percentile([], 95), null);
     assert.equal(percentile([5], 50), 5);
     assert.equal(percentile([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 50), 6);

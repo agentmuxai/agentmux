@@ -44,6 +44,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install deps (benches import 'ws')
+        run: npm ci
+
       - name: Unit-test the stats core (no app needed)
         run: node --test tools/tests/lib/bench-stats.test.mjs
 

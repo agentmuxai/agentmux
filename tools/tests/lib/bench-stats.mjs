@@ -23,7 +23,13 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 
 // ── Percentiles & single-sample-set summary ─────────────────────────────────
 
-/** Nearest-rank percentile (p in [0,100]). Returns null for empty input. */
+/**
+ * Percentile via floored linear index: idx = clamp(floor(N*p/100), 0, N-1).
+ * This intentionally matches the convention already used by the benches
+ * (bench-agent-keystroke.mjs, bench-term-echo.mjs) so aggregated numbers line
+ * up with each bench's own per-run output. It is NOT the strict nearest-rank
+ * (ceil) definition. p in [0,100]; returns null for empty input.
+ */
 export function percentile(arr, p) {
     if (!arr || arr.length === 0) return null;
     const sorted = [...arr].sort((a, b) => a - b);
