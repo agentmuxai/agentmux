@@ -397,8 +397,28 @@ pub(crate) fn capture_hwnd_for_label(state: &Arc<AppState>, label: &str) {
         if let Some(host) = browser.host() {
             let hwnd = host.window_handle();
             if !hwnd.0.is_null() {
-                state.window_hwnds.lock().insert(label.to_string(), hwnd.0 as isize);
-                tracing::debug!("[opacity] captured hwnd fast-path label={} hwnd={:#x}", label, hwnd.0 as isize);
+                // `host.window_handle()` can be the CEF inner WS_CHILD (the
+                // main window's Views child, or any `set_as_child` browser),
+                // but the cache MUST hold the OUTER top-level frame. The cache-
+                // first `resolve_window_hwnd` returns cache hits verbatim — it
+                // deliberately does NOT walk GA_ROOT on a hit (that would be
+                // wrong for owned floaters, whose GA_ROOT is their owner). So
+                // if we stash a child here, `set_window_position` drags the
+                // child within its parent (the main-window title-bar drag looks
+                // dead) and the redock Z-order walk in `resolve_window_at_cursor`
+                // — which matches real top-level frames against this map — never
+                // finds the main frame (no redock ghost / no drop target).
+                // Walk to GA_ROOT once at capture so the "cache holds the outer
+                // frame" invariant matches what floater-create pre-registers.
+                let raw = hwnd.0 as isize;
+                #[cfg(target_os = "windows")]
+                let raw = unsafe {
+                    use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
+                    let root = GetAncestor(hwnd.0 as *mut std::ffi::c_void, GA_ROOT);
+                    if root.is_null() { raw } else { root as isize }
+                };
+                state.window_hwnds.lock().insert(label.to_string(), raw);
+                tracing::debug!("[opacity] captured hwnd fast-path label={} hwnd={:#x} (outer via GA_ROOT)", label, raw);
                 return;
             }
         }

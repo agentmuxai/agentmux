@@ -4,9 +4,12 @@
 //! Pane window-placement reducer handlers (pane-state reducer, Phase 0).
 //!
 //! Owns the OS-window placement of FLOATING panes — the maximize/restore
-//! state and the rect to restore to — keyed by `block_id` in
-//! `HostState.pane_window_states`. Lifecycle (Live/Closing) is NOT here; it
-//! stays in `HostState.browser_panes` (`panes.rs`).
+//! state and the rect to restore to — keyed by the floating-window label
+//! (`floating-<uuid>`) in `HostState.pane_window_states`. Lifecycle
+//! (Live/Closing) is NOT here; it stays in `HostState.browser_panes`
+//! (`panes.rs`). Floaters live in `AppState.window_hwnds`, never in
+//! `browser_panes`, which is why eviction is keyed by label here (not by
+//! block_id via the `browser_panes` close path).
 //!
 //! Design + rationale: `SPEC_PANE_STATE_REDUCER_2026-05-28.md`
 //! (REVISION 2026-05-29 — folded into `HostState` instead of a standalone
@@ -14,101 +17,116 @@
 //! `pane::lifecycle::PaneStateMachine` in commit 151f42e2 because a parallel
 //! pane-state store drifted from the reducer's).
 //!
-//! ## Scope of Phase 0 (this PR)
+//! ## What this module owns
 //!
 //! - The `pane_window_states` field on `HostState` + its types in
 //!   `crate::state` (`PaneWindowState`, `WindowPlacement`, `PaneRect`).
-//! - The `ToggleFloatingMaximize` arm (the floating half of the shared
-//!   maximize button, spec §3.3a). It is DORMANT — wired into `update()`
-//!   and unit-tested, but no production code dispatches it yet. The IPC
-//!   wiring (refactoring `maximize_window` to dispatch this + apply the
-//!   `ShowWindow` side-effect from the emitted event) lands in a later
-//!   phase, alongside deleting `AppState.floating_restored_rects`.
+//! - `ToggleFloatingMaximize` (the floating half of the shared maximize
+//!   button, spec §3.3a) — dispatched by the `toggle_floating_maximize` IPC
+//!   from `FloatingMaximizeButton`. The reducer flips placement Normal↔
+//!   Maximized, stashes the floater's current rect on the way up, and returns
+//!   it as `PaneWindowStateChanged.restore_rect` on the way down. The IPC
+//!   handler applies the Win32 geometry AFTER dispatch — `SetWindowPos` to the
+//!   monitor work area on maximize, or back to the captured rect on restore
+//!   (NOT `ShowWindow(SW_MAXIMIZE)`, which mis-handles borderless popups).
+//! - `EvictFloatingPaneWindowState` — dispatched from `on_before_close` so a
+//!   floater's placement entry never outlives its window.
 //!
-//! ## Out of scope for Phase 0
+//! ## Out of scope (later phases)
 //!
-//! - `ReportOSPlacementChange` (Win+Down / system menu → reducer) — later phase.
+//! - `ReportOSPlacementChange` (Win+Down / system menu → reducer).
 //! - `ReportNormalRect` (WM_WINDOWPOSCHANGED debounced) + the backend
-//!   rect-mirror (`block.meta["pane:floating_normal_rect"]`) — later phase.
-//! - Cleanup-on-close eviction folded into the `browser_panes`
-//!   Closing→Closed transition — later phase.
+//!   rect-mirror (`block.meta["pane:floating_normal_rect"]`) — currently the
+//!   normal rect is captured at click time, not continuously tracked.
 
-use crate::state::{PaneWindowState, WindowPlacement};
+use crate::state::{PaneRect, PaneWindowState, WindowPlacement};
 
 use super::{DispatchOutput, HostEvent, HostState};
 
 /// Toggle a floating pane's OS-window maximize: `Maximized → Normal`, or
 /// anything else (`Normal` / `Minimized`) `→ Maximized`. Inserts a default
-/// `Normal` entry first if the pane has none yet.
+/// `Normal` entry first if the floater has none yet. Keyed by the
+/// floating-window `label` (`floating-<uuid>`).
 ///
-/// Pure: flips `pane_window_states[block_id].placement` and emits
+/// Pure: flips `pane_window_states[label].placement` and emits
 /// `PaneWindowStateChanged`. The `ShowWindow(SW_MAXIMIZE/SW_RESTORE)`
 /// side-effect is applied by the IPC handler AFTER `host_dispatch` returns —
-/// never inside the reducer (snapshot-and-drop discipline, spec §3.6).
+/// never inside the reducer (snapshot-and-drop discipline, spec §3.6) — by
+/// resolving `window_hwnds[label]`.
 pub(super) fn handle_toggle_floating_maximize(
     state: &mut HostState,
-    block_id: String,
+    label: String,
+    current_rect: Option<PaneRect>,
 ) -> DispatchOutput {
     // Scope the map borrow so it ends before `bump_version` re-borrows state.
-    let new_placement = {
+    // `restore_rect` is the rect the IPC handler must `SetWindowPos` the
+    // floater back to on a Maximized→Normal flip. Borderless WS_POPUP
+    // floaters have no usable native maximize placement, so we capture the
+    // pre-maximize rect here and hand it back on restore (the handler sizes
+    // to the monitor work area on the way up).
+    let (new_placement, restore_rect) = {
         let entry = state
             .pane_window_states
-            .entry(block_id.clone())
+            .entry(label.clone())
             .or_insert(PaneWindowState {
                 placement: WindowPlacement::Normal,
                 last_known_normal_rect: None,
             });
-        let next = match entry.placement {
-            WindowPlacement::Maximized => WindowPlacement::Normal,
-            // Normal or Minimized both enlarge to Maximized.
-            WindowPlacement::Normal | WindowPlacement::Minimized => WindowPlacement::Maximized,
-        };
-        entry.placement = next;
-        next
+        match entry.placement {
+            WindowPlacement::Maximized => {
+                // Maximized → Normal: hand back the rect we stashed when
+                // maximizing (if any), then clear it.
+                entry.placement = WindowPlacement::Normal;
+                let restore = entry.last_known_normal_rect.take();
+                (WindowPlacement::Normal, restore)
+            }
+            // Normal or Minimized both enlarge to Maximized. Stash the
+            // floater's current (normal) rect so the next restore can return
+            // to it; the handler computes the maximized (work-area) rect.
+            WindowPlacement::Normal | WindowPlacement::Minimized => {
+                entry.placement = WindowPlacement::Maximized;
+                entry.last_known_normal_rect = current_rect;
+                (WindowPlacement::Maximized, None)
+            }
+        }
     };
 
     let version = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::PaneWindowStateChanged {
-            block_id,
+            label,
             placement: new_placement,
+            restore_rect,
             version,
         }],
         ..Default::default()
     }
 }
 
+/// Evict a floater's window-placement entry on window close. Dispatched from
+/// `on_before_close` alongside the `window_hwnds[label]` eviction, so the
+/// placement entry can never outlive the floater. Idempotent — no-op if
+/// absent (non-floater windows never have an entry). This is the label-keyed
+/// cleanup-on-close that the (removed) block_id co-eviction in `panes.rs`
+/// could never do for floaters, since floaters aren't in `browser_panes`.
+pub(super) fn handle_evict_floating_pane_window_state(
+    state: &mut HostState,
+    label: String,
+) -> DispatchOutput {
+    // Idempotent: nothing to do (and no event) if there was no entry.
+    state.pane_window_states.remove(&label);
+    DispatchOutput::default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::reducer::{update, HostCommand};
-    use crate::state::{BrowserPaneEntry, BrowserPaneLifecycle};
 
-    fn placement_of(state: &HostState, block_id: &str) -> Option<WindowPlacement> {
-        state
-            .pane_window_states
-            .get(block_id)
-            .map(|e| e.placement)
-    }
+    const LBL: &str = "floating-abc123";
 
-    /// Seed a Live lifecycle entry + a Maximized placement entry for the
-    /// same block, so close/drain/abort arms have something to co-evict.
-    fn seed_pane(state: &mut HostState, block_id: &str, label: &str) {
-        state.browser_panes.insert(
-            block_id.to_string(),
-            BrowserPaneEntry {
-                block_id: block_id.to_string(),
-                label: label.to_string(),
-                lifecycle: BrowserPaneLifecycle::Live,
-            },
-        );
-        state.pane_window_states.insert(
-            block_id.to_string(),
-            PaneWindowState {
-                placement: WindowPlacement::Maximized,
-                last_known_normal_rect: None,
-            },
-        );
+    fn placement_of(state: &HostState, label: &str) -> Option<WindowPlacement> {
+        state.pane_window_states.get(label).map(|e| e.placement)
     }
 
     fn last_event_placement(out: &DispatchOutput) -> Option<WindowPlacement> {
@@ -121,41 +139,38 @@ mod tests {
     #[test]
     fn toggle_inserts_entry_and_maximizes_when_absent() {
         let mut state = HostState::default();
-        assert!(placement_of(&state, "b1").is_none());
+        assert!(placement_of(&state, LBL).is_none());
 
         let out = update(
             &mut state,
-            HostCommand::ToggleFloatingMaximize { block_id: "b1".into() },
+            HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None },
         );
 
-        assert_eq!(placement_of(&state, "b1"), Some(WindowPlacement::Maximized));
+        assert_eq!(placement_of(&state, LBL), Some(WindowPlacement::Maximized));
         assert_eq!(last_event_placement(&out), Some(WindowPlacement::Maximized));
     }
 
     #[test]
     fn toggle_is_an_identity_round_trip() {
         let mut state = HostState::default();
-        // Normal(implicit) → Maximized → Normal.
-        update(&mut state, HostCommand::ToggleFloatingMaximize { block_id: "b1".into() });
-        assert_eq!(placement_of(&state, "b1"), Some(WindowPlacement::Maximized));
-        update(&mut state, HostCommand::ToggleFloatingMaximize { block_id: "b1".into() });
-        assert_eq!(placement_of(&state, "b1"), Some(WindowPlacement::Normal));
+        // Normal(implicit) -> Maximized -> Normal.
+        update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None });
+        assert_eq!(placement_of(&state, LBL), Some(WindowPlacement::Maximized));
+        update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None });
+        assert_eq!(placement_of(&state, LBL), Some(WindowPlacement::Normal));
     }
 
     #[test]
     fn toggle_emits_versioned_event_each_time() {
         let mut state = HostState::default();
-        let out1 = update(&mut state, HostCommand::ToggleFloatingMaximize { block_id: "b1".into() });
-        let out2 = update(&mut state, HostCommand::ToggleFloatingMaximize { block_id: "b1".into() });
+        let out1 = update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None });
+        let out2 = update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None });
 
-        let v1 = out1.events.iter().find_map(|e| match e {
+        let v = |out: &DispatchOutput| out.events.iter().find_map(|e| match e {
             HostEvent::PaneWindowStateChanged { version, .. } => Some(*version),
             _ => None,
         });
-        let v2 = out2.events.iter().find_map(|e| match e {
-            HostEvent::PaneWindowStateChanged { version, .. } => Some(*version),
-            _ => None,
-        });
+        let (v1, v2) = (v(&out1), v(&out2));
         assert!(v1.is_some() && v2.is_some());
         assert!(v2 > v1, "event version must be monotonic across dispatches");
     }
@@ -164,78 +179,89 @@ mod tests {
     fn minimized_enlarges_to_maximized_not_normal() {
         let mut state = HostState::default();
         state.pane_window_states.insert(
-            "b1".into(),
+            LBL.into(),
             PaneWindowState {
                 placement: WindowPlacement::Minimized,
                 last_known_normal_rect: None,
             },
         );
-        update(&mut state, HostCommand::ToggleFloatingMaximize { block_id: "b1".into() });
-        assert_eq!(placement_of(&state, "b1"), Some(WindowPlacement::Maximized));
+        update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None });
+        assert_eq!(placement_of(&state, LBL), Some(WindowPlacement::Maximized));
     }
 
-    // ── Phase 1: cleanup-on-close — placement is co-evicted wherever a
-    // pane's lifecycle ends, so it can never leak. ───────────────────────
-
-    #[test]
-    fn complete_close_co_evicts_placement() {
-        let mut state = HostState::default();
-        seed_pane(&mut state, "b1", "browser-pane-b1-1");
-        assert!(placement_of(&state, "b1").is_some());
-
-        update(&mut state, HostCommand::CompleteBrowserPaneClose { block_id: "b1".into() });
-
-        assert!(placement_of(&state, "b1").is_none(), "placement must be evicted on close");
-        assert!(!state.browser_panes.contains_key("b1"), "lifecycle entry also gone");
+    fn last_event_restore_rect(out: &DispatchOutput) -> Option<PaneRect> {
+        out.events.iter().rev().find_map(|e| match e {
+            HostEvent::PaneWindowStateChanged { restore_rect, .. } => Some(*restore_rect),
+            _ => None,
+        }).flatten()
     }
 
     #[test]
-    fn drain_by_label_co_evicts_placement() {
+    fn maximize_captures_current_rect_and_restore_returns_it() {
         let mut state = HostState::default();
-        seed_pane(&mut state, "b1", "browser-pane-b1-1");
+        let normal = PaneRect { left: 100, top: 120, right: 740, bottom: 1020 };
 
-        update(&mut state, HostCommand::DrainBrowserPaneByLabel {
-            label: "browser-pane-b1-1".into(),
-        });
-
-        assert!(placement_of(&state, "b1").is_none(), "placement must be evicted on drain");
-    }
-
-    #[test]
-    fn abort_create_co_evicts_placement() {
-        let mut state = HostState::default();
-        seed_pane(&mut state, "b1", "browser-pane-b1-1");
-
-        update(&mut state, HostCommand::AbortBrowserPaneCreate {
-            block_id: "b1".into(),
-            reason: "browser_host returned 0".into(),
-        });
-
-        assert!(placement_of(&state, "b1").is_none(), "placement must be evicted on abort");
-    }
-
-    #[test]
-    fn close_without_placement_entry_is_clean() {
-        // Docked panes never have a placement entry; closing one must not
-        // panic or misbehave — the remove is a no-op.
-        let mut state = HostState::default();
-        state.browser_panes.insert(
-            "docked1".into(),
-            BrowserPaneEntry {
-                block_id: "docked1".into(),
-                label: "browser-pane-docked1-1".into(),
-                lifecycle: BrowserPaneLifecycle::Live,
-            },
+        // Normal → Maximized: stash the current rect, emit no restore_rect
+        // (the handler computes the work area on the way up).
+        let up = update(
+            &mut state,
+            HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: Some(normal) },
         );
-        // No pane_window_states entry.
-        let out = update(&mut state, HostCommand::CompleteBrowserPaneClose {
-            block_id: "docked1".into(),
-        });
-        assert!(!state.browser_panes.contains_key("docked1"));
+        assert_eq!(placement_of(&state, LBL), Some(WindowPlacement::Maximized));
+        assert_eq!(last_event_restore_rect(&up), None, "maximize emits no restore rect");
+        assert_eq!(
+            state.pane_window_states.get(LBL).and_then(|e| e.last_known_normal_rect),
+            Some(normal),
+            "the pre-maximize rect must be stashed for the later restore"
+        );
+
+        // Maximized → Normal: emit the stashed rect so the handler can
+        // SetWindowPos back to it, and clear it from state.
+        let down = update(
+            &mut state,
+            HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None },
+        );
+        assert_eq!(placement_of(&state, LBL), Some(WindowPlacement::Normal));
+        assert_eq!(last_event_restore_rect(&down), Some(normal), "restore returns the captured rect");
+        assert_eq!(
+            state.pane_window_states.get(LBL).and_then(|e| e.last_known_normal_rect),
+            None,
+            "the stashed rect is consumed on restore"
+        );
+    }
+
+    // -- Cleanup-on-close: EvictFloatingPaneWindowState is dispatched from
+    // on_before_close (where window_hwnds[label] is also evicted), keyed by
+    // the floating-window label. This is the correct cleanup hook for
+    // floaters, which are NOT in browser_panes. --
+
+    #[test]
+    fn evict_removes_placement_entry() {
+        let mut state = HostState::default();
+        state.pane_window_states.insert(
+            LBL.into(),
+            PaneWindowState { placement: WindowPlacement::Maximized, last_known_normal_rect: None },
+        );
+        assert!(placement_of(&state, LBL).is_some());
+
+        let out = update(
+            &mut state,
+            HostCommand::EvictFloatingPaneWindowState { label: LBL.into() },
+        );
+
+        assert!(placement_of(&state, LBL).is_none(), "placement must be evicted on close");
+        assert!(out.events.is_empty(), "eviction is internal cleanup; emits no event");
+    }
+
+    #[test]
+    fn evict_absent_label_is_idempotent_noop() {
+        // A non-floater window close (or a double close) must not panic.
+        let mut state = HostState::default();
+        let out = update(
+            &mut state,
+            HostCommand::EvictFloatingPaneWindowState { label: "main".into() },
+        );
         assert!(state.pane_window_states.is_empty());
-        assert!(matches!(
-            out.events.as_slice(),
-            [HostEvent::BrowserPaneClosed { .. }]
-        ));
+        assert!(out.events.is_empty());
     }
 }

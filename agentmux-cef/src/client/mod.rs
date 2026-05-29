@@ -703,6 +703,22 @@ impl AgentMuxHandler {
                     );
                 }
             }
+
+            // Co-evict the floater's window-placement entry (pane-state
+            // reducer). Floaters key `pane_window_states` by window label,
+            // and they're NOT in `browser_panes`, so this close hook — the
+            // same place `window_hwnds` is evicted — is the correct cleanup
+            // site. Gated to `floating-` labels (the only ones that ever
+            // hold an entry); the reducer arm is itself idempotent/no-op if
+            // absent. See SPEC_PANE_STATE_REDUCER_2026-05-28.md (REVISION
+            // 2026-05-29).
+            if lbl.starts_with("floating-") {
+                self.state.host_dispatch(
+                    crate::reducer::HostCommand::EvictFloatingPaneWindowState {
+                        label: lbl.to_string(),
+                    },
+                );
+            }
         }
 
         // Pane-specific on_before_close work (drain lifecycle entry) lives
