@@ -182,28 +182,28 @@ function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void
     return <IconButton decl={magnifyDecl()} className="block-frame-magnify" />;
 }
 
-/** Maximize/restore button for a torn-off FLOATING pane (the floating half of
- *  the shared maximize button — docked panes use {@link OptMagnifyButton} →
+/** Maximize button for a torn-off FLOATING pane (the floating half of the
+ *  shared maximize button — docked panes use {@link OptMagnifyButton} →
  *  layout magnify; see SPEC_PANE_STATE_REDUCER §3.3a). Routes to the host
  *  `toggle_floating_maximize` IPC, which dispatches the reducer's
- *  `ToggleFloatingMaximize`, flips the OS-window placement, and returns the
- *  new placement so we can keep the icon in sync (there is no host→frontend
- *  push channel on main). Reuses {@link MagnifyIcon} so maximize and magnify
- *  read as the same operation. */
+ *  `ToggleFloatingMaximize` and applies the OS-window geometry (maximize to
+ *  the monitor work area / restore to the captured rect).
+ *
+ *  Deliberately a FIXED button: the icon and title don't reflect the
+ *  maximized/normal state. A single click toggles maximize↔restore (users
+ *  expect a maximize button to toggle), which keeps the button stateless —
+ *  the reducer is the single source of truth for placement, not a mirrored
+ *  frontend signal that can drift. */
 function FloatingMaximizeButton(props: { label: string }): JSX.Element {
-    const [maximized, setMaximized] = createSignal(false);
-    const toggle = () => {
-        invokeCommand<{ placement?: string }>("toggle_floating_maximize", { label: props.label })
-            .then((res) => setMaximized(res?.placement === "maximized"))
-            .catch(console.error);
-    };
-    const decl = createMemo<IconButtonDecl>(() => ({
+    const decl: IconButtonDecl = {
         elemtype: "iconbutton",
-        icon: <MagnifyIcon enabled={maximized()} />,
-        title: maximized() ? "Restore" : "Maximize",
-        click: toggle,
-    }));
-    return <IconButton decl={decl()} className="block-frame-magnify" />;
+        icon: <MagnifyIcon enabled={false} />,
+        title: "Maximize",
+        click: () => {
+            invokeCommand("toggle_floating_maximize", { label: props.label }).catch(console.error);
+        },
+    };
+    return <IconButton decl={decl} className="block-frame-magnify" />;
 }
 
 function EndIcons(props: {

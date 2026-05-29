@@ -99,41 +99,102 @@ pub fn toggle_floating_maximize(
         .ok_or_else(|| "toggle_floating_maximize: label is required".to_string())?
         .to_string();
 
-    // 1. Pure reducer dispatch — flips Normal↔Maximized, emits the event.
+    // Read the floater's CURRENT (pre-toggle) screen rect so the reducer can
+    // stash it as the restore target. Win32 physical pixels — the same space
+    // `SetWindowPos` and `GetMonitorInfoW().rcWork` use, so no DPI conversion.
+    #[cfg(target_os = "windows")]
+    let current_rect = unsafe {
+        use windows_sys::Win32::Foundation::RECT;
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
+        let hwnd = super::lifecycle::resolve_window_hwnd(state, &label);
+        if hwnd.is_null() {
+            None
+        } else {
+            let mut r: RECT = std::mem::zeroed();
+            if GetWindowRect(hwnd, &mut r) != 0 {
+                Some(crate::state::PaneRect { left: r.left, top: r.top, right: r.right, bottom: r.bottom })
+            } else {
+                None
+            }
+        }
+    };
+    #[cfg(not(target_os = "windows"))]
+    let current_rect: Option<crate::state::PaneRect> = None;
+
+    // 1. Pure reducer dispatch — flips Normal↔Maximized, stashes/returns rect.
     let out = state.host_dispatch(crate::reducer::HostCommand::ToggleFloatingMaximize {
         label: label.clone(),
+        current_rect,
     });
 
-    // 2. Read the placement the reducer settled on.
-    let placement = out.events.iter().find_map(|e| match e {
-        crate::reducer::HostEvent::PaneWindowStateChanged { placement, .. } => Some(*placement),
-        _ => None,
-    });
+    // 2. Read the placement + restore rect the reducer settled on.
+    let (placement, restore_rect) = out
+        .events
+        .iter()
+        .find_map(|e| match e {
+            crate::reducer::HostEvent::PaneWindowStateChanged { placement, restore_rect, .. } => {
+                Some((*placement, *restore_rect))
+            }
+            _ => None,
+        })
+        .unwrap_or((crate::state::WindowPlacement::Normal, None));
 
-    // 3. Apply the Win32 side-effect AFTER dispatch (mirrors opacity).
+    // 3. Apply the Win32 geometry AFTER dispatch (snapshot-and-drop, mirrors
+    //    set_window_opacity). Borderless WS_POPUP floaters have no usable
+    //    native maximize placement — `ShowWindow(SW_MAXIMIZE)` parks them at
+    //    the top-left at current size — so we size to the monitor work area
+    //    on maximize and back to the captured rect on restore.
     #[cfg(target_os = "windows")]
     {
         use crate::state::WindowPlacement;
-        use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_MAXIMIZE, SW_RESTORE};
-        if let Some(p) = placement {
-            unsafe {
-                // Floaters resolve via the `window_hwnds` cache (label →
-                // outer HWND); the GA_ROOT walk would land on the owner.
-                let hwnd = super::lifecycle::resolve_window_hwnd(state, &label);
-                if !hwnd.is_null() {
-                    let show = if matches!(p, WindowPlacement::Maximized) {
-                        SW_MAXIMIZE
-                    } else {
-                        SW_RESTORE
-                    };
-                    ShowWindow(hwnd, show);
+        use windows_sys::Win32::Foundation::RECT;
+        use windows_sys::Win32::Graphics::Gdi::{
+            GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+        };
+        use windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos;
+        unsafe {
+            // Floaters resolve via the `window_hwnds` cache (label → outer
+            // HWND); the GA_ROOT walk would land on the owner.
+            let hwnd = super::lifecycle::resolve_window_hwnd(state, &label);
+            if !hwnd.is_null() {
+                let target: Option<RECT> = match placement {
+                    WindowPlacement::Maximized => {
+                        // Work area (excludes taskbar) of the floater's monitor.
+                        let hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+                        if hmon.is_null() {
+                            None
+                        } else {
+                            let mut mi: MONITORINFO = std::mem::zeroed();
+                            mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+                            if GetMonitorInfoW(hmon, &mut mi) != 0 {
+                                Some(mi.rcWork)
+                            } else {
+                                None
+                            }
+                        }
+                    }
+                    // Normal/Minimized → restore to the captured rect (if any).
+                    _ => restore_rect
+                        .map(|r| RECT { left: r.left, top: r.top, right: r.right, bottom: r.bottom }),
+                };
+                if let Some(rc) = target {
+                    SetWindowPos(
+                        hwnd,
+                        std::ptr::null_mut(),
+                        rc.left,
+                        rc.top,
+                        rc.right - rc.left,
+                        rc.bottom - rc.top,
+                        // 0x0014 = SWP_NOZORDER (0x0004) | SWP_NOACTIVATE (0x0010).
+                        0x0014,
+                    );
                 }
             }
         }
     }
 
     let placement_str = match placement {
-        Some(crate::state::WindowPlacement::Maximized) => "maximized",
+        crate::state::WindowPlacement::Maximized => "maximized",
         _ => "normal",
     };
     Ok(serde_json::json!({ "placement": placement_str }))

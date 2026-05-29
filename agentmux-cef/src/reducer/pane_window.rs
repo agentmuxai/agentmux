@@ -33,7 +33,7 @@
 //! - Cleanup-on-close eviction folded into the `browser_panes`
 //!   Closing→Closed transition — later phase.
 
-use crate::state::{PaneWindowState, WindowPlacement};
+use crate::state::{PaneRect, PaneWindowState, WindowPlacement};
 
 use super::{DispatchOutput, HostEvent, HostState};
 
@@ -50,9 +50,15 @@ use super::{DispatchOutput, HostEvent, HostState};
 pub(super) fn handle_toggle_floating_maximize(
     state: &mut HostState,
     label: String,
+    current_rect: Option<PaneRect>,
 ) -> DispatchOutput {
     // Scope the map borrow so it ends before `bump_version` re-borrows state.
-    let new_placement = {
+    // `restore_rect` is the rect the IPC handler must `SetWindowPos` the
+    // floater back to on a Maximized→Normal flip. Borderless WS_POPUP
+    // floaters have no usable native maximize placement, so we capture the
+    // pre-maximize rect here and hand it back on restore (the handler sizes
+    // to the monitor work area on the way up).
+    let (new_placement, restore_rect) = {
         let entry = state
             .pane_window_states
             .entry(label.clone())
@@ -60,13 +66,23 @@ pub(super) fn handle_toggle_floating_maximize(
                 placement: WindowPlacement::Normal,
                 last_known_normal_rect: None,
             });
-        let next = match entry.placement {
-            WindowPlacement::Maximized => WindowPlacement::Normal,
-            // Normal or Minimized both enlarge to Maximized.
-            WindowPlacement::Normal | WindowPlacement::Minimized => WindowPlacement::Maximized,
-        };
-        entry.placement = next;
-        next
+        match entry.placement {
+            WindowPlacement::Maximized => {
+                // Maximized → Normal: hand back the rect we stashed when
+                // maximizing (if any), then clear it.
+                entry.placement = WindowPlacement::Normal;
+                let restore = entry.last_known_normal_rect.take();
+                (WindowPlacement::Normal, restore)
+            }
+            // Normal or Minimized both enlarge to Maximized. Stash the
+            // floater's current (normal) rect so the next restore can return
+            // to it; the handler computes the maximized (work-area) rect.
+            WindowPlacement::Normal | WindowPlacement::Minimized => {
+                entry.placement = WindowPlacement::Maximized;
+                entry.last_known_normal_rect = current_rect;
+                (WindowPlacement::Maximized, None)
+            }
+        }
     };
 
     let version = state.bump_version();
@@ -74,6 +90,7 @@ pub(super) fn handle_toggle_floating_maximize(
         events: vec![HostEvent::PaneWindowStateChanged {
             label,
             placement: new_placement,
+            restore_rect,
             version,
         }],
         ..Default::default()
@@ -120,7 +137,7 @@ mod tests {
 
         let out = update(
             &mut state,
-            HostCommand::ToggleFloatingMaximize { label: LBL.into() },
+            HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None },
         );
 
         assert_eq!(placement_of(&state, LBL), Some(WindowPlacement::Maximized));
@@ -131,17 +148,17 @@ mod tests {
     fn toggle_is_an_identity_round_trip() {
         let mut state = HostState::default();
         // Normal(implicit) -> Maximized -> Normal.
-        update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into() });
+        update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None });
         assert_eq!(placement_of(&state, LBL), Some(WindowPlacement::Maximized));
-        update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into() });
+        update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None });
         assert_eq!(placement_of(&state, LBL), Some(WindowPlacement::Normal));
     }
 
     #[test]
     fn toggle_emits_versioned_event_each_time() {
         let mut state = HostState::default();
-        let out1 = update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into() });
-        let out2 = update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into() });
+        let out1 = update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None });
+        let out2 = update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None });
 
         let v = |out: &DispatchOutput| out.events.iter().find_map(|e| match e {
             HostEvent::PaneWindowStateChanged { version, .. } => Some(*version),
@@ -162,8 +179,49 @@ mod tests {
                 last_known_normal_rect: None,
             },
         );
-        update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into() });
+        update(&mut state, HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None });
         assert_eq!(placement_of(&state, LBL), Some(WindowPlacement::Maximized));
+    }
+
+    fn last_event_restore_rect(out: &DispatchOutput) -> Option<PaneRect> {
+        out.events.iter().rev().find_map(|e| match e {
+            HostEvent::PaneWindowStateChanged { restore_rect, .. } => Some(*restore_rect),
+            _ => None,
+        }).flatten()
+    }
+
+    #[test]
+    fn maximize_captures_current_rect_and_restore_returns_it() {
+        let mut state = HostState::default();
+        let normal = PaneRect { left: 100, top: 120, right: 740, bottom: 1020 };
+
+        // Normal → Maximized: stash the current rect, emit no restore_rect
+        // (the handler computes the work area on the way up).
+        let up = update(
+            &mut state,
+            HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: Some(normal) },
+        );
+        assert_eq!(placement_of(&state, LBL), Some(WindowPlacement::Maximized));
+        assert_eq!(last_event_restore_rect(&up), None, "maximize emits no restore rect");
+        assert_eq!(
+            state.pane_window_states.get(LBL).and_then(|e| e.last_known_normal_rect),
+            Some(normal),
+            "the pre-maximize rect must be stashed for the later restore"
+        );
+
+        // Maximized → Normal: emit the stashed rect so the handler can
+        // SetWindowPos back to it, and clear it from state.
+        let down = update(
+            &mut state,
+            HostCommand::ToggleFloatingMaximize { label: LBL.into(), current_rect: None },
+        );
+        assert_eq!(placement_of(&state, LBL), Some(WindowPlacement::Normal));
+        assert_eq!(last_event_restore_rect(&down), Some(normal), "restore returns the captured rect");
+        assert_eq!(
+            state.pane_window_states.get(LBL).and_then(|e| e.last_known_normal_rect),
+            None,
+            "the stashed rect is consumed on restore"
+        );
     }
 
     // -- Cleanup-on-close: EvictFloatingPaneWindowState is dispatched from

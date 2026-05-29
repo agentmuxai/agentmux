@@ -1342,11 +1342,12 @@ fn log_host_event(ev: &crate::reducer::HostEvent) {
             label = %label, version,
         ),
         // ── Pane window-placement (pane-state reducer, Phase 0) ──────────
-        HostEvent::PaneWindowStateChanged { label, placement, version } => tracing::info!(
+        HostEvent::PaneWindowStateChanged { label, placement, restore_rect, version } => tracing::info!(
             target: "host-reducer",
             event = "PaneWindowStateChanged",
             label = %label,
             placement = ?placement,
+            restore_rect = ?restore_rect,
             version,
         ),
         // ── Effect carrier ───────────────────────────────────────────────

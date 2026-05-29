@@ -376,7 +376,17 @@ pub enum HostCommand {
     /// (pure reducer, no I/O) by resolving `window_hwnds[label]`. Docked
     /// panes never reach here — magnify is routed frontend-side to the
     /// backend.
-    ToggleFloatingMaximize { label: String },
+    ///
+    /// `current_rect` is the floater's live screen rect at click time (read
+    /// by the IPC handler before dispatch). On a Normal→Maximized flip the
+    /// reducer stashes it as `last_known_normal_rect` so the later restore
+    /// has a rect to return to — borderless `WS_POPUP` floaters have no
+    /// usable native `WINDOWPLACEMENT`, so we track the normal rect
+    /// ourselves rather than rely on `SW_RESTORE`.
+    ToggleFloatingMaximize {
+        label: String,
+        current_rect: Option<crate::state::PaneRect>,
+    },
 
     /// Evict a floater's window-placement entry. Dispatched from
     /// `on_before_close` (where `window_hwnds[label]` is also evicted) so
@@ -494,9 +504,10 @@ impl std::fmt::Debug for HostCommand {
                 .field("label", label)
                 .field("opacity", opacity)
                 .finish(),
-            HostCommand::ToggleFloatingMaximize { label } => f
+            HostCommand::ToggleFloatingMaximize { label, current_rect } => f
                 .debug_struct("ToggleFloatingMaximize")
                 .field("label", label)
+                .field("current_rect", current_rect)
                 .finish(),
             HostCommand::EvictFloatingPaneWindowState { label } => f
                 .debug_struct("EvictFloatingPaneWindowState")
@@ -683,6 +694,11 @@ pub enum HostEvent {
     PaneWindowStateChanged {
         label: String,
         placement: WindowPlacement,
+        /// On a Maximized→Normal flip, the rect to restore the floater to
+        /// (the `last_known_normal_rect` captured when it was maximized).
+        /// `None` for Normal→Maximized (the handler computes the work area)
+        /// or when no normal rect was ever recorded.
+        restore_rect: Option<crate::state::PaneRect>,
         version: u64,
     },
 
@@ -879,8 +895,8 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
             handle_set_window_opacity(state, label, opacity)
         }
         // Pane window-placement (pane-state reducer)
-        HostCommand::ToggleFloatingMaximize { label } => {
-            pane_window::handle_toggle_floating_maximize(state, label)
+        HostCommand::ToggleFloatingMaximize { label, current_rect } => {
+            pane_window::handle_toggle_floating_maximize(state, label, current_rect)
         }
         HostCommand::EvictFloatingPaneWindowState { label } => {
             pane_window::handle_evict_floating_pane_window_state(state, label)
