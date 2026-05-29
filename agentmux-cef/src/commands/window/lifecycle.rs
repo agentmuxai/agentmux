@@ -155,7 +155,7 @@ unsafe fn is_offscreen_pool_window(hwnd: *mut std::ffi::c_void) -> bool {
 /// skip, the floater (owned, drawn ABOVE its owner) would be
 /// enumerated first and we'd target it instead.
 #[cfg(target_os = "windows")]
-unsafe fn find_main_window() -> *mut std::ffi::c_void {
+pub(super) unsafe fn find_main_window() -> *mut std::ffi::c_void {
     use windows_sys::Win32::System::Threading::GetCurrentProcessId;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 

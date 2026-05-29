@@ -17,7 +17,7 @@ use crate::state::AppState;
 // handlers call these only inside `#[cfg(windows)]` blocks, so the import
 // is gated to match (avoids an unused-import error on other targets).
 #[cfg(target_os = "windows")]
-use super::lifecycle::{find_own_top_level_window, resolve_window_hwnd};
+use super::lifecycle::{find_main_window, find_own_top_level_window, resolve_window_hwnd};
 
 /// Get the current window position on screen.
 ///
@@ -215,6 +215,19 @@ pub fn resolve_window_at_cursor(
             hwnds_by_label.get(exclude_label).copied()
         };
 
+        // Deterministic "main" fallback. `window_hwnds["main"]` is populated
+        // by a startup capture that races the main window becoming
+        // enumerable — when it loses, "main" is absent from the map and the
+        // reverse lookup below can't recognise the main frame, so a floater
+        // dropped onto the main window silently fails to re-dock (the redock
+        // intermittency). `find_main_window()` resolves the real on-screen
+        // main frame independently of the cache (it skips floaters and
+        // off-screen pool windows), so we can recognise main by HWND even
+        // when it never made it into `window_hwnds`. Resolved once here, not
+        // per-iteration. `null` if unresolved → the comparison just never
+        // matches (no regression).
+        let main_hwnd: isize = find_main_window() as isize;
+
         let our_pid = GetCurrentProcessId();
         let mut hwnd = GetTopWindow(std::ptr::null_mut());
         while !hwnd.is_null() {
@@ -245,11 +258,24 @@ pub fn resolve_window_at_cursor(
                                     "window_id": wid,
                                 }));
                             }
+                            // Not in window_hwnds — but if this IS the main
+                            // frame (per the cache-independent resolver),
+                            // recognise it as "main" anyway. This is the
+                            // deterministic redock-onto-main fix: it no longer
+                            // depends on the startup capture having won the
+                            // race to register "main".
+                            if main_hwnd != 0 && h_isize == main_hwnd {
+                                let wid = state.backend_window_id("main");
+                                return Ok(serde_json::json!({
+                                    "label": "main",
+                                    "window_id": wid,
+                                }));
+                            }
                             // Found a window we own but it isn't in
-                            // window_hwnds yet (very early startup or
-                            // a window we don't track). Treat as "no
-                            // agentmux match" and continue Z-order
-                            // walk in case a tracked window sits
+                            // window_hwnds and isn't the main frame (very
+                            // early startup or a window we don't track).
+                            // Treat as "no agentmux match" and continue the
+                            // Z-order walk in case a tracked window sits
                             // behind it.
                         }
                     }
