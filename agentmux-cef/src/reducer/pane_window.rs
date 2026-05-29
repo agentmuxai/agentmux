@@ -4,9 +4,12 @@
 //! Pane window-placement reducer handlers (pane-state reducer, Phase 0).
 //!
 //! Owns the OS-window placement of FLOATING panes — the maximize/restore
-//! state and the rect to restore to — keyed by `block_id` in
-//! `HostState.pane_window_states`. Lifecycle (Live/Closing) is NOT here; it
-//! stays in `HostState.browser_panes` (`panes.rs`).
+//! state and the rect to restore to — keyed by the floating-window label
+//! (`floating-<uuid>`) in `HostState.pane_window_states`. Lifecycle
+//! (Live/Closing) is NOT here; it stays in `HostState.browser_panes`
+//! (`panes.rs`). Floaters live in `AppState.window_hwnds`, never in
+//! `browser_panes`, which is why eviction is keyed by label here (not by
+//! block_id via the `browser_panes` close path).
 //!
 //! Design + rationale: `SPEC_PANE_STATE_REDUCER_2026-05-28.md`
 //! (REVISION 2026-05-29 — folded into `HostState` instead of a standalone
@@ -14,24 +17,27 @@
 //! `pane::lifecycle::PaneStateMachine` in commit 151f42e2 because a parallel
 //! pane-state store drifted from the reducer's).
 //!
-//! ## Scope of Phase 0 (this PR)
+//! ## What this module owns
 //!
 //! - The `pane_window_states` field on `HostState` + its types in
 //!   `crate::state` (`PaneWindowState`, `WindowPlacement`, `PaneRect`).
-//! - The `ToggleFloatingMaximize` arm (the floating half of the shared
-//!   maximize button, spec §3.3a). It is DORMANT — wired into `update()`
-//!   and unit-tested, but no production code dispatches it yet. The IPC
-//!   wiring (refactoring `maximize_window` to dispatch this + apply the
-//!   `ShowWindow` side-effect from the emitted event) lands in a later
-//!   phase, alongside deleting `AppState.floating_restored_rects`.
+//! - `ToggleFloatingMaximize` (the floating half of the shared maximize
+//!   button, spec §3.3a) — dispatched by the `toggle_floating_maximize` IPC
+//!   from `FloatingMaximizeButton`. The reducer flips placement Normal↔
+//!   Maximized, stashes the floater's current rect on the way up, and returns
+//!   it as `PaneWindowStateChanged.restore_rect` on the way down. The IPC
+//!   handler applies the Win32 geometry AFTER dispatch — `SetWindowPos` to the
+//!   monitor work area on maximize, or back to the captured rect on restore
+//!   (NOT `ShowWindow(SW_MAXIMIZE)`, which mis-handles borderless popups).
+//! - `EvictFloatingPaneWindowState` — dispatched from `on_before_close` so a
+//!   floater's placement entry never outlives its window.
 //!
-//! ## Out of scope for Phase 0
+//! ## Out of scope (later phases)
 //!
-//! - `ReportOSPlacementChange` (Win+Down / system menu → reducer) — later phase.
+//! - `ReportOSPlacementChange` (Win+Down / system menu → reducer).
 //! - `ReportNormalRect` (WM_WINDOWPOSCHANGED debounced) + the backend
-//!   rect-mirror (`block.meta["pane:floating_normal_rect"]`) — later phase.
-//! - Cleanup-on-close eviction folded into the `browser_panes`
-//!   Closing→Closed transition — later phase.
+//!   rect-mirror (`block.meta["pane:floating_normal_rect"]`) — currently the
+//!   normal rect is captured at click time, not continuously tracked.
 
 use crate::state::{PaneRect, PaneWindowState, WindowPlacement};
 

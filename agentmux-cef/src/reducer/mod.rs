@@ -686,10 +686,11 @@ pub enum HostEvent {
     // ── Pane window-placement events (pane-state reducer, Phase 0) ───────
 
     /// A floating pane's OS-window placement changed (e.g. via
-    /// `ToggleFloatingMaximize`). The IPC handler applies the matching
-    /// `ShowWindow` side-effect AFTER dispatch; renderers subscribe to keep
-    /// the shared maximize button's icon in sync (replaces PR #1132's
-    /// per-renderer `FloatingPaneContext` direct writes). See
+    /// `ToggleFloatingMaximize`). The IPC handler applies the matching Win32
+    /// geometry AFTER dispatch — `SetWindowPos` to the monitor work area on
+    /// maximize, or back to `restore_rect` on restore. No renderer subscribes:
+    /// the floating maximize button is intentionally stateless (fixed icon),
+    /// so the reducer is the single source of truth for placement. See
     /// SPEC_PANE_STATE_REDUCER_2026-05-28.md §3.4.
     PaneWindowStateChanged {
         label: String,

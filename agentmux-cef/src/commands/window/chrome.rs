@@ -79,12 +79,17 @@ pub fn maximize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 /// Flow mirrors `set_window_opacity` (transparency.rs): dispatch the reducer
 /// command, then apply the Win32 side-effect from the emitted event — never
 /// inside the reducer (snapshot-and-drop, no I/O in the pure reducer). The
-/// reducer owns the Normal↔Maximized state; we resolve the floater's outer
-/// HWND from `window_hwnds[label]` and call `ShowWindow`.
+/// reducer owns the Normal↔Maximized state (and the restore rect); we
+/// resolve the floater's outer HWND from `window_hwnds[label]` and, via
+/// `SetWindowPos`, size it to the monitor work area on maximize or back to
+/// the reducer-supplied normal rect on restore. We do NOT use
+/// `ShowWindow(SW_MAXIMIZE)` — borderless `WS_POPUP` floaters have no usable
+/// native maximize placement (it parks them top-left at current size).
 ///
-/// Returns `{ "placement": "maximized" | "normal" }` so the frontend button
-/// can update its icon from the result — there is no host→frontend event
-/// push channel on main.
+/// Returns `{ "placement": "maximized" | "normal" }` for callers that want
+/// the settled placement. The floating button itself is intentionally a
+/// FIXED "Maximize" button (no icon flip), so it ignores the result — the
+/// reducer is the single source of truth for placement.
 ///
 /// Maximize is intentionally independent of edge-resize: it does NOT install
 /// the HTTRANSPARENT WM_NCHITTEST child-subclass, so it cannot perturb the
