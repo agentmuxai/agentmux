@@ -405,22 +405,40 @@ unsafe extern "system" fn floating_pane_wndproc(
             // we don't map any zone to HTCAPTION here. Fall through to
             // HTCLIENT so clicks reach CEF and the JS handler.
         }
-        // Resize the embedded CEF child to fill the client area on every
-        // outer-window resize (maximize / restore, and future edge-resize).
-        // CEF `set_as_child` browsers do NOT self-resize, and our custom
-        // wndproc replaced CEF's default proc — so without this the child
-        // stays at its creation size while the outer grows. That left a
-        // maximized floater's pane content pinned small in the top-left
-        // (the "copy pinned to the left" bug). CEF cascades the resize to
-        // its own inner render-widget children, so sizing the immediate
-        // child is enough. Falls through to DefWindowProcW afterwards.
+        // Resize the floater's FRONTEND browser (header + layout) to fill the
+        // client area on every outer-window resize (maximize / restore, and
+        // future edge-resize). CEF `set_as_child` browsers don't self-resize,
+        // and our custom wndproc replaced CEF's default proc, so without this
+        // the browser stays at its creation size while the outer grows.
+        //
+        // CRITICAL: resize the BOTTOM-most direct child, NOT `GW_CHILD` (the
+        // topmost). The frontend browser is embedded at floater creation, so
+        // it's the oldest child and sits at the BOTTOM of the Z-order. A
+        // BROWSER pane adds a SECOND direct child later — the native
+        // web-content window from `browser_pane_create` — which lands ABOVE
+        // the frontend. Resizing the topmost child therefore stretched the
+        // web-content window over the whole floater, hiding the header and
+        // swallowing all input (the "maximized browser pane is fullscreen,
+        // can't click anything" trap). We only size the frontend browser; once
+        // it has the new viewport it reflows and repositions its own
+        // web-content child below the header via `browser_pane_resize`. CEF
+        // cascades the resize to the frontend's inner render-widget children.
+        // (Terminal/agent floaters have a single child, so bottom-most == that
+        // child — unchanged.) Falls through to DefWindowProcW afterwards.
         WM_SIZE => {
-            let child = GetWindow(hwnd, GW_CHILD);
-            if !child.is_null() {
+            // Walk the sibling Z-order from topmost (GW_CHILD) to the
+            // bottom-most direct child = the frontend browser.
+            let mut frontend = GetWindow(hwnd, GW_CHILD);
+            let mut next = frontend;
+            while !next.is_null() {
+                frontend = next;
+                next = GetWindow(next, GW_HWNDNEXT);
+            }
+            if !frontend.is_null() {
                 let mut rc = std::mem::zeroed::<windows_sys::Win32::Foundation::RECT>();
                 if GetClientRect(hwnd, &mut rc) != 0 {
                     SetWindowPos(
-                        child,
+                        frontend,
                         std::ptr::null_mut(),
                         0,
                         0,
