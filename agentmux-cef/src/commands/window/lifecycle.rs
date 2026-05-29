@@ -115,6 +115,39 @@ pub fn close_window_by_label(
 #[cfg(target_os = "windows")]
 const FLOATING_PANE_CLASS_NAME: &str = "AgentMuxFloatingPane";
 
+/// X-coordinate threshold (in screen px) below which a top-level window is
+/// treated as an off-screen warm-pool member, not a real user window.
+///
+/// Unpromoted pool windows are created at `POOL_OFFSCREEN_X` = -32000
+/// (`window_pool.rs`) and stay there until promoted — but they remain
+/// `IsWindowVisible`, so the EnumWindows-based fallbacks below would
+/// otherwise enumerate one and bind `"main"` to a window the user can't
+/// see. Drags and closes then act on the hidden pool window instead of the
+/// visible one (root cause of the "window won't drag" regression: every
+/// `set_window_position` faithfully moved an off-screen pool window). A
+/// failed drag can nudge the parked window a few hundred px before the bind
+/// is fixed, so we test against a generous threshold rather than the exact
+/// parking coordinate. No real monitor origin is anywhere near -20000
+/// (even a 4K monitor left of primary sits at ~-3840).
+#[cfg(target_os = "windows")]
+const OFFSCREEN_POOL_THRESHOLD_X: i32 = -20000;
+
+/// True if `hwnd` is parked at the warm-pool's off-screen position (see
+/// `OFFSCREEN_POOL_THRESHOLD_X`). Used by both `find_main_window` and the
+/// `capture_hwnd_for_label` fallback to refuse binding an on-screen label
+/// to a hidden pool window. On `GetWindowRect` failure we return `false`
+/// (can't prove it's a pool window — don't skip).
+#[cfg(target_os = "windows")]
+unsafe fn is_offscreen_pool_window(hwnd: *mut std::ffi::c_void) -> bool {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
+    let mut rect: RECT = std::mem::zeroed();
+    if GetWindowRect(hwnd, &mut rect) == 0 {
+        return false;
+    }
+    rect.left < OFFSCREEN_POOL_THRESHOLD_X
+}
+
 /// Like `find_own_top_level_window` but skips floating-pane windows.
 /// Used when the label points at the main window but the reducer-
 /// registry path failed (CEF Views' `BrowserHost::window_handle()`
@@ -152,6 +185,14 @@ unsafe fn find_main_window() -> *mut std::ffi::c_void {
             if class == FLOATING_PANE_CLASS_NAME {
                 return 1;
             }
+        }
+        // Skip unpromoted warm-pool windows parked off-screen. They share
+        // the main window's `Chrome_WidgetWin_1` class (so the class check
+        // above can't catch them) and are `IsWindowVisible`, but they are
+        // NOT the real promoted main window — binding to one breaks
+        // drag/close. See `is_offscreen_pool_window`.
+        if is_offscreen_pool_window(hwnd) {
+            return 1;
         }
         let result_ptr = lparam as *mut *mut std::ffi::c_void;
         *result_ptr = hwnd;
@@ -362,15 +403,33 @@ pub(crate) fn capture_hwnd_for_label(state: &Arc<AppState>, label: &str) {
             }
         }
     }
-    // Fallback: pick the first visible HWND not already mapped.
+    // Fallback: pick the first eligible visible HWND not already mapped.
+    //
+    // For on-screen labels (`main`, tear-off `window-*`, promoted pool
+    // windows) we MUST skip windows still parked at the warm-pool's
+    // off-screen position: those are unpromoted pool members that are
+    // `IsWindowVisible` but invisible to the user. Grabbing one binds the
+    // label to a hidden window, so drag/close act on the wrong window
+    // (root cause of the "window won't drag" regression). When capturing a
+    // pool label itself the window legitimately IS off-screen, so the skip
+    // is disabled for `window-pool-*` labels.
+    let capturing_pool_label = label.starts_with("window-pool-");
     let known: std::collections::HashSet<isize> = state.window_hwnds.lock().values().cloned().collect();
     for hwnd_raw in find_all_own_windows() {
         let raw = hwnd_raw as isize;
-        if !known.contains(&raw) {
-            state.window_hwnds.lock().insert(label.to_string(), raw);
-            tracing::debug!("[opacity] captured hwnd fallback label={} hwnd={:#x}", label, raw);
-            return;
+        if known.contains(&raw) {
+            continue;
         }
+        if !capturing_pool_label && unsafe { is_offscreen_pool_window(hwnd_raw) } {
+            tracing::debug!(
+                "[opacity] capture_hwnd_for_label: skipping off-screen pool window {:#x} for label={}",
+                raw, label
+            );
+            continue;
+        }
+        state.window_hwnds.lock().insert(label.to_string(), raw);
+        tracing::debug!("[opacity] captured hwnd fallback label={} hwnd={:#x}", label, raw);
+        return;
     }
     tracing::warn!("[opacity] capture_hwnd_for_label: no available HWND for label={}", label);
 }
