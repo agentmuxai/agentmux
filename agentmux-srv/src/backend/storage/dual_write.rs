@@ -267,7 +267,8 @@ impl Store {
                     github_context = ?6,
                     instance_name = ?7,
                     updated_at = ?8,
-                    user_hidden = ?9
+                    user_hidden = ?9,
+                    last_block_id = ?10
                  WHERE id = ?1",
                 params![
                     def.id,
@@ -279,6 +280,7 @@ impl Store {
                     inst.instance_name,
                     now_ms,
                     if inst.display_hidden { 1_i64 } else { 0_i64 },
+                    inst.block_id,
                 ],
             )
         } else if is_continuation {
@@ -308,7 +310,8 @@ impl Store {
                     github_context = ?6,
                     instance_name = ?7,
                     updated_at = ?8,
-                    user_hidden = ?9
+                    user_hidden = ?9,
+                    last_block_id = ?10
                  WHERE id = ?1 AND is_template = 0",
                 params![
                     root_id,
@@ -320,6 +323,7 @@ impl Store {
                     inst.instance_name,
                     now_ms,
                     if inst.display_hidden { 1_i64 } else { 0_i64 },
+                    inst.block_id,
                 ],
             )
         } else {
@@ -334,7 +338,8 @@ impl Store {
                     slug, branch_label,
                     identity_id, memory_id, working_directory, github_context,
                     instance_name,
-                    created_at, updated_at, is_seeded, user_hidden
+                    created_at, updated_at, is_seeded, user_hidden,
+                    last_block_id
                  ) VALUES (
                     ?1, ?2, ?3, ?4,
                     0, ?5,
@@ -344,7 +349,8 @@ impl Store {
                     ?16, ?17,
                     ?18, ?19, ?20, ?21,
                     ?22,
-                    ?23, ?24, 0, ?25
+                    ?23, ?24, 0, ?25,
+                    ?26
                  )
                  ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
@@ -354,7 +360,8 @@ impl Store {
                     github_context = excluded.github_context,
                     instance_name = excluded.instance_name,
                     updated_at = excluded.updated_at,
-                    user_hidden = excluded.user_hidden",
+                    user_hidden = excluded.user_hidden,
+                    last_block_id = excluded.last_block_id",
                 params![
                     inst.id,
                     name,
@@ -381,6 +388,7 @@ impl Store {
                     inst.created_at,
                     inst.created_at, // updated_at = created_at on insert
                     if inst.display_hidden { 1_i64 } else { 0_i64 },
+                    inst.block_id,
                 ],
             )
         };
