@@ -64,9 +64,11 @@
         opacity: 1;
     }
 
-    // Unfocused state: all three buttons turn neutral grey.
-    // Applied by JS when the OS window loses focus.
-    &.window-unfocused .traffic-btn {
-        background-color: #9E9E9E;
-    }
+    // NOTE: the macOS HIG "unfocused window → grey traffic lights" polish
+    // is intentionally not implemented here. Wiring it up requires a
+    // focus/blur observer that toggles a `.window-unfocused` class on
+    // this element from JS; both the observer and the class were
+    // omitted from the initial port to keep this PR scoped to the
+    // crash + layout fixes. Track as follow-up alongside other macOS
+    // HIG polish (cursor styles on title-bar, etc.).
 }
