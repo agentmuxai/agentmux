@@ -9,15 +9,23 @@
 // children would see 100vw/factor² and the close/min/max buttons drift left.
 
 .window-header {
-    // Keep the WindowDrag spacer between the traffic-light cluster and the
-    // first tab. The visible 10 px area is what users grab to move the
-    // borderless window — Cocoa's NSWindow.setMovableByWindowBackground
-    // routes drag through any non-control region in the title bar, and
-    // this spacer is the most natural target right of the traffic lights.
-    // Collapsing it to 0 px (as PR #444 originally proposed) makes drag
-    // feel broken because the lights themselves are -webkit-app-region:
-    // no-drag and clicks fall through to the tab bar otherwise.
     --default-indent: 10px;
+
+    // macOS window drag. Chromium for macOS reports
+    // `-webkit-app-region: drag` regions via on_draggable_regions_changed
+    // → cef::Window::set_draggable_regions, which configures the
+    // underlying NSWindow to be movable from those rects. Without this
+    // declaration the borderless main window has no drag handle on
+    // macOS at all — useWindowDrag.darwin.ts only sets a data-attribute
+    // with no native reader. The whole header (excluding tabs / widgets /
+    // traffic lights, which are -webkit-app-region: no-drag) becomes
+    // the drag surface, matching the macOS HIG.
+    //
+    // Linux deliberately does NOT use this (see window-header.linux.scss)
+    // because Chromium/Wayland suppresses all events on drag regions
+    // before they reach the renderer — Linux uses a JS-driven drag IPC
+    // instead.
+    -webkit-app-region: drag;
 }
 
 .config-error-message {
