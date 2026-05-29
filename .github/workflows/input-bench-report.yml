@@ -51,11 +51,19 @@ jobs:
         run: node --test tools/tests/lib/bench-stats.test.mjs
 
       - name: Run bench (report mode)
+        # Inputs go through env (not direct ${{ }} interpolation into the script)
+        # to avoid shell script-injection. EXTRA_ARGS is intentionally unquoted
+        # below so it word-splits into separate bench args.
+        env:
+          BENCH: ${{ inputs.bench }}
+          RUNS: ${{ inputs.runs }}
+          DEVICE: ${{ inputs.device }}
+          EXTRA_ARGS: ${{ inputs.extra_args }}
         run: |
           node tools/tests/bench-aggregate.mjs \
-            --bench "${{ inputs.bench }}" \
-            --runs "${{ inputs.runs }}" \
-            --baseline "tools/tests/baselines/${{ inputs.bench }}.${{ inputs.device }}.json" \
-            --device "${{ inputs.device }}" \
+            --bench "$BENCH" \
+            --runs "$RUNS" \
+            --baseline "tools/tests/baselines/${BENCH}.${DEVICE}.json" \
+            --device "$DEVICE" \
             --mode report \
-            -- ${{ inputs.extra_args }}
+            -- $EXTRA_ARGS
