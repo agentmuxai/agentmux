@@ -499,7 +499,53 @@ tasks:
         internal: true
         platforms: [darwin]
         cmds:
-            - echo "macOS bundling not yet implemented"
+            - |
+                # Resolve macOS CEF runtime via shell helper. Three-tier order:
+                #   1. $AGENTMUX_CEF_RUNTIME_DIR_DARWIN (explicit override)
+                #   2. ~/cef-build/darwin/<arch> (custom builds)
+                #   3. cef-dll-sys cargo cache (fallback — public upstream)
+                # See docs/specs/SPEC_MACOS_CEF_FRAMEWORK_BUNDLING_2026_05_28.md.
+                # Fail fast on any step: a missing CEF framework, a `ditto`
+                # failure, or an unreadable GL lib should fail bundle, not
+                # leak through to dev:serve which would launch the host
+                # straight into the cef-rs LibraryLoader panic and look
+                # like a runtime bug. Matches `bundle:windows`'s explicit
+                # error handling.
+                set -euo pipefail
+                CEF_DIR="$(bash scripts/resolve-cef-runtime-darwin.sh)"
+                if [ -z "$CEF_DIR" ] || [ ! -d "$CEF_DIR/Chromium Embedded Framework.framework" ]; then
+                    echo "❌ resolve-cef-runtime-darwin.sh did not yield a usable CEF framework" >&2
+                    exit 1
+                fi
+                mkdir -p dist/Frameworks dist/cef
+                rm -rf "dist/Frameworks/Chromium Embedded Framework.framework"
+                # `ditto` preserves the Versions/Current symlink chain that the
+                # CEF loader follows on macOS; `cp -R` flattens it and breaks
+                # framework lookup. The cef-dll-sys cargo-cache framework is
+                # already flat (no Versions/), so `ditto` works for both that
+                # and a real cef-build framework.
+                ditto "$CEF_DIR/Chromium Embedded Framework.framework" "dist/Frameworks/Chromium Embedded Framework.framework"
+                # Chromium's GPU process discovers GL libraries via
+                # base::PathService::Get(DIR_MODULE), which resolves to the
+                # directory of the *host* executable — not the framework's
+                # Libraries/ directory. Without these next to the exe the
+                # GPU process exits at gl_implementation.cc:522 ("Failed to
+                # load libGLESv2.dylib") and the renderer surfaces an
+                # app-wide "renderer crashed" banner. Copy rather than
+                # symlink because dev:serve's `cp -r dist/cef/* dist/cef-dev/`
+                # would otherwise leave dangling relative links once the
+                # cef-dev copy lives one level lower than dist/cef.
+                # 22 MB on disk — negligible.
+                libs_dir="$CEF_DIR/Chromium Embedded Framework.framework/Libraries"
+                if [ ! -d "$libs_dir" ]; then
+                    echo "❌ Framework Libraries/ directory missing: $libs_dir" >&2
+                    exit 1
+                fi
+                for lib in "$libs_dir/"*.dylib; do
+                    cp -f "$lib" "dist/cef/$(basename "$lib")"
+                done
+                cp -f "$libs_dir/vk_swiftshader_icd.json" "dist/cef/vk_swiftshader_icd.json"
+                echo "✓ Bundled CEF Framework for macOS (dist/Frameworks/ + GL libs in dist/cef/)"
 
     bundle:linux:
         internal: true
