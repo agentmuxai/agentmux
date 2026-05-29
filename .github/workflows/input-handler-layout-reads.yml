@@ -1,0 +1,35 @@
+name: Input-handler layout-read guardrail
+
+# Enforces SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md
+# rule #3: "Never read layout after touching style on the keystroke path."
+#
+# Catches the 22 ms-per-keystroke reflow regression at PR time rather
+# than chasing it in a Chrome trace later (see
+# docs/analysis/agent-typing-lag-trace-2026-04-12.md for prior incident).
+#
+# Path-filtered — only runs when an in-scope file is modified.
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/app/view/term/**'
+      - 'frontend/app/view/agent/components/AgentFooter.tsx'
+      - 'tools/lint/check-input-handler-layout-reads.sh'
+      - '.github/workflows/input-handler-layout-reads.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/app/view/term/**'
+      - 'frontend/app/view/agent/components/AgentFooter.tsx'
+      - 'tools/lint/check-input-handler-layout-reads.sh'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run check
+        run: bash tools/lint/check-input-handler-layout-reads.sh
