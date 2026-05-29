@@ -1,0 +1,69 @@
+name: Input-latency bench (report)
+
+# Phase 0.1 of the input-first plan (discussion #1161): run the keystroke /
+# echo latency benches N times and REPORT the delta vs the committed baseline.
+#
+# Reporting-mode (never blocks). Promote to a blocking gate (--mode gate) only
+# after the pinned runner's run-to-run variance is characterized — see
+# tools/tests/baselines/README.md.
+#
+# REQUIRES a self-hosted runner on the pinned reference device with a running
+# AgentMux instance and the relevant pane open. GitHub-hosted runners are too
+# noisy for this timing and cannot drive a live AgentMux, so this workflow is
+# MANUAL (workflow_dispatch) until those runners exist.
+#
+# Pass bench-specific args via `extra_args` (they go after `--`):
+#   - agent: drives the agent pane over CDP, e.g. "--cdp-port 9223 --count 200"
+#   - term:  discovers the WS endpoint/auth via authkey.dev (NO --cdp-port),
+#            e.g. "--count 50"
+
+on:
+  workflow_dispatch:
+    inputs:
+      bench:
+        description: "Which bench to run"
+        type: choice
+        options: [agent, term]
+        default: agent
+      runs:
+        description: "Repetitions"
+        default: "5"
+      device:
+        description: "Device label — MUST match the committed baseline filename (e.g. 'thinkpad-x250' → baselines/<bench>.thinkpad-x250.json)"
+        default: "pinned"
+      extra_args:
+        description: "Args passed through to the bench (after --). Both accept --count. --cdp-port is AGENT-ONLY (term discovers WS via authkey.dev); the agent bench defaults to 9223 if omitted."
+        default: "--count 200"
+
+jobs:
+  report:
+    # Self-hosted pinned reference device. Label these runners 'input-bench'.
+    # (No such runner is registered yet — this job will queue until one is.)
+    runs-on: [self-hosted, input-bench]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install deps (benches import 'ws')
+        run: npm ci
+
+      - name: Unit-test the stats core (no app needed)
+        run: node --test tools/tests/lib/bench-stats.test.mjs
+
+      - name: Run bench (report mode)
+        # Inputs go through env (not direct ${{ }} interpolation into the script)
+        # to avoid shell script-injection. EXTRA_ARGS is intentionally unquoted
+        # below so it word-splits into separate bench args.
+        env:
+          BENCH: ${{ inputs.bench }}
+          RUNS: ${{ inputs.runs }}
+          DEVICE: ${{ inputs.device }}
+          EXTRA_ARGS: ${{ inputs.extra_args }}
+        run: |
+          node tools/tests/bench-aggregate.mjs \
+            --bench "$BENCH" \
+            --runs "$RUNS" \
+            --baseline "tools/tests/baselines/${BENCH}.${DEVICE}.json" \
+            --device "$DEVICE" \
+            --mode report \
+            -- $EXTRA_ARGS
