@@ -6,6 +6,7 @@ import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { ModalLayer } from "@/element/ModalLayer";
 import { useModalLayer } from "@/element/modal-layer";
 import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-registry";
+import { paneReflowActive } from "@/app/platform/pane-anim";
 import type { BrowserViewModel } from "./browser-model";
 import "./browser-view.scss";
 
@@ -141,6 +142,39 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         // write).
         registerPaneRect(model.blockId, paneRectCss());
     };
+
+    // Per-frame tracking during a pane reflow animation.
+    //
+    // DOM panes ride the `.tile-node` / `.block-content` CSS transitions, but
+    // a native browser-pane HWND can't be moved by CSS — so while a reflow is
+    // in flight we re-sample this pane's (CSS-animating) placeholder rect every
+    // frame and push it to the host. `syncPosition` dedupes, so frames with no
+    // change are free. The native window thus tracks its DOM placeholder
+    // exactly (one clock, no drift). Reduced-motion users skip this — the
+    // layout snaps and the ResizeObserver/poll sends the final rect.
+    // See docs/specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md.
+    let reflowRAF: number | null = null;
+    const sampleReflowFrame = () => {
+        syncPosition();
+        if (paneReflowActive()) {
+            reflowRAF = requestAnimationFrame(sampleReflowFrame);
+        } else {
+            // One final settle frame so the HWND lands exactly on the
+            // post-animation rect even if the last tick fired slightly early.
+            reflowRAF = null;
+            syncPosition();
+        }
+    };
+    createEffect(() => {
+        // `paneReflowActive()` reads the shared `animatingUntil` signal, so
+        // this effect re-runs the instant a reflow begins. Pane reflow is
+        // treated as essential motion (see tilelayout.scss), so this tracks
+        // regardless of the reduced-motion preference — keeping the native
+        // browser-pane window in lockstep with the animating DOM panes.
+        if (paneReflowActive() && reflowRAF == null) {
+            reflowRAF = requestAnimationFrame(sampleReflowFrame);
+        }
+    });
 
     const createPane = async (url: string) => {
         if (!placeholderRef) return;
@@ -335,6 +369,10 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         if (positionInterval) {
             clearInterval(positionInterval);
             positionInterval = null;
+        }
+        if (reflowRAF != null) {
+            cancelAnimationFrame(reflowRAF);
+            reflowRAF = null;
         }
         authDisposed = true;
         if (authUnsub) {
