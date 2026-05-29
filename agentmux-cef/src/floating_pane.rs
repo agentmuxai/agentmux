@@ -294,6 +294,45 @@ unsafe fn install_child_nchittest_forwarder(child_hwnd: *mut std::ffi::c_void) {
         use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
+        if msg == WM_NCDESTROY {
+            // The child window is being torn down — WM_NCDESTROY is the
+            // last message it ever receives. Forward to the original
+            // wndproc so CEF completes its teardown, THEN prune our map
+            // entry. Without this, the entry leaks; worse, if Win32
+            // later reuses this HWND value for a new floater's child,
+            // `install_child_nchittest_forwarder`'s `contains_key`
+            // short-circuits, the forwarder is never installed on the
+            // new child, and edge-band resize silently breaks for that
+            // floater. Mirrors the round-3 `IsWindow` defense added to
+            // `window_hwnds`. ReAgent P2 on PR #1132.
+            let original_isize = {
+                let guard = ORIGINAL_WNDPROCS.lock().unwrap_or_else(|e| e.into_inner());
+                guard
+                    .as_ref()
+                    .and_then(|m| m.get(&(hwnd as usize)).copied())
+                    .unwrap_or(0)
+            };
+            let result = if original_isize != 0 {
+                let proc_fn: extern "system" fn(
+                    *mut std::ffi::c_void,
+                    u32,
+                    usize,
+                    isize,
+                ) -> isize = std::mem::transmute(original_isize);
+                CallWindowProcW(Some(proc_fn), hwnd, msg, wparam, lparam)
+            } else {
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            };
+            // Prune after the original handler runs — it may still read
+            // window state during teardown; we only need the entry gone
+            // before the HWND value can be recycled.
+            let mut guard = ORIGINAL_WNDPROCS.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(m) = guard.as_mut() {
+                m.remove(&(hwnd as usize));
+            }
+            return result;
+        }
+
         if msg == WM_NCHITTEST {
             // The lparam x/y for WM_NCHITTEST are in SCREEN coords.
             let x = (lparam & 0xFFFF) as i16 as i32;
