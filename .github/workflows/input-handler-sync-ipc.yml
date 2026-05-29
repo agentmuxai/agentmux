@@ -1,0 +1,40 @@
+name: Input-handler sync-IPC guardrail
+
+# Enforces input-first invariant I2 (follow-up to discussion #1161, built on
+# SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md):
+#   "No synchronous IPC on any input path, ever."
+#
+# A keystroke handler may DISPATCH host work (fire-and-forget invokeCommand)
+# but must never BLOCK on it before paint. See
+# docs/analysis/ANALYSIS_KEYDOWN_IPC_AUDIT_2026_05_29.md for the audit baseline.
+#
+# Path-filtered — only runs when an in-scope file is modified.
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/app/store/keymodel.ts'
+      - 'frontend/app/view/term/termViewModel.ts'
+      - 'frontend/app/view/launcher/launcher.tsx'
+      - 'frontend/app/view/agent/components/AgentFooter.tsx'
+      - 'tools/lint/check-input-handler-sync-ipc.sh'
+      - '.github/workflows/input-handler-sync-ipc.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/app/store/keymodel.ts'
+      - 'frontend/app/view/term/termViewModel.ts'
+      - 'frontend/app/view/launcher/launcher.tsx'
+      - 'frontend/app/view/agent/components/AgentFooter.tsx'
+      - 'tools/lint/check-input-handler-sync-ipc.sh'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run check
+        run: bash tools/lint/check-input-handler-sync-ipc.sh
