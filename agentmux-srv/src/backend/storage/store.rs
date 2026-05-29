@@ -1071,6 +1071,80 @@ mod tests {
     }
 
     #[test]
+    fn test_instance_update_partial() {
+        use crate::backend::storage::InstanceUpdate;
+        let store = v6_test_store();
+        let mut agent = sample_agent("defp", "agent-p");
+        store.agent_def_insert(&mut agent).unwrap();
+        let inst = AgentInstance {
+            id: "instp".to_string(),
+            definition_id: "defp".to_string(),
+            parent_instance_id: String::new(),
+            block_id: "block-1".to_string(),
+            session_id: "sess-1".to_string(),
+            status: InstanceStatus::Running.as_str().to_string(),
+            github_context: "ctx-1".to_string(),
+            started_at: 1000,
+            ended_at: 0,
+            created_at: 1000,
+            identity_id: String::new(),
+            memory_id: String::new(),
+            instance_name: String::new(),
+            working_directory: String::new(),
+            display_hidden: false,
+        };
+        store.instance_create(&inst).unwrap();
+
+        // Update ONLY status — other columns must be preserved.
+        let fresh = store
+            .instance_update_partial(
+                "instp",
+                &InstanceUpdate { status: Some("stopped".into()), ..Default::default() },
+            )
+            .unwrap()
+            .expect("row");
+        assert_eq!(fresh.status, "stopped");
+        assert_eq!(fresh.block_id, "block-1", "block_id must be untouched");
+        assert_eq!(fresh.session_id, "sess-1", "session_id must be untouched");
+        assert_eq!(fresh.github_context, "ctx-1", "github_context must be untouched");
+
+        // Update ONLY session_id — status from the prior write persists.
+        let fresh = store
+            .instance_update_partial(
+                "instp",
+                &InstanceUpdate { session_id: Some("sess-2".into()), ..Default::default() },
+            )
+            .unwrap()
+            .expect("row");
+        assert_eq!(fresh.session_id, "sess-2");
+        assert_eq!(fresh.status, "stopped", "status from prior partial write persists");
+
+        // `Some("")` explicitly clears a string column.
+        let fresh = store
+            .instance_update_partial(
+                "instp",
+                &InstanceUpdate { github_context: Some(String::new()), ..Default::default() },
+            )
+            .unwrap()
+            .expect("row");
+        assert_eq!(fresh.github_context, "", "Some(\"\") clears");
+
+        // All-`None` no-op returns the unchanged row (NOT None — that's
+        // reserved for not-found so the handler can tell them apart).
+        let noop = store
+            .instance_update_partial("instp", &InstanceUpdate::default())
+            .unwrap();
+        assert!(noop.is_some(), "no-op on an existing id returns the row");
+        assert_eq!(noop.unwrap().session_id, "sess-2");
+
+        // Not-found returns None.
+        let missing = store
+            .instance_update_partial("nope", &InstanceUpdate { status: Some("x".into()), ..Default::default() })
+            .unwrap();
+        assert!(missing.is_none(), "not-found returns None");
+    }
+
+    #[test]
     fn test_agent_def_list_orders_by_last_used() {
         let store = v6_test_store();
         // Three definitions; none launched yet.

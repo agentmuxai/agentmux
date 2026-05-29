@@ -1401,44 +1401,33 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             Box::pin(async move {
                 let cmd: CommandUpdateAgentInstanceData = serde_json::from_value(data)
                     .map_err(|e| format!("updateagentinstance: {e}"))?;
-                let existing = wstore
-                    .instance_get(&cmd.id)
+                // Partial write — only the fields the command provided.
+                // No fetch-and-merge: this used to `instance_get` the full
+                // row to fill the unspecified fields, which was the sole
+                // production caller needing `instance_get`'s transient
+                // per-launch columns. The store builds a dynamic UPDATE
+                // and returns the post-write row (for the event scope +
+                // response) from the reload it already runs.
+                // SPEC_UPDATEAGENTINSTANCE_PARTIAL_UPDATE_2026_05_29.md.
+                let upd = crate::backend::storage::InstanceUpdate {
+                    block_id: cmd.block_id,
+                    session_id: cmd.session_id,
+                    status: cmd.status,
+                    github_context: cmd.github_context,
+                    ended_at: cmd.ended_at,
+                };
+                let fresh = wstore
+                    .instance_update_partial(&cmd.id, &upd)
                     .map_err(|e| format!("updateagentinstance: {e}"))?
                     .ok_or_else(|| format!("updateagentinstance: not found id={}", cmd.id))?;
-                let merged = AgentInstance {
-                    id: existing.id.clone(),
-                    definition_id: existing.definition_id.clone(),
-                    parent_instance_id: existing.parent_instance_id.clone(),
-                    block_id: cmd.block_id.unwrap_or(existing.block_id),
-                    session_id: cmd.session_id.unwrap_or(existing.session_id),
-                    status: cmd.status.unwrap_or(existing.status),
-                    github_context: cmd.github_context.unwrap_or(existing.github_context),
-                    started_at: existing.started_at,
-                    ended_at: cmd.ended_at.unwrap_or(existing.ended_at),
-                    created_at: existing.created_at,
-                    // identity_id / memory_id / instance_name /
-                    // working_directory are immutable post-create
-                    // (mid-session credential rotation is out of scope
-                    // — launch a new instance with a different bundle
-                    // or use ContinueNamedAgentCommand). display_hidden
-                    // is mutated via instance_set_hidden, not here.
-                    identity_id: existing.identity_id.clone(),
-                    memory_id: existing.memory_id.clone(),
-                    instance_name: existing.instance_name.clone(),
-                    working_directory: existing.working_directory.clone(),
-                    display_hidden: existing.display_hidden,
-                };
-                wstore
-                    .instance_update(&merged)
-                    .map_err(|e| format!("updateagentinstance: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
-                    event: format!("agentinstances:changed:{}", merged.definition_id),
+                    event: format!("agentinstances:changed:{}", fresh.definition_id),
                     scopes: vec![],
                     sender: String::new(),
                     persist: 0,
                     data: None,
                 });
-                Ok(Some(serde_json::to_value(&merged).unwrap_or_default()))
+                Ok(Some(serde_json::to_value(&fresh).unwrap_or_default()))
             })
         }),
     );

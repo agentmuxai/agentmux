@@ -19,7 +19,7 @@ pub mod skills;
 pub mod snapshot;
 pub mod store;
 
-pub use agents::{AgentDefinition, AgentInstance, InstanceStatus};
+pub use agents::{AgentDefinition, AgentInstance, InstanceStatus, InstanceUpdate};
 pub use content::AgentContent;
 pub use error::StoreError;
 #[allow(unused_imports)]
