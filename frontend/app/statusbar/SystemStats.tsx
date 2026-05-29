@@ -44,12 +44,16 @@ function memColor(used: number, total: number): string {
 const SystemStats = (): JSX.Element => {
     const [stats, setStats] = createSignal<SysStats | null>(null);
 
+    // Diagnostic instrumentation (2026-05-28): pairs with BackendStatus
+    // to confirm whether the agent-pane cascade freeze is broker-side
+    // (handler silent) or scheduler-side (handler fires, DOM stays stale).
     onMount(() => {
         const unsub = waveEventSubscribe({
             eventType: "sysinfo",
             scope: "local",
             handler: (event) => {
                 const vals = (event as WaveEvent)?.data?.values;
+                console.log("[fe] sysinfo:SystemStats handler vals=", vals != null);
                 if (vals == null) return;
                 setStats({
                     cpu: vals["cpu"] ?? 0,
