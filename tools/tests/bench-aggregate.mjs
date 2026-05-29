@@ -66,11 +66,15 @@ function opt(name, fallback) {
     }
     return v;
 }
-function numOpt(name, fallback) {
+function numOpt(name, fallback, { min = 0 } = {}) {
     const raw = opt(name, String(fallback));
     const n = Number(raw);
-    if (Number.isNaN(n)) {
-        console.error(`bench-aggregate: ${name} must be a number (got '${raw}')`);
+    if (!Number.isFinite(n)) {
+        console.error(`bench-aggregate: ${name} must be a finite number (got '${raw}')`);
+        process.exit(2);
+    }
+    if (n < min) {
+        console.error(`bench-aggregate: ${name} must be >= ${min} (got ${n})`);
         process.exit(2);
     }
     return n;
@@ -114,12 +118,12 @@ if (!preset) {
     console.error(`bench-aggregate: --bench must be one of ${Object.keys(PRESETS).join(", ")}`);
     process.exit(2);
 }
-const RUNS = Math.max(1, Math.floor(numOpt("--runs", 5)));
+const RUNS = Math.floor(numOpt("--runs", 5, { min: 1 }));
 const BASELINE_PATH = opt("--baseline");
 const METRIC_PATH = opt("--metric-path", preset.metricPath);
 const MODE = opt("--mode", "report");
-const TOLERANCE_PCT = numOpt("--tolerance-pct", 20);
-const MAX_COV = numOpt("--max-cov", 0.25);
+const TOLERANCE_PCT = numOpt("--tolerance-pct", 20, { min: 0 });
+const MAX_COV = numOpt("--max-cov", 0.25, { min: 0 });
 const UPDATE_BASELINE = flag("--update-baseline");
 const DEVICE = opt("--device", "unspecified-device");
 
