@@ -456,10 +456,12 @@ impl std::fmt::Debug for EffectKind {
 
 /// A browser-pane create deferred while the block_id was still `Closing`
 /// (old CEF Browser mid-teardown). Held in `AppState.pending_browser_pane_creates`
-/// and replayed by `BrowserPaneManager::drain_closed_label` once the close
-/// drains — the deterministic re-create-after-close that fixes the redock
-/// "pane sometimes won't load" race (no frontend retry / timer). Rect stored
-/// as raw i32s to keep this type independent of `cef::Rect`.
+/// and replayed by `BrowserPaneManager::replay_deferred_create` from whichever
+/// close-completion path fires — the async `drain_closed_label`
+/// (`on_before_close`) or the explicit `close()` — once the old entry is gone.
+/// The deterministic re-create-after-close that fixes the redock "pane
+/// sometimes won't load" race (no frontend retry / timer). Rect stored as raw
+/// i32s to keep this type independent of `cef::Rect`.
 #[derive(Clone, Debug)]
 pub struct PendingBrowserPaneCreate {
     pub url: String,
@@ -766,9 +768,11 @@ pub struct AppState {
 
     /// Browser-pane creates deferred because the block_id was still `Closing`
     /// (old CEF Browser mid-teardown — e.g. redock re-creating the same
-    /// block_id the floater is still closing). Replayed deterministically from
-    /// `BrowserPaneManager::drain_closed_label` once the close drains. Keyed by
-    /// block_id. See docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md.
+    /// block_id the floater is still closing). Replayed deterministically by
+    /// `BrowserPaneManager::replay_deferred_create`, called from both
+    /// close-completion paths (the async `drain_closed_label` and the explicit
+    /// `close()`). Keyed by block_id.
+    /// See docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md.
     pub pending_browser_pane_creates: Mutex<HashMap<String, PendingBrowserPaneCreate>>,
 
 }

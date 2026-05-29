@@ -189,9 +189,10 @@ impl BrowserPaneManager {
             RegisterResult::Closing => {
                 // Don't overwrite (the old CEF Browser is mid-teardown and its
                 // on_before_close → DrainBrowserPaneByLabel would evict the NEW
-                // entry) — but don't drop the request either. STASH it and let
-                // `drain_closed_label` REPLAY it deterministically once the
-                // close completes. This is the redock case: the target window
+                // entry) — but don't drop the request either. STASH it; whichever
+                // close-completion path fires (`drain_closed_label` or `close()`)
+                // calls `replay_deferred_create` to REPLAY it deterministically
+                // once the old entry is gone. This is the redock case: the target window
                 // re-creates the same block_id while the floater's pane is
                 // still Closing. The old "Frontend retries on next tick" never
                 // existed (browser-view.tsx::createPane errors out, no retry),
