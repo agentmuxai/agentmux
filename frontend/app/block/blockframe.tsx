@@ -23,6 +23,7 @@ import { BlockStatsBadge } from "@/element/blockstats";
 import { MagnifyIcon } from "@/element/magnify";
 import { MenuButton } from "@/element/menubutton";
 import { MicButton } from "@/app/element/MicButton";
+import { invokeCommand } from "@/app/platform/ipc";
 import { NodeModel } from "@/layout/index";
 import * as util from "@/util/util";
 import { computeBgStyleFromMeta } from "@/util/waveutil";
@@ -181,6 +182,30 @@ function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void
     return <IconButton decl={magnifyDecl()} className="block-frame-magnify" />;
 }
 
+/** Maximize button for a torn-off FLOATING pane (the floating half of the
+ *  shared maximize button — docked panes use {@link OptMagnifyButton} →
+ *  layout magnify; see SPEC_PANE_STATE_REDUCER §3.3a). Routes to the host
+ *  `toggle_floating_maximize` IPC, which dispatches the reducer's
+ *  `ToggleFloatingMaximize` and applies the OS-window geometry (maximize to
+ *  the monitor work area / restore to the captured rect).
+ *
+ *  Deliberately a FIXED button: the icon and title don't reflect the
+ *  maximized/normal state. A single click toggles maximize↔restore (users
+ *  expect a maximize button to toggle), which keeps the button stateless —
+ *  the reducer is the single source of truth for placement, not a mirrored
+ *  frontend signal that can drift. */
+function FloatingMaximizeButton(props: { label: string }): JSX.Element {
+    const decl: IconButtonDecl = {
+        elemtype: "iconbutton",
+        icon: <MagnifyIcon enabled={false} />,
+        title: "Maximize",
+        click: () => {
+            invokeCommand("toggle_floating_maximize", { label: props.label }).catch(console.error);
+        },
+    };
+    return <IconButton decl={decl} className="block-frame-magnify" />;
+}
+
 function EndIcons(props: {
     viewModel: ViewModel;
     nodeModel: NodeModel;
@@ -195,6 +220,14 @@ function EndIcons(props: {
     const magnified = () => props.nodeModel.isMagnified();
     const ephemeral = () => props.nodeModel.isEphemeral();
     const magnifyDisabled = () => false;
+    // In a torn-off floating shell the window carries a `?windowLabel=floating-…`
+    // URL param (set by the host when it opens the popup). When present, the
+    // magnify button becomes an OS-window maximize/restore routed to the host
+    // reducer; docked panes (no such label) keep layout magnify.
+    const floatingLabel = createMemo(() => {
+        const label = new URLSearchParams(window.location.search).get("windowLabel") ?? "";
+        return label.startsWith("floating-") ? label : null;
+    });
 
     const closeDecl: IconButtonDecl = {
         elemtype: "iconbutton",
@@ -224,11 +257,15 @@ function EndIcons(props: {
                 />
             </Show>
             <Show when={ephemeral()} fallback={
-                <OptMagnifyButton
-                    magnified={magnified()}
-                    toggleMagnify={props.nodeModel.toggleMagnify}
-                    disabled={magnifyDisabled()}
-                />
+                <Show when={floatingLabel()} fallback={
+                    <OptMagnifyButton
+                        magnified={magnified()}
+                        toggleMagnify={props.nodeModel.toggleMagnify}
+                        disabled={magnifyDisabled()}
+                    />
+                }>
+                    <FloatingMaximizeButton label={floatingLabel()!} />
+                </Show>
             }>
                 <IconButton decl={{
                     elemtype: "iconbutton",
