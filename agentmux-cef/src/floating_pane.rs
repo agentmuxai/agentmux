@@ -405,6 +405,32 @@ unsafe extern "system" fn floating_pane_wndproc(
             // we don't map any zone to HTCAPTION here. Fall through to
             // HTCLIENT so clicks reach CEF and the JS handler.
         }
+        // Resize the embedded CEF child to fill the client area on every
+        // outer-window resize (maximize / restore, and future edge-resize).
+        // CEF `set_as_child` browsers do NOT self-resize, and our custom
+        // wndproc replaced CEF's default proc — so without this the child
+        // stays at its creation size while the outer grows. That left a
+        // maximized floater's pane content pinned small in the top-left
+        // (the "copy pinned to the left" bug). CEF cascades the resize to
+        // its own inner render-widget children, so sizing the immediate
+        // child is enough. Falls through to DefWindowProcW afterwards.
+        WM_SIZE => {
+            let child = GetWindow(hwnd, GW_CHILD);
+            if !child.is_null() {
+                let mut rc = std::mem::zeroed::<windows_sys::Win32::Foundation::RECT>();
+                if GetClientRect(hwnd, &mut rc) != 0 {
+                    SetWindowPos(
+                        child,
+                        std::ptr::null_mut(),
+                        0,
+                        0,
+                        rc.right - rc.left,
+                        rc.bottom - rc.top,
+                        SWP_NOZORDER | SWP_NOACTIVATE,
+                    );
+                }
+            }
+        }
         _ => {}
     }
 
