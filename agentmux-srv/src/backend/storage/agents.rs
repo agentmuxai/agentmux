@@ -182,6 +182,21 @@ pub struct GitHubContext {
     pub workflow_run_id: Option<u64>,
 }
 
+/// Partial-update payload for [`Store::instance_update_partial`]. Each
+/// `Some` field is written; `None` leaves the column untouched. Mirrors
+/// the mutable subset of `CommandUpdateAgentInstanceData`
+/// (`block_id`/`session_id`/`status`/`github_context`/`ended_at`) — the
+/// only columns `instance_update` ever wrote. `Some("")` for a string
+/// field explicitly clears it.
+#[derive(Debug, Clone, Default)]
+pub struct InstanceUpdate {
+    pub block_id: Option<String>,
+    pub session_id: Option<String>,
+    pub status: Option<String>,
+    pub github_context: Option<String>,
+    pub ended_at: Option<i64>,
+}
+
 /// One row per running/historical execution of an agent definition.
 /// `block_id` / `session_id` / `github_context` are modelled as empty
 /// strings on the wire rather than `Option<String>` to match the
@@ -1250,9 +1265,95 @@ impl Store {
         }
     }
 
+    /// Partial update of an instance's mutable runtime fields. Only
+    /// `Some` fields are written; `None` leaves that column untouched.
+    ///
+    /// Replaces the `updateagentinstance` handler's fetch-and-merge
+    /// (read the full row → fill the unspecified fields → write the
+    /// whole struct back). That read was the only production caller
+    /// that needed `instance_get`'s transient per-launch fields, which
+    /// pinned `instance_get` to the legacy `db_agent_instances` table.
+    /// With a partial write the handler no longer reads the row at all.
+    /// See docs/specs/SPEC_UPDATEAGENTINSTANCE_PARTIAL_UPDATE_2026_05_29.md.
+    ///
+    /// Returns the post-update row (`None` if the id didn't exist or no
+    /// fields were provided) so callers that need `definition_id` for an
+    /// event scope — or want to echo the row back — get it from the
+    /// same authoritative reload this method already runs to refresh the
+    /// registry mirror + Phase-3a dual-write. Those consumers read only
+    /// non-transient fields, so the reload survives a future
+    /// `instance_get` → db_agents flip (Phase 3b.3c).
+    pub fn instance_update_partial(
+        &self,
+        id: &str,
+        upd: &InstanceUpdate,
+    ) -> Result<Option<AgentInstance>, StoreError> {
+        use rusqlite::types::ToSql;
+
+        let mut sets: Vec<&str> = Vec::new();
+        let mut vals: Vec<Box<dyn ToSql>> = Vec::new();
+        if let Some(v) = &upd.block_id {
+            sets.push("block_id = ?");
+            vals.push(Box::new(v.clone()));
+        }
+        if let Some(v) = &upd.session_id {
+            sets.push("session_id = ?");
+            vals.push(Box::new(v.clone()));
+        }
+        if let Some(v) = &upd.status {
+            sets.push("status = ?");
+            vals.push(Box::new(v.clone()));
+        }
+        if let Some(v) = &upd.github_context {
+            // `Some("")` explicitly clears (matches the command contract).
+            sets.push("github_context = ?");
+            vals.push(Box::new(v.clone()));
+        }
+        if let Some(v) = upd.ended_at {
+            sets.push("ended_at = ?");
+            vals.push(Box::new(v));
+        }
+        if sets.is_empty() {
+            // No fields to write. Return the current row unchanged (or
+            // `None` if the id genuinely doesn't exist) so the caller can
+            // still tell a no-op apart from not-found — rather than
+            // conflating both as `None`. No write, no registry/dual-write
+            // reload needed since nothing changed.
+            return self.instance_get(id);
+        }
+
+        let rows = {
+            let conn = self.conn.lock().unwrap();
+            let sql = format!(
+                "UPDATE db_agent_instances SET {} WHERE id = ?",
+                sets.join(", ")
+            );
+            vals.push(Box::new(id.to_string()));
+            let params: Vec<&dyn ToSql> = vals.iter().map(|b| b.as_ref()).collect();
+            conn.execute(&sql, params.as_slice())?
+        };
+        if rows == 0 {
+            return Ok(None);
+        }
+        // Reload the authoritative post-update row and refresh the
+        // registry mirror + dual-write — identical to `instance_update`.
+        let fresh = self.instance_get(id)?;
+        if let Some(f) = &fresh {
+            self.registry_upsert_if_named(f);
+            // Phase 3a dual-write (Phase 3b: errors propagate).
+            self.agents_dual_write_instance_update(f)?;
+        }
+        Ok(fresh)
+    }
+
     /// Update mutable instance fields. `id`, `definition_id`,
     /// `parent_instance_id`, `started_at`, `created_at` are immutable
     /// after insert (they describe provenance, not state).
+    ///
+    /// Retained as a full-struct convenience for store tests + internal
+    /// callers; the `updateagentinstance` handler now uses
+    /// [`Self::instance_update_partial`] so it no longer reads the row
+    /// to merge.
     pub fn instance_update(&self, inst: &AgentInstance) -> Result<bool, StoreError> {
         let rows = {
             let conn = self.conn.lock().unwrap();
