@@ -650,6 +650,32 @@ tasks:
                   exit 1
                 fi
                 echo "Vite ready at $VITE_URL."
+                # macOS/Linux: auto-prune any stale Chromium SingletonLock
+                # whose target PID is dead. Without this, a crashed host
+                # leaves a `<cache>/SingletonLock` symlink pointing at a
+                # non-existent PID; the next `task dev` reads it, hands off
+                # via process_singleton, and exits with code 24 — the user
+                # sees "AgentMux failed to start" with no obvious recovery.
+                # On macOS 26 Tahoe this used to happen after every drag-
+                # induced crash (see #1138 / SPEC_MACOS_TEAROFF_STABILITY).
+                # Scoped to ~/.agentmux/dev/* so portable/installed locks
+                # are never touched; only flags actually-dead PIDs.
+                if [ "{{OS}}" != "windows" ]; then
+                  for lock in "$HOME/.agentmux/dev/"*/*/cef-cache/SingletonLock; do
+                    [ -L "$lock" ] || continue
+                    target=$(readlink "$lock") || continue
+                    pid="${target##*-}"
+                    [ -n "$pid" ] || continue
+                    if ! kill -0 "$pid" 2>/dev/null; then
+                      cache_dir=$(dirname "$lock")
+                      echo "[singleton] Pruning stale lock at $cache_dir (pid $pid is gone)"
+                      rm -f "$cache_dir/SingletonLock" \
+                            "$cache_dir/SingletonCookie" \
+                            "$cache_dir/SingletonSocket" \
+                            "$cache_dir/ipc-port"
+                    fi
+                  done
+                fi
                 # Inline AGENTMUX_DEV=1 on the launch: go-task's top-level
                 # env: block (on the `dev` task) doesn't propagate into
                 # cmd: shell subprocesses invoked via `task:` on Windows,
