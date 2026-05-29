@@ -66,6 +66,13 @@ export class SlashCommandRegistry {
      * Autocomplete — commands whose name or primary alias starts with
      * the given prefix (lowercase-insensitive). Returns unique commands
      * sorted by category then name.
+     *
+     * Currently called on every keystroke from AgentFooter.handleInput.
+     * The matcher operates on a small fixed list (~tens of entries) so
+     * per-call cost is negligible. If a future source pushes this past
+     * ~50 entries (history, semantic match, agent-specific commands),
+     * time-slice with scheduler.yield() per SPEC_INPUT_RESPONSIVENESS
+     * §6.3 — don't ship a blocking matcher into the keystroke path.
      */
     completions(prefix: string, ctx: SlashCommandContext): SlashCommand[] {
         const p = prefix.toLowerCase();
