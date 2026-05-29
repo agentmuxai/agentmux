@@ -30,7 +30,10 @@ use super::error::StoreError;
 ///        SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md Q2 Decision Y)
 ///   v4 — db_agents consolidation table (Phase 3a; dual-write only,
 ///        reads still on db_agent_definitions / db_agent_instances)
-pub const OBJECT_SCHEMA_VERSION: i64 = 4;
+///   v5 — db_agents.last_block_id (Phase 3c; latest launch's block, so the
+///        consolidated read can find the session snapshot without joining
+///        db_agent_instances)
+pub const OBJECT_SCHEMA_VERSION: i64 = 5;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -315,6 +318,14 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             github_context       TEXT NOT NULL DEFAULT '',
             instance_name        TEXT NOT NULL DEFAULT '',
 
+            -- Latest launch's block (Phase 3c): pointer to the most-recent
+            -- session's block so the consolidated read can locate the
+            -- conversation snapshot without joining db_agent_instances. The
+            -- only transient per-launch field db_agents retains; the rest
+            -- (status/session_id/started_at/ended_at) live on the block and
+            -- retire with db_agent_instances.
+            last_block_id        TEXT NOT NULL DEFAULT '',
+
             -- Provenance
             created_at           INTEGER NOT NULL DEFAULT 0,
             updated_at           INTEGER NOT NULL DEFAULT 0,
@@ -369,9 +380,14 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
     //     templates (Phase 2 of the two-tier picker spec, Q2 Decision Y).
     //     Defaults to 0 (visible) for all existing rows so a migration
     //     never silently hides previously-visible templates.
+    // v5: db_agents.last_block_id — most-recent launch's block (Phase 3c).
+    //     Defaults to '' for existing rows; the dual-write populates it on
+    //     the next launch/continuation. Read side (3b.1b) treats '' as
+    //     "no snapshot" (same as the current empty-block_id fallback).
     for stmt in &[
         "ALTER TABLE db_agent_definitions ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE db_agent_definitions ADD COLUMN user_hidden INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE db_agents ADD COLUMN last_block_id TEXT NOT NULL DEFAULT ''",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();

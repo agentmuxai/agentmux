@@ -2887,7 +2887,7 @@ mod tests {
             id: "inst-dw".to_string(),
             definition_id: "tpl-for-inst".to_string(),
             parent_instance_id: String::new(),
-            block_id: String::new(),
+            block_id: "blk-head".to_string(),
             session_id: String::new(),
             status: "running".to_string(),
             github_context: String::new(),
@@ -2915,6 +2915,10 @@ mod tests {
         // instance's resolved workdir ("/wd/maks"). db_agents holds durable
         // agent config; the per-launch resolved cwd lives on the block.
         assert_eq!(read_agent_field(&store, "inst-dw", "working_directory"), Some("/wd/tpl-cfg".to_string()));
+        // last_block_id mirrors the instance's per-launch block (the one
+        // transient field db_agents retains, so My Agents can locate the
+        // filestore snapshot). Non-empty value → non-vacuous assertion.
+        assert_eq!(read_agent_field(&store, "inst-dw", "last_block_id"), Some("blk-head".to_string()));
         // Continuation rows skipped.
         let cont = AgentInstance {
             id: "inst-cont".to_string(),
@@ -2986,7 +2990,7 @@ mod tests {
             id: "inst-fold-1".to_string(),
             definition_id: "user-clone-1".to_string(),
             parent_instance_id: String::new(),
-            block_id: String::new(),
+            block_id: "blk-fold".to_string(),
             session_id: String::new(),
             status: "running".to_string(),
             github_context: "gh-ctx-A".to_string(),
@@ -3013,6 +3017,9 @@ mod tests {
         // cwd, not the instance's resolved workdir ("/wd/folded").
         assert_eq!(read_agent_field(&store, "user-clone-1", "working_directory"), Some("/wd/clone-cfg".to_string()));
         assert_eq!(read_agent_field(&store, "user-clone-1", "github_context"), Some("gh-ctx-A".to_string()));
+        // last_block_id folds onto the user-clone row too (transient
+        // per-launch field; non-empty → non-vacuous).
+        assert_eq!(read_agent_field(&store, "user-clone-1", "last_block_id"), Some("blk-fold".to_string()));
         assert_eq!(read_agent_field(&store, "user-clone-1", "instance_name"), Some("Maks v2".to_string()));
         assert_eq!(read_agent_field(&store, "user-clone-1", "name"), Some("Maks v2".to_string()));
         // is_template stays 0, parent_template_id untouched (still empty
