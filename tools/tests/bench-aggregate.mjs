@@ -122,6 +122,10 @@ const RUNS = Math.floor(numOpt("--runs", 5, { min: 1 }));
 const BASELINE_PATH = opt("--baseline");
 const METRIC_PATH = opt("--metric-path", preset.metricPath);
 const MODE = opt("--mode", "report");
+if (MODE !== "report" && MODE !== "gate") {
+    console.error(`bench-aggregate: --mode must be 'report' or 'gate' (got '${MODE}')`);
+    process.exit(2);
+}
 const TOLERANCE_PCT = numOpt("--tolerance-pct", 20, { min: 0 });
 const MAX_COV = numOpt("--max-cov", 0.25, { min: 0 });
 const UPDATE_BASELINE = flag("--update-baseline");

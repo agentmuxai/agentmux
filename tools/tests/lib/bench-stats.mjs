@@ -139,8 +139,11 @@ export function compareToBaseline(agg, baseline, opts = {}) {
     if (agg && agg.p95CoV != null && agg.p95CoV > maxCoV) {
         return { verdict: VERDICT.NOISY, current, baseline: baseline?.value ?? null, deltaPct: null, tolerancePct, metric, coV: agg.p95CoV };
     }
-    if (!baseline || baseline.value == null) {
-        return { verdict: VERDICT.NO_BASELINE, current, baseline: null, deltaPct: null, tolerancePct, metric, coV: agg?.p95CoV ?? null };
+    // A valid latency baseline is a positive finite number. Reject null / 0 /
+    // negative / non-finite (a hand-edited "value": 0 would otherwise divide to
+    // Infinity → false REGRESS, or NaN → silent PASS).
+    if (!baseline || !Number.isFinite(baseline.value) || baseline.value <= 0) {
+        return { verdict: VERDICT.NO_BASELINE, current, baseline: baseline?.value ?? null, deltaPct: null, tolerancePct, metric, coV: agg?.p95CoV ?? null };
     }
     if (current == null) {
         return { verdict: VERDICT.NO_BASELINE, current: null, baseline: baseline.value, deltaPct: null, tolerancePct, metric, coV: agg?.p95CoV ?? null };

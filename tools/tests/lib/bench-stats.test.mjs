@@ -84,6 +84,15 @@ test("compareToBaseline: no baseline", () => {
     assert.equal(compareToBaseline(agg, null).verdict, VERDICT.NO_BASELINE);
 });
 
+test("compareToBaseline: rejects non-positive/invalid baseline (no divide-by-zero)", () => {
+    const agg = aggregateRuns([[10, 11, 12]]);
+    for (const bad of [{ value: 0 }, { value: -5 }, { value: NaN }, { value: Infinity }]) {
+        const cmp = compareToBaseline(agg, bad, { maxCoV: 5 });
+        assert.equal(cmp.verdict, VERDICT.NO_BASELINE);
+        assert.equal(cmp.deltaPct, null); // never Infinity/NaN
+    }
+});
+
 test("compareToBaseline: noisy runner flagged before verdict", () => {
     // Wildly varying per-run P95s → high CoV → NOISY regardless of baseline.
     const runs = [
