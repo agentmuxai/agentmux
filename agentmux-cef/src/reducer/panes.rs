@@ -133,6 +133,12 @@ pub(super) fn handle_drain_browser_pane_by_label(state: &mut HostState, label: S
         None => return DispatchOutput::default(),
     };
     state.browser_panes.remove(&block_id);
+    // Co-evict window-placement state in the SAME arm that ends the pane's
+    // lifecycle, so placement can never outlive the pane (cleanup by
+    // construction — the structural replacement for the leak-prone manual
+    // cleanup of AppState.floating_restored_rects). No-op if absent: docked
+    // panes never have a placement entry. See SPEC_PANE_STATE_REDUCER §4.
+    state.pane_window_states.remove(&block_id);
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::BrowserPaneClosed {
@@ -148,6 +154,9 @@ pub(super) fn handle_complete_browser_pane_close(state: &mut HostState, block_id
     if state.browser_panes.remove(&block_id).is_none() {
         return DispatchOutput::default(); // idempotent
     }
+    // Co-evict window-placement state alongside the lifecycle entry — see
+    // handle_drain_browser_pane_by_label. No-op if absent.
+    state.pane_window_states.remove(&block_id);
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::BrowserPaneClosed { block_id, version: v }],
@@ -161,6 +170,9 @@ pub(super) fn handle_abort_browser_pane_create(
     reason: String,
 ) -> DispatchOutput {
     state.browser_panes.remove(&block_id);
+    // Co-evict window-placement state — see handle_drain_browser_pane_by_label.
+    // No-op if absent.
+    state.pane_window_states.remove(&block_id);
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::BrowserPaneCreationFailed { block_id, reason, version: v }],
