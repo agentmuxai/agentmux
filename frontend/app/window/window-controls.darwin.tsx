@@ -9,9 +9,10 @@
  * WindowControlsRight — null on macOS (no right-side caption buttons needed).
  *
  * Ported from PR #444 (a5af/feat/macos-traffic-light-controls-v2). The Win11
- * caption-button code on the right side stays inline in `system-status.tsx`
- * on Windows/Linux; only the left-side traffic lights are added here because
- * macOS has no right-side caption buttons.
+ * caption-button code on the right side lives in `window-controls.win32.tsx`
+ * (re-exported by `window-controls.linux.tsx` so Linux gets the same buttons);
+ * only the left-side traffic lights are added here because macOS has no
+ * right-side caption buttons.
  */
 
 import { getApi } from "@/store/global";
