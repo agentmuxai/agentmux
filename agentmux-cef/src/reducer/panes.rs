@@ -77,7 +77,11 @@ pub(super) fn handle_enqueue_browser_pane_close(state: &mut HostState, block_id:
 /// - Closing entry exists → `Closing`
 /// - No entry → generate label, insert Live, `Fresh(label)` + emit
 ///   `BrowserPaneCreateRequested`
-pub(super) fn handle_try_register_browser_pane_live(state: &mut HostState, block_id: String) -> DispatchOutput {
+pub(super) fn handle_try_register_browser_pane_live(
+    state: &mut HostState,
+    block_id: String,
+    pending: Option<crate::state::PendingBrowserPaneCreate>,
+) -> DispatchOutput {
     if state.lifecycle == HostLifecyclePhase::ShuttingDown {
         return emit_error(
             state,
@@ -89,6 +93,17 @@ pub(super) fn handle_try_register_browser_pane_live(state: &mut HostState, block
             BrowserPaneLifecycle::Live => RegisterResult::AlreadyLive(entry.label.clone()),
             BrowserPaneLifecycle::Closing { .. } => RegisterResult::Closing,
         };
+        // Closing: stash the pending create (if the caller supplied one) so the
+        // close-completion arm (`CompleteBrowserPaneClose`/`DrainBrowserPaneByLabel`)
+        // can replay it. Done HERE, under the same host_state lock that just
+        // observed `Closing`, so the stash is atomic with that observation —
+        // no TOCTOU with a separate map (reagent P1 on #1168). The `entry`
+        // borrow ended with the match above, so this mutation is sound.
+        if matches!(result, RegisterResult::Closing) {
+            if let Some(p) = pending {
+                state.pending_browser_pane_creates.insert(block_id.clone(), p);
+            }
+        }
         return DispatchOutput {
             browser_pane_register_result: Some(result),
             ..Default::default()
@@ -133,6 +148,13 @@ pub(super) fn handle_drain_browser_pane_by_label(state: &mut HostState, label: S
         None => return DispatchOutput::default(),
     };
     state.browser_panes.remove(&block_id);
+    // Close completed → hand back any create deferred while this block_id was
+    // Closing, for the IPC handler to replay (now Fresh). Removed here so the
+    // stash can never outlive the close (no leak / no later resurrection).
+    let replay = state
+        .pending_browser_pane_creates
+        .remove(&block_id)
+        .map(|p| (block_id.clone(), p));
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::BrowserPaneClosed {
@@ -140,6 +162,7 @@ pub(super) fn handle_drain_browser_pane_by_label(state: &mut HostState, label: S
             version: v,
         }],
         drained_browser_pane_block_id: Some(block_id),
+        pending_browser_pane_create_to_replay: replay,
         ..Default::default()
     }
 }
@@ -148,9 +171,16 @@ pub(super) fn handle_complete_browser_pane_close(state: &mut HostState, block_id
     if state.browser_panes.remove(&block_id).is_none() {
         return DispatchOutput::default(); // idempotent
     }
+    // Same as the drain path: hand back any deferred create to replay, and
+    // remove it so it can't outlive the close.
+    let replay = state
+        .pending_browser_pane_creates
+        .remove(&block_id)
+        .map(|p| (block_id.clone(), p));
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::BrowserPaneClosed { block_id, version: v }],
+        pending_browser_pane_create_to_replay: replay,
         ..Default::default()
     }
 }

@@ -137,6 +137,18 @@ pub struct HostState {
     /// SPEC_PANE_STATE_REDUCER_2026-05-28.md (REVISION 2026-05-29).
     pub pane_window_states: HashMap<String, PaneWindowState>,
 
+    /// Browser-pane creates deferred because the block_id was still `Closing`
+    /// at register time (old CEF Browser mid-teardown — e.g. redock
+    /// re-creating the same block_id the floater is still closing). Keyed by
+    /// block_id. Lives HERE in the reducer (not `AppState`) so the
+    /// stash-on-`Closing` (in `TryRegisterBrowserPaneLive`) and the
+    /// remove-on-close (in `CompleteBrowserPaneClose`/`DrainBrowserPaneByLabel`)
+    /// are atomic under the single host_state lock — a separate `Mutex`
+    /// allowed a TOCTOU where the close path replayed before the stash landed,
+    /// orphaning it (reagent P1 on #1168). See
+    /// docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md.
+    pub pending_browser_pane_creates: HashMap<String, crate::state::PendingBrowserPaneCreate>,
+
     /// Lifecycle phase. `Running` is the operating state; the others
     /// gate command acceptance.
     pub lifecycle: HostLifecyclePhase,
@@ -160,6 +172,7 @@ impl Default for HostState {
             top_level_creation: TopLevelCreationState::default(),
             window_opacities: HashMap::new(),
             pane_window_states: HashMap::new(),
+            pending_browser_pane_creates: HashMap::new(),
             // Boot directly into Running — nothing in F.1 needs the
             // pre-init guard yet. Future PRs (drag, tear-off hooks)
             // will move boot through Bootstrapping → Running.
@@ -242,8 +255,16 @@ pub enum HostCommand {
     /// outcome via `DispatchOutput::browser_pane_register_result`:
     ///   - `Fresh(label)`: new `Live` entry inserted; caller posts CreateBrowserPaneTask
     ///   - `AlreadyLive(label)`: caller should re-navigate existing browser
-    ///   - `Closing`: caller must reject (old teardown still in flight)
-    TryRegisterBrowserPaneLive { block_id: String },
+    ///   - `Closing`: old teardown still in flight. The reducer stashes
+    ///     `pending` (if `Some`) in `pending_browser_pane_creates` so the
+    ///     close-completion arm can replay it — atomically, under this same
+    ///     lock (no TOCTOU with a separate map). Caller returns Ok (deferred).
+    /// `pending` carries the create params (url/rect/window_label) to stash on
+    /// `Closing`; ignored for `Fresh`/`AlreadyLive`.
+    TryRegisterBrowserPaneLive {
+        block_id: String,
+        pending: Option<crate::state::PendingBrowserPaneCreate>,
+    },
 
     /// CEF on_after_created fired for a pane browser; confirm it's Live.
     /// No-op if already Live or absent (idempotent against late callbacks).
@@ -413,9 +434,10 @@ impl std::fmt::Debug for HostCommand {
                 .field("block_id", block_id)
                 .field("label", label)
                 .finish(),
-            HostCommand::TryRegisterBrowserPaneLive { block_id } => f
+            HostCommand::TryRegisterBrowserPaneLive { block_id, pending } => f
                 .debug_struct("TryRegisterBrowserPaneLive")
                 .field("block_id", block_id)
+                .field("has_pending", &pending.is_some())
                 .finish(),
             HostCommand::CompleteBrowserPaneCreate { block_id } => f
                 .debug_struct("CompleteBrowserPaneCreate")
@@ -780,6 +802,13 @@ pub struct DispatchOutput {
     pub browser_pane_register_result: Option<RegisterResult>,
     pub closed_browser_pane_label: Option<String>,
     pub drained_browser_pane_block_id: Option<String>,
+    /// A browser-pane create that was deferred (stashed on `Closing`) and is
+    /// now eligible to replay, set by the close-completion arms
+    /// (`CompleteBrowserPaneClose` / `DrainBrowserPaneByLabel`) when they
+    /// remove the old entry. `(block_id, params)`. The IPC handler re-runs the
+    /// create (now `Fresh`) and posts the `CreateBrowserPaneTask`.
+    pub pending_browser_pane_create_to_replay:
+        Option<(String, crate::state::PendingBrowserPaneCreate)>,
     pub ended_drag_session: Option<DragSession>,
     pub pool_spawn_proceeding: bool,
     pub pool_size_after: Option<usize>,
@@ -838,8 +867,8 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         HostCommand::EnqueueBrowserPaneCreate { block_id, label } => {
             panes::handle_enqueue_browser_pane_create(state, block_id, label)
         }
-        HostCommand::TryRegisterBrowserPaneLive { block_id } => {
-            panes::handle_try_register_browser_pane_live(state, block_id)
+        HostCommand::TryRegisterBrowserPaneLive { block_id, pending } => {
+            panes::handle_try_register_browser_pane_live(state, block_id, pending)
         }
         HostCommand::CompleteBrowserPaneCreate { block_id } => {
             panes::handle_complete_browser_pane_create(state, block_id)
