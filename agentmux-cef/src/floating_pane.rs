@@ -206,6 +206,24 @@ wrap_task! {
                 label = %self.window_label,
                 "[floating-pane] CEF browser embedded in floating HWND",
             );
+
+            // Edge-resize: subclass the freshly-created CEF child so its
+            // WM_NCHITTEST forwards the floater's resize border (HTTRANSPARENT)
+            // to the outer wndproc → native WS_THICKFRAME resize. Done HERE,
+            // synchronously after create — the floater's GW_CHILD exists now;
+            // installing later (on_after_created) misses it. SPEC_FLOATING_PANE_EDGE_RESIZE.
+            unsafe {
+                use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindow, GW_CHILD};
+                let child = GetWindow(outer_hwnd as *mut std::ffi::c_void, GW_CHILD);
+                if !child.is_null() {
+                    install_child_nchittest_forwarder(child);
+                } else {
+                    tracing::warn!(
+                        label = %self.window_label,
+                        "[floating-pane] no CEF child after create — edge-resize disabled",
+                    );
+                }
+            }
         }
     }
 }
@@ -350,11 +368,6 @@ fn escape_query_value(s: &str) -> String {
 /// px = 3 CSS px at 200% → unreachable).
 const RESIZE_BORDER_CSS: i32 = 6;
 
-/// child HWND → original wndproc, for `CallWindowProcW` delegation.
-static FLOATING_RESIZE_WNDPROCS: std::sync::LazyLock<
-    std::sync::Mutex<std::collections::HashMap<usize, isize>>,
-> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-
 /// If `(screen_x, screen_y)` lies in `floater`'s resize border, return the
 /// matching `HT*` edge/corner code; else `None`. Screen coords (the
 /// `WM_NCHITTEST` lparam space).
@@ -398,79 +411,96 @@ unsafe fn floater_resize_hittest(
     Some(ht as isize)
 }
 
-type RawWndProc =
-    unsafe extern "system" fn(*mut std::ffi::c_void, u32, usize, isize) -> isize;
-
-unsafe extern "system" fn floating_resize_forwarder_hook(
-    hwnd: *mut std::ffi::c_void,
-    msg: u32,
-    wparam: usize,
-    lparam: isize,
-) -> isize {
+/// Subclass a CEF child window's `WndProc` so its `WM_NCHITTEST` returns
+/// `HTTRANSPARENT` for cursor positions within the floater's resize border —
+/// the OS then dispatches the hit-test to the parent (floater) wndproc, whose
+/// `WM_NCHITTEST` (`HT{LEFT,…}`) runs the native `WS_THICKFRAME` resize.
+/// Non-edge hits delegate to the original wndproc (`HTCLIENT`).
+///
+/// Why: a CEF browser embedded as `WS_CHILD` covers the whole client area, and
+/// the OS sends `WM_NCHITTEST` to the **topmost window under the cursor = the
+/// child**, which returns `HTCLIENT` — so without this the parent's
+/// `WM_NCHITTEST` never fires at the edge and resize is a no-op. Install on the
+/// floater's `GW_CHILD` **synchronously at create time** (the child exists
+/// right after `browser_host_create_browser`); installing later (e.g. in
+/// `on_after_created`) misses it. (Proven approach from the parked #1132 work;
+/// the earlier inset variant left a thick white DWM border that couldn't be
+/// repainted, so it was abandoned for this forwarder.)
+///
+/// Idempotent (keyed by child HWND). Prunes its map entry on `WM_NCDESTROY` so
+/// a recycled HWND value can't make a later install short-circuit. Win32-only.
+pub(crate) unsafe fn install_child_nchittest_forwarder(child_hwnd: *mut std::ffi::c_void) {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallWindowProcW, DefWindowProcW, GetAncestor, GA_ROOT, HTTRANSPARENT, WM_NCHITTEST,
+        GetWindowLongPtrW, SetWindowLongPtrW, GWLP_WNDPROC,
     };
-    if msg == WM_NCHITTEST {
-        let x = (lparam & 0xFFFF) as i16 as i32;
-        let y = ((lparam >> 16) & 0xFFFF) as i16 as i32;
-        let floater = GetAncestor(hwnd, GA_ROOT);
-        if !floater.is_null() && floater_resize_hittest(floater, x, y).is_some() {
-            // Over the floater's resize border → pass through to the floater's
-            // own WM_NCHITTEST (HT{LEFT,…}) so the native resize loop runs.
-            return HTTRANSPARENT as isize;
+
+    type Raw = unsafe extern "system" fn(*mut std::ffi::c_void, u32, usize, isize) -> isize;
+    static ORIGINAL_WNDPROCS: Mutex<Option<HashMap<usize, isize>>> = Mutex::new(None);
+
+    unsafe extern "system" fn forwarder(
+        hwnd: *mut std::ffi::c_void,
+        msg: u32,
+        wparam: usize,
+        lparam: isize,
+    ) -> isize {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            CallWindowProcW, DefWindowProcW, GetParent, HTTRANSPARENT, WM_NCDESTROY, WM_NCHITTEST,
+        };
+        let original = || -> isize {
+            ORIGINAL_WNDPROCS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+                .and_then(|m| m.get(&(hwnd as usize)).copied())
+                .unwrap_or(0)
+        };
+        if msg == WM_NCDESTROY {
+            // Child torn down — forward to the original so CEF finishes
+            // teardown, THEN prune the map entry (before the HWND value can be
+            // recycled). Without this, a recycled HWND makes the idempotent
+            // install short-circuit and resize silently breaks. ReAgent P2 (#1132).
+            let orig = original();
+            let result = if orig != 0 {
+                CallWindowProcW(Some(std::mem::transmute::<isize, Raw>(orig)), hwnd, msg, wparam, lparam)
+            } else {
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            };
+            if let Some(m) = ORIGINAL_WNDPROCS.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+                m.remove(&(hwnd as usize));
+            }
+            return result;
+        }
+        if msg == WM_NCHITTEST {
+            let x = (lparam & 0xFFFF) as i16 as i32;
+            let y = ((lparam >> 16) & 0xFFFF) as i16 as i32;
+            // Measure the edge band against the PARENT (the floater) rect; the
+            // child fills it, so the shared helper gives the same band as the
+            // parent's own WM_NCHITTEST.
+            let parent = GetParent(hwnd);
+            let measure = if parent.is_null() { hwnd } else { parent };
+            if floater_resize_hittest(measure, x, y).is_some() {
+                return HTTRANSPARENT as isize;
+            }
+        }
+        let orig = original();
+        if orig != 0 {
+            CallWindowProcW(Some(std::mem::transmute::<isize, Raw>(orig)), hwnd, msg, wparam, lparam)
+        } else {
+            DefWindowProcW(hwnd, msg, wparam, lparam)
         }
     }
-    let orig = FLOATING_RESIZE_WNDPROCS
-        .lock()
-        .ok()
-        .and_then(|m| m.get(&(hwnd as usize)).copied());
-    match orig {
-        Some(p) => CallWindowProcW(Some(std::mem::transmute::<isize, RawWndProc>(p)), hwnd, msg, wparam, lparam),
-        None => DefWindowProcW(hwnd, msg, wparam, lparam),
-    }
-}
 
-unsafe extern "system" fn install_forwarder_cb(child: *mut std::ffi::c_void, _l: isize) -> i32 {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowLongPtrW, GWLP_WNDPROC};
-    let key = child as usize;
-    if FLOATING_RESIZE_WNDPROCS.lock().map(|m| m.contains_key(&key)).unwrap_or(true) {
-        return 1; // already hooked (idempotent) — or lock poisoned; skip
+    let mut guard = ORIGINAL_WNDPROCS.lock().unwrap_or_else(|e| e.into_inner());
+    let map = guard.get_or_insert_with(HashMap::new);
+    if map.contains_key(&(child_hwnd as usize)) {
+        return; // already subclassed — idempotent
     }
-    let orig = SetWindowLongPtrW(child, GWLP_WNDPROC, floating_resize_forwarder_hook as *const () as isize);
-    if orig != 0 {
-        if let Ok(mut m) = FLOATING_RESIZE_WNDPROCS.lock() {
-            m.insert(key, orig);
-        }
-    }
-    1 // continue enumeration
-}
-
-unsafe extern "system" fn uninstall_forwarder_cb(child: *mut std::ffi::c_void, _l: isize) -> i32 {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowLongPtrW, GWLP_WNDPROC};
-    let key = child as usize;
-    let orig = FLOATING_RESIZE_WNDPROCS.lock().ok().and_then(|mut m| m.remove(&key));
-    if let Some(orig) = orig {
-        SetWindowLongPtrW(child, GWLP_WNDPROC, orig);
-    }
-    1
-}
-
-/// Subclass all descendant windows of `floater` so the resize border forwards
-/// (`HTTRANSPARENT`) to the floater's `WM_NCHITTEST`. Idempotent — safe to
-/// re-call when a floater gains a new child (e.g. a browser pane's web-content
-/// window, created after the frontend browser). `EnumChildWindows` recurses
-/// through ALL descendants, so it reaches the deepest Chromium render-widget
-/// window — the one that actually receives the edge hit-test.
-pub(crate) unsafe fn install_floating_resize_forwarder(floater: *mut std::ffi::c_void) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::EnumChildWindows;
-    EnumChildWindows(floater, Some(install_forwarder_cb), 0);
-}
-
-/// Remove the forwarder hooks from a closing floater's descendants (restores
-/// each original wndproc and drops the map entry).
-pub(crate) unsafe fn uninstall_floating_resize_forwarder(floater: *mut std::ffi::c_void) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::EnumChildWindows;
-    EnumChildWindows(floater, Some(uninstall_forwarder_cb), 0);
+    let original = GetWindowLongPtrW(child_hwnd, GWLP_WNDPROC);
+    map.insert(child_hwnd as usize, original);
+    SetWindowLongPtrW(child_hwnd, GWLP_WNDPROC, forwarder as *const () as isize);
+    tracing::info!(target: "edge-resize", child = ?child_hwnd, "installed WM_NCHITTEST forwarder on CEF child");
 }
 
 #[cfg(target_os = "windows")]
