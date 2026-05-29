@@ -332,6 +332,14 @@ impl BrowserPaneManager {
         );
         tracing::info!(block_id, label, "browser pane closed");
 
+        // The explicit-close path removes the reducer entry here (not via the
+        // async drain), so it must ALSO replay any create deferred while this
+        // block_id was Closing — otherwise the deferred create is orphaned
+        // (pane never loads) and its map entry leaks (and could later be
+        // replayed by an unrelated same-block_id drain, resurrecting a pane).
+        // reagent P2 on PR #1168.
+        self.replay_deferred_create(state, block_id);
+
         // PR #6 H.7 kick — top up the pool now that this pane has closed.
         // `spawn_pool_window` is internally idempotent (single-flight +
         // below-target check), so calling on every pane close is safe.
@@ -382,23 +390,29 @@ impl BrowserPaneManager {
             // was deferred while the pane was Closing should now resume.
             crate::commands::window_pool::spawn_pool_window(state);
 
-            // Deterministic redock re-create: if a `create` for this block_id
-            // was deferred while it was Closing (see `create`'s Closing arm),
-            // the reducer entry is now gone — replay it so the redocked pane
-            // actually loads. TryRegisterBrowserPaneLive will now return Fresh
-            // and post the CreateBrowserPaneTask. Single-shot (removed from the
-            // map). Fixes the intermittent "browser pane won't load after
-            // redock" race.
-            let pending = state
-                .pending_browser_pane_creates
-                .lock()
-                .remove(&block_id);
-            if let Some(p) = pending {
-                tracing::info!(block_id = %block_id, "replaying deferred browser pane create after drain");
-                let rect = Rect { x: p.x, y: p.y, width: p.width, height: p.height };
-                if let Err(e) = self.create(state, &block_id, &p.url, rect, &p.window_label) {
-                    tracing::warn!(block_id = %block_id, error = %e, "deferred browser pane create replay failed");
-                }
+            // Deterministic redock re-create: replay a create that was
+            // deferred while this block_id was Closing (see `create`'s Closing
+            // arm). The reducer entry is now gone, so the replay gets Fresh.
+            self.replay_deferred_create(state, &block_id);
+        }
+    }
+
+    /// Replay a browser-pane create that was deferred while `block_id` was
+    /// `Closing` (stashed by `create`'s Closing arm). Called from BOTH
+    /// close-completion paths — the async `drain_closed_label`
+    /// (`DrainBrowserPaneByLabel`) and the explicit `close()`
+    /// (`CompleteBrowserPaneClose`) — so a deferred create is never orphaned
+    /// regardless of which path tore the old pane down, and the pending entry
+    /// can't leak. Single-shot (removed from the map); no-op if nothing was
+    /// deferred. The old entry is gone by now, so the replayed `create` gets
+    /// `Fresh` and posts the `CreateBrowserPaneTask`.
+    fn replay_deferred_create(&self, state: &Arc<AppState>, block_id: &str) {
+        let pending = state.pending_browser_pane_creates.lock().remove(block_id);
+        if let Some(p) = pending {
+            tracing::info!(block_id, "replaying deferred browser pane create after close");
+            let rect = Rect { x: p.x, y: p.y, width: p.width, height: p.height };
+            if let Err(e) = self.create(state, block_id, &p.url, rect, &p.window_label) {
+                tracing::warn!(block_id, error = %e, "deferred browser pane create replay failed");
             }
         }
     }
