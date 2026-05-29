@@ -1,5 +1,58 @@
 # AgentMux Version History
 
+## 0.40.0 — 2026-05-29
+
+- feat(floating-pane): MVP re-dock — drop floater over agentmux window to redock its block
+- feat(agent-pane): scrub orphan in-progress nodes on session reopen
+- fix(tab-switch): fade-in opacity reveal eliminates FOUC flash + investigation spec
+- fix(workspace-tabs): widen tab basis to 240px (VS Code-aligned), enable grow, floor at 100px, cap at 320px, cap tab-name input at 128 chars
+- feat(agents): instance_get_by_name reads from db_agents (Phase 3b.2)
+- feat(agents): instance_list no-status case reads from db_agents (Phase 3b.3a)
+- feat(agents): instance_get_active_for_block resolves via block→agent reference (Phase 3b.4)
+- fix(package-portable): refuse to wipe a running install
+- refactor(storage): extract memory_bundles to its own module (R.3)
+- docs(readme): document muxlog log helper in Quick Start
+- fix(cef): resolve_frontend_base_url returns Result instead of silently emitting localhost:5173 in production
+- fix(cef): bound on_render_process_terminated with a crash budget (no infinite recovery loop)
+- fix(cef): auto-close crash-loop terminal page so the dead window releases its instance number
+- fix(agent-pane): merge same-batch text deltas instead of dropping the update
+- fix(launcher,cef): anchor asset lookup on AGENTMUX_HOME env from launcher instead of fragile current_exe()
+- fix(cef): rate-limit renderer_terminated log on the crash target (100ms gap, suppressed_count rolled forward)
+- refactor(storage): extract content/skills/history modules (R.4)
+- refactor(storage): extract identities module (R.2)
+- refactor(storage): extract Phase 3a dual_write helpers (R.5)
+- refactor(storage): extract registry_mirror module (R.6)
+- fix(cef): evict stale HWND from window_hwnds cache + on_before_close cleanup
+- refactor(storage): extract agents module (R.1) — modularization complete
+- fix(agent-pane): suppress Send-now flash by excluding Submitting from the predicate
+- fix(agent-pane): collapse 3 hover events into one auto-expand panel
+- build(package): ephemeral local build labels — stop committing version bumps for smoke builds
+- diag(statusbar): sysinfo channel instrumentation to bisect agent-pane cascade freeze
+- feat(statusbar): show local build label in the instance panel
+- refactor(cef): extract window lifecycle handlers into commands/window/lifecycle.rs
+- feat(agent-pane): IME composition handling + agent-keystroke perf marks + slash matcher TODO
+- refactor(cef): extract window motion handlers into commands/window/motion.rs
+- refactor(cef): extract window chrome handlers into commands/window/chrome.rs
+- ci(perf): guardrail against layout reads in agent/term input handlers
+- refactor(cef): extract window transparency/opacity handlers into commands/window/transparency.rs
+- test(bench): agent composer keystroke-latency benchmark via CDP
+- docs(spec): input responsiveness — terminal + agent pane structural rules + execution plan
+- refactor(cef): extract window meta handlers into commands/window/meta.rs
+- refactor(cef): extract window creation handlers into commands/window/creation.rs (window.rs modularization complete)
+- feat(host-reducer): pane-state reducer Phase 0 — pane_window_states scaffolding
+- fix(host-reducer): co-evict pane window-placement state on pane close (Phase 1)
+- fix(layout): animate pane open/close/split so panes glide into place instead of snapping
+- refactor(agents): partial-update API for updateagentinstance (drops fetch-and-merge)
+- feat(floating-pane): reducer-backed maximize/restore for torn-off floating panes
+- docs(analysis): typing-perf open-tracking inventory + consolidation
+- fix(agents): db_agents.working_directory mirrors the def's configured cwd, not the instance's resolved workdir
+- fix(window): cache the OUTER top-level frame (GA_ROOT) at capture, not the CEF inner WS_CHILD
+- feat(storage): add db_agents.last_block_id column + dual-write maintenance (Phase 3c PR1)
+- fix(cef): bind window label to promoted window, not off-screen warm-pool HWND (fixes window drag)
+- fix(floating-pane): maximize to monitor work area + fixed maximize button
+- fix(floating-pane): resize embedded CEF child to client area on WM_SIZE
+- fix(floating-pane): redock onto main resolves via find_main_window when window_hwnds cache misses
+
 ## 0.39.3 — 2026-05-28
 
 - (no semantic content — internal portable-build counter increment from `task package`; auto-appended by `scripts/bump-wrapper.sh` to satisfy the release-consistency invariant)
