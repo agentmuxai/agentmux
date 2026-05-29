@@ -254,6 +254,18 @@ fn main() {
         "Initializing CEF browser process"
     );
 
+    // macOS 26 Tahoe compat: CEF 146 calls private NSApplication selectors
+    // (e.g. `isHandlingSendEvent`, `isSendingEvent`) during NSDraggingSession
+    // setup. Apple removed them in macOS 26, so the calls go through
+    // `___forwarding___`, find nothing, and `objc_exception_throw` fires —
+    // AppKit's default uncaught-exception handler then calls `_objc_terminate`
+    // and the host dies (EXC_BREAKPOINT / SIGTRAP on CrBrowserMain). Inject
+    // `+[NSApplication resolveInstanceMethod:]` to add typed stubs *before*
+    // the forwarding machinery is entered. Must run before `cef::initialize`.
+    // See docs/specs/SPEC_MACOS_TEAROFF_STABILITY_2026_05_29.md and PR #403.
+    #[cfg(target_os = "macos")]
+    unsafe { patch_nsapp_unrecognized_selector() };
+
     // Phase B.6 (post-fix): the named-pipe bind in the launcher is
     // the AUTHORITATIVE single-instance lock — a second launcher
     // hits ERROR_ACCESS_DENIED and never reaches the host. We still
@@ -640,6 +652,125 @@ fn main() {
     let _ = std::fs::remove_file(&port_file);
 
     tracing::info!("AgentMux host shutdown complete");
+}
+
+/// macOS 26 Tahoe compatibility shim.
+///
+/// CEF 146 calls private `NSApplication` selectors (e.g. `isHandlingSendEvent`,
+/// `isSendingEvent`) during `NSDraggingSession` setup that Apple removed in
+/// macOS 26. Without a handler the ObjC runtime walks `___forwarding___`,
+/// finds nothing, and `objc_exception_throw`s; AppKit's default uncaught
+/// handler calls `_objc_terminate()` and the host dies with `EXC_BREAKPOINT`
+/// before Rust panic machinery runs.
+///
+/// We hook `+[NSApplication resolveInstanceMethod:]` on the metaclass —
+/// the earliest point in the ObjC dispatch chain — and install typed stubs
+/// for any unknown selector *before* the forwarding machinery is entered.
+/// Swizzling `doesNotRecognizeSelector:` would not work: that method is
+/// invoked FROM inside `___forwarding___`, and returning normally without
+/// throwing corrupts forwarding state and causes a secondary crash there.
+///
+/// Return-type matters: `isHandlingSendEvent` and `isSendingEvent` return
+/// `BOOL` and callers act on the value. A `void` stub leaves `x0 = self`
+/// (truthy) on ARM64, making CEF think the app is already inside a
+/// `sendEvent:` call and skip normal event routing — which breaks window
+/// drag silently. A maintained allowlist of `BOOL`-returning selectors
+/// gets a `BOOL_no_stub` returning `0` (NO); everything else gets a void
+/// stub, which is safe for the unbounded set of removed Apple-private APIs.
+///
+/// Safety: Called once, before `cef::initialize`. `NSApplication` is a
+/// singleton; adding a `+resolveInstanceMethod:` implementation on its
+/// metaclass at startup is documented Apple behavior. No allocations, no
+/// crossings of language boundaries that hold Rust references.
+///
+/// Ported from PR #403 (a5af, 2026-04-15) with rationale comments expanded.
+/// See `docs/specs/SPEC_MACOS_TEAROFF_STABILITY_2026_05_29.md` and
+/// `docs/analysis/REPORT_MACOS_TEAROFF_DRAG_CRASH_2026_05_29.md`.
+#[cfg(target_os = "macos")]
+unsafe fn patch_nsapp_unrecognized_selector() {
+    use std::ffi::{c_char, c_void};
+
+    type Id    = *mut c_void;
+    type Sel   = *const c_void;
+    type Class = *mut c_void;
+
+    extern "C" {
+        fn objc_getClass(name: *const c_char) -> Class;
+        fn object_getClass(obj: Id) -> Class; // on a Class obj → returns metaclass
+        fn sel_registerName(name: *const c_char) -> Sel;
+        fn sel_getName(sel: Sel) -> *const c_char;
+        fn class_addMethod(cls: Class, sel: Sel, imp: usize, types: *const c_char) -> u8;
+    }
+
+    // Void stub — safe for unknown selectors whose return value isn't read.
+    unsafe extern "C" fn void_stub(_self: Id, _cmd: Sel) {}
+
+    // BOOL stub returning 0 (NO). On ARM64 the return value lives in `x0`;
+    // a void stub leaves `x0 = self` (truthy), breaking CEF's sendEvent: guard.
+    unsafe extern "C" fn bool_no_stub(_self: Id, _cmd: Sel) -> u8 { 0 }
+
+    // +resolveInstanceMethod: injected onto NSApplication's metaclass.
+    // The ObjC runtime calls us the first time a selector is sent to an
+    // NSApplication instance that has no implementation. We `class_addMethod`
+    // a typed stub and return YES; the runtime retries the original message
+    // against the freshly added method.
+    unsafe extern "C" fn resolve_instance_method_impl(
+        cls:  Class,
+        _cmd: Sel,
+        sel:  Sel,
+    ) -> u8 {
+        let name = {
+            let ptr = sel_getName(sel);
+            if ptr.is_null() {
+                "<unknown>".to_owned()
+            } else {
+                std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned()
+            }
+        };
+
+        // BOOL-returning getters whose value callers act on. The truthy
+        // garbage a void stub would leave in x0 breaks event routing.
+        const BOOL_NO_SELECTORS: &[&str] = &[
+            "isHandlingSendEvent",
+            "isSendingEvent",
+        ];
+
+        if BOOL_NO_SELECTORS.contains(&name.as_str()) {
+            tracing::warn!(selector = %name, "macOS 26 compat: adding BOOL(NO) stub");
+            class_addMethod(cls, sel, bool_no_stub as usize, b"c@:\0".as_ptr() as _);
+        } else {
+            tracing::warn!(selector = %name, "macOS 26 compat: adding void stub");
+            class_addMethod(cls, sel, void_stub as usize, b"v@:\0".as_ptr() as _);
+        }
+        1 // YES — resolved; runtime retries the original send
+    }
+
+    let cls = objc_getClass(b"NSApplication\0".as_ptr() as _);
+    if cls.is_null() {
+        tracing::warn!("macOS 26 compat: NSApplication class not found");
+        return;
+    }
+
+    // +resolveInstanceMethod: is a class method; it lives on the metaclass.
+    let metacls = object_getClass(cls as Id);
+    if metacls.is_null() {
+        tracing::warn!("macOS 26 compat: NSApplication metaclass not found");
+        return;
+    }
+
+    let sel = sel_registerName(b"resolveInstanceMethod:\0".as_ptr() as _);
+    // "c@::" = BOOL return, id (Class), SEL (cmd), SEL (queried selector)
+    let added = class_addMethod(
+        metacls,
+        sel,
+        resolve_instance_method_impl as usize,
+        b"c@::\0".as_ptr() as _,
+    );
+    if added != 0 {
+        tracing::info!("macOS 26 compat: injected resolveInstanceMethod: into NSApplication metaclass");
+    } else {
+        tracing::warn!("macOS 26 compat: class_addMethod failed (method already exists?)");
+    }
 }
 
 /// Initialize tracing with dual output: rolling daily log file + human-readable stderr.
