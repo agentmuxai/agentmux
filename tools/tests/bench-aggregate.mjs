@@ -57,14 +57,29 @@ const ownArgs = ddIdx === -1 ? argv : argv.slice(0, ddIdx);
 const passthrough = ddIdx === -1 ? [] : argv.slice(ddIdx + 1);
 
 function opt(name, fallback) {
-    const i = ownArgs.indexOf(name);
-    if (i === -1) return fallback;
-    const v = ownArgs[i + 1];
-    if (v === undefined || v.startsWith("--")) {
-        console.error(`bench-aggregate: ${name} requires a value`);
-        process.exit(2);
+    // Support both `--name value` and `--name=value`. Without the `=` form,
+    // `--mode=gate` would slip past indexOf(), fall back to "report", and
+    // silently fail open once gating is enabled.
+    for (let i = 0; i < ownArgs.length; i++) {
+        const a = ownArgs[i];
+        if (a === name) {
+            const v = ownArgs[i + 1];
+            if (v === undefined || v.startsWith("--")) {
+                console.error(`bench-aggregate: ${name} requires a value`);
+                process.exit(2);
+            }
+            return v;
+        }
+        if (a.startsWith(name + "=")) {
+            const v = a.slice(name.length + 1);
+            if (v === "") {
+                console.error(`bench-aggregate: ${name} requires a value`);
+                process.exit(2);
+            }
+            return v;
+        }
     }
-    return v;
+    return fallback;
 }
 function numOpt(name, fallback, { min = 0 } = {}) {
     const raw = opt(name, String(fallback));
@@ -84,7 +99,7 @@ function flag(name) { return ownArgs.includes(name); }
 // The aggregator owns --output-file (one temp file per run). A passthrough
 // --output-file would make the bench write elsewhere while we read our temp
 // path → no metric. Reject it explicitly.
-if (passthrough.includes("--output-file")) {
+if (passthrough.some((a) => a === "--output-file" || a.startsWith("--output-file="))) {
     console.error("bench-aggregate: do not pass --output-file in passthrough args — the aggregator manages it per run.");
     process.exit(2);
 }
