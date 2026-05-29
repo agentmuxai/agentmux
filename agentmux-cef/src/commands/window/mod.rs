@@ -33,6 +33,10 @@ mod motion;
 // Position / drag / redock-hover command handlers, all dispatched by ipc.rs.
 pub use motion::*;
 
+mod chrome;
+// Minimize / maximize command handlers, dispatched by ipc.rs.
+pub use chrome::*;
+
 /// Get the current zoom factor.
 pub fn get_zoom_factor(state: &Arc<AppState>) -> serde_json::Value {
     let factor = *state.zoom_factor.lock();
@@ -67,57 +71,6 @@ pub fn set_zoom_factor(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 }
 
 
-/// Minimize the window. Args: optional `{ "label": string }`; defaults to "main".
-pub fn minimize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
-    #[cfg(target_os = "windows")]
-    unsafe {
-        use windows_sys::Win32::UI::WindowsAndMessaging::*;
-        let hwnd = find_own_top_level_window();
-        if !hwnd.is_null() {
-            ShowWindow(hwnd, SW_MINIMIZE);
-            return Ok(serde_json::Value::Null);
-        }
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
-        crate::ui_tasks::post_minimize_window(state, label);
-    }
-    let _ = (state, args);
-    Ok(serde_json::Value::Null)
-}
-
-/// Maximize/unmaximize the window (toggle).
-///
-/// Args: `{ "label": string | null }` — optional window label. When omitted,
-/// defaults to "main" (preserves single-window-build behavior). The frontend
-/// reads its own label from the `?windowLabel=…` URL query and passes it
-/// here so non-main windows act on the right CEF window.
-pub fn maximize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
-    #[cfg(target_os = "windows")]
-    unsafe {
-        use windows_sys::Win32::UI::WindowsAndMessaging::*;
-        let hwnd = find_own_top_level_window();
-        if !hwnd.is_null() {
-            let mut placement: WINDOWPLACEMENT = std::mem::zeroed();
-            placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
-            GetWindowPlacement(hwnd, &mut placement);
-            if placement.showCmd == SW_MAXIMIZE as u32 {
-                ShowWindow(hwnd, SW_RESTORE);
-            } else {
-                ShowWindow(hwnd, SW_MAXIMIZE);
-            }
-            return Ok(serde_json::Value::Null);
-        }
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
-        crate::ui_tasks::post_maximize_window(state, label);
-    }
-    let _ = (state, args);
-    Ok(serde_json::Value::Null)
-}
 
 
 /// Set window transparency/blur effects for a single window.
