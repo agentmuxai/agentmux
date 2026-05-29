@@ -129,12 +129,21 @@ tasks:
             §6.2). Forces new menus through useMenuPosition.
         cmd: bash scripts/check-menu-positioning.sh
 
+    check:input-handler-layout:
+        desc: >-
+            Grep gate — fails if a layout-read (scrollHeight, offsetTop,
+            getBoundingClientRect, etc.) appears in a hot-path input file
+            without a `// perf:allow-layout-read` justification. Enforces
+            rule #3 from SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.
+        cmd: bash tools/lint/check-input-handler-layout-reads.sh
+
     build:frontend:
         desc: Build the frontend (production mode).
         cmd: bash scripts/vite-build.sh --mode production --config vite.config.ts
         deps:
             - npm:install
             - check:menu-positioning
+            - check:input-handler-layout
         env:
             VITE_PLATFORM: "{{OS}}"
 
