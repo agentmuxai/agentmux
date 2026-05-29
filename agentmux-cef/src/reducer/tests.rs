@@ -208,7 +208,7 @@ fn try_register_browser_pane_live_fresh_returns_label_and_inserts_live() {
     let mut state = HostState::default();
     let out = update(
         &mut state,
-        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() },
+        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None },
     );
     let label = match out.browser_pane_register_result {
         Some(RegisterResult::Fresh(l)) => l,
@@ -225,7 +225,7 @@ fn try_register_browser_pane_live_already_live_returns_existing_label() {
     let mut state = HostState::default();
     let first = match update(
         &mut state,
-        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() },
+        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None },
     ).browser_pane_register_result
     {
         Some(RegisterResult::Fresh(l)) => l,
@@ -233,7 +233,7 @@ fn try_register_browser_pane_live_already_live_returns_existing_label() {
     };
     let out = update(
         &mut state,
-        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() },
+        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None },
     );
     match out.browser_pane_register_result {
         Some(RegisterResult::AlreadyLive(l)) => assert_eq!(l, first),
@@ -245,11 +245,11 @@ fn try_register_browser_pane_live_already_live_returns_existing_label() {
 #[test]
 fn try_register_browser_pane_live_closing_returns_closing() {
     let mut state = HostState::default();
-    update(&mut state, HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() });
+    update(&mut state, HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None });
     update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() });
     let out = update(
         &mut state,
-        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() },
+        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None },
     );
     assert!(matches!(out.browser_pane_register_result, Some(RegisterResult::Closing)));
 }
@@ -260,7 +260,7 @@ fn try_register_browser_pane_live_during_shutdown_errors() {
     state.lifecycle = HostLifecyclePhase::ShuttingDown;
     let out = update(
         &mut state,
-        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() },
+        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None },
     );
     assert!(out.browser_pane_register_result.is_none());
     assert!(matches!(out.events[0], HostEvent::Error { .. }));
@@ -272,7 +272,7 @@ fn enqueue_browser_pane_close_returns_label_for_live_entry() {
     let mut state = HostState::default();
     let label = match update(
         &mut state,
-        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() },
+        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None },
     ).browser_pane_register_result
     {
         Some(RegisterResult::Fresh(l)) => l,
@@ -288,7 +288,7 @@ fn enqueue_browser_pane_close_returns_label_for_live_entry() {
 #[test]
 fn enqueue_browser_pane_close_returns_none_for_already_closing() {
     let mut state = HostState::default();
-    update(&mut state, HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() });
+    update(&mut state, HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None });
     update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() });
     let out = update(
         &mut state,
@@ -302,7 +302,7 @@ fn drain_browser_pane_by_label_removes_entry_and_returns_block_id() {
     let mut state = HostState::default();
     let label = match update(
         &mut state,
-        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() },
+        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None },
     ).browser_pane_register_result
     {
         Some(RegisterResult::Fresh(l)) => l,
@@ -337,7 +337,7 @@ fn pane_lifecycle_supports_h7_invariant_check() {
     // baseline: no panes → no closing
     assert!(!state.browser_panes.values().any(|e| matches!(e.lifecycle, BrowserPaneLifecycle::Closing { .. })));
 
-    update(&mut state, HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() });
+    update(&mut state, HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None });
     // Live pane present → gate is OPEN (not closing)
     assert!(!state.browser_panes.values().any(|e| matches!(e.lifecycle, BrowserPaneLifecycle::Closing { .. })));
 
@@ -358,7 +358,7 @@ fn drain_after_close_recreate_does_not_evict_new_entry() {
     let mut state = HostState::default();
     let first = match update(
         &mut state,
-        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() },
+        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None },
     ).browser_pane_register_result
     {
         Some(RegisterResult::Fresh(l)) => l,
@@ -370,7 +370,7 @@ fn drain_after_close_recreate_does_not_evict_new_entry() {
     // re-register — gets a different label
     let second = match update(
         &mut state,
-        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() },
+        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None },
     ).browser_pane_register_result
     {
         Some(RegisterResult::Fresh(l)) => l,
@@ -383,6 +383,39 @@ fn drain_after_close_recreate_does_not_evict_new_entry() {
     assert!(stale.drained_browser_pane_block_id.is_none(), "stale drain must not evict the new entry");
     assert!(state.browser_panes.contains_key("b1"), "new entry must survive stale drain");
     assert_eq!(state.browser_panes["b1"].label, second);
+}
+
+// Deferred-create stash/replay (redock load race, #1168). A create that hits
+// `Closing` stashes its params IN THE REDUCER, atomically with the Closing
+// observation; the close-completion arm removes and hands them back to replay.
+#[test]
+fn closing_register_stashes_pending_and_complete_close_returns_it() {
+    use crate::state::PendingBrowserPaneCreate;
+    let mut state = HostState::default();
+
+    // b1 is Live, then close-requested → Closing.
+    update(&mut state, HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: None });
+    update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() });
+
+    // Re-register while Closing, WITH pending params (the redock re-create).
+    let pend = PendingBrowserPaneCreate {
+        url: "https://x".into(), x: 1, y: 2, width: 3, height: 4, window_label: "main".into(),
+    };
+    let out = update(
+        &mut state,
+        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: Some(pend.clone()) },
+    );
+    assert!(matches!(out.browser_pane_register_result, Some(RegisterResult::Closing)));
+    assert!(out.pending_browser_pane_create_to_replay.is_none(), "stash isn't returned until close completes");
+    assert!(state.pending_browser_pane_creates.contains_key("b1"), "pending create stashed in the reducer");
+
+    // Close completes → the stash is removed AND handed back to replay.
+    let done = update(&mut state, HostCommand::CompleteBrowserPaneClose { block_id: "b1".into() });
+    let (bid, returned) = done.pending_browser_pane_create_to_replay.expect("deferred create returned to replay");
+    assert_eq!(bid, "b1");
+    assert_eq!(returned.url, "https://x");
+    assert_eq!((returned.x, returned.y, returned.width, returned.height), (1, 2, 3, 4));
+    assert!(!state.pending_browser_pane_creates.contains_key("b1"), "stash removed on close (no leak)");
 }
 
 // ── H.3 drag (singleton invariant) ───────────────────────────────────

@@ -165,9 +165,22 @@ impl BrowserPaneManager {
         // Phase H.1.d (PR #5) — sole pane-registration entry point. The
         // reducer atomically generates the label and inserts the entry,
         // returning Fresh / AlreadyLive / Closing via DispatchOutput.
+        //
+        // We pass the create params as `pending`: if the reducer finds the
+        // block_id still `Closing`, it stashes them (under the same host_state
+        // lock that observed Closing — atomic, no TOCTOU) for the
+        // close-completion arm to replay. Ignored for Fresh/AlreadyLive.
         let out = state.host_dispatch(
             crate::reducer::HostCommand::TryRegisterBrowserPaneLive {
                 block_id: block_id.to_string(),
+                pending: Some(crate::state::PendingBrowserPaneCreate {
+                    url: url.to_string(),
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width,
+                    height: rect.height,
+                    window_label: window_label.to_string(),
+                }),
             },
         );
         let result = out.browser_pane_register_result.ok_or_else(|| {
@@ -187,14 +200,23 @@ impl BrowserPaneManager {
                 Ok(())
             }
             RegisterResult::Closing => {
-                // Reject rather than overwrite: the old CEF Browser is
-                // mid-teardown and its on_before_close will call
-                // DrainBrowserPaneByLabel — if we let create overwrite, drain
-                // would evict the NEW entry. Frontend retries on next tick.
-                Err(format!(
-                    "browser pane for block_id={} is still closing; retry after on_before_close",
-                    block_id
-                ))
+                // Old CEF Browser mid-teardown — don't overwrite (its
+                // on_before_close → DrainBrowserPaneByLabel would evict the NEW
+                // entry), and don't drop the request. The reducer already
+                // stashed our `pending` create (above) under the host_state
+                // lock; the close-completion arm replays it once the old entry
+                // is gone (see `drain_closed_label` / `close()`). This is the
+                // redock case: the target window re-creates the same block_id
+                // while the floater's pane is still Closing. (The old "frontend
+                // retries on next tick" never existed — browser-view.tsx::createPane
+                // errored out — which is why redocked panes intermittently
+                // never loaded.) See
+                // docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md.
+                tracing::info!(
+                    block_id,
+                    "browser pane create deferred — block_id still Closing; reducer will replay on close-completion"
+                );
+                Ok(())
             }
             RegisterResult::Fresh(label) => {
                 let mut task = CreateBrowserPaneTask::new(
@@ -307,12 +329,19 @@ impl BrowserPaneManager {
             let mut task = DetachBrowserPaneViewTask::new(state.clone(), label.clone());
             cef::post_task(cef::ThreadId::UI, Some(&mut task));
         }
-        state.host_dispatch(
+        let close_out = state.host_dispatch(
             crate::reducer::HostCommand::CompleteBrowserPaneClose {
                 block_id: block_id.to_string(),
             },
         );
         tracing::info!(block_id, label, "browser pane closed");
+
+        // The explicit-close path removes the reducer entry here (not via the
+        // async drain), so it must ALSO replay any create deferred while this
+        // block_id was Closing — otherwise the deferred create is orphaned
+        // (pane never loads + leak). The reducer removed the stash atomically
+        // and handed it back here. reagent P1/P2 on PR #1168.
+        self.replay_pending_create(state, close_out.pending_browser_pane_create_to_replay);
 
         // PR #6 H.7 kick — top up the pool now that this pane has closed.
         // `spawn_pool_window` is internally idempotent (single-flight +
@@ -363,6 +392,35 @@ impl BrowserPaneManager {
             // on_before_close path is the async drain; pool refill that
             // was deferred while the pane was Closing should now resume.
             crate::commands::window_pool::spawn_pool_window(state);
+
+            // Deterministic redock re-create: the reducer removed the stash
+            // atomically and handed back any create deferred while this
+            // block_id was Closing. Replay it (now Fresh).
+            self.replay_pending_create(state, out.pending_browser_pane_create_to_replay);
+        }
+    }
+
+    /// Replay a browser-pane create that the reducer deferred while `block_id`
+    /// was `Closing` and handed back on close-completion (via
+    /// `DispatchOutput.pending_browser_pane_create_to_replay`). Called from
+    /// BOTH close-completion paths — the async `drain_closed_label`
+    /// (`DrainBrowserPaneByLabel`) and the explicit `close()`
+    /// (`CompleteBrowserPaneClose`). No-op if nothing was deferred. The old
+    /// entry is gone by now, so the replayed `create` gets `Fresh` and posts
+    /// the `CreateBrowserPaneTask`. The stash lived in (and was removed from)
+    /// the reducer's `HostState` under the host_state lock — no separate map,
+    /// no TOCTOU.
+    fn replay_pending_create(
+        &self,
+        state: &Arc<AppState>,
+        pending: Option<(String, crate::state::PendingBrowserPaneCreate)>,
+    ) {
+        if let Some((block_id, p)) = pending {
+            tracing::info!(block_id, "replaying deferred browser pane create after close");
+            let rect = Rect { x: p.x, y: p.y, width: p.width, height: p.height };
+            if let Err(e) = self.create(state, &block_id, &p.url, rect, &p.window_label) {
+                tracing::warn!(block_id, error = %e, "deferred browser pane create replay failed");
+            }
         }
     }
 
