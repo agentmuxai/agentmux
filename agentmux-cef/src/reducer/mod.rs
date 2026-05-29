@@ -125,14 +125,16 @@ pub struct HostState {
     /// not inside the reducer. See SPEC_PER_WINDOW_OPACITY_2026-05-14.md §7.1.
     pub window_opacities: HashMap<String, f32>,
 
-    /// Pane-state reducer (Phase 0) — per-pane OS-window placement for
-    /// FLOATING panes, keyed by `block_id`. Holds maximize/minimize state +
-    /// the rect to restore to; lifecycle stays in `browser_panes`. Docked
-    /// panes have no entry (their magnify is backend-owned). Currently
-    /// DORMANT — the `ToggleFloatingMaximize` arm exists but no production
-    /// caller dispatches it yet (IPC wiring lands in a later phase). See
+    /// Pane-state reducer — per-floater OS-window placement, keyed by the
+    /// floating-window LABEL (`floating-<uuid>`), NOT block_id. Floaters are
+    /// tracked by window label everywhere (`window_hwnds`, the frontend
+    /// `?windowLabel=` URL, the `on_before_close` teardown) and are NOT in
+    /// `browser_panes` — so label is the correct key and the close-time
+    /// eviction hangs off `on_before_close` (via
+    /// `EvictFloatingPaneWindowState`), not the block_id `browser_panes`
+    /// arms. Holds maximize/minimize state + the rect to restore to. Docked
+    /// panes have no entry (their magnify is backend-owned). See
     /// SPEC_PANE_STATE_REDUCER_2026-05-28.md (REVISION 2026-05-29).
-    #[allow(dead_code)]
     pub pane_window_states: HashMap<String, PaneWindowState>,
 
     /// Lifecycle phase. `Running` is the operating state; the others
@@ -363,16 +365,27 @@ pub enum HostCommand {
     /// after `host_dispatch` returns (pure reducer, no I/O inside).
     SetWindowOpacity { label: String, opacity: f32 },
 
-    // ── Pane window-placement (pane-state reducer, Phase 0) ──────────────────
+    // ── Pane window-placement (pane-state reducer) ───────────────────────────
 
-    /// Toggle a FLOATING pane's OS-window maximize (Normal ↔ Maximized).
-    /// The floating half of the shared maximize button (spec §3.3a). The
-    /// reducer flips `pane_window_states[block_id].placement` and emits
+    /// Toggle a FLOATING pane's OS-window maximize (Normal ↔ Maximized),
+    /// keyed by the floating-window `label` (`floating-<uuid>`). The
+    /// floating half of the shared maximize button (spec §3.3a). The
+    /// reducer flips `pane_window_states[label].placement` and emits
     /// `PaneWindowStateChanged`; the IPC handler applies the
-    /// `ShowWindow(SW_MAXIMIZE/SW_RESTORE)` side-effect AFTER dispatch (pure
-    /// reducer, no I/O). Docked panes never reach here — magnify is routed
-    /// frontend-side to the backend. DORMANT in Phase 0 (no caller yet).
-    ToggleFloatingMaximize { block_id: String },
+    /// `ShowWindow(SW_MAXIMIZE/SW_RESTORE)` side-effect AFTER dispatch
+    /// (pure reducer, no I/O) by resolving `window_hwnds[label]`. Docked
+    /// panes never reach here — magnify is routed frontend-side to the
+    /// backend.
+    ToggleFloatingMaximize { label: String },
+
+    /// Evict a floater's window-placement entry. Dispatched from
+    /// `on_before_close` (where `window_hwnds[label]` is also evicted) so
+    /// placement state can never outlive the window. No-op if absent
+    /// (non-floater windows have no entry). This is the label-keyed
+    /// cleanup-on-close that replaces the earlier (incorrect) block_id
+    /// co-eviction in the `browser_panes` arms — floaters aren't in
+    /// `browser_panes`.
+    EvictFloatingPaneWindowState { label: String },
 }
 
 impl std::fmt::Debug for HostCommand {
@@ -481,9 +494,13 @@ impl std::fmt::Debug for HostCommand {
                 .field("label", label)
                 .field("opacity", opacity)
                 .finish(),
-            HostCommand::ToggleFloatingMaximize { block_id } => f
+            HostCommand::ToggleFloatingMaximize { label } => f
                 .debug_struct("ToggleFloatingMaximize")
-                .field("block_id", block_id)
+                .field("label", label)
+                .finish(),
+            HostCommand::EvictFloatingPaneWindowState { label } => f
+                .debug_struct("EvictFloatingPaneWindowState")
+                .field("label", label)
                 .finish(),
         }
     }
@@ -664,7 +681,7 @@ pub enum HostEvent {
     /// per-renderer `FloatingPaneContext` direct writes). See
     /// SPEC_PANE_STATE_REDUCER_2026-05-28.md §3.4.
     PaneWindowStateChanged {
-        block_id: String,
+        label: String,
         placement: WindowPlacement,
         version: u64,
     },
@@ -861,9 +878,12 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         HostCommand::SetWindowOpacity { label, opacity } => {
             handle_set_window_opacity(state, label, opacity)
         }
-        // Pane window-placement (pane-state reducer, Phase 0)
-        HostCommand::ToggleFloatingMaximize { block_id } => {
-            pane_window::handle_toggle_floating_maximize(state, block_id)
+        // Pane window-placement (pane-state reducer)
+        HostCommand::ToggleFloatingMaximize { label } => {
+            pane_window::handle_toggle_floating_maximize(state, label)
+        }
+        HostCommand::EvictFloatingPaneWindowState { label } => {
+            pane_window::handle_evict_floating_pane_window_state(state, label)
         }
     }
 }

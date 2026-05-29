@@ -189,10 +189,12 @@ pub enum WindowPlacement {
     Minimized,
 }
 
-/// Per-pane window-placement entry, keyed by `block_id` in
-/// `HostState.pane_window_states`. Holds ONLY the floating window's OS
-/// placement and the rect to restore to after un-maximize — NOT lifecycle
-/// (that's `BrowserPaneEntry` in `HostState.browser_panes`).
+/// Per-floater window-placement entry, keyed by the floating-window LABEL
+/// (`floating-<uuid>`) in `HostState.pane_window_states`. Holds ONLY the
+/// floating window's OS placement and the rect to restore to after
+/// un-maximize. Keyed by label (not block_id) because floaters are tracked
+/// by window label everywhere (`window_hwnds`, the `?windowLabel=` URL, the
+/// `on_before_close` teardown) and are not in `browser_panes`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
 pub struct PaneWindowState {
@@ -1340,10 +1342,10 @@ fn log_host_event(ev: &crate::reducer::HostEvent) {
             label = %label, version,
         ),
         // ── Pane window-placement (pane-state reducer, Phase 0) ──────────
-        HostEvent::PaneWindowStateChanged { block_id, placement, version } => tracing::info!(
+        HostEvent::PaneWindowStateChanged { label, placement, version } => tracing::info!(
             target: "host-reducer",
             event = "PaneWindowStateChanged",
-            block_id = %block_id,
+            label = %label,
             placement = ?placement,
             version,
         ),
