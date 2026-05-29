@@ -10,7 +10,7 @@
 
 The existing benches (`bench-agent-keystroke.mjs`, `bench-term-echo.mjs`, PR #1150) are single-run with a hard absolute threshold (`fail if P95 > 50 ms`). On variable hardware that gate is flaky → gets disabled → theater. This PR adds the statistical layer the reviewers converged on, **without modifying the benches**:
 
-- **`tools/tests/lib/bench-stats.mjs`** — pure functions: percentiles, multi-run aggregation, run-to-run variance (CoV), and a **delta-vs-baseline verdict** (`pass` / `regress` / `improve` / `no-baseline` / `noisy`) with a reporting-vs-gate exit-code policy. Unit-tested in **`bench-stats.test.mjs`** (11 tests, `node --test`, no app required — all green).
+- **`tools/tests/lib/bench-stats.mjs`** — pure functions: percentiles, multi-run aggregation, run-to-run variance (CoV), and a **delta-vs-baseline verdict** (`pass` / `regress` / `improve` / `no-baseline` / `noisy`) with a reporting-vs-gate exit-code policy. Unit-tested in **`bench-stats.test.mjs`** (12 tests, `node --test`, no app required — all green).
 - **`tools/tests/bench-aggregate.mjs`** — runs a chosen bench N times, extracts each run's headline metric (agent → `keystroke.stats.p95`, term → `quiet.p95` — the always-present term metric; `busy`/`stream_*` only exist with `--busy`/`--stream`), aggregates, compares to a committed baseline, and prints a REPORT/GATE verdict. `--update-baseline` captures one.
 - **`tools/tests/baselines/`** — schema + README documenting the pinned-device requirement and the reporting→gating promotion path.
 - **`.github/workflows/input-bench-report.yml`** — `workflow_dispatch`, self-hosted `input-bench` runner, reporting-mode. Also runs the stats unit tests (which *do* work on any runner).
