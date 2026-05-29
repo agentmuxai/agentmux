@@ -140,6 +140,13 @@ function runOnce(i) {
         encoding: "utf8",
         stdio: ["ignore", "inherit", "inherit"],
     });
+    if (res.error) {
+        // Child never launched (e.g. node not on PATH) — surface the real cause
+        // instead of a misleading "could not read metric" ENOENT downstream.
+        console.error(`  run ${i + 1}: failed to launch bench — ${res.error.message}`);
+        rmSync(tmp, { recursive: true, force: true });
+        return null;
+    }
     let value = null;
     try {
         const json = JSON.parse(readFileSync(out, "utf8"));

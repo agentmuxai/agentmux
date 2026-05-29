@@ -36,7 +36,7 @@ test("summarize: empty + populated", () => {
     assert.equal(s.p50, 12);
 });
 
-test("aggregateRuns: pooled + per-run p95 + spread", () => {
+test("aggregateRuns: pooled + per-run p95 + spread (hardcoded math)", () => {
     const runs = [
         [10, 11, 12, 13, 14],
         [10, 11, 12, 13, 40], // one slow run
@@ -45,10 +45,13 @@ test("aggregateRuns: pooled + per-run p95 + spread", () => {
     const agg = aggregateRuns(runs);
     assert.equal(agg.runs, 3);
     assert.equal(agg.pooled.n, 15);
-    assert.equal(agg.runP95s.length, 3);
-    assert.equal(agg.medianP95, percentile(agg.runP95s, 50));
-    assert.ok(agg.p95Spread >= 0);
-    assert.ok(agg.p95CoV >= 0);
+    // per-run P95 = floored index 4 of 5 (the last element)
+    assert.deepEqual(agg.runP95s, [14, 40, 15]);
+    // median of [14,40,15] → sorted [14,15,40], floored idx 1 → 15
+    assert.equal(agg.medianP95, 15);
+    assert.equal(agg.p95Spread, 26); // 40 - 14
+    // CoV = stdev([14,40,15]) / mean(23) = 12.0277 / 23 ≈ 0.5229
+    assert.ok(Math.abs(agg.p95CoV - 0.5229) < 1e-3, `CoV was ${agg.p95CoV}`);
 });
 
 test("aggregateRuns: filters empty runs", () => {

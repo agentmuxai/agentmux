@@ -45,7 +45,7 @@ The statistical core, aggregation, baseline-delta logic, and CI wiring are done 
 | Line | Blur | Nature |
 |---|---|---|
 | 313 | `blur(var(--magnified-block-blur))` | **Visual** — magnified-block backdrop. Candidate typing-time offender. |
-| 336 | `blur(50px)` | **Visual** — magnified-block backdrop. |
+| 336 | `blur(50px)` | **Visual** — `.connstatus-overlay` backdrop (rule at block.scss:324), not the magnified-block backdrop. |
 | 405 | `blur(8px)` | **Visual** — overlay backdrop. |
 | 455 | `blur(0.1px)` | **NOT visual — a compositing-order hack.** Comments at 450-452/485-490 explain `backdrop-filter` is used *deliberately* to force this element to composite **above** xterm so the focus ring is visible. |
 
