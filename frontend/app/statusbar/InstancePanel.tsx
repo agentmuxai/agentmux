@@ -50,6 +50,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         const d = getApi().getAboutModalDetails();
         return {
             version: d?.version ?? "unknown",
+            buildLabel: (d as any)?.buildLabel ?? null,
             gitHash: d?.gitHash ?? null,
             buildTime: typeof d?.buildTime === "number" && d.buildTime > 0 ? d.buildTime : null,
             platform: (d as any)?.platform ?? null,
@@ -311,6 +312,25 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                         ⧉
                     </button>
                 </div>
+                {/* Local-build label — the exact string in this portable's
+                    folder/ZIP name. Only present for `task package` builds;
+                    copyable so it can be pasted to match the on-disk artifact. */}
+                <Show when={about().buildLabel}>
+                    <div class="instance-panel-row instance-panel-row-meta">
+                        <span class="instance-panel-label">Label</span>
+                        <span class="instance-panel-value instance-panel-mono">{about().buildLabel}</span>
+                        <button
+                            type="button"
+                            class="instance-panel-copy"
+                            title="Copy build label"
+                            // Raw label (no "label: " prefix) so it pastes
+                            // straight into a folder-name match / grep.
+                            onClick={() => clipboardWriteText(about().buildLabel!)}
+                        >
+                            ⧉
+                        </button>
+                    </div>
+                </Show>
                 <Show when={about().gitHash}>
                     <div class="instance-panel-row instance-panel-row-meta">
                         <span class="instance-panel-label">Build</span>
