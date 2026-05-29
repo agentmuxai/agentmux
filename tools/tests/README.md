@@ -49,6 +49,41 @@ Reports p50/p95/p99/max in ms. Save `--output-file` before and after a
 fix to compare distributions. Full spec at
 [`docs/specs/SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md`](../../docs/specs/SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md).
 
+## `bench-agent-keystroke.mjs`
+
+Node.js benchmark for **agent composer keystroke latency** — the
+synchronous cost of the `<textarea>` `onInput` handler plus the
+RAF-coalesced scroll callback. Counterpart to `bench-term-echo.mjs`,
+but for the agent pane.
+
+CDP-driven (not App-API-driven) — connects to CEF's debug port
+(9223 dev / 9222 release), dispatches synthetic keystrokes via
+`Input.dispatchKeyEvent`, and reads `agent-keystroke:*` and
+`agent-input-raf-cb:*` perf measures via `performance.getEntriesByType`.
+
+**Prereq:** an agent pane must be open before running (the bench finds
+the textarea via `document.querySelector('.agent-input')`). The bench
+does NOT submit and clears the textarea on exit — zero token cost.
+
+```bash
+# Basic run (200 keystrokes, 50 ms apart)
+node tools/tests/bench-agent-keystroke.mjs
+
+# Custom thresholds + results file
+node tools/tests/bench-agent-keystroke.mjs --count 500 --p95-threshold-ms 30 --output-file results.json
+
+# Different CDP port (release build)
+node tools/tests/bench-agent-keystroke.mjs --cdp-port 9222
+```
+
+Reports p50/p95/p99/max for `agent-keystroke` (handler cost) and
+`agent-input-raf-cb` (RAF callback cost). Exits non-zero if keystroke
+P95 exceeds `--p95-threshold-ms` (default 50 ms — the spec's "snappy"
+internal target). Limitation: dispatches DOM-level events; does not
+exercise the OS keyboard pipeline.
+
+Spec: [`docs/specs/SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md`](../../docs/specs/SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md) §7.2.
+
 ## `pane-focus-smoke.ps1`
 
 Minimum-viable harness sanity check: reads the auth file and calls
