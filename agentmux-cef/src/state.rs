@@ -453,6 +453,27 @@ impl std::fmt::Debug for EffectKind {
 /// Unlike the Tauri version, this uses `Arc<AppState>` directly instead of
 /// `tauri::State<AppState>`. The sidecar child is `std::process::Child` instead
 /// of `tauri_plugin_shell::process::CommandChild`.
+
+/// A browser-pane create deferred while the block_id was still `Closing`
+/// (old CEF Browser mid-teardown). Owned by the reducer's
+/// `HostState.pending_browser_pane_creates` (NOT `AppState`) so stash-on-`Closing`
+/// and remove-on-close are atomic under the single host_state lock. The
+/// close-completion arms (`CompleteBrowserPaneClose`/`DrainBrowserPaneByLabel`)
+/// hand it back via `DispatchOutput.pending_browser_pane_create_to_replay`;
+/// the IPC handler replays it (now `Fresh`). The deterministic
+/// re-create-after-close that fixes the redock "pane sometimes won't load"
+/// race (no frontend retry / timer). Rect stored as raw i32s to keep this
+/// type independent of `cef::Rect`.
+#[derive(Clone, Debug)]
+pub struct PendingBrowserPaneCreate {
+    pub url: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub window_label: String,
+}
+
 pub struct AppState {
     // Phase B.5 (window_id_map step e) — `window_id_map` field
     // deleted. Authoritative copy lives in the launcher's
