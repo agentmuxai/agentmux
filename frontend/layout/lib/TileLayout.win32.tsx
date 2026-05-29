@@ -5,6 +5,7 @@
 // dragHandle: undefined — whole-tile drag (pragmatic-dnd dragHandle breaks WebView2).
 
 import { getSettingsKeyAtom } from "@/app/store/global";
+import { notifyPaneReflow } from "@/app/platform/pane-anim";
 import { draggable, dropTargetForElements, monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
 import { toPng } from "html-to-image";
@@ -339,6 +340,24 @@ const DisplayNode = (props: DisplayNodeProps) => {
     let previewRef: HTMLDivElement | undefined;
     let leafRef: HTMLDivElement | undefined;
     const addlProps = () => nodeModel.additionalProps();
+
+    // Ping the shared reflow signal whenever this node's geometry changes
+    // while animations are live (i.e. not during the first-paint reveal gate
+    // and not during a resize drag). Native browser panes read the signal to
+    // drive per-frame SetWindowPos so their HWND glides in lockstep with the
+    // CSS-animating DOM. DOM panes need nothing here — they ride the CSS
+    // transitions directly. See SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md.
+    let prevGeomKey: string | undefined;
+    createEffect(() => {
+        const t = addlProps()?.transform as JSX.CSSProperties | undefined;
+        const key = t ? `${t.transform ?? ""}|${t.width ?? ""}|${t.height ?? ""}` : "";
+        const animating = props.layoutModel.ready() === true && !props.layoutModel.isResizing();
+        if (prevGeomKey !== undefined && key !== prevGeomKey && animating) {
+            notifyPaneReflow();
+        }
+        prevGeomKey = key;
+    });
+
     const isEphemeral = () => nodeModel.isEphemeral();
     const isMagnified = () => nodeModel.isMagnified();
     // True when any pane is magnified. Every tile node is then hidden

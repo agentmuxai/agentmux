@@ -95,27 +95,29 @@ export function useDebouncedNodeInnerRect(nodeModel: NodeModel): () => CSSProper
         }
     };
 
-    const setInnerRectDebounced = (nodeInnerRect: CSSProperties) => {
-        clearInnerRectDebounce();
-        setInnerRectDebounceTimeout(
-            setTimeout(() => {
-                setInnerRect(nodeInnerRect as any);
-            }, nodeModel.animationTimeS() * 1000)
-        );
-    };
-
     createEffect(() => {
         const nodeInnerRect = nodeModel.innerRect();
-        const isMagnified = nodeModel.isMagnified();
-        const isResizing = nodeModel.isResizing();
-        const prefersReducedMotion = atoms.prefersReducedMotionAtom();
+        // Read remaining deps so the effect re-runs when they change.
+        void nodeModel.isMagnified();
+        void nodeModel.isResizing();
+        void atoms.prefersReducedMotionAtom();
 
-        if (prefersReducedMotion || isMagnified || isResizing) {
-            clearInnerRectDebounce();
-            setInnerRect(nodeInnerRect as any);
-        } else {
-            setInnerRectDebounced(nodeInnerRect);
-        }
+        // Apply the inner rect IMMEDIATELY in every case.
+        //
+        // Previously the open/close/rebalance path debounced this by
+        // `animationTimeS`, which held the pane CONTENT at its old size for
+        // the whole animation and then snapped it — so only the empty
+        // wrapper box eased while the visible content popped at the end
+        // (the "panes jerk into place" report). The reflow animation now
+        // lives in CSS: the inner rect changes old→new right now, and the
+        // `.block-content` size transition (block.scss, gated on
+        // `.tile-layout.animate`) animates it in lockstep with the
+        // `.tile-node` wrapper. During a resize drag `.animate` is off, so
+        // the content follows the cursor instantly with no transition —
+        // same as before. Reduced-motion zeroes the CSS transition.
+        // See docs/specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md.
+        clearInnerRectDebounce();
+        setInnerRect(nodeInnerRect as any);
     });
 
     onCleanup(() => clearInnerRectDebounce());

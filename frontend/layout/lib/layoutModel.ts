@@ -100,7 +100,17 @@ import {
     computeSpiralOrder,
 } from "./layoutGeometry";
 
-const DefaultAnimationTimeS = 0;
+// Duration (seconds) of the pane reflow animation that plays on
+// open/close/split/rebalance. Drives the `--animation-time-s` CSS custom
+// property consumed by the `.tile-node` wrapper transition AND the
+// `.block-content` size transition (block.scss). Browser panes track this
+// window by re-sampling their rect per frame (browser-view.tsx). The inner
+// rect is applied immediately (see layoutModelHooks) so both wrapper and
+// content transition from old→new in lockstep. 0.15s matches the file's
+// reveal-gate and placeholder timings. Honors prefers-reduced-motion (CSS
+// overrides + the layoutModelHooks instant path). See
+// docs/specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md.
+const DefaultAnimationTimeS = 0.15;
 
 export class LayoutModel {
     /**
