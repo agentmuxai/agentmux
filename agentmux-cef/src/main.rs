@@ -49,19 +49,6 @@ use std::sync::Arc;
 
 use cef::*;
 
-/// Platform-specific type for OS key events in KeyboardHandler.
-/// Matches `cef_event_handle_t` after deref:
-///   - Windows:  *mut MSG          → MSG
-///   - Linux:    *mut XEvent       → _XEvent (libX11)
-///   - macOS:    *mut c_void       → c_void  (NSEvent-backed; cef-dll-sys
-///                                            uses an opaque pointer here)
-#[cfg(target_os = "windows")]
-pub type OsKeyEvent = cef::sys::MSG;
-#[cfg(target_os = "linux")]
-pub type OsKeyEvent = cef::sys::_XEvent;
-#[cfg(target_os = "macos")]
-pub type OsKeyEvent = std::ffi::c_void;
-
 /// Suppress the Windows "Application Error" / WER crash dialog so an unhandled
 /// fault (a Chromium `LOG(FATAL)`, an `abort()`, a breakpoint) terminates the
 /// process immediately instead of wedging it behind a modal the user must

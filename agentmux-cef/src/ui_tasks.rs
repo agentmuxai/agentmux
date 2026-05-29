@@ -196,11 +196,29 @@ wrap_task! {
                         );
                         return;
                     }
-                    if let Some(f) = (*raw_ptr).begin_window_drag {
-                        let result = f(raw_ptr);
-                        tracing::info!("[start_window_drag] BeginWindowDrag returned {} label={}", result, self.label);
-                    } else {
-                        tracing::warn!("[start_window_drag] BeginWindowDrag fn ptr is null label={}", self.label);
+                    // begin_window_drag is appended to _cef_window_t by the
+                    // AgentMux fork of cef-dll-sys (see docs/cef-build/
+                    // build-patched-libcef.md). Unpatched builds (default
+                    // crates.io cef-dll-sys) lack the field — gated behind
+                    // the `patched-libcef` cargo feature so default builds
+                    // compile.
+                    #[cfg(feature = "patched-libcef")]
+                    {
+                        if let Some(f) = (*raw_ptr).begin_window_drag {
+                            let result = f(raw_ptr);
+                            tracing::info!("[start_window_drag] BeginWindowDrag returned {} label={}", result, self.label);
+                        } else {
+                            tracing::warn!("[start_window_drag] BeginWindowDrag fn ptr is null label={}", self.label);
+                        }
+                    }
+                    #[cfg(not(feature = "patched-libcef"))]
+                    {
+                        let _ = raw_ptr;
+                        tracing::warn!(
+                            "[start_window_drag] patched-libcef feature disabled — native drag is a no-op. \
+                             Rebuild with --features patched-libcef and a patched libcef.so (a5af/cef agentmux/7680-...) to enable. label={}",
+                            self.label
+                        );
                     }
                 }
             } else {
