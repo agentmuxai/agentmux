@@ -41,6 +41,15 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# cef-dll-sys's build script writes its output to `cef_macos_aarch64`
+# (Rust's `target_arch` convention), NOT `cef_macos_arm64` (Apple's
+# ecosystem convention). The script HAS to match that directory layout
+# or the cargo-cache fallback silently misses every candidate. The fact
+# that `agentmux-cef/src/sidecar.rs:386` separately maps `aarch64 →
+# arm64` is for the agentmux-srv binary FILENAME, not directory naming
+# — different concern. Don't "fix" this to arm64; verified empirically:
+#   $ ls target/release/build/cef-dll-sys-*/out/ | grep cef_macos
+#   cef_macos_aarch64
 case "$(uname -m)" in
     arm64)   ARCH="aarch64" ;;
     x86_64)  ARCH="x86_64"  ;;

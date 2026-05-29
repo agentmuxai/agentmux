@@ -109,8 +109,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 case "$(uname -m)" in
-    arm64)   ARCH="arm64" ;;
-    x86_64)  ARCH="x86_64" ;;
+    # cef-dll-sys's build script writes to `cef_macos_aarch64` (Rust's
+    # target_arch convention), not `cef_macos_arm64` (Apple's). We have
+    # to match the directory layout cef-dll-sys produces, even though
+    # sidecar.rs (a separate concern) uses `arm64` for binary filenames.
+    arm64)   ARCH="aarch64" ;;
+    x86_64)  ARCH="x86_64"  ;;
     *) echo "❌ unsupported macOS arch: $(uname -m)" >&2; exit 1 ;;
 esac
 
@@ -240,7 +244,7 @@ task dev
 1. `task bundle:darwin` succeeds and produces `dist/Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework` as a real file (not a broken symlink), with `Versions/Current` and `Versions/A` intact (verified via `ditto`, not `cp -R`).
 2. The host process started by `dev:serve` does not panic in `cef-146.7.0+146.0.12/src/library_loader.rs:20`. A window opens. Vite hot reload remains functional.
 
-Intel Macs: same flow, with `cef_macos_x86_64` candidate paths matched instead of `cef_macos_arm64`.
+Intel Macs: same flow, with `cef_macos_x86_64` candidate paths matched instead of `cef_macos_aarch64`.
 
 ---
 
