@@ -28,6 +28,9 @@ on:
       runs:
         description: "Repetitions"
         default: "5"
+      device:
+        description: "Device label — MUST match the committed baseline filename (e.g. 'thinkpad-x250' → baselines/<bench>.thinkpad-x250.json)"
+        default: "pinned"
       extra_args:
         description: "Args passed through to the bench (after --). agent: '--cdp-port 9223 --count 200'; term: '--count 50'"
         default: "--cdp-port 9223 --count 200"
@@ -49,6 +52,7 @@ jobs:
           node tools/tests/bench-aggregate.mjs \
             --bench "${{ inputs.bench }}" \
             --runs "${{ inputs.runs }}" \
-            --baseline "tools/tests/baselines/${{ inputs.bench }}.$(hostname).json" \
+            --baseline "tools/tests/baselines/${{ inputs.bench }}.${{ inputs.device }}.json" \
+            --device "${{ inputs.device }}" \
             --mode report \
             -- ${{ inputs.extra_args }}

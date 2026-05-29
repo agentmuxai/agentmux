@@ -22,11 +22,12 @@
 //
 // Usage:
 //   node tools/tests/bench-aggregate.mjs --bench agent --runs 5 \
-//        --baseline tools/tests/baselines/agent-keystroke.<device>.json \
+//        --baseline tools/tests/baselines/agent.<device>.json \
 //        --mode report -- --cdp-port 9223 --count 200
 //
 //   node tools/tests/bench-aggregate.mjs --bench agent --runs 5 \
-//        --baseline <path> --update-baseline --device "thinkpad-x250"
+//        --baseline tools/tests/baselines/agent.thinkpad-x250.json \
+//        --update-baseline --device "thinkpad-x250"
 //
 // Everything after `--` is passed through to the underlying bench verbatim.
 
