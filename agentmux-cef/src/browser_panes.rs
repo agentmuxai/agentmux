@@ -129,6 +129,46 @@ impl<'a> BrowserPaneCloseOps for AppStateCloseOps<'a> {
     }
 }
 
+/// Signature of the clip a pane should have, used by `set_pane_overlay_clip`
+/// to skip a redundant `SetWindowRgn` when nothing changed. The HWND value is
+/// folded in so a recreated pane (new HWND under a reused label) never matches a
+/// stale entry — see `AppState::pane_clip_cache`. Within-process only (the hash
+/// need not be stable across runs).
+#[cfg(target_os = "windows")]
+fn clip_sig_whole(hwnd: isize) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    0u8.hash(&mut h); // tag: full visibility (region = NULL)
+    hwnd.hash(&mut h);
+    h.finish()
+}
+
+#[cfg(target_os = "windows")]
+fn clip_sig_clipped(
+    hwnd: isize,
+    pane_left: i32,
+    pane_top: i32,
+    pane_w: i32,
+    pane_h: i32,
+    overlay_rects: &[(i32, i32, i32, i32)],
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    1u8.hash(&mut h); // tag: clipped
+    hwnd.hash(&mut h);
+    // The applied region is a deterministic function of the pane's screen
+    // position/size and the overlay rects, so hashing those inputs is a faithful
+    // signature: identical inputs ⇒ identical region (no false cache hit). A
+    // non-intersecting rect that changes only yields a false MISS (a harmless
+    // redundant re-apply), never a false hit.
+    pane_left.hash(&mut h);
+    pane_top.hash(&mut h);
+    pane_w.hash(&mut h);
+    pane_h.hash(&mut h);
+    overlay_rects.hash(&mut h);
+    h.finish()
+}
+
 pub struct BrowserPaneManager;
 
 impl BrowserPaneManager {
@@ -549,6 +589,13 @@ impl BrowserPaneManager {
                 // pump tick. For a menu hover that re-fires this code path
                 // several times per gesture, that's a material win.
                 if overlay_rects.is_empty() {
+                    // Skip if this pane is already at full visibility (same HWND,
+                    // already restored) — avoids a redundant SetWindowRgn +
+                    // repaint every call while any overlay is open elsewhere.
+                    let sig = clip_sig_whole(pane_hwnd as isize);
+                    if state.pane_clip_cache.lock().get(label).copied() == Some(sig) {
+                        continue;
+                    }
                     SetWindowRgn(pane_hwnd as _, std::ptr::null_mut(), 0);
                     // The pane is being made WHOLE again — the previously
                     // hidden sub-area needs to repaint its content. We
@@ -556,6 +603,7 @@ impl BrowserPaneManager {
                     // invalidate the entire pane; CEF will paint only
                     // dirty regions on the next pump.
                     InvalidateRect(pane_hwnd as _, std::ptr::null(), 0);
+                    state.pane_clip_cache.lock().insert(label.clone(), sig);
                     continue;
                 }
 
@@ -579,6 +627,20 @@ impl BrowserPaneManager {
                 let pane_w = pane_rect.right - pane_rect.left;
                 let pane_h = pane_rect.bottom - pane_rect.top;
                 if pane_w <= 0 || pane_h <= 0 {
+                    continue;
+                }
+
+                // Skip if the region we'd compute is identical to the one
+                // already applied to this HWND (same geometry + same overlays).
+                let sig = clip_sig_clipped(
+                    pane_hwnd as isize,
+                    pane_rect.left,
+                    pane_rect.top,
+                    pane_w,
+                    pane_h,
+                    overlay_rects,
+                );
+                if state.pane_clip_cache.lock().get(label).copied() == Some(sig) {
                     continue;
                 }
 
@@ -616,7 +678,16 @@ impl BrowserPaneManager {
                 // invalidate the whole pane. CEF dirty-region painting
                 // keeps the actual GPU work proportional to the change.
                 InvalidateRect(pane_hwnd as _, std::ptr::null(), 0);
+                state.pane_clip_cache.lock().insert(label.clone(), sig);
             }
+        }
+        // Prune cache entries for panes no longer live (closed/destroyed),
+        // bounding the map. Labels are never reused for a different pane, so a
+        // dropped entry only means the next clip for a (re)created pane applies
+        // fresh — which is correct.
+        {
+            let mut cache = state.pane_clip_cache.lock();
+            cache.retain(|k, _| labels.iter().any(|l| l == k));
         }
         tracing::info!(
             pane_count = labels.len(),
