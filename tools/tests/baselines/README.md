@@ -55,10 +55,12 @@ node tools/tests/bench-aggregate.mjs --bench agent --runs 5 \
   --baseline tools/tests/baselines/agent.thinkpad-x250.json \
   --update-baseline --device thinkpad-x250 -- --cdp-port 9223 --count 200
 
-# Terminal (terminal pane open):
+# Terminal (terminal pane open). The term bench discovers the WS endpoint/auth
+# via authkey.dev — it does NOT take --cdp-port. Uses the always-present
+# `quiet.p95` metric.
 node tools/tests/bench-aggregate.mjs --bench term --runs 5 \
   --baseline tools/tests/baselines/term.thinkpad-x250.json \
-  --update-baseline --device thinkpad-x250 -- --cdp-port 9223
+  --update-baseline --device thinkpad-x250 -- --count 50
 ```
 
 Commit the resulting JSON. Recapture (and commit) only after a **deliberate**

@@ -8,9 +8,14 @@ name: Input-latency bench (report)
 # tools/tests/baselines/README.md.
 #
 # REQUIRES a self-hosted runner on the pinned reference device with a running
-# AgentMux instance and the relevant pane open (CDP reachable). GitHub-hosted
-# runners are too noisy for this timing and cannot drive a live AgentMux, so
-# this workflow is MANUAL (workflow_dispatch) until those runners exist.
+# AgentMux instance and the relevant pane open. GitHub-hosted runners are too
+# noisy for this timing and cannot drive a live AgentMux, so this workflow is
+# MANUAL (workflow_dispatch) until those runners exist.
+#
+# Pass bench-specific args via `extra_args` (they go after `--`):
+#   - agent: drives the agent pane over CDP, e.g. "--cdp-port 9223 --count 200"
+#   - term:  discovers the WS endpoint/auth via authkey.dev (NO --cdp-port),
+#            e.g. "--count 50"
 
 on:
   workflow_dispatch:
@@ -23,9 +28,9 @@ on:
       runs:
         description: "Repetitions"
         default: "5"
-      cdp_port:
-        description: "CEF CDP debug port"
-        default: "9223"
+      extra_args:
+        description: "Args passed through to the bench (after --). agent: '--cdp-port 9223 --count 200'; term: '--count 50'"
+        default: "--cdp-port 9223 --count 200"
 
 jobs:
   report:
@@ -46,4 +51,4 @@ jobs:
             --runs "${{ inputs.runs }}" \
             --baseline "tools/tests/baselines/${{ inputs.bench }}.$(hostname).json" \
             --mode report \
-            -- --cdp-port "${{ inputs.cdp_port }}"
+            -- ${{ inputs.extra_args }}

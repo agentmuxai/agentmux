@@ -44,7 +44,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 const PRESETS = {
     agent: { script: "bench-agent-keystroke.mjs", metricPath: "keystroke.stats.p95", label: "agent-keystroke P95" },
-    term: { script: "bench-term-echo.mjs", metricPath: "busy.p95", label: "term-echo busy P95" },
+    // `quiet` is always present in the term bench output (bench-term-echo.mjs:431);
+    // `busy`/`stream_*` only appear with --busy/--stream, so they're not safe defaults.
+    term: { script: "bench-term-echo.mjs", metricPath: "quiet.p95", label: "term-echo quiet P95" },
 };
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
@@ -55,9 +57,32 @@ const passthrough = ddIdx === -1 ? [] : argv.slice(ddIdx + 1);
 
 function opt(name, fallback) {
     const i = ownArgs.indexOf(name);
-    return i !== -1 ? ownArgs[i + 1] : fallback;
+    if (i === -1) return fallback;
+    const v = ownArgs[i + 1];
+    if (v === undefined || v.startsWith("--")) {
+        console.error(`bench-aggregate: ${name} requires a value`);
+        process.exit(2);
+    }
+    return v;
+}
+function numOpt(name, fallback) {
+    const raw = opt(name, String(fallback));
+    const n = Number(raw);
+    if (Number.isNaN(n)) {
+        console.error(`bench-aggregate: ${name} must be a number (got '${raw}')`);
+        process.exit(2);
+    }
+    return n;
 }
 function flag(name) { return ownArgs.includes(name); }
+
+// The aggregator owns --output-file (one temp file per run). A passthrough
+// --output-file would make the bench write elsewhere while we read our temp
+// path → no metric. Reject it explicitly.
+if (passthrough.includes("--output-file")) {
+    console.error("bench-aggregate: do not pass --output-file in passthrough args — the aggregator manages it per run.");
+    process.exit(2);
+}
 
 if (flag("--help") || ownArgs.length === 0) {
     console.log(`
@@ -88,12 +113,12 @@ if (!preset) {
     console.error(`bench-aggregate: --bench must be one of ${Object.keys(PRESETS).join(", ")}`);
     process.exit(2);
 }
-const RUNS = parseInt(opt("--runs", "5"), 10);
+const RUNS = Math.max(1, Math.floor(numOpt("--runs", 5)));
 const BASELINE_PATH = opt("--baseline");
 const METRIC_PATH = opt("--metric-path", preset.metricPath);
 const MODE = opt("--mode", "report");
-const TOLERANCE_PCT = parseFloat(opt("--tolerance-pct", "20"));
-const MAX_COV = parseFloat(opt("--max-cov", "0.25"));
+const TOLERANCE_PCT = numOpt("--tolerance-pct", 20);
+const MAX_COV = numOpt("--max-cov", 0.25);
 const UPDATE_BASELINE = flag("--update-baseline");
 const DEVICE = opt("--device", "unspecified-device");
 
