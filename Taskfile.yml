@@ -505,7 +505,18 @@ tasks:
                 #   2. ~/cef-build/darwin/<arch> (custom builds)
                 #   3. cef-dll-sys cargo cache (fallback — public upstream)
                 # See docs/specs/SPEC_MACOS_CEF_FRAMEWORK_BUNDLING_2026_05_28.md.
+                # Fail fast on any step: a missing CEF framework, a `ditto`
+                # failure, or an unreadable GL lib should fail bundle, not
+                # leak through to dev:serve which would launch the host
+                # straight into the cef-rs LibraryLoader panic and look
+                # like a runtime bug. Matches `bundle:windows`'s explicit
+                # error handling.
+                set -euo pipefail
                 CEF_DIR="$(bash scripts/resolve-cef-runtime-darwin.sh)"
+                if [ -z "$CEF_DIR" ] || [ ! -d "$CEF_DIR/Chromium Embedded Framework.framework" ]; then
+                    echo "❌ resolve-cef-runtime-darwin.sh did not yield a usable CEF framework" >&2
+                    exit 1
+                fi
                 mkdir -p dist/Frameworks dist/cef
                 rm -rf "dist/Frameworks/Chromium Embedded Framework.framework"
                 # `ditto` preserves the Versions/Current symlink chain that the
@@ -525,10 +536,15 @@ tasks:
                 # would otherwise leave dangling relative links once the
                 # cef-dev copy lives one level lower than dist/cef.
                 # 22 MB on disk — negligible.
-                for lib in "$CEF_DIR/Chromium Embedded Framework.framework/Libraries/"*.dylib; do
+                libs_dir="$CEF_DIR/Chromium Embedded Framework.framework/Libraries"
+                if [ ! -d "$libs_dir" ]; then
+                    echo "❌ Framework Libraries/ directory missing: $libs_dir" >&2
+                    exit 1
+                fi
+                for lib in "$libs_dir/"*.dylib; do
                     cp -f "$lib" "dist/cef/$(basename "$lib")"
                 done
-                cp -f "$CEF_DIR/Chromium Embedded Framework.framework/Libraries/vk_swiftshader_icd.json" "dist/cef/vk_swiftshader_icd.json"
+                cp -f "$libs_dir/vk_swiftshader_icd.json" "dist/cef/vk_swiftshader_icd.json"
                 echo "✓ Bundled CEF Framework for macOS (dist/Frameworks/ + GL libs in dist/cef/)"
 
     bundle:linux:
