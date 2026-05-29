@@ -8,6 +8,36 @@
 
 ---
 
+## 0. Code-verified refresh — 2026-05-29 (READ THIS FIRST; §3–§9 below are the 2026-05-05 snapshot, retained as history)
+
+The original §2–§9 snapshot is **~3.5 weeks / ~280 merges stale** and materially under-reports progress. The relevant work shipped under commit subjects that don't contain its phase tags (e.g. "CPD"), so a subject-grep audit missed it. This section is **code-verified** (read the source files, not the git log); where §2–§9 disagree with §0, §0 wins.
+
+**Headline: the reducer stack is at its practical end-state.** Almost everything §2–§9 marked *designed / pending / open* has since shipped.
+
+### Layer status — corrected
+
+| Layer | 2026-05-05 said | Code-verified 2026-05-29 |
+|---|---|---|
+| **Launcher (L1)** | ✅ done | ✅ done (unchanged) |
+| **Srv reducer (Phase E)** | 🟨 mostly | ✅ **E.2c.5b + E.6 shipped** — renderer-side typed-event subscriber (`frontend/util/srv-events.ts`) + multi-source dispatcher with saga buffer (`frontend/util/event-buffer.ts`); `srv_event_bridge.rs` (PR #618). E.5.x UpdateWindowMeta through reducer (#856). |
+| **Srv layout (E.4.B)** | 🟨 Phase 5 "❌ next" | 🟨 **Phase 5 SHIPPED** (`reducer/layout.rs` + `Command::Layout{Clear,SetTree,InsertNode,DeleteNode}` arms + tests). **Open: Phase 6** (persist arms — `persist_subscriber` doesn't consume `Event::Layout*`; LayoutState still persists wcore-direct) **+ Phase 7** (legacy `pendingbackendactions`/rootnode writers in `server/app_api.rs:339,798` still bypass the reducer — multi-side migration). |
+| **Host reducer (Phase F)** | 🟨 6/7; H.6 dormant | 🟨 **+1 slice**: `pane_window_states` (Phase 0 #1154, Phase 1 #1157). H.6 top-level-creation still dormant by design (works via direct path). |
+| **Cross-process dispatch** | ❌ open / `IssueCmd::Host` log-only | ✅ **DONE — CPD-1→5.** Schema/HostFrame (CPD-1); `host_pipe/` launcher wrapper (CPD-2); live saga dispatch via `HostPipe::send_command` (CPD-3, "no longer log-only", integration-tested); per-saga `saga_id` correlation, evict-and-replace retired (CPD-4); host-side reader + idempotency LRU `(saga_id,kind)` in `agentmux-cef/src/launcher_ipc.rs:196+` (CPD-5). Only `PipeTarget::Srv`/`LauncherSelf` remain — reserved `#[allow(dead_code)]`, **no consumer**, dormant by design (spec §5 risk 4 flags preemptive activation as rot). |
+| **Sagas** | ✅ foundation; F.6 ❌ pending | ✅ **F.6 WindowCleanupCascade shipped** (`saga/window_cleanup.rs`) **+ saga durability/recovery** (`saga/recovery.rs`, beyond original scope). PoolRespawn now dispatches for real via CPD. |
+| **Frontend** | 🟨 #1 shipped, #2 doc-approved, #3–#8 designed | ✅ **8 slice reducers live** (code-verified `reducer.ts` files): agent-document (#1), agent-pane-state (#4 — full turn-phase series A–G #987–#997 + InitPhase + persist + cascade hardening), browser-pane-state (#9), editor-pane-state (#10), **launcher-event (#6 — said "designed")**, drone-run-state, launch-flow-state (Stages 2a–2d), window-opacity. |
+| **Persistence** | ✅ subscriber shipped | ✅ unchanged (Phase G still deferred). |
+
+### Genuinely-open reducer-stack items (the entire remaining list)
+
+1. **E.4.B Phase 6** — layout persist-subscriber arms (consume `Event::Layout*`; retire the wcore-direct LayoutState persist path).
+2. **E.4.B Phase 7** — migrate the legacy `pendingbackendactions`/rootnode writers (`app_api.rs:339,798`) onto the layout reducer. Multi-side (frontend currently applies `pendingbackendactions`), not a trivial swap.
+3. **`PipeTarget::Srv` / `LauncherSelf`** — dormant by design; build only when a class-D/E saga needs launcher→srv or launcher-self dispatch.
+4. **H.6** host top-level-creation runner — dormant; low priority (direct path works).
+
+Everything else in §3–§9 below that reads as "pending/designed/open" should be treated as **shipped** unless it's one of the four above. A full row-by-row rewrite of §3–§9 is deferred; this §0 is the authoritative current status.
+
+---
+
 ## 1. The 3-level stack
 
 ```
