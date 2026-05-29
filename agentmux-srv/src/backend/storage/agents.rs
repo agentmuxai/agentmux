@@ -1276,13 +1276,17 @@ impl Store {
     /// With a partial write the handler no longer reads the row at all.
     /// See docs/specs/SPEC_UPDATEAGENTINSTANCE_PARTIAL_UPDATE_2026_05_29.md.
     ///
-    /// Returns the post-update row (`None` if the id didn't exist or no
-    /// fields were provided) so callers that need `definition_id` for an
-    /// event scope — or want to echo the row back — get it from the
-    /// same authoritative reload this method already runs to refresh the
-    /// registry mirror + Phase-3a dual-write. Those consumers read only
-    /// non-transient fields, so the reload survives a future
+    /// Returns the post-update row so callers that need `definition_id`
+    /// for an event scope — or want to echo the row back — get it from
+    /// the same authoritative reload this method already runs to refresh
+    /// the registry mirror + Phase-3a dual-write. Those consumers read
+    /// only non-transient fields, so the reload survives a future
     /// `instance_get` → db_agents flip (Phase 3b.3c).
+    ///
+    /// `None` is reserved for **not-found** (the id doesn't exist). An
+    /// all-`None` update on an existing id is a no-op that returns the
+    /// unchanged row — so callers can distinguish "nothing to change"
+    /// from "no such instance".
     pub fn instance_update_partial(
         &self,
         id: &str,
