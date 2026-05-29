@@ -7,6 +7,7 @@
 
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
+import { markEnd, markStart } from "@/perf";
 import type { AgentViewModel } from "../agent-model";
 import type { SlashCommand } from "../commands/types";
 import type { SessionStats, TurnTokens } from "../types";
@@ -263,8 +264,17 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         return props.getCompletions(p);
     });
 
+    // IME composition state — true between compositionstart and compositionend.
+    // CJK / Vietnamese / any IME user types into a composition buffer; intermediate
+    // values fire `input` events but should NOT trigger slash-autocomplete matching
+    // (the prefix is unfinished) and Enter must NOT submit (it's confirming a
+    // candidate). Tracked as a plain `let` instead of a signal — read synchronously
+    // in handlers, never drives JSX. See SPEC_INPUT_RESPONSIVENESS §6.2.
+    let composingRef = false;
+
     const updateAutocomplete = (): void => {
         if (!textareaRef) return;
+        if (composingRef) return;
         const val = textareaRef.value;
         // Show the dropdown only when the value starts with `/` AND
         // contains no space — once the user types past the command name
@@ -293,15 +303,30 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // per 16ms. Flag is per-component-instance (captured in closure).
     let typingScrollPending = false;
     const handleInput = () => {
+        // Perf marks per SPEC_INPUT_RESPONSIVENESS §7.1. Target: handler
+        // body P95 < 5 ms. The mark span ends BEFORE the RAF enqueue so
+        // we measure only the synchronous handler cost.
+        markStart("agent-keystroke");
         updateAutocomplete();
         const cb = props.onTyping;
-        if (!cb) return;
-        if (typingScrollPending) return;
+        if (!cb) {
+            markEnd("agent-keystroke", "done");
+            return;
+        }
+        if (typingScrollPending) {
+            markEnd("agent-keystroke", "coalesced");
+            return;
+        }
         typingScrollPending = true;
+        markStart("agent-input-raf");
         requestAnimationFrame(() => {
             typingScrollPending = false;
+            markEnd("agent-input-raf", "fired");
+            markStart("agent-input-raf-cb");
             cb();
+            markEnd("agent-input-raf-cb", "done");
         });
+        markEnd("agent-keystroke", "scheduled");
     };
 
     // ── Voice input handle ───────────────────────────────────────────
@@ -364,6 +389,9 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         const message = textareaRef.value;
         if (!message.trim()) return;
         if (props.onSendMessage) {
+            // agent-submit span per SPEC_INPUT_RESPONSIVENESS §7.1. Includes
+            // the synchronous onSendMessage cost (WS send, slice dispatch).
+            markStart("agent-submit");
             props.onSendMessage(message);
             textareaRef.value = "";
             setAutocompletePrefix(null);
@@ -371,10 +399,19 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             // document signal synchronously before this point, so jumpToBottom
             // will include the just-added node in scrollHeight.
             props.onTyping?.();
+            markEnd("agent-submit", "sent");
         }
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+        // IME composition guard: when a CJK / Vietnamese / etc. IME is
+        // converting (between compositionstart and compositionend),
+        // Enter/Tab/Arrows/Esc confirm or navigate composition candidates
+        // — the IME, not our handler, owns them. `keyCode === 229` is
+        // Safari's quirk where it emits a synthetic keydown for IME
+        // events without setting `isComposing`. Both checks are
+        // load-bearing. See SPEC_INPUT_RESPONSIVENESS §6.2.
+        if (e.isComposing || e.keyCode === 229) return;
         // Autocomplete keys take precedence when the dropdown is open
         // and has at least one match. Tab/Enter accept the selection;
         // arrows navigate; Esc dismisses without affecting text.
@@ -456,6 +493,16 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                     placeholder={`Send message to ${props.agentName}...`}
                     onKeyDown={handleKeyDown}
                     onInput={handleInput}
+                    onCompositionStart={() => {
+                        composingRef = true;
+                    }}
+                    onCompositionEnd={() => {
+                        composingRef = false;
+                        // The textarea value updated during the composition
+                        // but we skipped slash matching. Run it now so the
+                        // dropdown reflects the committed text.
+                        updateAutocomplete();
+                    }}
                     rows={1}
                 />
                 <div class="agent-input-hint">
