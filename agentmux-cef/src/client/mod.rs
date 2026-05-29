@@ -465,6 +465,23 @@ impl AgentMuxHandler {
             crate::browser_pane::callbacks::on_after_created_browser_pane(&self.state, &browser);
         }
 
+        // Edge-resize forwarder (SPEC_FLOATING_PANE_EDGE_RESIZE PR A): subclass
+        // the floater's descendant CEF windows so the resize border passes
+        // through (HTTRANSPARENT) to the floater's own WM_NCHITTEST → native
+        // resize. Idempotent — re-run from the browser-pane path once a pane's
+        // web-content child is added. Win32-only.
+        #[cfg(target_os = "windows")]
+        if label.starts_with("floating-") {
+            let floater = self.state.window_hwnds.lock().get(&label).copied();
+            if let Some(floater) = floater {
+                unsafe {
+                    crate::floating_pane::install_floating_resize_forwarder(
+                        floater as *mut std::ffi::c_void,
+                    );
+                }
+            }
+        }
+
         // Phase B.4 — report top-level windows to the launcher's
         // read-only state mirror. Skips browser-pane child HWNDs and
         // pool windows (they're not user-visible until promoted; the
@@ -695,12 +712,24 @@ impl AgentMuxHandler {
             #[cfg(target_os = "windows")]
             {
                 let removed = self.state.window_hwnds.lock().remove(lbl);
-                if removed.is_some() {
+                if let Some(hwnd_val) = removed {
                     tracing::debug!(
                         target: "win-resolve",
                         label = %lbl,
                         "[win-resolve] evicted on close"
                     );
+                    // Edge-resize forwarder cleanup (SPEC_FLOATING_PANE_EDGE_RESIZE
+                    // PR A): restore the subclassed descendants' wndprocs + drop
+                    // their map entries. Done here (descendants still alive at
+                    // on_before_close) so recycled HWND values can't leave a
+                    // stale entry that makes a later install skip a real child.
+                    if lbl.starts_with("floating-") {
+                        unsafe {
+                            crate::floating_pane::uninstall_floating_resize_forwarder(
+                                hwnd_val as *mut std::ffi::c_void,
+                            );
+                        }
+                    }
                 }
             }
 

@@ -333,6 +333,146 @@ fn escape_query_value(s: &str) -> String {
 /// pattern as the main window's `useWindowDrag` hook.
 ///
 /// See `docs/analyses/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md`.
+// ── Edge-resize hit-test forwarder ───────────────────────────────────────
+// SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29.md (PR A).
+//
+// The floater's parent wndproc maps a resize border in WM_NCHITTEST, but the
+// embedded CEF child windows fill the client area (incl. the border) and
+// receive the edge mouse events first — so the parent's HT{LEFT,…} zones are
+// never reached and native resize never starts. We subclass the floater's
+// descendant CEF windows so that, over the border, they return HTTRANSPARENT
+// (falling through to the floater's own WM_NCHITTEST → native resize). All
+// other messages — and WM_NCHITTEST off the border — delegate unchanged.
+
+/// Resize-border width in CSS px; DPI-scaled per call. Shared by the floater
+/// wndproc's WM_NCHITTEST and the child forwarder so the strips line up. A
+/// hard-coded physical-px constant would shrink the zone on HiDPI (6 physical
+/// px = 3 CSS px at 200% → unreachable).
+const RESIZE_BORDER_CSS: i32 = 6;
+
+/// child HWND → original wndproc, for `CallWindowProcW` delegation.
+static FLOATING_RESIZE_WNDPROCS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<usize, isize>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// If `(screen_x, screen_y)` lies in `floater`'s resize border, return the
+/// matching `HT*` edge/corner code; else `None`. Screen coords (the
+/// `WM_NCHITTEST` lparam space).
+unsafe fn floater_resize_hittest(
+    floater: *mut std::ffi::c_void,
+    screen_x: i32,
+    screen_y: i32,
+) -> Option<isize> {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    let mut rect: RECT = std::mem::zeroed();
+    if GetWindowRect(floater, &mut rect) == 0 {
+        return None;
+    }
+    let inside = screen_x >= rect.left
+        && screen_x < rect.right
+        && screen_y >= rect.top
+        && screen_y < rect.bottom;
+    if !inside {
+        return None;
+    }
+    let dpi = GetDpiForWindow(floater) as i32;
+    let dpi = if dpi > 0 { dpi } else { 96 };
+    let b = (RESIZE_BORDER_CSS * dpi / 96).max(1);
+    let left = screen_x - rect.left < b;
+    let right = rect.right - screen_x < b;
+    let top = screen_y - rect.top < b;
+    let bottom = rect.bottom - screen_y < b;
+    let ht = match (top, bottom, left, right) {
+        (true, _, true, _) => HTTOPLEFT,
+        (true, _, _, true) => HTTOPRIGHT,
+        (_, true, true, _) => HTBOTTOMLEFT,
+        (_, true, _, true) => HTBOTTOMRIGHT,
+        (_, _, true, _) => HTLEFT,
+        (_, _, _, true) => HTRIGHT,
+        (true, _, _, _) => HTTOP,
+        (_, true, _, _) => HTBOTTOM,
+        _ => return None,
+    };
+    Some(ht as isize)
+}
+
+type RawWndProc =
+    unsafe extern "system" fn(*mut std::ffi::c_void, u32, usize, isize) -> isize;
+
+unsafe extern "system" fn floating_resize_forwarder_hook(
+    hwnd: *mut std::ffi::c_void,
+    msg: u32,
+    wparam: usize,
+    lparam: isize,
+) -> isize {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CallWindowProcW, DefWindowProcW, GetAncestor, GA_ROOT, HTTRANSPARENT, WM_NCHITTEST,
+    };
+    if msg == WM_NCHITTEST {
+        let x = (lparam & 0xFFFF) as i16 as i32;
+        let y = ((lparam >> 16) & 0xFFFF) as i16 as i32;
+        let floater = GetAncestor(hwnd, GA_ROOT);
+        if !floater.is_null() && floater_resize_hittest(floater, x, y).is_some() {
+            // Over the floater's resize border → pass through to the floater's
+            // own WM_NCHITTEST (HT{LEFT,…}) so the native resize loop runs.
+            return HTTRANSPARENT as isize;
+        }
+    }
+    let orig = FLOATING_RESIZE_WNDPROCS
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&(hwnd as usize)).copied());
+    match orig {
+        Some(p) => CallWindowProcW(Some(std::mem::transmute::<isize, RawWndProc>(p)), hwnd, msg, wparam, lparam),
+        None => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
+unsafe extern "system" fn install_forwarder_cb(child: *mut std::ffi::c_void, _l: isize) -> i32 {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowLongPtrW, GWLP_WNDPROC};
+    let key = child as usize;
+    if FLOATING_RESIZE_WNDPROCS.lock().map(|m| m.contains_key(&key)).unwrap_or(true) {
+        return 1; // already hooked (idempotent) — or lock poisoned; skip
+    }
+    let orig = SetWindowLongPtrW(child, GWLP_WNDPROC, floating_resize_forwarder_hook as *const () as isize);
+    if orig != 0 {
+        if let Ok(mut m) = FLOATING_RESIZE_WNDPROCS.lock() {
+            m.insert(key, orig);
+        }
+    }
+    1 // continue enumeration
+}
+
+unsafe extern "system" fn uninstall_forwarder_cb(child: *mut std::ffi::c_void, _l: isize) -> i32 {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowLongPtrW, GWLP_WNDPROC};
+    let key = child as usize;
+    let orig = FLOATING_RESIZE_WNDPROCS.lock().ok().and_then(|mut m| m.remove(&key));
+    if let Some(orig) = orig {
+        SetWindowLongPtrW(child, GWLP_WNDPROC, orig);
+    }
+    1
+}
+
+/// Subclass all descendant windows of `floater` so the resize border forwards
+/// (`HTTRANSPARENT`) to the floater's `WM_NCHITTEST`. Idempotent — safe to
+/// re-call when a floater gains a new child (e.g. a browser pane's web-content
+/// window, created after the frontend browser). `EnumChildWindows` recurses
+/// through ALL descendants, so it reaches the deepest Chromium render-widget
+/// window — the one that actually receives the edge hit-test.
+pub(crate) unsafe fn install_floating_resize_forwarder(floater: *mut std::ffi::c_void) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::EnumChildWindows;
+    EnumChildWindows(floater, Some(install_forwarder_cb), 0);
+}
+
+/// Remove the forwarder hooks from a closing floater's descendants (restores
+/// each original wndproc and drops the map entry).
+pub(crate) unsafe fn uninstall_floating_resize_forwarder(floater: *mut std::ffi::c_void) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::EnumChildWindows;
+    EnumChildWindows(floater, Some(uninstall_forwarder_cb), 0);
+}
+
 #[cfg(target_os = "windows")]
 unsafe extern "system" fn floating_pane_wndproc(
     hwnd: *mut std::ffi::c_void,
@@ -340,15 +480,7 @@ unsafe extern "system" fn floating_pane_wndproc(
     wparam: usize,
     lparam: isize,
 ) -> isize {
-    use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
-
-    // Edge resize zone in CSS / DIP pixels, scaled to physical pixels
-    // per the HWND's DPI inside the WM_NCHITTEST branch. A hard-coded
-    // physical-pixel constant would shrink the hit zone on HiDPI —
-    // a 6-physical-px resize border is 3 CSS px at 200% DPI and
-    // effectively unreachable.
-    const RESIZE_BORDER_CSS: i32 = 6;
 
     match msg {
         // Claim the entire window rect as client area — no system title
@@ -360,45 +492,10 @@ unsafe extern "system" fn floating_pane_wndproc(
         WM_NCHITTEST => {
             let x = (lparam & 0xFFFF) as i16 as i32;
             let y = ((lparam >> 16) & 0xFFFF) as i16 as i32;
-
-            let mut rect = std::mem::zeroed::<windows_sys::Win32::Foundation::RECT>();
-            GetWindowRect(hwnd, &mut rect);
-
-            // Scale the resize-border CSS px to physical px against
-            // THIS HWND's current monitor — handles mid-life monitor
-            // changes (the window can move between monitors at
-            // different DPIs).
-            let dpi = GetDpiForWindow(hwnd) as i32;
-            let dpi = if dpi > 0 { dpi } else { 96 };
-            let resize_border_px = (RESIZE_BORDER_CSS * dpi / 96).max(1);
-
-            let left = x - rect.left < resize_border_px;
-            let right = rect.right - x < resize_border_px;
-            let top = y - rect.top < resize_border_px;
-            let bottom = rect.bottom - y < resize_border_px;
-            if top && left {
-                return HTTOPLEFT as isize;
-            }
-            if top && right {
-                return HTTOPRIGHT as isize;
-            }
-            if bottom && left {
-                return HTBOTTOMLEFT as isize;
-            }
-            if bottom && right {
-                return HTBOTTOMRIGHT as isize;
-            }
-            if left {
-                return HTLEFT as isize;
-            }
-            if right {
-                return HTRIGHT as isize;
-            }
-            if top {
-                return HTTOP as isize;
-            }
-            if bottom {
-                return HTBOTTOM as isize;
+            // Shared border math (same helper the child forwarder uses, so the
+            // child's HTTRANSPARENT strip and this strip are pixel-identical).
+            if let Some(ht) = floater_resize_hittest(hwnd, x, y) {
+                return ht;
             }
 
             // Pane-header drag is JS-driven (see floating-pane-workspace.tsx);
