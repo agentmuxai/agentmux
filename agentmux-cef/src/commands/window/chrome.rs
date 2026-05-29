@@ -116,7 +116,12 @@ pub fn toggle_floating_maximize(
             None
         } else {
             let mut r: RECT = std::mem::zeroed();
-            if GetWindowRect(hwnd, &mut r) != 0 {
+            // Only stash a sane, non-degenerate rect. On GetWindowRect failure
+            // or a zero/negative-area rect (e.g. a window mid-teardown), keep
+            // `None` so the reducer records no restore target — a missing
+            // restore rect makes the later restore a safe no-op rather than
+            // sizing the floater to a 0×0 / inverted rect.
+            if GetWindowRect(hwnd, &mut r) != 0 && r.right > r.left && r.bottom > r.top {
                 Some(crate::state::PaneRect { left: r.left, top: r.top, right: r.right, bottom: r.bottom })
             } else {
                 None
