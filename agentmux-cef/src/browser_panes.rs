@@ -187,14 +187,32 @@ impl BrowserPaneManager {
                 Ok(())
             }
             RegisterResult::Closing => {
-                // Reject rather than overwrite: the old CEF Browser is
-                // mid-teardown and its on_before_close will call
-                // DrainBrowserPaneByLabel — if we let create overwrite, drain
-                // would evict the NEW entry. Frontend retries on next tick.
-                Err(format!(
-                    "browser pane for block_id={} is still closing; retry after on_before_close",
-                    block_id
-                ))
+                // Don't overwrite (the old CEF Browser is mid-teardown and its
+                // on_before_close → DrainBrowserPaneByLabel would evict the NEW
+                // entry) — but don't drop the request either. STASH it and let
+                // `drain_closed_label` REPLAY it deterministically once the
+                // close completes. This is the redock case: the target window
+                // re-creates the same block_id while the floater's pane is
+                // still Closing. The old "Frontend retries on next tick" never
+                // existed (browser-view.tsx::createPane errors out, no retry),
+                // which is why redocked panes intermittently never loaded. See
+                // docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md.
+                state.pending_browser_pane_creates.lock().insert(
+                    block_id.to_string(),
+                    crate::state::PendingBrowserPaneCreate {
+                        url: url.to_string(),
+                        x: rect.x,
+                        y: rect.y,
+                        width: rect.width,
+                        height: rect.height,
+                        window_label: window_label.to_string(),
+                    },
+                );
+                tracing::info!(
+                    block_id,
+                    "browser pane create deferred — block_id still Closing; will replay on drain"
+                );
+                Ok(())
             }
             RegisterResult::Fresh(label) => {
                 let mut task = CreateBrowserPaneTask::new(
@@ -363,6 +381,25 @@ impl BrowserPaneManager {
             // on_before_close path is the async drain; pool refill that
             // was deferred while the pane was Closing should now resume.
             crate::commands::window_pool::spawn_pool_window(state);
+
+            // Deterministic redock re-create: if a `create` for this block_id
+            // was deferred while it was Closing (see `create`'s Closing arm),
+            // the reducer entry is now gone — replay it so the redocked pane
+            // actually loads. TryRegisterBrowserPaneLive will now return Fresh
+            // and post the CreateBrowserPaneTask. Single-shot (removed from the
+            // map). Fixes the intermittent "browser pane won't load after
+            // redock" race.
+            let pending = state
+                .pending_browser_pane_creates
+                .lock()
+                .remove(&block_id);
+            if let Some(p) = pending {
+                tracing::info!(block_id = %block_id, "replaying deferred browser pane create after drain");
+                let rect = Rect { x: p.x, y: p.y, width: p.width, height: p.height };
+                if let Err(e) = self.create(state, &block_id, &p.url, rect, &p.window_label) {
+                    tracing::warn!(block_id = %block_id, error = %e, "deferred browser pane create replay failed");
+                }
+            }
         }
     }
 

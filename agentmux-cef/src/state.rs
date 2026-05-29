@@ -453,6 +453,23 @@ impl std::fmt::Debug for EffectKind {
 /// Unlike the Tauri version, this uses `Arc<AppState>` directly instead of
 /// `tauri::State<AppState>`. The sidecar child is `std::process::Child` instead
 /// of `tauri_plugin_shell::process::CommandChild`.
+
+/// A browser-pane create deferred while the block_id was still `Closing`
+/// (old CEF Browser mid-teardown). Held in `AppState.pending_browser_pane_creates`
+/// and replayed by `BrowserPaneManager::drain_closed_label` once the close
+/// drains — the deterministic re-create-after-close that fixes the redock
+/// "pane sometimes won't load" race (no frontend retry / timer). Rect stored
+/// as raw i32s to keep this type independent of `cef::Rect`.
+#[derive(Clone, Debug)]
+pub struct PendingBrowserPaneCreate {
+    pub url: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub window_label: String,
+}
+
 pub struct AppState {
     // Phase B.5 (window_id_map step e) — `window_id_map` field
     // deleted. Authoritative copy lives in the launcher's
@@ -747,6 +764,13 @@ pub struct AppState {
     #[cfg(target_os = "windows")]
     pub window_hwnds: Mutex<HashMap<String, isize>>,
 
+    /// Browser-pane creates deferred because the block_id was still `Closing`
+    /// (old CEF Browser mid-teardown — e.g. redock re-creating the same
+    /// block_id the floater is still closing). Replayed deterministically from
+    /// `BrowserPaneManager::drain_closed_label` once the close drains. Keyed by
+    /// block_id. See docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md.
+    pub pending_browser_pane_creates: Mutex<HashMap<String, PendingBrowserPaneCreate>>,
+
 }
 
 impl Default for AppState {
@@ -803,6 +827,7 @@ impl Default for AppState {
             debug_port: Mutex::new(0),
             #[cfg(target_os = "windows")]
             window_hwnds: Mutex::new(HashMap::new()),
+            pending_browser_pane_creates: Mutex::new(HashMap::new()),
         }
     }
 }
