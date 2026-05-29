@@ -126,6 +126,42 @@ pub fn get_env(args: &serde_json::Value) -> serde_json::Value {
     }
 }
 
+/// The ephemeral build label of a local portable, read from the
+/// `agentmux-portable.marker` file the packaging script writes next to
+/// the launcher (`scripts/package-portable.sh`). Format on disk:
+/// `AgentMux portable build <label>\n`, e.g.
+/// `AgentMux portable build 0.39.2+g9dd2d78.dirty.20260528T2203.21046`.
+///
+/// Read from the MARKER (not baked via `option_env!`) on purpose: the
+/// label changes every build, and the marker is rewritten on every
+/// `task package`, so reading it at runtime is always accurate and
+/// costs no recompile — whereas a compile-time bake would go stale any
+/// time `agentmux-cef` itself wasn't rebuilt (e.g. a frontend-only
+/// rebuild). Released / installed / dev builds have no marker → returns
+/// `None` and the UI falls back to the plain version + git hash.
+///
+/// The host runs from `<portable>/runtime/`, so the marker sits one
+/// level up; we also check the exe dir itself for layout robustness.
+fn read_build_label() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent()?;
+    let candidates = [
+        exe_dir.parent().map(|p| p.join("agentmux-portable.marker")),
+        Some(exe_dir.join("agentmux-portable.marker")),
+    ];
+    for cand in candidates.into_iter().flatten() {
+        if let Ok(contents) = std::fs::read_to_string(&cand) {
+            if let Some(label) = contents.trim().strip_prefix("AgentMux portable build ") {
+                let label = label.trim();
+                if !label.is_empty() {
+                    return Some(label.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Get details for the About modal.
 pub fn get_about_modal_details(state: &Arc<AppState>) -> serde_json::Value {
     let version = env!("CARGO_PKG_VERSION");
@@ -133,6 +169,10 @@ pub fn get_about_modal_details(state: &Arc<AppState>) -> serde_json::Value {
 
     serde_json::json!({
         "version": version,
+        // Exact local-build label matching the portable's folder/ZIP name
+        // (null for released / installed / dev builds). Lets the user tie
+        // a running instance back to the artifact on disk.
+        "buildLabel": read_build_label(),
         "gitHash": env!("AGENTMUX_GIT_HASH"),
         "buildTime": env!("AGENTMUX_BUILD_TIME").parse::<i64>().unwrap_or(0),
         "platform": match std::env::consts::OS {
