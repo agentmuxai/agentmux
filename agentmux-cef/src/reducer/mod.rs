@@ -34,9 +34,9 @@ use cef::Browser;
 
 use crate::state::{
     BrowserHandle, BrowserKind, CompletedCreation, CreationPhase, DragSession, EffectKind,
-    InFlightCreation, BrowserPaneEntry, BrowserPaneLifecycle, PendingWindowCreation, PoolState, QuitReason,
-    QuitState, TopLevelCreationOutcome, TopLevelCreationRequest, TopLevelCreationState,
-    TopLevelSource,
+    InFlightCreation, BrowserPaneEntry, BrowserPaneLifecycle, PaneWindowState, PendingWindowCreation,
+    PoolState, QuitReason, QuitState, TopLevelCreationOutcome, TopLevelCreationRequest,
+    TopLevelCreationState, TopLevelSource, WindowPlacement,
 };
 
 /// Capacity of `TopLevelCreationState.history` ring buffer. Configurable
@@ -125,6 +125,16 @@ pub struct HostState {
     /// not inside the reducer. See SPEC_PER_WINDOW_OPACITY_2026-05-14.md §7.1.
     pub window_opacities: HashMap<String, f32>,
 
+    /// Pane-state reducer (Phase 0) — per-pane OS-window placement for
+    /// FLOATING panes, keyed by `block_id`. Holds maximize/minimize state +
+    /// the rect to restore to; lifecycle stays in `browser_panes`. Docked
+    /// panes have no entry (their magnify is backend-owned). Currently
+    /// DORMANT — the `ToggleFloatingMaximize` arm exists but no production
+    /// caller dispatches it yet (IPC wiring lands in a later phase). See
+    /// SPEC_PANE_STATE_REDUCER_2026-05-28.md (REVISION 2026-05-29).
+    #[allow(dead_code)]
+    pub pane_window_states: HashMap<String, PaneWindowState>,
+
     /// Lifecycle phase. `Running` is the operating state; the others
     /// gate command acceptance.
     pub lifecycle: HostLifecyclePhase,
@@ -147,6 +157,7 @@ impl Default for HostState {
             quit_state: QuitState::default(),
             top_level_creation: TopLevelCreationState::default(),
             window_opacities: HashMap::new(),
+            pane_window_states: HashMap::new(),
             // Boot directly into Running — nothing in F.1 needs the
             // pre-init guard yet. Future PRs (drag, tear-off hooks)
             // will move boot through Bootstrapping → Running.
@@ -351,6 +362,17 @@ pub enum HostCommand {
     /// `window_opacities`; the IPC handler applies the Win32 side-effect
     /// after `host_dispatch` returns (pure reducer, no I/O inside).
     SetWindowOpacity { label: String, opacity: f32 },
+
+    // ── Pane window-placement (pane-state reducer, Phase 0) ──────────────────
+
+    /// Toggle a FLOATING pane's OS-window maximize (Normal ↔ Maximized).
+    /// The floating half of the shared maximize button (spec §3.3a). The
+    /// reducer flips `pane_window_states[block_id].placement` and emits
+    /// `PaneWindowStateChanged`; the IPC handler applies the
+    /// `ShowWindow(SW_MAXIMIZE/SW_RESTORE)` side-effect AFTER dispatch (pure
+    /// reducer, no I/O). Docked panes never reach here — magnify is routed
+    /// frontend-side to the backend. DORMANT in Phase 0 (no caller yet).
+    ToggleFloatingMaximize { block_id: String },
 }
 
 impl std::fmt::Debug for HostCommand {
@@ -458,6 +480,10 @@ impl std::fmt::Debug for HostCommand {
                 .debug_struct("SetWindowOpacity")
                 .field("label", label)
                 .field("opacity", opacity)
+                .finish(),
+            HostCommand::ToggleFloatingMaximize { block_id } => f
+                .debug_struct("ToggleFloatingMaximize")
+                .field("block_id", block_id)
                 .finish(),
         }
     }
@@ -629,6 +655,20 @@ pub enum HostEvent {
     /// Opacity cleared (opacity >= 1.0 → remove WS_EX_LAYERED).
     WindowOpacityCleared { label: String, version: u64 },
 
+    // ── Pane window-placement events (pane-state reducer, Phase 0) ───────
+
+    /// A floating pane's OS-window placement changed (e.g. via
+    /// `ToggleFloatingMaximize`). The IPC handler applies the matching
+    /// `ShowWindow` side-effect AFTER dispatch; renderers subscribe to keep
+    /// the shared maximize button's icon in sync (replaces PR #1132's
+    /// per-renderer `FloatingPaneContext` direct writes). See
+    /// SPEC_PANE_STATE_REDUCER_2026-05-28.md §3.4.
+    PaneWindowStateChanged {
+        block_id: String,
+        placement: WindowPlacement,
+        version: u64,
+    },
+
     // ── Effect carrier ──────────────────────────────────────────────────
 
     /// Side-effect descriptor. The reducer emits these but never executes
@@ -746,6 +786,7 @@ impl std::fmt::Debug for DispatchOutput {
 /// function takes only `&mut HostState` and produces no I/O.
 mod browsers;
 mod drag;
+mod pane_window;
 mod panes;
 mod pool;
 mod quit;
@@ -819,6 +860,10 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         // Opacity
         HostCommand::SetWindowOpacity { label, opacity } => {
             handle_set_window_opacity(state, label, opacity)
+        }
+        // Pane window-placement (pane-state reducer, Phase 0)
+        HostCommand::ToggleFloatingMaximize { block_id } => {
+            pane_window::handle_toggle_floating_maximize(state, block_id)
         }
     }
 }

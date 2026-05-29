@@ -148,6 +148,61 @@ pub struct BrowserPaneEntry {
     pub lifecycle: BrowserPaneLifecycle,
 }
 
+// ── Pane window-placement state (pane-state reducer, Phase 0) ─────────────
+//
+// SPEC_PANE_STATE_REDUCER_2026-05-28.md (REVISION 2026-05-29 — folded into
+// HostState rather than a standalone PaneStateMachine, mirroring the Phase-H
+// consolidation that deleted `pane::lifecycle::PaneStateMachine`).
+//
+// This tracks the OS-window placement of a FLOATING pane (its
+// maximize/restore state + the rect to restore to). It is deliberately
+// SEPARATE from `BrowserPaneEntry`/`BrowserPaneLifecycle` above, which own
+// Live/Closing lifecycle: lifecycle stays in `HostState.browser_panes`;
+// placement lives in `HostState.pane_window_states`. Docked panes have NO
+// entry here — their "maximize" is backend magnify
+// (`LayoutState.magnifiednodeid`), routed by the frontend `<MaximizeButton>`
+// (spec §3.3a, b2), never through this reducer.
+
+/// Screen-space window rectangle in physical pixels. Distinct from
+/// `browser_api::Rect` (web/CSS coordinates) — this is for native window
+/// placement (the floating pane's outer HWND rect).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[allow(dead_code)]
+pub struct PaneRect {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+}
+
+/// OS-window placement for a floating pane. The shared maximize button's
+/// floating half toggles between `Normal` and `Maximized`; `Minimized` is
+/// OS-reported (Win+Down / system) and orthogonal — a minimized floater
+/// un-minimizes back to whichever of Normal/Maximized it held before, so
+/// the reducer remembers the pre-minimize placement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[allow(dead_code)]
+pub enum WindowPlacement {
+    #[default]
+    Normal,
+    Maximized,
+    Minimized,
+}
+
+/// Per-pane window-placement entry, keyed by `block_id` in
+/// `HostState.pane_window_states`. Holds ONLY the floating window's OS
+/// placement and the rect to restore to after un-maximize — NOT lifecycle
+/// (that's `BrowserPaneEntry` in `HostState.browser_panes`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub struct PaneWindowState {
+    pub placement: WindowPlacement,
+    /// Rect to restore to after un-maximize / un-minimize. `None` until a
+    /// normal-mode rect has been observed (replaces the deleted
+    /// `AppState.floating_restored_rects` stash — spec §4).
+    pub last_known_normal_rect: Option<PaneRect>,
+}
+
 // ── Browser handle registry (H.2) ────────────────────────────────────────
 
 /// Wrapped CEF Browser handle stored in `HostState.browsers`. Replaces the
@@ -1283,6 +1338,14 @@ fn log_host_event(ev: &crate::reducer::HostEvent) {
             target: "host-reducer",
             event = "WindowOpacityCleared",
             label = %label, version,
+        ),
+        // ── Pane window-placement (pane-state reducer, Phase 0) ──────────
+        HostEvent::PaneWindowStateChanged { block_id, placement, version } => tracing::info!(
+            target: "host-reducer",
+            event = "PaneWindowStateChanged",
+            block_id = %block_id,
+            placement = ?placement,
+            version,
         ),
         // ── Effect carrier ───────────────────────────────────────────────
         HostEvent::Effect { effect, version } => tracing::debug!(

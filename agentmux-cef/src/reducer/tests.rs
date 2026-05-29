@@ -110,6 +110,9 @@ fn version_increments_monotonically() {
         HostEvent::TopLevelCreationCompleted { version, .. } => *version,
         HostEvent::TopLevelCreationFailed { version, .. } => *version,
         HostEvent::TopLevelQueueLengthChanged { version, .. } => *version,
+        HostEvent::WindowOpacityApplied { version, .. } => *version,
+        HostEvent::WindowOpacityCleared { version, .. } => *version,
+        HostEvent::PaneWindowStateChanged { version, .. } => *version,
         HostEvent::Effect { version, .. } => *version,
         HostEvent::Error { version, .. } => *version,
     };
