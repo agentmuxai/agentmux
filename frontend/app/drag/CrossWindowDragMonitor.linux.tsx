@@ -51,8 +51,30 @@ function CrossWindowDragMonitor(): JSX.Element {
             await handleCrossWindowDragEnd(payload, windowLabelRef);
         };
 
+        // Suppress the "operation not allowed" cursor during a cross-window
+        // drag. WebKitGTK (and all HTML5 DnD implementations) shows the
+        // prohibited-circle cursor whenever the cursor is over a region with
+        // no `dragover` preventDefault — i.e., everywhere outside our own
+        // tab bar and the workspace surface. The JS-driven tear-off on
+        // `dragend` then completes successfully, so the user sees a clear
+        // mismatch: cursor says "no", behavior says "yes". Telling the
+        // browser "this is a valid drop target everywhere" while a cross-
+        // window drag is in flight (i.e. _currentDragPayload is set) keeps
+        // the cursor on the "move" affordance throughout, matching the
+        // actual outcome. Gated on payload so we don't hijack unrelated DnD
+        // sessions (file drops, etc.).
+        const handleDragOver = (e: DragEvent) => {
+            if (_currentDragPayload == null) return;
+            e.preventDefault();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+        };
+
+        document.addEventListener("dragover", handleDragOver);
         document.addEventListener("dragend", handleDragEnd);
-        onCleanup(() => document.removeEventListener("dragend", handleDragEnd));
+        onCleanup(() => {
+            document.removeEventListener("dragover", handleDragOver);
+            document.removeEventListener("dragend", handleDragEnd);
+        });
     });
 
     return null;
