@@ -73,6 +73,23 @@ if (-not $PortableDir -or -not (Test-Path (Join-Path $PortableDir 'agentmux.exe'
 }
 Write-Host "  portable : $PortableDir"
 
+# ── guard: bundled binary version MUST match the manifest version ────────────
+# $msixVersion is derived from package.json, but the staged binaries come from
+# whatever portable we resolved (newest on the Desktop by mtime). A lingering
+# older portable would silently yield an MSIX whose manifest version diverges
+# from the binaries it ships. The host exe is named agentmux-<ver>.exe, so its
+# filename is the binaries' own version of record — assert it equals package.json
+# and fail the build on skew. (reagent #1209 P2.)
+$hostExe = Get-ChildItem (Join-Path $PortableDir 'runtime') -Filter 'agentmux-*.exe' -ErrorAction SilentlyContinue |
+  Where-Object { $_.Name -match '^agentmux-(\d+\.\d+\.\d+)\.exe$' } |
+  Select-Object -First 1
+if (-not $hostExe) { throw "No runtime\agentmux-<version>.exe in portable: $PortableDir — is this a CEF portable build?" }
+$portableVersion = [regex]::Match($hostExe.Name, '^agentmux-(\d+\.\d+\.\d+)\.exe$').Groups[1].Value
+if ($portableVersion -ne $semver) {
+  throw "Version skew: package.json is $semver but the portable bundles agentmux-$portableVersion.exe ($($hostExe.FullName)). Rebuild with 'task package' or pass an explicit -PortableDir."
+}
+Write-Host "  binver   : $portableVersion (matches package.json)"
+
 # ── stage ────────────────────────────────────────────────────────────────────
 # Copy the portable VERBATIM except the portable marker + seed data + readme, so
 # the packaged app runs in INSTALLED mode (per-user data dir), not portable mode
