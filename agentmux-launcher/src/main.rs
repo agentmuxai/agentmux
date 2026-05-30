@@ -78,7 +78,22 @@ fn main() {
 async fn launcher_main() {
     let exe_path = std::env::current_exe().expect("cannot resolve exe path");
     let exe_dir = exe_path.parent().expect("exe has no parent directory");
-    let runtime_dir = exe_dir.join("runtime");
+    // Production + Windows dev use a `runtime/` subdir (launcher at root,
+    // host + libs + srv under runtime/). The macOS/Linux `task dev` flat
+    // layout (Phase 1, SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30)
+    // drops the launcher next to the host in dist/cef-dev/ so the host's
+    // `../Frameworks` resolution and asset anchoring are byte-identical to
+    // the legacy direct-invoke path — no `runtime/` to descend into. Fall
+    // back to exe_dir when there's no runtime/ subdir. Windows always has
+    // one, so its behavior is unchanged.
+    let runtime_dir = {
+        let rt = exe_dir.join("runtime");
+        if rt.is_dir() {
+            rt
+        } else {
+            exe_dir.to_path_buf()
+        }
+    };
 
     log(&format!(
         "starting — exe={} runtime={}",
@@ -127,6 +142,26 @@ async fn launcher_main() {
 
     let real_exe = find_cef_binary(&runtime_dir);
     log(&format!("resolved CEF binary: {}", real_exe.display()));
+    // Self-spawn guard: if host resolution ever points back at the
+    // launcher's own binary (the flat dev layout's failure mode —
+    // launcher + host co-located), spawning it would recurse into an
+    // unbounded launcher fork bomb. find_cef_binary excludes
+    // `agentmux-launcher` by name; this is the loud backstop in case a
+    // future binary slips past that filter. Compare canonicalized paths
+    // so symlink/`./` differences don't defeat the check.
+    if let (Ok(a), Ok(b)) = (
+        std::fs::canonicalize(&real_exe),
+        std::fs::canonicalize(&exe_path),
+    ) {
+        if a == b {
+            log(&format!(
+                "FATAL: host resolved to the launcher's own binary ({}) — refusing to self-spawn",
+                a.display()
+            ));
+            eprintln!("AgentMux runtime is misconfigured (host == launcher). Aborting.");
+            std::process::exit(1);
+        }
+    }
     if !real_exe.exists() {
         log(&format!(
             "FATAL: CEF binary not found at {}",
@@ -191,15 +226,13 @@ async fn launcher_main() {
 
     #[cfg(not(target_os = "windows"))]
     {
-        // Phase 7 covers cross-platform parity. For now the legacy
-        // exec-into-host path is preserved on macOS/Linux. Phase B.1
-        // is Windows-only.
-        log("exec into CEF host (Unix)");
-        use std::os::unix::process::CommandExt;
-        let err = std::process::Command::new(&real_exe).args(&args).exec();
-        log(&format!("FATAL: exec failed: {}", err));
-        eprintln!("Failed to launch AgentMux: {}", err);
-        std::process::exit(1);
+        // Phase 1 (SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30):
+        // the launcher now owns srv + host on macOS/Linux too — it
+        // spawns the backend, hands the host its endpoints via env,
+        // and supervises both with the same crash budget Windows uses.
+        // The legacy exec-into-host escape hatch lives in
+        // `task dev:standalone` (host invoked directly, no launcher).
+        run_unix(exe_dir, &real_exe, &args).await;
     }
 }
 
@@ -207,10 +240,9 @@ async fn launcher_main() {
 /// `docs/specs/SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md`): on an
 /// abnormal host exit the launcher relaunches the host, but at most
 /// `HOST_RESTART_BUDGET` times within `HOST_RESTART_WINDOW` — a crash budget
-/// so a deterministic crash cannot spin forever (spec §10-A).
-#[cfg(target_os = "windows")]
+/// so a deterministic crash cannot spin forever (spec §10-A). Shared by
+/// the Windows (`run_windows`) and Unix (`run_unix`) supervisors.
 const HOST_RESTART_BUDGET: usize = 3;
-#[cfg(target_os = "windows")]
 const HOST_RESTART_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Spawn the CEF host suspended, assign it to the launcher's Job Object, and
@@ -301,6 +333,282 @@ fn spawn_host_supervised(
         return None;
     }
     Some(host_child)
+}
+
+/// Spawn the CEF host on Unix with the srv endpoints + canonical
+/// data-dir env handed off, mirroring `spawn_host_supervised` minus the
+/// Windows-only machinery (Job Object assignment, CREATE_SUSPENDED /
+/// resume, named-pipe handle, splash event). `disable_gpu` is the retry
+/// ladder's degraded rung (software rendering). Returns the running
+/// child or `None` if spawn failed.
+///
+/// AGENTMUX_HOME is intentionally NOT set: on the flat dev layout the
+/// host's `current_exe().parent()` fallback resolves to the same dir the
+/// launcher would export, so omitting it keeps asset + framework lookup
+/// byte-identical to the legacy direct-invoke (`task dev:standalone`)
+/// path. Phase 2 will set it once the production runtime/ layout lands
+/// on macOS.
+#[cfg(not(target_os = "windows"))]
+fn spawn_host_unix(
+    real_exe: &std::path::Path,
+    args: &[String],
+    srv: &srv_spawner::SrvSpawnResult,
+    host_env: &[(&'static str, std::ffi::OsString)],
+    disable_gpu: bool,
+) -> Option<tokio::process::Child> {
+    let mut host_cmd = tokio::process::Command::new(real_exe);
+    host_cmd
+        .args(args)
+        .env("AGENTMUX_BACKEND_WS", &srv.ws_endpoint)
+        .env("AGENTMUX_BACKEND_WEB", &srv.web_endpoint)
+        .env("AGENTMUX_BACKEND_PID", srv.pid.to_string())
+        .env("AGENTMUX_AUTH_KEY", &srv.auth_key)
+        .env("AGENTMUX_INSTANCE_ID", &srv.instance_id)
+        // Parent-identity stamp: our pid == the host's getppid (we spawn it
+        // directly). A dev-build host normally ignores AGENTMUX_BACKEND_WS
+        // (it could be a stale value inherited from a parent agentmux pane);
+        // this lets the host verify the hand-off is genuinely ours THIS run
+        // and adopt our launcher-owned srv instead of double-spawning. See
+        // agentmux-cef/src/main.rs::launcher_is_genuine_parent.
+        .env("AGENTMUX_LAUNCHER_PID", std::process::id().to_string())
+        .envs(host_env.iter().cloned())
+        // We reap children ourselves on shutdown (SIGTERM, then SIGKILL
+        // backstop) — kill_on_drop would SIGKILL the host the moment the
+        // Child is dropped, robbing CEF of the chance to reap its render
+        // subprocesses cleanly.
+        .kill_on_drop(false);
+    if disable_gpu {
+        host_cmd.arg("--disable-gpu");
+    }
+    match host_cmd.spawn() {
+        Ok(c) => {
+            let pid = c.id().unwrap_or(0);
+            log(&format!("spawned CEF host pid={} (unix)", pid));
+            Some(c)
+        }
+        Err(e) => {
+            log(&format!("failed to spawn CEF host: {}", e));
+            None
+        }
+    }
+}
+
+/// Send SIGTERM to a child so it can shut down gracefully — for the CEF
+/// host that means reaping its render subprocesses (a tokio `start_kill`
+/// SIGKILL would orphan them); for srv it's a clean shutdown. No-op if the
+/// child has already exited (its pid may have been reaped). Best-effort:
+/// the SIGKILL grace-window backstop in `run_unix` catches anything that
+/// ignores SIGTERM.
+#[cfg(not(target_os = "windows"))]
+fn terminate_child_gracefully(child: &tokio::process::Child) {
+    if let Some(pid) = child.id() {
+        // SAFETY: kill(2) with a process-scoped pid + a constant signal —
+        // no memory is touched. A stale pid just returns ESRCH (ignored).
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGTERM);
+        }
+    }
+}
+
+/// Await the next delivery of a Unix signal, or never resolve if the
+/// signal stream couldn't be installed. Lets `run_unix`'s `select!`
+/// treat an absent handler as "this branch is dormant" rather than
+/// special-casing `Option` at every poll.
+#[cfg(not(target_os = "windows"))]
+async fn next_signal(s: &mut Option<tokio::signal::unix::Signal>) {
+    match s {
+        Some(sig) => {
+            sig.recv().await;
+        }
+        None => std::future::pending::<()>().await,
+    }
+}
+
+/// Unix (macOS/Linux) main flow, Phase 1: resolve paths → spawn srv →
+/// spawn host with srv endpoints in env → supervised wait → cleanup.
+///
+/// Differs from `run_windows` only where the OS forces it:
+///   * No Job Object — children inherit the launcher's process group, so
+///     a terminal Ctrl+C (SIGINT to the foreground group) already reaches
+///     host + srv directly. We additionally install SIGINT/SIGTERM
+///     handlers so `kill <launcher-pid>` (signal to the launcher alone)
+///     also tears the tree down deterministically.
+///   * No named-pipe IPC yet (Phase 2): srv is launched WITHOUT an
+///     AGENTMUX_SRV_PIPE_PATH, so it skips binding its IPC pipe — exactly
+///     as in today's `task dev` direct-invoke mode.
+///   * Cleanup is SIGTERM-then-SIGKILL (we own the reap) rather than
+///     KILL_ON_JOB_CLOSE.
+///
+/// srv's stdin write-end is held for the launcher's lifetime — its EOF is
+/// srv's parent-death backstop if the launcher is SIGKILLed (the one case
+/// our signal handlers can't cover).
+#[cfg(not(target_os = "windows"))]
+async fn run_unix(
+    launcher_exe_dir: &std::path::Path,
+    real_exe: &std::path::Path,
+    args: &[String],
+) {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    let version = env!("CARGO_PKG_VERSION");
+
+    // 1. Resolve + create data dirs (same authority as run_windows: srv +
+    //    host receive these via env so they can't drift).
+    let paths = match data_dir::resolve_paths(launcher_exe_dir, version) {
+        Ok(p) => p,
+        Err(e) => {
+            log(&format!("FATAL: path resolution failed: {}", e));
+            eprintln!("Failed to resolve AgentMux data directories: {}", e);
+            std::process::exit(1);
+        }
+    };
+    log(&format!(
+        "paths resolved: data={} config={} user_home={} portable={}",
+        paths.data_dir.display(),
+        paths.config_dir.display(),
+        paths.user_home_dir.display(),
+        paths.portable_root.is_some(),
+    ));
+    if let Err(e) = data_dir::ensure_dirs(&paths) {
+        log(&format!("FATAL: failed to create data dirs: {}", e));
+        eprintln!("{}", e);
+        std::process::exit(1);
+    }
+
+    // 2. Spawn srv. Empty pipe path → srv skips its IPC bind (Phase 2
+    //    wires the Unix-socket transport). spawn_srv is already
+    //    Unix-clean (the job_handle param is #[cfg(windows)]).
+    let srv_pipe_path = String::new();
+    let (srv_result, mut srv_child) =
+        match srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path).await {
+            Ok(pair) => pair,
+            Err(e) => {
+                log(&format!("FATAL: srv spawn failed: {}", e));
+                eprintln!("Failed to start backend: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+    // CRITICAL (same rationale as run_windows): take srv's stdin out of
+    // the Child so tokio's wait() can't close it and trip srv's
+    // parent-watch EOF. Held until launcher exit.
+    let _srv_stdin_keepalive = srv_child.stdin.take();
+
+    // 3. Spawn the host with srv endpoints in env.
+    let host_env = paths.common.to_env_vars();
+    let mut host_child = match spawn_host_unix(real_exe, args, &srv_result, &host_env, false) {
+        Some(c) => c,
+        None => {
+            log("FATAL: could not start CEF host — terminating");
+            eprintln!("Failed to launch AgentMux.");
+            terminate_child_gracefully(&srv_child);
+            let _ = srv_child.start_kill();
+            std::process::exit(1);
+        }
+    };
+
+    // 4. Signal handlers for `kill <launcher-pid>` (a terminal Ctrl+C
+    //    already signals the whole foreground group; these cover the
+    //    launcher-only case and make Ctrl+C deterministic too).
+    let mut sigint = signal(SignalKind::interrupt()).ok();
+    let mut sigterm = signal(SignalKind::terminate()).ok();
+    if sigint.is_none() || sigterm.is_none() {
+        log("WARN: failed to install one or more signal handlers — \
+             relying on default termination + srv stdin-EOF backstop");
+    }
+
+    // 5. Supervised wait loop — host crash budget mirrors run_windows.
+    log("entering supervised host + srv wait (unix)");
+    let mut host_restarts: Vec<std::time::Instant> = Vec::new();
+    let mut last_abnormal_code: Option<i32> = None;
+    let mut host_degraded = false;
+    let exit_code = loop {
+        tokio::select! {
+            host_status = host_child.wait() => {
+                let code = match host_status {
+                    Ok(s) => s.code().unwrap_or(1),
+                    Err(e) => {
+                        log(&format!("FATAL: host wait failed: {}", e));
+                        break 1;
+                    }
+                };
+                if code == 0 {
+                    log("CEF host exited cleanly (code 0) — shutting down");
+                    break 0;
+                }
+                let now = std::time::Instant::now();
+                host_restarts.retain(|t| now.duration_since(*t) < HOST_RESTART_WINDOW);
+                if host_restarts.len() >= HOST_RESTART_BUDGET {
+                    log(&format!(
+                        "CEF host exited abnormally (code {}); restart budget exhausted \
+                         ({} in {}s) — giving up",
+                        code,
+                        host_restarts.len(),
+                        HOST_RESTART_WINDOW.as_secs()
+                    ));
+                    break code;
+                }
+                host_restarts.push(now);
+                if last_abnormal_code == Some(code) {
+                    host_degraded = true;
+                }
+                last_abnormal_code = Some(code);
+                log(&format!(
+                    "CEF host exited abnormally (code {}) — relaunching (restart {}/{}{})",
+                    code,
+                    host_restarts.len(),
+                    HOST_RESTART_BUDGET,
+                    if host_degraded { ", degraded: --disable-gpu" } else { "" }
+                ));
+                match spawn_host_unix(real_exe, args, &srv_result, &host_env, host_degraded) {
+                    Some(c) => host_child = c,
+                    None => {
+                        log("host relaunch failed to spawn — giving up");
+                        break code;
+                    }
+                }
+            }
+            srv_status = srv_child.wait() => {
+                match srv_status {
+                    Ok(s) => log(&format!(
+                        "srv exited UNEXPECTEDLY (host still running) with code {} — terminating launcher",
+                        s.code().unwrap_or(1)
+                    )),
+                    Err(e) => log(&format!("FATAL: srv wait failed: {}", e)),
+                }
+                break 1;
+            }
+            _ = next_signal(&mut sigint) => {
+                log("received SIGINT — shutting down");
+                break 0;
+            }
+            _ = next_signal(&mut sigterm) => {
+                log("received SIGTERM — shutting down");
+                break 0;
+            }
+        }
+    };
+
+    // 6. Cleanup. SIGTERM both children so the host reaps its render
+    //    subprocesses (and srv shuts down cleanly), wait a short grace
+    //    window, then SIGKILL any survivor. Dropping the stdin keepalive
+    //    is srv's secondary shutdown trigger (parent-watch EOF).
+    log("terminating children (SIGTERM → grace → SIGKILL)");
+    terminate_child_gracefully(&host_child);
+    terminate_child_gracefully(&srv_child);
+    drop(_srv_stdin_keepalive);
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_millis(1500),
+        async {
+            let _ = host_child.wait().await;
+            let _ = srv_child.wait().await;
+        },
+    )
+    .await;
+    let _ = host_child.start_kill();
+    let _ = srv_child.start_kill();
+    log(&format!("launcher exiting with code {}", exit_code));
+    std::process::exit(exit_code);
 }
 
 /// Windows main flow: resolve paths → create J0 → spawn srv → spawn
@@ -1060,6 +1368,13 @@ fn find_cef_binary(runtime_dir: &std::path::Path) -> std::path::PathBuf {
             if name.starts_with(prefix)
                 && !name.starts_with(cef_prefix)
                 && !name.starts_with("agentmux-srv")
+                // CRITICAL for the flat dev layout (macOS/Linux Phase 1):
+                // launcher + host + srv share one dir, so the launcher
+                // binary itself matches `agentmux-*`. Without this guard
+                // the launcher resolves ITSELF as the host and spawns a
+                // recursive launcher fork bomb. On Windows the launcher
+                // lives at the root (not in runtime/), so this is a no-op.
+                && !name.starts_with("agentmux-launcher")
                 && name.ends_with(ext)
             {
                 return entry.path();
