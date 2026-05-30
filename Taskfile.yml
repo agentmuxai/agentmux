@@ -466,10 +466,16 @@ tasks:
         # before the macOS libcef story was sorted; on Linux we always had
         # the patched runtime).
         cmds:
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef --features patched-libcef'
+            # Phase 1 (SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30): build
+            # the launcher alongside the host so the flat dev layout (launcher
+            # + host + srv co-located in dist/cef-dev/) has it — same as
+            # build:host:darwin. Without this, dev:serve's launcher-not-found
+            # guard hard-fails on Linux.
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef --features patched-libcef && PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-launcher'
             - mkdir -p dist/cef
             - cp target/release/agentmux-cef dist/cef/agentmux-cef
-            - echo "✓ Built host for Linux"
+            - cp target/release/agentmux-launcher dist/cef/agentmux-launcher
+            - echo "✓ Built host + launcher for Linux"
 
     bundle:
         desc: Bundle runtime binaries alongside the host executable.
@@ -589,7 +595,7 @@ tasks:
 
     dev:serve:
         internal: true
-        desc: Start Vite dev server and host concurrently, via the launcher (Windows) or direct host invocation (Unix).
+        desc: Start Vite dev server and the app concurrently, via the launcher (launcher → srv + host on all platforms; Windows uses the runtime/ layout, macOS/Linux a flat layout).
         cmds:
             - task: build:host
             - task: bundle
@@ -613,10 +619,13 @@ tasks:
                 #            so dev mirrors the package-portable runtime.
                 #            See docs/specs/SPEC_LAUNCHER_DEV_INTEGRATION_2026-05-13.md.
                 #
-                #   Unix:    legacy flat layout — host + DLLs in DEV_DIR
-                #            directly, launcher bypassed. Phase 7 cross-
-                #            platform parity will integrate the launcher
-                #            on Unix (launcher main.rs:153).
+                #   Unix:    flat layout — launcher + host + srv co-located
+                #            in DEV_DIR (no runtime/ subdir, so the host's
+                #            ../Frameworks resolution + asset anchoring stay
+                #            byte-identical to the legacy direct-invoke path).
+                #            The launcher drives srv + host here too (Phase 1,
+                #            SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30);
+                #            `task dev:standalone` is the direct-invoke hatch.
                 #
                 # Either way the staging dir (dist/cef/) is never locked by
                 # the running process, so the next build can overwrite it.
@@ -655,7 +664,7 @@ tasks:
                   fi
                   cp "$SRV_SRC" "$DEV_DIR/agentmux-srv" 2>/dev/null || true
                   if [ ! -f "$DEV_DIR/agentmux-launcher" ]; then
-                    echo "❌ $DEV_DIR/agentmux-launcher not found — build:host:darwin should have staged it"
+                    echo "❌ $DEV_DIR/agentmux-launcher not found — build:host:{{OS}} should have staged it"
                     exit 1
                   fi
                   if [ ! -f "$DEV_DIR/agentmux-srv" ]; then
