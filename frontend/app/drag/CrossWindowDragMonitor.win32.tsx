@@ -25,7 +25,7 @@ import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "@/layout/index";
 import { invokeCommand } from "@/app/platform/ipc";
 import { Logger } from "@/util/logger";
-import { openTearOffWindow } from "./tear-off-pool-helper";
+import { openTearOffWindow, measureSourcePaneSize } from "./tear-off-pool-helper";
 import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
@@ -226,40 +226,6 @@ async function performCrossWindowDrop(
     _sourceTabId: string
 ) {
     // The target window handles the actual move when it receives the cross-drag-end event.
-}
-
-// Fallback floating-pane size if we can't read the source pane's rect
-// (block element not in the DOM for any reason). 720×480 is a comfortable
-// single-block working area without dominating the screen.
-const DEFAULT_FLOATER_WIDTH = 720;
-const DEFAULT_FLOATER_HEIGHT = 480;
-// Defensive lower bounds — protect against degenerate (0-width/height)
-// rects yielding an unusable floater.
-const MIN_FLOATER_WIDTH = 200;
-const MIN_FLOATER_HEIGHT = 120;
-
-/// Measure the source pane's rendered size in CSS / DIP pixels.
-/// `getBoundingClientRect` returns CSS px regardless of DPR; we deliberately
-/// do NOT multiply by `window.devicePixelRatio` here because that's the
-/// SOURCE monitor's scale, and the floater may spawn on a DIFFERENT
-/// monitor (different DPI). Cross-monitor scaling MUST happen on the host
-/// using `GetDpiForMonitor(MonitorFromPoint(x, y))` against the destination
-/// — see `agentmux-cef/src/commands/floating_pane.rs` and the matching
-/// pattern in `agentmux-cef/src/commands/window_pool.rs:684-701` (tab
-/// tear-off).
-///
-/// Must be called BEFORE `TearOffBlock` — that mutation removes the
-/// source pane from the layout and unmounts its DOM element.
-function measureSourcePaneSize(blockId: string): { width: number; height: number } {
-    const el = document.querySelector(`[data-blockid="${blockId}"]`) as HTMLElement | null;
-    if (!el) {
-        return { width: DEFAULT_FLOATER_WIDTH, height: DEFAULT_FLOATER_HEIGHT };
-    }
-    const rect = el.getBoundingClientRect();
-    return {
-        width: Math.max(MIN_FLOATER_WIDTH, Math.round(rect.width)),
-        height: Math.max(MIN_FLOATER_HEIGHT, Math.round(rect.height)),
-    };
 }
 
 async function performTearOff(

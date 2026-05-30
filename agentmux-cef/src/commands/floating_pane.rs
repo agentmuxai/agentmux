@@ -154,14 +154,76 @@ pub fn open_floating_pane_window(
 
     #[cfg(not(target_os = "windows"))]
     {
-        // Phase 1 is Windows-only per spec §10. macOS uses
-        // `NSWindow::addChildWindow`; Linux varies. Both are explicit
-        // follow-ups; return a clear error so callers fail loudly.
-        let _ = parsed;
-        let _ = window_label;
-        Err(
-            "open_floating_pane_window: not yet implemented on this platform (Windows only in Phase 1)"
-                .to_string(),
-        )
+        // Phase A (SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md): create a
+        // frameless top-level window via the SAME CEF Views path the regular
+        // tear-off uses (`open_window_at_position` →
+        // `ui_tasks::post_create_window(..., frameless=true)`), but with a
+        // `floatingPaneId` in the URL so the frontend renders
+        // `<FloatingPaneWorkspace>` (chromeless: no tab bar, no widget bar)
+        // instead of `<Workspace>`. Secondary windows are already frameless on
+        // macOS/Linux (window/creation.rs), so this alone produces "just the
+        // pane" — the user's request.
+        //
+        // No DPI scaling on non-Windows: the Windows-only block above is
+        // skipped, and CEF Views positions/sizes in DIP (logical px), which is
+        // exactly what `width`/`height` (from `getBoundingClientRect`) and
+        // `x`/`y` (from the DOM drop event's `screenX/Y`) already are.
+        //
+        // Phase B adds owned-window lifecycle (follows/minimizes/closes with
+        // the source window), JS header-drag, and redock — see the spec.
+        let ipc_port = *state.ipc_port.lock();
+        let ipc_token = &state.ipc_token;
+        let workspace_id = parsed.workspace_id.clone().unwrap_or_default();
+
+        let url = match super::window::resolve_frontend_base_url(ipc_port) {
+            Ok(base_url) => {
+                let separator = if base_url.contains('?') { "&" } else { "?" };
+                let mut u = format!(
+                    "{}{}ipc_port={}&ipc_token={}&windowLabel={}&floatingPaneId={}",
+                    base_url, separator, ipc_port, ipc_token, window_label, parsed.pane_id
+                );
+                if !workspace_id.is_empty() {
+                    u.push_str(&format!("&workspaceId={}", workspace_id));
+                }
+                u
+            }
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    label = %window_label,
+                    "[floating-pane] frontend assets unavailable — opening static error page",
+                );
+                super::window::assets_missing_data_url(&e)
+            }
+        };
+
+        // Register the pending window (same as the tear-off cold path). The
+        // floater shares the source instance's sidecar/data dir — it's not a
+        // separate launcher instance — but on non-Windows there is no launcher
+        // bookkeeping, so `FullInstance` (matching `open_window_at_position`)
+        // is the proven kind for this creation path. Phase B (owned window)
+        // may revisit.
+        state.host_dispatch(
+            crate::reducer::HostCommand::EnqueuePendingWindowCreation {
+                entry: crate::state::PendingWindowCreation {
+                    label: window_label.clone(),
+                    kind: crate::state::WindowKind::FullInstance,
+                    parent_instance_id: None,
+                },
+            },
+        );
+
+        crate::ui_tasks::post_create_window(
+            state,
+            &url,
+            &window_label,
+            parsed.x,
+            parsed.y,
+            parsed.width,
+            parsed.height,
+            true, // frameless — secondary windows use the custom title bar
+        );
+
+        Ok(serde_json::to_value(OpenFloatingPaneResponse { window_label }).unwrap_or_default())
     }
 }

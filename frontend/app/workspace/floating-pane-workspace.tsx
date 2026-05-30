@@ -32,6 +32,7 @@
  */
 
 import { invokeCommand } from "@/app/platform/ipc";
+import { isWindows } from "@/util/platformutil";
 import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { CenteredDiv } from "@/app/element/quickelems";
@@ -43,6 +44,24 @@ import * as WOS from "@/store/wos";
 import { Show, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js";
 
 import "./floating-pane-workspace.scss";
+
+/**
+ * Scale factor for converting a CSS-px drag delta into the host's window-
+ * position coordinate space.
+ *
+ * On Windows the host moves the raw HWND with `SetWindowPos` in PHYSICAL
+ * pixels, so a CSS-px delta must be multiplied by `devicePixelRatio`. On
+ * macOS / Linux the floater is a CEF Views window positioned via
+ * `set_bounds` / `bounds` in DIP (logical) pixels — and 1 CSS px == 1 DIP —
+ * so the delta is applied 1:1 (multiplying by DPR would move the window
+ * `devicePixelRatio`× too fast, e.g. 2× on a Retina display). Re-read per
+ * use so a mid-drag monitor crossing on Windows picks up the new DPR.
+ */
+function posScale(): number {
+    // Only Windows positions in physical px (raw-HWND SetWindowPos); macOS and
+    // Linux use CEF Views DIP (1 CSS px == 1 DIP).
+    return isWindows() ? window.devicePixelRatio || 1 : 1;
+}
 
 function FloatingPaneWorkspaceElem(): JSX.Element {
     const tabId = atoms.activeTabId;
@@ -317,13 +336,13 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     latestScreenX !== clickScreenX ||
                     latestScreenY !== clickScreenY
                 ) {
-                    const dpr = window.devicePixelRatio || 1;
+                    const scale = posScale();
                     const tx =
                         initWinX +
-                        Math.round((latestScreenX - clickScreenX) * dpr);
+                        Math.round((latestScreenX - clickScreenX) * scale);
                     const ty =
                         initWinY +
-                        Math.round((latestScreenY - clickScreenY) * dpr);
+                        Math.round((latestScreenY - clickScreenY) * scale);
                     sendPos(tx, ty);
                 }
             } catch {
@@ -360,15 +379,16 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             latestScreenX = e.screenX;
             latestScreenY = e.screenY;
             if (!dragging) return;
-            // CSS-px delta * devicePixelRatio = physical-px delta added
-            // to the physical-px baseline from get_window_position. Re-
-            // read DPR every move so a mid-drag monitor crossing picks
-            // up the new value automatically.
-            const dpr = window.devicePixelRatio || 1;
+            // CSS-px delta * posScale() = host-coordinate delta added to the
+            // baseline from get_window_position. On Windows posScale() is the
+            // devicePixelRatio (physical px); on macOS/Linux it's 1 (CEF Views
+            // DIP). Re-read every move so a mid-drag monitor crossing on
+            // Windows picks up the new DPR automatically.
+            const scale = posScale();
             const tx =
-                initWinX + Math.round((e.screenX - clickScreenX) * dpr);
+                initWinX + Math.round((e.screenX - clickScreenX) * scale);
             const ty =
-                initWinY + Math.round((e.screenY - clickScreenY) * dpr);
+                initWinY + Math.round((e.screenY - clickScreenY) * scale);
             sendPos(tx, ty);
             pushRedockHover(e.screenX, e.screenY);
         };
