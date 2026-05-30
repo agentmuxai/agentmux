@@ -42,6 +42,7 @@ import {
 import { loadFonts } from "@/util/fontutil";
 import { primeAccountCache } from "@/app/view/identity/identity-model";
 import { setKeyUtilPlatform } from "@/util/keyutil";
+import { isWindows } from "@/util/platformutil";
 import { render } from "solid-js/web";
 import { benchMark, benchDump } from "@/util/startup-bench";
 import { ContextMenuModel } from "@/app/store/contextmenu";
@@ -173,15 +174,20 @@ function installFloatingRedockHoverListener(): void {
                 clearPlaceholder();
                 return;
             }
-            const cursorPxX = payload.cursor_x;
-            const cursorPxY = payload.cursor_y;
-            if (typeof cursorPxX !== "number" || typeof cursorPxY !== "number") {
+            const cursorX = payload.cursor_x;
+            const cursorY = payload.cursor_y;
+            if (typeof cursorX !== "number" || typeof cursorY !== "number") {
                 clearPlaceholder();
                 return;
             }
-            const dpr = window.devicePixelRatio || 1;
-            const clientX = cursorPxX / dpr - window.screenX;
-            const clientY = cursorPxY / dpr - window.screenY;
+            // The broadcast cursor is in the host's coordinate space: physical
+            // px on Windows (divide by DPR to get CSS px), DIP on macOS/Linux
+            // (already CSS px — no divide). Inverse of the sender's posScale()
+            // in floating-pane-workspace.tsx. Without this the drop-zone
+            // highlight lands wrong on a Retina display.
+            const invScale = isWindows() ? window.devicePixelRatio || 1 : 1;
+            const clientX = cursorX / invScale - window.screenX;
+            const clientY = cursorY / invScale - window.screenY;
             const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
             const leafEl = el?.closest("[data-blockid]") as HTMLElement | null;
             if (!leafEl) {
