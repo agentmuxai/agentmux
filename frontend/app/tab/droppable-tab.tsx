@@ -3,6 +3,8 @@
 
 import { Logger } from "@/util/logger";
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
+import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
+import { isWindows } from "@/util/platformutil";
 import { createMemo, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import clsx from "clsx";
@@ -95,6 +97,17 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 });
             },
             onDragStart: () => {
+                // Suppress the WebKit/WebKitGTK "drop rejected" snapback on
+                // tab tear-off (macOS/Linux): the tab is released outside any
+                // pragmatic-dnd drop target (the new window is created on
+                // dragend), so the browser would otherwise animate the drag
+                // ghost back into the source window. preventUnhandled makes the
+                // drop "handled" so the ghost just vanishes on release.
+                // Windows is excluded — its SC_MOVE tear-off path relies on
+                // the existing behavior, and the move cursor there isn't fixed
+                // by PR #1175 (darwin/linux only). In-window tab reorder still
+                // works via pragmatic-dnd's own drop targets.
+                if (!isWindows()) preventUnhandled.start();
                 setGlobalDragTabId(props.tabId);
                 setInsertionPoint(null);
                 setIsDragging(true);
@@ -107,6 +120,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 });
             },
             onDrop: () => {
+                if (!isWindows()) preventUnhandled.stop();
                 setGlobalDragTabId(null);
                 setIsDragging(false);
                 // Do NOT clear setTabGrabOffset here. pragmatic-dnd's
