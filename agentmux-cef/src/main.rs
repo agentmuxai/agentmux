@@ -266,6 +266,19 @@ fn main() {
     #[cfg(target_os = "macos")]
     unsafe { patch_nsapp_unrecognized_selector() };
 
+    // macOS tear-off polish: suppress AppKit's native drag slide-back
+    // ("poof" / fly-back-to-origin) animation. When a pane/tab is torn
+    // off, the pointer is released OUTSIDE any DOM drop target (the new
+    // floating window is created on mouseup), so blink hands AppKit
+    // NSDragOperationNone and AppKit animates the drag image sliding
+    // back into the source window — the very "rejection" animation the
+    // tear-off is trying to avoid. `preventUnhandled` (PR #1186) only
+    // covers in-document drops, not this out-of-window case. Disable the
+    // session-level animation flag globally; we never want a
+    // drop-rejected slide-back anywhere in the app.
+    #[cfg(target_os = "macos")]
+    unsafe { disable_macos_drag_slideback() };
+
     // Phase B.6 (post-fix): the named-pipe bind in the launcher is
     // the AUTHORITATIVE single-instance lock — a second launcher
     // hits ERROR_ACCESS_DENIED and never reaches the host. We still
@@ -805,6 +818,99 @@ unsafe fn patch_nsapp_unrecognized_selector() {
     } else {
         tracing::warn!("macOS 26 compat: class_addMethod failed (method already exists?)");
     }
+}
+
+/// Suppress AppKit's native drag slide-back animation app-wide.
+///
+/// When an `NSDraggingSession` ends without a successful drop (the drag
+/// operation resolves to `NSDragOperationNone`), AppKit animates the drag
+/// image sliding back to where the drag began. For a pane/tab tear-off the
+/// pointer is released outside any DOM drop target — the floating window is
+/// created on mouseup — so blink reports `NSDragOperationNone` and the user
+/// sees the drag image fly back into the source window before the new
+/// window appears. That "rejection" animation is exactly what tear-off
+/// wants gone; the frontend `preventUnhandled` guard (PR #1186) only
+/// suppresses the WebKit-level snapback for *in-document* drops and can't
+/// reach this AppKit-level animation.
+///
+/// `NSDraggingSession` exposes `animatesToStartingPositionsOnCancelOrFail`
+/// (default `YES`) to control exactly this. CEF/Chromium starts every drag
+/// via `-[NSView beginDraggingSessionWithItems:event:source:]` and never
+/// flips the flag, so we swizzle that method: call the original, then set
+/// the flag to `NO` on the returned session. Done at the `NSView` level so
+/// it covers whichever Chromium content view initiates the drag. The flag
+/// only affects the cancel/fail slide-back — successful in-window drops
+/// (e.g. tab reorder) are unaffected — so disabling it globally is safe;
+/// there is no place in the app where a drop-rejected slide-back is wanted.
+///
+/// Safety: called once at startup, before `cef::initialize`, on the main
+/// thread. Mirrors the raw-libobjc FFI of `patch_nsapp_unrecognized_selector`.
+#[cfg(target_os = "macos")]
+unsafe fn disable_macos_drag_slideback() {
+    use std::ffi::{c_char, c_void};
+
+    type Id     = *mut c_void;
+    type Sel    = *const c_void;
+    type Class  = *mut c_void;
+    type Method = *mut c_void;
+    type Imp    = *const c_void;
+
+    extern "C" {
+        fn objc_getClass(name: *const c_char) -> Class;
+        fn sel_registerName(name: *const c_char) -> Sel;
+        fn class_getInstanceMethod(cls: Class, sel: Sel) -> Method;
+        fn method_getImplementation(m: Method) -> Imp;
+        fn method_setImplementation(m: Method, imp: Imp) -> Imp;
+        fn objc_msgSend();
+    }
+
+    // IMP of the original beginDraggingSessionWithItems:event:source:, saved
+    // so our replacement can chain to it. Single-threaded startup write +
+    // main-thread-only drag reads, so a plain static is sufficient.
+    static mut ORIGINAL_BEGIN_DRAG: Imp = std::ptr::null();
+
+    // Replacement IMP: call the original to create the session, then clear
+    // the slide-back flag on it before returning.
+    unsafe extern "C" fn begin_drag_no_slideback(
+        this:   Id,
+        cmd:    Sel,
+        items:  Id,
+        event:  Id,
+        source: Id,
+    ) -> Id {
+        let orig: extern "C" fn(Id, Sel, Id, Id, Id) -> Id =
+            std::mem::transmute(ORIGINAL_BEGIN_DRAG);
+        let session = orig(this, cmd, items, event, source);
+        if !session.is_null() {
+            // [session setAnimatesToStartingPositionsOnCancelOrFail:NO]
+            let sel = sel_registerName(
+                b"setAnimatesToStartingPositionsOnCancelOrFail:\0".as_ptr() as _,
+            );
+            let set_flag: extern "C" fn(Id, Sel, u8) =
+                std::mem::transmute(objc_msgSend as *const c_void);
+            set_flag(session, sel, 0); // NO
+        }
+        session
+    }
+
+    let cls = objc_getClass(b"NSView\0".as_ptr() as _);
+    if cls.is_null() {
+        tracing::warn!("drag slide-back: NSView class not found");
+        return;
+    }
+    let sel = sel_registerName(
+        b"beginDraggingSessionWithItems:event:source:\0".as_ptr() as _,
+    );
+    let method = class_getInstanceMethod(cls, sel);
+    if method.is_null() {
+        tracing::warn!("drag slide-back: beginDraggingSessionWithItems:event:source: not found");
+        return;
+    }
+    ORIGINAL_BEGIN_DRAG = method_getImplementation(method);
+    method_setImplementation(method, begin_drag_no_slideback as Imp);
+    tracing::info!(
+        "macOS drag polish: swizzled NSView beginDraggingSession to disable cancel/fail slide-back"
+    );
 }
 
 /// Set the macOS Dock icon for the running process.
