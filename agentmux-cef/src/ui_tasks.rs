@@ -237,16 +237,16 @@ pub fn post_start_drag(state: &Arc<AppState>, label: &str) {
 #[cfg(target_os = "windows")]
 pub fn post_start_drag(_state: &Arc<AppState>, _label: &str) {}
 
-// ── Win32 native window move (HTCAPTION modal loop) ───────────────────────
+// ── Win32 host-side manual native move loop ───────────────────────────────
 //
-// Despite the module header's "Win32 is safe from any thread" note,
-// `ReleaseCapture()` is THREAD-SPECIFIC — it releases only the CALLING
-// thread's mouse capture — and the OS modal move loop must be initiated on the
-// thread that owns the window's capture: the CEF UI thread. The previous
-// inline path (motion.rs, on a tokio worker) made `ReleaseCapture()` a no-op,
-// so the renderer kept capture and `WM_NCLBUTTONDOWN` never engaged the move
-// loop ("loses mouse state"). This task runs it on the UI thread. The HWND is
-// resolved by the caller (thread-safe) and passed in as a u64.
+// The raw `WM_NCLBUTTONDOWN(HTCAPTION)` trick does NOT work with a CEF/Chromium
+// window: Chromium's HWNDMessageHandler swallows the non-client message and only
+// runs an OS drag for `-webkit-app-region:drag` regions (which we can't use —
+// they suppress renderer events). Instrumented proof: on the UI thread with
+// `release_ok=true`, SendMessage(WM_NCLBUTTONDOWN) returned in 0.4ms — the move
+// loop never engaged. So we run the move loop OURSELVES, on the UI thread (which
+// owns the window + capture), driving `SetWindowPos` per mouse-move with zero
+// per-move IPC. Full design + risks: SPEC_WINDOW_DRAG_MANUAL_MOVE_LOOP_2026_05_29.
 #[cfg(target_os = "windows")]
 wrap_task! {
     pub struct Win32BeginMoveTask {
@@ -255,32 +255,113 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            use windows_sys::Win32::Foundation::HWND;
-            use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetCapture, ReleaseCapture};
-            use windows_sys::Win32::UI::WindowsAndMessaging::{
-                SendMessageW, HTCAPTION, WM_NCLBUTTONDOWN,
+            use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
+            use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+                GetAsyncKeyState, ReleaseCapture, SetCapture, VK_ESCAPE, VK_LBUTTON,
             };
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                DispatchMessageW, GetCursorPos, GetMessageW, GetWindowRect, PostQuitMessage,
+                SetWindowPos, TranslateMessage, MSG, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+                WM_KEYDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+            };
+
             let h = self.hwnd as HWND;
+            // High bit of GetAsyncKeyState = key currently down.
+            let lbutton_down = || unsafe {
+                (GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000) != 0
+            };
+
             unsafe {
-                // Diagnostics: who holds capture before we release, and whether
-                // ReleaseCapture actually did anything (it only does when we're
-                // on the capturing thread — the whole reason for being here).
-                let cap_before = GetCapture() as usize;
-                let released = ReleaseCapture();
+                // 0. Bail if the press already ended (fast click / late task).
+                if !lbutton_down() {
+                    tracing::info!(
+                        "[start_window_drag] manual move loop skipped — button already up hwnd={:#x}",
+                        self.hwnd
+                    );
+                    return;
+                }
+
+                // 1. Capture the mouse to THIS (UI) thread so WM_MOUSEMOVE /
+                //    WM_LBUTTONUP route to our GetMessage loop. ReleaseCapture
+                //    first to drop any capture Chromium set on the press.
+                ReleaseCapture();
+                SetCapture(h);
+
+                // 2. Anchor in physical screen px — no devicePixelRatio math.
+                let mut anchor = POINT { x: 0, y: 0 };
+                GetCursorPos(&mut anchor);
+                let mut r: RECT = std::mem::zeroed();
+                GetWindowRect(h, &mut r);
+                let (x0, y0) = (r.left, r.top);
                 tracing::info!(
-                    "[start_window_drag] win32 begin-move on UI thread hwnd={:#x} capture_before={:#x} release_ok={}",
-                    self.hwnd,
-                    cap_before,
-                    released != 0
+                    "[start_window_drag] manual move loop begin hwnd={:#x} anchor=({},{}) origin=({},{})",
+                    self.hwnd, anchor.x, anchor.y, x0, y0
                 );
-                // WM_NCLBUTTONDOWN(HTCAPTION) enters the OS modal move loop,
-                // which blocks the UI thread until the user releases the button.
-                // The loop pumps messages, so child HWNDs move + paint with the
-                // window; CEF task processing resumes when the loop returns.
-                SendMessageW(h, WM_NCLBUTTONDOWN, HTCAPTION as usize, 0);
+
+                // 3. Modal move loop on the UI thread.
+                let mut msg: MSG = std::mem::zeroed();
+                let mut moves: u32 = 0;
+                loop {
+                    // Safety net: end if the button is up but no WM_LBUTTONUP came.
+                    if !lbutton_down() {
+                        break;
+                    }
+                    let got = GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0);
+                    if got <= 0 {
+                        if got == 0 {
+                            // WM_QUIT — don't swallow app shutdown.
+                            PostQuitMessage(msg.wParam as i32);
+                        }
+                        break;
+                    }
+                    match msg.message {
+                        WM_MOUSEMOVE => {
+                            let mut cur = POINT { x: 0, y: 0 };
+                            GetCursorPos(&mut cur);
+                            SetWindowPos(
+                                h,
+                                std::ptr::null_mut(),
+                                x0 + (cur.x - anchor.x),
+                                y0 + (cur.y - anchor.y),
+                                0,
+                                0,
+                                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                            );
+                            moves += 1;
+                        }
+                        WM_LBUTTONUP => {
+                            // Let Chromium see the up so its input state stays
+                            // balanced against the mousedown the renderer got
+                            // (SPEC §5.1).
+                            DispatchMessageW(&msg);
+                            break;
+                        }
+                        WM_KEYDOWN if (msg.wParam as u16) == VK_ESCAPE => {
+                            // Cancel: restore the start position.
+                            SetWindowPos(
+                                h,
+                                std::ptr::null_mut(),
+                                x0,
+                                y0,
+                                0,
+                                0,
+                                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                            );
+                            break;
+                        }
+                        _ => {
+                            // Keep the app alive (paint, DPI changes, sent msgs).
+                            TranslateMessage(&msg);
+                            DispatchMessageW(&msg);
+                        }
+                    }
+                }
+
+                // 4. Always release capture.
+                ReleaseCapture();
                 tracing::info!(
-                    "[start_window_drag] win32 move loop returned hwnd={:#x}",
-                    self.hwnd
+                    "[start_window_drag] manual move loop end hwnd={:#x} moves={}",
+                    self.hwnd, moves
                 );
             }
         }
