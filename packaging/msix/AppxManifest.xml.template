@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AgentMux — Microsoft Store MSIX manifest (FullTrust packaged desktop app).
+  Identity is the LIVE published identity (Store ID 9P9QCXNNCRK3, PFN
+  AgentMux.AgentMux_vqr1k32tkfk4y). The Publisher CN is an identity value, not a
+  secret. {{VERSION_4PART}} is substituted by scripts/package-msix.ps1 from
+  package.json (X.Y.Z -> X.Y.Z.0). See docs/specs/SPEC_MSIX_PACKAGING_2026_05_30.md.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="rescap">
+
+  <Identity
+    Name="AgentMux.AgentMux"
+    Publisher="CN=C2BCB530-27CD-4DCF-87C5-2967CE009AAC"
+    Version="{{VERSION_4PART}}"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>AgentMux</DisplayName>
+    <PublisherDisplayName>AgentMux Corp</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="AgentMux" Executable="agentmux.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="AgentMux"
+        Description="Integrated agentic workflow environment — run multiple AI agents side by side"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile
+          Wide310x150Logo="Assets\Wide310x150Logo.png"
+          Square71x71Logo="Assets\Square71x71Logo.png"
+          Square310x310Logo="Assets\Square310x310Logo.png"
+          ShortName="AgentMux" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- FullTrust: AgentMux spawns the CEF host, the srv sidecar, terminals, and agent CLIs -->
+    <rescap:Capability Name="runFullTrust" />
+    <Capability Name="internetClient" />
+    <Capability Name="internetClientServer" />
+    <Capability Name="privateNetworkClientServer" />
+  </Capabilities>
+</Package>
