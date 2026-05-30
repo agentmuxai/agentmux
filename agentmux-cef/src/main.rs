@@ -622,6 +622,12 @@ fn main() {
 
     tracing::info!("CEF initialized, entering message loop");
 
+    // Set the Dock icon now that NSApplication exists. macOS-only; no-op
+    // elsewhere. See set_macos_dock_icon for why this is a runtime call
+    // rather than a bundle CFBundleIconFile.
+    #[cfg(target_os = "macos")]
+    unsafe { set_macos_dock_icon() };
+
     // Start memory heartbeat — logs system/process memory stats every 20s.
     // Provides forensic data if the process later crashes from OOM / VA exhaustion.
     memory_heartbeat::start();
@@ -799,6 +805,101 @@ unsafe fn patch_nsapp_unrecognized_selector() {
     } else {
         tracing::warn!("macOS 26 compat: class_addMethod failed (method already exists?)");
     }
+}
+
+/// Set the macOS Dock icon for the running process.
+///
+/// `task dev` launches the bare `agentmux-cef` Mach-O directly (not inside an
+/// `.app` bundle — see `Taskfile.yml::dev:serve`), so macOS has no
+/// `CFBundleIconFile` to read and shows the generic executable tile in the
+/// Dock. Rather than restructure the dev launch around a bundle, we set the
+/// icon at runtime via `-[NSApplication setApplicationIconImage:]`, which
+/// works whether or not we're in a bundle and also overrides a bundle icon
+/// in any future packaged build — one code path for all launch modes.
+///
+/// The PNG is embedded at compile time (`include_bytes!`) so there's no
+/// dependency on the `dist/` layout or a resource-path lookup at runtime.
+/// It's the SAME normal AgentMux logo the Linux taskbar uses
+/// (`assets/linux/icons/hicolor/512x512/apps/agentmux.png`, wired up in
+/// `scripts/install-linux-desktop.sh`), keeping the Dock/taskbar icon
+/// identical across platforms.
+///
+/// Must run on the main thread after `cef::initialize` (NSApplication exists
+/// by then). FFI mirrors `patch_nsapp_unrecognized_selector` — raw libobjc,
+/// no `objc2`/`cocoa` crate dependency. The created NSImage is intentionally
+/// leaked (one per process lifetime): `setApplicationIconImage:` retains it
+/// and the icon lives as long as the app does.
+#[cfg(target_os = "macos")]
+unsafe fn set_macos_dock_icon() {
+    use std::ffi::{c_char, c_void};
+
+    type Id    = *mut c_void;
+    type Sel   = *const c_void;
+    type Class = *mut c_void;
+
+    // The normal AgentMux logo (panel layout, not the brain-alternate),
+    // matching the Linux taskbar source.
+    const ICON_PNG: &[u8] =
+        include_bytes!("../../assets/linux/icons/hicolor/512x512/apps/agentmux.png");
+
+    extern "C" {
+        fn objc_getClass(name: *const c_char) -> Class;
+        fn sel_registerName(name: *const c_char) -> Sel;
+        // objc_msgSend is declared bare and transmuted to the exact prototype
+        // at each call site — the ARM64 calling convention requires the real
+        // signature, not a variadic stand-in.
+        fn objc_msgSend();
+    }
+
+    let cls_nsdata  = objc_getClass(b"NSData\0".as_ptr() as _);
+    let cls_nsimage = objc_getClass(b"NSImage\0".as_ptr() as _);
+    let cls_nsapp   = objc_getClass(b"NSApplication\0".as_ptr() as _);
+    if cls_nsdata.is_null() || cls_nsimage.is_null() || cls_nsapp.is_null() {
+        tracing::warn!("dock-icon: an AppKit class was not found; skipping");
+        return;
+    }
+
+    // NSData *data = [NSData dataWithBytes:ICON_PNG.ptr length:ICON_PNG.len]
+    let sel_data = sel_registerName(b"dataWithBytes:length:\0".as_ptr() as _);
+    let msg_data: extern "C" fn(Class, Sel, *const c_void, usize) -> Id =
+        std::mem::transmute(objc_msgSend as *const ());
+    let data = msg_data(cls_nsdata, sel_data, ICON_PNG.as_ptr() as *const c_void, ICON_PNG.len());
+    if data.is_null() {
+        tracing::warn!("dock-icon: NSData creation failed");
+        return;
+    }
+
+    // NSImage *img = [[NSImage alloc] initWithData:data]
+    let sel_alloc = sel_registerName(b"alloc\0".as_ptr() as _);
+    let msg_alloc: extern "C" fn(Class, Sel) -> Id =
+        std::mem::transmute(objc_msgSend as *const ());
+    let img_alloc = msg_alloc(cls_nsimage, sel_alloc);
+    let sel_init = sel_registerName(b"initWithData:\0".as_ptr() as _);
+    let msg_init: extern "C" fn(Id, Sel, Id) -> Id =
+        std::mem::transmute(objc_msgSend as *const ());
+    let image = msg_init(img_alloc, sel_init, data);
+    if image.is_null() {
+        tracing::warn!("dock-icon: NSImage creation failed (corrupt PNG?)");
+        return;
+    }
+
+    // NSApplication *app = [NSApplication sharedApplication]
+    let sel_shared = sel_registerName(b"sharedApplication\0".as_ptr() as _);
+    let msg_shared: extern "C" fn(Class, Sel) -> Id =
+        std::mem::transmute(objc_msgSend as *const ());
+    let app = msg_shared(cls_nsapp, sel_shared);
+    if app.is_null() {
+        tracing::warn!("dock-icon: NSApplication.sharedApplication unavailable");
+        return;
+    }
+
+    // [app setApplicationIconImage:img]
+    let sel_set = sel_registerName(b"setApplicationIconImage:\0".as_ptr() as _);
+    let msg_set: extern "C" fn(Id, Sel, Id) =
+        std::mem::transmute(objc_msgSend as *const ());
+    msg_set(app, sel_set, image);
+
+    tracing::info!("dock-icon: set NSApplication icon to embedded AgentMux logo");
 }
 
 /// Initialize tracing with dual output: rolling daily log file + human-readable stderr.
