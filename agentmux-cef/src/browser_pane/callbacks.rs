@@ -133,6 +133,15 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str) {
 /// the pane during the *initial* navigation focus steal.
 pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     tracing::info!("[pane-load-end] pane page loaded; reinstalling focus subclass");
+    if let Some(block_id) = resolve_pane_block_id(state, browser) {
+        let url = {
+            let mut b: cef::Browser = browser.clone();
+            b.main_frame()
+                .map(|f| cef::CefString::from(&cef::ImplFrame::url(&f)).to_string())
+                .unwrap_or_default()
+        };
+        crate::browser_pane::trace::pane_trace(&block_id, "load-end", &format!("url={url}"));
+    }
 
     #[cfg(target_os = "windows")]
     {
