@@ -685,11 +685,22 @@ pub struct AppState {
     /// every other pane's clip is identical).
     ///
     /// Keyed by label, NOT by HWND: HWND integer values are recycled by the OS,
-    /// so an HWND key risks a stale entry colliding with a recreated pane. The
-    /// HWND value is instead folded INTO the signature, so a recreated pane
-    /// (new HWND, even under a reused label) produces a different signature and
-    /// always re-applies. A wrong-skip is therefore impossible by construction —
-    /// we only skip when the same label already has the same region on the same
+    /// so an HWND key risks a stale entry colliding with a recreated pane.
+    ///
+    /// Why a wrong-skip can't happen:
+    /// - **Labels are globally unique and never reused** (monotonic
+    ///   `BROWSER_PANE_LABEL_SEQ`; see `next_browser_pane_label`). A
+    ///   close→recreate registers the new pane under a brand-new label, so the
+    ///   label-keyed cache always *misses* and re-applies. This is the primary
+    ///   guarantee.
+    /// - The HWND value is also folded INTO the signature as cheap
+    ///   belt-and-suspenders: even if a label were somehow reused, a different
+    ///   (or recycled-but-distinct) HWND yields a different signature → re-apply.
+    /// - `set_pane_overlay_clip` holds this lock across check → apply → record,
+    ///   so the recorded signature always matches the region that call actually
+    ///   applied even though the Windows handler runs on multiple tokio workers.
+    ///
+    /// We only skip when the same label already has the same region on the same
     /// HWND. Pruned to live labels each call to bound size.
     #[cfg(target_os = "windows")]
     pub pane_clip_cache: Mutex<std::collections::HashMap<String, u64>>,

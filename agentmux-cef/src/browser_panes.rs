@@ -592,18 +592,33 @@ impl BrowserPaneManager {
                     // Skip if this pane is already at full visibility (same HWND,
                     // already restored) — avoids a redundant SetWindowRgn +
                     // repaint every call while any overlay is open elsewhere.
+                    //
+                    // The cache guard is held across check → apply → record so
+                    // the sequence is atomic. This handler runs INLINE on a
+                    // multi-threaded tokio worker (ipc.rs — no UI-thread marshal,
+                    // unlike the non-Windows path), so two concurrent clips for
+                    // the same pane could otherwise interleave their SetWindowRgn
+                    // vs cache.insert and leave the recorded sig disagreeing with
+                    // the live region — a later wrong-skip.
                     let sig = clip_sig_whole(pane_hwnd as isize);
-                    if state.pane_clip_cache.lock().get(label).copied() == Some(sig) {
+                    let mut cache = state.pane_clip_cache.lock();
+                    if cache.get(label).copied() == Some(sig) {
                         continue;
                     }
-                    SetWindowRgn(pane_hwnd as _, std::ptr::null_mut(), 0);
+                    let applied = SetWindowRgn(pane_hwnd as _, std::ptr::null_mut(), 0) != 0;
                     // The pane is being made WHOLE again — the previously
                     // hidden sub-area needs to repaint its content. We
                     // don't track the diff yet (Phase 2 follow-up), so
                     // invalidate the entire pane; CEF will paint only
                     // dirty regions on the next pump.
                     InvalidateRect(pane_hwnd as _, std::ptr::null(), 0);
-                    state.pane_clip_cache.lock().insert(label.clone(), sig);
+                    // Only record the sig if the region actually applied; on a
+                    // (rare) SetWindowRgn failure leave the entry unset so the
+                    // next call retries instead of skipping a clip that never
+                    // landed.
+                    if applied {
+                        cache.insert(label.clone(), sig);
+                    }
                     continue;
                 }
 
@@ -632,6 +647,12 @@ impl BrowserPaneManager {
 
                 // Skip if the region we'd compute is identical to the one
                 // already applied to this HWND (same geometry + same overlays).
+                //
+                // As in the whole-visibility branch above, the cache guard is
+                // held across check → build → apply → record so a concurrent
+                // clip for the same pane (this handler runs inline on a
+                // multi-threaded tokio worker) can't interleave SetWindowRgn and
+                // cache.insert and desync the recorded sig from the live region.
                 let sig = clip_sig_clipped(
                     pane_hwnd as isize,
                     pane_rect.left,
@@ -640,7 +661,8 @@ impl BrowserPaneManager {
                     pane_h,
                     overlay_rects,
                 );
-                if state.pane_clip_cache.lock().get(label).copied() == Some(sig) {
+                let mut cache = state.pane_clip_cache.lock();
+                if cache.get(label).copied() == Some(sig) {
                     continue;
                 }
 
@@ -669,16 +691,24 @@ impl BrowserPaneManager {
                 }
                 // SetWindowRgn takes ownership of the region handle on
                 // success; the system frees it when the window is destroyed
-                // or a new region is set.
+                // or a new region is set. On FAILURE ownership stays with us,
+                // so we DeleteObject the region below to avoid a GDI leak.
                 // bRedraw=FALSE — async paint via InvalidateRect below.
                 // See the empty-overlay branch above for the rationale.
-                SetWindowRgn(pane_hwnd as _, region as _, 0);
+                let applied = SetWindowRgn(pane_hwnd as _, region as _, 0) != 0;
                 // The clip may have GROWN (more area hidden) or SHRUNK
                 // (less area hidden); we don't track the diff yet, so
                 // invalidate the whole pane. CEF dirty-region painting
                 // keeps the actual GPU work proportional to the change.
                 InvalidateRect(pane_hwnd as _, std::ptr::null(), 0);
-                state.pane_clip_cache.lock().insert(label.clone(), sig);
+                // Only record the sig when the region actually applied (matches
+                // the whole-visibility branch); on failure free the orphaned
+                // region and leave the entry unset so the next call retries.
+                if applied {
+                    cache.insert(label.clone(), sig);
+                } else {
+                    DeleteObject(region as _);
+                }
             }
         }
         // Prune cache entries for panes no longer live (closed/destroyed),
