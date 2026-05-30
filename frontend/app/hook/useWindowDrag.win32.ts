@@ -2,13 +2,49 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Windows-specific window drag hook.
-// Tauri: data-drag-region is handled at the WebView/OS level.
-// CEF: JS-driven window move — track mouse delta, set window position via IPC.
-// WM_NCLBUTTONDOWN doesn't work because the async IPC roundtrip loses mouse state.
+//
+// Two implementations, chosen at install time:
+//
+//  - NATIVE (default) — SPEC_WINDOW_DRAG_NATIVE_MOVE_LOOP_2026_05_29.md.
+//    Keep the title bar HTCLIENT (so right-click / contextmenu still fire),
+//    detect drag intent in JS, and on a 4px threshold hand the move to the OS
+//    via ONE fire-and-forget `start_window_drag` IPC. The host runs
+//    `ReleaseCapture()` + `SendMessageW(WM_NCLBUTTONDOWN, HTCAPTION)`, so the
+//    OS modal move loop tracks the cursor with ZERO further IPC — matching
+//    VS Code / Electron smoothness. This mirrors useWindowDrag.linux.ts.
+//
+//  - LEGACY JS (fallback) — JS-driven per-mousemove `set_window_position`.
+//    Smooth-but-laggy: the window position is gated on an IPC round-trip per
+//    move, so it lags the cursor under any host jitter. Kept behind a runtime
+//    opt-out while the native path is validated, because of a historical note
+//    that the native `WM_NCLBUTTONDOWN` path "loses mouse state" (this hook is
+//    the spike that verifies whether that still reproduces — the previous
+//    attempt awaited an IPC before sending; the native path here never awaits).
+//
+// Toggle: native is ON by default. To force the legacy JS path, set
+//   localStorage['agentmux.win32NativeDrag'] = '0'
+// in DevTools and reload the window.
 
 import { detectHost, invokeCommand } from "@/app/platform/ipc";
 
 let cefDragListenerInstalled = false;
+
+// Threshold in CSS pixels before we treat a press+move as a window drag.
+// Below this the press is a normal click (buttons inside a drag region still
+// work). 4px matches Chrome's default drag threshold (and the Linux hook).
+const DRAG_THRESHOLD_PX = 4;
+
+/// Native OS move loop is the default. Set localStorage
+/// 'agentmux.win32NativeDrag' = '0' (then reload) to fall back to the legacy
+/// JS-driven drag. Wrapped in try/catch because localStorage can throw in
+/// locked-down contexts.
+function useNativeDrag(): boolean {
+    try {
+        return localStorage.getItem("agentmux.win32NativeDrag") !== "0";
+    } catch {
+        return true;
+    }
+}
 
 function isInDragRegion(target: HTMLElement | null): boolean {
     let el = target;
@@ -21,106 +57,157 @@ function isInDragRegion(target: HTMLElement | null): boolean {
     return false;
 }
 
-/// Identify which top-level window we're running in so the host can
-/// route `get/set_window_position` IPC to the right HWND. The renderer
-/// URL carries `windowLabel=…` for every non-main window (the launcher
-/// doesn't add it for `main`); falling back to `"main"` keeps the
-/// main-window's drag pointing at itself.
-///
-/// Necessary because `find_own_top_level_window` on the host walks
-/// process-wide windows in Z-order, and owned floating-pane windows
-/// sit ABOVE their owner — so without a label, the main window's drag
-/// would accidentally move whichever floater is currently topmost.
+/// Identify which top-level window we're running in so the host can route
+/// drag/maximize IPC to the right HWND. The renderer URL carries
+/// `windowLabel=…` for every non-main window (the launcher doesn't add it for
+/// `main`); falling back to `"main"` keeps the main window pointing at itself.
 function ownWindowLabel(): string {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("windowLabel") || "main";
+    try {
+        return new URLSearchParams(window.location.search).get("windowLabel") || "main";
+    } catch {
+        return "main";
+    }
 }
 
-function installCefDragListener() {
-    if (cefDragListenerInstalled || detectHost() !== "cef") return;
-    cefDragListenerInstalled = true;
+// ── NATIVE path ──────────────────────────────────────────────────────────
+// Mirrors useWindowDrag.linux.ts: arm on mousedown, hand the move to the OS
+// on threshold crossing, let the OS modal loop run the rest. No per-move IPC,
+// no DPI math, no race-guarding — the OS owns the move.
+function installNativeDragListener() {
+    let pressX = 0;
+    let pressY = 0;
+    let pressArmed = false; // mousedown seen, waiting for threshold-crossing motion
+    let dragInitiated = false; // start_window_drag has been sent
 
-    // Per-mousedown sequence token. Each press increments
-    // `currentMouseDownId`; the async `get_window_position` handler
-    // captures the value at press time and bails if it doesn't still
-    // match when the promise resolves.
-    //
-    // Without the sequence token, a rapid press → release → press
-    // sequence with a slow IPC could let the OLDER request arm drag
-    // using the older click coords (a shared boolean would already
-    // be true again from the newer press). Codex P2 PR #734 round 2.
+    document.addEventListener(
+        "mousedown",
+        (e: MouseEvent) => {
+            // Left button only; right/middle pass through to standard handling
+            // (contextmenu etc) — the whole reason we keep the region HTCLIENT.
+            if (e.button !== 0) return;
+            if (!isInDragRegion(e.target as HTMLElement)) return;
+            pressX = e.clientX;
+            pressY = e.clientY;
+            pressArmed = true;
+            dragInitiated = false;
+            // No preventDefault: a sub-threshold click must still reach child
+            // handlers, and the button must stay "down" for the OS move loop.
+        },
+        true,
+    );
+
+    document.addEventListener(
+        "mousemove",
+        (e: MouseEvent) => {
+            if (!pressArmed || dragInitiated) return;
+            // Primary button released (possibly outside the webview) → disarm
+            // so a stray hover after an interrupted press can't start a drag.
+            if ((e.buttons & 1) === 0) {
+                pressArmed = false;
+                return;
+            }
+            const dx = Math.abs(e.clientX - pressX);
+            const dy = Math.abs(e.clientY - pressY);
+            if (dx < DRAG_THRESHOLD_PX && dy < DRAG_THRESHOLD_PX) return;
+            // Threshold crossed — the button is still physically down here,
+            // which is exactly what the WM_NCLBUTTONDOWN modal loop needs.
+            // Fire ONE fire-and-forget IPC and stop tracking; the OS runs the
+            // move until the user releases. NEVER await it on the input path.
+            dragInitiated = true;
+            pressArmed = false;
+            invokeCommand("start_window_drag", { label: ownWindowLabel() }).catch(() => {
+                dragInitiated = false;
+            });
+        },
+        true,
+    );
+
+    document.addEventListener(
+        "mouseup",
+        () => {
+            pressArmed = false;
+            dragInitiated = false;
+        },
+        true,
+    );
+
+    document.addEventListener(
+        "dblclick",
+        (e: MouseEvent) => {
+            if (e.button !== 0) return;
+            if (!isInDragRegion(e.target as HTMLElement)) return;
+            e.preventDefault();
+            pressArmed = false;
+            dragInitiated = false;
+            invokeCommand("maximize_window", { label: ownWindowLabel() }).catch(() => {});
+        },
+        true,
+    );
+}
+
+// ── LEGACY JS path (fallback) ──────────────────────────────────────────────
+// JS-driven window move: track mouse delta, set absolute window position via
+// IPC per mousemove. Kept verbatim (Codex PR #734 race-guarding intact) behind
+// the localStorage opt-out. See the file header for why it lags.
+function installJsDragListener() {
+    // Per-mousedown sequence token. Each press increments `currentMouseDownId`;
+    // the async `get_window_position` handler captures the value at press time
+    // and bails if it doesn't still match when the promise resolves.
+    // (Codex P2 PR #734 round 2.)
     let currentMouseDownId = 0;
     let dragging = false;
     let clickScreenX = 0;
     let clickScreenY = 0;
     let initWinX = 0;
     let initWinY = 0;
-    // Track the latest cursor position seen during a press, even
-    // before `dragging` is armed. When the get_window_position IPC
-    // resolves we can immediately catch up with one set_window_position
-    // call against the latest cursor — otherwise mousemoves during
-    // the initial round-trip are silently dropped (codex P2 PR #734
-    // round 4).
+    // Latest cursor position seen during a press, even before `dragging` is
+    // armed, so the get_window_position resolution can catch up (PR #734 r4).
     let latestScreenX = 0;
     let latestScreenY = 0;
 
-    document.addEventListener("mousedown", async (e: MouseEvent) => {
-        if (e.button !== 0) return;
-        if (!isInDragRegion(e.target as HTMLElement)) return;
-        e.preventDefault();
-        currentMouseDownId += 1;
-        const myId = currentMouseDownId;
-        // Capture press coords synchronously — used as the baseline
-        // for both the live drag math and the catch-up move below.
-        clickScreenX = e.screenX;
-        clickScreenY = e.screenY;
-        latestScreenX = e.screenX;
-        latestScreenY = e.screenY;
-        try {
-            const pos = await invokeCommand<{ x: number; y: number }>("get_window_position", {
-                label: ownWindowLabel(),
-            });
-            // Race guard: bail if a mouseup or a newer mousedown has
-            // happened during the IPC round-trip.
-            if (myId !== currentMouseDownId) return;
-            initWinX = pos.x;
-            initWinY = pos.y;
-            dragging = true;
-            // Catch-up: if the cursor moved during the IPC, fire one
-            // set_window_position immediately against the latest known
-            // position so we don't lose the first few pixels of motion.
-            //
-            // DPI scaling: `e.screenX` exposes CSS pixels (Blink divides
-            // physical by combined browser-zoom under use-zoom-for-dsf,
-            // default on Windows since Chrome 54); `initWinX` from
-            // `get_window_position` and `set_window_position` use Win32
-            // physical pixels in this PMv2 process. Multiply the CSS-
-            // pixel delta by devicePixelRatio + round before adding to
-            // the physical baseline. Without this, Win11's default 125%
-            // scale makes the window lag the cursor by ~20%.
-            // See docs/specs/SPEC_WINDOW_DRAG_DPI_FIX_2026-05-13.md.
-            if (latestScreenX !== clickScreenX || latestScreenY !== clickScreenY) {
-                const dpr = window.devicePixelRatio || 1;
-                const tx = initWinX + Math.round((latestScreenX - clickScreenX) * dpr);
-                const ty = initWinY + Math.round((latestScreenY - clickScreenY) * dpr);
-                sendPos(tx, ty);
+    document.addEventListener(
+        "mousedown",
+        async (e: MouseEvent) => {
+            if (e.button !== 0) return;
+            if (!isInDragRegion(e.target as HTMLElement)) return;
+            e.preventDefault();
+            currentMouseDownId += 1;
+            const myId = currentMouseDownId;
+            clickScreenX = e.screenX;
+            clickScreenY = e.screenY;
+            latestScreenX = e.screenX;
+            latestScreenY = e.screenY;
+            try {
+                const pos = await invokeCommand<{ x: number; y: number }>("get_window_position", {
+                    label: ownWindowLabel(),
+                });
+                // Race guard: bail if a mouseup or a newer mousedown happened
+                // during the IPC round-trip.
+                if (myId !== currentMouseDownId) return;
+                initWinX = pos.x;
+                initWinY = pos.y;
+                dragging = true;
+                // Catch-up: if the cursor moved during the IPC, fire one
+                // set_window_position immediately against the latest position.
+                // DPI: e.screenX is CSS px; initWinX is Win32 physical px —
+                // multiply the CSS delta by devicePixelRatio + round.
+                // See docs/specs/SPEC_WINDOW_DRAG_DPI_FIX_2026-05-13.md.
+                if (latestScreenX !== clickScreenX || latestScreenY !== clickScreenY) {
+                    const dpr = window.devicePixelRatio || 1;
+                    const tx = initWinX + Math.round((latestScreenX - clickScreenX) * dpr);
+                    const ty = initWinY + Math.round((latestScreenY - clickScreenY) * dpr);
+                    sendPos(tx, ty);
+                }
+            } catch {
+                // host unavailable — abort drag
             }
-        } catch {
-            // host unavailable — abort drag
-        }
-    }, true);
+        },
+        true,
+    );
 
-    // One-in-flight + coalesce. Native mousemove fires at ~120Hz; the
-    // IPC round-trip can be slower under load. If two requests overlap
-    // and the older one resolves AFTER the newer (e.g. transient host
-    // jitter), the window snaps backward to the older absolute position.
-    // Codex P2 PR #734 round 3.
-    //
-    // Strategy: at most one set_window_position in flight. If more
-    // mousemoves arrive while in flight, stash the latest pending
-    // position; on completion, fire that. Older positions are dropped
-    // — they're stale by definition. Keeps the window tracking the
-    // most recent cursor without ordering hazards.
+    // One-in-flight + coalesce: at most one set_window_position in flight; if
+    // more mousemoves arrive, stash the latest and fire on completion. Older
+    // positions are dropped (stale). (Codex P2 PR #734 round 3.)
     let setPosInFlight = false;
     let pendingPos: { x: number; y: number } | null = null;
     const sendPos = (x: number, y: number): void => {
@@ -141,19 +228,11 @@ function installCefDragListener() {
             });
     };
     document.addEventListener("mousemove", (e: MouseEvent) => {
-        // Track latest cursor position even before `dragging` is armed
-        // so the catch-up at IPC resolution can use the most recent
-        // value (otherwise initial mousemoves during the round-trip
-        // are dropped).
         latestScreenX = e.screenX;
         latestScreenY = e.screenY;
         if (!dragging) return;
-        // DPI scaling: CSS-pixel delta * devicePixelRatio = physical
-        // delta, added to the physical-pixel baseline from
-        // `get_window_position`. Re-read DPR every move so a mid-drag
-        // monitor crossing (with different scale) picks up the new
-        // value automatically. Spec:
-        // docs/specs/SPEC_WINDOW_DRAG_DPI_FIX_2026-05-13.md §4.1-4.2.
+        // CSS-pixel delta * devicePixelRatio = physical delta. Re-read DPR
+        // every move so a mid-drag monitor crossing picks up the new scale.
         const dpr = window.devicePixelRatio || 1;
         const tx = initWinX + Math.round((e.screenX - clickScreenX) * dpr);
         const ty = initWinY + Math.round((e.screenY - clickScreenY) * dpr);
@@ -161,26 +240,35 @@ function installCefDragListener() {
     });
 
     document.addEventListener("mouseup", () => {
-        // Invalidate any in-flight mousedown handler — incrementing
-        // the id ensures their `myId !== currentMouseDownId` check
-        // fires when they resolve.
         currentMouseDownId += 1;
         dragging = false;
-        // Do NOT clear pendingPos — that would discard the FINAL
-        // queued position (the cursor's location at release time)
-        // and leave the window stranded at the previous in-flight
-        // position. Let the in-flight set_window_position complete
-        // naturally; its `.finally` will drain pendingPos to its
-        // correct end state. (codex P2 PR #734 round 4.)
+        // Do NOT clear pendingPos — let the in-flight set_window_position drain
+        // to the cursor's release position. (PR #734 round 4.)
     });
 
-    document.addEventListener("dblclick", (e: MouseEvent) => {
-        if (e.button !== 0) return;
-        if (!isInDragRegion(e.target as HTMLElement)) return;
-        e.preventDefault();
-        dragging = false;
-        invokeCommand("maximize_window").catch(() => {});
-    }, true);
+    document.addEventListener(
+        "dblclick",
+        (e: MouseEvent) => {
+            if (e.button !== 0) return;
+            if (!isInDragRegion(e.target as HTMLElement)) return;
+            e.preventDefault();
+            dragging = false;
+            invokeCommand("maximize_window").catch(() => {});
+        },
+        true,
+    );
+}
+
+function installCefDragListener() {
+    if (cefDragListenerInstalled || detectHost() !== "cef") return;
+    cefDragListenerInstalled = true;
+    if (useNativeDrag()) {
+        console.info("[window-drag] win32: NATIVE OS move loop (start_window_drag)");
+        installNativeDragListener();
+    } else {
+        console.info("[window-drag] win32: legacy JS-driven drag (set_window_position)");
+        installJsDragListener();
+    }
 }
 
 export function useWindowDrag(): { dragProps: Record<string, unknown> } {
