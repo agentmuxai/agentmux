@@ -117,6 +117,32 @@ wrap_drag_handler! {
     }
 
     impl DragHandler {
+        // File drop path-capture. The HTML5 drop event in CEF/Chromium hides
+        // full filesystem paths from JS (security model: pages can read `File`
+        // objects but not their host paths). CefDragData::get_file_paths
+        // exposes the real paths during OnDragEnter; we stash them so the
+        // JS-side drop handler can consume them via the consume_drag_paths
+        // IPC a few ms later. Returning 0 (don't cancel) lets the JS drop
+        // event fire normally — required for the existing DragOverlay UI to
+        // run unchanged. Spec: docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md §3.3.
+        fn on_drag_enter(
+            &self,
+            _browser: Option<&mut Browser>,
+            drag_data: Option<&mut DragData>,
+            _mask: DragOperationsMask,
+        ) -> ::std::os::raw::c_int {
+            if let Some(dd) = drag_data {
+                let mut list = CefStringList::new();
+                let _ = dd.file_paths(Some(&mut list));
+                let paths: Vec<String> = list.into_iter().filter(|p| !p.is_empty()).collect();
+                if !paths.is_empty() {
+                    tracing::info!("[drag] captured {} file path(s) via OnDragEnter", paths.len());
+                    crate::drag_stash::put(paths);
+                }
+            }
+            0
+        }
+
         fn on_draggable_regions_changed(
             &self,
             browser: Option<&mut Browser>,

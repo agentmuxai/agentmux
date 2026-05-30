@@ -40,6 +40,8 @@ import { usePtyWidth } from "./hooks/usePtyWidth";
 import { useSubagentEvents } from "./hooks/useSubagentEvents";
 import { useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
 import { useAgentCommands } from "./hooks/useAgentCommands";
+import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
+import { DragOverlay } from "@/app/element/dragoverlay";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { ActivityLogPanel } from "./components/ActivityLogPanel";
 import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
@@ -640,6 +642,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     let rootRef: HTMLDivElement | undefined;
 
+    // File-drop attach. Drop a file onto the agent pane → copy it into the
+    // agent's CWD AND splice `@filename` into the composer at the caret, so
+    // the agent sees it on its next turn. Spec:
+    // docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md.
+    const dropAttach = useAgentDropAttach({
+        blockId: model.blockId,
+        rootRef: () => rootRef,
+    });
+
     // Track pane width → PTY cols so tools running inside the agent CLI
     // (git, ls, claude, …) wrap their output to match the pane instead of
     // the hard-coded `cols: 80` the PTY was opened with. ResizeObserver
@@ -708,6 +719,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             onContextMenu={handleContextMenu}
             tabIndex={-1}
         >
+            <DragOverlay message={dropAttach.dropMessage()} visible={dropAttach.isDragOver()} />
             {/* Pane title + back button now live in the block frame header,
                 driven by AgentViewModel.viewName / viewIcon / endIconButtons.
                 See SPEC_AGENT_PANE_FOLLOWUPS item #8. */}

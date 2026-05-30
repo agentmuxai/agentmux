@@ -17,6 +17,12 @@
     // "term:allowbracketedpaste": true,
     // "term:shiftenternewline":   false,
 
+    // -- Drag and drop (file drop onto Terminal / Agent panes) --
+    // "dnd:enabled":              true,
+    // "dnd:maxfilesizemb":        256,
+    // "dnd:concurrency":          4,
+    // "dnd:agentinserttoken":     true,
+
     // -- Window --
     // "window:transparent":       false,
     // "window:blur":              false,

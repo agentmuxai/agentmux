@@ -1341,6 +1341,11 @@ declare global {
         "conn:*"?: boolean;
         "network:lan_discovery"?: boolean;
         "voice:enabled"?: boolean;
+        "dnd:*"?: boolean;
+        "dnd:enabled"?: boolean;
+        "dnd:maxfilesizemb"?: number;
+        "dnd:concurrency"?: number;
+        "dnd:agentinserttoken"?: boolean;
     };
 
     // waveobj.StickerClickOptsType
