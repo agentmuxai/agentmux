@@ -2,7 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- required for electron -->
+    <!-- Required for CEF/Chromium under the hardened runtime: V8 JIT writes +
+         executes code pages, so it needs JIT + unsigned-executable-memory, and
+         CEF dlopen's the framework + GL dylibs (disable library validation). -->
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
