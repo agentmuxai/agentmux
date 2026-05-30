@@ -337,6 +337,12 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
             if (!viewRef) return;
             const onDragOver = (e: DragEvent) => {
                 if (!dndEnabled()) return;
+                // Only treat file drags as drop targets — text/URL drags keep
+                // their browser default behavior so a selection or link dragged
+                // over a terminal doesn't trigger a misleading "Copy to <cwd>"
+                // overlay. Matches the guard in useAgentDropAttach.
+                const types = e.dataTransfer?.types;
+                if (!types || !Array.from(types).includes("Files")) return;
                 e.preventDefault();
                 setIsDragOver(true);
             };
