@@ -47,7 +47,7 @@ function getBaseFontSize(blockId: string): number {
     if (typeof metaFontSize === "number" && !isNaN(metaFontSize) && metaFontSize >= 4 && metaFontSize <= 64) {
         return metaFontSize;
     }
-    return 12;
+    return 15;
 }
 
 function computeEffectiveFontSize(baseFontSize: number, zoom: number): number {

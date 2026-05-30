@@ -249,9 +249,9 @@ class TermViewModel implements ViewModel {
                 const connName = blockData?.meta?.connection;
                 const fullConfig = atoms.fullConfigAtom();
                 const connFontSize = fullConfig?.connections?.[connName]?.["term:fontsize"];
-                const baseFontSize = blockData?.meta?.["term:fontsize"] ?? connFontSize ?? settingsFontSize ?? 12;
+                const baseFontSize = blockData?.meta?.["term:fontsize"] ?? connFontSize ?? settingsFontSize ?? 15;
                 if (typeof baseFontSize !== "number" || isNaN(baseFontSize) || baseFontSize < 4 || baseFontSize > 64) {
-                    return 12;
+                    return 15;
                 }
                 const zoomFactor = this.termZoomAtom();
                 const effectiveFontSize = baseFontSize * zoomFactor;

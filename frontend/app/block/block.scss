@@ -267,9 +267,11 @@
 
                     .wave-iconbutton {
                         display: flex;
-                        width: 24px;
+                        width: 26px;
                         padding: var(--space-1) var(--space-1-5);
                         align-items: center;
+                        justify-content: center;
+                        font-size: 18px;
                     }
 
                     .block-frame-magnify {
