@@ -63,7 +63,7 @@ function readFontSizePx(el: HTMLElement): number {
     const cs = getComputedStyle(el);
     const parsed = parseFloat(cs.fontSize);
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
-    return 13; // matches the SCSS fallback for --termfontsize.
+    return 15; // matches the SCSS fallback for --termfontsize.
 }
 
 export function usePtyWidth(opts: UsePtyWidthOpts): void {
