@@ -77,7 +77,7 @@ Everything else (root `agentmux.exe` + full `runtime/`) is copied verbatim into 
 
   <Properties>
     <DisplayName>AgentMux</DisplayName>
-    <PublisherDisplayName>AgentMux Corp</PublisherDisplayName>  <!-- ✅ recovered (Store DeveloperName) -->
+    <PublisherDisplayName>AgentMux</PublisherDisplayName>  <!-- MUST equal Partner Center publisher display name verbatim, NOT legal entity "AgentMux Corp." (regressed twice — see retro 2026-05-30) -->
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
 
@@ -176,7 +176,7 @@ Recovered from the public Store display-catalog API (`displaycatalog.mp.microsof
 | Manifest field | Value | Status |
 |----------------|-------|--------|
 | `Identity/@Name` | `AgentMux.AgentMux` | ✅ recovered (PFN prefix) |
-| `PublisherDisplayName` | `AgentMux Corp` | ✅ recovered (`DeveloperName`) |
+| `PublisherDisplayName` | `AgentMux` | ⚠️ MUST equal the Partner Center **publisher display name** verbatim — **NOT** the catalog `DeveloperName` ("AgentMux Corp") and NOT the legal entity. Trusting `DeveloperName` here caused the ingest rejection on 2026-05-30 (regression of bb391461/#240). Guarded in `package-msix.ps1`. See retro 2026-05-30. |
 | Package Family Name | `AgentMux.AgentMux_vqr1k32tkfk4y` | ✅ recovered |
 | `Identity/@Publisher` | `CN=C2BCB530-27CD-4DCF-87C5-2967CE009AAC` | ✅ recovered from **PR #240** (`f74eb732`, "correct MSIX identity for Partner Center") + **hash-verified** → `vqr1k32tkfk4y` |
 

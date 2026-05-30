@@ -34,6 +34,13 @@ Set-Location (Split-Path -Parent $PSScriptRoot)   # repo root
 # (the PFN suffix of Store ID 9P9QCXNNCRK3 = AgentMux.AgentMux_vqr1k32tkfk4y).
 $EXPECTED_PFN_HASH = "vqr1k32tkfk4y"
 
+# Partner Center account "publisher display name" — PublisherDisplayName MUST equal
+# this verbatim or Store ingest rejects the package. It is NOT the legal entity
+# "AgentMux Corp." (that's for copyright). Regressed twice (bb391461/#240, then
+# cc5f7368) — guarded here so it can't happen a third time. See
+# docs/retro/retro-msix-publisherdisplayname-regression-2026-05-30.md.
+$EXPECTED_PUBLISHER_DISPLAY_NAME = "AgentMux"
+
 function Get-PublisherHash([string]$publisher) {
   # MSIX PFN publisher hash: SHA-256(UTF-16LE) -> first 8 bytes -> base32(13 chars).
   $bytes = [System.Text.Encoding]::Unicode.GetBytes($publisher)
@@ -131,6 +138,18 @@ if ($pfnHash -ne $EXPECTED_PFN_HASH) {
         "The Store would reject this package — fix the Publisher in AppxManifest.xml.template."
 }
 Write-Host "       identity  : OK (matches published PFN)"
+
+# PublisherDisplayName MUST match the Partner Center account name verbatim, or the
+# Store rejects ingest with "PublisherDisplayName ... doesn't match your publisher
+# display name". (Not the legal entity "AgentMux Corp." — see the const comment.)
+$pubDisplay = $doc.Package.Properties.PublisherDisplayName
+Write-Host "       pubDisplay: $pubDisplay (expected $EXPECTED_PUBLISHER_DISPLAY_NAME)"
+if ($pubDisplay -ne $EXPECTED_PUBLISHER_DISPLAY_NAME) {
+  throw "PublisherDisplayName mismatch: '$pubDisplay', expected '$EXPECTED_PUBLISHER_DISPLAY_NAME'. " +
+        "The Store would reject this package — fix <PublisherDisplayName> in AppxManifest.xml.template " +
+        "(it must equal the Partner Center publisher display name, NOT the legal entity 'AgentMux Corp.')."
+}
+Write-Host "       pubName   : OK (matches Partner Center account)"
 
 # ── pack ─────────────────────────────────────────────────────────────────────
 Write-Host "[4/5] Packing MSIX..."

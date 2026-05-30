@@ -20,7 +20,13 @@
 
   <Properties>
     <DisplayName>AgentMux</DisplayName>
-    <PublisherDisplayName>AgentMux Corp</PublisherDisplayName>
+    <!-- MUST equal the Partner Center account "publisher display name" verbatim:
+         "AgentMux" (NOT the legal entity "AgentMux Corp." used in copyright
+         headers). A mismatch fails Store ingest. This regressed twice already
+         (fixed in bb391461/#240, lost when src-tauri was deleted); the build-time
+         guard in scripts/package-msix.ps1 now enforces it. See
+         docs/retro/retro-msix-publisherdisplayname-regression-2026-05-30.md. -->
+    <PublisherDisplayName>AgentMux</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
 
