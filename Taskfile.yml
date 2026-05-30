@@ -99,10 +99,10 @@ tasks:
             - bash scripts/package.sh {{.CLI_ARGS}}
 
     package:msix:
-        desc: "[TODO] Package for Windows Store (MSIX)."
+        desc: 'Build a Microsoft Store MSIX from a portable build. `-- -Sign` produces a self-signed package for local Add-AppxPackage testing. See docs/specs/SPEC_MSIX_PACKAGING_2026_05_30.md.'
         platforms: [windows]
         cmds:
-            - echo "MSIX packaging not yet implemented."
+            - pwsh -File scripts/package-msix.ps1 {{.CLI_ARGS}}
 
     package:macos:
         desc: "[TODO] Package the application for macOS."
