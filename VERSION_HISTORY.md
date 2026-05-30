@@ -1,5 +1,33 @@
 # AgentMux Version History
 
+## 0.40.1 — 2026-05-30
+
+- fix(cef): unbreak agentmux-cef compile on macOS with public cef-rs 146
+- fix(macos): make task dev launchable on a fresh checkout — bundle CEF Framework + suppress keychain prompts
+- fix(macos): port PR #444 traffic-light buttons — hide Win11 caption buttons on macOS, add platform-resolved window-controls
+- fix(browser-pane): replay deferred create after close-drain so redocked panes always load
+- fix(macos): patch NSApplication for macOS 26 Tahoe drag crash
+- fix(macos): traffic-light scss stylelint comment + stale docstring on win32 move
+- fix(floating-pane): maximize resizes the frontend browser, not the web-content child
+- chore(perf): add input-handler sync-IPC CI guardrail (input-first I2, #1161)
+- fix(dnd): suppress prohibited-cursor during cross-window tear-off on macOS+Linux
+- test(perf): input-latency bench harness — multi-run baseline-delta + reporting (input-first 0.1, #1161)
+- perf(airspace): skip redundant SetWindowRgn when a pane's clip is unchanged (input-first 0.3b, #1161)
+- feat(floating-pane): resize floating panes by dragging edges/corners
+- fix(macos): set Dock icon at runtime so task dev shows the AgentMux logo
+- fix(linux): enable patched-libcef feature in build:host:linux so window drag works
+- feat(window-drag): Windows title-bar drag via host-side native move loop (VS Code-smooth, zero per-move IPC)
+- feat(macos): floating-pane tear-off — chromeless floater + working header drag
+- docs: macOS floating-pane redock analysis + implementation plan
+- docs(floating-pane): cross-platform field docs for OpenFloatingPaneArgs x/y/width/height
+- feat(macos): floating-pane redock — drop a floater onto a window to merge the pane
+- fix(dnd): suppress tear-off drag snapback on macOS/Linux for pane + tab
+- feat(ui): fatten pane control + hamburger icons, raise pane body text default to 15px
+- fix(window): gate macOS/Linux floating-pane redock resolver off Windows so the host compiles
+- fix(macos): suppress AppKit drag slide-back animation on pane/tab tear-off
+- fix(airspace): send overlay-clip rects in physical px so DOM overlays clip correctly over browser panes at display scale != 100%
+
+
 ## 0.40.0 — 2026-05-29
 
 - feat(floating-pane): MVP re-dock — drop floater over agentmux window to redock its block
