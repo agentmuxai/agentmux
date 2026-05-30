@@ -16,6 +16,7 @@ import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { invokeCommand } from "@/app/platform/ipc";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
+import { getLayoutModelForStaticTab, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "@/layout/index";
 import type { LayoutNode } from "@/layout/lib/types";
 
 export type DragItemPayload =
@@ -218,14 +219,26 @@ async function performTearOff(
                 height: floaterHeight,
             });
         } catch (err) {
-            Logger.error("dnd:cross", "open_floating_pane_window failed (linux)", {
+            Logger.error("dnd:cross", "open_floating_pane_window failed — leaving pane docked", {
                 error: String(err),
                 blockId: payload.blockId,
                 newWsId,
             });
-            // Don't try to undo TearOffBlock — the source layout was
-            // already mutated server-side. Log at error level; the user
-            // sees a missing pane and can drag it back from history.
+            return;
+        }
+
+        // IPC succeeded → drop the docked layout node so the pane
+        // doesn't render twice (once in the source tab, once in the
+        // floater). Mirrors the .win32 and .darwin siblings.
+        const layoutModel = getLayoutModelForStaticTab();
+        if (layoutModel) {
+            const node = layoutModel.getNodeByBlockId(payload.blockId);
+            if (node) {
+                layoutModel.treeReducer({
+                    type: LayoutTreeActionType.DeleteNode,
+                    nodeId: node.id,
+                } as LayoutTreeDeleteNodeAction);
+            }
         }
     } else if (dragType === "tab" && payload.tabId) {
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
