@@ -733,14 +733,14 @@ function TabBar(props: TabBarProps): JSX.Element {
                      * parent's CSS zoom, no rasterization unevenness.
                      */}
                     <svg
-                        width="18"
-                        height="14"
-                        viewBox="0 0 18 14"
+                        width="26"
+                        height="22"
+                        viewBox="0 0 26 22"
                         fill="currentColor"
                     >
-                        <rect x="2" y="1" width="14" height="3" rx="1" />
-                        <rect x="2" y="6" width="14" height="3" rx="1" />
-                        <rect x="2" y="11" width="14" height="3" rx="1" />
+                        <rect x="2" y="3" width="22" height="3" rx="1" />
+                        <rect x="2" y="10" width="22" height="3" rx="1" />
+                        <rect x="2" y="17" width="22" height="3" rx="1" />
                     </svg>
                 </button>
             </FlyoutMenu>

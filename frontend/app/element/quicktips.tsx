@@ -1,7 +1,6 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { MagnifyIcon } from "@/app/element/magnify";
 import { PLATFORM, PlatformMacOS } from "@/util/platformutil";
 import { cn } from "@/util/util";
 import { For, JSX } from "solid-js";
@@ -107,10 +106,10 @@ const QuickTips = (): JSX.Element => {
                 <div class="grid grid-cols-1 @lg:grid-cols-2 gap-3">
                     <div class="flex items-center gap-3 p-2 rounded-md hover:bg-white/5 transition-colors">
                         <IconBox variant="secondary">
-                            <MagnifyIcon enabled={false} />
+                            <i class="fa-solid fa-sharp fa-window-maximize fa-fw" />
                         </IconBox>
                         <div class="flex flex-col gap-0.5 flex-1">
-                            <span class="text-[15px]">Magnify a Block</span>
+                            <span class="text-[15px]">Maximize a Block</span>
                             <KeyBinding keyDecl="Cmd:m" />
                         </div>
                     </div>
