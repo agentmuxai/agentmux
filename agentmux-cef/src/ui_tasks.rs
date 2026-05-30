@@ -261,8 +261,9 @@ wrap_task! {
             };
             use windows_sys::Win32::UI::WindowsAndMessaging::{
                 DispatchMessageW, GetCursorPos, GetMessageW, GetWindowRect, KillTimer,
-                PostQuitMessage, SetTimer, SetWindowPos, TranslateMessage, MSG, SWP_NOACTIVATE,
-                SWP_NOSIZE, SWP_NOZORDER, WM_KEYDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_TIMER,
+                PeekMessageW, PostQuitMessage, SendMessageW, SetTimer, SetWindowPos,
+                TranslateMessage, MSG, PM_REMOVE, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+                WM_KEYDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_TIMER,
             };
 
             let h = self.hwnd as HWND;
@@ -317,8 +318,22 @@ wrap_task! {
                 let mut moves: u32 = 0;
                 let mut cancelled = false;
                 loop {
-                    // Safety net: end if the button is up but no WM_LBUTTONUP came.
+                    // Safety net: GetAsyncKeyState reflects PHYSICAL button state,
+                    // which can lead the message queue — so a release arriving
+                    // just after a WM_MOUSEMOVE/WM_TIMER would trip this check and
+                    // break BEFORE the queued WM_LBUTTONUP is dispatched, leaving
+                    // the up to land off-window post-ReleaseCapture and Chromium's
+                    // mousedown unbalanced (reagent P1 / spec §5.1). So before
+                    // breaking, drain a queued WM_LBUTTONUP (capture still held)
+                    // and dispatch it; if none is queued yet, synthesize one so
+                    // the renderer always sees its balancing up.
                     if !lbutton_down() {
+                        let mut up: MSG = std::mem::zeroed();
+                        if PeekMessageW(&mut up, h, WM_LBUTTONUP, WM_LBUTTONUP, PM_REMOVE) != 0 {
+                            DispatchMessageW(&up);
+                        } else {
+                            SendMessageW(h, WM_LBUTTONUP, 0, 0);
+                        }
                         break;
                     }
                     let got = GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0);

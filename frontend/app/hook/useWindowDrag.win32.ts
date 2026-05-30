@@ -33,7 +33,7 @@ let cefDragListenerInstalled = false;
 // work). 4px matches Chrome's default drag threshold (and the Linux hook).
 const DRAG_THRESHOLD_PX = 4;
 
-/// Native OS move loop is the default. Set localStorage
+/// Host-side native move loop is the default. Set localStorage
 /// 'agentmux.win32NativeDrag' = '0' (then reload) to fall back to the legacy
 /// JS-driven drag. Wrapped in try/catch because localStorage can throw in
 /// locked-down contexts.
@@ -91,7 +91,8 @@ function installNativeDragListener() {
             pressArmed = true;
             dragInitiated = false;
             // No preventDefault: a sub-threshold click must still reach child
-            // handlers, and the button must stay "down" for the OS move loop.
+            // handlers, and the button must stay "down" so the host's manual
+            // move loop (which polls GetAsyncKeyState(VK_LBUTTON)) keeps running.
         },
         true,
     );
