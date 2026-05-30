@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Search, useSearch } from "@/app/element/search";
-import { atoms, getOverrideConfigAtom, getSettingsPrefixAtom, pushNotification, WOS } from "@/store/global";
+import { atoms, getOverrideConfigAtom, getSettingsKeyAtom, getSettingsPrefixAtom, pushNotification, WOS } from "@/store/global";
 import { backendStatusAtom } from "@/store/backendStatus";
 import { fireAndForget } from "@/util/util";
 import { computeBgStyleFromMeta } from "@/util/waveutil";
@@ -279,6 +279,14 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
 
     const termBg = createMemo(() => computeBgStyleFromMeta(blockData()?.meta));
 
+    const dndEnabledAtom = getSettingsKeyAtom("dnd:enabled");
+    const dndConcurrencyAtom = getSettingsKeyAtom("dnd:concurrency");
+    const dndEnabled = () => (dndEnabledAtom() ?? true) !== false;
+    const dndConcurrency = () => {
+        const v = dndConcurrencyAtom();
+        return typeof v === "number" && v > 0 ? v : undefined;
+    };
+
     const handleFilesDropped = async (paths: string[]) => {
         const cwd = blockData()?.meta?.["cmd:cwd"];
         if (!cwd) {
@@ -293,7 +301,7 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
             });
             return;
         }
-        const outcome = await copyFilesToDir(paths, cwd);
+        const outcome = await copyFilesToDir(paths, cwd, { concurrency: dndConcurrency() });
         const successes = outcome.results.filter((r) => r.dest);
         const failures = outcome.results.filter((r) => r.error);
         if (successes.length > 0) {
@@ -328,11 +336,13 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
             // CEF: HTML5 drag events work natively (unlike WebView2)
             if (!viewRef) return;
             const onDragOver = (e: DragEvent) => {
+                if (!dndEnabled()) return;
                 e.preventDefault();
                 setIsDragOver(true);
             };
             const onDragLeave = () => setIsDragOver(false);
             const onDrop = (e: DragEvent) => {
+                if (!dndEnabled()) return;
                 e.preventDefault();
                 setIsDragOver(false);
                 const files = e.dataTransfer?.files;

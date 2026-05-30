@@ -62,9 +62,14 @@ export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
 
     const enabledAtom = getSettingsKeyAtom("dnd:enabled");
     const insertTokenAtom = getSettingsKeyAtom("dnd:agentinserttoken");
+    const concurrencyAtom = getSettingsKeyAtom("dnd:concurrency");
 
     const enabled = () => (enabledAtom() ?? true) !== false;
     const insertToken = () => (insertTokenAtom() ?? true) !== false;
+    const concurrency = () => {
+        const v = concurrencyAtom();
+        return typeof v === "number" && v > 0 ? v : undefined;
+    };
 
     const cwd = (): string | undefined => {
         const block = WOS.getObjectValue<Block>(WOS.makeORef("block", opts.blockId));
@@ -125,17 +130,24 @@ export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
                     });
                     return;
                 }
-                const outcome = await copyFilesToDir(paths, targetCwd);
+                const outcome = await copyFilesToDir(paths, targetCwd, { concurrency: concurrency() });
                 const successes = outcome.results.filter((r) => r.dest);
                 const failures = outcome.results.filter((r) => r.error);
 
                 if (successes.length > 0) {
+                    // Track whether the composer actually received tokens. The
+                    // toast wording differs: "Attached" implies the agent will
+                    // see the file via the spliced @-token in its next turn;
+                    // "Copied" is just "the bytes are on disk now — mention
+                    // them yourself."
+                    let tokensInserted = false;
                     if (insertToken()) {
                         const tokens = successes.map((r) => `@${baseName(r.dest!)}`);
-                        const ok = spliceComposerTokens(root, tokens);
-                        if (!ok) {
-                            // Composer not mounted; surface a hint so the user
-                            // knows the file is on disk and can mention it manually.
+                        tokensInserted = spliceComposerTokens(root, tokens);
+                        if (!tokensInserted) {
+                            // Composer not mounted (rare race during pane init).
+                            // Surface a hint so the user knows the file is on
+                            // disk and can mention it manually.
                             const names = successes.map((r) => baseName(r.dest!)).join(", ");
                             pushNotification({
                                 icon: "fa-info-circle",
@@ -148,10 +160,11 @@ export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
                             return;
                         }
                     }
+                    const verb = tokensInserted ? "Attached" : "Copied";
                     const title =
                         successes.length === 1
-                            ? `Attached ${baseName(successes[0].dest!)}`
-                            : `Attached ${successes.length} files`;
+                            ? `${verb} ${baseName(successes[0].dest!)}`
+                            : `${verb} ${successes.length} files`;
                     pushNotification({
                         icon: "fa-check",
                         title:
