@@ -108,10 +108,10 @@ function installNativeDragListener() {
             const dx = Math.abs(e.clientX - pressX);
             const dy = Math.abs(e.clientY - pressY);
             if (dx < DRAG_THRESHOLD_PX && dy < DRAG_THRESHOLD_PX) return;
-            // Threshold crossed — the button is still physically down here,
-            // which is exactly what the WM_NCLBUTTONDOWN modal loop needs.
-            // Fire ONE fire-and-forget IPC and stop tracking; the OS runs the
-            // move until the user releases. NEVER await it on the input path.
+            // Threshold crossed (button still down). Fire ONE fire-and-forget
+            // IPC and stop tracking; the host then runs a manual native move
+            // loop on its UI thread until the user releases. NEVER await it on
+            // the input path.
             dragInitiated = true;
             pressArmed = false;
             invokeCommand("start_window_drag", { label: ownWindowLabel() }).catch(() => {

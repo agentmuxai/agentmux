@@ -315,6 +315,7 @@ wrap_task! {
                 // 3. Modal move loop on the UI thread.
                 let mut msg: MSG = std::mem::zeroed();
                 let mut moves: u32 = 0;
+                let mut cancelled = false;
                 loop {
                     // Safety net: end if the button is up but no WM_LBUTTONUP came.
                     if !lbutton_down() {
@@ -330,18 +331,23 @@ wrap_task! {
                     }
                     match msg.message {
                         WM_MOUSEMOVE => {
-                            let mut cur = POINT { x: 0, y: 0 };
-                            GetCursorPos(&mut cur);
-                            SetWindowPos(
-                                h,
-                                std::ptr::null_mut(),
-                                x0 + (cur.x - anchor.x),
-                                y0 + (cur.y - anchor.y),
-                                0,
-                                0,
-                                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
-                            );
-                            moves += 1;
+                            // After Esc-cancel we keep looping (so the renderer
+                            // still gets its balancing WM_LBUTTONUP on release)
+                            // but stop moving the window.
+                            if !cancelled {
+                                let mut cur = POINT { x: 0, y: 0 };
+                                GetCursorPos(&mut cur);
+                                SetWindowPos(
+                                    h,
+                                    std::ptr::null_mut(),
+                                    x0 + (cur.x - anchor.x),
+                                    y0 + (cur.y - anchor.y),
+                                    0,
+                                    0,
+                                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                                );
+                                moves += 1;
+                            }
                         }
                         WM_LBUTTONUP => {
                             // Let Chromium see the up so its input state stays
@@ -351,7 +357,11 @@ wrap_task! {
                             break;
                         }
                         WM_KEYDOWN if (msg.wParam as u16) == VK_ESCAPE => {
-                            // Cancel: restore the start position.
+                            // Cancel: restore the start position, but DON'T break
+                            // — keep capture and keep looping so the eventual
+                            // WM_LBUTTONUP is still dispatched to balance the
+                            // renderer's mousedown (reagent P1 / spec §5.1).
+                            // Further moves are ignored via `cancelled`.
                             SetWindowPos(
                                 h,
                                 std::ptr::null_mut(),
@@ -361,7 +371,7 @@ wrap_task! {
                                 0,
                                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                             );
-                            break;
+                            cancelled = true;
                         }
                         WM_TIMER => {
                             // Our wake tick — consume it; the top-of-loop
