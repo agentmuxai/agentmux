@@ -35,6 +35,10 @@
         "term:disablewebgl": {
           "type": "boolean"
         },
+        "term:disablerafcoalesce": {
+          "type": "boolean",
+          "description": "EXPERIMENTAL. Bypass AgentMux's own RAF write-coalescer and write PTY output straight to xterm.js (which coalesces internally). Removes a redundant frame gate that can cause uneven typing frame-pacing. Default false. The coalescer originally fixed a Windows-10 DWM scroll-flash (PR #208) — verify no flash regression on Windows 10 before relying on this. See SPEC_TERM_DOUBLE_RAF_TEAROUT_2026_05_30."
+        },
         "term:localshellpath": {
           "type": "string"
         },
