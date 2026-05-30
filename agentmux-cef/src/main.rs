@@ -677,11 +677,19 @@ fn main() {
 
     tracing::info!("CEF initialized, entering message loop");
 
-    // Set the Dock icon now that NSApplication exists. macOS-only; no-op
-    // elsewhere. See set_macos_dock_icon for why this is a runtime call
-    // rather than a bundle CFBundleIconFile.
+    // Claim a Dock tile, THEN paint the icon onto it. A bare Mach-O launched
+    // outside an `.app` bundle (both `task dev` direct-invoke and the launcher
+    // flat layout) defaults to a background/accessory activation policy — no
+    // Dock tile, no menu bar — so the AgentMux instance never shows in the
+    // taskbar and the icon set below has nothing to land on. Force
+    // NSApplicationActivationPolicyRegular first so the instance is a normal,
+    // Dock-visible app. macOS-only; no-op elsewhere. Order matters: policy
+    // before icon.
     #[cfg(target_os = "macos")]
-    unsafe { set_macos_dock_icon() };
+    unsafe {
+        set_macos_activation_policy_regular();
+        set_macos_dock_icon();
+    }
 
     // Start memory heartbeat — logs system/process memory stats every 20s.
     // Provides forensic data if the process later crashes from OOM / VA exhaustion.
@@ -953,6 +961,62 @@ unsafe fn disable_macos_drag_slideback() {
     tracing::info!(
         "macOS drag polish: swizzled NSView beginDraggingSession to disable cancel/fail slide-back"
     );
+}
+
+/// Promote the process to a regular, Dock-visible macOS app.
+///
+/// A bare Mach-O launched outside an `.app` bundle — both `task dev`
+/// direct-invoke and the launcher's flat `dist/cef-dev/` layout — has no
+/// `Info.plist`, so LaunchServices leaves it as a background/accessory
+/// process: it can open windows but gets **no Dock tile and no menu bar**, so
+/// the AgentMux instance is invisible in the taskbar (`lsappinfo` reports it
+/// `type="BackgroundOnly"`). `-[NSApplication setActivationPolicy:]` with
+/// `NSApplicationActivationPolicyRegular` (raw value `0`) flips it to a normal
+/// foreground app so it shows in the Dock; this must run before
+/// `set_macos_dock_icon` (the icon needs a tile to land on). Harmless in a
+/// future packaged `.app` (already regular there). Idempotent.
+///
+/// Must run on the main thread after `cef::initialize` (NSApplication exists
+/// by then). FFI mirrors `set_macos_dock_icon` — raw libobjc, no extra crate.
+#[cfg(target_os = "macos")]
+unsafe fn set_macos_activation_policy_regular() {
+    use std::ffi::{c_char, c_void};
+
+    type Id    = *mut c_void;
+    type Sel   = *const c_void;
+    type Class = *mut c_void;
+
+    // NSApplicationActivationPolicyRegular == 0 (Accessory == 1, Prohibited == 2).
+    const NS_ACTIVATION_POLICY_REGULAR: isize = 0;
+
+    extern "C" {
+        fn objc_getClass(name: *const c_char) -> Class;
+        fn sel_registerName(name: *const c_char) -> Sel;
+        fn objc_msgSend();
+    }
+
+    let cls_nsapp = objc_getClass(b"NSApplication\0".as_ptr() as _);
+    if cls_nsapp.is_null() {
+        tracing::warn!("activation-policy: NSApplication class not found; skipping");
+        return;
+    }
+
+    // NSApplication *app = [NSApplication sharedApplication]
+    let sel_shared = sel_registerName(b"sharedApplication\0".as_ptr() as _);
+    let msg_shared: extern "C" fn(Class, Sel) -> Id =
+        std::mem::transmute(objc_msgSend as *const ());
+    let app = msg_shared(cls_nsapp, sel_shared);
+    if app.is_null() {
+        tracing::warn!("activation-policy: NSApplication.sharedApplication unavailable");
+        return;
+    }
+
+    // BOOL ok = [app setActivationPolicy:NSApplicationActivationPolicyRegular]
+    let sel_set = sel_registerName(b"setActivationPolicy:\0".as_ptr() as _);
+    let msg_set: extern "C" fn(Id, Sel, isize) -> u8 =
+        std::mem::transmute(objc_msgSend as *const ());
+    let ok = msg_set(app, sel_set, NS_ACTIVATION_POLICY_REGULAR);
+    tracing::info!(ok = ok != 0, "activation-policy: set NSApplication to Regular (Dock-visible)");
 }
 
 /// Set the macOS Dock icon for the running process.
