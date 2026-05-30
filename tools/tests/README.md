@@ -84,6 +84,41 @@ exercise the OS keyboard pipeline.
 
 Spec: [`docs/specs/SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md`](../../docs/specs/SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md) §7.2.
 
+## `term-keyrepeat-hiccups.mjs`
+
+CDP-driven diagnostic for the **"not silky" stutter felt while HOLDING a key**
+in a terminal pane (sustained key-repeat) — a distinct failure mode from
+single-keystroke echo latency (`bench-term-echo.mjs`) and the agent composer
+(`bench-agent-keystroke.mjs`).
+
+Attaches an in-page monitor to **every** shell window over CDP (9223 dev /
+9222 release) and, while you hold a key, records per window:
+
+- **rAF frame intervals** → dropped/janky frames (>20 / >33 / >50 / >100 ms)
+- **`longtask`** entries → main-thread JS blocking ≥ 50 ms
+- **perf measures** → `term-keypress` / `term-echo-render` / `term-raf-write`
+- **focus + active-element sampling** and an **xterm-rows `MutationObserver`** —
+  these *prove* the terminal was focused and actually echoing in the measured
+  window, so a run is marked **VALID** only when the keystrokes truly landed (and
+  rendered) there. A mis-focused capture can't masquerade as data.
+
+It auto-selects the active terminal window and classifies the hiccup as
+**main-thread JS** (schedulable/fixable), **xterm write cost**, or
+**compositor/GPU stall** (render-path, not scheduler).
+
+```bash
+# focus a terminal pane, run this, then HOLD a key for the whole countdown
+node tools/tests/term-keyrepeat-hiccups.mjs                       # 18 s, port 9223
+node tools/tests/term-keyrepeat-hiccups.mjs --secs 30 --json out.json
+node tools/tests/term-keyrepeat-hiccups.mjs --cdp-port 9222       # release build
+```
+
+Limitation: `longtask` only fires for blocks ≥ 50 ms, so a 17–49 ms main-thread
+task can drop a frame without being counted. For definitive frame-by-frame
+attribution, follow up with a CDP `Tracing` capture.
+
+Spec: [`docs/specs/SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md`](../../docs/specs/SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md) · Umbrella: [discussion #1161](https://github.com/agentmuxai/agentmux/discussions/1161).
+
 ## `pane-focus-smoke.ps1`
 
 Minimum-viable harness sanity check: reads the auth file and calls
