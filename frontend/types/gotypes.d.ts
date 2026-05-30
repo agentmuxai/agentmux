@@ -1297,6 +1297,7 @@ declare global {
         "term:zoom"?: number;
         "term:theme"?: string;
         "term:disablewebgl"?: boolean;
+        "term:disablerafcoalesce"?: boolean;
         "term:localshellpath"?: string;
         "term:localshellopts"?: string[];
         "term:scrollback"?: number;
