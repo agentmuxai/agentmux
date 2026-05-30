@@ -8,6 +8,7 @@
 
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { draggable, dropTargetForElements, monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
+import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
 import clsx from "clsx";
 import { toPng } from "html-to-image";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
@@ -399,6 +400,17 @@ const DisplayNode = (props: DisplayNodeProps) => {
                     }
                 },
                 onDragStart: () => {
+                    // Suppress WebKit's "drop rejected" snapback: a pane
+                    // tear-off releases the drag OUTSIDE any pragmatic-dnd
+                    // drop target (the floater is created on `dragend`), so
+                    // the browser would otherwise animate the drag preview
+                    // back into the source window ("it doesn't want to go").
+                    // preventUnhandled makes every element a drop target in
+                    // the browser's eyes, so the drop is "handled" and there's
+                    // no snapback — the preview just vanishes on release.
+                    // In-window rearrange still works via pragmatic-dnd's own
+                    // drop targets. Stopped in onDrop.
+                    preventUnhandled.start();
                     globalDragNodeId = props.node.id;
                     globalDragLayoutModel = props.layoutModel;
                     props.layoutModel.activeDrag._set(true);
@@ -406,6 +418,7 @@ const DisplayNode = (props: DisplayNodeProps) => {
                     setCurrentDragPayload({ kind: "tile", node: props.node });
                 },
                 onDrop: () => {
+                    preventUnhandled.stop();
                     globalDragNodeId = null;
                     globalDragLayoutModel = null;
                     props.layoutModel.activeDrag._set(false);
