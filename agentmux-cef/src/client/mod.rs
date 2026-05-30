@@ -465,11 +465,6 @@ impl AgentMuxHandler {
             crate::browser_pane::callbacks::on_after_created_browser_pane(&self.state, &browser);
         }
 
-        // (Floating-pane edge-resize forwarder is installed synchronously at
-        // create time in `floating_pane.rs` on the floater's GW_CHILD, and the
-        // browser-pane web-content child is covered in `browser_pane::callbacks`.
-        // Nothing to do here — `on_after_created` is too late to find the child.)
-
         // Phase B.4 — report top-level windows to the launcher's
         // read-only state mirror. Skips browser-pane child HWNDs and
         // pool windows (they're not user-visible until promoted; the

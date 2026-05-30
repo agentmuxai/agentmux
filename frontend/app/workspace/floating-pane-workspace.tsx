@@ -32,6 +32,7 @@
  */
 
 import { invokeCommand } from "@/app/platform/ipc";
+import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { CenteredDiv } from "@/app/element/quickelems";
 import { ModalsRenderer } from "@/app/modals/modalsrenderer";
@@ -125,6 +126,138 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         // IPC to OUR HWND (not whichever top-level the OS happens to
         // enumerate first in Z-order).
         const label = windowLabel();
+
+        // ── Edge-resize (floater only) ──────────────────────────────────
+        // The floater is a frameless WS_POPUP; the embedded CEF child(ren)
+        // consume WM_NCHITTEST, so native edge-resize via the parent wndproc
+        // never fires (cef-rs 146 — confirmed: a child-wndproc HTTRANSPARENT
+        // forwarder gets 0 hits, and WM_SYSCOMMAND(SC_SIZE) posts fine but its
+        // modal loop can't read the mouse because Chromium holds the OS capture
+        // from the DOM pointerdown). So we drive the resize from the DOM: on an
+        // edge pointerdown we take pointer capture (keeps receiving moves even
+        // as the cursor leaves the window), capture the start rect, and on each
+        // move SetWindowPos the new rect. Same mechanism as the JS-driven
+        // header MOVE below. SPEC_FLOATING_PANE_EDGE_RESIZE.
+        if (label.startsWith("floating-")) {
+            // Invisible edge grab-band depth (CSS px). Shared with the browser
+            // pane's web-content inset so they can't drift — see floater-resize.ts.
+            const RESIZE_BORDER = FLOATER_EDGE_RESIZE_BORDER;
+            const MIN_W = 240;
+            const MIN_H = 140;
+            // Direction codes 1..8: LEFT, RIGHT, TOP, TOP-LEFT, TOP-RIGHT,
+            // BOTTOM, BOTTOM-LEFT, BOTTOM-RIGHT (WMSZ_* ordering).
+            const edgeDirection = (e: { clientX: number; clientY: number }): number => {
+                const w = window.innerWidth;
+                const h = window.innerHeight;
+                const left = e.clientX <= RESIZE_BORDER;
+                const right = e.clientX >= w - RESIZE_BORDER;
+                const top = e.clientY <= RESIZE_BORDER;
+                const bottom = e.clientY >= h - RESIZE_BORDER;
+                if (top && left) return 4;
+                if (top && right) return 5;
+                if (bottom && left) return 7;
+                if (bottom && right) return 8;
+                if (left) return 1;
+                if (right) return 2;
+                if (top) return 3;
+                if (bottom) return 6;
+                return 0;
+            };
+            const CURSORS = ["", "ew-resize", "ew-resize", "ns-resize",
+                "nwse-resize", "nesw-resize", "ns-resize", "nesw-resize", "nwse-resize"];
+
+            let resizing = false;
+            let dir = 0;
+            let startX = 0; // screen px at pointerdown
+            let startY = 0;
+            let startRect = { x: 0, y: 0, w: 0, h: 0 }; // physical px
+
+            // Coalesce moves the same way the header MOVE does: one IPC in
+            // flight at a time, last position wins (no timers/RAF).
+            let rectInFlight = false;
+            let pendingRect: { x: number; y: number; width: number; height: number } | null = null;
+            const sendRect = (r: { x: number; y: number; width: number; height: number }): void => {
+                if (rectInFlight) { pendingRect = r; return; }
+                rectInFlight = true;
+                invokeCommand("set_window_rect", { label, ...r })
+                    .catch(() => {})
+                    .finally(() => {
+                        rectInFlight = false;
+                        if (pendingRect) { const p = pendingRect; pendingRect = null; sendRect(p); }
+                    });
+            };
+
+            const onPointerDown = (e: PointerEvent): void => {
+                if (e.button !== 0) return;
+                const d = edgeDirection(e);
+                if (d === 0) return;
+                // Win the event over the header-drag + content handlers, and
+                // stop text selection.
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                dir = d;
+                startX = e.screenX;
+                startY = e.screenY;
+                const target = e.target as Element;
+                // Take capture synchronously so moves keep flowing even as the
+                // cursor leaves the window; then fetch the start rect.
+                try { target.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+                invokeCommand<{ x: number; y: number; width: number; height: number }>(
+                    "get_window_rect",
+                    { label },
+                ).then((r) => {
+                    startRect = { x: r.x, y: r.y, w: r.width, h: r.height };
+                    resizing = true;
+                }).catch(() => {
+                    try { target.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+                });
+            };
+
+            const onPointerMove = (e: PointerEvent): void => {
+                if (!resizing) {
+                    // Hover feedback only.
+                    const d = edgeDirection(e);
+                    document.body.style.cursor = d ? CURSORS[d] : "";
+                    return;
+                }
+                // screenX/Y are CSS px; the window rect is physical px.
+                const dpr = window.devicePixelRatio || 1;
+                const dx = Math.round((e.screenX - startX) * dpr);
+                const dy = Math.round((e.screenY - startY) * dpr);
+                let { x, y, w, h } = startRect;
+                const left = dir === 1 || dir === 4 || dir === 7;
+                const right = dir === 2 || dir === 5 || dir === 8;
+                const top = dir === 3 || dir === 4 || dir === 5;
+                const bottom = dir === 6 || dir === 7 || dir === 8;
+                if (left) { x += dx; w -= dx; }
+                if (right) { w += dx; }
+                if (top) { y += dy; h -= dy; }
+                if (bottom) { h += dy; }
+                // Clamp to a min size; when dragging a top/left edge, pin the
+                // opposite edge by not letting the origin run past the min.
+                if (w < MIN_W) { if (left) x -= MIN_W - w; w = MIN_W; }
+                if (h < MIN_H) { if (top) y -= MIN_H - h; h = MIN_H; }
+                sendRect({ x, y, width: w, height: h });
+            };
+
+            const onPointerUp = (e: PointerEvent): void => {
+                if (!resizing) return;
+                resizing = false;
+                try { (e.target as Element).releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+                document.body.style.cursor = "";
+            };
+
+            // Capture phase + registered before the header listener so the
+            // edge wins (stopImmediatePropagation halts the header handler).
+            document.addEventListener("pointerdown", onPointerDown, true);
+            document.addEventListener("pointermove", onPointerMove, true);
+            document.addEventListener("pointerup", onPointerUp, true);
+            onCleanup(() => {
+                document.removeEventListener("pointerdown", onPointerDown, true);
+                document.removeEventListener("pointermove", onPointerMove, true);
+                document.removeEventListener("pointerup", onPointerUp, true);
+            });
+        }
 
         const sendPos = (x: number, y: number): void => {
             if (setPosInFlight) {

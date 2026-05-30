@@ -2,10 +2,26 @@
 
 **Date:** 2026-05-29
 **Author:** AgentA
-**Status:** Draft — ready to implement
+**Status:** **Implemented (JS-driven).** The `HTTRANSPARENT` forwarder (Phase 1 below) was built and **abandoned** — it does not work on cef-rs 146. What shipped is the JS-driven approach in §0. Phases 2–3 remain future work.
 **Investigation:** `docs/analysis/REPORT_FLOATING_PANE_EDGE_RESIZE_2026_05_29.md`
 **Prior art:** #1132 (parked resize), #1159 (maximize-only, deferred this), #1173 (WM_SIZE resizes frontend child)
-**Platform:** Windows. Linux/macOS floater resize is a separate platform-parity task (the floater is a Win32 `WS_POPUP`; the hit-test forwarder is Win32-only). All new code is `#[cfg(target_os = "windows")]`.
+**Platform:** Windows. Linux/macOS floater resize is a separate platform-parity task (the floater is a Win32 `WS_POPUP`). All new code is `#[cfg(target_os = "windows")]` on the host; the frontend driver is cross-platform-ready (it only needs the `get/set_window_rect` IPC, which currently no-ops off Windows).
+
+---
+
+## §0 — What shipped: JS-driven resize (not the forwarder)
+
+The `HTTRANSPARENT` forwarder (Phase 1) was implemented and **abandoned**: on cef-rs 146 the embedded Chromium child consumes `WM_NCHITTEST` before any child-wndproc subclass sees it, so the forwarder got **zero** hits (confirmed with live `target:"edge-resize"` diagnostics). A follow-on `WM_SYSCOMMAND(SC_SIZE)` attempt also failed — the post succeeds, but the native resize modal loop can't read the mouse because Chromium holds the OS capture from the DOM pointerdown, and the host's `ReleaseCapture` runs on the IPC thread (cross-thread → no-op).
+
+**Shipped instead — JS-driven resize**, mirroring the already-working JS header MOVE:
+
+1. The floater's frontend DOM (`floating-pane-workspace.tsx`) detects a pointerdown within `FLOATER_EDGE_RESIZE_BORDER` (12 CSS px, `frontend/app/workspace/floater-resize.ts`) of an edge/corner.
+2. It takes **pointer capture** (so it keeps getting moves after the cursor leaves the window), reads the start rect via `get_window_rect`, and on each move computes the new rect (cursor delta + which of the 8 edges) and calls `set_window_rect` → `SetWindowPos`. Moves coalesce one-IPC-in-flight (last wins). No native loop, no NCHITTEST/capture conflict.
+3. New host IPC: `get_window_rect` / `set_window_rect` in `commands/window/motion.rs`.
+
+**Browser floaters** have a second OS child (the web-content window) layered over the frontend DOM in the content region, which would cover the grab band. `browser-view.tsx` therefore insets that child by the band depth on the three window-edge sides (left/right/bottom — the top edge is over the 33px header, already frontend), exposing the band. The full-size placeholder div paints the strip, so there's **no native white border** (the failure mode the `WS_THICKFRAME` design hit).
+
+The Phase 1 forwarder design below is kept for the record.
 
 ---
 

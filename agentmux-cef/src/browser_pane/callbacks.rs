@@ -65,33 +65,6 @@ pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
                         block_id,
                     );
                 }
-
-                // If this pane lives in a FLOATING window, subclass ITS HWND
-                // with the edge-resize forwarder too — a browser pane's
-                // web-content window is a second direct child of the floater
-                // that covers the content-area edges, so without this only the
-                // header edge (over the frontend browser) would resize.
-                // `install_child_nchittest_forwarder` is idempotent and uses
-                // GetParent (= the floater) for the band math.
-                // SPEC_FLOATING_PANE_EDGE_RESIZE.
-                unsafe {
-                    use windows_sys::Win32::UI::WindowsAndMessaging::{
-                        GetAncestor, GetClassNameW, GA_ROOT,
-                    };
-                    let root = GetAncestor(hwnd, GA_ROOT);
-                    if !root.is_null() {
-                        let mut buf = [0u16; 64];
-                        let n = GetClassNameW(root, buf.as_mut_ptr(), buf.len() as i32);
-                        // Matches floating_pane.rs CLASS_NAME / lifecycle.rs
-                        // FLOATING_PANE_CLASS_NAME.
-                        if n > 0
-                            && String::from_utf16_lossy(&buf[..n as usize])
-                                == "AgentMuxFloatingPane"
-                        {
-                            crate::floating_pane::install_child_nchittest_forwarder(hwnd);
-                        }
-                    }
-                }
             }
         }
     }
