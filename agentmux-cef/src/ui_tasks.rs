@@ -533,6 +533,7 @@ pub fn get_window_position_blocking(state: &Arc<AppState>, label: &str) -> Optio
 // only when it's the sole match. True Z-order among multiple overlapping
 // non-main windows is a follow-up (would need `[NSApp orderedWindows]` + a
 // label↔NSWindow registry).
+#[cfg(not(target_os = "windows"))]
 wrap_task! {
     pub struct ResolveWindowAtCursorTask {
         state: Arc<AppState>,
@@ -581,6 +582,7 @@ wrap_task! {
 /// point `(x, y)`, excluding `exclude_label` (the drag source). `None` if the
 /// point is over the desktop / an external app / only the source window, or if
 /// the UI thread doesn't answer within the timeout.
+#[cfg(not(target_os = "windows"))]
 pub fn resolve_window_at_cursor_blocking(
     state: &Arc<AppState>,
     x: i32,
