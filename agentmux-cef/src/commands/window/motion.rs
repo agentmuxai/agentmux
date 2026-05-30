@@ -199,23 +199,41 @@ pub fn set_window_rect(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 }
 
 /// Initiate window drag (for frameless windows).
-/// Windows: sends WM_NCLBUTTONDOWN/HTCAPTION via Win32 — find_own_top_level_window
-/// resolves the per-process HWND so multi-window works without a label.
+/// Windows: resolves the top-level HWND label-aware (`resolve_window_hwnd`, so a
+/// floating pane drags itself) and posts a host-side manual move loop on the CEF
+/// UI thread (`post_win32_begin_move` → `ui_tasks::Win32BeginMoveTask`). The raw
+/// WM_NCLBUTTONDOWN/HTCAPTION OS move loop does NOT work for a CEF window
+/// (Chromium's frame swallows it), so the host drives the loop itself.
 /// Linux/macOS: dispatches CefWindow::BeginWindowDrag on the UI thread; needs
 /// the source window's label so non-main windows drag themselves rather than
 /// the main window. Frontend reads `?windowLabel=…` from its URL and passes
 /// it here; missing → "main" for backward compatibility.
 pub fn start_window_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "windows")]
-    unsafe {
-        use windows_sys::Win32::UI::WindowsAndMessaging::*;
-        use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
-        let hwnd = find_own_top_level_window();
+    {
+        // The native move loop must run on the CEF UI thread (it owns the
+        // renderer's mouse capture). This IPC handler is on a tokio worker, so
+        // we only do thread-safe HWND lookup here (label-aware, so a floating
+        // pane drags itself, not main) and marshal the move loop onto the UI
+        // thread via `post_win32_begin_move`. The loop itself is a manual
+        // SetCapture + GetMessage + SetWindowPos loop (`ui_tasks::Win32BeginMoveTask`),
+        // NOT WM_NCLBUTTONDOWN — Chromium's frame swallows that NC message, so
+        // the OS modal move loop never engages for a CEF window.
+        let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+        let hwnd = unsafe {
+            let h = resolve_window_hwnd(state, label);
+            if h.is_null() {
+                find_own_top_level_window()
+            } else {
+                h
+            }
+        };
         if !hwnd.is_null() {
-            ReleaseCapture();
-            SendMessageW(hwnd, WM_NCLBUTTONDOWN, 2 /* HTCAPTION */, 0);
-            return Ok(serde_json::Value::Null);
+            crate::ui_tasks::post_win32_begin_move(hwnd as usize as u64);
+        } else {
+            tracing::warn!("[start_window_drag] no HWND resolved for label={}", label);
         }
+        return Ok(serde_json::Value::Null);
     }
     #[cfg(not(target_os = "windows"))]
     {
