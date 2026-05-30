@@ -201,6 +201,33 @@
         }
     }
 
+    // === New-message enter animation ===
+    // Matches the swift feel of the tool-panel collapse transition
+    // (120ms cubic-bezier(0.4,0,0.2,1) — see _document-nodes.scss).
+    // Scoped to .agent-document-streaming-buffer so virtualizer re-inserts
+    // (scroll recycling, loadOlder) do NOT re-animate.
+    // Spec: docs/specs/SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30.md
+    @keyframes agent-node-enter {
+        from {
+            opacity: 0;
+            transform: translateY(4px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .agent-document-streaming-buffer .agent-document-row {
+        animation: agent-node-enter 120ms cubic-bezier(0.4, 0, 0.2, 1) both;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .agent-document-streaming-buffer .agent-document-row {
+            animation: none;
+        }
+    }
+
     // === Status Log (terminal-style) ===
     .agent-history-loading {
         padding: var(--space-1) var(--space-2);
