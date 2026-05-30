@@ -423,52 +423,36 @@ wrap_app! {
                 // Upstream: https://github.com/chromiumembedded/cef/issues/3603
                 cmd.append_switch(Some(&CefString::from("disable-chrome-login-prompt")));
 
-                // Suppress OS credential prompts on first-run dev / portable
-                // launches. **Dev-only** — gated to `RuntimeMode::Dev` because
-                // these switches weaken Chromium's at-rest encryption of
-                // cookies / passwords by routing OSCrypt to an unencrypted
-                // basic store (and, on macOS, mocking the Keychain entirely).
-                // Enabling them in a packaged AppImage / .app / installer
-                // build would silently degrade credential security on user
-                // machines — production builds keep the platform-native
-                // backend so OSCrypt can derive a real encryption key from
-                // gnome-keyring / kwallet / Keychain / CredVault.
-                //
-                // The prompt-on-first-launch UX issue only matters in dev
-                // (devs don't want to authenticate Keychain on every
-                // `task dev` against a fresh per-branch data dir). Released
-                // builds run once per user; the prompt is appropriate there.
-                let is_dev_runtime = matches!(
-                    agentmux_common::RuntimeMode::from_env().or_else(|| {
-                        std::env::current_exe()
-                            .ok()
-                            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-                            .map(|d| agentmux_common::RuntimeMode::current(&d))
-                    }),
-                    Some(agentmux_common::RuntimeMode::Dev { .. })
-                );
-                if is_dev_runtime {
-                    // `--password-store=basic` swaps Chromium's password
-                    // backend from the platform-native store (Keychain on
-                    // macOS, gnome-keyring/kwallet on Linux, CredVault on
-                    // Windows) to an in-process unencrypted store. The
-                    // native backends pop an "AgentMux wants to use your
-                    // confidential information stored in Login" prompt
-                    // the first time Chromium touches them, even if
-                    // AgentMux never actually saves a password.
-                    let ps_key = CefString::from("password-store");
-                    let ps_val = CefString::from("basic");
-                    cmd.append_switch_with_value(Some(&ps_key), Some(&ps_val));
+                // Never request OS credential / keychain access — in ANY
+                // runtime mode (dev, installed, portable), on any platform.
+                // These switches route Chromium's OSCrypt away from the
+                // platform-native credential store, which otherwise pops an
+                // "AgentMux wants to use your confidential information stored
+                // in Login" prompt the first time it's touched — and on macOS
+                // that modal BLOCKS browser startup, so the app hangs with no
+                // window. AgentMux never saves a password, so OSCrypt only
+                // matters for the cookie jar; for a local single-user
+                // workbench (data dir 0700) an obfuscation-key store is an
+                // acceptable tradeoff vs prompting the user for keychain
+                // access. This reverses the earlier "prompt is appropriate for
+                // released builds" gating. See
+                // docs/specs/SPEC_SUPPRESS_OS_CREDENTIAL_PROMPTS_2026_05_30.md
+                // and docs/retro/retro-macos-keychain-prompt-2026-05-30.md.
 
-                    // macOS belt-and-suspenders: `--use-mock-keychain`
-                    // redirects every keychain call to an in-process mock,
-                    // including OSCrypt's encryption-key derivation that
-                    // bypasses the password store. Without it, Chromium
-                    // still surfaces a Keychain auth dialog on first run
-                    // as OSCrypt fetches its encryption key.
-                    #[cfg(target_os = "macos")]
-                    cmd.append_switch(Some(&CefString::from("use-mock-keychain")));
-                }
+                // `--password-store=basic` swaps Chromium's password backend
+                // from the platform-native store (Keychain on macOS,
+                // gnome-keyring/kwallet on Linux, CredVault on Windows) to an
+                // in-process basic store — no native-backend prompt.
+                let ps_key = CefString::from("password-store");
+                let ps_val = CefString::from("basic");
+                cmd.append_switch_with_value(Some(&ps_key), Some(&ps_val));
+
+                // macOS belt-and-suspenders: even with password-store=basic,
+                // OSCrypt still fetches its encryption key from the Keychain
+                // unless the keychain itself is mocked. `--use-mock-keychain`
+                // redirects those calls to an in-process mock. macOS-only.
+                #[cfg(target_os = "macos")]
+                cmd.append_switch(Some(&CefString::from("use-mock-keychain")));
 
                 // GPU compositing runs in a separate process (Chromium default).
                 // This allows Chromium to restart the GPU process transparently
