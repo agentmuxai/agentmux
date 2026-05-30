@@ -172,14 +172,24 @@ export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
                         successes.length === 1
                             ? `${verb} ${baseName(successes[0].dest!)}`
                             : `${verb} ${successes.length} files`;
+                    // When tokens weren't spliced (user disabled the setting),
+                    // surface the same "mention them in your next message" hint
+                    // that the composer-not-mounted branch above shows — same
+                    // root cause from the user's POV: the agent won't see the
+                    // file unless they reference it explicitly. Failures still
+                    // take precedence in the message body.
+                    const failureLines = failures
+                        .map((f) => `${baseName(f.source)}: ${f.error}`)
+                        .join("\n");
+                    const hint = !tokensInserted
+                        ? `Files are in ${targetCwd}. Mention them in your next message.`
+                        : "";
+                    const message = failureLines || hint;
                     pushNotification({
                         icon: "fa-check",
                         title:
                             failures.length > 0 ? `${title} (${failures.length} failed)` : title,
-                        message:
-                            failures.length > 0
-                                ? failures.map((f) => `${baseName(f.source)}: ${f.error}`).join("\n")
-                                : "",
+                        message,
                         timestamp: new Date().toISOString(),
                         type: failures.length > 0 ? "warning" : "info",
                         expiration: Date.now() + 5000,
