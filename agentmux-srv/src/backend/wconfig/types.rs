@@ -67,9 +67,6 @@ pub struct SettingsType {
     #[serde(rename = "term:disablewebgl", default, skip_serializing_if = "is_false")]
     pub term_disable_web_gl: bool,
 
-    #[serde(rename = "term:disablerafcoalesce", default, skip_serializing_if = "is_false")]
-    pub term_disable_raf_coalesce: bool,
-
     #[serde(rename = "term:localshellpath", default, skip_serializing_if = "String::is_empty")]
     pub term_local_shell_path: String,
 

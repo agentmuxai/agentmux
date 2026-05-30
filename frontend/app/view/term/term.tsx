@@ -184,7 +184,6 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
                 keydownHandler: model.handleTerminalKeydown.bind(model),
                 useWebGl: !ts?.["term:disablewebgl"],
                 sendDataHandler: model.sendDataToController.bind(model),
-                coalesceWrites: !ts?.["term:disablerafcoalesce"],
             }
         );
         window.term = termWrap;
