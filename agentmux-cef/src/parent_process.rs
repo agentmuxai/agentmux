@@ -61,12 +61,13 @@ pub fn parent_is_agentmux_launcher() -> Option<bool> {
 
 #[cfg(not(target_os = "windows"))]
 pub fn parent_is_agentmux_launcher() -> Option<bool> {
-    // Linux/macOS launcher integration is on a separate roadmap
-    // (Phase 7 cross-platform parity per
-    // SPEC_LAUNCHER_DEV_INTEGRATION_2026-05-13.md). On those
-    // platforms the host is invoked directly by `task dev` and IPC
-    // is not in play, so the parent-check is moot — return None and
-    // let the path-based guard decide.
+    // The launcher now drives srv + host on macOS/Linux dev too (Phase 1,
+    // SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30), but the launcher↔host
+    // IPC pipe is still deferred to Phase 2 — so there is no IPC parent-
+    // identity check to perform here yet. (The host's srv-adoption decision
+    // uses a separate, direct getppid == AGENTMUX_LAUNCHER_PID check in
+    // main.rs::launcher_is_genuine_parent.) Return None and let the path-
+    // based guard decide until the Unix IPC transport lands.
     None
 }
 

@@ -525,13 +525,32 @@ async fn run_unix(
     let exit_code = loop {
         tokio::select! {
             host_status = host_child.wait() => {
-                let code = match host_status {
-                    Ok(s) => s.code().unwrap_or(1),
+                use std::os::unix::process::ExitStatusExt;
+                let status = match host_status {
+                    Ok(s) => s,
                     Err(e) => {
                         log(&format!("FATAL: host wait failed: {}", e));
                         break 1;
                     }
                 };
+                // Host killed by a signal. On a terminal Ctrl+C the host gets
+                // SIGINT DIRECTLY (it shares our foreground process group), so
+                // host_child.wait() can win the select! race against our own
+                // SIGINT arm. Without this guard the host's signal-death has no
+                // exit code → unwrap_or(1) → it looks like a crash and we'd
+                // relaunch a replacement host that the SIGINT arm then has to
+                // kill (reagent #1193 P2). Treat the group-shutdown signals
+                // (SIGINT/SIGTERM/SIGHUP) as a clean shutdown; real crash
+                // signals (SIGSEGV, SIGABRT, …) still fall through to the
+                // crash-budget relaunch below.
+                if let Some(sig) = status.signal() {
+                    if sig == libc::SIGINT || sig == libc::SIGTERM || sig == libc::SIGHUP {
+                        log(&format!("CEF host terminated by signal {} (group shutdown) — shutting down", sig));
+                        break 0;
+                    }
+                    log(&format!("CEF host killed by signal {} (crash) — entering crash-budget relaunch", sig));
+                }
+                let code = status.code().unwrap_or(1);
                 if code == 0 {
                     log("CEF host exited cleanly (code 0) — shutting down");
                     break 0;
