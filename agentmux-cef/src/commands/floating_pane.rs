@@ -44,19 +44,24 @@ pub struct OpenFloatingPaneArgs {
     #[serde(default)]
     pub workspace_id: Option<String>,
     /// Screen-space top-left coordinates where the new floating window
-    /// should appear, in Win32 PHYSICAL pixels. Typically the cursor
-    /// position at drop time (frontend reads from host
-    /// `get_cursor_point` which uses `GetCursorPos`).
+    /// should appear, at the drop point. Coordinate space is per-platform
+    /// (the consistent "Windows = physical px, macOS/Linux = DIP" rule):
+    /// - **Windows**: PHYSICAL px — the frontend reads `get_cursor_point`
+    ///   (`GetCursorPos`).
+    /// - **macOS/Linux**: DIP (top-left, CSS px) — the frontend uses the DOM
+    ///   `dragend` event's `screenX/Y`, and the host applies no scaling
+    ///   (CEF Views positions in DIP).
     pub x: i32,
     pub y: i32,
-    /// Initial window size in CSS / DIP pixels (NOT physical). The host
-    /// scales to physical px using the destination monitor's DPI via
-    /// `MonitorFromPoint(x, y)` + `GetDpiForMonitor`. Passing DIP here
-    /// (rather than physical, which would need the frontend to know the
-    /// destination monitor's DPI) lets us correctly cross-DPI handoff —
-    /// e.g. drag from a 100% monitor onto a 150% monitor and the floater
-    /// matches the source pane's visual size on the destination.
-    /// Mirrors the pattern in `commands/window_pool.rs:684-701`.
+    /// Initial window size in CSS / DIP pixels (NOT physical).
+    /// - **Windows**: the host scales to physical px using the DESTINATION
+    ///   monitor's DPI via `MonitorFromPoint(x, y)` + `GetDpiForMonitor`
+    ///   (`#[cfg(target_os = "windows")]` below) — the frontend can't, since
+    ///   it only knows its source monitor's DPR. This makes cross-DPI handoff
+    ///   correct (drag from a 100% monitor onto a 150% one and the floater
+    ///   keeps the source pane's visual size). Mirrors
+    ///   `commands/window_pool.rs:684-701`.
+    /// - **macOS/Linux**: passed through unscaled — CEF Views sizes in DIP.
     pub width: i32,
     pub height: i32,
 }
