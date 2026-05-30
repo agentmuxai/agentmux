@@ -588,11 +588,32 @@ async fn run_unix(
                 }
             }
             srv_status = srv_child.wait() => {
+                use std::os::unix::process::ExitStatusExt;
                 match srv_status {
-                    Ok(s) => log(&format!(
-                        "srv exited UNEXPECTEDLY (host still running) with code {} — terminating launcher",
-                        s.code().unwrap_or(1)
-                    )),
+                    Ok(s) => {
+                        // Mirror the host arm's group-shutdown guard. On a
+                        // terminal Ctrl+C srv gets SIGINT DIRECTLY (it shares
+                        // our foreground process group); its own signal handler
+                        // shuts it down gracefully and it exits with code 0
+                        // (agentmux-srv/src/main.rs — SIGINT/SIGTERM → cancel
+                        // token → clean exit). srv_child.wait() can win this
+                        // select! race against our own SIGINT arm, so a clean
+                        // (code 0) or signal-killed exit is a group teardown,
+                        // NOT an unexpected srv death — don't log a scary
+                        // message and break 1 (reagent #1193 P2).
+                        let group_shutdown = matches!(
+                            s.signal(),
+                            Some(sig) if sig == libc::SIGINT || sig == libc::SIGTERM || sig == libc::SIGHUP
+                        );
+                        if s.success() || group_shutdown {
+                            log("srv exited as part of shutdown — shutting down");
+                            break 0;
+                        }
+                        log(&format!(
+                            "srv exited UNEXPECTEDLY (host still running) with code {} — terminating launcher",
+                            s.code().unwrap_or(1)
+                        ));
+                    }
                     Err(e) => log(&format!("FATAL: srv wait failed: {}", e)),
                 }
                 break 1;
