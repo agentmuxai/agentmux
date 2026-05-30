@@ -256,9 +256,19 @@ impl BrowserPaneManager {
                     block_id,
                     "browser pane create deferred — block_id still Closing; reducer will replay on close-completion"
                 );
+                crate::browser_pane::trace::pane_trace(
+                    block_id,
+                    "create-deferred-closing",
+                    "old entry still Closing; reducer will replay on close-completion",
+                );
                 Ok(())
             }
             RegisterResult::Fresh(label) => {
+                crate::browser_pane::trace::pane_trace(
+                    block_id,
+                    "create-request",
+                    &format!("url={url} label={label} win={window_label}"),
+                );
                 let mut task = CreateBrowserPaneTask::new(
                     state.clone(),
                     block_id.to_string(),
@@ -340,6 +350,7 @@ impl BrowserPaneManager {
     /// user expects to persist across close). If beforeunload becomes
     /// important, revisit.
     pub fn close(&self, block_id: &str, state: &Arc<AppState>) {
+        crate::browser_pane::trace::pane_trace(block_id, "close", "");
         // Phase H.1.d (PR #5) — sole pane-close entry point. The reducer
         // flips Live→Closing atomically and returns the entry's label iff
         // the transition fired. None means missing or already-Closing —

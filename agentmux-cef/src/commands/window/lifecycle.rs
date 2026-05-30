@@ -204,7 +204,7 @@ pub(super) unsafe fn find_main_window() -> *mut std::ffi::c_void {
 }
 
 #[cfg(target_os = "windows")]
-pub(super) unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> *mut std::ffi::c_void {
+pub(crate) unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> *mut std::ffi::c_void {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, IsWindow, GA_ROOT};
 
     if !label.is_empty() {
@@ -333,6 +333,17 @@ pub(super) fn find_all_own_windows() -> Vec<*mut std::ffi::c_void> {
 /// Find the top-level window belonging to this process.
 /// In CEF Views mode, browser.host().window_handle() returns NULL,
 /// so we enumerate windows and find ours by process ID.
+///
+/// ⚠️ **LABEL-LESS LAST RESORT — never call this when a window label is
+/// available.** It returns the process's FIRST visible top-level, and owned
+/// floater popups draw ABOVE their owner in Z-order, so once any floater
+/// exists this returns the *floater*, not main. That is the root of the
+/// recurring "wrong window" bug class (#1165, #1166, the 2026-05-30
+/// browser-pane parent bug). Any handler that has a `label` must resolve via
+/// [`resolve_window_hwnd`] instead. The only legitimate callers are the
+/// non-"main" fallback inside `resolve_window_hwnd` and genuinely label-less
+/// paths (the floater's own owner at create, the deprecated `move_window_by`).
+/// See P1 in docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md.
 #[cfg(target_os = "windows")]
 pub(crate) unsafe fn find_own_top_level_window() -> *mut std::ffi::c_void {
     use windows_sys::Win32::UI::WindowsAndMessaging::*;

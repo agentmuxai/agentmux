@@ -18,7 +18,7 @@ pub use lifecycle::{close_window, close_window_by_label};
 // Windows-only helpers other modules resolve as `commands::window::<name>`
 // (browser_pane / client / backend call sites are all `#[cfg(windows)]`).
 #[cfg(target_os = "windows")]
-pub(crate) use lifecycle::{capture_hwnd_for_label, find_own_top_level_window};
+pub(crate) use lifecycle::{capture_hwnd_for_label, find_own_top_level_window, resolve_window_hwnd};
 
 mod motion;
 // Position / drag / redock-hover command handlers, all dispatched by ipc.rs.

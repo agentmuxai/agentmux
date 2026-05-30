@@ -1188,7 +1188,7 @@ impl AgentMuxHandler {
 
     fn on_load_error(
         &mut self,
-        _browser: Option<&mut Browser>,
+        browser: Option<&mut Browser>,
         frame: Option<&mut Frame>,
         error_code: Errorcode,
         error_text: Option<&CefString>,
@@ -1221,6 +1221,28 @@ impl AgentMuxHandler {
             is_main_frame,
             error_code_raw == sys::cef_errorcode_t::ERR_ABORTED,
         );
+
+        // Persistent pane lifecycle trace (see browser_pane::trace). Recorded
+        // BEFORE the ERR_ABORTED early-return below, because ERR_ABORTED on a
+        // pane's main frame is exactly the black-render-on-redock signature
+        // (the re-created pane's navigation was aborted mid-load).
+        if self.is_browser_pane && is_main_frame {
+            if let Some(b) = browser.as_deref() {
+                if let Some(block_id) =
+                    crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b)
+                {
+                    crate::browser_pane::trace::pane_trace(
+                        &block_id,
+                        "load-error",
+                        &format!(
+                            "url={failed_url_dbg} err={error_text_dbg}({}) aborted={}",
+                            error_code_raw as i32,
+                            error_code_raw == sys::cef_errorcode_t::ERR_ABORTED,
+                        ),
+                    );
+                }
+            }
+        }
 
         if error_code_raw == sys::cef_errorcode_t::ERR_ABORTED {
             return;

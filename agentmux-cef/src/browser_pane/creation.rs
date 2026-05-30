@@ -18,8 +18,9 @@
 //!     CEF client. Phase 4 will flip this direction by moving the pane
 //!     callbacks into `pane/callbacks.rs`; until then, `client` is fine as
 //!     a one-way dependency.
-//!   - `crate::commands::window::find_own_top_level_window` for the parent
-//!     HWND (CEF Views returns null on Alloy).
+//!   - `crate::commands::window::resolve_window_hwnd` to resolve the parent
+//!     HWND from the pane's target `window_label` (CEF Views returns null on
+//!     Alloy, so the Windows native-child path needs the HWND explicitly).
 
 use std::sync::Arc;
 
@@ -34,10 +35,11 @@ wrap_task! {
         label: String,
         url: String,
         rect: Rect,
-        // Linux/macOS only: which top-level CefWindow to attach the pane
-        // overlay to (looked up in `state.windows`). Windows path doesn't
-        // read this field — `find_own_top_level_window` resolves the
-        // calling window's HWND directly.
+        // The pane's TARGET top-level window. Both platforms read it:
+        // Linux/macOS looks up the CefWindow to attach the overlay to (in
+        // `state.windows`); Windows resolves it to the parent HWND via
+        // `resolve_window_hwnd`, so a redocked pane is parented to its target
+        // window rather than the process's first-visible top-level (the floater).
         window_label: String,
     }
 
@@ -47,8 +49,8 @@ wrap_task! {
             //
             // Two completely separate paths by platform:
             //   - Windows: native child window via WindowInfo::set_as_child +
-            //     browser_host_create_browser. Requires the parent HWND from
-            //     find_own_top_level_window.
+            //     browser_host_create_browser. Requires the parent HWND,
+            //     resolved from `window_label` via `resolve_window_hwnd`.
             //   - Linux / macOS: CEF Views via browser_view_create +
             //     Window::add_overlay_view. The Windows native-child path does
             //     not work on Wayland (cef#2804) and is officially unsupported
@@ -72,13 +74,47 @@ wrap_task! {
 
             #[cfg(target_os = "windows")]
             {
-                // Get parent HWND via Win32 enumeration (CEF Views returns null).
+                // Resolve the parent HWND from the pane's TARGET `window_label`,
+                // NOT `find_own_top_level_window` (which returns the process's
+                // FIRST visible top-level). Under redock churn the still-alive
+                // floater is that first window, so the redocked pane was parented
+                // to the dying floater and cascade-destroyed when its HWND died
+                // → black render. Proven via the `create-parent` pane-trace:
+                // requested_window=main but parent_hwnd == the floater's HWND.
+                // `resolve_window_hwnd` is cache-first + IsWindow-guarded and
+                // handles `main` and `floating-*` identically.
                 let parent_hwnd_raw = unsafe {
-                    crate::commands::window::find_own_top_level_window()
+                    crate::commands::window::resolve_window_hwnd(&self.state, &self.window_label)
                 };
                 if parent_hwnd_raw.is_null() {
-                    tracing::error!(block_id = %self.block_id, "cannot find main window HWND — aborting browser pane creation");
+                    tracing::error!(block_id = %self.block_id, window_label = %self.window_label, "cannot resolve target window HWND — aborting browser pane creation");
                     return;
+                }
+
+                // [pane-trace] CONFIRM the parent window. `find_own_top_level_window`
+                // returns the process's FIRST visible top-level, NOT necessarily
+                // `window_label`'s window. Under redock churn the dying floater can
+                // be that first window, so the freshly-redocked pane gets parented
+                // to it and is cascade-destroyed when the floater's HWND dies
+                // (child-before-parent) → black render. If `actual_parent_label`
+                // here is a `floating-*` while `requested_window` is `main`, that's
+                // the bug. DO NOT REMOVE (see browser_pane::trace).
+                {
+                    let actual_parent_label = self
+                        .state
+                        .window_hwnds
+                        .lock()
+                        .iter()
+                        .find(|(_, h)| **h == parent_hwnd_raw as isize)
+                        .map(|(l, _)| l.clone());
+                    crate::browser_pane::trace::pane_trace(
+                        &self.block_id,
+                        "create-parent",
+                        &format!(
+                            "requested_window={} parent_hwnd={:?} actual_parent_label={:?}",
+                            self.window_label, parent_hwnd_raw, actual_parent_label
+                        ),
+                    );
                 }
 
                 // Phase B.5 (window_meta step d) — pre-create handoff.
