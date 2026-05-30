@@ -77,14 +77,16 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 // anchor the new window so the cursor stays on the same
                 // pixel of the same tab across the handoff.
                 //
-                // Note: we DO NOT suppress the OS drag image even though
-                // the spec drafted it. SC_MOVE doesn't actually engage
-                // during the HTML5 drag (pragmatic-dnd's OLE capture
-                // blocks the modal move-loop), so the new window only
-                // appears on mouseup. Suppressing the OS ghost leaves
-                // the user with a no-drop cursor and zero visual
-                // feedback during drag — strictly worse. Spec §4.5
-                // updated to reflect this.
+                // Note: we DO NOT suppress the OS drag image — the ghost
+                // following the cursor is the only drag feedback (SC_MOVE
+                // doesn't engage during the HTML5 drag; the new window
+                // appears on mouseup). We keep the ghost AND stop the
+                // "drop rejected" snapback via `preventUnhandled` in
+                // onDragStart/onDrop (macOS/Linux). An earlier note here
+                // argued against suppressing the ghost because it left a
+                // no-drop cursor with zero feedback — that's moot now:
+                // PR #1175 fixed the cursor (→ "move"), and this path
+                // keeps the ghost and only removes the snapback.
                 const tabRect = tabWrapRef.getBoundingClientRect();
                 setTabGrabOffset({
                     x: location.current.input.clientX - tabRect.left,
