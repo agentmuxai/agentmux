@@ -249,6 +249,8 @@ async fn route_command(
         "set_window_opacity" => commands::window::set_window_opacity(state, args),
         "get_window_opacity" => commands::window::get_window_opacity(state, args),
         "start_window_drag" => commands::window::start_window_drag(state, args),
+        "get_window_rect" => commands::window::get_window_rect(state, args),
+        "set_window_rect" => commands::window::set_window_rect(state, args),
         "get_window_position" => commands::window::get_window_position(state, args),
         "resolve_window_at_cursor" => commands::window::resolve_window_at_cursor(state, args),
         "update_floating_redock_hover" => commands::window::update_floating_redock_hover(state, args),
