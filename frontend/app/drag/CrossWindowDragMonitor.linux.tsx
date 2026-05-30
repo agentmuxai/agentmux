@@ -254,13 +254,14 @@ async function performTearOff(
     } else if (dragType === "tab" && payload.tabId) {
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
         if (newWsId) {
-            // Tab anchor — see win32 sibling for DPI rationale. Linux
-            // host cursor coords also come from native GetCursor APIs
-            // and may be physical px; multiply DIP offset by DPR.
+            // Tab anchor in DIP — screenX/Y are DOM `e.screenX/Y` (CSS px =
+            // DIP), and `getTabGrabOffset()` is also DOM client-space (DIP).
+            // Linux CEF Views positions in DIP, so no DPR scale (the win32
+            // sibling needs `* dpr` because `get_cursor_point` there returns
+            // physical px from `GetCursorPos`).
             const grabOffset = getTabGrabOffset();
-            const dpr = window.devicePixelRatio || 1;
-            const tabAnchorX = grabOffset ? screenX - grabOffset.x * dpr : undefined;
-            const tabAnchorY = grabOffset ? screenY - grabOffset.y * dpr : undefined;
+            const tabAnchorX = grabOffset ? screenX - grabOffset.x : undefined;
+            const tabAnchorY = grabOffset ? screenY - grabOffset.y : undefined;
             await openTearOffWindow(
                 api,
                 newWsId,
