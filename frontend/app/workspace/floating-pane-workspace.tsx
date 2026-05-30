@@ -360,9 +360,12 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             const now = performance.now();
             if (now - lastHoverPushAt < HOVER_PUSH_THROTTLE_MS) return;
             lastHoverPushAt = now;
-            const dpr = window.devicePixelRatio || 1;
-            const px = Math.round(screenX * dpr);
-            const py = Math.round(screenY * dpr);
+            // Host coordinate space: physical px on Windows, DIP on macOS/Linux
+            // (posScale). resolve_window_at_cursor / the hover hit-test compare
+            // against the same space.
+            const scale = posScale();
+            const px = Math.round(screenX * scale);
+            const py = Math.round(screenY * scale);
             const sourceLabel = windowLabel();
             if (!sourceLabel) return;
             invokeCommand("update_floating_redock_hover", {
@@ -429,10 +432,11 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         const tryRedockAtCursor = async (screenX: number, screenY: number) => {
             const ourLabel = windowLabel();
             if (!ourLabel) return;
-            // `mouseup.screenX/Y` are CSS pixels; host expects physical.
-            const dpr = window.devicePixelRatio || 1;
-            const px = Math.round(screenX * dpr);
-            const py = Math.round(screenY * dpr);
+            // `mouseup.screenX/Y` are CSS px. Host coordinate space: physical px
+            // on Windows (× DPR), DIP on macOS/Linux (× 1) — posScale().
+            const scale = posScale();
+            const px = Math.round(screenX * scale);
+            const py = Math.round(screenY * scale);
 
             let target: { label: string | null; window_id: string | null };
             try {

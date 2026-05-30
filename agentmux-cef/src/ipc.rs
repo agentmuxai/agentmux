@@ -268,8 +268,29 @@ async fn route_command(
             .await
             .map_err(|e| format!("get_window_position join error: {}", e))?
         }
-        "resolve_window_at_cursor" => commands::window::resolve_window_at_cursor(state, args),
-        "update_floating_redock_hover" => commands::window::update_floating_redock_hover(state, args),
+        "resolve_window_at_cursor" => {
+            // spawn_blocking — on macOS/Linux this bounces a CEF Views bounds
+            // hit-test through the UI thread (up to 250 ms), same as
+            // get_window_position above. Windows reads HWND rects directly.
+            let state_clone = state.clone();
+            let args_clone = args.clone();
+            tokio::task::spawn_blocking(move || {
+                commands::window::resolve_window_at_cursor(&state_clone, &args_clone)
+            })
+            .await
+            .map_err(|e| format!("resolve_window_at_cursor join error: {}", e))?
+        }
+        "update_floating_redock_hover" => {
+            // spawn_blocking — calls resolve_window_at_cursor internally, which
+            // blocks on the UI thread for up to 250 ms on macOS/Linux.
+            let state_clone = state.clone();
+            let args_clone = args.clone();
+            tokio::task::spawn_blocking(move || {
+                commands::window::update_floating_redock_hover(&state_clone, &args_clone)
+            })
+            .await
+            .map_err(|e| format!("update_floating_redock_hover join error: {}", e))?
+        }
         "clear_floating_redock_hover" => commands::window::clear_floating_redock_hover(state, args),
         "move_window_by" => commands::window::move_window_by(state, args),
         "set_window_position" => commands::window::set_window_position(state, args),

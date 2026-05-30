@@ -199,6 +199,21 @@ pub fn register_backend_window(_state: &Arc<AppState>, args: &serde_json::Value)
         // `Event::BackendWindowIdRegistered` (delivered via the CEF
         // JS bridge) carries the label → windowId mapping change to
         // every renderer's reducer. No sync emit here.
+        //
+        // On non-Windows there is NO launcher, so the
+        // `Event::BackendWindowIdRegistered` → `apply_event_to_shadow` round
+        // trip that fills `shadow_backend_window_ids` never runs
+        // (`report_backend_window_id_registered` no-ops without a launcher
+        // channel). The host is the sole authority here, so populate the
+        // projection directly. `resolve_window_at_cursor` reads it via
+        // `backend_window_id(label)` to resolve a redock target's window_id;
+        // without this it is always `None` on macOS/Linux and redock silently
+        // fails. See docs/analysis/REPORT_MACOS_FLOATING_PANE_REDOCK_2026_05_30.md.
+        #[cfg(not(target_os = "windows"))]
+        _state
+            .shadow_backend_window_ids
+            .lock()
+            .insert(label.to_string(), window_id.to_string());
     } else {
         tracing::warn!(label = %label, "[window] register_backend_window called with empty window_id — skipped");
     }

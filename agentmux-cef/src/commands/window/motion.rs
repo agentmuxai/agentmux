@@ -359,10 +359,24 @@ pub fn resolve_window_at_cursor(
         Ok(serde_json::json!({ "label": null, "window_id": null }))
     }
 
+    // macOS / Linux: CEF Views hit-test. Iterate registered top-level windows
+    // on the UI thread, find the top-most one whose DIP bounds contain the
+    // (DIP) point — the frontend sends DIP here on macOS/Linux (the posScale()
+    // rule), excluding the drag source. Then map label → backend window_id via
+    // the same `backend_window_id` projection (populated directly on non-Windows
+    // by `register_backend_window`, since there's no launcher). Mirrors the
+    // Windows return shape. See
+    // docs/analysis/REPORT_MACOS_FLOATING_PANE_REDOCK_2026_05_30.md.
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (state, args, x, y, exclude_label);
-        Ok(serde_json::json!({ "label": null, "window_id": null }))
+        let _ = args;
+        match crate::ui_tasks::resolve_window_at_cursor_blocking(state, x, y, exclude_label) {
+            Some(label) => {
+                let wid = state.backend_window_id(&label);
+                Ok(serde_json::json!({ "label": label, "window_id": wid }))
+            }
+            None => Ok(serde_json::json!({ "label": null, "window_id": null })),
+        }
     }
 }
 

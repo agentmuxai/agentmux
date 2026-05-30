@@ -336,6 +336,81 @@ pub fn get_window_position_blocking(state: &Arc<AppState>, label: &str) -> Optio
     rx.recv_timeout(std::time::Duration::from_millis(250)).ok().flatten()
 }
 
+// ── Resolve which window is under a screen point (DIP) — blocking UI read ──
+//
+// The macOS/Linux analogue of the Windows HWND Z-order walk in
+// `commands/window/motion.rs::resolve_window_at_cursor`. Used by floating-pane
+// REDOCK to find the AgentMux window the cursor is over at drop time. CEF Views
+// `bounds()` must run on the UI thread, so iterate the registered top-level
+// windows there and hit-test the DIP point against each.
+//
+// Overlap rule (pragmatic first cut — see the redock report): exclude the drag
+// source; among the rest, prefer a non-"main" match (a floater/tear-off stacked
+// above main is almost always the intended target) over "main"; "main" wins
+// only when it's the sole match. True Z-order among multiple overlapping
+// non-main windows is a follow-up (would need `[NSApp orderedWindows]` + a
+// label↔NSWindow registry).
+wrap_task! {
+    pub struct ResolveWindowAtCursorTask {
+        state: Arc<AppState>,
+        x: i32,
+        y: i32,
+        exclude_label: String,
+        tx: std::sync::mpsc::SyncSender<Option<String>>,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let windows = self.state.windows.lock();
+            let mut main_match = false;
+            let mut best_other: Option<String> = None;
+            for (label, window) in windows.iter() {
+                if label.as_str() == self.exclude_label {
+                    continue;
+                }
+                let b = window.bounds();
+                let hit = self.x >= b.x
+                    && self.x < b.x + b.width
+                    && self.y >= b.y
+                    && self.y < b.y + b.height;
+                if !hit {
+                    continue;
+                }
+                if label.as_str() == "main" {
+                    main_match = true;
+                } else {
+                    // Deterministic pick among overlapping non-main windows:
+                    // lexicographically smallest label. (HashMap iteration
+                    // order is otherwise nondeterministic.)
+                    match &best_other {
+                        Some(cur) if cur.as_str() <= label.as_str() => {}
+                        _ => best_other = Some(label.clone()),
+                    }
+                }
+            }
+            let result = best_other.or(if main_match { Some("main".to_string()) } else { None });
+            let _ = self.tx.try_send(result);
+        }
+    }
+}
+
+/// Resolve the label of the top-most AgentMux window containing the DIP screen
+/// point `(x, y)`, excluding `exclude_label` (the drag source). `None` if the
+/// point is over the desktop / an external app / only the source window, or if
+/// the UI thread doesn't answer within the timeout.
+pub fn resolve_window_at_cursor_blocking(
+    state: &Arc<AppState>,
+    x: i32,
+    y: i32,
+    exclude_label: &str,
+) -> Option<String> {
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Option<String>>(1);
+    let mut task =
+        ResolveWindowAtCursorTask::new(state.clone(), x, y, exclude_label.to_string(), tx);
+    post_task(ThreadId::UI, Some(&mut task));
+    rx.recv_timeout(std::time::Duration::from_millis(250)).ok().flatten()
+}
+
 // ── Phase B.9.2 (WRR) — corrective absolute-position move ─────────────────
 //
 // Reducer-driven self-heal. Triggered by `Event::CorrectiveWindowMove` when
