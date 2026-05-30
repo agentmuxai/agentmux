@@ -237,6 +237,62 @@ pub fn post_start_drag(state: &Arc<AppState>, label: &str) {
 #[cfg(target_os = "windows")]
 pub fn post_start_drag(_state: &Arc<AppState>, _label: &str) {}
 
+// ── Win32 native window move (HTCAPTION modal loop) ───────────────────────
+//
+// Despite the module header's "Win32 is safe from any thread" note,
+// `ReleaseCapture()` is THREAD-SPECIFIC — it releases only the CALLING
+// thread's mouse capture — and the OS modal move loop must be initiated on the
+// thread that owns the window's capture: the CEF UI thread. The previous
+// inline path (motion.rs, on a tokio worker) made `ReleaseCapture()` a no-op,
+// so the renderer kept capture and `WM_NCLBUTTONDOWN` never engaged the move
+// loop ("loses mouse state"). This task runs it on the UI thread. The HWND is
+// resolved by the caller (thread-safe) and passed in as a u64.
+#[cfg(target_os = "windows")]
+wrap_task! {
+    pub struct Win32BeginMoveTask {
+        hwnd: u64,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            use windows_sys::Win32::Foundation::HWND;
+            use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetCapture, ReleaseCapture};
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                SendMessageW, HTCAPTION, WM_NCLBUTTONDOWN,
+            };
+            let h = self.hwnd as HWND;
+            unsafe {
+                // Diagnostics: who holds capture before we release, and whether
+                // ReleaseCapture actually did anything (it only does when we're
+                // on the capturing thread — the whole reason for being here).
+                let cap_before = GetCapture() as usize;
+                let released = ReleaseCapture();
+                tracing::info!(
+                    "[start_window_drag] win32 begin-move on UI thread hwnd={:#x} capture_before={:#x} release_ok={}",
+                    self.hwnd,
+                    cap_before,
+                    released != 0
+                );
+                // WM_NCLBUTTONDOWN(HTCAPTION) enters the OS modal move loop,
+                // which blocks the UI thread until the user releases the button.
+                // The loop pumps messages, so child HWNDs move + paint with the
+                // window; CEF task processing resumes when the loop returns.
+                SendMessageW(h, WM_NCLBUTTONDOWN, HTCAPTION as usize, 0);
+                tracing::info!(
+                    "[start_window_drag] win32 move loop returned hwnd={:#x}",
+                    self.hwnd
+                );
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn post_win32_begin_move(hwnd: u64) {
+    let mut task = Win32BeginMoveTask::new(hwnd);
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
 // ── Move window ───────────────────────────────────────────────────────────
 
 wrap_task! {
