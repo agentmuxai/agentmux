@@ -11,7 +11,7 @@
 import { atoms, getApi } from "@/store/global";
 import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
-import { openTearOffWindow } from "./tear-off-pool-helper";
+import { openTearOffWindow, measureSourcePaneSize } from "./tear-off-pool-helper";
 import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { invokeCommand } from "@/app/platform/ipc";
 import { onCleanup, onMount } from "solid-js";
@@ -155,8 +155,78 @@ async function performTearOff(
 ) {
     const api = getApi();
     if (dragType === "pane" && payload.blockId) {
-        const newWsId = await WorkspaceService.TearOffBlock(payload.blockId, sourceTabId, sourceWsId, true);
-        if (newWsId) await openTearOffWindow(api, newWsId, screenX, screenY, window.outerWidth, window.outerHeight);
+        // PANE → chromeless floating window (just the pane: no tab bar, no
+        // widget bar). Mirrors the Windows and macOS pane branches.
+        // `TearOffBlock` moves the block into a fresh backend workspace+tab;
+        // the floating window's `initApp` → `initHostNewWindow` path
+        // attaches to it via `?workspaceId=`, and the `?floatingPaneId=`
+        // URL param makes the frontend render `<FloatingPaneWorkspace>`
+        // (chromeless) instead of `<Workspace>`.
+        //
+        // Backend creates the frameless top-level via
+        // `post_create_window(frameless=true)` — the SAME CEF Views path
+        // the legacy tear-off used — so on Linux this is purely a
+        // frontend routing change. #1182 widened the backend's
+        // `open_floating_pane_window` non-Windows branch from "not
+        // implemented" to a real impl that runs identically on Linux
+        // and macOS.
+        //
+        // See docs/specs/SPEC_LINUX_FLOATING_PANE_TEAROFF_2026_05_30.md
+        // (mirrors SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md §"Phase A").
+
+        // Snapshot the source pane's rendered size BEFORE TearOffBlock —
+        // that mutation removes the block from the source layout and
+        // unmounts the source DOM element.
+        const { width: floaterWidth, height: floaterHeight } = measureSourcePaneSize(
+            payload.blockId,
+        );
+
+        const newWsId = await WorkspaceService.TearOffBlock(
+            payload.blockId,
+            sourceTabId,
+            sourceWsId,
+            true,
+        );
+        if (!newWsId) {
+            Logger.error("dnd:cross", "TearOffBlock returned no workspace id", {
+                blockId: payload.blockId,
+            });
+            return;
+        }
+
+        // CRITICAL: invoke the IPC FIRST, then mutate the layout on
+        // success. If we deleted the layout node up front and the IPC
+        // failed (e.g. the H.7 mid-close gate rejects), the pane would
+        // be orphaned — still in `blockids` but with no layout node and
+        // no floater. Reagent P1 on PR #1073 (Windows path); the same
+        // ordering is preserved here.
+        try {
+            await invokeCommand<{ window_label: string }>("open_floating_pane_window", {
+                pane_id: payload.blockId,
+                workspace_id: newWsId,
+                x: screenX,
+                y: screenY,
+                width: floaterWidth,
+                height: floaterHeight,
+            });
+            Logger.info("dnd:cross", "floating pane spawned (linux)", {
+                blockId: payload.blockId,
+                newWsId,
+                screenX,
+                screenY,
+                width: floaterWidth,
+                height: floaterHeight,
+            });
+        } catch (err) {
+            Logger.error("dnd:cross", "open_floating_pane_window failed (linux)", {
+                error: String(err),
+                blockId: payload.blockId,
+                newWsId,
+            });
+            // Don't try to undo TearOffBlock — the source layout was
+            // already mutated server-side. Log at error level; the user
+            // sees a missing pane and can drag it back from history.
+        }
     } else if (dragType === "tab" && payload.tabId) {
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
         if (newWsId) {
