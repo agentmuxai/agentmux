@@ -11,28 +11,29 @@ use std::sync::Arc;
 
 use crate::state::AppState;
 
-// Resolved per-process top-level HWND lives in the sibling `lifecycle`
-// module; used only inside the `#[cfg(windows)]` branches below.
+// Canonical label→top-level-HWND resolver from the sibling `lifecycle`
+// module. We resolve by LABEL (not `find_own_top_level_window`, which returns
+// the process's first visible top-level = the floater when one exists, so
+// minimize/maximize would act on the wrong window). See P1 in
+// docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md.
 #[cfg(target_os = "windows")]
-use super::lifecycle::find_own_top_level_window;
+use super::lifecycle::resolve_window_hwnd;
 
 /// Minimize the window. Args: optional `{ "label": string }`; defaults to "main".
 pub fn minimize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
     #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
-        let hwnd = find_own_top_level_window();
+        let hwnd = resolve_window_hwnd(state, label);
         if !hwnd.is_null() {
             ShowWindow(hwnd, SW_MINIMIZE);
             return Ok(serde_json::Value::Null);
         }
     }
     #[cfg(not(target_os = "windows"))]
-    {
-        let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
-        crate::ui_tasks::post_minimize_window(state, label);
-    }
-    let _ = (state, args);
+    crate::ui_tasks::post_minimize_window(state, label);
+    let _ = (state, args, label);
     Ok(serde_json::Value::Null)
 }
 
@@ -43,10 +44,11 @@ pub fn minimize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 /// reads its own label from the `?windowLabel=…` URL query and passes it
 /// here so non-main windows act on the right CEF window.
 pub fn maximize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
     #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
-        let hwnd = find_own_top_level_window();
+        let hwnd = resolve_window_hwnd(state, label);
         if !hwnd.is_null() {
             let mut placement: WINDOWPLACEMENT = std::mem::zeroed();
             placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
@@ -60,11 +62,8 @@ pub fn maximize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
         }
     }
     #[cfg(not(target_os = "windows"))]
-    {
-        let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
-        crate::ui_tasks::post_maximize_window(state, label);
-    }
-    let _ = (state, args);
+    crate::ui_tasks::post_maximize_window(state, label);
+    let _ = (state, args, label);
     Ok(serde_json::Value::Null)
 }
 

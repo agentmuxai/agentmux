@@ -209,6 +209,7 @@ pub fn set_window_rect(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 /// the main window. Frontend reads `?windowLabel=…` from its URL and passes
 /// it here; missing → "main" for backward compatibility.
 pub fn start_window_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
     #[cfg(target_os = "windows")]
     {
         // The native move loop must run on the CEF UI thread (it owns the
@@ -236,11 +237,8 @@ pub fn start_window_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Res
         return Ok(serde_json::Value::Null);
     }
     #[cfg(not(target_os = "windows"))]
-    {
-        let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
-        crate::ui_tasks::post_start_drag(state, label);
-    }
-    let _ = (state, args);
+    crate::ui_tasks::post_start_drag(state, label);
+    let _ = (state, args, label);
     Ok(serde_json::Value::Null)
 }
 
@@ -286,8 +284,24 @@ pub fn resolve_window_at_cursor(
         use windows_sys::Win32::Foundation::RECT;
         use windows_sys::Win32::System::Threading::GetCurrentProcessId;
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            GetTopWindow, GetWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId,
-            IsWindowVisible, GWL_EXSTYLE, GW_HWNDNEXT, WS_EX_TRANSPARENT,
+            GetClassNameW, GetTopWindow, GetWindow, GetWindowLongW, GetWindowRect,
+            GetWindowThreadProcessId, IsWindowVisible, GWL_EXSTYLE, GW_HWNDNEXT, WS_EX_TRANSPARENT,
+        };
+        // [redock-resolve] permanent diagnostic for the recurring theme-1
+        // "main not recognised as a redock target → no landing ghost on main"
+        // bug. `muxlog host redock-resolve`. DO NOT REMOVE (see the architecture
+        // doc §0 theme 1).
+        let class_of = |h: isize| -> String {
+            if h == 0 {
+                return String::new();
+            }
+            let mut buf = [0u16; 64];
+            let n = GetClassNameW(h as *mut _, buf.as_mut_ptr(), buf.len() as i32);
+            if n > 0 {
+                String::from_utf16_lossy(&buf[..n as usize])
+            } else {
+                String::new()
+            }
         };
 
         // Snapshot the label↔HWND map once, then walk top-level
@@ -344,38 +358,64 @@ pub fn resolve_window_at_cursor(
                             && y >= rect.top
                             && y < rect.bottom
                         {
-                            if let Some(label) = label_by_hwnd.get(&h_isize) {
+                            tracing::info!(
+                                target: "redock-resolve",
+                                hwnd = %format!("{:#x}", h_isize),
+                                class = %class_of(h_isize),
+                                label = ?label_by_hwnd.get(&h_isize),
+                                is_main_hwnd = (main_hwnd != 0 && h_isize == main_hwnd),
+                                main_hwnd = %format!("{:#x}", main_hwnd),
+                                "cursor inside window"
+                            );
+                            // Resolution precedence (P1). The HWND→label
+                            // reverse map can carry a STALE `window-pool-*`
+                            // label for a promoted main frame: a warm-pool
+                            // window moved on-screen to serve as the user's
+                            // main window keeps its pool label in
+                            // `window_hwnds` while "main" is left with no live
+                            // HWND (proven 2026-05-30 — redock onto main
+                            // resolved the pool label, so the target rendered no
+                            // ghost and the drop was rejected: no dock).
+                            // `find_main_window` is the cache-INDEPENDENT
+                            // authority on which HWND is the main frame, so when
+                            // the cached label is a lingering pool label AND
+                            // this HWND is the main frame, "main" wins. Real
+                            // labels (floating-* / additional windows / an
+                            // already-correct "main") are used verbatim, so
+                            // multi-window resolution is unchanged.
+                            let is_main_frame = main_hwnd != 0 && h_isize == main_hwnd;
+                            let resolved_label: Option<&str> = match label_by_hwnd.get(&h_isize) {
+                                Some(l) if l.starts_with("window-pool-") && is_main_frame => {
+                                    Some("main")
+                                }
+                                Some(l) => Some(l.as_str()),
+                                None if is_main_frame => Some("main"),
+                                None => None,
+                            };
+                            if let Some(label) = resolved_label {
                                 let wid = state.backend_window_id(label);
                                 return Ok(serde_json::json!({
                                     "label": label,
                                     "window_id": wid,
                                 }));
                             }
-                            // Not in window_hwnds — but if this IS the main
-                            // frame (per the cache-independent resolver),
-                            // recognise it as "main" anyway. This is the
-                            // deterministic redock-onto-main fix: it no longer
-                            // depends on the startup capture having won the
-                            // race to register "main".
-                            if main_hwnd != 0 && h_isize == main_hwnd {
-                                let wid = state.backend_window_id("main");
-                                return Ok(serde_json::json!({
-                                    "label": "main",
-                                    "window_id": wid,
-                                }));
-                            }
-                            // Found a window we own but it isn't in
-                            // window_hwnds and isn't the main frame (very
-                            // early startup or a window we don't track).
-                            // Treat as "no agentmux match" and continue the
-                            // Z-order walk in case a tracked window sits
-                            // behind it.
+                            // Owned but untracked and not the main frame (very
+                            // early startup or a window we don't track). Treat
+                            // as "no agentmux match" and continue the Z-order
+                            // walk in case a tracked window sits behind it.
                         }
                     }
                 }
             }
             hwnd = GetWindow(hwnd, GW_HWNDNEXT);
         }
+        tracing::info!(
+            target: "redock-resolve",
+            x, y,
+            main_hwnd = %format!("{:#x}", main_hwnd),
+            main_class = %class_of(main_hwnd),
+            "no agentmux window matched at cursor — no ghost / redock target"
+        );
         Ok(serde_json::json!({ "label": null, "window_id": null }))
     }
 
