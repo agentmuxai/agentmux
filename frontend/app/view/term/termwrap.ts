@@ -49,12 +49,6 @@ type TermWrapOptions = {
     keydownHandler?: (e: KeyboardEvent) => boolean;
     useWebGl?: boolean;
     sendDataHandler?: (data: string) => void;
-    // When false, bypass our own RAF write-coalescer and write straight to
-    // xterm.js, letting its built-in RenderDebouncer own frame coalescing.
-    // Removes the "double rAF" (our rAF feeding xterm's rAF). Default true
-    // (keep the Tier-3 Win10 scroll-flash fix, PR #208). Toggled by the
-    // `term:disablerafcoalesce` setting — see SPEC_TERM_DOUBLE_RAF_TEAROUT.
-    coalesceWrites?: boolean;
 };
 
 /**
@@ -90,12 +84,6 @@ export class TermWrap {
     private toDispose: TermTypes.IDisposable[] = [];
     pasteActive: boolean = false;
     lastUpdated: number;
-    private rafBuffer: Uint8Array[] = [];
-    private rafPending: boolean = false;
-    private writeInFlight: boolean = false;
-    // Stage-1 RAF coalescer toggle. true = coalesce (default, Tier-3 fix);
-    // false = write straight to xterm (double-rAF tear-out experiment).
-    private coalesceWrites: boolean = true;
     // Thaw-cycle handles — cleared in dispose() so callbacks don't fire
     // on a disposed Terminal. dispose() doesn't null `this.terminal`, so
     // a null-check guard alone isn't enough.
@@ -114,7 +102,6 @@ export class TermWrap {
         this.loaded = false;
         this.blockId = blockId;
         this.sendDataHandler = waveOptions.sendDataHandler;
-        this.coalesceWrites = waveOptions.coalesceWrites ?? true;
         this.ptyOffset = 0;
         this.dataBytesProcessed = 0;
         this.lastUpdated = Date.now();
@@ -459,7 +446,13 @@ export class TermWrap {
         } else if (msg.fileop == "append") {
             const decodedData = base64ToArray(msg.data64);
             if (this.loaded) {
-                this.scheduleRafWrite(decodedData);
+                // Write straight to xterm.js — its built-in RenderDebouncer is the
+                // single frame-coalescer (one render per animation frame). We no
+                // longer run our own RAF coalescer on top (the "double rAF" removed
+                // in SPEC_TERM_DOUBLE_RAF_TEAROUT). The ≤32B echo perf mark is
+                // started here and closed in doTerminalWrite's write callback.
+                if (decodedData.length <= 32) markStart('term-echo-render');
+                this.doTerminalWrite(decodedData, null);
             } else {
                 this.heldData.push(decodedData);
             }
@@ -469,98 +462,21 @@ export class TermWrap {
         }
     }
 
-    // Tier-3 scroll fix: RAF-batched writes with sequential drain.
+    // PTY output is written straight to xterm.js (doTerminalWrite). xterm's own
+    // RenderDebouncer is the single frame-coalescer — one render per animation
+    // frame, with dirty rows merged. We previously ran our OWN RAF write-coalescer
+    // on top of that (Stage-1 rAF: scheduleRafWrite/armRaf), a second frame gate
+    // that beat against xterm's rAF and caused uneven typing frame-pacing. Removed
+    // in SPEC_TERM_DOUBLE_RAF_TEAROUT_2026_05_30.
     //
-    // PTY data arrives as separate WebSocket messages. Each doTerminalWrite() call
-    // triggers an xterm.js viewport sync. When Ink's cursor-up chunk and content chunk
-    // land in back-to-back messages, the viewport snaps up then back down — two flashes
-    // per render cycle, visible on Windows 10 as the DWM compositor presents each snap
-    // as a distinct frame.
-    //
-    // Buffering writes until the next animation frame coalesces same-cycle chunks into
-    // one terminal.write() call so xterm.js only updates the viewport once, to the final
-    // cursor position (back at bottom). Latency added: ≤ 16ms — imperceptible during
-    // streaming output.
-    //
-    // writeInFlight ensures no second RAF fires while a slow write (large scrollback buffer)
-    // is still in progress. Without this guard, rafPending resets before doTerminalWrite
-    // resolves, letting a concurrent write race and causing the same flash at high bufLines.
-    //
-    // Fast path: small chunks (character echo, single completions) bypass RAF entirely.
-    // The scroll-flicker pattern only occurs when Ink emits cursor-up + content as separate
-    // WebSocket messages — that only happens with large multi-chunk outputs. A single
-    // echoed character (1–4 bytes) is never split, so there is no flicker risk.
-    // Bypassing RAF here eliminates the ≤16ms echo delay (and the writeInFlight stall)
-    // that made typing feel sluggish during PTY output.
-    private static readonly RAF_BYPASS_THRESHOLD = 512; // bytes
-
-    private scheduleRafWrite(data: Uint8Array) {
-        // Double-rAF tear-out (term:disablerafcoalesce=true): bypass our Stage-1
-        // rAF coalescer entirely and write straight to xterm.js. xterm's own
-        // RenderDebouncer already coalesces same-frame writes into one render, so
-        // our extra rAF is a SECOND frame gate in series — adding latency and
-        // beating against xterm's rAF (uneven frame pacing / "hiccups"). Writing
-        // direct lets xterm own coalescing, matching how VS Code drives xterm.
-        //
-        // EXPERIMENTAL — default is coalesce=true. Our Stage-1 rAF was added to
-        // fix a real Windows-10 DWM scroll-flash with Ink TUIs (cursor-up +
-        // content arriving as separate WS messages presented as two frames; PR
-        // #208). On Windows 11 the compositor coalesces those within vsync, so
-        // the fix may be obsolete there. MUST be re-verified on Windows 10
-        // before flipping the default. See SPEC_TERM_DOUBLE_RAF_TEAROUT_2026_05_30.
-        if (!this.coalesceWrites) {
-            if (data.length <= 32) markStart('term-echo-render');
-            this.doTerminalWrite(data, null);
-            return;
-        }
-        // Fast path: small data, nothing buffered — bypass RAF to eliminate echo delay.
-        // writeInFlight is intentionally NOT checked here: xterm.js serialises all
-        // terminal.write() calls internally, so a concurrent small write always lands
-        // after the in-flight batch without ordering issues. Removing the writeInFlight
-        // guard eliminates the extra RAF cycle (≤16ms) that was stalling echo rendering
-        // while a large PTY write was in progress, causing the sporadic keypress delays.
-        if (data.length <= TermWrap.RAF_BYPASS_THRESHOLD && this.rafBuffer.length === 0) {
-            if (data.length <= 32) markStart('term-echo-render');
-            this.doTerminalWrite(data, null);
-            return;
-        }
-        this.rafBuffer.push(data);
-        this.armRaf();
-    }
-
-    // Schedule a RAF flush if one isn't already pending and no write is in flight.
-    private armRaf() {
-        if (this.rafPending || this.writeInFlight) return;
-        this.rafPending = true;
-        requestAnimationFrame(() => {
-            this.rafPending = false;
-            if (this.rafBuffer.length === 0) return;
-            const totalLen = this.rafBuffer.reduce((n, b) => n + b.length, 0);
-            const merged = new Uint8Array(totalLen);
-            let offset = 0;
-            for (const chunk of this.rafBuffer) {
-                merged.set(chunk, offset);
-                offset += chunk.length;
-            }
-            const chunkCount = this.rafBuffer.length;
-            this.rafBuffer = [];
-            this.writeInFlight = true;
-            markStart('term-raf-write');
-            const t0 = performance.now();
-            this.doTerminalWrite(merged, null).then(() => {
-                this.writeInFlight = false;
-                const elapsed = performance.now() - t0;
-                markEnd('term-raf-write', 'done');
-                const bufLines = this.terminal.buffer.active.length;
-                if (elapsed > 4) {
-                    console.warn(`[raf-write] SLOW chunks=${chunkCount} bytes=${totalLen} elapsed=${elapsed.toFixed(1)}ms bufLines=${bufLines}`);
-                }
-                // Drain any data that arrived while the write was in progress.
-                if (this.rafBuffer.length > 0) this.armRaf();
-            });
-        });
-    }
-
+    // The Stage-1 rAF originally fixed a Windows-10 DWM scroll-flash with Ink TUIs
+    // (cursor-up + content arriving as separate WS messages presented as two
+    // frames; PR #208) — invisible on Windows 11, where the compositor coalesces
+    // within vsync. xterm's debouncer renders only once per frame, so the
+    // intermediate up/down viewport state should not paint separately even on
+    // Win10; that must be re-verified on real Windows 10 (see the spec). If the
+    // flash regresses, the fix is backend-side read coalescing (merge consecutive
+    // PTY reads into one WS message in agentmux-srv), NOT a second frontend rAF.
     doTerminalWrite(data: string | Uint8Array, setPtyOffset?: number): Promise<void> {
         const isSmall = data.length <= 32;
         let resolve: () => void = null;
