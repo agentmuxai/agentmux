@@ -3,6 +3,8 @@
 
 import { Logger } from "@/util/logger";
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
+import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
+import { isWindows } from "@/util/platformutil";
 import { createMemo, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import clsx from "clsx";
@@ -75,14 +77,16 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 // anchor the new window so the cursor stays on the same
                 // pixel of the same tab across the handoff.
                 //
-                // Note: we DO NOT suppress the OS drag image even though
-                // the spec drafted it. SC_MOVE doesn't actually engage
-                // during the HTML5 drag (pragmatic-dnd's OLE capture
-                // blocks the modal move-loop), so the new window only
-                // appears on mouseup. Suppressing the OS ghost leaves
-                // the user with a no-drop cursor and zero visual
-                // feedback during drag — strictly worse. Spec §4.5
-                // updated to reflect this.
+                // Note: we DO NOT suppress the OS drag image — the ghost
+                // following the cursor is the only drag feedback (SC_MOVE
+                // doesn't engage during the HTML5 drag; the new window
+                // appears on mouseup). We keep the ghost AND stop the
+                // "drop rejected" snapback via `preventUnhandled` in
+                // onDragStart/onDrop (macOS/Linux). An earlier note here
+                // argued against suppressing the ghost because it left a
+                // no-drop cursor with zero feedback — that's moot now:
+                // PR #1175 fixed the cursor (→ "move"), and this path
+                // keeps the ghost and only removes the snapback.
                 const tabRect = tabWrapRef.getBoundingClientRect();
                 setTabGrabOffset({
                     x: location.current.input.clientX - tabRect.left,
@@ -95,6 +99,17 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 });
             },
             onDragStart: () => {
+                // Suppress the WebKit/WebKitGTK "drop rejected" snapback on
+                // tab tear-off (macOS/Linux): the tab is released outside any
+                // pragmatic-dnd drop target (the new window is created on
+                // dragend), so the browser would otherwise animate the drag
+                // ghost back into the source window. preventUnhandled makes the
+                // drop "handled" so the ghost just vanishes on release.
+                // Windows is excluded — its SC_MOVE tear-off path relies on
+                // the existing behavior, and the move cursor there isn't fixed
+                // by PR #1175 (darwin/linux only). In-window tab reorder still
+                // works via pragmatic-dnd's own drop targets.
+                if (!isWindows()) preventUnhandled.start();
                 setGlobalDragTabId(props.tabId);
                 setInsertionPoint(null);
                 setIsDragging(true);
@@ -107,6 +122,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 });
             },
             onDrop: () => {
+                if (!isWindows()) preventUnhandled.stop();
                 setGlobalDragTabId(null);
                 setIsDragging(false);
                 // Do NOT clear setTabGrabOffset here. pragmatic-dnd's
