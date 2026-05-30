@@ -21,9 +21,13 @@
  *    a targeted document mousedown listener scoped to
  *    `[data-role="block-header"]` (and skipping interactive elements
  *    via `target.closest('button, a, input, ...')`) drives
- *    `get/set_window_position` IPC. `preventDefault` on mousedown
- *    blocks the HTML5 dragstart pragmatic-dnd would otherwise have
- *    used, suppressing a "double tear-off" regression. See
+ *    `get/set_window_position` IPC on Windows and macOS. On Linux
+ *    (Wayland forbids client-driven top-level repositioning) it instead
+ *    fires a single `start_window_drag` IPC that hands the drag to the
+ *    compositor — same path as the main window's `useWindowDrag.linux`.
+ *    `preventDefault` on mousedown blocks the HTML5 dragstart
+ *    pragmatic-dnd would otherwise have used, suppressing a "double
+ *    tear-off" regression. See
  *    `docs/analyses/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md`
  *    for why we use JS-driven drag rather than OS HTCAPTION.
  *

@@ -48,8 +48,17 @@ function CrossWindowDragMonitor(): JSX.Element {
 
             if (!payload) return;
 
+            // Drop coordinates straight from the DOM event. `screenX/Y` are
+            // top-left-origin screen coords in CSS px (= DIP), which is what
+            // CEF Views window positioning expects on Linux. Don't round-trip
+            // through `get_cursor_point` — that command is Windows-only
+            // (returns 0,0 on non-Windows builds, drag.rs:211-212), which
+            // would open the floater at the screen corner.
+            const dropX = e.screenX;
+            const dropY = e.screenY;
+
             await new Promise((r) => setTimeout(r, 50));
-            await handleCrossWindowDragEnd(payload, windowLabelRef);
+            await handleCrossWindowDragEnd(payload, windowLabelRef, dropX, dropY);
         };
 
         // Suppress the "operation not allowed" cursor during a cross-window
@@ -81,14 +90,16 @@ function CrossWindowDragMonitor(): JSX.Element {
     return null;
 }
 
-async function handleCrossWindowDragEnd(payload: DragItemPayload, sourceWindow: string | null) {
-    let cursorPoint: { x: number; y: number };
-    try {
-        cursorPoint = await invokeCommand<{ x: number; y: number }>("get_cursor_point");
-    } catch (e) {
-        Logger.error("dnd:cross", "failed to get cursor position", { error: String(e) });
-        return;
-    }
+async function handleCrossWindowDragEnd(
+    payload: DragItemPayload,
+    sourceWindow: string | null,
+    dropX: number,
+    dropY: number,
+) {
+    // `get_cursor_point` is a Windows-only host command (GetCursorPos); on
+    // Linux it returns 0,0. Use the DOM drop coordinates (top-left origin,
+    // CSS px = DIP) — correct for CEF Views positioning.
+    const cursorPoint = { x: dropX, y: dropY };
 
     let windows: string[];
     try {
