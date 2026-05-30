@@ -678,6 +678,33 @@ pub struct AppState {
     pub pane_overlay_rects:
         Mutex<std::collections::HashMap<String, Vec<(i32, i32, i32, i32)>>>,
 
+    /// Windows only — last-applied clip signature per pane *label*, so
+    /// `BrowserPaneManager::set_pane_overlay_clip` can skip a redundant
+    /// `SetWindowRgn` + `InvalidateRect` when a pane's computed region is
+    /// unchanged since the previous call (the common case: one overlay moves,
+    /// every other pane's clip is identical).
+    ///
+    /// Keyed by label, NOT by HWND: HWND integer values are recycled by the OS,
+    /// so an HWND key risks a stale entry colliding with a recreated pane.
+    ///
+    /// Why a wrong-skip can't happen:
+    /// - **Labels are globally unique and never reused** (monotonic
+    ///   `BROWSER_PANE_LABEL_SEQ`; see `next_browser_pane_label`). A
+    ///   close→recreate registers the new pane under a brand-new label, so the
+    ///   label-keyed cache always *misses* and re-applies. This is the primary
+    ///   guarantee.
+    /// - The HWND value is also folded INTO the signature as cheap
+    ///   belt-and-suspenders: even if a label were somehow reused, a different
+    ///   (or recycled-but-distinct) HWND yields a different signature → re-apply.
+    /// - `set_pane_overlay_clip` holds this lock across check → apply → record,
+    ///   so the recorded signature always matches the region that call actually
+    ///   applied even though the Windows handler runs on multiple tokio workers.
+    ///
+    /// We only skip when the same label already has the same region on the same
+    /// HWND. Pruned to live labels each call to bound size.
+    #[cfg(target_os = "windows")]
+    pub pane_clip_cache: Mutex<std::collections::HashMap<String, u64>>,
+
     /// Linux/macOS only — OverlayControllers awaiting deferred destroy.
     ///
     /// Calling `OverlayController::destroy()` synchronously on the same UI
@@ -812,6 +839,8 @@ impl Default for AppState {
             pane_overlay_rects: Mutex::new(HashMap::new()),
             #[cfg(not(target_os = "windows"))]
             pending_overlay_destroy: Mutex::new(HashMap::new()),
+            #[cfg(target_os = "windows")]
+            pane_clip_cache: Mutex::new(HashMap::new()),
             // window_pool / unpromoted_pool_labels / window_pool_respawn_in_flight
             // deleted (PR #5 H.4) — see HostState.pool.
             // is_quitting deleted (PR #5 H.5) — see HostState.quit_state.
