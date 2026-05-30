@@ -233,12 +233,14 @@ pub fn start_window_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Res
 /// kicks off `RedockFloatingPane`.
 ///
 /// Args: `{ "x": int, "y": int, "exclude_label": string|null }` —
-/// cursor position in physical px (whatever `get_cursor_point`
-/// returned). `exclude_label` is the source floater's label; without
-/// it, `WindowFromPoint` returns the floater itself (the floater
-/// follows the cursor during drag, so it's always at the cursor in
-/// Z-order). We walk top-levels in Z-order from front to back and
-/// return the first match that ISN'T the excluded source.
+/// cursor position in the host coordinate space: physical px on Windows
+/// (from `get_cursor_point`/`GetCursorPos`), DIP on macOS/Linux (from the
+/// DOM drop event's `screenX/Y`; the posScale() rule). `exclude_label` is
+/// the source floater's label; without it the hit-test returns the floater
+/// itself (it follows the cursor during drag, so it's always topmost at the
+/// cursor). Windows walks HWND Z-order front-to-back; macOS/Linux hit-test
+/// CEF Views bounds (see `ui_tasks::resolve_window_at_cursor_blocking`).
+/// Either way we return the first match that ISN'T the excluded source.
 ///
 /// Returns: `{ "label": string|null, "window_id": string|null }`. Both
 /// null means no agentmux window of this process is under the cursor
@@ -417,7 +419,10 @@ pub fn update_floating_redock_hover(
     // Emit on every call (frontend throttles ~50 ms upstream). The
     // event must carry the cursor position so target renderers can
     // compute which TILE the cursor is over and highlight just that
-    // leaf (not the whole window). Cursor is in physical screen px.
+    // leaf (not the whole window). The cursor is in the sender's host
+    // coordinate space — physical screen px on Windows, DIP on
+    // macOS/Linux (the posScale() rule) — and the receiver inverts it
+    // accordingly (app-init.ts divides by DPR only on Windows).
     let payload = serde_json::json!({
         "target_label": new_target.clone(),
         "source_label": source_label,
