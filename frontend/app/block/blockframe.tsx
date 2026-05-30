@@ -20,7 +20,6 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { IconButton, ToggleIconButton } from "@/element/iconbutton";
 import { BlockStatsBadge } from "@/element/blockstats";
-import { MagnifyIcon } from "@/element/magnify";
 import { MenuButton } from "@/element/menubutton";
 import { MicButton } from "@/app/element/MicButton";
 import { invokeCommand } from "@/app/platform/ipc";
@@ -174,8 +173,8 @@ function getViewIconElem(viewIconUnion: string | IconButtonDecl, blockData: Bloc
 function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void; disabled: boolean }): JSX.Element {
     const magnifyDecl = createMemo<IconButtonDecl>(() => ({
         elemtype: "iconbutton",
-        icon: <MagnifyIcon enabled={props.magnified} />,
-        title: props.magnified ? "Minimize" : "Magnify",
+        icon: props.magnified ? "window-restore" : "window-maximize",
+        title: props.magnified ? "Restore" : "Maximize",
         click: props.toggleMagnify,
         disabled: props.disabled,
     }));
@@ -197,7 +196,7 @@ function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void
 function FloatingMaximizeButton(props: { label: string }): JSX.Element {
     const decl: IconButtonDecl = {
         elemtype: "iconbutton",
-        icon: <MagnifyIcon enabled={false} />,
+        icon: "window-maximize",
         title: "Maximize",
         click: () => {
             invokeCommand("toggle_floating_maximize", { label: props.label }).catch(console.error);
