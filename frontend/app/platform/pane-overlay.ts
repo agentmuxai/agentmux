@@ -132,7 +132,27 @@ function flushClip(): void {
     }
     // What we'll actually send: the intersecting set when there IS an
     // intersection, else an explicit empty set to clear.
-    const rectsToSend = intersects ? rects : [];
+    //
+    // Convert CSS px → physical px HERE. The host computes each pane's
+    // geometry from GetWindowRect (physical px) and subtracts these overlay
+    // rects directly (browser_panes.rs::set_pane_overlay_clip — no DPI
+    // scaling on that side). A CSS-px rect therefore punches the airspace
+    // hole in the wrong place and at the wrong size on any display scale
+    // != 100%: black voids where the hole misses the overlay, and the pane
+    // covering the overlay where the hole is too small (the "offset menus /
+    // black spots / hidden" airspace bug — see
+    // docs/analysis/ANALYSIS_BROWSER_PANE_AIRSPACE_ARCHITECTURE_2026_05_30.md).
+    // Mirror browser-view.tsx::paneRect's `Math.round(v * dpr)` convention
+    // EXACTLY so the hole and the pane HWND share rounding and never leave a
+    // 1px seam. The intersection gate above stays in CSS px because the
+    // pane-rect registry it tests against is CSS px.
+    const dpr = window.devicePixelRatio || 1;
+    const rectsToSend: OverlayRect[] = (intersects ? rects : []).map((r) => ({
+        x: Math.round(r.x * dpr),
+        y: Math.round(r.y * dpr),
+        w: Math.round(r.w * dpr),
+        h: Math.round(r.h * dpr),
+    }));
     const sendKey = rectsKey(rectsToSend);
     // Identical-rect deduplication — if the menu closes-then-reopens
     // exactly the same overlay rect within one tick, skip the redundant
