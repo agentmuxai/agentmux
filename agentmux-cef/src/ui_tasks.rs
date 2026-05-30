@@ -237,6 +237,189 @@ pub fn post_start_drag(state: &Arc<AppState>, label: &str) {
 #[cfg(target_os = "windows")]
 pub fn post_start_drag(_state: &Arc<AppState>, _label: &str) {}
 
+// ── Win32 host-side manual native move loop ───────────────────────────────
+//
+// The raw `WM_NCLBUTTONDOWN(HTCAPTION)` trick does NOT work with a CEF/Chromium
+// window: Chromium's HWNDMessageHandler swallows the non-client message and only
+// runs an OS drag for `-webkit-app-region:drag` regions (which we can't use —
+// they suppress renderer events). Instrumented proof: on the UI thread with
+// `release_ok=true`, SendMessage(WM_NCLBUTTONDOWN) returned in 0.4ms — the move
+// loop never engaged. So we run the move loop OURSELVES, on the UI thread (which
+// owns the window + capture), driving `SetWindowPos` per mouse-move with zero
+// per-move IPC. Full design + risks: SPEC_WINDOW_DRAG_MANUAL_MOVE_LOOP_2026_05_29.
+#[cfg(target_os = "windows")]
+wrap_task! {
+    pub struct Win32BeginMoveTask {
+        hwnd: u64,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
+            use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+                GetAsyncKeyState, GetCapture, ReleaseCapture, SetCapture, VK_ESCAPE, VK_LBUTTON,
+            };
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                DispatchMessageW, GetCursorPos, GetMessageW, GetWindowRect, KillTimer,
+                PeekMessageW, PostQuitMessage, SendMessageW, SetTimer, SetWindowPos,
+                TranslateMessage, MSG, PM_REMOVE, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+                WM_KEYDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_TIMER,
+            };
+
+            let h = self.hwnd as HWND;
+            // High bit of GetAsyncKeyState = key currently down.
+            let lbutton_down = || unsafe {
+                (GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000) != 0
+            };
+
+            unsafe {
+                // 0. Bail if the press already ended (fast click / late task).
+                if !lbutton_down() {
+                    tracing::info!(
+                        "[start_window_drag] manual move loop skipped — button already up hwnd={:#x}",
+                        self.hwnd
+                    );
+                    return;
+                }
+
+                // 1. Capture the mouse to THIS (UI) thread so WM_MOUSEMOVE /
+                //    WM_LBUTTONUP route to our GetMessage loop. ReleaseCapture
+                //    first to drop any capture Chromium set on the press.
+                ReleaseCapture();
+                let prev_capture = SetCapture(h);
+                // Confirm we actually hold capture; if not, mouse moves won't
+                // reach our loop and the drag would silently no-op (reagent #1).
+                if GetCapture() != h {
+                    tracing::warn!(
+                        "[start_window_drag] SetCapture did not take hwnd={:#x} prev={:#x}",
+                        self.hwnd, prev_capture as usize
+                    );
+                }
+                // Wake the loop ~10x/sec even with no mouse input, so a stolen
+                // capture or a missed WM_LBUTTONUP can't hang the UI thread —
+                // the top-of-loop button-state check then ends the drag
+                // (reagent #2; the blocking-GetMessage hang noted in the spec).
+                const DRAG_TICK_ID: usize = 0xD9A6;
+                SetTimer(h, DRAG_TICK_ID, 100, None);
+
+                // 2. Anchor in physical screen px — no devicePixelRatio math.
+                let mut anchor = POINT { x: 0, y: 0 };
+                GetCursorPos(&mut anchor);
+                let mut r: RECT = std::mem::zeroed();
+                GetWindowRect(h, &mut r);
+                let (x0, y0) = (r.left, r.top);
+                tracing::info!(
+                    "[start_window_drag] manual move loop begin hwnd={:#x} anchor=({},{}) origin=({},{})",
+                    self.hwnd, anchor.x, anchor.y, x0, y0
+                );
+
+                // 3. Modal move loop on the UI thread.
+                let mut msg: MSG = std::mem::zeroed();
+                let mut moves: u32 = 0;
+                let mut cancelled = false;
+                loop {
+                    // Safety net: GetAsyncKeyState reflects PHYSICAL button state,
+                    // which can lead the message queue — so a release arriving
+                    // just after a WM_MOUSEMOVE/WM_TIMER would trip this check and
+                    // break BEFORE the queued WM_LBUTTONUP is dispatched, leaving
+                    // the up to land off-window post-ReleaseCapture and Chromium's
+                    // mousedown unbalanced (reagent P1 / spec §5.1). So before
+                    // breaking, drain a queued WM_LBUTTONUP (capture still held)
+                    // and dispatch it; if none is queued yet, synthesize one so
+                    // the renderer always sees its balancing up.
+                    if !lbutton_down() {
+                        let mut up: MSG = std::mem::zeroed();
+                        if PeekMessageW(&mut up, h, WM_LBUTTONUP, WM_LBUTTONUP, PM_REMOVE) != 0 {
+                            DispatchMessageW(&up);
+                        } else {
+                            SendMessageW(h, WM_LBUTTONUP, 0, 0);
+                        }
+                        break;
+                    }
+                    let got = GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0);
+                    if got <= 0 {
+                        if got == 0 {
+                            // WM_QUIT — don't swallow app shutdown.
+                            PostQuitMessage(msg.wParam as i32);
+                        }
+                        break;
+                    }
+                    match msg.message {
+                        WM_MOUSEMOVE => {
+                            // After Esc-cancel we keep looping (so the renderer
+                            // still gets its balancing WM_LBUTTONUP on release)
+                            // but stop moving the window.
+                            if !cancelled {
+                                let mut cur = POINT { x: 0, y: 0 };
+                                GetCursorPos(&mut cur);
+                                SetWindowPos(
+                                    h,
+                                    std::ptr::null_mut(),
+                                    x0 + (cur.x - anchor.x),
+                                    y0 + (cur.y - anchor.y),
+                                    0,
+                                    0,
+                                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                                );
+                                moves += 1;
+                            }
+                        }
+                        WM_LBUTTONUP => {
+                            // Let Chromium see the up so its input state stays
+                            // balanced against the mousedown the renderer got
+                            // (SPEC §5.1).
+                            DispatchMessageW(&msg);
+                            break;
+                        }
+                        WM_KEYDOWN if (msg.wParam as u16) == VK_ESCAPE => {
+                            // Cancel: restore the start position, but DON'T break
+                            // — keep capture and keep looping so the eventual
+                            // WM_LBUTTONUP is still dispatched to balance the
+                            // renderer's mousedown (reagent P1 / spec §5.1).
+                            // Further moves are ignored via `cancelled`.
+                            SetWindowPos(
+                                h,
+                                std::ptr::null_mut(),
+                                x0,
+                                y0,
+                                0,
+                                0,
+                                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                            );
+                            cancelled = true;
+                        }
+                        WM_TIMER if msg.wParam == DRAG_TICK_ID => {
+                            // Our wake tick — consume ONLY ours; the top-of-loop
+                            // button-state check re-runs on the next iteration.
+                            // Other timers fall through to the `_` arm so CEF's
+                            // own timers aren't dropped during the drag.
+                        }
+                        _ => {
+                            // Keep the app alive (paint, DPI changes, sent msgs).
+                            TranslateMessage(&msg);
+                            DispatchMessageW(&msg);
+                        }
+                    }
+                }
+
+                // 4. Stop the wake tick and release capture.
+                KillTimer(h, DRAG_TICK_ID);
+                ReleaseCapture();
+                tracing::info!(
+                    "[start_window_drag] manual move loop end hwnd={:#x} moves={}",
+                    self.hwnd, moves
+                );
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn post_win32_begin_move(hwnd: u64) {
+    let mut task = Win32BeginMoveTask::new(hwnd);
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
 // ── Move window ───────────────────────────────────────────────────────────
 
 wrap_task! {
