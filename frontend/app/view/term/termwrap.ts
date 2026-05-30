@@ -49,6 +49,12 @@ type TermWrapOptions = {
     keydownHandler?: (e: KeyboardEvent) => boolean;
     useWebGl?: boolean;
     sendDataHandler?: (data: string) => void;
+    // When false, bypass our own RAF write-coalescer and write straight to
+    // xterm.js, letting its built-in RenderDebouncer own frame coalescing.
+    // Removes the "double rAF" (our rAF feeding xterm's rAF). Default true
+    // (keep the Tier-3 Win10 scroll-flash fix, PR #208). Toggled by the
+    // `term:disablerafcoalesce` setting — see SPEC_TERM_DOUBLE_RAF_TEAROUT.
+    coalesceWrites?: boolean;
 };
 
 /**
@@ -87,6 +93,9 @@ export class TermWrap {
     private rafBuffer: Uint8Array[] = [];
     private rafPending: boolean = false;
     private writeInFlight: boolean = false;
+    // Stage-1 RAF coalescer toggle. true = coalesce (default, Tier-3 fix);
+    // false = write straight to xterm (double-rAF tear-out experiment).
+    private coalesceWrites: boolean = true;
     // Thaw-cycle handles — cleared in dispose() so callbacks don't fire
     // on a disposed Terminal. dispose() doesn't null `this.terminal`, so
     // a null-check guard alone isn't enough.
@@ -105,6 +114,7 @@ export class TermWrap {
         this.loaded = false;
         this.blockId = blockId;
         this.sendDataHandler = waveOptions.sendDataHandler;
+        this.coalesceWrites = waveOptions.coalesceWrites ?? true;
         this.ptyOffset = 0;
         this.dataBytesProcessed = 0;
         this.lastUpdated = Date.now();
@@ -485,6 +495,24 @@ export class TermWrap {
     private static readonly RAF_BYPASS_THRESHOLD = 512; // bytes
 
     private scheduleRafWrite(data: Uint8Array) {
+        // Double-rAF tear-out (term:disablerafcoalesce=true): bypass our Stage-1
+        // rAF coalescer entirely and write straight to xterm.js. xterm's own
+        // RenderDebouncer already coalesces same-frame writes into one render, so
+        // our extra rAF is a SECOND frame gate in series — adding latency and
+        // beating against xterm's rAF (uneven frame pacing / "hiccups"). Writing
+        // direct lets xterm own coalescing, matching how VS Code drives xterm.
+        //
+        // EXPERIMENTAL — default is coalesce=true. Our Stage-1 rAF was added to
+        // fix a real Windows-10 DWM scroll-flash with Ink TUIs (cursor-up +
+        // content arriving as separate WS messages presented as two frames; PR
+        // #208). On Windows 11 the compositor coalesces those within vsync, so
+        // the fix may be obsolete there. MUST be re-verified on Windows 10
+        // before flipping the default. See SPEC_TERM_DOUBLE_RAF_TEAROUT_2026_05_30.
+        if (!this.coalesceWrites) {
+            if (data.length <= 32) markStart('term-echo-render');
+            this.doTerminalWrite(data, null);
+            return;
+        }
         // Fast path: small data, nothing buffered — bypass RAF to eliminate echo delay.
         // writeInFlight is intentionally NOT checked here: xterm.js serialises all
         // terminal.write() calls internally, so a concurrent small write always lands
