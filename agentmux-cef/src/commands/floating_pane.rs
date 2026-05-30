@@ -1,30 +1,27 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase 1 of the floating-pane tear-off feature (issue #810 + spec
-//! `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md`).
+//! Floating-pane tear-off — the `open_floating_pane_window` IPC command.
+//! Specs: `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md` (Windows,
+//! issue #810) + `docs/specs/SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md`
+//! (macOS/Linux Phase A).
 //!
-//! This module hosts the IPC command and Win32-native primitive that
-//! creates a *subordinate* floating window — a free-positioned palette-
-//! style window OWNED by the source AgentMux main window. Unlike the
-//! existing tab tear-off path (which spawns a full new AgentMux
-//! instance), a floating pane:
+//! Creates a *subordinate* floating window — a free-positioned, chromeless
+//! window showing just the torn-off pane (no tab bar, no widget bar). Unlike
+//! the tab tear-off path (which spawns a full new AgentMux instance), a
+//! floating pane shares the source instance's sidecar, data dir, and reducer
+//! state. The embedded browser loads
+//! `<frontend>?floatingPaneId=<id>&windowLabel=floating-<n>&workspaceId=<ws>`
+//! and the frontend renders `<FloatingPaneWorkspace>` (chromeless).
 //!
-//! - has no taskbar entry (`WS_EX_TOOLWINDOW`),
-//! - has no Alt-Tab entry (also `WS_EX_TOOLWINDOW`),
-//! - minimizes / restores / destroys with its owner,
-//! - shares the source instance's sidecar, data dir, and reducer state.
-//!
-//! Phase 1 ships **only** the windowing primitive. The browser embedded
-//! in the floating window loads
-//! `<frontend>?floatingPaneId=<id>&windowLabel=floating-<n>` and the
-//! frontend renders a minimal placeholder shell that says "Floating
-//! pane: \<id\>". Wiring the *drag-out gesture* to this primitive is
-//! Phase 3. Wiring the full `<Block>` renderer is Phase 2.
-//!
-//! Non-Windows platforms are out of scope per spec §10. The macOS path
-//! is `NSWindow::addChildWindow`; Linux varies by compositor. Both will
-//! be addressed in a follow-up.
+//! Platform primitive differs by OS:
+//! - **Windows**: a raw `WS_POPUP + WS_EX_TOOLWINDOW` HWND OWNED by the source
+//!   main window (no taskbar/Alt-Tab entry; minimizes/restores/destroys with
+//!   its owner), CEF browser embedded — see `crate::floating_pane`.
+//! - **macOS / Linux** (Phase A): a frameless CEF Views window created via the
+//!   same `ui_tasks::post_create_window(frameless=true)` path the regular
+//!   tear-off uses, with `&floatingPaneId=` injected into the URL. Owned-window
+//!   lifecycle + redock are follow-ups (see the macOS spec, Phase B).
 
 use std::sync::Arc;
 
@@ -154,14 +151,76 @@ pub fn open_floating_pane_window(
 
     #[cfg(not(target_os = "windows"))]
     {
-        // Phase 1 is Windows-only per spec §10. macOS uses
-        // `NSWindow::addChildWindow`; Linux varies. Both are explicit
-        // follow-ups; return a clear error so callers fail loudly.
-        let _ = parsed;
-        let _ = window_label;
-        Err(
-            "open_floating_pane_window: not yet implemented on this platform (Windows only in Phase 1)"
-                .to_string(),
-        )
+        // Phase A (SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md): create a
+        // frameless top-level window via the SAME CEF Views path the regular
+        // tear-off uses (`open_window_at_position` →
+        // `ui_tasks::post_create_window(..., frameless=true)`), but with a
+        // `floatingPaneId` in the URL so the frontend renders
+        // `<FloatingPaneWorkspace>` (chromeless: no tab bar, no widget bar)
+        // instead of `<Workspace>`. Secondary windows are already frameless on
+        // macOS/Linux (window/creation.rs), so this alone produces "just the
+        // pane" — the user's request.
+        //
+        // No DPI scaling on non-Windows: the Windows-only block above is
+        // skipped, and CEF Views positions/sizes in DIP (logical px), which is
+        // exactly what `width`/`height` (from `getBoundingClientRect`) and
+        // `x`/`y` (from the DOM drop event's `screenX/Y`) already are.
+        //
+        // Phase B adds owned-window lifecycle (follows/minimizes/closes with
+        // the source window), JS header-drag, and redock — see the spec.
+        let ipc_port = *state.ipc_port.lock();
+        let ipc_token = &state.ipc_token;
+        let workspace_id = parsed.workspace_id.clone().unwrap_or_default();
+
+        let url = match super::window::resolve_frontend_base_url(ipc_port) {
+            Ok(base_url) => {
+                let separator = if base_url.contains('?') { "&" } else { "?" };
+                let mut u = format!(
+                    "{}{}ipc_port={}&ipc_token={}&windowLabel={}&floatingPaneId={}",
+                    base_url, separator, ipc_port, ipc_token, window_label, parsed.pane_id
+                );
+                if !workspace_id.is_empty() {
+                    u.push_str(&format!("&workspaceId={}", workspace_id));
+                }
+                u
+            }
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    label = %window_label,
+                    "[floating-pane] frontend assets unavailable — opening static error page",
+                );
+                super::window::assets_missing_data_url(&e)
+            }
+        };
+
+        // Register the pending window (same as the tear-off cold path). The
+        // floater shares the source instance's sidecar/data dir — it's not a
+        // separate launcher instance — but on non-Windows there is no launcher
+        // bookkeeping, so `FullInstance` (matching `open_window_at_position`)
+        // is the proven kind for this creation path. Phase B (owned window)
+        // may revisit.
+        state.host_dispatch(
+            crate::reducer::HostCommand::EnqueuePendingWindowCreation {
+                entry: crate::state::PendingWindowCreation {
+                    label: window_label.clone(),
+                    kind: crate::state::WindowKind::FullInstance,
+                    parent_instance_id: None,
+                },
+            },
+        );
+
+        crate::ui_tasks::post_create_window(
+            state,
+            &url,
+            &window_label,
+            parsed.x,
+            parsed.y,
+            parsed.width,
+            parsed.height,
+            true, // frameless — secondary windows use the custom title bar
+        );
+
+        Ok(serde_json::to_value(OpenFloatingPaneResponse { window_label }).unwrap_or_default())
     }
 }

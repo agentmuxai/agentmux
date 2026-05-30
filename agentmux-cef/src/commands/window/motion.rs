@@ -40,6 +40,17 @@ pub fn get_window_position(state: &Arc<AppState>, args: &serde_json::Value) -> R
             return Ok(serde_json::json!({ "x": rect.left, "y": rect.top }));
         }
     }
+    // macOS / Linux: CEF Views windows report DIP bounds; read them on the UI
+    // thread. The floating-pane header drag uses this as its absolute-move
+    // baseline, adding CSS-px (= DIP) deltas with no DPR scaling — see
+    // floating-pane-workspace.tsx `posScale()`. (Windows works in physical px
+    // and scales by devicePixelRatio; that path returns above.)
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Some((x, y)) = crate::ui_tasks::get_window_position_blocking(state, label) {
+            return Ok(serde_json::json!({ "x": x, "y": y }));
+        }
+    }
     let _ = (state, label);
     Ok(serde_json::json!({ "x": 0, "y": 0 }))
 }

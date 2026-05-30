@@ -234,11 +234,12 @@ async fn route_command(
             commands::window::open_subwindow(state, parent)
         }
         "open_floating_pane_window" => {
-            // Phase 1 of floating-pane tear-off (issue #810 / spec
-            // SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md). Creates a
-            // subordinate `WS_POPUP + WS_EX_TOOLWINDOW` HWND owned by
-            // the source main window, with a CEF browser embedded.
-            // Windows-only; macOS / Linux return a clear error.
+            // Floating-pane tear-off — a chromeless window showing just the
+            // torn-off pane. Windows: a subordinate WS_POPUP+WS_EX_TOOLWINDOW
+            // HWND owned by the source window. macOS/Linux (Phase A): a
+            // frameless CEF Views window with ?floatingPaneId= in the URL.
+            // Specs: SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md +
+            // SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md.
             commands::floating_pane::open_floating_pane_window(state, args)
         }
         "get_instance_number" => Ok(commands::window::get_instance_number(state, args)),
@@ -251,7 +252,22 @@ async fn route_command(
         "start_window_drag" => commands::window::start_window_drag(state, args),
         "get_window_rect" => commands::window::get_window_rect(state, args),
         "set_window_rect" => commands::window::set_window_rect(state, args),
-        "get_window_position" => commands::window::get_window_position(state, args),
+        "get_window_position" => {
+            // Wrap in spawn_blocking — on macOS/Linux `get_window_position`
+            // bounces a CEF Views `bounds()` read through the UI thread and
+            // waits on a bounded channel for up to 250 ms
+            // (ui_tasks::get_window_position_blocking). Without this wrap it
+            // would block a Tokio worker, same as `tear_off_sc_move_handshake`
+            // above. (Windows reads GetWindowRect directly — cheap — but the
+            // wrap is harmless there and keeps the dispatch uniform.)
+            let state_clone = state.clone();
+            let args_clone = args.clone();
+            tokio::task::spawn_blocking(move || {
+                commands::window::get_window_position(&state_clone, &args_clone)
+            })
+            .await
+            .map_err(|e| format!("get_window_position join error: {}", e))?
+        }
         "resolve_window_at_cursor" => commands::window::resolve_window_at_cursor(state, args),
         "update_floating_redock_hover" => commands::window::update_floating_redock_hover(state, args),
         "clear_floating_redock_hover" => commands::window::clear_floating_redock_hover(state, args),
