@@ -257,12 +257,12 @@ wrap_task! {
         fn execute(&self) {
             use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
             use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-                GetAsyncKeyState, ReleaseCapture, SetCapture, VK_ESCAPE, VK_LBUTTON,
+                GetAsyncKeyState, GetCapture, ReleaseCapture, SetCapture, VK_ESCAPE, VK_LBUTTON,
             };
             use windows_sys::Win32::UI::WindowsAndMessaging::{
-                DispatchMessageW, GetCursorPos, GetMessageW, GetWindowRect, PostQuitMessage,
-                SetWindowPos, TranslateMessage, MSG, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
-                WM_KEYDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+                DispatchMessageW, GetCursorPos, GetMessageW, GetWindowRect, KillTimer,
+                PostQuitMessage, SetTimer, SetWindowPos, TranslateMessage, MSG, SWP_NOACTIVATE,
+                SWP_NOSIZE, SWP_NOZORDER, WM_KEYDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_TIMER,
             };
 
             let h = self.hwnd as HWND;
@@ -285,7 +285,21 @@ wrap_task! {
                 //    WM_LBUTTONUP route to our GetMessage loop. ReleaseCapture
                 //    first to drop any capture Chromium set on the press.
                 ReleaseCapture();
-                SetCapture(h);
+                let prev_capture = SetCapture(h);
+                // Confirm we actually hold capture; if not, mouse moves won't
+                // reach our loop and the drag would silently no-op (reagent #1).
+                if GetCapture() != h {
+                    tracing::warn!(
+                        "[start_window_drag] SetCapture did not take hwnd={:#x} prev={:#x}",
+                        self.hwnd, prev_capture as usize
+                    );
+                }
+                // Wake the loop ~10x/sec even with no mouse input, so a stolen
+                // capture or a missed WM_LBUTTONUP can't hang the UI thread —
+                // the top-of-loop button-state check then ends the drag
+                // (reagent #2; the blocking-GetMessage hang noted in the spec).
+                const DRAG_TICK_ID: usize = 0xD9A6;
+                SetTimer(h, DRAG_TICK_ID, 100, None);
 
                 // 2. Anchor in physical screen px — no devicePixelRatio math.
                 let mut anchor = POINT { x: 0, y: 0 };
@@ -349,6 +363,10 @@ wrap_task! {
                             );
                             break;
                         }
+                        WM_TIMER => {
+                            // Our wake tick — consume it; the top-of-loop
+                            // button-state check re-runs on the next iteration.
+                        }
                         _ => {
                             // Keep the app alive (paint, DPI changes, sent msgs).
                             TranslateMessage(&msg);
@@ -357,7 +375,8 @@ wrap_task! {
                     }
                 }
 
-                // 4. Always release capture.
+                // 4. Stop the wake tick and release capture.
+                KillTimer(h, DRAG_TICK_ID);
                 ReleaseCapture();
                 tracing::info!(
                     "[start_window_drag] manual move loop end hwnd={:#x} moves={}",
