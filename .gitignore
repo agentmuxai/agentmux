@@ -63,3 +63,7 @@ nul
 
 # Claude Code agent session state — worktrees, logs, todos, etc.
 .claude/
+
+# macOS packaging build artifact (signed .app — never commit)
+build/AgentMux.app/
+build/AgentMux.AppDir/
