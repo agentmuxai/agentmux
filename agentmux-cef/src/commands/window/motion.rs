@@ -188,8 +188,11 @@ pub fn set_window_rect(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 }
 
 /// Initiate window drag (for frameless windows).
-/// Windows: sends WM_NCLBUTTONDOWN/HTCAPTION via Win32 — find_own_top_level_window
-/// resolves the per-process HWND so multi-window works without a label.
+/// Windows: resolves the top-level HWND label-aware (`resolve_window_hwnd`, so a
+/// floating pane drags itself) and posts a host-side manual move loop on the CEF
+/// UI thread (`post_win32_begin_move` → `ui_tasks::Win32BeginMoveTask`). The raw
+/// WM_NCLBUTTONDOWN/HTCAPTION OS move loop does NOT work for a CEF window
+/// (Chromium's frame swallows it), so the host drives the loop itself.
 /// Linux/macOS: dispatches CefWindow::BeginWindowDrag on the UI thread; needs
 /// the source window's label so non-main windows drag themselves rather than
 /// the main window. Frontend reads `?windowLabel=…` from its URL and passes
@@ -197,15 +200,14 @@ pub fn set_window_rect(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 pub fn start_window_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "windows")]
     {
-        // ReleaseCapture() + WM_NCLBUTTONDOWN(HTCAPTION) starts the OS modal
-        // move loop — but BOTH must run on the CEF UI thread, the thread that
-        // OWNS the renderer's mouse capture. This handler runs on a tokio IPC
-        // worker, where `ReleaseCapture()` is a NO-OP (it releases only the
-        // calling thread's capture), so the renderer keeps capture and the move
-        // loop never engages. That is the historical "WM_NCLBUTTONDOWN loses
-        // mouse state". HWND lookup is thread-safe, so resolve here (label-aware,
-        // so a floating pane drags itself, not main) and marshal the begin-move
-        // onto the UI thread.
+        // The native move loop must run on the CEF UI thread (it owns the
+        // renderer's mouse capture). This IPC handler is on a tokio worker, so
+        // we only do thread-safe HWND lookup here (label-aware, so a floating
+        // pane drags itself, not main) and marshal the move loop onto the UI
+        // thread via `post_win32_begin_move`. The loop itself is a manual
+        // SetCapture + GetMessage + SetWindowPos loop (`ui_tasks::Win32BeginMoveTask`),
+        // NOT WM_NCLBUTTONDOWN — Chromium's frame swallows that NC message, so
+        // the OS modal move loop never engages for a CEF window.
         let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
         let hwnd = unsafe {
             let h = resolve_window_hwnd(state, label);

@@ -5,21 +5,20 @@
 //
 // Two implementations, chosen at install time:
 //
-//  - NATIVE (default) — SPEC_WINDOW_DRAG_NATIVE_MOVE_LOOP_2026_05_29.md.
+//  - NATIVE (default) — SPEC_WINDOW_DRAG_MANUAL_MOVE_LOOP_2026_05_29.md.
 //    Keep the title bar HTCLIENT (so right-click / contextmenu still fire),
-//    detect drag intent in JS, and on a 4px threshold hand the move to the OS
-//    via ONE fire-and-forget `start_window_drag` IPC. The host runs
-//    `ReleaseCapture()` + `SendMessageW(WM_NCLBUTTONDOWN, HTCAPTION)`, so the
-//    OS modal move loop tracks the cursor with ZERO further IPC — matching
-//    VS Code / Electron smoothness. This mirrors useWindowDrag.linux.ts.
+//    detect drag intent in JS, and on a 4px threshold hand the move to the host
+//    via ONE fire-and-forget `start_window_drag` IPC. The host then runs a
+//    manual native move loop on its UI thread (SetCapture + GetMessage +
+//    SetWindowPos per WM_MOUSEMOVE), tracking the cursor with ZERO further IPC
+//    — matching VS Code / Electron smoothness. (The raw WM_NCLBUTTONDOWN OS
+//    move loop does NOT work for a CEF window — Chromium's frame swallows it —
+//    so the host drives the loop itself.) Mirrors useWindowDrag.linux.ts.
 //
 //  - LEGACY JS (fallback) — JS-driven per-mousemove `set_window_position`.
 //    Smooth-but-laggy: the window position is gated on an IPC round-trip per
 //    move, so it lags the cursor under any host jitter. Kept behind a runtime
-//    opt-out while the native path is validated, because of a historical note
-//    that the native `WM_NCLBUTTONDOWN` path "loses mouse state" (this hook is
-//    the spike that verifies whether that still reproduces — the previous
-//    attempt awaited an IPC before sending; the native path here never awaits).
+//    opt-out while the host-side native move loop is validated.
 //
 // Toggle: native is ON by default. To force the legacy JS path, set
 //   localStorage['agentmux.win32NativeDrag'] = '0'
