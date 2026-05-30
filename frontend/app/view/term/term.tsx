@@ -20,6 +20,7 @@ import { DragOverlay } from "@/app/element/dragoverlay";
 import { detectHost, invokeCommand } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { baseName, consumeDragPaths, copyFilesToDir } from "@/util/dnd";
 
 // TermResyncHandler: watches connection status changes and resyncs the terminal controller.
 // Also resyncs when the backend restarts — local terminals have no connStatus change on restart,
@@ -278,7 +279,7 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
 
     const termBg = createMemo(() => computeBgStyleFromMeta(blockData()?.meta));
 
-    const handleFilesDropped = (paths: string[]) => {
+    const handleFilesDropped = async (paths: string[]) => {
         const cwd = blockData()?.meta?.["cmd:cwd"];
         if (!cwd) {
             console.warn("[term-drop] No working directory detected, ignoring drop");
@@ -292,23 +293,31 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
             });
             return;
         }
-        for (const filePath of paths) {
-            const fileName = filePath.split(/[\\/]/).pop() ?? filePath;
-            invokeCommand("copy_file_to_dir", { sourcePath: filePath, targetDir: cwd })
-                .then((destPath: any) => {
-                    console.log(`[term-drop] copied ${fileName} → ${destPath}`);
-                })
-                .catch((err: any) => {
-                    const msg = String(err);
-                    pushNotification({
-                        icon: "fa-triangle-exclamation",
-                        title: `Copy failed: ${fileName}`,
-                        message: msg,
-                        timestamp: new Date().toISOString(),
-                        type: "error",
-                        expiration: Date.now() + 12000,
-                    });
-                });
+        const outcome = await copyFilesToDir(paths, cwd);
+        const successes = outcome.results.filter((r) => r.dest);
+        const failures = outcome.results.filter((r) => r.error);
+        if (successes.length > 0) {
+            const summary =
+                successes.length === 1
+                    ? `Copied ${baseName(successes[0].dest!)} to ${cwd}`
+                    : `Copied ${successes.length} files to ${cwd}`;
+            pushNotification({
+                icon: "fa-check",
+                title: failures.length > 0 ? `${summary} (${failures.length} failed)` : summary,
+                message: failures.length > 0 ? failures.map((f) => `${baseName(f.source)}: ${f.error}`).join("\n") : "",
+                timestamp: new Date().toISOString(),
+                type: failures.length > 0 ? "warning" : "info",
+                expiration: Date.now() + 6000,
+            });
+        } else if (failures.length > 0) {
+            pushNotification({
+                icon: "fa-triangle-exclamation",
+                title: `Copy failed (${failures.length} file${failures.length === 1 ? "" : "s"})`,
+                message: failures.map((f) => `${baseName(f.source)}: ${f.error}`).join("\n"),
+                timestamp: new Date().toISOString(),
+                type: "error",
+                expiration: Date.now() + 12000,
+            });
         }
     };
 
@@ -326,21 +335,31 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
             const onDrop = (e: DragEvent) => {
                 e.preventDefault();
                 setIsDragOver(false);
-                // HTML5 File API doesn't expose full paths — CEF needs CefDragHandler for that.
-                // For now, log the file names as a placeholder.
                 const files = e.dataTransfer?.files;
-                if (files && files.length > 0) {
-                    const names = Array.from(files).map(f => f.name);
-                    console.log("[term-drop] CEF drop:", names.join(", "), "(full path copy not yet implemented)");
+                if (!files || files.length === 0) return;
+                // HTML5 File API only exposes bare filenames; the OS paths
+                // were captured by CefDragHandler::on_drag_enter and stashed
+                // in the host. Consume the stash now — it's keyed by drag
+                // session, not by pane, so it returns the same N paths the
+                // browser sees as `files`.
+                void consumeDragPaths().then((paths) => {
+                    if (paths.length > 0) {
+                        handleFilesDropped(paths);
+                        return;
+                    }
+                    // Stash empty: TTL expired, or the OnDragEnter callback
+                    // didn't fire (e.g. browser pane child window that
+                    // doesn't carry our DragHandler). Surface a clear
+                    // message rather than silently dropping.
                     pushNotification({
-                        icon: "fa-info-circle",
-                        title: "File drop",
-                        message: `Dropped ${files.length} file(s). Full path copy requires CefDragHandler integration.`,
+                        icon: "fa-triangle-exclamation",
+                        title: "Drop failed",
+                        message: `Couldn't read the OS paths for ${files.length} dropped file(s). Try again.`,
                         timestamp: new Date().toISOString(),
-                        type: "info",
-                        expiration: Date.now() + 5000,
+                        type: "warning",
+                        expiration: Date.now() + 6000,
                     });
-                }
+                });
             };
             viewRef.addEventListener("dragover", onDragOver);
             viewRef.addEventListener("dragleave", onDragLeave);
