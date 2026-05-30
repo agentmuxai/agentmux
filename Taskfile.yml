@@ -450,8 +450,18 @@ tasks:
     build:host:linux:
         internal: true
         platforms: [linux]
+        # `--features patched-libcef` enables the call site for
+        # `_cef_window_t::begin_window_drag` (used by StartWindowDragTask
+        # for native left-click window drag on Wayland). The slot is now
+        # part of public `cef-dll-sys-146.7.0+146.0.12` (upstreamed) and
+        # the bundled libcef.so picked by `scripts/resolve-cef-runtime.sh`
+        # implements it — so this flag is safe to default-on for Linux.
+        # Without it, `start_window_drag` IPC compiles as a warn-and-noop
+        # (PR #1131 made the gate default-off so macOS compile could land
+        # before the macOS libcef story was sorted; on Linux we always had
+        # the patched runtime).
         cmds:
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef'
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef --features patched-libcef'
             - mkdir -p dist/cef
             - cp target/release/agentmux-cef dist/cef/agentmux-cef
             - echo "✓ Built host for Linux"
