@@ -62,15 +62,17 @@ The agent dials the same `AGENTMUX_LOCAL_URL` (an `http://<addr>` env var the si
 
 ### 3.2 Option B — Terminal CLI (`amux <verb> ...`)
 
-A small Rust binary (call it `amux` — `wsh` was retired but the shape was right) lives on `$PATH` inside every pane and forwards verbs to the sidecar.
+A small Rust binary (call it `amux`) lives on `$PATH` inside every pane and forwards verbs to the sidecar.
 
 ```
-$ amux open ./src/foo.ts
+$ amux open ./src/foo.ts               # from inside an agent's tool call (Phase 1)
 $ amux open ./src/                     # folder
 $ amux open --new-pane ./src/foo.ts    # opt out of reuse
 $ amux browse https://docs.example
 $ amux say "agent finished phase 2"
 ```
+
+(Plain-shell invocation — a user typing `amux open` at a terminal prompt — is Phase 2; see §6 for the auth-key injection asymmetry.)
 
 - **Pro:** familiar UNIX-y surface (matches `code`, `xdg-open`, `open`); discoverable by `--help`; works from shell scripts as well as from agents.
 - **Con:** a new binary to bundle, install into containers (via shell-integration injection?), keep version-compatible with the sidecar protocol. And it widens the install surface (one more thing to package, sign, ship).
@@ -202,12 +204,12 @@ The editor pane gains a `connection:` meta. It reads/writes files via a sidecar-
 
 ## 6. Transport: how does `amux` reach the sidecar?
 
-The sidecar exports two env vars and the shell-spawn path injects both into every locally-launched PTY:
+The sidecar's `/ws` and `/agentmux/wps/publish` endpoints are gated by `auth_middleware` (`agentmux-srv/src/server/mod.rs:374-400`) — every call needs the header `X-AuthKey: $AGENTMUX_AUTH_KEY`. Two env vars carry the transport:
 
-- `AGENTMUX_LOCAL_URL` — `http://<addr>` (set at `agentmux-srv/src/main.rs:695`, injected at `…/shell.rs:527-528`)
-- `AGENTMUX_AUTH_KEY` — the bearer token that satisfies the sidecar's `auth_middleware` (`agentmux-srv/src/server/mod.rs:374-400`); every authed route requires the header `X-AuthKey: $AGENTMUX_AUTH_KEY`
+- `AGENTMUX_LOCAL_URL` — `http://<addr>` (set at `agentmux-srv/src/main.rs:695`, injected into **every** locally-launched PTY at `…/shell.rs:527-528`)
+- `AGENTMUX_AUTH_KEY` — the bearer token. **Asymmetric injection:** removed from the sidecar's own env at startup (`agentmux-srv/src/config.rs:45`, per the security review in PR #801), and re-injected **only** in the agent-CLI spawn path (`agentmux-srv/src/server/websocket.rs:912`) so `agentmux-bashwrap` running inside the Claude/agent subprocess tree can authenticate. The generic terminal-pane shell spawn does **not** carry it.
 
-`agentmux-bashwrap` already reads both and attaches the header (`agentmux-bashwrap/src/wps_client.rs:71-72`, `:114`). So for local panes the transport is solved: `amux` does one `reqwest` POST with `X-AuthKey`. No new transport plumbing.
+`agentmux-bashwrap` reads both env vars and attaches the header (`agentmux-bashwrap/src/wps_client.rs:71-72`, `:114`). So for **agent-launched** local panes the transport is solved: `amux` does one `reqwest` POST with `X-AuthKey`. For **plain terminal panes** (a user typing `amux open foo.ts` at a shell prompt with no agent in the process tree) the auth key is absent and the call would 401 — that case is a Phase 2 decision (do we widen the shell spawn to inject the key, accepting a wider key-exposure surface, or do we keep amux strictly an agent-tool surface?).
 
 For **container / SSH / WSL panes**: the URL still names the *host's* loopback address, which the container can't always reach. The `AGENTMUX_AUTH_KEY` is also a secret that you don't want to leak across trust boundaries unintentionally. Options:
 
@@ -226,7 +228,8 @@ Ordered phases — each shippable independently.
 ### Phase 1 (small, ~2-3 days)
 - Extend `pane.open` with `reuse_strategy: "current-tab" | "none"` (default `"none"` for back-compat) and the editor-pane reuse logic.
 - Extend `pane.open` with `editor_workspace_root` for folders, wire to editor view-model.
-- Create the `amux` CLI: single verb `open`, flags `--new-pane`, `--tab`, `--split`, `--read-only`, `--line`. Reads `AGENTMUX_LOCAL_URL` + `AGENTMUX_AUTH_KEY` (same env vars `agentmux-bashwrap` already uses); calls `pane.open` over HTTP with the `X-AuthKey` header. Fail with a clear error message if either env var is missing.
+- Create the `amux` CLI: single verb `open`, flags `--new-pane`, `--tab`, `--split`, `--read-only`, `--line`. Reads `AGENTMUX_LOCAL_URL` + `AGENTMUX_AUTH_KEY` (same env vars `agentmux-bashwrap` already uses); calls `pane.open` over HTTP with the `X-AuthKey` header. Fail with a clear error message if either env var is missing — "this looks like a plain terminal pane; `amux` currently runs only inside an agent's tool-call context. Use the command palette to open files."
+- **Phase 1 scope clarification:** `amux` works in the agent-CLI process tree (which is the immediate use case — an agent says "open this file"). Plain terminal users typing `amux open foo.ts` at a shell prompt is **Phase 2** (decision: widen the generic shell-spawn env injection vs keep amux agent-only).
 - **Local connections only.** Container/SSH/WSL drops a "not supported on this connection" toast.
 - Spec it; PR it.
 
