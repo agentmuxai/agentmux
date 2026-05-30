@@ -1,30 +1,27 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase 1 of the floating-pane tear-off feature (issue #810 + spec
-//! `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md`).
+//! Floating-pane tear-off — the `open_floating_pane_window` IPC command.
+//! Specs: `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md` (Windows,
+//! issue #810) + `docs/specs/SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md`
+//! (macOS/Linux Phase A).
 //!
-//! This module hosts the IPC command and Win32-native primitive that
-//! creates a *subordinate* floating window — a free-positioned palette-
-//! style window OWNED by the source AgentMux main window. Unlike the
-//! existing tab tear-off path (which spawns a full new AgentMux
-//! instance), a floating pane:
+//! Creates a *subordinate* floating window — a free-positioned, chromeless
+//! window showing just the torn-off pane (no tab bar, no widget bar). Unlike
+//! the tab tear-off path (which spawns a full new AgentMux instance), a
+//! floating pane shares the source instance's sidecar, data dir, and reducer
+//! state. The embedded browser loads
+//! `<frontend>?floatingPaneId=<id>&windowLabel=floating-<n>&workspaceId=<ws>`
+//! and the frontend renders `<FloatingPaneWorkspace>` (chromeless).
 //!
-//! - has no taskbar entry (`WS_EX_TOOLWINDOW`),
-//! - has no Alt-Tab entry (also `WS_EX_TOOLWINDOW`),
-//! - minimizes / restores / destroys with its owner,
-//! - shares the source instance's sidecar, data dir, and reducer state.
-//!
-//! Phase 1 ships **only** the windowing primitive. The browser embedded
-//! in the floating window loads
-//! `<frontend>?floatingPaneId=<id>&windowLabel=floating-<n>` and the
-//! frontend renders a minimal placeholder shell that says "Floating
-//! pane: \<id\>". Wiring the *drag-out gesture* to this primitive is
-//! Phase 3. Wiring the full `<Block>` renderer is Phase 2.
-//!
-//! Non-Windows platforms are out of scope per spec §10. The macOS path
-//! is `NSWindow::addChildWindow`; Linux varies by compositor. Both will
-//! be addressed in a follow-up.
+//! Platform primitive differs by OS:
+//! - **Windows**: a raw `WS_POPUP + WS_EX_TOOLWINDOW` HWND OWNED by the source
+//!   main window (no taskbar/Alt-Tab entry; minimizes/restores/destroys with
+//!   its owner), CEF browser embedded — see `crate::floating_pane`.
+//! - **macOS / Linux** (Phase A): a frameless CEF Views window created via the
+//!   same `ui_tasks::post_create_window(frameless=true)` path the regular
+//!   tear-off uses, with `&floatingPaneId=` injected into the URL. Owned-window
+//!   lifecycle + redock are follow-ups (see the macOS spec, Phase B).
 
 use std::sync::Arc;
 

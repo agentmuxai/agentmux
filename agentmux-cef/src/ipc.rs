@@ -234,11 +234,12 @@ async fn route_command(
             commands::window::open_subwindow(state, parent)
         }
         "open_floating_pane_window" => {
-            // Phase 1 of floating-pane tear-off (issue #810 / spec
-            // SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md). Creates a
-            // subordinate `WS_POPUP + WS_EX_TOOLWINDOW` HWND owned by
-            // the source main window, with a CEF browser embedded.
-            // Windows-only; macOS / Linux return a clear error.
+            // Floating-pane tear-off — a chromeless window showing just the
+            // torn-off pane. Windows: a subordinate WS_POPUP+WS_EX_TOOLWINDOW
+            // HWND owned by the source window. macOS/Linux (Phase A): a
+            // frameless CEF Views window with ?floatingPaneId= in the URL.
+            // Specs: SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md +
+            // SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md.
             commands::floating_pane::open_floating_pane_window(state, args)
         }
         "get_instance_number" => Ok(commands::window::get_instance_number(state, args)),
