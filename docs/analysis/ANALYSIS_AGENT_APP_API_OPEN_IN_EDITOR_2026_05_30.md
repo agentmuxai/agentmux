@@ -28,7 +28,9 @@ Plus a broader framing question: this is the *first* shipped agent → app callb
 | `createblock` low-level RPC (returns `ORef`) | ✅ shipped | `frontend/app/store/rpc-api.ts:105` |
 | `open_agent` callback (CEF → frontend via `CustomEvent`) — proves the agent→app pattern works | ✅ shipped | `agentmux-cef/src/commands/palette.rs:60` |
 | `WshRpcEngine` handler registration framework on the sidecar | ✅ shipped | `agentmux-srv/src/backend/rpc/engine.rs:189` |
-| Terminal CLI for agent → app calls (anything an agent could invoke from `bash` to reach the app) | ❌ **never existed** | The `wsh*` files in `frontend/app/store/` are a **frontend** RPC client layer renamed `rpc-*` per `docs/specs/SPEC_RENAME_WSH_TO_RPC_2026_04_17.md`; no terminal-side binary has ever shipped. |
+| General-purpose terminal CLI for agent → app calls | ❌ none today | But see the next two rows — the transport and the precedent both exist. |
+| In-pane Rust binary that calls the sidecar over the local URL | ✅ shipped as `agentmux-bashwrap` | A streaming bash wrapper + Claude PreToolUse hook helper. Lives at `agentmux-bashwrap/`; reads `AGENTMUX_LOCAL_URL` and dials the sidecar via `reqwest`. Proves the in-pane → sidecar path. The `wsh*` files in `frontend/app/store/` are an unrelated **frontend** RPC client layer renamed `rpc-*` per `docs/specs/SPEC_RENAME_WSH_TO_RPC_2026_04_17.md`. |
+| Sidecar local URL injected into spawned PTYs | ✅ shipped | `AGENTMUX_LOCAL_URL` (an `http://<addr>` value) set at `agentmux-srv/src/main.rs:695`, passed through to shells at `agentmux-srv/src/backend/blockcontroller/shell.rs:527-528`. **Local terminal panes already have a working sidecar address.** |
 | MCP server inside AgentMux | ❌ none |   |
 | Path translation (container → host, WSL → host, SSH → host) | ❌ none |   |
 
@@ -50,13 +52,13 @@ What `pane.open` does **not** do today:
 
 Before we lock in transport for one verb, decide the API contract category. Three options form the broader framing — every future agent→app callback (open URL, show diff, start agent, …) will land in one of them.
 
-### 3.1 Option A — RPC over the existing sidecar socket
+### 3.1 Option A — direct RPC to the sidecar local URL
 
-The agent calls a method on the same `WshRpcEngine` the host already uses. Agents in **local** terminal panes inherit the connection; agents in **container/SSH/WSL** sessions need a tunnel.
+The agent dials the same `AGENTMUX_LOCAL_URL` (an `http://<addr>` env var the sidecar exports and shells inherit) that `agentmux-bashwrap` already uses, and POSTs to whichever RPC endpoint serves `pane.open`.
 
-- **Pro:** zero new server surface; type-safe RPC types already exist; auth handled by socket identity.
-- **Con:** the agent process has to *find* the socket. For local agents that's a known env var; for container agents the socket lives on the host. Tunnel via stdin/stdout-multiplexed control channel, or have the sidecar listen on a tcp port reachable via host.docker.internal.
-- **Maps to:** v1 of every agent→app callback we'll ever want.
+- **Pro:** zero new server surface; type-safe RPC types already exist; transport is plain HTTP/WS so any language with an HTTP client speaks it (no socket bindings to write).
+- **Con:** every agent now has to learn the JSON wire-format and the endpoint URL convention. That bar kills shell-agent adoption — agents shouldn't curl their app server.
+- **Maps to:** v1 of every agent→app callback we'll ever want, *if* there's a CLI on top of it.
 
 ### 3.2 Option B — Terminal CLI (`amux <verb> ...`)
 
@@ -192,25 +194,23 @@ The editor pane gains a `connection:` meta. It reads/writes files via a sidecar-
 
 ### 5.4 Recommendation
 
-Ship Phase 1 with **5.1 (push-to-host)** for non-local connections, **5.2 (path map)** for the easy case (local container with known bind mount = the workspace dir). 5.3 is the right long-term answer but is its own multi-week spec — call it out, don't block on it.
-
-**Critically**: for the very first `amux open` PR, scope to **local connections only.** Container/SSH/WSL surfaces a "this connection doesn't support `amux open` yet" toast, the same way file-drop Phase 1 leaves remote transport for Phase 2. This keeps the first slice shippable in a small PR and proves the verb shape works before we eat the path-translation complexity.
+- **Phase 1 — local only.** The first `amux open` PR ships **just** the host-local connection path. Container/SSH/WSL surfaces a "this connection doesn't support `amux open` yet" toast, same pattern as file-drop Phase 1 deferring remote transport. Proves the verb shape works before we eat any path-translation complexity.
+- **Phase 2 — pick up 5.1 + 5.2 together.** 5.1 (push-to-host) handles the general remote case; 5.2 (path map) optimises the common "container with the workspace bind-mounted" case to zero-copy. Both ride the same sidecar `FileTransportCommand` work introduced for file-drop Phase 2.
+- **Phase 3+ — defer 5.3.** Connection-aware editor pane (5.3) is the strictly-more-general answer but is a multi-week spec on its own. Call it out, don't block on it.
 
 ---
 
 ## 6. Transport: how does `amux` reach the sidecar?
 
-The CLI needs to find and call the sidecar's WshRpcEngine. Today the sidecar listens on a unix socket / named pipe; the path is in an env var that the host sets when it spawns the agent.
+The sidecar exports `AGENTMUX_LOCAL_URL` (an `http://<addr>` value) and the shell-spawn path injects it into every locally-launched PTY (`agentmux-srv/src/main.rs:695`, `…/shell.rs:527-528`). `agentmux-bashwrap` already reads it. So for local panes the transport is solved — `amux` is one `reqwest` POST.
 
-For **local terminal panes**: the env var passes naturally; `amux` reads it and dials. Simple.
+For **container / SSH / WSL panes**: the URL still names the *host's* loopback address, which the container can't always reach. Options:
 
-For **container / SSH / WSL panes**: the env var inside the agent's environment points to a path that doesn't exist on the *agent's* host. Options:
+- **TCP via `host.docker.internal`**: the sidecar HTTP server already listens on a TCP port (it's `http://…`, not a unix socket). For Docker Desktop containers, `host.docker.internal` resolves to the host loopback for free; for Linux containers an explicit `--add-host` is needed at container creation. Pair with a short-lived bearer token in the env var to keep the surface secure.
+- **Stdin/stdout multiplexing**: `amux` writes a framed RPC request to `stdout` with a magic prefix the terminal pane intercepts (OSC-style). The pane forwards to sidecar; reads back the response. Works through any pty — covers SSH and WSL too.
+- **Reverse-mount the URL via env-var rewrite**: when the user attaches the agent to a container/SSH/WSL session, the connection setup rewrites `AGENTMUX_LOCAL_URL` to a host-reachable form (e.g., `http://host.docker.internal:<port>`). Works if AgentMux controls the connection setup; doesn't if the user `docker exec`s in.
 
-- **Stdin/stdout multiplexing**: `amux` writes a framed RPC request to `stdout` with a magic prefix the terminal pane intercepts (OSC-style). The pane forwards to sidecar; reads back the response. **Compatible with shells; works through any pty.**
-- **TCP via `host.docker.internal`**: sidecar listens on a tcp port; container reaches it via the docker host name. Simple but: requires open port, needs auth (currently socket-identity-based, would need a token), doesn't work for SSH/WSL the same way.
-- **Reverse-mount the socket**: bind-mount the sidecar's socket into the container at a known path. Works if AgentMux owns container creation; doesn't if the user attaches to a pre-existing container.
-
-For Phase 1 (local only), the simple env-var dial is enough. For Phase 2 the **OSC-multiplexed stdio channel** is the most universal — works for any pty-backed connection, no port management, no socket bind-mounting.
+For Phase 1 (local only), the existing env-var dial is enough — zero new transport code. For Phase 2 the **OSC-multiplexed stdio channel** is the most universal: works for any pty-backed connection, no port management, no host-mapping rules per platform.
 
 ---
 
@@ -221,13 +221,13 @@ Ordered phases — each shippable independently.
 ### Phase 1 (small, ~2-3 days)
 - Extend `pane.open` with `reuse_strategy: "current-tab" | "none"` (default `"none"` for back-compat) and the editor-pane reuse logic.
 - Extend `pane.open` with `editor_workspace_root` for folders, wire to editor view-model.
-- Create the `amux` CLI: single verb `open`, flags `--new-pane`, `--tab`, `--split`, `--read-only`, `--line`. Reads sidecar socket from env var; calls `pane.open`.
+- Create the `amux` CLI: single verb `open`, flags `--new-pane`, `--tab`, `--split`, `--read-only`, `--line`. Reads `AGENTMUX_LOCAL_URL` (the same env var `agentmux-bashwrap` uses); calls `pane.open` over HTTP.
 - **Local connections only.** Container/SSH/WSL drops a "not supported on this connection" toast.
 - Spec it; PR it.
 
 ### Phase 2 (~1 week)
-- OSC-multiplexed stdio channel so `amux` works inside containers.
-- Path translation (5.1 + 5.2) for the open-from-container case.
+- OSC-multiplexed stdio channel (or `host.docker.internal` + token) so `amux` works inside containers.
+- Path translation §5.1 (push-to-host) + §5.2 (path map) — rides the file-drop Phase 2 `FileTransportCommand` work.
 - Second verb: `amux browse <url>` (open in browser pane).
 
 ### Phase 3 (deferred until we see usage)
