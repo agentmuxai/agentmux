@@ -11,7 +11,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
     const termThemes = fullConfig?.termthemes ?? {};
     const termThemeKeys = Object.keys(termThemes);
     const curThemeName = getBlockMetaKeyAtom(model.blockId, "term:theme")();
-    const defaultFontSize = getSettingsKeyAtom("term:fontsize")() ?? 12;
+    const defaultFontSize = getSettingsKeyAtom("term:fontsize")() ?? 15;
     const transparencyMeta = getBlockMetaKeyAtom(model.blockId, "term:transparency")();
     const blockData = model.blockAtom();
     const overrideFontSize = blockData?.meta?.["term:fontsize"];
