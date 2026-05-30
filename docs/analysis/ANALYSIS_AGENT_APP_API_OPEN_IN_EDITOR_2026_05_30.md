@@ -23,12 +23,12 @@ Plus a broader framing question: this is the *first* shipped agent → app callb
 
 | Capability | Status | Reference |
 |---|---|---|
-| `pane.open` RPC — high-level intent: open a pane with `view`, `file`, `cwd`, `title`, `tab_id`, `split_direction`, `focus` | ✅ implemented | `agentmux-srv/src/backend/rpc_types.rs:38`, handler `agentmux-srv/src/server/app_api.rs` |
+| `pane.open` RPC — high-level intent: open a pane with `view`, `file`, `cwd`, `title`, `tab_id`, `split_direction`, `focus` | ✅ implemented | `COMMAND_PANE_OPEN` const at `agentmux-srv/src/backend/rpc_types.rs:407`, `CommandPaneOpenData` struct at `:809`, handler in `agentmux-srv/src/server/app_api.rs` |
 | Editor pane backed by multi-tab state (`tabs[]`, `activeTabId`, `recentlyClosed[]`) | ✅ shipped | `frontend/app/store/editor-pane-state-store.ts:64-69` |
 | `createblock` low-level RPC (returns `ORef`) | ✅ shipped | `frontend/app/store/rpc-api.ts:105` |
 | `open_agent` callback (CEF → frontend via `CustomEvent`) — proves the agent→app pattern works | ✅ shipped | `agentmux-cef/src/commands/palette.rs:60` |
-| WshRpcEngine handler registration framework | ✅ shipped | `agentmux-srv/src/backend/rpc/engine.rs:189` |
-| `wsh` terminal CLI for agent → app calls | ❌ **retired** | `docs/specs/SPEC_RETIRE_WSH_2026_04_12.md` |
+| `WshRpcEngine` handler registration framework on the sidecar | ✅ shipped | `agentmux-srv/src/backend/rpc/engine.rs:189` |
+| Terminal CLI for agent → app calls (anything an agent could invoke from `bash` to reach the app) | ❌ **never existed** | The `wsh*` files in `frontend/app/store/` are a **frontend** RPC client layer renamed `rpc-*` per `docs/specs/SPEC_RENAME_WSH_TO_RPC_2026_04_17.md`; no terminal-side binary has ever shipped. |
 | MCP server inside AgentMux | ❌ none |   |
 | Path translation (container → host, WSL → host, SSH → host) | ❌ none |   |
 
@@ -71,7 +71,7 @@ $ amux say "agent finished phase 2"
 ```
 
 - **Pro:** familiar UNIX-y surface (matches `code`, `xdg-open`, `open`); discoverable by `--help`; works from shell scripts as well as from agents.
-- **Con:** *another* binary to bundle, install into containers (via shell-integration injection?), keep version-compatible with the sidecar protocol. AgentMux **just retired wsh** — adding it back needs to be a different shape, not the same one.
+- **Con:** a new binary to bundle, install into containers (via shell-integration injection?), keep version-compatible with the sidecar protocol. And it widens the install surface (one more thing to package, sign, ship).
 - **Maps to:** every agent→app callback, with a low-friction surface that agents (and shell scripts, and curious users) can use.
 
 ### 3.3 Option C — MCP server inside AgentMux
@@ -92,7 +92,7 @@ Why not just A directly: agents (especially shell-based ones) need a syscall-sha
 
 Why not C alone: leaves out everyone who isn't an MCP-speaking AI client.
 
-Why a new name (not revive `wsh`): the retirement spec called out that `wsh`'s shape was wrong — overgrown, tangled with shell integration, wrong scoping unit. A new `amux` starts clean: verbs only, no shell integration, no `wsh exit-code-injection` style cleverness.
+Why not call it `wsh`: that name belonged to a *frontend* RPC client layer (a legacy fork-naming holdover from WaveTerm, renamed `rpc-*` per `SPEC_RENAME_WSH_TO_RPC_2026_04_17.md`). It was never a terminal-side CLI — and reusing the name would just relitigate the rename for no benefit. `amux` starts clean and matches the product name.
 
 ---
 
