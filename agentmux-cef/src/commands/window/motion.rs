@@ -125,6 +125,68 @@ pub fn set_window_position(state: &Arc<AppState>, args: &serde_json::Value) -> R
     Ok(serde_json::Value::Null)
 }
 
+/// Get the window's full screen rect `{ x, y, width, height }` (physical px).
+/// Used by the floater JS-driven edge-resize to capture the start rect.
+pub fn get_window_rect(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::Foundation::RECT;
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
+        let hwnd = resolve_window_hwnd(state, label);
+        if !hwnd.is_null() {
+            let mut rect: RECT = std::mem::zeroed();
+            GetWindowRect(hwnd, &mut rect);
+            return Ok(serde_json::json!({
+                "x": rect.left,
+                "y": rect.top,
+                "width": rect.right - rect.left,
+                "height": rect.bottom - rect.top,
+            }));
+        }
+    }
+    let _ = (state, label);
+    Ok(serde_json::json!({ "x": 0, "y": 0, "width": 0, "height": 0 }))
+}
+
+/// Set the window's full screen rect (absolute position AND size), physical px.
+/// Self-contained (no read-modify-write) so concurrent in-flight calls are
+/// idempotent — last write wins, exactly right for a live edge-resize drag.
+/// This is the floater edge-resize primitive: the frontend captures the start
+/// rect (`get_window_rect`) on edge pointer-down (with pointer capture so it
+/// keeps receiving moves), computes the new rect per cursor delta + edge, and
+/// calls this on each move. Sidesteps WM_NCHITTEST / native SC_SIZE (Chromium
+/// holds the DOM mouse capture). See SPEC_FLOATING_PANE_EDGE_RESIZE.
+pub fn set_window_rect(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let width = args.get("width").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let height = args.get("height").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+
+    #[cfg(target_os = "windows")]
+    if width > 0 && height > 0 {
+        unsafe {
+            use windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos;
+            let hwnd = resolve_window_hwnd(state, label);
+            if !hwnd.is_null() {
+                SetWindowPos(
+                    hwnd,
+                    std::ptr::null_mut(),
+                    x,
+                    y,
+                    width,
+                    height,
+                    0x0014, // SWP_NOZORDER | SWP_NOACTIVATE
+                );
+                return Ok(serde_json::Value::Null);
+            }
+        }
+    }
+    let _ = (state, label, x, y, width, height);
+    Ok(serde_json::Value::Null)
+}
+
 /// Initiate window drag (for frameless windows).
 /// Windows: sends WM_NCLBUTTONDOWN/HTCAPTION via Win32 — find_own_top_level_window
 /// resolves the per-process HWND so multi-window works without a label.

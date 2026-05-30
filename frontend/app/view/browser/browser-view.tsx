@@ -3,6 +3,7 @@
 
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
 import { ModalLayer } from "@/element/ModalLayer";
 import { useModalLayer } from "@/element/modal-layer";
 import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-registry";
@@ -99,12 +100,24 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
     const paneRect = () => {
         const r = placeholderRef!.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
-        return {
-            x: Math.round(r.x * dpr),
-            y: Math.round(r.y * dpr),
-            width: Math.round(r.width * dpr),
-            height: Math.round(r.height * dpr),
-        };
+        let x = Math.round(r.x * dpr);
+        const y = Math.round(r.y * dpr);
+        let width = Math.round(r.width * dpr);
+        let height = Math.round(r.height * dpr);
+        // Floating browser pane: the floater's frontend DOM owns an invisible
+        // edge grab band for edge-resize, but this pane's web-content child is
+        // a separate OS window layered on top of it — so inset the child by the
+        // band depth on the three window-edge sides (left/right/bottom; the top
+        // edge is over the 33px header, already frontend) to expose the band.
+        // The full-size placeholder div paints the strip (frontend, so no native
+        // border). SPEC_FLOATING_PANE_EDGE_RESIZE.
+        if (windowLabel.startsWith("floating-")) {
+            const b = Math.round(FLOATER_EDGE_RESIZE_BORDER * dpr);
+            x += b;
+            width = Math.max(1, width - 2 * b);
+            height = Math.max(1, height - b);
+        }
+        return { x, y, width, height };
     };
 
     /** CSS-pixel rect (same coordinate space as `getBoundingClientRect`
