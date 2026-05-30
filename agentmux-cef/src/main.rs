@@ -76,6 +76,37 @@ fn suppress_os_crash_dialogs() {
 #[cfg(not(target_os = "windows"))]
 fn suppress_os_crash_dialogs() {}
 
+/// True when a launcher is THIS host's actual parent process this run.
+///
+/// The launcher (which spawns the host directly) stamps
+/// `AGENTMUX_LAUNCHER_PID` with its own pid; since we are its direct
+/// child, that pid equals our `getppid()`. This distinguishes a fresh,
+/// authoritative launcher hand-off from a STALE `AGENTMUX_BACKEND_WS`
+/// inherited down the environment from a parent agentmux pane (whose
+/// launcher pid will not match our real parent). Used only to relax the
+/// dev-build "ignore the env hand-off" rule for the macOS/Linux Phase 1
+/// launcher dev integration.
+///
+/// Unix-only — on other platforms it returns `false`, leaving the
+/// existing dev-build behavior unchanged.
+#[cfg(unix)]
+fn launcher_is_genuine_parent() -> bool {
+    match std::env::var("AGENTMUX_LAUNCHER_PID")
+        .ok()
+        .and_then(|s| s.trim().parse::<i32>().ok())
+    {
+        // SAFETY: getppid() takes no arguments, touches no memory, and is
+        // documented as always succeeding.
+        Some(pid) => pid == unsafe { libc::getppid() },
+        None => false,
+    }
+}
+
+#[cfg(not(unix))]
+fn launcher_is_genuine_parent() -> bool {
+    false
+}
+
 fn main() {
     // Phase 0 (service supervision & recovery): suppress the Windows crash
     // modal so a fault terminates the process immediately instead of freezing
@@ -406,7 +437,18 @@ fn main() {
         // Consuming it would connect to the parent's srv instead of
         // spawning our own, so the dev frontend runs against the wrong
         // (parent's) backend and no dev-version srv is ever started.
-        let launcher_provided = if agentmux_common::is_dev_build_exe(&host_exe_dir) {
+        //
+        // EXCEPTION (macOS/Linux Phase 1 launcher dev integration,
+        // SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30): when a launcher
+        // is our GENUINE parent this run (it stamped AGENTMUX_LAUNCHER_PID
+        // with its pid == our getppid), the env it set is fresh + ours —
+        // adopt its launcher-owned srv instead of double-spawning. The
+        // getppid match can't be satisfied by a value merely inherited
+        // down the env from a parent pane, so `task dev:standalone`
+        // (direct host invoke) still spawns its own srv.
+        let launcher_provided = if agentmux_common::is_dev_build_exe(&host_exe_dir)
+            && !launcher_is_genuine_parent()
+        {
             None
         } else {
             sidecar::use_launcher_endpoints(&app_state)

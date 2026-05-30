@@ -442,10 +442,15 @@ tasks:
         internal: true
         platforms: [darwin]
         cmds:
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef'
+            # Phase 1 (SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30): the
+            # launcher now drives srv + host on macOS dev too, so build it
+            # alongside the host. They co-locate in dist/cef-dev/ (flat
+            # layout) — see dev:serve's Unix branch.
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef -p agentmux-launcher'
             - mkdir -p dist/cef
             - cp target/release/agentmux-cef dist/cef/agentmux-cef
-            - echo "✓ Built host for macOS"
+            - cp target/release/agentmux-launcher dist/cef/agentmux-launcher
+            - echo "✓ Built host + launcher for macOS"
 
     build:host:linux:
         internal: true
@@ -461,10 +466,16 @@ tasks:
         # before the macOS libcef story was sorted; on Linux we always had
         # the patched runtime).
         cmds:
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef --features patched-libcef'
+            # Phase 1 (SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30): build
+            # the launcher alongside the host so the flat dev layout (launcher
+            # + host + srv co-located in dist/cef-dev/) has it — same as
+            # build:host:darwin. Without this, dev:serve's launcher-not-found
+            # guard hard-fails on Linux.
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef --features patched-libcef && PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-launcher'
             - mkdir -p dist/cef
             - cp target/release/agentmux-cef dist/cef/agentmux-cef
-            - echo "✓ Built host for Linux"
+            - cp target/release/agentmux-launcher dist/cef/agentmux-launcher
+            - echo "✓ Built host + launcher for Linux"
 
     bundle:
         desc: Bundle runtime binaries alongside the host executable.
@@ -584,7 +595,7 @@ tasks:
 
     dev:serve:
         internal: true
-        desc: Start Vite dev server and host concurrently, via the launcher (Windows) or direct host invocation (Unix).
+        desc: Start Vite dev server and the app concurrently, via the launcher (launcher → srv + host on all platforms; Windows uses the runtime/ layout, macOS/Linux a flat layout).
         cmds:
             - task: build:host
             - task: bundle
@@ -608,10 +619,13 @@ tasks:
                 #            so dev mirrors the package-portable runtime.
                 #            See docs/specs/SPEC_LAUNCHER_DEV_INTEGRATION_2026-05-13.md.
                 #
-                #   Unix:    legacy flat layout — host + DLLs in DEV_DIR
-                #            directly, launcher bypassed. Phase 7 cross-
-                #            platform parity will integrate the launcher
-                #            on Unix (launcher main.rs:153).
+                #   Unix:    flat layout — launcher + host + srv co-located
+                #            in DEV_DIR (no runtime/ subdir, so the host's
+                #            ../Frameworks resolution + asset anchoring stay
+                #            byte-identical to the legacy direct-invoke path).
+                #            The launcher drives srv + host here too (Phase 1,
+                #            SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30);
+                #            `task dev:standalone` is the direct-invoke hatch.
                 #
                 # Either way the staging dir (dist/cef/) is never locked by
                 # the running process, so the next build can overwrite it.
@@ -627,9 +641,37 @@ tasks:
                   cp dist/bin/agentmux-srv-*-windows.x64.exe "$DEV_DIR/runtime/" 2>/dev/null || true
                   echo "Built $DEV_DIR with launcher layout (launcher at root, host + DLLs + srv in runtime/)"
                 else
+                  # Unix flat layout (Phase 1,
+                  # SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30): launcher
+                  # + host + srv all co-located in DEV_DIR. The launcher is
+                  # already inside dist/cef/ (staged by build:host:darwin),
+                  # so the `cp -r` below brings it across with the host. Flat
+                  # — NOT runtime/ — so the host's `../Frameworks` resolution
+                  # and current_exe()-based asset anchoring stay byte-identical
+                  # to the legacy direct-invoke path (launcher's runtime_dir
+                  # falls back to exe_dir when there's no runtime/ subdir).
                   mkdir -p "$DEV_DIR"
                   cp -r dist/cef/* "$DEV_DIR"/
-                  echo "Copied dist/cef → $DEV_DIR (flat layout, launcher bypassed on Unix)"
+                  # srv binary — launcher's resolve_srv_binary candidate 4 is
+                  # launcher_exe_dir/agentmux-srv (plain name). DEV_DIR is
+                  # wiped each run so the plain name can't go stale. Copy the
+                  # EXACT version-matched srv (dist/bin holds older versions
+                  # too — a glob would match several and break `cp`).
+                  if [ "{{OS}}" = "darwin" ]; then
+                    SRV_SRC="dist/bin/agentmux-srv-{{.VERSION}}-darwin.arm64"
+                  else
+                    SRV_SRC="dist/bin/agentmux-srv-{{.VERSION}}-linux.x64"
+                  fi
+                  cp "$SRV_SRC" "$DEV_DIR/agentmux-srv" 2>/dev/null || true
+                  if [ ! -f "$DEV_DIR/agentmux-launcher" ]; then
+                    echo "❌ $DEV_DIR/agentmux-launcher not found — build:host:{{OS}} should have staged it"
+                    exit 1
+                  fi
+                  if [ ! -f "$DEV_DIR/agentmux-srv" ]; then
+                    echo "❌ $DEV_DIR/agentmux-srv not found — build:backend should have produced dist/bin/agentmux-srv-*"
+                    exit 1
+                  fi
+                  echo "Built $DEV_DIR with flat launcher layout (launcher + host + srv co-located)"
                 fi
 
                 # Linux: register the .desktop file + hicolor icons so the
@@ -742,7 +784,14 @@ tasks:
                 if [ "{{OS}}" = "windows" ]; then
                   cd "$DEV_DIR" && AGENTMUX_DEV=1 ./agentmux-launcher.exe --url="$VITE_URL"
                 else
-                  cd "$DEV_DIR" && LD_LIBRARY_PATH=. AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url="$VITE_URL"
+                  # Phase 1: launch via the launcher (it spawns srv, hands the
+                  # host its endpoints, and supervises both). LD_LIBRARY_PATH=.
+                  # so the launcher-spawned host finds libcef next to it (Linux);
+                  # the host inherits it through tokio's spawn. The launcher +
+                  # host + srv share the terminal's process group, so Ctrl+C
+                  # reaches all three. `task dev:standalone` keeps the direct
+                  # host-invoke escape hatch.
+                  cd "$DEV_DIR" && LD_LIBRARY_PATH=. AGENTMUX_DEV=1 ./agentmux-launcher{{exeExt}} --url="$VITE_URL"
                 fi
 
     dev:standalone:serve:
