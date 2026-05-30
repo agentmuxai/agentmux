@@ -340,7 +340,15 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
                 e.preventDefault();
                 setIsDragOver(true);
             };
-            const onDragLeave = () => setIsDragOver(false);
+            const onDragLeave = (e: DragEvent) => {
+                // Only clear when the drag actually leaves the pane — see the
+                // matching comment in useAgentDropAttach. xterm fills the pane
+                // with composited child layers; treating every dragleave as
+                // "drag is gone" caused the overlay to flicker the moment the
+                // cursor crossed into the xterm viewport.
+                const next = e.relatedTarget as Node | null;
+                if (!next || !viewRef.contains(next)) setIsDragOver(false);
+            };
             const onDrop = (e: DragEvent) => {
                 if (!dndEnabled()) return;
                 e.preventDefault();

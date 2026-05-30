@@ -96,8 +96,15 @@ export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
             setIsDragOver(true);
         };
         const onDragLeave = (e: DragEvent) => {
-            // Only clear when leaving the root, not when crossing inner elements.
-            if (e.target === root) setIsDragOver(false);
+            // Only clear when the drag actually leaves the root, not when it
+            // crosses an inner element boundary. `relatedTarget` is where the
+            // cursor is *going*; if it's null or not contained in the root,
+            // the drag has left for real. The previous `e.target === root`
+            // check stuck the overlay open whenever the cursor exited via a
+            // child element (which is most of the time, since the pane is
+            // densely populated with children).
+            const next = e.relatedTarget as Node | null;
+            if (!next || !root.contains(next)) setIsDragOver(false);
         };
         const onDrop = (e: DragEvent) => {
             if (!enabled()) return;
