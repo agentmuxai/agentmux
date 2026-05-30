@@ -24,6 +24,42 @@ import { Logger } from "@/util/logger";
 
 type Api = ReturnType<typeof getApi>;
 
+// Default floater size when the source pane element can't be measured
+// (e.g. it already unmounted). Used by every platform's pane tear-off.
+const DEFAULT_FLOATER_WIDTH = 720;
+const DEFAULT_FLOATER_HEIGHT = 480;
+// Defensive lower bounds — protect against degenerate (0-width/height)
+// rects yielding an unusable floater.
+const MIN_FLOATER_WIDTH = 200;
+const MIN_FLOATER_HEIGHT = 120;
+
+/**
+ * Measure the source pane's rendered size in CSS / DIP pixels.
+ *
+ * Returned values are LOGICAL (CSS) pixels — do NOT multiply by
+ * `window.devicePixelRatio` here. On Windows the floater may spawn on a
+ * DIFFERENT monitor (different DPI), so cross-monitor physical scaling
+ * MUST happen on the host using `GetDpiForMonitor(MonitorFromPoint(x, y))`
+ * against the destination (see `agentmux-cef/src/commands/floating_pane.rs`).
+ * On macOS / Linux CEF Views positions in DIP directly, so the host passes
+ * these through unscaled.
+ *
+ * MUST be called BEFORE `TearOffBlock` — that mutation removes the source
+ * pane from the layout and unmounts its DOM element. Platform-agnostic;
+ * shared by win32 / darwin (/ linux) `CrossWindowDragMonitor` variants.
+ */
+export function measureSourcePaneSize(blockId: string): { width: number; height: number } {
+    const el = document.querySelector(`[data-blockid="${blockId}"]`) as HTMLElement | null;
+    if (!el) {
+        return { width: DEFAULT_FLOATER_WIDTH, height: DEFAULT_FLOATER_HEIGHT };
+    }
+    const rect = el.getBoundingClientRect();
+    return {
+        width: Math.max(MIN_FLOATER_WIDTH, Math.round(rect.width)),
+        height: Math.max(MIN_FLOATER_HEIGHT, Math.round(rect.height)),
+    };
+}
+
 /**
  * Open a tear-off destination window at `(screenX, screenY)`,
  * preferring the pre-warmed pool. Falls back to cold-path only when

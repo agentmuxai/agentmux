@@ -297,6 +297,45 @@ pub fn post_set_window_position(state: &Arc<AppState>, label: &str, x: i32, y: i
     post_task(ThreadId::UI, Some(&mut task));
 }
 
+// ── Get window absolute position (DIP) — blocking UI-thread read ──────────
+//
+// CEF Views `window.bounds()` must run on the UI thread, but
+// `get_window_position` is a synchronous IPC command dispatched on the
+// (non-UI) IPC thread. Post a task that reads the bounds on the UI thread and
+// hand the DIP origin back over a bounded channel. Used by the macOS / Linux
+// floating-pane header drag, which needs the window's current position as the
+// absolute-move baseline (Windows reads it directly via GetWindowRect, which
+// is thread-agnostic).
+wrap_task! {
+    pub struct GetWindowPositionTask {
+        state: Arc<AppState>,
+        label: String,
+        tx: std::sync::mpsc::SyncSender<Option<(i32, i32)>>,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let pos = get_window_on_ui(&self.state, &self.label).map(|w| {
+                let b = w.bounds();
+                (b.x, b.y)
+            });
+            // Capacity-1, freshly created per call → try_send never blocks
+            // the UI thread.
+            let _ = self.tx.try_send(pos);
+        }
+    }
+}
+
+/// Read a CEF Views window's absolute position (DIP) from the IPC thread by
+/// bouncing through the UI thread. `None` if the window isn't found or the UI
+/// thread doesn't answer within the timeout (e.g. mid-teardown).
+pub fn get_window_position_blocking(state: &Arc<AppState>, label: &str) -> Option<(i32, i32)> {
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Option<(i32, i32)>>(1);
+    let mut task = GetWindowPositionTask::new(state.clone(), label.to_string(), tx);
+    post_task(ThreadId::UI, Some(&mut task));
+    rx.recv_timeout(std::time::Duration::from_millis(250)).ok().flatten()
+}
+
 // ── Phase B.9.2 (WRR) — corrective absolute-position move ─────────────────
 //
 // Reducer-driven self-heal. Triggered by `Event::CorrectiveWindowMove` when
