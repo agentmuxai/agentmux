@@ -202,11 +202,16 @@ The editor pane gains a `connection:` meta. It reads/writes files via a sidecar-
 
 ## 6. Transport: how does `amux` reach the sidecar?
 
-The sidecar exports `AGENTMUX_LOCAL_URL` (an `http://<addr>` value) and the shell-spawn path injects it into every locally-launched PTY (`agentmux-srv/src/main.rs:695`, `…/shell.rs:527-528`). `agentmux-bashwrap` already reads it. So for local panes the transport is solved — `amux` is one `reqwest` POST.
+The sidecar exports two env vars and the shell-spawn path injects both into every locally-launched PTY:
 
-For **container / SSH / WSL panes**: the URL still names the *host's* loopback address, which the container can't always reach. Options:
+- `AGENTMUX_LOCAL_URL` — `http://<addr>` (set at `agentmux-srv/src/main.rs:695`, injected at `…/shell.rs:527-528`)
+- `AGENTMUX_AUTH_KEY` — the bearer token that satisfies the sidecar's `auth_middleware` (`agentmux-srv/src/server/mod.rs:374-400`); every authed route requires the header `X-AuthKey: $AGENTMUX_AUTH_KEY`
 
-- **TCP via `host.docker.internal`**: the sidecar HTTP server already listens on a TCP port (it's `http://…`, not a unix socket). For Docker Desktop containers, `host.docker.internal` resolves to the host loopback for free; for Linux containers an explicit `--add-host` is needed at container creation. Pair with a short-lived bearer token in the env var to keep the surface secure.
+`agentmux-bashwrap` already reads both and attaches the header (`agentmux-bashwrap/src/wps_client.rs:71-72`, `:114`). So for local panes the transport is solved: `amux` does one `reqwest` POST with `X-AuthKey`. No new transport plumbing.
+
+For **container / SSH / WSL panes**: the URL still names the *host's* loopback address, which the container can't always reach. The `AGENTMUX_AUTH_KEY` is also a secret that you don't want to leak across trust boundaries unintentionally. Options:
+
+- **TCP via `host.docker.internal`**: the sidecar HTTP server already listens on a TCP port. For Docker Desktop containers, `host.docker.internal` resolves to the host loopback for free; for Linux containers an explicit `--add-host` is needed at container creation. `AGENTMUX_AUTH_KEY` is already a per-instance secret, so the auth model carries cleanly.
 - **Stdin/stdout multiplexing**: `amux` writes a framed RPC request to `stdout` with a magic prefix the terminal pane intercepts (OSC-style). The pane forwards to sidecar; reads back the response. Works through any pty — covers SSH and WSL too.
 - **Reverse-mount the URL via env-var rewrite**: when the user attaches the agent to a container/SSH/WSL session, the connection setup rewrites `AGENTMUX_LOCAL_URL` to a host-reachable form (e.g., `http://host.docker.internal:<port>`). Works if AgentMux controls the connection setup; doesn't if the user `docker exec`s in.
 
@@ -221,7 +226,7 @@ Ordered phases — each shippable independently.
 ### Phase 1 (small, ~2-3 days)
 - Extend `pane.open` with `reuse_strategy: "current-tab" | "none"` (default `"none"` for back-compat) and the editor-pane reuse logic.
 - Extend `pane.open` with `editor_workspace_root` for folders, wire to editor view-model.
-- Create the `amux` CLI: single verb `open`, flags `--new-pane`, `--tab`, `--split`, `--read-only`, `--line`. Reads `AGENTMUX_LOCAL_URL` (the same env var `agentmux-bashwrap` uses); calls `pane.open` over HTTP.
+- Create the `amux` CLI: single verb `open`, flags `--new-pane`, `--tab`, `--split`, `--read-only`, `--line`. Reads `AGENTMUX_LOCAL_URL` + `AGENTMUX_AUTH_KEY` (same env vars `agentmux-bashwrap` already uses); calls `pane.open` over HTTP with the `X-AuthKey` header. Fail with a clear error message if either env var is missing.
 - **Local connections only.** Container/SSH/WSL drops a "not supported on this connection" toast.
 - Spec it; PR it.
 
