@@ -251,7 +251,22 @@ async fn route_command(
         "start_window_drag" => commands::window::start_window_drag(state, args),
         "get_window_rect" => commands::window::get_window_rect(state, args),
         "set_window_rect" => commands::window::set_window_rect(state, args),
-        "get_window_position" => commands::window::get_window_position(state, args),
+        "get_window_position" => {
+            // Wrap in spawn_blocking — on macOS/Linux `get_window_position`
+            // bounces a CEF Views `bounds()` read through the UI thread and
+            // waits on a bounded channel for up to 250 ms
+            // (ui_tasks::get_window_position_blocking). Without this wrap it
+            // would block a Tokio worker, same as `tear_off_sc_move_handshake`
+            // above. (Windows reads GetWindowRect directly — cheap — but the
+            // wrap is harmless there and keeps the dispatch uniform.)
+            let state_clone = state.clone();
+            let args_clone = args.clone();
+            tokio::task::spawn_blocking(move || {
+                commands::window::get_window_position(&state_clone, &args_clone)
+            })
+            .await
+            .map_err(|e| format!("get_window_position join error: {}", e))?
+        }
         "resolve_window_at_cursor" => commands::window::resolve_window_at_cursor(state, args),
         "update_floating_redock_hover" => commands::window::update_floating_redock_hover(state, args),
         "clear_floating_redock_hover" => commands::window::clear_floating_redock_hover(state, args),
