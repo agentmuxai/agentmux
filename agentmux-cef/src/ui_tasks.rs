@@ -373,9 +373,11 @@ wrap_task! {
                             );
                             cancelled = true;
                         }
-                        WM_TIMER => {
-                            // Our wake tick — consume it; the top-of-loop
+                        WM_TIMER if msg.wParam == DRAG_TICK_ID => {
+                            // Our wake tick — consume ONLY ours; the top-of-loop
                             // button-state check re-runs on the next iteration.
+                            // Other timers fall through to the `_` arm so CEF's
+                            // own timers aren't dropped during the drag.
                         }
                         _ => {
                             // Keep the app alive (paint, DPI changes, sent msgs).

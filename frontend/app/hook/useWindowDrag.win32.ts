@@ -69,9 +69,10 @@ function ownWindowLabel(): string {
 }
 
 // ── NATIVE path ──────────────────────────────────────────────────────────
-// Mirrors useWindowDrag.linux.ts: arm on mousedown, hand the move to the OS
-// on threshold crossing, let the OS modal loop run the rest. No per-move IPC,
-// no DPI math, no race-guarding — the OS owns the move.
+// Mirrors useWindowDrag.linux.ts: arm on mousedown, and on threshold crossing
+// hand the move to the HOST, which runs a manual native move loop on its UI
+// thread (SetCapture + GetMessage + SetWindowPos). No per-move IPC, no DPI
+// math, no race-guarding — the host owns the move loop.
 function installNativeDragListener() {
     let pressX = 0;
     let pressY = 0;
@@ -262,7 +263,7 @@ function installCefDragListener() {
     if (cefDragListenerInstalled || detectHost() !== "cef") return;
     cefDragListenerInstalled = true;
     if (useNativeDrag()) {
-        console.info("[window-drag] win32: NATIVE OS move loop (start_window_drag)");
+        console.info("[window-drag] win32: host-side native move loop (start_window_drag)");
         installNativeDragListener();
     } else {
         console.info("[window-drag] win32: legacy JS-driven drag (set_window_position)");
