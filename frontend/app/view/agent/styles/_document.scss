@@ -202,33 +202,41 @@
     }
 
     // === New-message enter animation ===
-    // Matches the swift feel of the tool-panel collapse transition
-    // (120ms cubic-bezier(0.4,0,0.2,1) — see _document-nodes.scss).
-    // Scoped to .agent-document-streaming-buffer[data-animate] so:
-    //  (a) virtualizer re-inserts (scroll recycling, loadOlder) do NOT
-    //      re-animate (never in the streaming buffer), and
-    //  (b) the initial HistoryLoaded/HistoryRestored batch does NOT
-    //      animate — [data-animate] is absent until queueMicrotask fires
-    //      after those rows are already in the DOM (reagent P1 on #1212).
+    // Uses transition + @starting-style instead of @keyframes animation.
+    // @starting-style fires ONLY when an element is first rendered (or
+    // transitions from display:none), NOT when a CSS rule becomes newly
+    // applicable to an already-mounted element. This is the critical
+    // distinction:
+    //  - history rows: mount while [data-animate] is ABSENT → rule never
+    //    matched → @starting-style never fires → they appear immediately.
+    //  - queueMicrotask adds [data-animate]: rule now matches mounted rows,
+    //    but @starting-style does NOT retroactively fire → no animation.
+    //  - new streaming rows: mount while [data-animate] IS present → rule
+    //    matches at mount → @starting-style fires → fade+slide runs. ✓
+    // A CSS animation (@keyframes) would animate on ANY selector-match
+    // change (including adding the parent attribute), making the JS gate
+    // insufficient (codex P2 on #1212). @starting-style is available on
+    // Chromium 117+ / cef-146. Virtualizer re-inserts never land in the
+    // streaming buffer so they are also safe.
     // Spec: docs/specs/SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30.md
-    @keyframes agent-node-enter {
-        from {
+
+    .agent-document-streaming-buffer[data-animate] .agent-document-row {
+        opacity: 1;
+        transform: translateY(0);
+        transition: opacity 120ms cubic-bezier(0.4, 0, 0.2, 1),
+                    transform 120ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    @starting-style {
+        .agent-document-streaming-buffer[data-animate] .agent-document-row {
             opacity: 0;
             transform: translateY(4px);
         }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-
-    .agent-document-streaming-buffer[data-animate] .agent-document-row {
-        animation: agent-node-enter 120ms cubic-bezier(0.4, 0, 0.2, 1) both;
     }
 
     @media (prefers-reduced-motion: reduce) {
         .agent-document-streaming-buffer[data-animate] .agent-document-row {
-            animation: none;
+            transition: none;
         }
     }
 
