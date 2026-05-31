@@ -35,6 +35,13 @@ describe("capText", () => {
         expect(r.hiddenLines).toBe(50);
         expect(r.text.split("\n").length).toBe(MAX_TOOL_OUTPUT_LINES);
     });
+
+    it("ignores a trailing newline when counting against the budget", () => {
+        const exact = Array.from({ length: MAX_TOOL_OUTPUT_LINES }, (_, i) => `l${i}`).join("\n") + "\n";
+        const r = capText(exact);
+        expect(r.hiddenLines).toBe(0);
+        expect(r.text).toBe(exact);
+    });
 });
 
 describe("capChunksByLines", () => {

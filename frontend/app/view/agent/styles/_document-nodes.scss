@@ -264,7 +264,7 @@
         .agent-tool-panel {
             display: flex;
             flex-direction: column;
-            margin: 4px 0 8px 0;
+            margin: 4px 0 8px 24px;
             border-left: 2px solid var(--accent-color, #2bd4a8);
             background: var(--surface-elevated, rgba(255, 255, 255, 0.02));
             border-radius: 0;
@@ -531,7 +531,7 @@
                 border-left: 2px solid var(--error-color);
             }
 
-            .agent-bash-stderr {
+            &.agent-bash-stderr {
                 color: var(--error-color);
             }
         }

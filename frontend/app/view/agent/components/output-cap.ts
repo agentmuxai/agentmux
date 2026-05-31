@@ -33,9 +33,12 @@ export function capText(
 ): CappedText {
     if (!text) return { text: text ?? "", hiddenLines: 0 };
     const lines = text.split("\n");
-    if (lines.length <= max) return { text, hiddenLines: 0 };
-    const kept = from === "tail" ? lines.slice(lines.length - max) : lines.slice(0, max);
-    return { text: kept.join("\n"), hiddenLines: lines.length - max };
+    // A trailing newline yields a phantom empty final segment — exclude it so
+    // exactly-`max` lines followed by "\n" is not treated as over budget.
+    const body = lines.length > 1 && lines[lines.length - 1] === "" ? lines.slice(0, -1) : lines;
+    if (body.length <= max) return { text, hiddenLines: 0 };
+    const kept = from === "tail" ? body.slice(body.length - max) : body.slice(0, max);
+    return { text: kept.join("\n"), hiddenLines: body.length - max };
 }
 
 export interface CappedChunks<T> {
@@ -90,5 +93,7 @@ function countLines(s: string): number {
     for (let i = 0; i < s.length; i++) {
         if (s.charCodeAt(i) === 10 /* \n */) n++;
     }
+    // A trailing newline terminates the last line — don't count a phantom.
+    if (s.charCodeAt(s.length - 1) === 10) n--;
     return n;
 }
