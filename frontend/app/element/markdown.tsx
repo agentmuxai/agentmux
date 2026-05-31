@@ -342,6 +342,10 @@ type MarkdownProps = {
     resolveOpts?: MarkdownResolveOpts;
     scrollable?: boolean;
     rehype?: boolean;
+    /** When false, skip the (expensive) syntax-highlighting rehype plugin
+     *  while keeping every other plugin (sanitize, etc.). Read reactively so
+     *  streaming callers can defer highlighting until the content settles. */
+    highlight?: boolean;
     fontSizeOverride?: number;
     fixedFontSizeOverride?: number;
 };
@@ -466,14 +470,14 @@ const Markdown = (props: MarkdownProps) => {
 
     const renderedMarkdown = createMemo(() => {
         const txt = transformedText();
-        markStart("agent-markdown-parse");
+        markStart("markdown-render");
         const tocRef: TocItem[] = [];
         const tocRefObj = { current: tocRef };
 
         const rehypePlugins: any[] = rehype
             ? [
                   rehypeRaw,
-                  rehypeHighlight,
+                  ...((props.highlight ?? true) ? [rehypeHighlight] : []),
                   rehypeAlignToClass,
                   () =>
                       rehypeSanitize({
@@ -539,7 +543,7 @@ const Markdown = (props: MarkdownProps) => {
             console.error("Markdown render error:", e);
             return <pre>{txt}</pre>;
         } finally {
-            markEnd("agent-markdown-parse", `len=${txt.length}`);
+            markEnd("markdown-render", `len=${txt.length}`);
         }
     });
 

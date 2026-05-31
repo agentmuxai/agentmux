@@ -7,6 +7,16 @@
 
 ---
 
+> **Update (post-review, 2026-05-31):** the §6 "per-block incremental render"
+> plan was implemented and **rejected on review** — splitting at blank lines
+> breaks lists (loose lists, multi-paragraph items), paragraph spacing, and
+> cross-block reference definitions (reagent P1s + codex P2s on #1213).
+> The shipped fix keeps each message a **single parse** and instead
+> **throttles** streaming re-renders (~1 per 90 ms) while **deferring syntax
+> highlighting** until the stream settles (`MarkdownBlock.tsx` + a reactive
+> `highlight` prop on `Markdown`). The root-cause analysis below stands; only
+> the fix shape changed.
+
 ## 1. Symptom & measured data
 
 Typing in the agent-pane composer lags badly **while an agent response is streaming**. Measured on the clean v0.40.3 instance via the existing keystroke perf marks (#1146) + the long-task observer:

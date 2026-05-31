@@ -7,44 +7,22 @@
 
 import { Markdown } from "@/app/element/markdown";
 import clsx from "clsx";
-import { createMemo, createSignal, Index, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
 import type { MarkdownNode } from "../types";
-
-/**
- * Split markdown into top-level blocks at paragraph breaks that are NOT
- * inside a ``` fence (so a code block is never cut). Lets the streaming
- * render parse only the last/growing block per frame — completed blocks
- * keep their stable string so the inner Markdown memo skips re-parsing
- * them. O(n) char scan, negligible vs a parse.
- * See docs/analysis/ANALYSIS_AGENT_PANE_TYPING_LATENCY_2026_05_30.md.
- */
-function splitTopLevelBlocks(content: string): string[] {
-    if (!content) return [];
-    const blocks: string[] = [];
-    let fenceOpen = false;
-    let start = 0;
-    let i = 0;
-    while (i < content.length) {
-        if (content.startsWith("```", i)) {
-            fenceOpen = !fenceOpen;
-            i += 3;
-            continue;
-        }
-        if (!fenceOpen && content.startsWith("\n\n", i)) {
-            blocks.push(content.slice(start, i));
-            i += 2;
-            start = i;
-            continue;
-        }
-        i++;
-    }
-    if (start < content.length) blocks.push(content.slice(start));
-    return blocks;
-}
 
 interface MarkdownBlockProps {
     node: MarkdownNode;
 }
+
+// During streaming the message content grows ~60x/s. Re-parsing the whole
+// document (including syntax highlighting) on every frame is O(n^2) and
+// starves keystrokes (see ANALYSIS_AGENT_PANE_TYPING_LATENCY_2026_05_30.md).
+// Coalesce: commit at most one cheap (un-highlighted) intermediate render per
+// window while content keeps arriving, then one full highlighted render once
+// it settles. The whole message stays a SINGLE parse, so lists / reference
+// definitions / paragraph spacing are unaffected. This is a perf rate-limit
+// on an expensive render, not a timer papering over a race.
+const STREAM_RENDER_MS = 90;
 
 export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
     // Don't destructure `node` — the streaming buffer keeps this row
@@ -62,11 +40,36 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
     const isCanceled = (): boolean => props.node.metadata?.canceled === true;
     const [expanded, setExpanded] = createSignal(false);
 
-    // Incremental streaming render: split into top-level blocks so only the
-    // last (growing) block re-parses each frame. Completed blocks keep their
-    // stable string, so the inner Markdown memo skips them — fixes the O(n²)
-    // full-message re-parse that was starving keystrokes during streaming.
-    const blocks = createMemo(() => splitTopLevelBlocks(props.node.content));
+    // Throttled view of the streaming content + whether to syntax-highlight.
+    // A settled/static message renders fully (highlighted) immediately; a
+    // fast stream renders cheap intermediates and a full final.
+    const [view, setView] = createSignal<{ text: string; highlight: boolean }>({
+        text: props.node.content,
+        highlight: true,
+    });
+    let lastCommitAt = 0;
+    let streaming = false;
+    let trailing: ReturnType<typeof setTimeout> | undefined;
+    createEffect(() => {
+        const text = props.node.content; // dep: re-runs on each streamed update
+        const now = performance.now();
+        if (trailing) clearTimeout(trailing);
+        if (now - lastCommitAt >= STREAM_RENDER_MS) {
+            // Leading edge: cheap intermediate (skip highlight mid-stream).
+            lastCommitAt = now;
+            setView({ text, highlight: !streaming });
+        }
+        streaming = true;
+        // Trailing edge: once updates stop for a window, render full + highlight.
+        trailing = setTimeout(() => {
+            streaming = false;
+            lastCommitAt = performance.now();
+            setView({ text: props.node.content, highlight: true });
+        }, STREAM_RENDER_MS);
+    });
+    onCleanup(() => {
+        if (trailing) clearTimeout(trailing);
+    });
 
     return (
         <Show
@@ -77,9 +80,7 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
                         "thinking-block": props.node.metadata?.thinking,
                     })}
                 >
-                    <Index each={blocks()}>
-                        {(block) => <Markdown text={block()} scrollable={false} />}
-                    </Index>
+                    <Markdown text={view().text} highlight={view().highlight} />
                 </div>
             }
         >
