@@ -29,7 +29,7 @@
  */
 
 import { createVirtualizer } from "@tanstack/solid-virtual";
-import { createEffect, createMemo, For, Index, onMount, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Index, onMount, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
@@ -95,6 +95,17 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // Plain `let` rather than a Solid signal: mutating the variable
     // must NOT trigger another memo run while we're inside one.
     let stickyFrontierId: string | null = null;
+
+    // Gate for the new-message enter animation. Starts false so that
+    // the initial history batch (HistoryLoaded / HistoryRestored) mounts
+    // into the streaming buffer WITHOUT triggering the fade+slide —
+    // those are already-seen rows, not new messages. A queueMicrotask
+    // after the first non-empty render flips it true; from that point,
+    // any row that mounts into .agent-document-streaming-buffer is a
+    // freshly-streamed node and gets the animation. The streaming-buffer
+    // container is annotated with [data-animate] so CSS can scope to it.
+    // (reagent P1 on #1212.)
+    const [animateEnabled, setAnimateEnabled] = createSignal(false);
 
     // Memoized — partition is read inside virtualizer's reactive
     // count getter, estimateSize, getItemKey, the streaming buffer
@@ -185,6 +196,17 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // subsequent mounts are no-ops. Production: short-circuits.
     onMount(() => {
         startAgentLayoutShiftObserver();
+    });
+
+    // Flip animateEnabled after the initial history batch has rendered.
+    // The effect fires synchronously once nodes() is non-empty; the
+    // queueMicrotask defers the setter to AFTER Solid has flushed the
+    // current batch of DOM mutations, so any rows that mounted during
+    // this tick (history load) are already in the DOM and won't
+    // re-trigger their CSS animation when [data-animate] appears.
+    createEffect(() => {
+        if (animateEnabled() || props.viewState.nodes().length === 0) return;
+        queueMicrotask(() => setAnimateEnabled(true));
     });
 
     // Project stickToBottom into scroll position. When the document
@@ -405,7 +427,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 DocumentRow stays mounted while its `props.node()`
                 reactively re-reads the current value. (reagent P1 on
                 #784.) */}
-            <div class="agent-document-streaming-buffer">
+            <div class="agent-document-streaming-buffer" data-animate={animateEnabled() || undefined}>
                 <Index each={partition().streamingNodes as DocumentNode[]}>
                     {(nodeAccessor) => (
                         <DocumentRow
