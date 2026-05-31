@@ -57,18 +57,25 @@ export AGENTMUX_CEF_RUNTIME_DIR_DARWIN=$PWD/out/Release_GN_arm64
 cd <agentmux> && task package:macos     # bundles the PATCHED framework, signs, notarizes, staples
 ```
 
-## ⚠️ Metal caveat (important for a SHIP build)
+## Metal (resolved — framework is Metal-accelerated)
 
-This first framework was built with **`angle_enable_metal=false`** to bypass a broken Xcode-26 Metal
-toolchain (`xcodebuild -downloadComponent MetalToolchain` fails on an outdated DVTDownloads from the
-old Command Line Tools). The app **works** (ANGLE falls back to CGL/SwiftShader), but the GPU is not
-Metal-accelerated.
+The framework is built **with Metal enabled** (`angle_enable_metal=true`, the default) — verified at
+runtime: the GPU process loads `Metal.framework` + `AGXMetalG14G` via ANGLE-Metal (hardware accel).
 
-**For a production framework with Metal:**
+Getting Metal to build required a one-time Xcode-26 toolchain repair. Xcode 26 ships the Metal
+compiler as a *separate* downloadable component, and `xcodebuild -downloadComponent MetalToolchain`
+was broken by a stale `DVTDownloads.framework` (old `XcodeSystemResources` pkg) whose missing symbol
+crashed the download plugin. Fix (run once, with sudo):
+
 ```bash
-sudo softwareupdate -i 'Command Line Tools for Xcode 26.5'   # fixes the Metal toolchain
-# then remove angle_enable_metal=false from out/Release_GN_arm64/args.gn, re-gen, rebuild.
+sudo installer -pkg /Applications/Xcode.app/Contents/Resources/Packages/XcodeSystemResources.pkg -target /
+xcodebuild -downloadComponent MetalToolchain
+xcrun metal --version   # confirm
 ```
+
+(The first framework was a stopgap built with `angle_enable_metal=false` → CGL/SwiftShader; once the
+toolchain was repaired we removed that arg, re-ran `gn gen`, and did an incremental rebuild — only
+the ANGLE-Metal objects + `.air` shaders + the `libcef` relink, ~minutes.)
 
 ## Fork persistence
 
