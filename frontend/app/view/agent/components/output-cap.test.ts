@@ -101,6 +101,13 @@ describe("capChunksByLines", () => {
         expect(r.keptLines).toBe(1000);
     });
 
+    it("bounds a long run of empty chunks (each still renders a node)", () => {
+        const chunks = Array.from({ length: 5000 }, () => C(""));
+        const r = capChunksByLines(chunks, 1000);
+        expect(r.chunks).toHaveLength(1000); // node count bounded, not unlimited
+        expect(r.keptLines).toBe(1000);
+    });
+
     it("handles an empty list", () => {
         expect(capChunksByLines([], 10)).toEqual({ chunks: [], keptLines: 0 });
     });
@@ -139,5 +146,12 @@ describe("createChunkCapper", () => {
         const cap = createChunkCapper(1000);
         expect(cap([C(lines(900)), C(lines(900))]).hiddenLines).toBe(800); // total 1800 - 1000
         expect(cap([C(lines(100)), C(lines(100))]).hiddenLines).toBe(0); // different stream, total 200
+    });
+
+    it("counts empty chunks so a long empty run is bounded", () => {
+        const cap = createChunkCapper(1000);
+        const r = cap(Array.from({ length: 1500 }, () => C("")));
+        expect(r.chunks).toHaveLength(1000);
+        expect(r.hiddenLines).toBe(500); // 1500 - 1000
     });
 });
