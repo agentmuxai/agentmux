@@ -149,8 +149,8 @@ function ChunkList(props: ChunkListProps): JSX.Element {
     const capped = () => capChunksByLines(props.chunks);
     return (
         <>
-            <Show when={capped().hiddenChunks > 0 || capped().boundaryTrimmed}>
-                <OutputHiddenMarker hidden={capped().hiddenChunks} noun="block" from="tail" />
+            <Show when={capped().hiddenLines > 0}>
+                <OutputHiddenMarker hidden={capped().hiddenLines} noun="line" from="tail" />
             </Show>
             <For each={capped().chunks}>
                 {(chunk) => (

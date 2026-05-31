@@ -8,7 +8,7 @@
  * pane; for now it is informational (the full output is preserved in state).
  */
 
-import { Show, type JSX } from "solid-js";
+import { type JSX } from "solid-js";
 
 interface OutputHiddenMarkerProps {
     /** How many units were dropped. */
@@ -28,10 +28,8 @@ export function OutputHiddenMarker(props: OutputHiddenMarkerProps): JSX.Element 
             class="agent-output-hidden-marker"
             title="Full output preserved — open in pane to view all"
         >
-            <Show when={props.hidden > 0} fallback={<>… output truncated</>}>
-                … {props.hidden.toLocaleString()} {direction()} {props.noun}
-                {plural()} hidden
-            </Show>
+            … {props.hidden.toLocaleString()} {direction()} {props.noun}
+            {plural()} hidden
         </div>
     );
 }

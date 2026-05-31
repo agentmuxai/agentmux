@@ -43,22 +43,21 @@ export function capText(
 
 export interface CappedChunks<T> {
     chunks: ReadonlyArray<T>;
-    /** Whole chunks dropped off the front (0 when under budget). */
-    hiddenChunks: number;
-    /** The first kept chunk was itself line-trimmed to fit the budget. */
-    boundaryTrimmed: boolean;
+    /** Total lines hidden — dropped whole chunks plus any trimmed boundary. */
+    hiddenLines: number;
 }
 
 /**
  * Cap an append-only chunk list (one <pre> per chunk) to the tail whose
- * cumulative line count first reaches `maxLines`. Walks only the kept tail
- * — O(kept), not O(all) — so it is cheap to call on every streamed append.
- * Retained chunk objects keep their identity, so a `<For>` keyed by
- * reference only churns at the window boundary.
- *
- * If a single boundary chunk alone exceeds the remaining budget it is
- * line-trimmed to its tail (not kept whole), so one chunk that batches a
+ * cumulative line count first reaches `maxLines`. Retained chunk objects keep
+ * their identity, so a `<For>` keyed by reference only churns at the window
+ * boundary. If a single boundary chunk alone exceeds the remaining budget it
+ * is line-trimmed to its tail (not kept whole), so one chunk that batches a
  * huge output can't render an unbounded <pre>.
+ *
+ * Reports the exact number of hidden lines (dropped chunks + the trimmed
+ * boundary). Counting the dropped remainder is a cheap char scan — not a
+ * re-parse — so it stays inexpensive even on large output.
  */
 export function capChunksByLines<T extends { content: string }>(
     chunks: ReadonlyArray<T>,
@@ -71,18 +70,20 @@ export function capChunksByLines<T extends { content: string }>(
         if (n > budget) break; // this chunk overflows the remaining budget
         budget -= n;
     }
-    if (i < 0) return { chunks, hiddenChunks: 0, boundaryTrimmed: false };
+    if (i < 0) return { chunks, hiddenLines: 0 };
+    // Lines from every chunk fully dropped off the front.
+    let hiddenLines = 0;
+    for (let j = 0; j < i; j++) hiddenLines += countLines(chunks[j].content);
     if (budget <= 0) {
-        // Budget exactly spent by newer chunks — drop this one whole too.
-        return { chunks: chunks.slice(i + 1), hiddenChunks: i + 1, boundaryTrimmed: false };
+        // No room left for the boundary chunk — drop it whole too.
+        return { chunks: chunks.slice(i + 1), hiddenLines: hiddenLines + countLines(chunks[i].content) };
     }
-    // The boundary chunk alone exceeds the remaining budget — keep only its
-    // last `budget` lines so one oversized chunk can't render unbounded.
+    // The boundary chunk alone exceeds the budget — keep only its last `budget`
+    // lines so one oversized chunk can't render unbounded.
     const trimmed = capText(chunks[i].content, budget, "tail");
     return {
         chunks: [{ ...chunks[i], content: trimmed.text } as T, ...chunks.slice(i + 1)],
-        hiddenChunks: i,
-        boundaryTrimmed: true,
+        hiddenLines: hiddenLines + trimmed.hiddenLines,
     };
 }
 
