@@ -5,10 +5,12 @@
  * CompactResult - Shows tool results as a compact summary with expand-to-JSON.
  *
  * Default view: a short one-line description extracted from the result shape.
- * Expanded view: pretty-printed JSON.
+ * Expanded view: pretty-printed JSON, render-capped per
+ * SPEC_TOOL_OUTPUT_CAP_2026_05_30.md so a large structured result can't bloat
+ * the conversation DOM once expanded.
  */
 
-import { Show, type JSX } from "solid-js";
+import { createSignal, Show, type JSX } from "solid-js";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 
@@ -96,18 +98,29 @@ function shortPath(p: string): string {
 }
 
 export const CompactResult = ({ tool, params, result }: CompactResultProps): JSX.Element => {
+    const [expanded, setExpanded] = createSignal(false);
+
     const summary = summarize(tool, params, result);
     const fullJson = result != null ? JSON.stringify(result, null, 2) : "";
     const hasDetail = fullJson.length > summary.length + 10;
-    // Head-cap the JSON detail (read top-down) to bound the DOM.
+    // Head-cap the expanded JSON so a large structured payload (Glob / Grep /
+    // Agent) can't add an unbounded <pre> once the summary is expanded.
     const jsonCap = capText(fullJson, MAX_TOOL_OUTPUT_LINES, "head");
 
     return (
         <div class="agent-tool-compact-result">
-            <div class="agent-tool-compact-summary">
+            <div
+                class="agent-tool-compact-summary"
+                classList={{ clickable: hasDetail }}
+                onClick={() => hasDetail && setExpanded(!expanded())}
+                title={hasDetail ? (expanded() ? "Collapse" : "Expand full result") : undefined}
+            >
+                <Show when={hasDetail}>
+                    <span class="agent-tool-compact-chevron">{expanded() ? "▾" : "▸"}</span>
+                </Show>
                 <span class="agent-tool-compact-text">{summary}</span>
             </div>
-            <Show when={hasDetail}>
+            <Show when={expanded()}>
                 <pre class="agent-tool-compact-json">{jsonCap.text}</pre>
                 <Show when={jsonCap.hiddenLines > 0}>
                     <OutputHiddenMarker hidden={jsonCap.hiddenLines} noun="line" from="head" />

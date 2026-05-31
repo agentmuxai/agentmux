@@ -39,44 +39,67 @@ describe("capText", () => {
 
 describe("capChunksByLines", () => {
     const C = (content: string) => ({ content });
+    const lines = (n: number, p = "x") => Array.from({ length: n }, (_, i) => `${p}${i}`).join("\n");
 
     it("returns the same array reference when under budget", () => {
         const chunks = [C("a"), C("b\nc")];
         const r = capChunksByLines(chunks, 10);
         expect(r.hiddenChunks).toBe(0);
+        expect(r.boundaryTrimmed).toBe(false);
         expect(r.chunks).toBe(chunks);
     });
 
-    it("keeps the tail whose cumulative lines reach the budget", () => {
+    it("drops whole chunks past the budget, keeping the tail", () => {
         const chunks = [C("a"), C("b"), C("c"), C("d")]; // 1 line each
         const r = capChunksByLines(chunks, 2);
         expect(r.chunks.map((c) => c.content)).toEqual(["c", "d"]);
         expect(r.hiddenChunks).toBe(2);
+        expect(r.boundaryTrimmed).toBe(false);
     });
 
-    it("counts multi-line chunks against the budget", () => {
+    it("trims the boundary chunk to fit the remaining budget", () => {
         const chunks = [C("a"), C("b\nc"), C("d\ne")]; // 1, 2, 2 lines
         const r = capChunksByLines(chunks, 3);
-        // tail walk: "d\ne"(2) → budget 1; "b\nc"(2) → budget -1, stop, keep both
-        expect(r.chunks.map((c) => c.content)).toEqual(["b\nc", "d\ne"]);
+        // keep "d\ne" (2); "b\nc" overflows the remaining 1 → trimmed to its last line
+        expect(r.chunks.map((c) => c.content)).toEqual(["c", "d\ne"]);
         expect(r.hiddenChunks).toBe(1);
+        expect(r.boundaryTrimmed).toBe(true);
     });
 
-    it("keeps a single oversized tail chunk whole", () => {
-        const huge = Array.from({ length: 5000 }, (_, i) => `x${i}`).join("\n");
-        const chunks = [C("a"), C(huge)];
+    it("trims a single oversized chunk instead of rendering it whole", () => {
+        const chunks = [C("a"), C(lines(5000))];
         const r = capChunksByLines(chunks, 1000);
-        expect(r.chunks.map((c) => c.content)).toEqual([huge]);
+        expect(r.chunks).toHaveLength(1);
+        const kept = r.chunks[0].content.split("\n");
+        expect(kept).toHaveLength(1000);
+        expect(kept[kept.length - 1]).toBe("x4999"); // kept the tail
         expect(r.hiddenChunks).toBe(1);
+        expect(r.boundaryTrimmed).toBe(true);
     });
 
-    it("retains object identity for kept chunks", () => {
+    it("trims the only chunk when it alone exceeds the budget", () => {
+        const r = capChunksByLines([C(lines(3000))], 1000);
+        expect(r.chunks).toHaveLength(1);
+        expect(r.chunks[0].content.split("\n")).toHaveLength(1000);
+        expect(r.hiddenChunks).toBe(0);
+        expect(r.boundaryTrimmed).toBe(true);
+    });
+
+    it("retains object identity for whole kept chunks", () => {
         const chunks = [C("a"), C("b"), C("c")];
         const r = capChunksByLines(chunks, 1);
         expect(r.chunks[r.chunks.length - 1]).toBe(chunks[chunks.length - 1]);
+        expect(r.boundaryTrimmed).toBe(false);
+    });
+
+    it("keeps tail chunks by reference even when the boundary is trimmed", () => {
+        const tail = C("keep");
+        const r = capChunksByLines([C(lines(2000)), tail], 1000);
+        expect(r.chunks[r.chunks.length - 1]).toBe(tail);
+        expect(r.boundaryTrimmed).toBe(true);
     });
 
     it("handles an empty list", () => {
-        expect(capChunksByLines([], 10)).toEqual({ chunks: [], hiddenChunks: 0 });
+        expect(capChunksByLines([], 10)).toEqual({ chunks: [], hiddenChunks: 0, boundaryTrimmed: false });
     });
 });
