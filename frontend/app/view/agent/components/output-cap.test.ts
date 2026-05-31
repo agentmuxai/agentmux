@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { capChunksByLines, capText, createChunkCapper, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import {
+    capChunksByLines,
+    capText,
+    createChunkCapper,
+    MAX_TOOL_OUTPUT_CHARS,
+    MAX_TOOL_OUTPUT_LINES,
+} from "./output-cap";
 
 describe("capText", () => {
     it("returns unchanged when under budget", () => {
@@ -41,6 +47,20 @@ describe("capText", () => {
         const r = capText(exact);
         expect(r.hiddenLines).toBe(0);
         expect(r.text).toBe(exact);
+    });
+
+    it("char-caps a single very long line that fits the line budget", () => {
+        const huge = "x".repeat(MAX_TOOL_OUTPUT_CHARS * 2); // one line, ~2 MB
+        const r = capText(huge, 1000, "tail");
+        expect(r.text.length).toBeLessThan(MAX_TOOL_OUTPUT_CHARS + 50);
+        expect(r.text).toContain("truncated");
+    });
+
+    it("does not char-cap normal multi-line output under the byte budget", () => {
+        const normal = Array.from({ length: 500 }, () => "a".repeat(80)).join("\n"); // ~40 KB
+        const r = capText(normal, 1000);
+        expect(r.text).toBe(normal);
+        expect(r.hiddenLines).toBe(0);
     });
 });
 

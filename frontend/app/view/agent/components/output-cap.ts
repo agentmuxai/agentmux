@@ -15,6 +15,12 @@
 /** Max rendered lines of a single text body (Bash stdout, Read content, …). */
 export const MAX_TOOL_OUTPUT_LINES = 1000;
 
+/** Max rendered characters of a single text body. Bounds a payload that fits
+ *  the line budget but is one enormous line (minified JSON, base64, a long
+ *  compiler line). ~1 MB: comfortably above any real multi-line output, well
+ *  below the multi-MB blobs that bloat the conversation DOM. */
+export const MAX_TOOL_OUTPUT_CHARS = 1_000_000;
+
 export interface CappedText {
     text: string;
     /** Lines dropped (0 when under budget). */
@@ -24,7 +30,9 @@ export interface CappedText {
 /**
  * Cap a text body to `max` lines, keeping the head or the tail. Logs and
  * command output use "tail" (the latest matters); file/diff content uses
- * "head" (read top-down). Exactly-at-budget is not considered capped.
+ * "head" (read top-down). Exactly-at-budget is not considered capped. The
+ * result is additionally bounded to MAX_TOOL_OUTPUT_CHARS so one enormous
+ * line (minified JSON, base64) can't render an unbounded <pre>.
  */
 export function capText(
     text: string,
@@ -36,9 +44,22 @@ export function capText(
     // A trailing newline yields a phantom empty final segment — exclude it so
     // exactly-`max` lines followed by "\n" is not treated as over budget.
     const body = lines.length > 1 && lines[lines.length - 1] === "" ? lines.slice(0, -1) : lines;
-    if (body.length <= max) return { text, hiddenLines: 0 };
-    const kept = from === "tail" ? body.slice(body.length - max) : body.slice(0, max);
-    return { text: kept.join("\n"), hiddenLines: body.length - max };
+    let hiddenLines = 0;
+    let out = text;
+    if (body.length > max) {
+        const kept = from === "tail" ? body.slice(body.length - max) : body.slice(0, max);
+        hiddenLines = body.length - max;
+        out = kept.join("\n");
+    }
+    // Character bound: a payload within the line budget can still be enormous
+    // as one long line (minified JSON, base64). Trim by chars with a visible
+    // marker so the rendered <pre> stays bounded regardless of line count.
+    if (out.length > MAX_TOOL_OUTPUT_CHARS) {
+        out = from === "tail"
+            ? "…(truncated)\n" + out.slice(out.length - MAX_TOOL_OUTPUT_CHARS)
+            : out.slice(0, MAX_TOOL_OUTPUT_CHARS) + "\n…(truncated)";
+    }
+    return { text: out, hiddenLines };
 }
 
 export interface CappedChunks<T> {
