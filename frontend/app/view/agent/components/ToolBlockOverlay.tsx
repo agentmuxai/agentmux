@@ -15,13 +15,10 @@
  *   └────────────────────────────────────┘
  *
  * Per SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28.md the header was
- * simplified to two slots: timestamp on the left, status label on the
- * right. The status icon, tool name, summary, and duration were dropped
- * because the collapsed row above already displays all four — the
- * earlier header was pure duplication. The "small time popup" the user
- * was seeing on hover (a browser-native `title=` tooltip whose contents
- * included `(N.Ns)`) is also gone with this change: the time now lives
- * here, persistent, at the top of the unified panel.
+ * simplified: the status icon, tool name, summary, and duration are on
+ * the collapsed row above, so the header carries only the status label.
+ * The on-hover timestamp slot was later removed. The header is omitted
+ * while running — the body's "Thinking…" spinner already conveys that.
  */
 
 import { type JSX } from "solid-js";
@@ -47,23 +44,12 @@ const STATUS_LABEL: Record<ToolNode["status"], string> = {
     canceled: "canceled",
 };
 
-/**
- * Local-time `HH:MM:SS` for the header timestamp. Minutes precision is
- * too coarse for distinguishing rapid tool sequences in a Bash chain;
- * seconds gives the user enough to correlate against their own clock
- * without dominating the visual layout.
- */
-function formatToolTime(ms: number | undefined): string {
-    if (ms == null) return "";
-    return new Date(ms).toLocaleTimeString(undefined, { hour12: false });
-}
-
 export const ToolBlockOverlay = (props: ToolBlockOverlayProps): JSX.Element => (
     <div class="agent-tool-overlay" data-node-id={props.node.id}>
-        <div class="agent-tool-overlay-header">
-            <span class="agent-tool-overlay-time">
-                {formatToolTime(props.node.timestamp)}
-            </span>
+        <div
+            class="agent-tool-overlay-header"
+            style={{ display: props.node.status === "running" ? "none" : "" }}
+        >
             <span class="agent-tool-overlay-status-label">
                 {STATUS_LABEL[props.node.status]}
             </span>
