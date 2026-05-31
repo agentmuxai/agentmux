@@ -5,10 +5,14 @@
  * CompactResult - Shows tool results as a compact summary with expand-to-JSON.
  *
  * Default view: a short one-line description extracted from the result shape.
- * Expanded view: pretty-printed JSON.
+ * Expanded view: pretty-printed JSON, render-capped per
+ * SPEC_TOOL_OUTPUT_CAP_2026_05_30.md so a large structured result can't bloat
+ * the conversation DOM once expanded.
  */
 
 import { createSignal, Show, type JSX } from "solid-js";
+import { OutputHiddenMarker } from "./OutputHiddenMarker";
+import { capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 
 interface CompactResultProps {
     tool: string;
@@ -99,6 +103,9 @@ export const CompactResult = ({ tool, params, result }: CompactResultProps): JSX
     const summary = summarize(tool, params, result);
     const fullJson = result != null ? JSON.stringify(result, null, 2) : "";
     const hasDetail = fullJson.length > summary.length + 10;
+    // Head-cap the expanded JSON so a large structured payload (Glob / Grep /
+    // Agent) can't add an unbounded <pre> once the summary is expanded.
+    const jsonCap = capText(fullJson, MAX_TOOL_OUTPUT_LINES, "head");
 
     return (
         <div class="agent-tool-compact-result">
@@ -114,7 +121,10 @@ export const CompactResult = ({ tool, params, result }: CompactResultProps): JSX
                 <span class="agent-tool-compact-text">{summary}</span>
             </div>
             <Show when={expanded()}>
-                <pre class="agent-tool-compact-json">{fullJson}</pre>
+                <pre class="agent-tool-compact-json">{jsonCap.text}</pre>
+                <Show when={jsonCap.hiddenLines > 0}>
+                    <OutputHiddenMarker hidden={jsonCap.hiddenLines} noun="line" from="head" />
+                </Show>
             </Show>
         </div>
     );
