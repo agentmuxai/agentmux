@@ -43,10 +43,14 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
     // Throttled view of the streaming content + whether to syntax-highlight.
     // A settled/static message renders fully (highlighted) immediately; a
     // fast stream renders cheap intermediates and a full final.
-    const [view, setView] = createSignal<{ text: string; highlight: boolean }>({
-        text: props.node.content,
-        highlight: true,
-    });
+    // Value-based equality: `Markdown` subscribes to this signal via the
+    // `highlight` prop, so a fresh-but-equal object would needlessly re-parse
+    // static / history blocks on mount (and on the trailing no-op write).
+    // With this, a same-value setView is a no-op.
+    const [view, setView] = createSignal<{ text: string; highlight: boolean }>(
+        { text: props.node.content, highlight: true },
+        { equals: (a, b) => a.text === b.text && a.highlight === b.highlight },
+    );
     let lastCommitAt = 0;
     let streaming = false;
     let trailing: ReturnType<typeof setTimeout> | undefined;
