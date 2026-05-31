@@ -64,20 +64,12 @@ const BackendStatus = (): JSX.Element => {
     // Drive uptime from sysinfo event timestamp so all windows update in sync.
     // The backend broadcasts sysinfo with a server-side ts (ms epoch); all windows
     // receive the same ts and compute the same integer, eliminating phase drift.
-    //
-    // Diagnostic instrumentation (2026-05-28): the per-agent-pane cascade
-    // crash has been observed to leave this widget's value frozen until a
-    // sysinfo widget pane is opened. The console.log distinguishes:
-    //   - log silent + DOM frozen  → backend stopped delivering (broker drop)
-    //   - log fires + DOM frozen   → SolidJS scheduler / render-effect stuck
-    // Remove once the cascade root cause lands.
     onMount(() => {
         const unsub = waveEventSubscribe({
             eventType: "sysinfo",
             scope: "local",
             handler: (event) => {
                 const ts: number | undefined = (event as WaveEvent)?.data?.ts;
-                console.log("[fe] sysinfo:BackendStatus handler ts=", ts);
                 const start = startedAt();
                 if (ts != null && start != null) {
                     setUptimeSecs(Math.floor((ts - start) / 1000));

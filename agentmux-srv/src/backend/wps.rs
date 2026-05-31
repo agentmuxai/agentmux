@@ -315,26 +315,10 @@ impl Broker {
 
         let client = match &inner.client {
             Some(c) => c,
-            None => {
-                // Diagnostic for agent-pane cascade freeze (2026-05-28):
-                // if the bridge gets dropped, every publish silently no-ops.
-                tracing::warn!(target: "wps-diag", event = %event.event,
-                    "broker.publish: client is None — no delivery");
-                return;
-            }
+            None => return,
         };
 
         let route_ids = Self::get_matching_routes(&inner, &event);
-        // Diagnostic for agent-pane cascade freeze (2026-05-28): if sysinfo
-        // is published but no routes match, the status-bar widgets will
-        // freeze. Pair with `[fe] sysinfo:* handler` console logs to
-        // distinguish broker-drop from FE-scheduler-stall. Remove once
-        // the cascade root cause lands.
-        if route_ids.is_empty() && event.event == "sysinfo" {
-            tracing::warn!(target: "wps-diag",
-                scopes = ?event.scopes,
-                "broker.publish: 0 routes for sysinfo event");
-        }
         for route_id in route_ids {
             client.send_event(&route_id, event.clone());
         }
