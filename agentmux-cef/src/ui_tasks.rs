@@ -697,28 +697,45 @@ wrap_task! {
             };
             let cef_url = CefString::from(self.url.as_str());
 
-            // Get client from an existing TOP-LEVEL browser. Cannot use
-            // `first_browser()` here: that does `HashMap::iter().next()`
-            // over the full browsers map, which includes pane browsers.
-            // Pane browsers have `is_browser_pane=true` on their client.
-            // If we inherited that, the new window's `on_load_end` would
-            // take the pane early-return branch (client/mod.rs:954) and
-            // never call `window.show()` — backend reports success
-            // (status panel updates) but no OS window appears. Filter on
-            // label prefix: top-level labels are `window-…` (per
-            // client/mod.rs:218), panes are `browser-pane-…`.
+            // Get client from an existing TOP-LEVEL browser.
+            // Use list_top_level_browsers() rather than list_browsers() +
+            // manual filter — the dedicated helper already excludes pane
+            // browsers (kind: Pane{..}), removing the label-prefix heuristic.
+            //
+            // GUARD: if no top-level browser is alive at this point (race
+            // between window close → UnregisterBrowser and this task being
+            // posted, or all windows closing during a multi-window tear-off),
+            // bail early rather than passing None to browser_view_create.
+            // CEF's C++ layer CHECK-fails on a null client → SIGABRT on
+            // CrBrowserMain. A graceful return here lets the launcher's crash-
+            // budget supervisor retry (with --disable-gpu) only on real CEF
+            // faults, not on this transient race.
             let client = self
                 .state
-                .list_browsers()
+                .list_top_level_browsers()
                 .into_iter()
-                .find(|(label, _)| !label.starts_with("browser-pane-"))
-                .and_then(|(_, b)| b.host().map(|h| h.client()));
+                .find_map(|(_, b)| {
+                    b.host().and_then(|h| h.client())
+                });
             tracing::info!(
                 label = %self.label,
                 elapsed_us = t0.elapsed().as_micros() as u64,
                 client_found = client.is_some(),
                 "[create-window] got client"
             );
+
+            let mut client_ref = match client {
+                Some(c) => c,
+                None => {
+                    tracing::error!(
+                        label = %self.label,
+                        elapsed_us = t0.elapsed().as_micros() as u64,
+                        "[create-window] no live top-level browser to clone client from \
+                         (all windows closing?) — aborting window creation"
+                    );
+                    return;
+                }
+            };
 
             let mut request_context = crate::commands::create_isolated_request_context(
                 &self.state, &self.label,
@@ -728,13 +745,11 @@ wrap_task! {
                 elapsed_us = t0.elapsed().as_micros() as u64,
                 "[create-window] request_context resolved"
             );
-
-            let mut client_ref = client.flatten();
             let mut bv_delegate = crate::app::AgentMuxBrowserViewDelegate::new(
                 RuntimeStyle::ALLOY,
             );
             let browser_view = browser_view_create(
-                client_ref.as_mut(),
+                Some(&mut client_ref),
                 Some(&cef_url),
                 Some(&settings),
                 None,
