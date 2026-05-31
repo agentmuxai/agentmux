@@ -95,29 +95,35 @@ shopt -u nullglob
 ditto "dist/Frameworks/Chromium Embedded Framework.framework" \
       "$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
 
-# CEF Helper app — renderer/GPU/utility subprocesses run as this dedicated
-# helper (distinct bundle id, LSUIElement) instead of re-execing the main
-# bundle binary, which the macOS process model rejects (→ renderer crash-loop).
-# The host points CEF's browser_subprocess_path at it (see
-# main.rs::resolve_browser_subprocess_path). One helper suffices because all
-# subprocess types share one entitlement set.
-HELPER_APP="$APP/Contents/Frameworks/AgentMux Helper.app"
-mkdir -p "$HELPER_APP/Contents/MacOS"
-cp dist/cef/agentmux-cef "$HELPER_APP/Contents/MacOS/AgentMux Helper"
-# GL libs next to the helper exe too — the GPU subprocess resolves them via its
-# own DIR_MODULE (= the helper's MacOS dir).
+# CEF Helper apps — on macOS, Chromium launches renderer/GPU/utility
+# subprocesses as the standard per-type helper apps named "<App> Helper (<Type>)"
+# (CEF's canonical macOS layout). Each is a copy of the host binary (which
+# handles --type subprocess mode), with a distinct bundle id + LSUIElement, so
+# the macOS process model accepts them instead of re-execing the main bundle.
+# (The patched CEF framework additionally disables the Mach-port peer
+# process_requirement validation that failed on macOS 26 — the deeper fix.)
+HELPER_NAMES=("AgentMux Helper" "AgentMux Helper (GPU)" "AgentMux Helper (Plugin)" \
+              "AgentMux Helper (Renderer)" "AgentMux Helper (Alloy)")
+HELPER_IDS=("helper" "helper.gpu" "helper.plugin" "helper.renderer" "helper.alloy")
+HELPER_APPS=()
 shopt -s nullglob
-for f in dist/cef/*.dylib; do cp "$f" "$HELPER_APP/Contents/MacOS/"; done
-shopt -u nullglob
-cat > "$HELPER_APP/Contents/Info.plist" <<PLIST
+for i in "${!HELPER_NAMES[@]}"; do
+    hn="${HELPER_NAMES[$i]}"
+    ha="$APP/Contents/Frameworks/${hn}.app"
+    mkdir -p "$ha/Contents/MacOS"
+    cp dist/cef/agentmux-cef "$ha/Contents/MacOS/${hn}"
+    # GL libs next to each helper exe (the GPU subprocess resolves them via its
+    # own DIR_MODULE = the helper's MacOS dir).
+    for f in dist/cef/*.dylib; do cp "$f" "$ha/Contents/MacOS/"; done
+    cat > "$ha/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>AgentMux Helper</string>
-    <key>CFBundleDisplayName</key><string>AgentMux Helper</string>
-    <key>CFBundleExecutable</key><string>AgentMux Helper</string>
-    <key>CFBundleIdentifier</key><string>${BUNDLE_ID}.helper</string>
+    <key>CFBundleName</key><string>${hn}</string>
+    <key>CFBundleDisplayName</key><string>${hn}</string>
+    <key>CFBundleExecutable</key><string>${hn}</string>
+    <key>CFBundleIdentifier</key><string>${BUNDLE_ID}.${HELPER_IDS[$i]}</string>
     <key>CFBundleVersion</key><string>${VERSION}</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
     <key>CFBundlePackageType</key><string>APPL</string>
@@ -128,6 +134,9 @@ cat > "$HELPER_APP/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+    HELPER_APPS+=("$ha")
+done
+shopt -u nullglob
 
 # Icon: build AgentMux.icns from the 512px PNG (the normal AgentMux logo, same
 # source the Dock icon + Linux taskbar use).
@@ -173,14 +182,18 @@ shopt -s nullglob
 for dy in "$APP/Contents/MacOS/"*.dylib; do "${SIGN[@]}" "$dy"; done
 # 2. Framework's nested dylibs, then the framework bundle itself.
 for dy in "$FW/Libraries/"*.dylib; do "${SIGN[@]}" "$dy"; done
-# 3. Helper app: its GL dylibs → helper exe (entitlements: the renderer's V8
-#    JIT + framework dlopen) → helper bundle. Signed before the outer .app so
-#    its signature is included in the bundle seal.
-for dy in "$HELPER_APP/Contents/MacOS/"*.dylib; do "${SIGN[@]}" "$dy"; done
+# 3. Each Helper app: its GL dylibs → helper exe (entitlements: the renderer's
+#    V8 JIT + framework dlopen) → helper bundle. Signed before the outer .app so
+#    the signatures are included in the bundle seal.
+for ha in "${HELPER_APPS[@]}"; do
+    for dy in "$ha/Contents/MacOS/"*.dylib; do "${SIGN[@]}" "$dy"; done
+done
 shopt -u nullglob
 "${SIGN[@]}" "$FW"
-"${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$HELPER_APP/Contents/MacOS/AgentMux Helper"
-"${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$HELPER_APP"
+for ha in "${HELPER_APPS[@]}"; do
+    "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$ha/Contents/MacOS/$(basename "$ha" .app)"
+    "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$ha"
+done
 # 4. Backend + host get the app entitlements (CLI feature access + CEF JIT).
 "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/$(basename "$SRV")"
 "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/agentmux-cef"
@@ -202,17 +215,22 @@ codesign --force --timestamp --sign "$CERT" "$DMG"
 NOTARIZED=0
 if [ "$NOTARIZE" = "1" ]; then
     echo "==> Notarizing (keychain profile: $NOTARY_PROFILE)"
-    if xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait 2>&1 \
-         | tee /tmp/agentmux-notary.log | grep -q "status: Accepted"; then
+    # Capture the full output FIRST, then inspect — do NOT pipe into `grep -q`.
+    # `grep -q` exits on the first match (the mid-stream "Current status:
+    # Accepted"), which SIGPIPEs notarytool; under `set -o pipefail` that makes
+    # the whole pipeline non-zero and the success branch is skipped even though
+    # Apple accepted the submission (notarized-but-not-stapled). `|| true` keeps
+    # set -e from aborting if notarytool exits non-zero.
+    notary_out="$(xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait 2>&1 || true)"
+    printf '%s\n' "$notary_out" > /tmp/agentmux-notary.log
+    if printf '%s\n' "$notary_out" | grep -q "status: Accepted"; then
         xcrun stapler staple "$DMG"
         NOTARIZED=1
         echo "✓ Notarized + stapled"
     else
-        echo "⚠ Notarization FAILED or unavailable — emitting a SIGNED-ONLY DMG."
-        echo "  Log: /tmp/agentmux-notary.log"
-        echo "  Most likely the Apple Developer program license agreement needs"
-        echo "  re-signing at https://appstoreconnect.apple.com (notarytool returns"
-        echo "  HTTP 403 'a required agreement is missing or has expired')."
+        echo "⚠ Notarization not accepted — emitting a SIGNED-ONLY DMG. Log: /tmp/agentmux-notary.log"
+        echo "  If this is an agreement issue, re-sign at https://appstoreconnect.apple.com"
+        echo "  (notarytool returns HTTP 403 'a required agreement is missing or has expired')."
     fi
 else
     echo "==> Skipping notarization (NOTARIZE=0)"
