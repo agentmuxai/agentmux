@@ -112,9 +112,14 @@ for i in "${!HELPER_NAMES[@]}"; do
     ha="$APP/Contents/Frameworks/${hn}.app"
     mkdir -p "$ha/Contents/MacOS"
     cp dist/cef/agentmux-cef "$ha/Contents/MacOS/${hn}"
-    # GL libs next to each helper exe (the GPU subprocess resolves them via its
-    # own DIR_MODULE = the helper's MacOS dir).
-    for f in dist/cef/*.dylib; do cp "$f" "$ha/Contents/MacOS/"; done
+    # GL libs ONLY next to the GPU helper (the GPU subprocess resolves them via
+    # its DIR_MODULE) + the generic helper as a fallback. The renderer/plugin/
+    # alloy helpers never touch GL, so copying ~45MB of GL libs (mostly
+    # libvk_swiftshader) into each of them is pure bloat.
+    case "$hn" in
+        "AgentMux Helper"|"AgentMux Helper (GPU)")
+            for f in dist/cef/*.dylib; do cp "$f" "$ha/Contents/MacOS/"; done ;;
+    esac
     cat > "$ha/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -173,9 +178,40 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+FW="$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
+
+# Strip debug/local symbols from every Mach-O BEFORE signing (a from-source
+# CEF build with symbol_level=1 leaves ~240MB of symbols in libcef alone).
+# `strip -S -x` removes debug info + local symbols while keeping the exported
+# (global) symbols that cef-rs's loader needs. Halves the framework; the GL
+# dylibs and the host/helper copies shrink too. Must run before codesign (it
+# would otherwise invalidate the signature).
+echo "==> Stripping symbols (lean build)"
+strip -S -x "$FW/Versions/A/Chromium Embedded Framework" 2>/dev/null || true
+shopt -s nullglob
+for dy in "$FW/Versions/A/Libraries/"*.dylib \
+          "$APP/Contents/MacOS/"*.dylib \
+          "$APP/Contents/MacOS/agentmux-cef" \
+          "$APP/Contents/Frameworks/"*Helper*.app/Contents/MacOS/*.dylib \
+          "$APP/Contents/Frameworks/"*Helper*.app/Contents/MacOS/"AgentMux Helper"*; do
+    strip -S -x "$dy" 2>/dev/null || true
+done
+shopt -u nullglob
+# Trim non-English locales (~52MB of locale.pak across ~200 languages). These
+# are only Chromium's built-in UI strings (context menus, etc.) — AgentMux's UI
+# is its own bundled frontend. Chromium falls back to en for any locale whose
+# .pak is absent, so keeping en* is safe and standard for size-conscious builds.
+LOCDIR="$FW/Versions/A/Resources"
+for lp in "$LOCDIR"/*.lproj; do
+    case "$(basename "$lp")" in
+        en.lproj|en_*.lproj|en-*.lproj) ;;
+        *) rm -rf "$lp" ;;
+    esac
+done
+echo "  framework now: $(du -sh "$FW" 2>/dev/null | awk '{print $1}')  (locales trimmed to en*)"
+
 echo "==> Signing inside-out (Developer ID: $CERT)"
 SIGN=(codesign --force --timestamp --options runtime --sign "$CERT")
-FW="$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
 
 # 1. GL dylibs next to the exe (plain libraries — no entitlements).
 shopt -s nullglob
