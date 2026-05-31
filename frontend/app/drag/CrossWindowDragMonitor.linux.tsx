@@ -11,11 +11,12 @@
 import { atoms, getApi } from "@/store/global";
 import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
-import { openTearOffWindow } from "./tear-off-pool-helper";
+import { openTearOffWindow, measureSourcePaneSize } from "./tear-off-pool-helper";
 import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { invokeCommand } from "@/app/platform/ipc";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
+import { getLayoutModelForStaticTab, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "@/layout/index";
 import type { LayoutNode } from "@/layout/lib/types";
 
 export type DragItemPayload =
@@ -47,8 +48,17 @@ function CrossWindowDragMonitor(): JSX.Element {
 
             if (!payload) return;
 
+            // Drop coordinates straight from the DOM event. `screenX/Y` are
+            // top-left-origin screen coords in CSS px (= DIP), which is what
+            // CEF Views window positioning expects on Linux. Don't round-trip
+            // through `get_cursor_point` — that command is Windows-only
+            // (returns 0,0 on non-Windows builds, drag.rs:211-212), which
+            // would open the floater at the screen corner.
+            const dropX = e.screenX;
+            const dropY = e.screenY;
+
             await new Promise((r) => setTimeout(r, 50));
-            await handleCrossWindowDragEnd(payload, windowLabelRef);
+            await handleCrossWindowDragEnd(payload, windowLabelRef, dropX, dropY);
         };
 
         // Suppress the "operation not allowed" cursor during a cross-window
@@ -80,14 +90,16 @@ function CrossWindowDragMonitor(): JSX.Element {
     return null;
 }
 
-async function handleCrossWindowDragEnd(payload: DragItemPayload, sourceWindow: string | null) {
-    let cursorPoint: { x: number; y: number };
-    try {
-        cursorPoint = await invokeCommand<{ x: number; y: number }>("get_cursor_point");
-    } catch (e) {
-        Logger.error("dnd:cross", "failed to get cursor position", { error: String(e) });
-        return;
-    }
+async function handleCrossWindowDragEnd(
+    payload: DragItemPayload,
+    sourceWindow: string | null,
+    dropX: number,
+    dropY: number,
+) {
+    // `get_cursor_point` is a Windows-only host command (GetCursorPos); on
+    // Linux it returns 0,0. Use the DOM drop coordinates (top-left origin,
+    // CSS px = DIP) — correct for CEF Views positioning.
+    const cursorPoint = { x: dropX, y: dropY };
 
     let windows: string[];
     try {
@@ -155,18 +167,101 @@ async function performTearOff(
 ) {
     const api = getApi();
     if (dragType === "pane" && payload.blockId) {
-        const newWsId = await WorkspaceService.TearOffBlock(payload.blockId, sourceTabId, sourceWsId, true);
-        if (newWsId) await openTearOffWindow(api, newWsId, screenX, screenY, window.outerWidth, window.outerHeight);
+        // PANE → chromeless floating window (just the pane: no tab bar, no
+        // widget bar). Mirrors the Windows and macOS pane branches.
+        // `TearOffBlock` moves the block into a fresh backend workspace+tab;
+        // the floating window's `initApp` → `initHostNewWindow` path
+        // attaches to it via `?workspaceId=`, and the `?floatingPaneId=`
+        // URL param makes the frontend render `<FloatingPaneWorkspace>`
+        // (chromeless) instead of `<Workspace>`.
+        //
+        // Backend creates the frameless top-level via
+        // `post_create_window(frameless=true)` — the SAME CEF Views path
+        // the legacy tear-off used — so on Linux this is purely a
+        // frontend routing change. #1182 widened the backend's
+        // `open_floating_pane_window` non-Windows branch from "not
+        // implemented" to a real impl that runs identically on Linux
+        // and macOS.
+        //
+        // See docs/specs/SPEC_LINUX_FLOATING_PANE_TEAROFF_2026_05_30.md
+        // (mirrors SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md §"Phase A").
+
+        // Snapshot the source pane's rendered size BEFORE TearOffBlock —
+        // that mutation removes the block from the source layout and
+        // unmounts the source DOM element.
+        const { width: floaterWidth, height: floaterHeight } = measureSourcePaneSize(
+            payload.blockId,
+        );
+
+        const newWsId = await WorkspaceService.TearOffBlock(
+            payload.blockId,
+            sourceTabId,
+            sourceWsId,
+            true,
+        );
+        if (!newWsId) {
+            Logger.error("dnd:cross", "TearOffBlock returned no workspace id", {
+                blockId: payload.blockId,
+            });
+            return;
+        }
+
+        // CRITICAL: invoke the IPC FIRST, then mutate the layout on
+        // success. If we deleted the layout node up front and the IPC
+        // failed (e.g. the H.7 mid-close gate rejects), the pane would
+        // be orphaned — still in `blockids` but with no layout node and
+        // no floater. Reagent P1 on PR #1073 (Windows path); the same
+        // ordering is preserved here.
+        try {
+            await invokeCommand<{ window_label: string }>("open_floating_pane_window", {
+                pane_id: payload.blockId,
+                workspace_id: newWsId,
+                x: screenX,
+                y: screenY,
+                width: floaterWidth,
+                height: floaterHeight,
+            });
+            Logger.info("dnd:cross", "floating pane spawned (linux)", {
+                blockId: payload.blockId,
+                newWsId,
+                screenX,
+                screenY,
+                width: floaterWidth,
+                height: floaterHeight,
+            });
+        } catch (err) {
+            Logger.error("dnd:cross", "open_floating_pane_window failed — leaving pane docked", {
+                error: String(err),
+                blockId: payload.blockId,
+                newWsId,
+            });
+            return;
+        }
+
+        // IPC succeeded → drop the docked layout node so the pane
+        // doesn't render twice (once in the source tab, once in the
+        // floater). Mirrors the .win32 and .darwin siblings.
+        const layoutModel = getLayoutModelForStaticTab();
+        if (layoutModel) {
+            const node = layoutModel.getNodeByBlockId(payload.blockId);
+            if (node) {
+                layoutModel.treeReducer({
+                    type: LayoutTreeActionType.DeleteNode,
+                    nodeId: node.id,
+                } as LayoutTreeDeleteNodeAction);
+            }
+        }
     } else if (dragType === "tab" && payload.tabId) {
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
         if (newWsId) {
-            // Tab anchor — see win32 sibling for DPI rationale. Linux
-            // host cursor coords also come from native GetCursor APIs
-            // and may be physical px; multiply DIP offset by DPR.
+            // Tab anchor in DIP — screenX/Y are DOM `e.screenX/Y` (CSS px =
+            // DIP), and `getTabGrabOffset()` is also DOM client-space (DIP).
+            // Linux CEF Views positions in DIP, so no DPR scale (the win32
+            // sibling needs `* dpr` because `get_cursor_point` there returns
+            // physical px from `GetCursorPos`).
             const grabOffset = getTabGrabOffset();
-            const dpr = window.devicePixelRatio || 1;
-            const tabAnchorX = grabOffset ? screenX - grabOffset.x * dpr : undefined;
-            const tabAnchorY = grabOffset ? screenY - grabOffset.y * dpr : undefined;
+            const tabAnchorX = grabOffset ? screenX - grabOffset.x : undefined;
+            const tabAnchorY = grabOffset ? screenY - grabOffset.y : undefined;
             await openTearOffWindow(
                 api,
                 newWsId,
