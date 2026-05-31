@@ -40,8 +40,10 @@ export function capText(
 
 export interface CappedChunks<T> {
     chunks: ReadonlyArray<T>;
-    /** Chunks dropped off the front (0 when under budget). */
+    /** Whole chunks dropped off the front (0 when under budget). */
     hiddenChunks: number;
+    /** The first kept chunk was itself line-trimmed to fit the budget. */
+    boundaryTrimmed: boolean;
 }
 
 /**
@@ -51,22 +53,34 @@ export interface CappedChunks<T> {
  * Retained chunk objects keep their identity, so a `<For>` keyed by
  * reference only churns at the window boundary.
  *
- * A single oversized tail chunk is kept whole (one <pre>, one node — far
- * cheaper than the many-node case this guards against).
+ * If a single boundary chunk alone exceeds the remaining budget it is
+ * line-trimmed to its tail (not kept whole), so one chunk that batches a
+ * huge output can't render an unbounded <pre>.
  */
 export function capChunksByLines<T extends { content: string }>(
     chunks: ReadonlyArray<T>,
     maxLines: number = MAX_TOOL_OUTPUT_LINES,
 ): CappedChunks<T> {
     let budget = maxLines;
-    let firstKept = chunks.length;
-    for (let i = chunks.length - 1; i >= 0; i--) {
-        firstKept = i;
-        budget -= countLines(chunks[i].content);
-        if (budget <= 0) break;
+    let i = chunks.length - 1;
+    for (; i >= 0; i--) {
+        const n = countLines(chunks[i].content);
+        if (n > budget) break; // this chunk overflows the remaining budget
+        budget -= n;
     }
-    if (firstKept <= 0) return { chunks, hiddenChunks: 0 };
-    return { chunks: chunks.slice(firstKept), hiddenChunks: firstKept };
+    if (i < 0) return { chunks, hiddenChunks: 0, boundaryTrimmed: false };
+    if (budget <= 0) {
+        // Budget exactly spent by newer chunks — drop this one whole too.
+        return { chunks: chunks.slice(i + 1), hiddenChunks: i + 1, boundaryTrimmed: false };
+    }
+    // The boundary chunk alone exceeds the remaining budget — keep only its
+    // last `budget` lines so one oversized chunk can't render unbounded.
+    const trimmed = capText(chunks[i].content, budget, "tail");
+    return {
+        chunks: [{ ...chunks[i], content: trimmed.text } as T, ...chunks.slice(i + 1)],
+        hiddenChunks: i,
+        boundaryTrimmed: true,
+    };
 }
 
 /** Visual line count of a string (newline-delimited), allocation-free. */

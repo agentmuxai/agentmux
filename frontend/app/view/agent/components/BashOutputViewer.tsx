@@ -79,17 +79,19 @@ export const BashOutputViewer = ({ params, result }: BashOutputViewerProps): JSX
                 <Show when={stdoutCap.hiddenLines > 0}>
                     <OutputHiddenMarker hidden={stdoutCap.hiddenLines} noun="line" from="tail" />
                 </Show>
-                <pre class={clsx("agent-bash-output", { "has-error": hasError })}>
-                    {stdoutCap.text}
-                    <Show when={stderrCap.text}>
-                        <span class="agent-bash-stderr">
-                            <Show when={stderrCap.hiddenLines > 0}>
-                                {`… ${stderrCap.hiddenLines.toLocaleString()} earlier stderr lines hidden\n`}
-                            </Show>
-                            {stderrCap.text}
-                        </span>
+                <Show when={stdoutCap.text}>
+                    <pre class={clsx("agent-bash-output", { "has-error": hasError })}>
+                        {stdoutCap.text}
+                    </pre>
+                </Show>
+                <Show when={stderrCap.text}>
+                    <Show when={stderrCap.hiddenLines > 0}>
+                        <OutputHiddenMarker hidden={stderrCap.hiddenLines} noun="line" from="tail" />
                     </Show>
-                </pre>
+                    <pre class={clsx("agent-bash-output agent-bash-stderr", { "has-error": hasError })}>
+                        {stderrCap.text}
+                    </pre>
+                </Show>
             </Show>
             <Show when={exitCode !== undefined}>
                 <div
