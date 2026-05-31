@@ -43,21 +43,21 @@ export function capText(
 
 export interface CappedChunks<T> {
     chunks: ReadonlyArray<T>;
-    /** Total lines hidden — dropped whole chunks plus any trimmed boundary. */
-    hiddenLines: number;
+    /** Lines retained in the rendered window (== total when under budget). */
+    keptLines: number;
 }
 
 /**
  * Cap an append-only chunk list (one <pre> per chunk) to the tail whose
- * cumulative line count first reaches `maxLines`. Retained chunk objects keep
- * their identity, so a `<For>` keyed by reference only churns at the window
- * boundary. If a single boundary chunk alone exceeds the remaining budget it
- * is line-trimmed to its tail (not kept whole), so one chunk that batches a
- * huge output can't render an unbounded <pre>.
+ * cumulative line count first reaches `maxLines`. Walks ONLY the kept tail —
+ * O(kept), never the dropped prefix. Retained chunk objects keep their
+ * identity, so a `<For>` keyed by reference only churns at the window
+ * boundary. A single oversized boundary chunk is line-trimmed to its tail
+ * (not kept whole) so one chunk can't render an unbounded <pre>.
  *
- * Reports the exact number of hidden lines (dropped chunks + the trimmed
- * boundary). Counting the dropped remainder is a cheap char scan — not a
- * re-parse — so it stays inexpensive even on large output.
+ * Returns the kept line count; pair it with a running total
+ * (createChunkCapper) to derive the hidden-line count without ever rescanning
+ * the dropped prefix.
  */
 export function capChunksByLines<T extends { content: string }>(
     chunks: ReadonlyArray<T>,
@@ -70,20 +70,44 @@ export function capChunksByLines<T extends { content: string }>(
         if (n > budget) break; // this chunk overflows the remaining budget
         budget -= n;
     }
-    if (i < 0) return { chunks, hiddenLines: 0 };
-    // Lines from every chunk fully dropped off the front.
-    let hiddenLines = 0;
-    for (let j = 0; j < i; j++) hiddenLines += countLines(chunks[j].content);
+    // Under budget: keep everything (kept == total == maxLines - budget).
+    if (i < 0) return { chunks, keptLines: maxLines - budget };
+    // Capping: the window holds exactly `maxLines` lines (whole tail chunks
+    // plus, if the budget didn't land on a chunk boundary, a trimmed boundary).
     if (budget <= 0) {
-        // No room left for the boundary chunk — drop it whole too.
-        return { chunks: chunks.slice(i + 1), hiddenLines: hiddenLines + countLines(chunks[i].content) };
+        return { chunks: chunks.slice(i + 1), keptLines: maxLines };
     }
-    // The boundary chunk alone exceeds the budget — keep only its last `budget`
-    // lines so one oversized chunk can't render unbounded.
     const trimmed = capText(chunks[i].content, budget, "tail");
     return {
         chunks: [{ ...chunks[i], content: trimmed.text } as T, ...chunks.slice(i + 1)],
-        hiddenLines: hiddenLines + trimmed.hiddenLines,
+        keptLines: maxLines,
+    };
+}
+
+/** A capped chunk window plus how many earlier lines are hidden. */
+export interface CappedChunkView<T> {
+    chunks: ReadonlyArray<T>;
+    hiddenLines: number;
+}
+
+/**
+ * Stateful capper for an append-only chunk stream. Tracks the total line
+ * count incrementally — each call scans only the chunks appended since the
+ * previous call — so the hidden-line count (total − kept) never rescans the
+ * growing dropped prefix (which would reintroduce O(n^2) over a long stream).
+ * One instance per stream; on the rare reset (the array shrinks) it recounts.
+ */
+export function createChunkCapper(maxLines: number = MAX_TOOL_OUTPUT_LINES) {
+    let total = 0;
+    let counted = 0;
+    return function cap<T extends { content: string }>(chunks: ReadonlyArray<T>): CappedChunkView<T> {
+        if (chunks.length < counted) {
+            total = 0;
+            counted = 0;
+        }
+        for (; counted < chunks.length; counted++) total += countLines(chunks[counted].content);
+        const r = capChunksByLines(chunks, maxLines);
+        return { chunks: r.chunks, hiddenLines: Math.max(0, total - r.keptLines) };
     };
 }
 
