@@ -20,7 +20,6 @@ export default mergeConfig(
             exclude: [
                 "**/node_modules/**",
                 "**/dist/**",
-                "**/infra/cdk/**", // CDK has its own testing setup with aws-cdk-lib
                 // Leftover git worktrees from prior agent sessions
                 // live under `.claude/worktrees/agent-*/`. Each carries
                 // a full clone of the project (including test files),
