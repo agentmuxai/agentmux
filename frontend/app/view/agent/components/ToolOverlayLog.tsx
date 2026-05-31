@@ -23,7 +23,7 @@ import { CompactResult } from "./CompactResult";
 import { DiffViewer } from "./DiffViewer";
 import { HighlightedCode } from "./HighlightedCode";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
-import { capChunksByLines, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { createChunkCapper, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { detectLanguage } from "./detectLanguage";
 
 interface ToolOverlayLogProps {
@@ -144,9 +144,11 @@ interface ChunkListProps {
 }
 function ChunkList(props: ChunkListProps): JSX.Element {
     // Cap the inline render to ~MAX_TOOL_OUTPUT_LINES worth of trailing
-    // chunks. Inline (not memoized) per this file's reactivity discipline;
-    // capChunksByLines is O(kept), cheap to re-run on each streamed append.
-    const capped = () => capChunksByLines(props.chunks);
+    // chunks. Inline (not memoized) per this file's reactivity discipline.
+    // The capper is stateful (per-stream running line total) so each streamed
+    // append only scans the new chunk, never the growing dropped prefix.
+    const cap = createChunkCapper();
+    const capped = () => cap(props.chunks);
     return (
         <>
             <Show when={capped().hiddenLines > 0}>
