@@ -20,7 +20,7 @@
  * output.
  */
 
-import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { For } from "solid-js";
 import type { EditParams, EditResult } from "../types";
 import { detectLanguage } from "./detectLanguage";
@@ -66,10 +66,13 @@ export const DiffViewer = (props: DiffViewerProps): JSX.Element => {
     const rawDiff = () => props.result?.diff;
     // Head-cap the diff (read top-down) so the plain fallback (one <div> per
     // line, used for diffs > CAP_LINES) can't bloat the conversation DOM.
-    const diffCap = () => {
+    // Memoized: this is read several times per render (highlight effect,
+    // PlainDiff, hidden-lines marker) and capText splits the whole diff, so a
+    // bare accessor would re-split a large diff several times each frame.
+    const diffCap = createMemo(() => {
         const d = rawDiff();
         return d ? capText(d, MAX_TOOL_OUTPUT_LINES, "head") : null;
-    };
+    });
     const diff = () => diffCap()?.text;
     const filePath = () => props.params.file_path ?? "";
 
