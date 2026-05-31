@@ -126,14 +126,53 @@ describe("PredictiveEcho — predict, confirm, diverge", () => {
         expect(h.screen).toBe("a");
     });
 
-    it("flushes (rolls back) on non-printable input", () => {
+    it("flushes (rolls back) AND disarms on non-printable input", () => {
         const h = harness();
         h.arm();
         h.input("a"); // predicted, screen "aa"
         expect(h.screen).toBe("aa");
-        h.input("\r"); // Enter → flush
+        h.input("\r"); // Enter → flush + disarm
         expect(h.ops).toContain("erase:1");
         expect(h.screen).toBe("a");
+        expect(h.pe.isArmed).toBe(false); // re-observe before predicting again
+    });
+});
+
+describe("PredictiveEcho — mode-transition safety", () => {
+    it("disarms at the Enter boundary so a following echo-off password char is never painted (reagent P0)", () => {
+        const h = harness();
+        h.arm(); // armed: echo was on and confirmed
+        expect(h.pe.isArmed).toBe(true);
+        h.input("\r"); // user runs `sudo …` — Enter is the line/echo-off boundary
+        expect(h.pe.isArmed).toBe(false);
+        // sudo prompts (echo OFF). The first password keystroke must be observed,
+        // not predicted — the armed→echo-off transition is the hole reagent flagged.
+        h.input("s");
+        h.advance(700); // echo never returns (echo off)
+        h.sweep();
+        expect(h.ops).toEqual([]); // never painted → zero plaintext flash
+        expect(h.screen).toBe("a");
+    });
+
+    it("disarms on alt-screen enter output so TUI commands aren't mispredicted (codex P1)", () => {
+        const h = harness();
+        h.arm();
+        h.echo("\x1b[?1049h"); // a full-screen app (vim/less) takes over
+        expect(h.pe.isArmed).toBe(false);
+        const before = h.ops.length;
+        h.input("j"); // vim normal-mode command — must NOT be painted
+        expect(h.ops.length).toBe(before);
+    });
+
+    it("sweeps a stale painted prediction on the next keystroke, with no PTY chunk and no timer (reagent P1)", () => {
+        const h = harness();
+        h.arm();
+        h.input("b"); // armed → painted, queue=[b]
+        expect(h.screen).toBe("ab");
+        h.advance(700); // echo stalls past predictTimeout; NO chunk arrives
+        h.input("c"); // the keystroke itself drives the sweep
+        expect(h.ops).toContain("erase:1"); // stale 'b' rolled back on input
+        expect(h.screen).not.toContain("b");
     });
 });
 

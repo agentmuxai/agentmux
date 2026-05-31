@@ -66,6 +66,10 @@ export function isPredictable(data: string): boolean {
     return c >= 0x20 && c <= 0x7e;
 }
 
+/** Alt-screen enter (DEC private mode 1049/1047/47 set) — a full-screen TUI
+ *  (vim, less, htop) has taken over and no longer line-echoes. */
+const ALT_SCREEN_ENTER = /\x1b\[\?(?:1049|1047|47)h/;
+
 export class PredictiveEcho {
     private queue: Pending[] = [];
     private armed = false;
@@ -97,6 +101,12 @@ export class PredictiveEcho {
             return;
         }
         if (data.length === 0) return;
+        // Sweep stale predictions off the KEYSTROKE stream, not a wall-clock
+        // timer (project rule: no grace timers). If echo stalls — e.g. echo
+        // silently turned off mid-line — no PTY chunk arrives to drive
+        // reconcile, so the next key the user presses is what rolls back an
+        // aged, unconfirmed prediction (reagent #1223 P1).
+        this.sweep();
         // Anything outside the safe set (Enter, arrows, Ctrl-*, ESC, paste,
         // multi-char) flushes: roll back any painted predictions and stop — the
         // authoritative stream will redraw whatever the shell does.
@@ -129,6 +139,15 @@ export class PredictiveEcho {
      * The visible buffer therefore always converges to exactly the PTY stream.
      */
     reconcile(chunk: string): string {
+        // Mode-changing output: a full-screen app entering the alt buffer no
+        // longer line-echoes. Abandon predictions and disarm BEFORE the switch
+        // lands (the erase here is still on the normal buffer), so we never
+        // mispredict a TUI command nor run a CSI-K rollback inside the alt
+        // screen (codex #1223 P1).
+        if (ALT_SCREEN_ENTER.test(chunk)) {
+            this.rollback();
+            this.armed = false;
+        }
         if (this.queue.length === 0) return chunk;
         const now = this.now();
         let rest = chunk;
@@ -212,6 +231,12 @@ export class PredictiveEcho {
 
     private flush(): void {
         this.rollback();
+        // A non-printable input (Escape, arrows, Ctrl-*, Enter) is a likely mode
+        // boundary — entering vim/less or moving the cursor. Re-observe a
+        // confirmed echo before predicting again, so printable commands like
+        // vim's j/x aren't mispredicted in an app that doesn't line-echo
+        // (codex #1223 P1).
+        this.armed = false;
     }
 
     private enterCooldown(now: number): void {

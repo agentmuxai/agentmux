@@ -101,7 +101,7 @@ On each authoritative `chunk` from the PTY, before writing it:
 2. Walk `chunk` against the head of `queue`:
    - If the chunk's next bytes **equal** `head.expected` → **confirm**: pop `head`, consume those bytes from `chunk` (the cell is already painted correctly; nothing to redraw), continue.
    - If they **diverge** → **rollback**: discard the remaining `queue`, restore the affected cells to their pre-prediction authoritative content (re-issue an `xterm.write` of the authoritative bytes over the predicted region using saved cell snapshots, or the simpler/robust path — see §11), then write the *entire* original `chunk` authoritatively from the rollback point. Enter `cooldown` (§7.3).
-3. Any `queue` entries older than `PREDICT_TIMEOUT_MS` with no matching output → treat as divergence (rollback + cooldown). This is the password/echo-off catch: predictions that are never echoed time out and vanish.
+3. Any `queue` entries older than `PREDICT_TIMEOUT_MS` with no matching output → treat as divergence (rollback + cooldown). This is the password/echo-off catch: predictions that are never echoed time out and vanish. The sweep is driven by **both** the PTY-chunk path *and* the keystroke stream (`onInput` sweeps before handling each key) — **no wall-clock timer** (project rule: no grace timers). So when echo stalls and no chunk arrives, the next key the user presses is what ages out a stale prediction.
 
 Confirmation is **byte-exact** against `expected`, so terminals that echo differently than we predicted (e.g. `^C`, tab expansion, autosuggest) are caught as divergence and reconciled, never left wrong.
 
@@ -114,6 +114,7 @@ Two layers, defense-in-depth:
 Prediction is only **armed** after we have **recently observed our own input echoed back** (a confirmed `char` prediction within the last `ECHO_CONFIRM_WINDOW_MS`). Concretely:
 - Start in `unarmed`. The first keystroke of a session/line is **not** predicted; it is sent and we watch whether the PTY echoes it.
 - On a byte-exact echo confirmation → `armed`; subsequent keystrokes in the burst predict.
+- **Disarm at every boundary.** Any **non-printable input** (Enter, arrows, Ctrl-\*, Esc — i.e. the keys that launch `sudo`/`ssh`/`vim` or move into a new mode) flushes *and* clears `armed`. This is the critical fix for the armed→echo-off transition: because a password prompt or TUI is always reached *through* a non-printable key (the Enter that runs the command), the first keystroke of the new context starts `unarmed` and is observed, not painted. Without this, an already-armed session would paint the first password char as plaintext.
 - This means at an **echo-off boundary** (entering a password prompt, `vim`, raw mode) the very next keystroke is sent **without** a prediction — there is no plaintext to flash, because we stopped predicting the moment confirmations stopped.
 
 This is the same self-correcting principle VS Code relies on, hardened: we require *positive* confirmation to predict rather than predicting-until-proven-wrong, trading one round-trip of "first char of a burst is authoritative-only" for **zero plaintext flash**.
@@ -136,8 +137,8 @@ After any rollback (§6.3) or explicit `echo=false`, enter `cooldown`: unarmed f
 ## 9. Phased plan
 
 - **Phase 0 — instrument the round-trip (no behavior change).** Add a `term-roundtrip` measure (keystroke-sent → first matching echo byte) to `termwrap`, surfaced in the Perf HUD + `bench-term-echo`. Fix the bench's stale-`authkey.dev` discovery (prune dead-pid entries) so we have a clean baseline number. **Gate**: a real Windows p50/p95 round-trip figure recorded in this spec.
-- **Phase 1 — core predictive echo (cooked mode, single-line, ASCII).** `PredictiveEcho` class; §6.1 char/backspace/newline; §6.3 reconcile; §7.1 observational gate; §7.3 cooldown; §8 RTT gate. Setting `term:predictiveecho` default **on** (opt-out), threshold default **0** (always predict once armed). **Gate**: byte-exact reconciliation property test; manual password-prompt test shows **zero** plaintext flash; `vim`/alt-screen shows no corruption.
-- **Phase 2 — explicit Unix tty-mode signal (§7.2a)** for zero-flash within-line, + alt-screen parser (§7.2b) for all platforms.
+- **Phase 1 — core predictive echo (cooked mode, single-line, ASCII).** `PredictiveEcho` class; §6.1 char/backspace/newline; §6.3 reconcile; §7.1 observational gate **+ disarm-at-every-boundary** (non-printable input *and* a basic alt-screen-**enter** parse `CSI ?1049h|?47h|?1047h` ⇒ disarm, folded into `reconcile` since it already scans the chunk); §7.3 cooldown; §8 RTT gate; keystroke-driven sweep (§6.3). Setting `term:predictiveecho` default **on** (opt-out), threshold default **0** (always predict once armed). **Gate**: byte-exact reconciliation property test; manual password-prompt test shows **zero** plaintext flash; `vim`/alt-screen shows no corruption.
+- **Phase 2 — explicit Unix tty-mode signal (§7.2a)** for zero-flash within-line, + the **full** alt-screen parser (§7.2b: enter/leave/re-evaluate) for all platforms (Phase 1 ships only the enter⇒disarm half).
 - **Phase 3 — width-aware prediction**: CJK/wide-char + line-wrap + backspace-across-wrap correctness.
 - **Phase 4 — tune + default-on**: threshold tuning, optional dim styling for unconfirmed cells (VS Code dims; we evaluate), flip default after a soak. RTT-gated so default-on is safe where it does nothing.
 
