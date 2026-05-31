@@ -34,6 +34,8 @@ mod reducer;
 mod saga;
 #[cfg(target_os = "windows")]
 mod splash;
+#[cfg(target_os = "macos")]
+mod splash_mac;
 mod srv_spawner;
 mod state;
 mod wrr;
@@ -70,9 +72,37 @@ fn suppress_os_crash_dialogs() {}
 /// docs/specs/SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md.
 fn main() {
     suppress_os_crash_dialogs();
-    tokio::runtime::Runtime::new()
-        .expect("failed to build Tokio runtime")
-        .block_on(launcher_main());
+
+    // macOS: paint the splash FIRST, on the main thread, before any heavy work
+    // — this is the whole reason the splash lives in the small fast launcher
+    // rather than the slow CEF host. AppKit must own the main thread, so the
+    // srv+host supervisor (`launcher_main`) runs on a worker thread with its
+    // own Tokio runtime; the splash pumps a CoreFoundation runloop on main
+    // until the host signals first paint. See `splash_mac`.
+    #[cfg(target_os = "macos")]
+    {
+        let splash = splash_mac::Splash::show();
+        std::thread::Builder::new()
+            .name("launcher-supervisor".into())
+            .spawn(|| {
+                tokio::runtime::Runtime::new()
+                    .expect("failed to build Tokio runtime")
+                    .block_on(launcher_main());
+                // Supervisor finished (host exited / fatal) — end the process;
+                // this unblocks the parked main thread and tears the splash down.
+                std::process::exit(0);
+            })
+            .expect("failed to spawn launcher supervisor thread");
+        splash.run_until_dismissed(); // pumps the runloop, then parks forever
+        return;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        tokio::runtime::Runtime::new()
+            .expect("failed to build Tokio runtime")
+            .block_on(launcher_main());
+    }
 }
 
 async fn launcher_main() {

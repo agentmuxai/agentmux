@@ -1237,6 +1237,21 @@ impl AgentMuxHandler {
             }
         }
 
+        // macOS analogue of the Win32 splash signal: the launcher owns the
+        // native splash (see agentmux-launcher/src/splash_mac.rs) and passes a
+        // ready-file path via AGENTMUX_SPLASH_READY_FILE. Creating the file is
+        // the cross-process "first frame painted" signal the launcher polls for
+        // before tearing the splash down. Fire-and-forget; absent var => no
+        // launcher splash (e.g. dev:standalone), so this is a no-op.
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(path) = std::env::var("AGENTMUX_SPLASH_READY_FILE") {
+                if !path.is_empty() {
+                    let _ = std::fs::write(&path, b"ready");
+                }
+            }
+        }
+
         // Show window via CEF Views API after content paints.
         // All windows (main + secondary) now use CEF Views.
         let mut browser_cloned = browser.cloned();
