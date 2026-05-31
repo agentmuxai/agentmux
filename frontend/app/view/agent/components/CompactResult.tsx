@@ -8,7 +8,9 @@
  * Expanded view: pretty-printed JSON.
  */
 
-import { createSignal, Show, type JSX } from "solid-js";
+import { Show, type JSX } from "solid-js";
+import { OutputHiddenMarker } from "./OutputHiddenMarker";
+import { capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 
 interface CompactResultProps {
     tool: string;
@@ -94,27 +96,22 @@ function shortPath(p: string): string {
 }
 
 export const CompactResult = ({ tool, params, result }: CompactResultProps): JSX.Element => {
-    const [expanded, setExpanded] = createSignal(false);
-
     const summary = summarize(tool, params, result);
     const fullJson = result != null ? JSON.stringify(result, null, 2) : "";
     const hasDetail = fullJson.length > summary.length + 10;
+    // Head-cap the JSON detail (read top-down) to bound the DOM.
+    const jsonCap = capText(fullJson, MAX_TOOL_OUTPUT_LINES, "head");
 
     return (
         <div class="agent-tool-compact-result">
-            <div
-                class="agent-tool-compact-summary"
-                classList={{ clickable: hasDetail }}
-                onClick={() => hasDetail && setExpanded(!expanded())}
-                title={hasDetail ? (expanded() ? "Collapse" : "Expand full result") : undefined}
-            >
-                <Show when={hasDetail}>
-                    <span class="agent-tool-compact-chevron">{expanded() ? "▾" : "▸"}</span>
-                </Show>
+            <div class="agent-tool-compact-summary">
                 <span class="agent-tool-compact-text">{summary}</span>
             </div>
-            <Show when={expanded()}>
-                <pre class="agent-tool-compact-json">{fullJson}</pre>
+            <Show when={hasDetail}>
+                <pre class="agent-tool-compact-json">{jsonCap.text}</pre>
+                <Show when={jsonCap.hiddenLines > 0}>
+                    <OutputHiddenMarker hidden={jsonCap.hiddenLines} noun="line" from="head" />
+                </Show>
             </Show>
         </div>
     );

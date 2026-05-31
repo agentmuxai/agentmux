@@ -22,6 +22,8 @@ import { BashOutputViewer } from "./BashOutputViewer";
 import { CompactResult } from "./CompactResult";
 import { DiffViewer } from "./DiffViewer";
 import { HighlightedCode } from "./HighlightedCode";
+import { OutputHiddenMarker } from "./OutputHiddenMarker";
+import { capChunksByLines, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { detectLanguage } from "./detectLanguage";
 
 interface ToolOverlayLogProps {
@@ -141,14 +143,23 @@ interface ChunkListProps {
     chunks: ReadonlyArray<{ kind: string; content: string; timestamp: number }>;
 }
 function ChunkList(props: ChunkListProps): JSX.Element {
+    // Cap the inline render to ~MAX_TOOL_OUTPUT_LINES worth of trailing
+    // chunks. Inline (not memoized) per this file's reactivity discipline;
+    // capChunksByLines is O(kept), cheap to re-run on each streamed append.
+    const capped = () => capChunksByLines(props.chunks);
     return (
-        <For each={props.chunks}>
-            {(chunk) => (
-                <pre class={`agent-tool-log-line ${KIND_CLASS[chunk.kind] ?? ""}`}>
-                    {chunk.content}
-                </pre>
-            )}
-        </For>
+        <>
+            <Show when={capped().hiddenChunks > 0}>
+                <OutputHiddenMarker hidden={capped().hiddenChunks} noun="block" from="tail" />
+            </Show>
+            <For each={capped().chunks}>
+                {(chunk) => (
+                    <pre class={`agent-tool-log-line ${KIND_CLASS[chunk.kind] ?? ""}`}>
+                        {chunk.content}
+                    </pre>
+                )}
+            </For>
+        </>
     );
 }
 
@@ -194,11 +205,15 @@ function renderToolResultBody(node: ToolNode): JSX.Element {
         case "Read": {
             const filePath = (node.params as any).file_path ?? "";
             const content: string | undefined = (node.result as any)?.content;
+            // Head-cap file content (read top-down) so a huge Read can't bloat
+            // the conversation DOM; HighlightedCode stays simple (it injects
+            // innerHTML, so capping here is cleaner than inside it).
+            const capped = content ? capText(content, MAX_TOOL_OUTPUT_LINES, "head") : null;
             return (
                 <div class="agent-tool-read">
                     <div class="agent-tool-file-path">{filePath}</div>
                     <Show
-                        when={content}
+                        when={capped}
                         fallback={
                             <Show when={node.result}>
                                 <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
@@ -206,10 +221,13 @@ function renderToolResultBody(node: ToolNode): JSX.Element {
                         }
                     >
                         <HighlightedCode
-                            code={content!}
-                            lang={detectLanguage(filePath, content!.split("\n")[0])}
+                            code={capped!.text}
+                            lang={detectLanguage(filePath, capped!.text.split("\n")[0])}
                             class="agent-tool-read-content"
                         />
+                        <Show when={capped!.hiddenLines > 0}>
+                            <OutputHiddenMarker hidden={capped!.hiddenLines} noun="line" from="head" />
+                        </Show>
                     </Show>
                 </div>
             );
