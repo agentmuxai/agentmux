@@ -66,7 +66,9 @@ export function capChunksByLines<T extends { content: string }>(
     let budget = maxLines;
     let i = chunks.length - 1;
     for (; i >= 0; i--) {
-        const n = countLines(chunks[i].content);
+        // Each chunk renders one <pre>, so it costs at least one line of
+        // budget — otherwise a run of empty chunks would retain unbounded nodes.
+        const n = Math.max(1, countLines(chunks[i].content));
         if (n > budget) break; // this chunk overflows the remaining budget
         budget -= n;
     }
@@ -111,7 +113,8 @@ export function createChunkCapper(maxLines: number = MAX_TOOL_OUTPUT_LINES) {
             counted = 0;
             anchor = chunks[0];
         }
-        for (; counted < chunks.length; counted++) total += countLines(chunks[counted].content);
+        // Match capChunksByLines: each chunk costs >= 1 line (it renders a <pre>).
+        for (; counted < chunks.length; counted++) total += Math.max(1, countLines(chunks[counted].content));
         const r = capChunksByLines(chunks, maxLines);
         return { chunks: r.chunks, hiddenLines: Math.max(0, total - r.keptLines) };
     };
