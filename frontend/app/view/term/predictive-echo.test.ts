@@ -174,6 +174,20 @@ describe("PredictiveEcho — mode-transition safety", () => {
         expect(h.ops).toContain("erase:1"); // stale 'b' rolled back on input
         expect(h.screen).not.toContain("b");
     });
+
+    it("reset() rolls back a pending painted prediction so the authoritative echo writes cleanly (disable mid-prediction, codex P2)", () => {
+        const h = harness();
+        h.arm();
+        h.input("b"); // painted, still pending
+        expect(h.screen).toBe("ab");
+        expect(h.pe.pending).toBe(1);
+        // user toggles term:predictiveecho OFF mid-prediction; the output path
+        // (doTerminalWrite) calls reset() before writing the authoritative echo.
+        h.pe.reset();
+        expect(h.ops).toContain("erase:1"); // speculative glyph rolled back
+        expect(h.pe.pending).toBe(0);
+        expect(h.screen).toBe("a"); // clean — the authoritative 'b' now writes exactly once
+    });
 });
 
 describe("PredictiveEcho — gates", () => {

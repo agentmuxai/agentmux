@@ -514,10 +514,17 @@ export class TermWrap {
         // roll back on divergence, write only what the user can't already see.
         // ptyOffset still advances by the FULL chunk — these are real PTY bytes.
         let toWrite: string | Uint8Array = data;
-        if (this.predict?.isEnabled() && data instanceof Uint8Array) {
-            const str = this.echoDecoder.decode(data, { stream: true });
-            toWrite = this.predict.reconcile(str);
-            this.predict.sweep();
+        if (this.predict && data instanceof Uint8Array) {
+            if (this.predict.isEnabled()) {
+                const str = this.echoDecoder.decode(data, { stream: true });
+                toWrite = this.predict.reconcile(str);
+                this.predict.sweep();
+            } else if (this.predict.pending > 0) {
+                // Setting toggled off mid-prediction: roll back any speculative
+                // glyph before the authoritative echo lands, else it double-renders
+                // until the next keystroke runs reset() (codex #1223 P2).
+                this.predict.reset();
+            }
         }
         let resolve: () => void = null;
         let prtn = new Promise<void>((presolve, _) => {
