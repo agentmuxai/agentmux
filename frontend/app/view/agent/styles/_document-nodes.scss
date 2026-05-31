@@ -7,6 +7,17 @@
 // `.agent-view` so the cascade chain matches the pre-split file
 // (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
 .agent-view {
+    // Shown wherever a tool-output body is render-capped
+    // (SPEC_TOOL_OUTPUT_CAP_2026_05_30.md). One muted line, never silent.
+    .agent-output-hidden-marker {
+        padding: 1px 0;
+        color: var(--secondary-text-color, #888);
+        font-size: 0.85em;
+        font-style: italic;
+        opacity: 0.75;
+        user-select: none;
+    }
+
     .agent-raw-output {
         margin: 0;
         padding: 1px 0;
@@ -520,7 +531,7 @@
                 border-left: 2px solid var(--error-color);
             }
 
-            .agent-bash-stderr {
+            &.agent-bash-stderr {
                 color: var(--error-color);
             }
         }

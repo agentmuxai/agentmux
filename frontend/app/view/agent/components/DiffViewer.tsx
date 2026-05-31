@@ -20,10 +20,12 @@
  * output.
  */
 
-import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { For } from "solid-js";
 import type { EditParams, EditResult } from "../types";
 import { detectLanguage } from "./detectLanguage";
+import { OutputHiddenMarker } from "./OutputHiddenMarker";
+import { capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 
 const ShikiTheme = "github-dark-high-contrast";
 
@@ -61,7 +63,17 @@ interface DiffViewerProps {
 }
 
 export const DiffViewer = (props: DiffViewerProps): JSX.Element => {
-    const diff = () => props.result?.diff;
+    const rawDiff = () => props.result?.diff;
+    // Head-cap the diff (read top-down) so the plain fallback (one <div> per
+    // line, used for diffs > CAP_LINES) can't bloat the conversation DOM.
+    // Memoized: this is read several times per render (highlight effect,
+    // PlainDiff, hidden-lines marker) and capText splits the whole diff, so a
+    // bare accessor would re-split a large diff several times each frame.
+    const diffCap = createMemo(() => {
+        const d = rawDiff();
+        return d ? capText(d, MAX_TOOL_OUTPUT_LINES, "head") : null;
+    });
+    const diff = () => diffCap()?.text;
     const filePath = () => props.params.file_path ?? "";
 
     // --- Highlighted path ---
@@ -192,17 +204,22 @@ export const DiffViewer = (props: DiffViewerProps): JSX.Element => {
     };
 
     return (
-        <Show
-            when={highlightedHtml() !== null}
-            fallback={<PlainDiff />}
-        >
-            {/* Header lives outside the <pre> so that innerHTML = shikiHtml
-                does not overwrite it. The <pre> receives only Shiki content. */}
-            <div class="agent-diff agent-diff--highlighted">
-                <div class="agent-diff-header">{filePath()}</div>
-                <pre ref={preEl} class="agent-diff-highlighted-body" />
-            </div>
-        </Show>
+        <>
+            <Show
+                when={highlightedHtml() !== null}
+                fallback={<PlainDiff />}
+            >
+                {/* Header lives outside the <pre> so that innerHTML = shikiHtml
+                    does not overwrite it. The <pre> receives only Shiki content. */}
+                <div class="agent-diff agent-diff--highlighted">
+                    <div class="agent-diff-header">{filePath()}</div>
+                    <pre ref={preEl} class="agent-diff-highlighted-body" />
+                </div>
+            </Show>
+            <Show when={(diffCap()?.hiddenLines ?? 0) > 0}>
+                <OutputHiddenMarker hidden={diffCap()!.hiddenLines} noun="line" from="head" />
+            </Show>
+        </>
     );
 };
 

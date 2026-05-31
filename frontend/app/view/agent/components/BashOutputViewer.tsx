@@ -9,6 +9,8 @@ import clsx from "clsx";
 import { Show, type JSX } from "solid-js";
 import type { BashParams, BashResult } from "../types";
 import { HighlightedCode } from "./HighlightedCode";
+import { OutputHiddenMarker } from "./OutputHiddenMarker";
+import { capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 
 interface BashOutputViewerProps {
     params: BashParams;
@@ -52,10 +54,15 @@ export const BashOutputViewer = ({ params, result }: BashOutputViewerProps): JSX
     // bashwrap injects, when the result lacks a native exitCode field.
     // Strip the prefix from stdout regardless — the user shouldn't
     // see the marker.
-    const { exit: parsedExit, body: stdout } = parseExitPrefix(rawStdout);
+    const { exit: parsedExit, body: rawBody } = parseExitPrefix(rawStdout);
     const exitCode = nativeExit ?? parsedExit;
 
-    const hasOutput = stdout.length > 0 || stderr.length > 0;
+    // Cap each body to bound the conversation DOM (SPEC_TOOL_OUTPUT_CAP).
+    // Tail-keep — the latest output is what matters for a command.
+    const stdoutCap = capText(rawBody, MAX_TOOL_OUTPUT_LINES, "tail");
+    const stderrCap = capText(stderr, MAX_TOOL_OUTPUT_LINES, "tail");
+
+    const hasOutput = stdoutCap.text.length > 0 || stderrCap.text.length > 0;
     const hasError = exitCode !== undefined && exitCode !== 0;
 
     return (
@@ -69,12 +76,22 @@ export const BashOutputViewer = ({ params, result }: BashOutputViewerProps): JSX
                 />
             </div>
             <Show when={hasOutput}>
-                <pre class={clsx("agent-bash-output", { "has-error": hasError })}>
-                    {stdout}
-                    <Show when={stderr}>
-                        <span class="agent-bash-stderr">{stderr}</span>
+                <Show when={stdoutCap.hiddenLines > 0}>
+                    <OutputHiddenMarker hidden={stdoutCap.hiddenLines} noun="line" from="tail" />
+                </Show>
+                <Show when={stdoutCap.text}>
+                    <pre class={clsx("agent-bash-output", { "has-error": hasError })}>
+                        {stdoutCap.text}
+                    </pre>
+                </Show>
+                <Show when={stderrCap.text}>
+                    <Show when={stderrCap.hiddenLines > 0}>
+                        <OutputHiddenMarker hidden={stderrCap.hiddenLines} noun="line" from="tail" />
                     </Show>
-                </pre>
+                    <pre class={clsx("agent-bash-output agent-bash-stderr", { "has-error": hasError })}>
+                        {stderrCap.text}
+                    </pre>
+                </Show>
             </Show>
             <Show when={exitCode !== undefined}>
                 <div
