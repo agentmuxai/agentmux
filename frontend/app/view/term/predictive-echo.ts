@@ -117,6 +117,17 @@ export class PredictiveEcho {
         const now = this.now();
         // Observe-only (no paint) while in cooldown, unarmed, or when the
         // round-trip is already fast enough that prediction buys nothing.
+        //
+        // Known Phase 1 gap (spec §7.2 / codex #1223): a program that turns
+        // echo off PROGRAMMATICALLY between printable chars (no preceding
+        // non-printable) leaves `armed` true, so the very next char is painted.
+        // The self-healing path: echo never arrives → sweep() rolls it back at
+        // predictTimeoutMs (600ms) or on the following keystroke — a brief
+        // flash, not a persistent leak. The deterministic fix is Phase 2
+        // (tcgetattr / sidecar tty-mode signal for Unix; the non-printable
+        // disarm already handles the overwhelmingly common case on all platforms:
+        // every real password prompt is reached through the Enter that runs the
+        // command).
         if (now < this.cooldownUntil || !this.armed || this.rttP50 < this.threshold) {
             this.observe(data, now);
             return;

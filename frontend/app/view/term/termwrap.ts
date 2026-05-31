@@ -516,13 +516,17 @@ export class TermWrap {
         let toWrite: string | Uint8Array = data;
         if (this.predict && data instanceof Uint8Array) {
             if (this.predict.isEnabled()) {
-                const str = this.echoDecoder.decode(data, { stream: true });
-                toWrite = this.predict.reconcile(str);
-                this.predict.sweep();
+                // Skip the decode + reconcile entirely when fully dormant (nothing
+                // painted, not armed) — zero cost on the authoritative path until
+                // the first confirmation arms the predictor (reagent #1223 P2).
+                if (this.predict.pending > 0 || this.predict.isArmed) {
+                    const str = this.echoDecoder.decode(data, { stream: true });
+                    toWrite = this.predict.reconcile(str);
+                    this.predict.sweep();
+                }
             } else if (this.predict.pending > 0) {
                 // Setting toggled off mid-prediction: roll back any speculative
-                // glyph before the authoritative echo lands, else it double-renders
-                // until the next keystroke runs reset() (codex #1223 P2).
+                // glyph before the authoritative echo lands (codex #1223 P2).
                 this.predict.reset();
             }
         }

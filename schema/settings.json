@@ -59,6 +59,12 @@
         "term:shiftenternewline": {
           "type": "boolean"
         },
+        "term:predictiveecho": {
+          "type": "boolean"
+        },
+        "term:predictiveecho:thresholdms": {
+          "type": "number"
+        },
         "cmd:env": {
           "additionalProperties": {
             "type": "string"
