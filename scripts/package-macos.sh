@@ -278,7 +278,10 @@ OSA
     sync
     hdiutil detach "$RWMNT" >/dev/null 2>&1 || true
 fi
-hdiutil convert "$RW" -format UDZO -o "$DMG" >/dev/null
+# ULMO (LZMA) compression — LZMA-class like Linux's SquashFS AppImage, vs the
+# default UDZO (zlib) which left the DMG ~50% larger. Requires macOS 10.15+ to
+# mount (we target 11+, so fine). On this build: UDZO 248MB -> ULMO 167MB.
+hdiutil convert "$RW" -format ULMO -o "$DMG" >/dev/null
 rm -f "$RW"
 codesign --force --timestamp --sign "$CERT" "$DMG"
 
