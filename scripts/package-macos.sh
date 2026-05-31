@@ -16,8 +16,11 @@
 #   AgentMux.app/Contents/
 #     Info.plist
 #     MacOS/
-#       agentmux-cef                          ← host (CFBundleExecutable; re-execs
-#                                                itself for renderer/gpu subprocesses)
+#       agentmux-launcher                     ← CFBundleExecutable: tiny binary
+#                                                that paints the splash instantly,
+#                                                then spawns + supervises srv + host
+#       agentmux-cef                          ← host (spawned by the launcher;
+#                                                re-execs for renderer/gpu helpers)
 #       agentmux-srv-<VERSION>-darwin.arm64   ← backend (sidecar::resolve_backend_binary)
 #       frontend/                             ← bundled UI (resolve_frontend_base_url)
 #       *.dylib + vk_swiftshader_icd.json     ← GL libs (Chromium DIR_MODULE = exe dir)
@@ -59,6 +62,7 @@ SRV="dist/bin/agentmux-srv-${VERSION}-darwin.${ARCH}"
 
 require() { [ -e "$1" ] || { echo "❌ missing required artifact: $1 — run the build steps first" >&2; exit 1; }; }
 require dist/cef/agentmux-cef
+require dist/cef/agentmux-launcher
 require "$SRV"
 require dist/frontend/index.html
 require "dist/Frameworks/Chromium Embedded Framework.framework"
@@ -70,6 +74,15 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resourc
 
 cp dist/cef/agentmux-cef "$APP/Contents/MacOS/agentmux-cef"
 cp "$SRV" "$APP/Contents/MacOS/$(basename "$SRV")"
+
+# The LAUNCHER is the bundle entry point (CFBundleExecutable below): a tiny,
+# fast binary that paints the native splash INSTANTLY — before the multi-second
+# CEF host load — then spawns + supervises srv and the host (run_unix). The host
+# stays a sibling under MacOS/, so its current_exe()-relative resolution of
+# frontend/srv/../Frameworks and its Dock tile are byte-identical to the
+# host-as-entry-point build. The launcher runs as an accessory (no Dock tile of
+# its own); the host sets the regular policy and owns the one tile.
+cp dist/cef/agentmux-launcher "$APP/Contents/MacOS/agentmux-launcher"
 
 # Frontend is a tree of resource files (HTML/CSS/fonts), NOT code. codesign
 # only allows executables under Contents/MacOS/ — a resource dir there breaks
@@ -102,9 +115,12 @@ ditto "dist/Frameworks/Chromium Embedded Framework.framework" \
 # the macOS process model accepts them instead of re-execing the main bundle.
 # (The patched CEF framework additionally disables the Mach-port peer
 # process_requirement validation that failed on macOS 26 — the deeper fix.)
+# CEF 148 / Chromium also spawns an "(Alerts)" helper for the native
+# notification (alert) service; without it the framework retries
+# posix_spawnp forever ("No such file or directory"). Ship all six.
 HELPER_NAMES=("AgentMux Helper" "AgentMux Helper (GPU)" "AgentMux Helper (Plugin)" \
-              "AgentMux Helper (Renderer)" "AgentMux Helper (Alloy)")
-HELPER_IDS=("helper" "helper.gpu" "helper.plugin" "helper.renderer" "helper.alloy")
+              "AgentMux Helper (Renderer)" "AgentMux Helper (Alloy)" "AgentMux Helper (Alerts)")
+HELPER_IDS=("helper" "helper.gpu" "helper.plugin" "helper.renderer" "helper.alloy" "helper.alerts")
 HELPER_APPS=()
 shopt -s nullglob
 for i in "${!HELPER_NAMES[@]}"; do
@@ -163,7 +179,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
     <key>CFBundleName</key><string>AgentMux</string>
     <key>CFBundleDisplayName</key><string>AgentMux</string>
-    <key>CFBundleExecutable</key><string>agentmux-cef</string>
+    <key>CFBundleExecutable</key><string>agentmux-launcher</string>
     <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
     <key>CFBundleVersion</key><string>${VERSION}</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
@@ -192,6 +208,7 @@ shopt -s nullglob
 for dy in "$FW/Versions/A/Libraries/"*.dylib \
           "$APP/Contents/MacOS/"*.dylib \
           "$APP/Contents/MacOS/agentmux-cef" \
+          "$APP/Contents/MacOS/agentmux-launcher" \
           "$APP/Contents/Frameworks/"*Helper*.app/Contents/MacOS/*.dylib \
           "$APP/Contents/Frameworks/"*Helper*.app/Contents/MacOS/"AgentMux Helper"*; do
     strip -S -x "$dy" 2>/dev/null || true
@@ -231,9 +248,13 @@ for ha in "${HELPER_APPS[@]}"; do
     "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$ha"
 done
 # 4. Backend + host get the app entitlements (CLI feature access + CEF JIT).
+#    The host is now NESTED code (the launcher is CFBundleExecutable), so it must
+#    be signed here, before the bundle seal.
 "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/$(basename "$SRV")"
 "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/agentmux-cef"
-# 5. Seal the .app bundle last (everything nested is already signed).
+# 5. Seal the .app bundle last. codesign signs the main executable
+#    (agentmux-launcher) as part of sealing; pass the entitlements so the
+#    launcher is hardened-runtime signed identically to the host.
 "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP"
 
 echo "==> Verifying signature"
