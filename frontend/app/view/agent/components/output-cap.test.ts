@@ -134,4 +134,10 @@ describe("createChunkCapper", () => {
         cap([C(lines(900)), C(lines(900))]); // total 1800
         expect(cap([C(lines(300))]).hiddenLines).toBe(0); // reset → total 300
     });
+
+    it("resets when handed a different stream of the same length", () => {
+        const cap = createChunkCapper(1000);
+        expect(cap([C(lines(900)), C(lines(900))]).hiddenLines).toBe(800); // total 1800 - 1000
+        expect(cap([C(lines(100)), C(lines(100))]).hiddenLines).toBe(0); // different stream, total 200
+    });
 });

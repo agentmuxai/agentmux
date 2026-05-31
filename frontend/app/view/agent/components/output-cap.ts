@@ -100,10 +100,16 @@ export interface CappedChunkView<T> {
 export function createChunkCapper(maxLines: number = MAX_TOOL_OUTPUT_LINES) {
     let total = 0;
     let counted = 0;
+    let anchor: { content: string } | undefined;
     return function cap<T extends { content: string }>(chunks: ReadonlyArray<T>): CappedChunkView<T> {
-        if (chunks.length < counted) {
+        // Reset the running total unless this is an append-only continuation of
+        // the same stream. A recycled ChunkList can be handed a different
+        // tool's chunks — even with the same length — so anchor on the first
+        // chunk's identity (stable under append), not just the array length.
+        if (chunks.length < counted || chunks[0] !== anchor) {
             total = 0;
             counted = 0;
+            anchor = chunks[0];
         }
         for (; counted < chunks.length; counted++) total += countLines(chunks[counted].content);
         const r = capChunksByLines(chunks, maxLines);
