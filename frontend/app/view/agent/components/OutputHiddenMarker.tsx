@@ -26,7 +26,7 @@ export function OutputHiddenMarker(props: OutputHiddenMarkerProps): JSX.Element 
     return (
         <div
             class="agent-output-hidden-marker"
-            title="Full output preserved — open in pane to view all"
+            title="Rendering capped — the full output is preserved"
         >
             … {props.hidden.toLocaleString()} {direction()} {props.noun}
             {plural()} hidden
