@@ -15,6 +15,7 @@ import { ALIGN_CLASS_REGEX, rehypeAlignToClass } from "@/app/element/rehype-alig
 import remarkMermaidToTag from "@/app/element/remark-mermaid-to-tag";
 import { TableBlock } from "@/app/element/table-block";
 import { boundNumber, useAtomValueSafe, cn } from "@/util/util";
+import { markEnd, markStart } from "@/perf";
 import clsx from "clsx";
 import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import { OverlayScrollbars } from "overlayscrollbars";
@@ -465,6 +466,7 @@ const Markdown = (props: MarkdownProps) => {
 
     const renderedMarkdown = createMemo(() => {
         const txt = transformedText();
+        markStart("agent-markdown-parse");
         const tocRef: TocItem[] = [];
         const tocRefObj = { current: tocRef };
 
@@ -536,6 +538,8 @@ const Markdown = (props: MarkdownProps) => {
         } catch (e) {
             console.error("Markdown render error:", e);
             return <pre>{txt}</pre>;
+        } finally {
+            markEnd("agent-markdown-parse", `len=${txt.length}`);
         }
     });
 
