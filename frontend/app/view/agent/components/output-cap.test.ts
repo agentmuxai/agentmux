@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+    capChars,
     capChunksByLines,
     capText,
     createChunkCapper,
@@ -61,6 +62,20 @@ describe("capText", () => {
         const r = capText(normal, 1000);
         expect(r.text).toBe(normal);
         expect(r.hiddenLines).toBe(0);
+    });
+});
+
+describe("capChars", () => {
+    it("returns short strings unchanged", () => {
+        expect(capChars("hello", 1000)).toBe("hello");
+    });
+
+    it("trims an oversized string to its tail with a marker", () => {
+        const huge = "x".repeat(2000);
+        const r = capChars(huge, 1000);
+        expect(r.length).toBeLessThan(1020);
+        expect(r).toContain("truncated");
+        expect(r.endsWith("x".repeat(1000))).toBe(true);
     });
 });
 

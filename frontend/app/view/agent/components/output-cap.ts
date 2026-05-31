@@ -62,6 +62,17 @@ export function capText(
     return { text: out, hiddenLines };
 }
 
+/**
+ * Trim a single string to `max` characters (keeping the tail) with a visible
+ * marker. For the streamed-chunk path, which renders raw chunk content rather
+ * than routing through capText — a single multi-MB one-line chunk would
+ * otherwise render an unbounded <pre> even though it is under the line budget.
+ */
+export function capChars(text: string, max: number = MAX_TOOL_OUTPUT_CHARS): string {
+    if (text.length <= max) return text;
+    return "…(truncated)\n" + text.slice(text.length - max);
+}
+
 export interface CappedChunks<T> {
     chunks: ReadonlyArray<T>;
     /** Lines retained in the rendered window (== total when under budget). */
