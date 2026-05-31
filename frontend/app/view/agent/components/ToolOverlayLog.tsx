@@ -23,7 +23,7 @@ import { CompactResult } from "./CompactResult";
 import { DiffViewer } from "./DiffViewer";
 import { HighlightedCode } from "./HighlightedCode";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
-import { createChunkCapper, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { capChars, createChunkCapper, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { detectLanguage } from "./detectLanguage";
 
 interface ToolOverlayLogProps {
@@ -157,7 +157,7 @@ function ChunkList(props: ChunkListProps): JSX.Element {
             <For each={capped().chunks}>
                 {(chunk) => (
                     <pre class={`agent-tool-log-line ${KIND_CLASS[chunk.kind] ?? ""}`}>
-                        {chunk.content}
+                        {capChars(chunk.content)}
                     </pre>
                 )}
             </For>
