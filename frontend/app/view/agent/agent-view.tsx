@@ -822,6 +822,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 so it sits adjacent to the messages it accelerates. */}
             <PendingMessagesPanel
                 pendingMessages={pendingMessagesAtom[0]}
+                interruptibleTurn={() =>
+                    isInterruptibleTurn(agentAtoms().turnPhaseAtom[0]())
+                }
                 showSendNow={() =>
                     // "Send now" appears only when there is an in-flight
                     // turn that SIGINT can actually interrupt — i.e.
