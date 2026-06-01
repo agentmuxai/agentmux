@@ -62,12 +62,7 @@ session, they work without any code change.
 
 ## What to do if maps are needed in a portable
 
-Pass `VITE_SOURCEMAP=inline` or restore maps manually:
-
-```bash
-# One-off: temporarily comment out the `find … -delete` line in
-# scripts/package.sh for that build only. Do NOT commit that change.
-```
+Temporarily comment out the `find … -delete` line in `scripts/package.sh` for that build only. Do **not** commit that change.
 
 ## For future agents
 
