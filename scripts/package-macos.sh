@@ -141,14 +141,12 @@ for i in "${!HELPER_NAMES[@]}"; do
     ha="$APP/Contents/Frameworks/${hn}.app"
     mkdir -p "$ha/Contents/MacOS"
     cp dist/cef/agentmux-cef "$ha/Contents/MacOS/${hn}"
-    # GL libs ONLY next to the GPU helper (the GPU subprocess resolves them via
-    # its DIR_MODULE) + the generic helper as a fallback. The renderer/plugin/
-    # alloy helpers never touch GL, so copying ~45MB of GL libs (mostly
-    # libvk_swiftshader) into each of them is pure bloat.
-    case "$hn" in
-        "AgentMux Helper"|"AgentMux Helper (GPU)")
-            for f in dist/cef/*.dylib; do cp "$f" "$ha/Contents/MacOS/"; done ;;
-    esac
+    # GL libs go next to the generic helper only — GPU/renderer processes
+    # resolve dylibs via their DIR_MODULE (= this helper's MacOS dir).
+    # The Alerts helper never touches GL.
+    if [ "$hn" = "AgentMux Helper" ]; then
+        for f in dist/cef/*.dylib; do cp "$f" "$ha/Contents/MacOS/"; done
+    fi
     cat > "$ha/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
