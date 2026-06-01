@@ -176,6 +176,27 @@ impl AgentMuxHandler {
             .map(|(k, _)| k)
     }
 
+    /// Best navigation target for bringing a crashed window back. Prefers the
+    /// window's OWN pre-crash URL (read from its main frame before we load any
+    /// recovery page over it): it already carries every creation-time param —
+    /// `windowLabel` and, for tear-off / floating-pane windows, `workspaceId`
+    /// / `floatingPaneId` — plus the still-valid in-process `ipc_port` /
+    /// `ipc_token`, so reusing it verbatim re-projects the exact window. Falls
+    /// back to a reconstructed `?ipc_port&ipc_token&windowLabel` URL only when
+    /// the frame URL isn't a live app URL (renderer died before committing one,
+    /// or it's a prior data: recovery page). codex P2 #1229.
+    fn recovery_target_url(&self, owned: &mut Browser, base_url: &str) -> String {
+        let pre_crash = owned
+            .main_frame()
+            .map(|f| CefString::from(&f.url()).to_string())
+            .filter(|u| u.starts_with("http://127.0.0.1"));
+        if let Some(u) = pre_crash {
+            return u;
+        }
+        let label = self.window_label_for(owned);
+        recovery_navigation_url(base_url, self.ipc_port, &self.state.ipc_token, label.as_deref())
+    }
+
     fn on_title_change(&mut self, browser: Option<&mut Browser>, title: Option<&CefString>) {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
 
@@ -1471,13 +1492,7 @@ impl AgentMuxHandler {
                             // `browser` Option stays intact for the fall-through
                             // paths below. as_deref().cloned() borrows, not moves.
                             if let Some(mut owned) = browser.as_deref().cloned() {
-                                let window_label = self.window_label_for(&mut owned);
-                                let app_url = recovery_navigation_url(
-                                    &base_url,
-                                    self.ipc_port,
-                                    &self.state.ipc_token,
-                                    window_label.as_deref(),
-                                );
+                                let app_url = self.recovery_target_url(&mut owned, &base_url);
                                 tracing::warn!(
                                     target: "crash",
                                     kind = "renderer_memory_paused",
@@ -1485,7 +1500,6 @@ impl AgentMuxHandler {
                                     commit_free_mb = commit_free,
                                     resume_floor_mb = RESUME_FLOOR_MB,
                                     pauses_in_window,
-                                    window_label = window_label.as_deref().unwrap_or("<unknown>"),
                                     "renderer OOM under low system commit — paused (NOT counted against the crash budget)",
                                 );
                                 let html = memory_paused_page(reason, error_code, commit_free, &app_url);
@@ -1578,20 +1592,22 @@ impl AgentMuxHandler {
         // short-circuit to the "install broken" static page instead of
         // pointing the Reload button at a URL that would itself crash.
         // See docs/retro/retro-portable-rm-running-install-2026-05-28.md.
-        // Preserve the window label so the Reload button brings a recovered
-        // secondary window back as itself, not as `main` (codex P2 #1229).
-        // as_deref().cloned() borrows browser, leaving it intact for the load.
-        let recovery_label = browser
-            .as_deref()
-            .cloned()
-            .and_then(|mut owned| self.window_label_for(&mut owned));
+        // Reload must bring a recovered window back as ITSELF — preserving
+        // windowLabel and (for tear-off / floating-pane windows) workspaceId /
+        // floatingPaneId. recovery_target_url reuses the window's own pre-crash
+        // URL when possible. as_deref().cloned() borrows browser (a clone),
+        // leaving the original intact for the load below. (codex P2 #1229.)
+        let mut recovery_owned = browser.as_deref().cloned();
         let app_url = match crate::commands::window::resolve_frontend_base_url(self.ipc_port) {
-            Ok(base_url) => recovery_navigation_url(
-                &base_url,
-                self.ipc_port,
-                &self.state.ipc_token,
-                recovery_label.as_deref(),
-            ),
+            Ok(base_url) => match recovery_owned.as_mut() {
+                Some(owned) => self.recovery_target_url(owned, &base_url),
+                None => recovery_navigation_url(
+                    &base_url,
+                    self.ipc_port,
+                    &self.state.ipc_token,
+                    None,
+                ),
+            },
             Err(e) => {
                 tracing::error!(
                     target: "crash",
