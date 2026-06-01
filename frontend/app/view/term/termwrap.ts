@@ -444,6 +444,20 @@ export class TermWrap {
             }
         }
         this.sendDataHandler?.(data);
+        // Flush predictions when the cursor is at or past the last terminal
+        // column. The rollback sequence (CSI n D + CSI K) only works within
+        // the current row — any painted glyph that would wrap onto the next
+        // line can't be reliably erased, violating the convergence invariant.
+        // Resetting here keeps predictions within the safe single-row window;
+        // re-arming happens normally on the next confirmed echo after the wrap.
+        // (reagent P2 / codex P1 on #1223.)
+        if (this.predict?.isArmed || this.predict?.pending) {
+            const cx = this.terminal?.buffer?.active?.cursorX ?? 0;
+            const cols = this.terminal?.cols ?? 80;
+            if (cx >= cols - 1) {
+                this.predict.reset();
+            }
+        }
         // Optimistically paint the keystroke (no-op unless term:predictiveecho is
         // on AND the echo round-trip is above threshold AND we're armed).
         this.predict?.onInput(data);
