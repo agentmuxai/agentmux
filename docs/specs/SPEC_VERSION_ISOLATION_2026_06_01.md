@@ -76,12 +76,12 @@ pub fn data_dir_hash16(data_dir: &Path) -> String {
 // After:
 pub fn data_dir_hash16(data_dir: &Path, version: &str) -> String {
     let canonical = ...;
-    let input = format!("{}|{}", canonical.to_string_lossy().to_lowercase(), version);
-    format!("{:016x}", fnv1a_64(input.as_bytes()))
+    let combined = format!("{}\x00{}", canonical.to_string_lossy().to_lowercase(), version);
+    format!("{:016x}", fnv1a_64(combined.as_bytes()))
 }
 ```
 
-All callers in `main.rs` (3 sites: launcher pipe, srv pipe, splash event) pass the build version string.
+All callers in `main.rs` (1 call site — `dir_hash` is computed once and reused for pipe, srv-pipe, and splash) and `diag.rs` (2 call sites) pass the build version string.
 
 **Effect:** 0.40.2 and 0.41.0 now produce different pipe names → both launch independently → no single-instance collision. Data dirs still shared (same `channels/stable/data/`), but both instances won't be running simultaneously on the same DB in practice (users typically upgrade, not run side-by-side long-term).
 
@@ -136,8 +136,8 @@ This is the principled end-state the user described. Phase 1 + 2 are the path to
 | File | Change |
 |---|---|
 | `agentmux-launcher/src/hash.rs` | Add `version: &str` param to `data_dir_hash16`, include in hash input |
-| `agentmux-launcher/src/main.rs` | Pass `env!("CARGO_PKG_VERSION")` at the 3 `hash::data_dir_hash16` call sites |
-| `agentmux-launcher/src/diag.rs` | Update 2 call sites that use `pipe_name`/`srv_pipe_name` with `dir_hash` |
+| `agentmux-launcher/src/main.rs` | Pass `env!("CARGO_PKG_VERSION")` to the 1 `hash::data_dir_hash16` call; the resulting `dir_hash` is reused for the launcher pipe, srv pipe, and splash event name |
+| `agentmux-launcher/src/diag.rs` | Update 2 call sites (`run_wrr_diag` and the srv-diag variant); `version` was already in scope at both |
 
 That's the entire Phase 1 surface. No changes to `data_paths.rs`, no changes to the DB layout, no migration needed.
 
@@ -154,6 +154,6 @@ That's the entire Phase 1 surface. No changes to `data_paths.rs`, no changes to 
 
 - **Phase 1 is a P0 fix** — any release where two versions can coexist on the same machine is broken without it. Always include the build version in the pipe hash.
 - **Do not change the channel name** (`stable`) to include the version — that would break the agent-persistence goal and is NOT the right fix. The fix is in the hash input, not the channel name.
-- **The single-instance pipe contract:** `\\.\pipe\agentmux-<hash>\command` where hash = `fnv1a_16(lowercase(canonical_data_dir) + "|" + build_version)` after Phase 1. Document this if the pipe format ever needs updating.
+- **The single-instance pipe contract:** `\\.\pipe\agentmux-<hash>\command` where hash = first 16 hex chars of `fnv1a_64(lowercase(canonical_data_dir) + "\x00" + build_version)` after Phase 1. The `\x00` separator ensures path and version strings can't be confused. Document this if the pipe format ever needs updating.
 - **Channels are for settings.** If you're adding a feature that scopes something by "which version the user is on", it should use the version number, not the channel. Channels are the user's configuration profile, not a version identifier.
 - **Discussion #1026** is the long-term tracking thread for data isolation work. Append decisions and PRs there, don't fork.
