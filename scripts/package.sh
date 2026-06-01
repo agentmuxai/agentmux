@@ -89,11 +89,20 @@ if [ "$FRESH" -eq 1 ]; then
     CHANNEL="${CHANNEL}-${STAMP}"
 fi
 
+# Release portables must bake the "stable" channel so users open their
+# real data dir, not a branch-scoped dev-portable dir. Set RELEASE_CHANNEL
+# (task package:release does this automatically) to override.
+if [ -n "${RELEASE_CHANNEL:-}" ]; then
+    CHANNEL="$RELEASE_CHANNEL"
+fi
+
 echo "────────────────────── local build ──────────────────────"
 echo "  version : $VERSION   (unchanged — no bump, no git mutation)"
 echo "  label   : $LABEL"
 echo "  channel : $CHANNEL"
-if [ "$FRESH" -eq 1 ]; then
+if [ -n "${RELEASE_CHANNEL:-}" ]; then
+    echo "  data    : RELEASE — channel override: $RELEASE_CHANNEL"
+elif [ "$FRESH" -eq 1 ]; then
     echo "  data    : FRESH — throwaway dir for this build only"
 else
     echo "  data    : persistent — shared across rebuilds of '$BRANCH'"
@@ -107,7 +116,8 @@ echo "────────────────────────�
 #     recompiles instead of serving a stale cache.
 #   - package-portable.sh: AGENTMUX_BUILD_LABEL names the artifacts.
 # Locally-built portables default to the dev-portable channel family per
-# SPEC_DATA_CHANNELS_2026_05_24.md §2.2; release CI never calls this script.
+# SPEC_DATA_CHANNELS_2026_05_24.md §2.2; release portables use RELEASE_CHANNEL
+# (set by task package:release) to bake "stable"; release CI never calls this script.
 export AGENTMUX_BUILD_CHANNEL_DEFAULT="$CHANNEL"
 export AGENTMUX_BUILD_LABEL="$LABEL"
 
