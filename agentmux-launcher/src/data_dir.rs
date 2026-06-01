@@ -171,14 +171,17 @@ pub fn launcher_saga_log_path(data_dir: &Path) -> PathBuf {
 /// Create every directory the launcher + srv expect to exist.
 /// Idempotent. Delegates to the common implementation.
 pub fn ensure_dirs(paths: &DataPaths) -> Result<(), String> {
-    paths.common.ensure_dirs()?;
+    // Migrate BEFORE ensure_dirs creates the destination dirs.
+    // ensure_dirs creates <new>/data/db/ as an empty directory; if we
+    // checked for db dir existence AFTER that, we'd always see it and
+    // skip the copy (codex P1 on #1227).
     migrate_legacy_data_dir(paths);
-    Ok(())
+    paths.common.ensure_dirs()
 }
 
 /// One-time migration: copy `channels/<ch>/data/db/` into the new
 /// `channels/<ch>/versions/<v>/data/db/` when:
-///   (a) the new versioned db dir does not yet exist, AND
+///   (a) the new versioned db dir has no DB files yet, AND
 ///   (b) the old unversioned db dir does exist (pre-Phase-2 install).
 ///
 /// Uses *copy* not *move* so the old data is preserved for older
@@ -186,8 +189,14 @@ pub fn ensure_dirs(paths: &DataPaths) -> Result<(), String> {
 /// a fresh DB is safer than a partially migrated one blocking launch.
 fn migrate_legacy_data_dir(paths: &DataPaths) {
     let new_db = paths.data_dir.join("db");
-    if new_db.exists() {
-        return; // already migrated or fresh install
+    // Check for an actual DB file, not just the directory — ensure_dirs
+    // may have already created the empty dir on a previous failed launch.
+    let has_db_files = new_db.is_dir()
+        && std::fs::read_dir(&new_db)
+            .map(|mut d| d.any(|e| e.map(|e| e.path().extension().and_then(|x| x.to_str()) == Some("db")).unwrap_or(false)))
+            .unwrap_or(false);
+    if has_db_files {
+        return; // already migrated or fresh install with data
     }
     // The legacy dir is the parent of data_dir in the old layout:
     // channels/<ch>/data/db/ (instance_dir/data/db/).

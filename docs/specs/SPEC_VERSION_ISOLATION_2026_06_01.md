@@ -81,7 +81,7 @@ pub fn data_dir_hash16(data_dir: &Path, version: &str) -> String {
 }
 ```
 
-All callers in `main.rs` (1 call site — `dir_hash` is computed once and reused for pipe, srv-pipe, and splash) and `diag.rs` (2 call sites) pass the build version string.
+All callers pass the build version string: `main.rs` has **2 call sites** — one in `run_windows` (line 732, `dir_hash` reused for pipe + srv-pipe + splash) and one in `run_unix` (line 498, `dir_hash_unix`). `diag.rs` has 2 call sites.
 
 **Effect:** 0.40.2 and 0.41.0 now produce different pipe names → both launch independently → no single-instance collision. Data dirs still shared (same `channels/stable/data/`), but both instances won't be running simultaneously on the same DB in practice (users typically upgrade, not run side-by-side long-term).
 
@@ -136,7 +136,7 @@ This is the principled end-state the user described. Phase 1 + 2 are the path to
 | File | Change |
 |---|---|
 | `agentmux-launcher/src/hash.rs` | Add `version: &str` param to `data_dir_hash16`, include in hash input |
-| `agentmux-launcher/src/main.rs` | Pass `env!("CARGO_PKG_VERSION")` to the 1 `hash::data_dir_hash16` call; `dir_hash` reused for pipe + srv-pipe + splash. Pass `AGENTMUX_IPC_HASH` env to host at both spawn sites (Windows + Unix). Update `forward_open_new_window` to read `ipc-port-{hash}`. |
+| `agentmux-launcher/src/main.rs` | **2 call sites** for `data_dir_hash16`: `run_windows` (L732, `dir_hash` reused for pipe + srv-pipe + splash) and `run_unix` (L498, `dir_hash_unix`). Pass `AGENTMUX_IPC_HASH` env to host at both spawn sites. Update `forward_open_new_window` to read `ipc-port-{hash}`. |
 | `agentmux-launcher/src/diag.rs` | Update 2 call sites; `version` already in scope |
 | `agentmux-cef/src/main.rs` | Write `ipc-port-{AGENTMUX_IPC_HASH}` instead of `ipc-port` |
 | `agentmux-common/src/data_paths.rs` | **(Phase 2)** Version-scope `data_dir`, `logs_dir`, `cef_cache_dir`, `instance_runtime_dir` under `channels/<ch>/versions/<v>/`. `config_dir` and `agents_dir` stay channel-wide. |
