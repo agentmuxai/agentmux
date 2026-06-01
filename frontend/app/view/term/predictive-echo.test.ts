@@ -164,6 +164,31 @@ describe("PredictiveEcho — mode-transition safety", () => {
         expect(h.ops.length).toBe(before);
     });
 
+    it("does not re-arm when alt-screen enter and an echo confirmation are in the same PTY chunk (codex P2)", () => {
+        const h = harness();
+        h.arm();
+        // A chunk that contains both the echo confirmation AND the alt-screen enter.
+        // The disarm must win; confirming the echo should not re-arm.
+        h.echo("a\x1b[?1049h");
+        expect(h.pe.isArmed).toBe(false);
+        h.input("j"); // vim normal-mode — must NOT be painted
+        expect(h.ops.filter(o => o.startsWith("paint"))).toHaveLength(0);
+    });
+
+    it("does not paint when unconfirmed observations are ahead in the queue — burst ordering (reagent P1)", () => {
+        // "ab" typed at high RTT: "a" observed (unarmed), "b" typed before "a" echoes.
+        // queue=[{a,obs}] → b must be OBSERVED, not painted, else "b" glyph appears
+        // before authoritative "a" echo writes, scrambling order to "ba".
+        const h = harness();
+        h.input("a"); // unarmed → observed, queue=[{a,obs}]
+        h.input("b"); // obs pending ahead → must observe, NOT paint
+        expect(h.ops.filter(o => o.startsWith("paint"))).toHaveLength(0);
+        h.advance(5);
+        h.echo("a"); // "a" confirmed, armed=true, auth "a" written
+        h.echo("b"); // "b" confirmed (was observed), auth "b" written
+        expect(h.screen).toBe("ab"); // correct order, no scramble
+    });
+
     it("sweeps a stale painted prediction on the next keystroke, with no PTY chunk and no timer (reagent P1)", () => {
         const h = harness();
         h.arm();

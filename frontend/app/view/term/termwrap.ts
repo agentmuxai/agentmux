@@ -431,6 +431,7 @@ export class TermWrap {
     // frame, reconciled against the authoritative PTY echo. Null until init().
     // Spec: docs/specs/SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31.md.
     private predict: PredictiveEcho | null = null;
+    // Stateless decode — stream:false so no cross-chunk buffering accumulates.
     private echoDecoder = new TextDecoder();
 
     handleTermData(data: string) {
@@ -520,7 +521,15 @@ export class TermWrap {
                 // painted, not armed) — zero cost on the authoritative path until
                 // the first confirmation arms the predictor (reagent #1223 P2).
                 if (this.predict.pending > 0 || this.predict.isArmed) {
-                    const str = this.echoDecoder.decode(data, { stream: true });
+                    // stream: false — don't buffer across WS chunks. If a multibyte
+                    // UTF-8 sequence is split between chunks and the predict path is
+                    // later disabled/flushed before the continuation arrives, the
+                    // leading bytes would be stranded in the decoder while subsequent
+                    // chunks bypass it and go directly to xterm, corrupting output.
+                    // Using stream:false (stateless per-call) produces U+FFFD for an
+                    // incomplete sequence at chunk boundaries — same as xterm's own
+                    // behaviour on the raw Uint8Array path (codex P2 on #1223).
+                    const str = this.echoDecoder.decode(data, { stream: false });
                     toWrite = this.predict.reconcile(str);
                     this.predict.sweep();
                 }

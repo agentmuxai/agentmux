@@ -128,11 +128,19 @@ export class PredictiveEcho {
         // disarm already handles the overwhelmingly common case on all platforms:
         // every real password prompt is reached through the Enter that runs the
         // command).
-        if (now < this.cooldownUntil || !this.armed || this.rttP50 < this.threshold) {
+        // Also block painting when unconfirmed OBSERVATIONS are ahead in the
+        // queue. Those chars have been sent but not yet echoed — the cursor
+        // hasn't advanced past them. Painting a new prediction now would place
+        // the glyph before their authoritative echoes arrive, creating "abXc"
+        // when the user typed "abc" at high RTT. Only predict when every queued
+        // entry is already painted (cursor is exactly where we expect it).
+        // (reagent P1 on #1223.)
+        const hasPendingObservation = this.queue.some(p => !p.painted);
+        if (now < this.cooldownUntil || !this.armed || this.rttP50 < this.threshold || hasPendingObservation) {
             this.observe(data, now);
             return;
         }
-        // Armed + safe + slow enough → predict.
+        // Armed + safe + slow enough + no unconfirmed observations ahead → predict.
         this.sink.paint(data);
         this.queue.push({ expected: data, at: now, painted: true });
         if (this.queue.length > this.maxQueue) this.flush();
@@ -154,8 +162,12 @@ export class PredictiveEcho {
         // longer line-echoes. Abandon predictions and disarm BEFORE the switch
         // lands (the erase here is still on the normal buffer), so we never
         // mispredict a TUI command nor run a CSI-K rollback inside the alt
-        // screen (codex #1223 P1).
-        if (ALT_SCREEN_ENTER.test(chunk)) {
+        // screen. Track locally so the confirmation loop below doesn't
+        // re-arm us for the same chunk (codex P2 on #1223 — a chunk
+        // containing both an echo confirmation AND an alt-screen enter would
+        // disarm then immediately re-arm at `this.armed = true`).
+        const altScreenEntered = ALT_SCREEN_ENTER.test(chunk);
+        if (altScreenEntered) {
             this.rollback();
             this.armed = false;
         }
@@ -168,7 +180,8 @@ export class PredictiveEcho {
             if (rest.startsWith(head.expected)) {
                 this.queue.shift();
                 this.recordRtt(now - head.at);
-                this.armed = true; // observed our own echo → safe to predict
+                // Don't re-arm if we just disarmed for alt-screen in this chunk.
+                if (!altScreenEntered) this.armed = true;
                 if (!head.painted) auth += head.expected; // observation: must still write
                 rest = rest.slice(head.expected.length);
             } else {
