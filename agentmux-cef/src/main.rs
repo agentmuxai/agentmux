@@ -347,7 +347,15 @@ fn main() {
             .unwrap_or_else(|| data_dir.clone())
     };
     let _ = std::fs::create_dir_all(&port_file_dir);
-    let port_file = port_file_dir.join("ipc-port");
+    // Use a version-scoped filename so two concurrent release versions
+    // don't overwrite each other's port file (codex P1 on #1227).
+    // AGENTMUX_IPC_HASH is set by the launcher to hash(data_dir, version).
+    let port_file_name = std::env::var("AGENTMUX_IPC_HASH")
+        .ok()
+        .filter(|h| !h.is_empty())
+        .map(|h| format!("ipc-port-{}", h))
+        .unwrap_or_else(|| "ipc-port".to_string());
+    let port_file = port_file_dir.join(&port_file_name);
 
     // Create shared application state.
     let app_state = Arc::new(state::AppState::default());
