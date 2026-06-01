@@ -67,9 +67,9 @@
 #### 2. Make source maps dev-only in production portables (est. ~28 MB)
 **Current:** Source maps always included because `sourcemap: true` is unconditional.  
 **Context:** The runtime source-map resolver (SPEC_FE_SOURCE_MAP_RESOLVER_2026_05_27.md) uses maps to rewrite crash stacks. Maps are the "why" for keeping them.  
-**Fix:** Split: keep maps in `task dev` / debug builds; strip in `task package` via `VITE_SOURCEMAP=false`. The source-map resolver can degrade gracefully to raw stack lines when maps are absent.  
-**Trade-off:** Production crash stacks show minified names (e.g. `e.x` instead of `blockId`). Acceptable if dev builds retain full maps.  
-**Effort:** Medium — needs sourcemap resolver fallback path + build flag.
+**Fix (shipped v0.41.1):** `task package:release` runs `find dist/frontend -name "*.map" -delete` after the Vite build. `task package` (dev portables) keeps maps. See `docs/specs/SPEC_PORTABLE_SOURCE_MAPS_2026_06_01.md`.  
+**Trade-off:** Production crash stacks show minified names. Acceptable since dev builds retain full maps.  
+**Effort:** Done.
 
 #### 3. Lazy-load heavy vendor chunks (est. ~3–5 MB parsed JS)
 **Current:** All vendor code in one bundle (index-\*.js = 2.9 MB). Mermaid, Cytoscape, KaTeX are loaded eagerly even on panes that never use them.  

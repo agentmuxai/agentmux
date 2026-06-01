@@ -19,7 +19,7 @@ The same build pipeline produces the portable ZIP. Without intervention,
 ~28 MB of `.map` files (7% of the ZIP) would ship in every portable — data
 that serves no user-facing purpose at runtime.
 
-Maps stripped in v0.41.0+. See `docs/analysis/ANALYSIS_PORTABLE_SIZE_REDUCTION_2026_06_01.md`
+Maps stripped in v0.41.1+. See `docs/analysis/ANALYSIS_PORTABLE_SIZE_REDUCTION_2026_06_01.md`
 for the full size breakdown that motivated this.
 
 ## How it works
