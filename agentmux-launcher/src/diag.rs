@@ -42,7 +42,7 @@ pub async fn run_wrr_diag(launcher_exe_dir: &std::path::Path) -> Result<(), Stri
 
     let paths = crate::data_dir::resolve_paths(launcher_exe_dir, version)
         .map_err(|e| format!("path resolution failed: {}", e))?;
-    let dir_hash = crate::hash::data_dir_hash16(&paths.data_dir);
+    let dir_hash = crate::hash::data_dir_hash16(&paths.data_dir, version);
     let pipe_path = crate::ipc::pipe_name(&dir_hash);
 
     println!("AgentMux diagnostic — connecting to {}", pipe_path);
@@ -174,7 +174,7 @@ pub async fn run_srv_diag(launcher_exe_dir: &std::path::Path) -> Result<(), Stri
 
     let paths = crate::data_dir::resolve_paths(launcher_exe_dir, version)
         .map_err(|e| format!("path resolution failed: {}", e))?;
-    let dir_hash = crate::hash::data_dir_hash16(&paths.data_dir);
+    let dir_hash = crate::hash::data_dir_hash16(&paths.data_dir, version);
     let pipe_path = crate::ipc::srv_pipe_name(&dir_hash);
 
     println!("AgentMux srv diagnostic — connecting to {}", pipe_path);

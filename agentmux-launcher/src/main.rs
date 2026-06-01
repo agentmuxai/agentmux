@@ -726,7 +726,10 @@ async fn run_windows(
     // "AgentMux is already running for this data directory" and
     // exit cleanly BEFORE spawning srv/host (otherwise the second
     // host would briefly contend on the CEF cache lockfile).
-    let dir_hash = hash::data_dir_hash16(&paths.data_dir);
+    // Include the build version so two different release versions (e.g.
+    // 0.40.2 and 0.41.0) sharing the same channel data dir produce
+    // distinct pipe names — each version is its own single-instance domain.
+    let dir_hash = hash::data_dir_hash16(&paths.data_dir, env!("CARGO_PKG_VERSION"));
     let pipe_path = ipc::pipe_name(&dir_hash);
     let first_pipe = match ipc::server::bind_first_pipe_instance(&pipe_path) {
         Ok(p) => p,
