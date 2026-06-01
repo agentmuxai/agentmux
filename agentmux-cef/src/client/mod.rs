@@ -186,10 +186,15 @@ impl AgentMuxHandler {
     /// the frame URL isn't a live app URL (renderer died before committing one,
     /// or it's a prior data: recovery page). codex P2 #1229.
     fn recovery_target_url(&self, owned: &mut Browser, base_url: &str) -> String {
+        // Only reuse the pre-crash URL if it's on the SAME origin we'd reload
+        // from (`base_url`) — that's `http://127.0.0.1:<ipc_port>` for
+        // installed/portable and `http://localhost:<vite_port>` for dev, so
+        // matching against base_url rather than a hardcoded host covers both
+        // (codex P2 #1229: dev tear-off URLs are localhost).
         let pre_crash = owned
             .main_frame()
             .map(|f| CefString::from(&f.url()).to_string())
-            .filter(|u| u.starts_with("http://127.0.0.1"));
+            .filter(|u| url_on_origin(u, base_url));
         if let Some(u) = pre_crash {
             return u;
         }
@@ -2007,6 +2012,17 @@ setTimeout(tick, 1000);
         error_code = error_code,
         auto_close_secs = CRASH_LOOP_AUTO_CLOSE_SECS,
     )
+}
+
+/// True when `url` is on the same origin as `base_url` (i.e. a live app URL we
+/// can safely reuse for recovery). The boundary check after the prefix guards
+/// against a port that is a numeric prefix of another (e.g. `:5173` matching
+/// `:51730`): the char following the origin must be a path/query separator or
+/// end-of-string. `base_url` is an origin with no path
+/// (`http://127.0.0.1:<port>` or `http://localhost:<port>`).
+fn url_on_origin(url: &str, base_url: &str) -> bool {
+    url.strip_prefix(base_url)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/') || rest.starts_with('?'))
 }
 
 /// Build the navigation URL a crash-recovery / low-memory page sends the user
