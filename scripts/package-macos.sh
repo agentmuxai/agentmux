@@ -123,17 +123,16 @@ ditto "dist/Frameworks/Chromium Embedded Framework.framework" \
 # the macOS process model accepts them instead of re-execing the main bundle.
 # (The patched CEF framework additionally disables the Mach-port peer
 # process_requirement validation that failed on macOS 26 — the deeper fix.)
-# Two helpers are needed:
-# 1. "AgentMux Helper"         — the subprocess binary CEF spawns for all
-#    renderer/GPU/utility processes. resolve_browser_subprocess_path()
-#    (agentmux-cef/src/main.rs) points browser_subprocess_path here; the
-#    per-type variants (GPU/Plugin/Renderer/Alloy) are NOT used because we
-#    set an explicit subprocess path rather than relying on CEF's name-based
-#    discovery.
-# 2. "AgentMux Helper (Alerts)" — spawned by Chromium's native notification
-#    alert service; without it posix_spawnp retries forever.
-HELPER_NAMES=("AgentMux Helper" "AgentMux Helper (Alerts)")
-HELPER_IDS=("helper" "helper.alerts")
+# The patched from-source CEF 148 framework spawns renderer/GPU/utility
+# subprocesses as per-type named helpers (Renderer/GPU/Plugin/Alloy) regardless
+# of browser_subprocess_path — it derives the path from the bundle name directly.
+# All six variants are required:
+#   Generic  — fallback + resolve_browser_subprocess_path() target
+#   Renderer / GPU / Plugin / Alloy — spawned by the patched CEF 148 framework
+#   Alerts   — Chromium's native notification service
+HELPER_NAMES=("AgentMux Helper" "AgentMux Helper (GPU)" "AgentMux Helper (Plugin)" \
+              "AgentMux Helper (Renderer)" "AgentMux Helper (Alloy)" "AgentMux Helper (Alerts)")
+HELPER_IDS=("helper" "helper.gpu" "helper.plugin" "helper.renderer" "helper.alloy" "helper.alerts")
 HELPER_APPS=()
 shopt -s nullglob
 for i in "${!HELPER_NAMES[@]}"; do
@@ -141,12 +140,13 @@ for i in "${!HELPER_NAMES[@]}"; do
     ha="$APP/Contents/Frameworks/${hn}.app"
     mkdir -p "$ha/Contents/MacOS"
     cp dist/cef/agentmux-cef "$ha/Contents/MacOS/${hn}"
-    # GL libs go next to the generic helper only — GPU/renderer processes
-    # resolve dylibs via their DIR_MODULE (= this helper's MacOS dir).
-    # The Alerts helper never touches GL.
-    if [ "$hn" = "AgentMux Helper" ]; then
-        for f in dist/cef/*.dylib; do cp "$f" "$ha/Contents/MacOS/"; done
-    fi
+    # GL libs next to generic + GPU helpers only — the GPU subprocess resolves
+    # them via its DIR_MODULE; the generic helper needs them as a fallback.
+    # Renderer/Plugin/Alloy/Alerts never touch GL.
+    case "$hn" in
+        "AgentMux Helper"|"AgentMux Helper (GPU)")
+            for f in dist/cef/*.dylib; do cp "$f" "$ha/Contents/MacOS/"; done ;;
+    esac
     cat > "$ha/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
