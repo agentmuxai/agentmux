@@ -156,7 +156,7 @@ ws.send(JSON.stringify({
 AgentMux is a four-process desktop app. Each process owns one concern, end-to-end. See [Architecture overview](https://docs.agentmux.ai/architecture-overview/) for the full topology.
 
 ```
-┌──────────────────┐        named pipe        ┌──────────────────┐
+┌──────────────────┐         named pipe        ┌──────────────────┐
 │  agentmux-       │ ◀────────────────────────▶│  agentmux-cef    │
 │  launcher        │                          │  (the "host")    │
 │  (≈325 KB shim)  │                          │                  │
