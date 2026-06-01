@@ -76,6 +76,17 @@ export interface AgentViewState {
 
     /** Convenience: lookup index by node id, or -1. */
     indexOf: (nodeId: string) => number;
+
+    /**
+     * True once the initial history load has completed (HistoryLoaded /
+     * HistoryRestored / empty-document fast-exit / InitFailed). Used by
+     * AgentDocumentVirtualList to gate the new-message enter animation:
+     * rows that mount before this point are historical, rows that mount
+     * after it are live-streamed. Set by useHistoryPagination via
+     * markHistoryReady. See PR #1212.
+     */
+    historyReady: Accessor<boolean>;
+    markHistoryReady: () => void;
 }
 
 /**
@@ -100,6 +111,8 @@ export function createAgentViewState(documentAtom: SignalPair<DocumentNode[]>): 
     const [stickToBottom, setStickToBottom] = createSignal(true);
     const [headAnchor, setHeadAnchor] = createSignal<ScrollAnchor | null>(null);
     const [streamingNodeId, setStreamingNodeId] = createSignal<string | null>(null);
+    const [historyReady, setHistoryReady] = createSignal(false);
+    const markHistoryReady = () => setHistoryReady(true);
 
     // Both two-signal mutations wrap in batch() so subscribers don't
     // observe the inconsistent intermediate state — without batch, an
@@ -145,5 +158,7 @@ export function createAgentViewState(documentAtom: SignalPair<DocumentNode[]>): 
         streamingNodeId,
         setStreamingNodeId,
         indexOf,
+        historyReady,
+        markHistoryReady,
     };
 }

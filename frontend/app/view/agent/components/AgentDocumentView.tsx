@@ -55,6 +55,13 @@ interface AgentDocumentViewProps {
     scrollToBottomRef?: (fn: () => void) => void;
     /** The node id of the currently highlighted search match (if any). */
     highlightNodeId?: Accessor<string | null>;
+    /**
+     * Called synchronously during mount with the viewState.markHistoryReady
+     * function so the parent can wire it to useHistoryPagination's
+     * onHistoryReady callback. Drives the new-message enter animation gate.
+     * See PR #1212.
+     */
+    registerHistoryReadyCallback?: (fn: () => void) => void;
 }
 
 export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element => {
@@ -64,6 +71,11 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
     // this component (not the agent ViewModel) — that's fine because
     // scroll state is per-pane-mount, not per-agent-session.
     const viewState = createAgentViewState(props.documentAtom);
+    // Register the markHistoryReady callback with the parent so
+    // useHistoryPagination (called in agent-view.tsx) can signal when
+    // the initial history load is done. Called synchronously — before
+    // any async history work starts. See PR #1212.
+    props.registerHistoryReadyCallback?.(viewState.markHistoryReady);
 
     // Auto-collapse-on-size for user messages was retired in PR #1020
     // — `UserMessageBlock` keys collapse off `node.isStartup` and

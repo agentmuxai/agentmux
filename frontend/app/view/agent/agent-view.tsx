@@ -229,6 +229,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // per-block zone. `agentId` here is the AgentDefinition slug/UUID —
     // a non-empty string is guaranteed at this point by the `Show
     // when={agentId()}` gate in AgentViewWrapper above.
+    // Bridged callback: AgentDocumentView registers viewState.markHistoryReady
+    // here on mount (before any async history work starts), so
+    // useHistoryPagination can signal "history done" into the viewState
+    // that lives inside AgentDocumentView. This drives the enter-animation
+    // gate on the streaming buffer. See PR #1212.
+    let historyReadyFn: (() => void) | undefined;
     const history = useHistoryPagination({
         blockId: model.blockId,
         // PR-4 — see useAgentStream above; same rationale.
@@ -241,6 +247,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // is >30s. Setter is a no-op if the pane unmounts before
         // restore.
         onContinuationModts: (ms) => model.continuedFromMsAtom._set(ms),
+        onHistoryReady: () => historyReadyFn?.(),
         log,
     });
 
@@ -786,6 +793,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 scrollCommand={scroll.command}
                 scrollToBottomRef={(fn) => { scrollToBottomFn = fn; }}
                 highlightNodeId={search.highlightId}
+                registerHistoryReadyCallback={(fn) => { historyReadyFn = fn; }}
             />
 
             <Show when={status.canRetry()}>
