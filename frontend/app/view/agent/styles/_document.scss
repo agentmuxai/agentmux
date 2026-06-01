@@ -201,6 +201,44 @@
         }
     }
 
+    // === New-message enter animation ===
+    // Uses transition + @starting-style (not @keyframes — @keyframes fires on
+    // ANY selector-match change, including adding [data-animate] to a parent).
+    // @starting-style fires on an element's FIRST STYLE RESOLUTION (at paint
+    // time). The gate works because:
+    //  - history rows: mount while [data-animate] ABSENT → but @starting-style
+    //    fires at PAINT TIME (after all microtasks), not at DOM insert. A forced
+    //    synchronous reflow (void scrollRef.scrollTop in AgentDocumentVirtualList
+    //    createEffect) commits their first style resolution BEFORE [data-animate]
+    //    is added, so @starting-style sees the rule absent → no animation.
+    //    Without the reflow, @starting-style would fire WITH [data-animate] even
+    //    for history rows. This CSS comment is intentionally silent on the
+    //    mechanism — see AgentDocumentVirtualList.tsx for the reflow rationale.
+    //  - new streaming rows: mount while [data-animate] IS present → first
+    //    resolution sees the rule → @starting-style fires → fade+slide runs. ✓
+    // @starting-style: Chromium 117+ / cef-146.
+    // Spec: docs/specs/SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30.md
+
+    .agent-document-streaming-buffer[data-animate] .agent-document-row {
+        opacity: 1;
+        transform: translateY(0);
+        transition: opacity 120ms cubic-bezier(0.4, 0, 0.2, 1),
+                    transform 120ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    @starting-style {
+        .agent-document-streaming-buffer[data-animate] .agent-document-row {
+            opacity: 0;
+            transform: translateY(4px);
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .agent-document-streaming-buffer[data-animate] .agent-document-row {
+            transition: none;
+        }
+    }
+
     // === Status Log (terminal-style) ===
     .agent-history-loading {
         padding: var(--space-1) var(--space-2);

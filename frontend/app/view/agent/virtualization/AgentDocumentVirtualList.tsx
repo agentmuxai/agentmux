@@ -29,7 +29,7 @@
  */
 
 import { createVirtualizer } from "@tanstack/solid-virtual";
-import { createEffect, createMemo, For, Index, onMount, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Index, onMount, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
@@ -95,6 +95,18 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // Plain `let` rather than a Solid signal: mutating the variable
     // must NOT trigger another memo run while we're inside one.
     let stickyFrontierId: string | null = null;
+
+    // Gate for the new-message enter animation. Starts false.
+    // Flipped to true by a createEffect (below) once viewState.historyReady()
+    // fires, but only AFTER a forced browser style resolution via
+    // `void scrollRef.scrollTop`. The forced reflow commits the history rows'
+    // first style resolution WITHOUT [data-animate] present; subsequent
+    // mounts (new streaming rows) get [data-animate] at their first resolution
+    // and animate via @starting-style + transition. Without the reflow,
+    // @starting-style fires on the history rows' first resolution (which
+    // happens at paint time, after all microtasks, including any queueMicrotask
+    // defer), so they cascade regardless. (reagent P1 on #1212.)
+    const [animateEnabled, setAnimateEnabled] = createSignal(false);
 
     // Memoized — partition is read inside virtualizer's reactive
     // count getter, estimateSize, getItemKey, the streaming buffer
@@ -185,6 +197,31 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // subsequent mounts are no-ops. Production: short-circuits.
     onMount(() => {
         startAgentLayoutShiftObserver();
+    });
+
+    // Flip animateEnabled once history loading is done.
+    //
+    // `historyReady()` is set by useHistoryPagination after
+    // HistoryLoaded/HistoryRestored (or immediately for empty documents).
+    // By the time it fires, the history rows are already in the DOM.
+    //
+    // CRITICAL: we must force a browser style resolution for those rows
+    // BEFORE adding [data-animate], otherwise @starting-style applies to
+    // them on their first resolution (which happens at paint time, after
+    // all pending microtasks drain — including any queueMicrotask defers).
+    // Reading a layout property (scrollRef.scrollTop) triggers a
+    // synchronous style recalc/layout flush, so the history rows' first
+    // style resolution is committed WITHOUT [data-animate]. Subsequent
+    // mounts (new streaming rows) see [data-animate] at their first
+    // resolution and animate correctly. (reagent #1212 P1.)
+    //
+    // For empty conversations historyReady() fires immediately with no
+    // rows in the DOM yet — the forced reflow is a no-op and the first
+    // streaming row mounts with [data-animate] already present. (codex P2.)
+    createEffect(() => {
+        if (animateEnabled() || !props.viewState.historyReady()) return;
+        void scrollRef?.scrollTop; // forced synchronous style/layout flush
+        setAnimateEnabled(true);
     });
 
     // Project stickToBottom into scroll position. When the document
@@ -405,7 +442,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 DocumentRow stays mounted while its `props.node()`
                 reactively re-reads the current value. (reagent P1 on
                 #784.) */}
-            <div class="agent-document-streaming-buffer">
+            <div class="agent-document-streaming-buffer" data-animate={animateEnabled() || undefined}>
                 <Index each={partition().streamingNodes as DocumentNode[]}>
                     {(nodeAccessor) => (
                         <DocumentRow
