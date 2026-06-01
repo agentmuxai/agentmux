@@ -171,7 +171,60 @@ pub fn launcher_saga_log_path(data_dir: &Path) -> PathBuf {
 /// Create every directory the launcher + srv expect to exist.
 /// Idempotent. Delegates to the common implementation.
 pub fn ensure_dirs(paths: &DataPaths) -> Result<(), String> {
-    paths.common.ensure_dirs()
+    paths.common.ensure_dirs()?;
+    migrate_legacy_data_dir(paths);
+    Ok(())
+}
+
+/// One-time migration: copy `channels/<ch>/data/db/` into the new
+/// `channels/<ch>/versions/<v>/data/db/` when:
+///   (a) the new versioned db dir does not yet exist, AND
+///   (b) the old unversioned db dir does exist (pre-Phase-2 install).
+///
+/// Uses *copy* not *move* so the old data is preserved for older
+/// binaries that may still be installed. Silent on any I/O error —
+/// a fresh DB is safer than a partially migrated one blocking launch.
+fn migrate_legacy_data_dir(paths: &DataPaths) {
+    let new_db = paths.data_dir.join("db");
+    if new_db.exists() {
+        return; // already migrated or fresh install
+    }
+    // The legacy dir is the parent of data_dir in the old layout:
+    // channels/<ch>/data/db/ (instance_dir/data/db/).
+    // After Phase 2, data_dir is channels/<ch>/versions/<v>/data/.
+    // The old path was channels/<ch>/data/.  Walk up from data_dir's
+    // grandparent (versions/) to reach instance_dir.
+    let old_db = match paths.data_dir.parent().and_then(|v| v.parent()) {
+        Some(versions_dir) => versions_dir.parent().map(|ch| ch.join("data").join("db")),
+        None => None,
+    };
+    let old_db = match old_db {
+        Some(p) if p.is_dir() => p,
+        _ => return, // no legacy data — fresh install
+    };
+    crate::log(&format!(
+        "[migrate] copying legacy data dir {} → {}",
+        old_db.display(),
+        new_db.display()
+    ));
+    if let Err(e) = copy_dir_recursive(&old_db, &new_db) {
+        crate::log(&format!("[migrate] copy failed (fresh db will be used): {}", e));
+    }
+}
+
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let dst_path = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_recursive(&entry.path(), &dst_path)?;
+        } else {
+            std::fs::copy(entry.path(), dst_path)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

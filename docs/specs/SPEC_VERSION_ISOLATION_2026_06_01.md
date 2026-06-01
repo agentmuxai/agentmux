@@ -136,8 +136,11 @@ This is the principled end-state the user described. Phase 1 + 2 are the path to
 | File | Change |
 |---|---|
 | `agentmux-launcher/src/hash.rs` | Add `version: &str` param to `data_dir_hash16`, include in hash input |
-| `agentmux-launcher/src/main.rs` | Pass `env!("CARGO_PKG_VERSION")` to the 1 `hash::data_dir_hash16` call; the resulting `dir_hash` is reused for the launcher pipe, srv pipe, and splash event name |
-| `agentmux-launcher/src/diag.rs` | Update 2 call sites (`run_wrr_diag` and the srv-diag variant); `version` was already in scope at both |
+| `agentmux-launcher/src/main.rs` | Pass `env!("CARGO_PKG_VERSION")` to the 1 `hash::data_dir_hash16` call; `dir_hash` reused for pipe + srv-pipe + splash. Pass `AGENTMUX_IPC_HASH` env to host at both spawn sites (Windows + Unix). Update `forward_open_new_window` to read `ipc-port-{hash}`. |
+| `agentmux-launcher/src/diag.rs` | Update 2 call sites; `version` already in scope |
+| `agentmux-cef/src/main.rs` | Write `ipc-port-{AGENTMUX_IPC_HASH}` instead of `ipc-port` |
+| `agentmux-common/src/data_paths.rs` | **(Phase 2)** Version-scope `data_dir`, `logs_dir`, `cef_cache_dir`, `instance_runtime_dir` under `channels/<ch>/versions/<v>/`. `config_dir` and `agents_dir` stay channel-wide. |
+| `agentmux-launcher/src/data_dir.rs` | **(Phase 2)** `migrate_legacy_data_dir()`: on first run copies `channels/<ch>/data/db/` → `channels/<ch>/versions/<v>/data/db/` if old path exists and new doesn't |
 
 That's the entire Phase 1 surface. No changes to `data_paths.rs`, no changes to the DB layout, no migration needed.
 
