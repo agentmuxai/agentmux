@@ -76,6 +76,10 @@ export interface UseHistoryPaginationOptions {
      * the read returned no snapshot (fresh agent).
      */
     onContinuationModts?: (modts: number) => void;
+    /** Called once when the initial history load is complete (or immediately
+     *  for an empty document). Used to gate the new-message enter animation
+     *  so history rows don't animate on open/restore. See PR #1212. */
+    onHistoryReady?: () => void;
     log: LogFn;
 }
 
@@ -211,6 +215,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                             type: "InitReady",
                             at: Date.now(),
                         });
+                        opts.onHistoryReady?.();
                         return;
                     }
                     opts.log(
@@ -242,6 +247,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         type: "InitReady",
                         at: Date.now(),
                     });
+                    opts.onHistoryReady?.();
                     return;
                 }
 
@@ -275,6 +281,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     type: "InitReady",
                     at: Date.now(),
                 });
+                opts.onHistoryReady?.();
             } catch (err: any) {
                 if (!mounted) return;
                 // Non-fatal — fresh session or backend not ready yet.
@@ -292,6 +299,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     at: Date.now(),
                     reason,
                 });
+                opts.onHistoryReady?.();
             }
         })();
     });

@@ -198,15 +198,29 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         startAgentLayoutShiftObserver();
     });
 
-    // Flip animateEnabled after the initial history batch has rendered.
-    // The effect fires synchronously once nodes() is non-empty; the
-    // queueMicrotask defers the setter to AFTER Solid has flushed the
-    // current batch of DOM mutations, so any rows that mounted during
-    // this tick (history load) are already in the DOM and won't
-    // re-trigger their CSS animation when [data-animate] appears.
+    // Flip animateEnabled once history loading is done.
+    //
+    // `historyReady()` is set by useHistoryPagination after
+    // HistoryLoaded/HistoryRestored (or immediately for empty documents).
+    // By the time it fires, the history rows are already in the DOM.
+    //
+    // CRITICAL: we must force a browser style resolution for those rows
+    // BEFORE adding [data-animate], otherwise @starting-style applies to
+    // them on their first resolution (which happens at paint time, after
+    // all pending microtasks drain — including any queueMicrotask defers).
+    // Reading a layout property (scrollRef.scrollTop) triggers a
+    // synchronous style recalc/layout flush, so the history rows' first
+    // style resolution is committed WITHOUT [data-animate]. Subsequent
+    // mounts (new streaming rows) see [data-animate] at their first
+    // resolution and animate correctly. (reagent #1212 P1.)
+    //
+    // For empty conversations historyReady() fires immediately with no
+    // rows in the DOM yet — the forced reflow is a no-op and the first
+    // streaming row mounts with [data-animate] already present. (codex P2.)
     createEffect(() => {
-        if (animateEnabled() || props.viewState.nodes().length === 0) return;
-        queueMicrotask(() => setAnimateEnabled(true));
+        if (animateEnabled() || !props.viewState.historyReady()) return;
+        void scrollRef?.scrollTop; // forced synchronous style/layout flush
+        setAnimateEnabled(true);
     });
 
     // Project stickToBottom into scroll position. When the document

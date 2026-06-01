@@ -39,72 +39,91 @@ quick succession; each pops into existence abruptly.
 
 New nodes during an active turn land in `.agent-document-streaming-buffer`, a plain flex
 column in normal document flow (no virtualization). They are **not** virtualized while
-streaming, so CSS `@keyframes` / transition on mount is safe — the elements ARE in the DOM at
-paint time.
+streaming, so CSS transition on mount is safe — the elements ARE in the DOM at paint time.
+
+**Note on short documents:** `partitionForVirtualization` places the trailing ≤50 nodes
+in `.agent-document-streaming-buffer` (not the virtualizer) when the document is ≤50
+nodes total. This means history rows for a short conversation also land in the streaming
+buffer on open/restore — they must NOT animate. §4 handles this via a JS `[data-animate]`
+gate that is absent during the initial history load and only enabled after.
 
 Once the turn ends and the virtualizer absorbs them, rows are re-inserted as absolutely-
-positioned tiles inside `.agent-document-virtualizer`. Replayed history rows also enter via
-the virtualizer. Those paths are covered by §5 (reduced-motion guard) and should NOT
-animate on virtualized re-insert (that would fire every time the user scrolls a row into
-the virtual window).
+positioned tiles inside `.agent-document-virtualizer`. `loadOlder` rows also use the
+virtualizer. Those paths should NOT animate on virtualized re-insert (that would fire every
+time the user scrolls a row into the virtual window).
 
 ---
 
 ## 4. Implementation
 
-### 4.1 Keyframe definition
+### 4.1 Transition + @starting-style (not @keyframes)
 
-Add to `_document.scss` inside `.agent-view`:
-
-```scss
-@keyframes agent-node-enter {
-    from {
-        opacity: 0;
-        transform: translateY(4px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-```
-
-`4px` translateY keeps it subtle — enough to convey direction (downward stream) without
-feeling like a full slide-in. Matches the "swift" character of the tool-panel collapse.
-
-### 4.2 Apply to streaming-buffer rows only
+`@starting-style` fires ONLY when an element receives its first computed styles (DOM mount
+or `display:none`→visible), not when a CSS rule becomes newly applicable to an
+already-mounted element. This is the key property that makes the history-gate safe.
 
 ```scss
 // _document.scss — inside .agent-view
-.agent-document-streaming-buffer .agent-document-row {
-    animation: agent-node-enter 120ms cubic-bezier(0.4, 0, 0.2, 1) both;
+.agent-document-streaming-buffer[data-animate] .agent-document-row {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 120ms cubic-bezier(0.4, 0, 0.2, 1),
+                transform 120ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@starting-style {
+    .agent-document-streaming-buffer[data-animate] .agent-document-row {
+        opacity: 0;
+        transform: translateY(4px);
+    }
 }
 ```
 
-Scoped to `.agent-document-streaming-buffer` — not `.agent-document-virtualizer` — so
-the animation fires ONLY when a new node mounts into the live streaming region. Virtualized
-rows that scroll in/out of the DOM window are NOT affected.
+### 4.2 History gate — `[data-animate]` on the streaming buffer container
 
-`animation-fill-mode: both` ensures the node starts at `opacity: 0` even before the first
-frame if there's any scheduling jitter.
+The streaming buffer div starts WITHOUT `[data-animate]`. It is added only after the
+initial history load completes AND a forced browser style-resolution has occurred for the
+already-mounted rows:
+
+```ts
+// AgentDocumentVirtualList.tsx
+createEffect(() => {
+    if (animateEnabled() || !props.viewState.historyReady()) return;
+    void scrollRef?.scrollTop; // force synchronous style/layout flush (reagent P1 fix)
+    setAnimateEnabled(true);
+});
+```
+
+```tsx
+<div class="agent-document-streaming-buffer" data-animate={animateEnabled() || undefined}>
+```
+
+The forced reflow (`void scrollRef.scrollTop`) is critical: `@starting-style` fires on the
+element's **first style resolution** (at paint time, AFTER all microtasks). Without the
+reflow, microtask-deferred setters would add `[data-animate]` before that resolution —
+meaning history rows' first resolution sees the attribute and they animate anyway.
+
+`historyReady()` is a signal in `AgentViewState` set by `useHistoryPagination` via a
+`registerHistoryReadyCallback` prop on `AgentDocumentView`, bridged through `agent-view.tsx`.
+It is set at every terminal point of the initial load:
+- Snapshot restore (`HistoryRestored`)
+- NDJSON load complete (`HistoryLoaded`)
+- Empty document (total=0 fast-exit)
+- Load failure (`InitFailed` — fail-open)
+
+For **empty/new conversations**: `historyReady()` fires immediately with no rows in the
+buffer. The forced reflow is a no-op. The first streaming row mounts WITH `[data-animate]`
+present and animates correctly.
 
 ### 4.3 Reduced-motion override
 
 ```scss
 @media (prefers-reduced-motion: reduce) {
-    .agent-document-streaming-buffer .agent-document-row {
-        animation: none;
+    .agent-document-streaming-buffer[data-animate] .agent-document-row {
+        transition: none;
     }
 }
 ```
-
-Required. Respects the OS accessibility setting; mirrors the existing reduced-motion guard
-in `tilelayout.scss`.
-
-### 4.4 No JS changes required
-
-This is CSS-only. The SolidJS component tree, the virtualizer, the document store, and
-the streaming reducer are all untouched.
 
 ---
 
@@ -112,9 +131,10 @@ the streaming reducer are all untouched.
 
 | Node path | Animated? | Reason |
 |---|---|---|
-| Streaming rows in `.agent-document-streaming-buffer` | ✅ Yes | New DOM mount |
-| History rows replayed via virtualizer | ❌ No | `.agent-document-virtualizer` excluded from selector |
-| `loadOlder` rows prepended to virtualizer | ❌ No | Same — appear above the viewport, no visible flash |
+| Streaming rows in `.agent-document-streaming-buffer` | ✅ Yes | New DOM mount after `[data-animate]` is present |
+| History rows (any document length) in streaming buffer | ❌ No | `[data-animate]` absent during initial load; forced reflow commits their first style resolution before it is added |
+| First row in a new/empty conversation | ✅ Yes | `historyReady()` fires immediately → `[data-animate]` added before first streaming row arrives |
+| `loadOlder` rows prepended to virtualizer | ❌ No | Virtualizer rows, not in streaming buffer |
 | Tool-panel expand/collapse | ✅ Already (existing) | Separate `max-height` transition on `.agent-tool-panel` |
 | Pane-level open/close reflow | ❌ Out of scope | See `ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md` |
 
