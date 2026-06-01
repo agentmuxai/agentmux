@@ -37,17 +37,26 @@ pub fn fnv1a_64(bytes: &[u8]) -> u64 {
 }
 
 /// First 16 hex chars of FNV-1a-64 over the canonical-lowercase
-/// representation of the data_dir path. Used as the per-instance
-/// IPC namespace component.
-pub fn data_dir_hash16(data_dir: &std::path::Path) -> String {
-    // Canonicalize if possible (resolves `..`, mixed casing on
-    // Windows), but fall back to the raw path if canonicalize fails
-    // (e.g. data_dir doesn't exist yet during early startup).
+/// data_dir path **combined with the build version string**.
+///
+/// Including the version ensures that two different release binaries
+/// (e.g. 0.40.2 and 0.41.0) that share the same channel data dir
+/// (`~/.agentmux/channels/stable/`) produce DISTINCT pipe names and
+/// therefore satisfy the CLAUDE.md multi-version concurrency guarantee:
+/// each version is an independent single-instance domain.
+///
+/// Without the version, both binaries hash to the same pipe name and
+/// the second one silently forwards its "open window" request to the
+/// first, activating the wrong version. `version` should be the semver
+/// string from `CARGO_PKG_VERSION` (e.g. `"0.41.0"`). The `\x00`
+/// separator never appears in a filesystem path, so path + version
+/// are always unambiguously distinguishable.
+pub fn data_dir_hash16(data_dir: &std::path::Path, version: &str) -> String {
     let canonical = data_dir
         .canonicalize()
         .unwrap_or_else(|_| data_dir.to_path_buf());
-    let s = canonical.to_string_lossy().to_lowercase();
-    format!("{:016x}", fnv1a_64(s.as_bytes()))
+    let combined = format!("{}\x00{}", canonical.to_string_lossy().to_lowercase(), version);
+    format!("{:016x}", fnv1a_64(combined.as_bytes()))
 }
 
 #[cfg(test)]
@@ -66,8 +75,8 @@ mod tests {
     #[test]
     fn data_dir_hash_stable_across_calls() {
         let p = std::path::PathBuf::from("C:\\Users\\test\\AgentMux");
-        assert_eq!(data_dir_hash16(&p), data_dir_hash16(&p));
-        assert_eq!(data_dir_hash16(&p).len(), 16);
+        assert_eq!(data_dir_hash16(&p, "0.41.0"), data_dir_hash16(&p, "0.41.0"));
+        assert_eq!(data_dir_hash16(&p, "0.41.0").len(), 16);
     }
 
     #[test]
@@ -76,6 +85,21 @@ mod tests {
         // different casings of the same logical path.
         let lower = std::path::PathBuf::from("c:\\users\\test");
         let upper = std::path::PathBuf::from("C:\\Users\\Test");
-        assert_eq!(data_dir_hash16(&lower), data_dir_hash16(&upper));
+        assert_eq!(data_dir_hash16(&lower, "0.41.0"), data_dir_hash16(&upper, "0.41.0"));
+    }
+
+    #[test]
+    fn different_versions_same_dir_produce_different_hashes() {
+        // Core invariant: same data dir + different version → different pipe name.
+        // This is what prevents 0.40.2 and 0.41.0 from colliding on single-instance.
+        let p = std::path::PathBuf::from("C:\\Users\\test\\.agentmux\\channels\\stable\\data");
+        assert_ne!(data_dir_hash16(&p, "0.40.2"), data_dir_hash16(&p, "0.41.0"));
+    }
+
+    #[test]
+    fn same_version_different_dirs_produce_different_hashes() {
+        let a = std::path::PathBuf::from("C:\\Users\\test\\.agentmux\\channels\\stable\\data");
+        let b = std::path::PathBuf::from("C:\\Users\\test\\.agentmux\\channels\\beta\\data");
+        assert_ne!(data_dir_hash16(&a, "0.41.0"), data_dir_hash16(&b, "0.41.0"));
     }
 }

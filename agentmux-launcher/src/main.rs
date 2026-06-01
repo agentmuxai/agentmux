@@ -495,7 +495,9 @@ async fn run_unix(
     let _srv_stdin_keepalive = srv_child.stdin.take();
 
     // 3. Spawn the host with srv endpoints in env.
-    let host_env = paths.common.to_env_vars();
+    let dir_hash_unix = hash::data_dir_hash16(&paths.data_dir, version);
+    let mut host_env = paths.common.to_env_vars();
+    host_env.push(("AGENTMUX_IPC_HASH", std::ffi::OsString::from(&dir_hash_unix)));
     let mut host_child = match spawn_host_unix(real_exe, args, &srv_result, &host_env, false) {
         Some(c) => c,
         None => {
@@ -726,7 +728,10 @@ async fn run_windows(
     // "AgentMux is already running for this data directory" and
     // exit cleanly BEFORE spawning srv/host (otherwise the second
     // host would briefly contend on the CEF cache lockfile).
-    let dir_hash = hash::data_dir_hash16(&paths.data_dir);
+    // Include the build version so two different release versions (e.g.
+    // 0.40.2 and 0.41.0) sharing the same channel data dir produce
+    // distinct pipe names — each version is its own single-instance domain.
+    let dir_hash = hash::data_dir_hash16(&paths.data_dir, env!("CARGO_PKG_VERSION"));
     let pipe_path = ipc::pipe_name(&dir_hash);
     let first_pipe = match ipc::server::bind_first_pipe_instance(&pipe_path) {
         Ok(p) => p,
@@ -748,7 +753,7 @@ async fn run_windows(
                 already_running, e, pipe_path
             ));
             if already_running {
-                match forward_open_new_window(&paths.data_dir) {
+                match forward_open_new_window(&paths.data_dir, &dir_hash) {
                     Ok(()) => {
                         log("forwarded open_new_window to existing instance — exiting 0");
                         std::process::exit(0);
@@ -995,7 +1000,12 @@ async fn run_windows(
     // spawn_host_supervised(). The splash event is passed on every launch
     // (including restarts) so a relaunched host still dismisses a pending
     // splash if the first host crashed before its first frame.
-    let host_env = paths.common.to_env_vars();
+    let mut host_env = paths.common.to_env_vars();
+    // Pass the version-scoped IPC hash to the host so it writes the
+    // port file to `ipc-port-{hash}` rather than the shared `ipc-port`.
+    // Prevents two running releases from overwriting each other's port
+    // file (codex P1 on #1227).
+    host_env.push(("AGENTMUX_IPC_HASH", std::ffi::OsString::from(&dir_hash)));
     let mut host_child = match spawn_host_supervised(
         real_exe,
         args,
@@ -1297,8 +1307,11 @@ enum ForwardError {
     Fatal(String),
 }
 
-fn forward_open_new_window(data_dir: &std::path::Path) -> Result<(), ForwardError> {
-    let port_file = data_dir.join("ipc-port");
+fn forward_open_new_window(data_dir: &std::path::Path, dir_hash: &str) -> Result<(), ForwardError> {
+    // Read the version-scoped port file so we reach THIS version's host,
+    // not a concurrent release's host that may have overwritten "ipc-port".
+    let port_file_name = format!("ipc-port-{}", dir_hash);
+    let port_file = data_dir.join(&port_file_name);
     let contents = std::fs::read_to_string(&port_file).map_err(|e| {
         ForwardError::Transient(format!("read {}: {}", port_file.display(), e))
     })?;

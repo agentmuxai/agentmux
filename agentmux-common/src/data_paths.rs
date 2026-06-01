@@ -183,12 +183,35 @@ impl DataPaths {
         let (channel, instance_dir) =
             resolve_channel_and_dir(mode, &root, honor_env_channel)?;
 
-        let data_dir = instance_dir.join("data");
+        // For Installed/Portable builds, version-scope the mutable
+        // runtime dirs so two concurrent release versions don't share
+        // SQLite DBs or Chromium caches. Dev builds are already
+        // branch-isolated via their path; no extra scoping needed.
+        //
+        // Layout after this change:
+        //   channels/<ch>/versions/<v>/data/      ← objects.db, sagas.db …
+        //   channels/<ch>/versions/<v>/logs/
+        //   channels/<ch>/versions/<v>/cef-cache/
+        //   channels/<ch>/versions/<v>/runtime/   ← ipc-port, lock
+        //   channels/<ch>/config/                 ← settings (channel-wide)
+        //   channels/<ch>/agents/                 ← agent defs (survive upgrades)
+        //
+        // See SPEC_VERSION_ISOLATION_2026_06_01.md §5 Phase 2.
+        let version_dir = match mode {
+            RuntimeMode::Installed | RuntimeMode::Portable => {
+                instance_dir.join("versions").join(version)
+            }
+            RuntimeMode::Dev { .. } => instance_dir.clone(),
+        };
+
+        let data_dir = version_dir.join("data");
+        let logs_dir = version_dir.join("logs");
+        let cef_cache_dir = version_dir.join("cef-cache");
+        let instance_runtime_dir = version_dir.join("runtime");
+        // config and agents stay channel-wide so settings and agent
+        // definitions persist across version upgrades.
         let config_dir = instance_dir.join("config");
-        let logs_dir = instance_dir.join("logs");
-        let cef_cache_dir = instance_dir.join("cef-cache");
         let agents_dir = instance_dir.join("agents");
-        let instance_runtime_dir = instance_dir.join("runtime");
         let shared_dir = root.join("shared");
 
         Ok(Self {
@@ -546,20 +569,43 @@ mod tests {
     fn installed_paths_under_default_channel() {
         with_home_override(|root| {
             clear_channel_env();
-            let p = DataPaths::resolve("0.33.639", &RuntimeMode::Installed).unwrap();
-            // Default channel for Installed without env override =
-            // BUILD_CHANNEL_DEFAULT (which is "stable" in dev / test
-            // builds — `option_env!` falls back when the build env
-            // wasn't set by the packaging script).
+            let ver = "0.41.0";
+            let p = DataPaths::resolve(ver, &RuntimeMode::Installed).unwrap();
+            // Channel-level root (instance_dir).
             assert_eq!(p.channel, "stable");
-            assert_eq!(p.instance_dir, root.join("channels").join("stable"));
-            assert_eq!(p.data_dir, p.instance_dir.join("data"));
-            assert_eq!(p.config_dir, p.instance_dir.join("config"));
-            assert_eq!(p.logs_dir, p.instance_dir.join("logs"));
-            assert_eq!(p.cef_cache_dir, p.instance_dir.join("cef-cache"));
-            assert_eq!(p.agents_dir, p.instance_dir.join("agents"));
-            assert_eq!(p.instance_runtime_dir, p.instance_dir.join("runtime"));
-            assert_eq!(p.shared_dir, root.join("shared"));
+            let ch = root.join("channels").join("stable");
+            assert_eq!(p.instance_dir, ch);
+            // Version-scoped dirs live under versions/<ver>/.
+            let vd = ch.join("versions").join(ver);
+            assert_eq!(p.data_dir,             vd.join("data"));
+            assert_eq!(p.logs_dir,             vd.join("logs"));
+            assert_eq!(p.cef_cache_dir,        vd.join("cef-cache"));
+            assert_eq!(p.instance_runtime_dir, vd.join("runtime"));
+            // Channel-wide dirs stay at instance_dir level.
+            assert_eq!(p.config_dir,  ch.join("config"));
+            assert_eq!(p.agents_dir,  ch.join("agents"));
+            assert_eq!(p.shared_dir,  root.join("shared"));
+        });
+    }
+
+    #[test]
+    fn two_installed_versions_have_distinct_data_dirs() {
+        with_home_override(|root| {
+            clear_channel_env();
+            let p1 = DataPaths::resolve("0.40.2", &RuntimeMode::Installed).unwrap();
+            let p2 = DataPaths::resolve("0.41.0", &RuntimeMode::Installed).unwrap();
+            // Same channel root — agents and config are shared.
+            assert_eq!(p1.instance_dir, p2.instance_dir);
+            assert_eq!(p1.agents_dir,   p2.agents_dir);
+            assert_eq!(p1.config_dir,   p2.config_dir);
+            // Different versioned dirs — concurrent writes are safe.
+            assert_ne!(p1.data_dir,             p2.data_dir);
+            assert_ne!(p1.cef_cache_dir,        p2.cef_cache_dir);
+            assert_ne!(p1.instance_runtime_dir, p2.instance_runtime_dir);
+            // Paths contain the version string.
+            assert!(p1.data_dir.to_string_lossy().contains("0.40.2"));
+            assert!(p2.data_dir.to_string_lossy().contains("0.41.0"));
+            let _ = root; // suppress unused warning
         });
     }
 
