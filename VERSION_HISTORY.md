@@ -1,5 +1,196 @@
 # AgentMux Version History
 
+## 0.41.0 — 2026-06-01
+
+- fix(window): canonical label-based window resolution (P1)
+- Route minimize / maximize / drag / browser-pane-parent through the canonical
+- `resolve_window_hwnd(label)` instead of `find_own_top_level_window`, which
+- returns the process's first-visible top-level — the floater when one exists,
+- so those actions hit the wrong window.
+- Also fixes redock-onto-main silently failing (no landing ghost, no dock): a
+- warm-pool window promoted on-screen to serve as main keeps its `window-pool-*`
+- label in the HWND cache while `main` is left with no live HWND, so
+- `resolve_window_at_cursor` handed back the stale pool label and it never matched
+- the target window's frontend `main` identity. It now resolves the
+- cache-independent main frame (`find_main_window`) as `main` even when the
+- reverse-map label is a lingering pool label. Adds permanent `redock-resolve`
+- and `browser_pane` lifecycle instrumentation (kept, per the regression history).
+- docs: spec for integrating the launcher into macOS/Linux task dev (Phase 7)
+- feat(linux): floating-pane tear-off — chromeless floater (Phase A, mirrors macOS #1182)
+- On Linux, tearing a pane off used to produce a full workspace window
+- (tab bar + widget bar). Now it produces a chromeless floating window —
+- "just the pane" — matching Windows and macOS (the latter shipped this
+- in #1182).
+- One-file frontend change in
+- `frontend/app/drag/CrossWindowDragMonitor.linux.tsx`:
+- - Pane branch in `performTearOff` now calls
+-   `open_floating_pane_window` (chromeless), mirroring the win32 and
+-   darwin siblings. Imports `measureSourcePaneSize` from the shared
+-   helper and uses it to size the floater at the source pane's
+-   rendered size (not the parent window's outer size). IPC-first /
+-   mutate-on-success ordering matches the win32 reference (Reagent
+-   P1 on #1073).
+- - Tab branch unchanged. Tab tear-off still spawns a full top-level
+-   instance with its own taskbar entry.
+- No backend work: #1182 already widened the
+- `agentmux-cef/src/commands/floating_pane.rs` non-Windows branch
+- from "not yet implemented" to a real implementation that runs
+- identically on Linux and macOS. Secondary windows on Linux are
+- already frameless CEF Views windows (`window_create_top_level
+- frameless=true`), and the chromeless renderer
+- (`<FloatingPaneWorkspace>`) is purely a function of the
+- `?floatingPaneId=` URL param — both platform-agnostic.
+- Phase A scope only. Owned-window lifecycle (Gtk `transient-for` +
+- `skip-taskbar-hint` + `destroy-with-parent`), JS-driven header drag,
+- and floater redock are Phase B+ (tracked separately).
+- Spec: docs/specs/SPEC_LINUX_FLOATING_PANE_TEAROFF_2026_05_30.md
+- docs(analysis): blur audit — backdrop-filter is not an input-first hotspot (input-first 0.3, #1161)
+- feat(launcher): drive srv and host via agentmux-launcher on macOS/Linux task dev (Phase 1)
+- fix(linux): floating-pane header drag — use compositor IPC instead of polling
+- After the Phase A chromeless floater landed, the floater appeared at the
+- drop point but its header could not be dragged. The existing handler in
+- `floating-pane-workspace.tsx` is polling-based: on `mousedown` it reads
+- `get_window_position`, then on each `mousemove` it calls
+- `set_window_position`. That round-trip is correct on Windows
+- (SetWindowPos in physical px) and on macOS (CEF Views `set_bounds`),
+- but on Wayland the compositor forbids client-driven top-level
+- repositioning, so `set_bounds` is a no-op for position. IPCs fire at
+- ~20ms cadence — the window never moves.
+- Fix: branch on Linux at the top of the header `mousedown` handler and
+- fire a single `start_window_drag` IPC, mirroring the main window's
+- `useWindowDrag.linux.ts`. That routes through the patched CEF
+- `BeginWindowDrag` → `WmMoveResizeHandler::DispatchHostWindowDragMovement`
+- → `xdg_toplevel.move`, handing the drag to Mutter until mouseup. No
+- polling, no `set_bounds`. Same IPC the main title bar already uses — no
+- new backend surface.
+- Windows and macOS branches unchanged.
+- fix(linux): tear-off — delete docked layout node after IPC succeeds
+- Phase A left a P1 from reagent's review on PR #1188: the win32 and
+- darwin tear-off paths both call `treeReducer(DeleteNode)` after a
+- successful `open_floating_pane_window` so the pane doesn't render
+- twice (once in the source tab, once in the floater), and the linux
+- file omitted that step. `TearOffBlock` moves the block server-side
+- but the source layout's local tree still references the layout node
+- until SolidJS reconciles a new tree — so the docked pane stays
+- visible.
+- Fix: port the same `getLayoutModelForStaticTab` → `DeleteNode` block
+- from `.darwin.tsx` (lines 226-236) into the linux file's success
+- branch, and change the error branch to `return` instead of falling
+- through (matching darwin/win32 — if the IPC failed there is nothing
+- to clean up locally, and we don't want to delete the layout node when
+- the user can still see the docked pane).
+- Also adds the matching imports
+- (`getLayoutModelForStaticTab`, `LayoutTreeActionType`,
+- `LayoutTreeDeleteNodeAction`).
+- docs(spec): terminal flow control (PTY backpressure) design — input-first (#1161)
+- fix(linux): tear-off — use DOM screen coords instead of get_cursor_point
+- reagent CHANGES_REQUESTED on PR #1188 caught a P1: the
+- `agentmux-cef` host command `get_cursor_point` is a Windows-only
+- `GetCursorPos` wrapper — on non-Windows builds (Linux, macOS) it
+- returns `{x:0,y:0}` (drag.rs:211-212). The linux dragend handler was
+- threading those zeros into `open_floating_pane_window` as the
+- floater's top-left, so every Linux pane tear-off opened pinned to the
+- screen's top-left corner instead of the drop point.
+- The `.darwin.tsx` sibling already solved this by reading
+- `DragEvent.screenX/screenY` straight out of the DOM event (top-left
+- origin, CSS px = DIP — exactly what CEF Views positioning expects).
+- Port that fix verbatim to the linux file:
+- - `handleDragEnd` captures `dropX = e.screenX`, `dropY = e.screenY`
+-   before the 50ms settle.
+- - `handleCrossWindowDragEnd` signature grows `dropX, dropY` params;
+-   the `get_cursor_point` invoke is gone.
+- - `cursorPoint` is now `{x: dropX, y: dropY}` — same shape, correct
+-   source.
+- Also clears the stale P2 doc-comment at `floating-pane-workspace.tsx`
+- header: clarified that on Linux the JS-driven drag fires
+- `start_window_drag` (compositor-driven) rather than the
+- `get/set_window_position` polling used on Windows/macOS.
+- After this commit the only remaining `get_cursor_point` invoke is in
+- the win32 sibling, where it is correct.
+- fix(linux): tab tear-off anchor — drop DPR scale now that screenX is DIP
+- reagent P2 against `edda8911` on PR #1188: the tab-anchor in
+- `.linux.tsx` does `screenX - grabOffset.x * dpr`, which was correct
+- when `screenX` came from `get_cursor_point` (Windows-style
+- `GetCursorPos` returning physical px). The prior commit on this PR
+- switched `screenX/Y` to DOM `e.screenX/Y` (CSS px = DIP) to fix the
+- floater-at-screen-origin bug — but the tab-anchor multiplier still
+- assumed physical px. On HiDPI Linux that double-scales the grab
+- offset, placing the tab tear-off window off by the grab-offset
+- amount; harmless only at dpr=1.
+- Fix: drop the `* dpr` on both axes. Both `screenX/Y` and
+- `grabOffset.x/y` are now DIP, and CEF Views positions in DIP on
+- Linux, so plain subtraction is correct. The `* dpr` survives in the
+- win32 sibling, where it's still right (`get_cursor_point` returns
+- physical px there).
+- Updated the inline comment to spell out the DIP arithmetic and why
+- the win32 sibling diverges.
+- fix(ui): canonical maximize/restore icons + tighter hamburger
+- feat(dnd): file drop on terminal + agent panes (phase 1)
+- fix(macos): show the AgentMux instance in the Dock (set Regular activation policy)
+- test(bench): term key-repeat hiccup diagnostic (CDP frame/longtask/mark capture) — input-first (#1161)
+- docs(analysis): agent app API + amux CLI for open-in-editor
+- fix(cef): never request OS credential/keychain access in any runtime mode
+- feat(packaging): Microsoft Store MSIX packaging for the CEF app (task package:msix)
+- refactor(term): remove the Stage-1 RAF write-coalescer (double-rAF) — xterm RenderDebouncer is the only frame gate (input-first #1161)
+- feat(agent-pane): new-message enter animation — swift fade+slide on streaming rows
+- perf(agent-pane): incremental streaming-markdown render
+- chore(infra): remove dead speculative CDK source for the never-deployed webhook stack
+- fix(agent-pane): cap tool-output rendering to bound conversation DOM
+- chore: delete dead db/migrations-* legacy SQL files (superseded by inline flat schema)
+- fix(agent-pane): byte-cap single huge lines in tool output
+- fix(agent-pane): gate send-now zone on an interruptible turn
+- fix(agent-pane): hide tool-overlay header while running
+- perf: drop sysinfo cascade-diagnostic instrumentation
+- Commit ac70ff59 (2026-05-28) added temporary diagnostic instrumentation to
+- the sysinfo broadcast hot path — two `tracing::warn!` calls in
+- `Broker::publish` (one per missing-client branch, one per zero-routes
+- sysinfo branch) and two per-tick `console.log("[fe] sysinfo:* handler …")`
+- emits in the status-bar widgets (`SystemStats`, `BackendStatus`). All four
+- were tagged "Remove once the cascade root cause lands."
+- The cascade root cause has since landed. The diag is no longer needed and
+- is shipping in production builds, where:
+- - The two FE `console.log` calls fire every sysinfo tick (~1 Hz × 2
+-   widgets) → routed through CEF's console→host bridge → synchronous
+-   `tracing::info!` → disk. Locally measured at ~70k `[fe] sysinfo:*` lines
+-   per day in the host log on Linux. Each emit also rides the main thread's
+-   IPC bridge, adding noise to the input-first hot path.
+- - The two backend `tracing::warn!` calls fire from inside the broker
+-   mutex, with `event.scopes` formatted as `?` debug on every sysinfo
+-   publish whose route lookup is empty.
+- This commit removes all four diagnostics. The widget bodies revert to the
+- shape they had pre-ac70ff59 (no diagnostic logging around the reactive
+- setStats / setUptimeSecs calls). The broker's `client is None` arm
+- becomes a plain early return; the zero-routes branch is deleted entirely.
+- Net: 1 insertion / 29 deletions across 3 files.
+- perf(block): replace `.block-mask` `backdrop-filter` with `will-change: transform`
+- feat(term): predictive local echo for terminal input
+- perf(cef): enable EarlyEstablishGpuChannel + EstablishGpuChannelAsync
+- Adds `--enable-features=EarlyEstablishGpuChannel,EstablishGpuChannelAsync`
+- to the CEF browser-process command line in
+- `AgentMuxApp::on_before_command_line_processing`. Both features ship
+- enabled in stable Chrome on Linux and are explicitly set by VSCode's
+- Electron (confirmed via `/proc/<pid>/cmdline` on a running VSCode); CEF
+- does not enable them by default.
+- They (a) request the GPU process channel before the renderer's first
+- paint instead of synchronously on first paint and (b) treat the channel
+- establishment as non-blocking, which lets the compositor start producing
+- frames against the GPU process sooner.
+- ## Empirical impact (Linux Chromium-Ozone-Wayland, 10 panes, 12 s held key)
+- Measured via `scripts/capture-trace-ipv6.cjs`:
+- | | Before | After |
+- |---|---|---|
+- | `BeginMainFrame` avg | 39.1 ms | **35.7 ms** (-9 %) |
+- | `BeginMainFrame` count | 12 | 12 (unchanged) |
+- | Frame cadence | ~1 Hz | ~1 Hz (unchanged) |
+- | `LayerTreeHostImpl::DidNotProduceFrame` | 66 | 60 |
+- Small per-frame win (~3 ms / frame). The Wayland frame-production stall
+- that holds the cadence at ~1 Hz under sysinfo invalidation is a separate
+- problem (the renderer rejects 60+ Mutter `BeginFrame` requests as
+- `DidNotProduceFrame` because xterm.js WebGL canvas writes don't surface
+- as page-level dirtiness). Tracked separately; this PR is just the
+- matching VSCode flag set so we're not unnecessarily off-default.
+
+
 ## 0.40.1 — 2026-05-30
 
 - fix(cef): unbreak agentmux-cef compile on macOS with public cef-rs 146
