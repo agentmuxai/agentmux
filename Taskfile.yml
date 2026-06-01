@@ -98,6 +98,12 @@ tasks:
             # No version bump, no git mutation.
             - bash scripts/package.sh {{.CLI_ARGS}}
 
+    package:release:
+        desc: 'Like `task package` but (a) strips source maps (~28 MB) and (b) bakes the "stable" channel so the artifact opens the user''s real data dir. Use this for GitHub release artifacts. Dev portables (`task package`) keep maps and use the branch-scoped dev-portable channel. See docs/specs/SPEC_PORTABLE_SOURCE_MAPS_2026_06_01.md.'
+        platforms: [windows]
+        cmds:
+            - bash -c 'STRIP_MAPS=1 RELEASE_CHANNEL=stable bash scripts/package.sh {{.CLI_ARGS}}'
+
     package:msix:
         desc: 'Build a Microsoft Store MSIX from a portable build. `-- -Sign` produces a self-signed package for local Add-AppxPackage testing. See docs/specs/SPEC_MSIX_PACKAGING_2026_05_30.md.'
         platforms: [windows]
