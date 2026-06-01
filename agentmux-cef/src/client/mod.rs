@@ -158,6 +158,24 @@ impl AgentMuxHandler {
         }))
     }
 
+    /// Reverse-lookup this browser's window label from the reducer's browsers
+    /// map (label → browser), by object identity. Mirrors the find-by-identity
+    /// loop in `on_before_close`. Used by the crash-recovery navigation so a
+    /// resumed *secondary* window preserves its `windowLabel` instead of
+    /// defaulting to `main` (the frontend treats a missing label as `main`,
+    /// which would re-register/route the recovered window as the wrong one).
+    /// (codex P2 on #1229.)
+    fn window_label_for(&self, browser: &mut Browser) -> Option<String> {
+        self.state
+            .list_browsers()
+            .into_iter()
+            .find(|(_, b)| {
+                let mut b = b.clone();
+                b.is_same(Some(&mut *browser)) != 0
+            })
+            .map(|(k, _)| k)
+    }
+
     fn on_title_change(&mut self, browser: Option<&mut Browser>, title: Option<&CefString>) {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
 
@@ -1448,41 +1466,51 @@ impl AgentMuxHandler {
                         let within_budget = record_memory_pause(hist, now);
                         let pauses_in_window = hist.len();
                         if within_budget {
-                            let separator = if base_url.contains('?') { "&" } else { "?" };
-                            let app_url = format!(
-                                "{}{}ipc_port={}&ipc_token={}",
-                                base_url, separator, self.ipc_port, self.state.ipc_token
-                            );
-                            tracing::warn!(
-                                target: "crash",
-                                kind = "renderer_memory_paused",
-                                browser_id = bid,
-                                commit_free_mb = commit_free,
-                                resume_floor_mb = RESUME_FLOOR_MB,
-                                pauses_in_window,
-                                "renderer OOM under low system commit — paused (NOT counted against the crash budget)",
-                            );
-                            let html = memory_paused_page(reason, error_code, commit_free, &app_url);
-                            let b64 = cef::base64_encode(Some(html.as_bytes()));
-                            let b64_str = CefString::from(&b64).to_string();
-                            let data_uri = format!("data:text/html;base64,{}", b64_str);
-                            let uri = CefString::from(data_uri.as_str());
-                            if let Some(b) = browser {
-                                if let Some(frame) = b.main_frame() {
+                            // Clone to an owned Browser (mirrors on_before_close)
+                            // for the label lookup + navigation; the original
+                            // `browser` Option stays intact for the fall-through
+                            // paths below. as_deref().cloned() borrows, not moves.
+                            if let Some(mut owned) = browser.as_deref().cloned() {
+                                let window_label = self.window_label_for(&mut owned);
+                                let app_url = recovery_navigation_url(
+                                    &base_url,
+                                    self.ipc_port,
+                                    &self.state.ipc_token,
+                                    window_label.as_deref(),
+                                );
+                                tracing::warn!(
+                                    target: "crash",
+                                    kind = "renderer_memory_paused",
+                                    browser_id = bid,
+                                    commit_free_mb = commit_free,
+                                    resume_floor_mb = RESUME_FLOOR_MB,
+                                    pauses_in_window,
+                                    window_label = window_label.as_deref().unwrap_or("<unknown>"),
+                                    "renderer OOM under low system commit — paused (NOT counted against the crash budget)",
+                                );
+                                let html = memory_paused_page(reason, error_code, commit_free, &app_url);
+                                let b64 = cef::base64_encode(Some(html.as_bytes()));
+                                let b64_str = CefString::from(&b64).to_string();
+                                let data_uri = format!("data:text/html;base64,{}", b64_str);
+                                let uri = CefString::from(data_uri.as_str());
+                                if let Some(frame) = owned.main_frame() {
                                     frame.load_url(Some(&uri));
                                 }
+                                return;
                             }
-                            return;
+                            // browser was None (unusual on this path) — fall
+                            // through to the normal crash-budget handling below.
+                        } else {
+                            tracing::error!(
+                                target: "crash",
+                                kind = "memory_pause_budget_exceeded",
+                                browser_id = bid,
+                                pauses_in_window,
+                                window_secs = MEMORY_PAUSE_WINDOW.as_secs(),
+                                "memory-pause budget exceeded (commit totally exhausted) — falling through to the give-up page",
+                            );
+                            // fall through to the crash-budget path below.
                         }
-                        tracing::error!(
-                            target: "crash",
-                            kind = "memory_pause_budget_exceeded",
-                            browser_id = bid,
-                            pauses_in_window,
-                            window_secs = MEMORY_PAUSE_WINDOW.as_secs(),
-                            "memory-pause budget exceeded (commit totally exhausted) — falling through to the give-up page",
-                        );
-                        // fall through to the crash-budget path below.
                     }
                 }
             }
@@ -1550,14 +1578,20 @@ impl AgentMuxHandler {
         // short-circuit to the "install broken" static page instead of
         // pointing the Reload button at a URL that would itself crash.
         // See docs/retro/retro-portable-rm-running-install-2026-05-28.md.
+        // Preserve the window label so the Reload button brings a recovered
+        // secondary window back as itself, not as `main` (codex P2 #1229).
+        // as_deref().cloned() borrows browser, leaving it intact for the load.
+        let recovery_label = browser
+            .as_deref()
+            .cloned()
+            .and_then(|mut owned| self.window_label_for(&mut owned));
         let app_url = match crate::commands::window::resolve_frontend_base_url(self.ipc_port) {
-            Ok(base_url) => {
-                let separator = if base_url.contains('?') { "&" } else { "?" };
-                format!(
-                    "{}{}ipc_port={}&ipc_token={}",
-                    base_url, separator, self.ipc_port, self.state.ipc_token
-                )
-            }
+            Ok(base_url) => recovery_navigation_url(
+                &base_url,
+                self.ipc_port,
+                &self.state.ipc_token,
+                recovery_label.as_deref(),
+            ),
             Err(e) => {
                 tracing::error!(
                     target: "crash",
@@ -1957,6 +1991,26 @@ setTimeout(tick, 1000);
         error_code = error_code,
         auto_close_secs = CRASH_LOOP_AUTO_CLOSE_SECS,
     )
+}
+
+/// Build the navigation URL a crash-recovery / low-memory page sends the user
+/// back to. Carries `ipc_port` + `ipc_token` and — critically — the window's
+/// `windowLabel` when known, so a recovered secondary window doesn't
+/// reinitialize as `main` (creation.rs adds the same `windowLabel` param on
+/// first load; the frontend defaults a missing label to `main`). codex P2 #1229.
+fn recovery_navigation_url(
+    base_url: &str,
+    ipc_port: u16,
+    ipc_token: &str,
+    window_label: Option<&str>,
+) -> String {
+    let sep = if base_url.contains('?') { "&" } else { "?" };
+    match window_label {
+        Some(lbl) => format!(
+            "{base_url}{sep}ipc_port={ipc_port}&ipc_token={ipc_token}&windowLabel={lbl}"
+        ),
+        None => format!("{base_url}{sep}ipc_port={ipc_port}&ipc_token={ipc_token}"),
+    }
 }
 
 /// Record a memory-pause for `now` into `hist`, pruning entries older than
