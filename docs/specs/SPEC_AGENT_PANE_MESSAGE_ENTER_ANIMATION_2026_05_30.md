@@ -159,13 +159,19 @@ dev; not a production concern.
 
 ---
 
-## 7. Files to change
+## 7. Files changed
+
+The original design was CSS-only. The shipped implementation spans 5 source files
+due to the history-animation gate (§4.2):
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/styles/_document.scss` | Add `@keyframes agent-node-enter` and the two rulesets (§4.1–4.3) inside `.agent-view` |
-
-That's it — one file, ~15 lines of CSS.
+| `frontend/app/view/agent/styles/_document.scss` | `@starting-style` + `transition` rulesets (§4.1–4.3); no `@keyframes` |
+| `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` | `animateEnabled` signal; `createEffect` with forced reflow + `historyReady()` gate; `[data-animate]` on streaming-buffer container |
+| `frontend/app/view/agent/virtualization/state.ts` | `historyReady: Accessor<boolean>` + `markHistoryReady: () => void` added to `AgentViewState` |
+| `frontend/app/view/agent/hooks/useHistoryPagination.ts` | `onHistoryReady?: () => void` option; called at every terminal init point (HistoryRestored, HistoryLoaded, total=0, InitFailed) |
+| `frontend/app/view/agent/components/AgentDocumentView.tsx` | `registerHistoryReadyCallback` prop; wires `viewState.markHistoryReady` to the parent |
+| `frontend/app/view/agent/agent-view.tsx` | `historyReadyFn` bridge variable; passes `onHistoryReady` to `useHistoryPagination` and `registerHistoryReadyCallback` to `AgentDocumentView` |
 
 ---
 

@@ -202,22 +202,21 @@
     }
 
     // === New-message enter animation ===
-    // Uses transition + @starting-style instead of @keyframes animation.
-    // @starting-style fires ONLY when an element is first rendered (or
-    // transitions from display:none), NOT when a CSS rule becomes newly
-    // applicable to an already-mounted element. This is the critical
-    // distinction:
-    //  - history rows: mount while [data-animate] is ABSENT → rule never
-    //    matched → @starting-style never fires → they appear immediately.
-    //  - queueMicrotask adds [data-animate]: rule now matches mounted rows,
-    //    but @starting-style does NOT retroactively fire → no animation.
-    //  - new streaming rows: mount while [data-animate] IS present → rule
-    //    matches at mount → @starting-style fires → fade+slide runs. ✓
-    // A CSS animation (@keyframes) would animate on ANY selector-match
-    // change (including adding the parent attribute), making the JS gate
-    // insufficient (codex P2 on #1212). @starting-style is available on
-    // Chromium 117+ / cef-146. Virtualizer re-inserts never land in the
-    // streaming buffer so they are also safe.
+    // Uses transition + @starting-style (not @keyframes — @keyframes fires on
+    // ANY selector-match change, including adding [data-animate] to a parent).
+    // @starting-style fires on an element's FIRST STYLE RESOLUTION (at paint
+    // time). The gate works because:
+    //  - history rows: mount while [data-animate] ABSENT → but @starting-style
+    //    fires at PAINT TIME (after all microtasks), not at DOM insert. A forced
+    //    synchronous reflow (void scrollRef.scrollTop in AgentDocumentVirtualList
+    //    createEffect) commits their first style resolution BEFORE [data-animate]
+    //    is added, so @starting-style sees the rule absent → no animation.
+    //    Without the reflow, @starting-style would fire WITH [data-animate] even
+    //    for history rows. This CSS comment is intentionally silent on the
+    //    mechanism — see AgentDocumentVirtualList.tsx for the reflow rationale.
+    //  - new streaming rows: mount while [data-animate] IS present → first
+    //    resolution sees the rule → @starting-style fires → fade+slide runs. ✓
+    // @starting-style: Chromium 117+ / cef-146.
     // Spec: docs/specs/SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30.md
 
     .agent-document-streaming-buffer[data-animate] .agent-document-row {

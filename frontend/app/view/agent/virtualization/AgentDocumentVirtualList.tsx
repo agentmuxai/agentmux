@@ -96,15 +96,16 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // must NOT trigger another memo run while we're inside one.
     let stickyFrontierId: string | null = null;
 
-    // Gate for the new-message enter animation. Starts false so that
-    // the initial history batch (HistoryLoaded / HistoryRestored) mounts
-    // into the streaming buffer WITHOUT triggering the fade+slide —
-    // those are already-seen rows, not new messages. A queueMicrotask
-    // after the first non-empty render flips it true; from that point,
-    // any row that mounts into .agent-document-streaming-buffer is a
-    // freshly-streamed node and gets the animation. The streaming-buffer
-    // container is annotated with [data-animate] so CSS can scope to it.
-    // (reagent P1 on #1212.)
+    // Gate for the new-message enter animation. Starts false.
+    // Flipped to true by a createEffect (below) once viewState.historyReady()
+    // fires, but only AFTER a forced browser style resolution via
+    // `void scrollRef.scrollTop`. The forced reflow commits the history rows'
+    // first style resolution WITHOUT [data-animate] present; subsequent
+    // mounts (new streaming rows) get [data-animate] at their first resolution
+    // and animate via @starting-style + transition. Without the reflow,
+    // @starting-style fires on the history rows' first resolution (which
+    // happens at paint time, after all microtasks, including any queueMicrotask
+    // defer), so they cascade regardless. (reagent P1 on #1212.)
     const [animateEnabled, setAnimateEnabled] = createSignal(false);
 
     // Memoized — partition is read inside virtualizer's reactive
