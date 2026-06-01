@@ -126,8 +126,10 @@ wrap_window_delegate! {
                 return 1;
             };
             if let Some(browser) = browser_view.browser() {
-                let browser_host = browser.host().expect("BrowserHost is None");
-                browser_host.try_close_browser()
+                match browser.host() {
+                    Some(host) => host.try_close_browser(),
+                    None => 1, // no host yet (pre-init teardown) — allow close
+                }
             } else {
                 1
             }
@@ -372,14 +374,13 @@ wrap_app! {
                 // The last two were the actual Google QUIC traffic observed via
                 // net-log; AgentMux makes no such calls itself.
                 let key = CefString::from("disable-features");
-                // MachPortRendezvous{Validate,Enforce}PeerRequirements: Chromium's
-                // Mach-port peer code-sign validation. Our self-reexec CEF Helper
-                // fails it on macOS 26 (process_requirement.cc -67030), so the
-                // rendezvous denies the renderer its ports → crash-loop. The
-                // browser reads this policy from the runtime FeatureList and
-                // propagates it to children via env var, so disabling both here
-                // forces kNoValidation everywhere. (Earlier attempts used the
-                // wrong feature name.) Acceptable for a local single-user app.
+                // MachPortRendezvous{Validate,Enforce}PeerRequirements: belt-and-
+                // suspenders flags kept for defence in depth. NOTE: the actual fix
+                // for the macOS-26 renderer crash (-67030 / errSecCSReqFailed) is
+                // the source patch in docs/cef-patches/ (GetPeerValidationPolicy →
+                // kNoValidation) — the policy is read before FeatureList init so
+                // this runtime flag cannot apply in time and is NOT the load-bearing
+                // mechanism. Do not remove the patch thinking these flags cover it.
                 let val = CefString::from(
                     "CalculateNativeWinOcclusion,MediaRouter,PreconnectToSearch,\
                      AutofillServerCommunication,MachPortRendezvousValidatePeerRequirements,\

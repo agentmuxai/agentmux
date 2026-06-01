@@ -327,7 +327,10 @@ impl AgentMuxHandler {
     fn on_after_created(&mut self, browser: Option<&mut Browser>) {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
 
-        let browser = browser.cloned().expect("Browser is None");
+        let Some(browser) = browser.cloned() else {
+            tracing::error!("[on_after_created] browser is None — skipping registration");
+            return;
+        };
         tracing::info!("Browser created (total: {})", self.browser_list.len() + 1);
 
         // Phase 1 diagnostic tracing — find the exact line that silences the
@@ -715,7 +718,14 @@ impl AgentMuxHandler {
         );
         dlog(&format!("on_before_close fired; browser_list.len()={}", self.browser_list.len()));
 
-        let mut browser = browser.cloned().expect("Browser is None");
+        let Some(mut browser) = browser.cloned() else {
+            // CEF can pass None during emergency teardown (e.g. process
+            // shutdown while a browser is still closing). Log and bail —
+            // a panic here SIGABRTs CrBrowserMain, which the launcher
+            // mistakes for a crash and relaunches the app.
+            tracing::error!("[on_before_close] browser is None — skipping close logic");
+            return;
+        };
 
         // Drop any crash-history entry for this browser — it's closing
         // cleanly so its budget is reset. Without this the map would

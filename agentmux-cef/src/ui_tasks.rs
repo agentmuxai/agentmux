@@ -61,8 +61,16 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            if let Some(window) = get_window_on_ui(&self.state, &self.label) {
-                window.close();
+            // Use try_close_browser rather than window.close() — the latter
+            // calls Widget::Close directly, which CHECKs !on_call_stack_ and
+            // aborts if the widget is already being destroyed (e.g. the OS
+            // sent windowShouldClose on macOS while our close_window IPC task
+            // was already queued). try_close_browser goes through do_close
+            // which sets is_closing and is idempotent on re-entry.
+            if let Some(mut browser) = self.state.get_browser(&self.label) {
+                if let Some(host) = browser.host() {
+                    host.try_close_browser();
+                }
             }
         }
     }

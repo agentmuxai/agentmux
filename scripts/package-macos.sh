@@ -65,6 +65,7 @@ require dist/cef/agentmux-cef
 require dist/cef/agentmux-launcher
 require "$SRV"
 require dist/frontend/index.html
+require dist/schema/settings.json
 require "dist/Frameworks/Chromium Embedded Framework.framework"
 [ -f "$ENTITLEMENTS" ] || { echo "❌ missing entitlements: $ENTITLEMENTS" >&2; exit 1; }
 
@@ -93,6 +94,13 @@ cp dist/cef/agentmux-launcher "$APP/Contents/MacOS/agentmux-launcher"
 cp -R dist/frontend "$APP/Contents/Resources/frontend"
 ln -s "../Resources/frontend" "$APP/Contents/MacOS/frontend"
 
+# Schema files (JSON) — srv resolves these from AGENTMUX_APP_PATH/schema
+# which is Contents/MacOS/ (the host exe's parent directory). Resource files
+# cannot live under Contents/MacOS/ without breaking the bundle seal, so
+# place them in Resources/schema and symlink like frontend.
+cp -R dist/schema "$APP/Contents/Resources/schema"
+ln -s "../Resources/schema" "$APP/Contents/MacOS/schema"
+
 # GL libs next to the host exe (Chromium DIR_MODULE = exe dir). These are
 # Mach-O dylibs, so codesign signs them as nested code — fine under MacOS/.
 # NOTE: vk_swiftshader_icd.json (the SwiftShader Vulkan ICD manifest) is
@@ -115,12 +123,17 @@ ditto "dist/Frameworks/Chromium Embedded Framework.framework" \
 # the macOS process model accepts them instead of re-execing the main bundle.
 # (The patched CEF framework additionally disables the Mach-port peer
 # process_requirement validation that failed on macOS 26 — the deeper fix.)
-# CEF 148 / Chromium also spawns an "(Alerts)" helper for the native
-# notification (alert) service; without it the framework retries
-# posix_spawnp forever ("No such file or directory"). Ship all six.
-HELPER_NAMES=("AgentMux Helper" "AgentMux Helper (GPU)" "AgentMux Helper (Plugin)" \
-              "AgentMux Helper (Renderer)" "AgentMux Helper (Alloy)" "AgentMux Helper (Alerts)")
-HELPER_IDS=("helper" "helper.gpu" "helper.plugin" "helper.renderer" "helper.alloy" "helper.alerts")
+# Two helpers are needed:
+# 1. "AgentMux Helper"         — the subprocess binary CEF spawns for all
+#    renderer/GPU/utility processes. resolve_browser_subprocess_path()
+#    (agentmux-cef/src/main.rs) points browser_subprocess_path here; the
+#    per-type variants (GPU/Plugin/Renderer/Alloy) are NOT used because we
+#    set an explicit subprocess path rather than relying on CEF's name-based
+#    discovery.
+# 2. "AgentMux Helper (Alerts)" — spawned by Chromium's native notification
+#    alert service; without it posix_spawnp retries forever.
+HELPER_NAMES=("AgentMux Helper" "AgentMux Helper (Alerts)")
+HELPER_IDS=("helper" "helper.alerts")
 HELPER_APPS=()
 shopt -s nullglob
 for i in "${!HELPER_NAMES[@]}"; do
