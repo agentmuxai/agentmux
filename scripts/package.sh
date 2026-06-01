@@ -112,6 +112,15 @@ export AGENTMUX_BUILD_CHANNEL_DEFAULT="$CHANNEL"
 export AGENTMUX_BUILD_LABEL="$LABEL"
 
 task build:frontend
+
+# Release portables strip source maps (~28 MB). Dev portables keep them so
+# the runtime source-map resolver works during local testing.
+# Set STRIP_MAPS=1 explicitly (task package:release does this automatically).
+if [ "${STRIP_MAPS:-0}" = "1" ]; then
+    echo "  maps    : stripping .map files (release portable)"
+    find dist/frontend -name "*.map" -delete
+fi
+
 task build:backend
 task build:host
 task bundle
