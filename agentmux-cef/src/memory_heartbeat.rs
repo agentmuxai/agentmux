@@ -4,7 +4,41 @@
 // Memory heartbeat — logs system and process memory stats every 20 seconds.
 // Designed to provide forensic data for OOM / VA exhaustion crash analysis.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+
+/// Latest observed system commit-free (available page file) in MB. Published by
+/// the heartbeat loop and by the on-demand probe; read by the gated renderer
+/// recovery path to distinguish "OOM under system memory pressure" (transient,
+/// recoverable) from "broken renderer". `u64::MAX` until the first sample, so
+/// the gate treats an un-sampled process as having ample commit.
+///
+/// See docs/specs/SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md §6.A.
+static COMMIT_FREE_MB: AtomicU64 = AtomicU64::new(u64::MAX);
+
+/// On-demand synchronous probe of system commit-free (available page file), in
+/// MB. ~microsecond cost (a single `GlobalMemoryStatusEx`). Republishes the
+/// atomic so `last_commit_free_mb()` stays fresh. On non-Windows returns
+/// `u64::MAX` — commit-limit exhaustion is a Windows concern here and the
+/// recovery gate degrades to "always treat as ample" elsewhere.
+#[cfg(target_os = "windows")]
+pub fn commit_free_mb() -> u64 {
+    use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    let mut mem: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+    mem.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+    if unsafe { GlobalMemoryStatusEx(&mut mem) } != 0 {
+        let mb = (mem.ullAvailPageFile / (1024 * 1024)) as u64;
+        COMMIT_FREE_MB.store(mb, Ordering::Relaxed);
+        mb
+    } else {
+        COMMIT_FREE_MB.load(Ordering::Relaxed)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn commit_free_mb() -> u64 {
+    u64::MAX
+}
 
 /// Spawn a background thread that logs memory stats at a fixed interval.
 /// Also refreshes the log pointer file on UTC date rollover.
@@ -102,6 +136,9 @@ fn log_memory_stats() {
         let total_virt_gb = mem.ullTotalVirtual as f64 / (1024.0 * 1024.0 * 1024.0);
         let avail_virt_gb = mem.ullAvailVirtual as f64 / (1024.0 * 1024.0 * 1024.0);
         let load_pct = mem.dwMemoryLoad;
+
+        // Publish commit-free for the gated renderer recovery path (§6.A).
+        COMMIT_FREE_MB.store((mem.ullAvailPageFile / (1024 * 1024)) as u64, Ordering::Relaxed);
 
         tracing::info!(
             target: "mem_heartbeat",
