@@ -1,5 +1,10 @@
 # AgentMux Version History
 
+## 0.41.1 — 2026-06-01
+
+- fix(launcher): include build version in pipe name hash — two releases no longer share single-instance domain
+
+
 ## 0.41.0 — 2026-06-01
 
 - fix(window): canonical label-based window resolution (P1)
