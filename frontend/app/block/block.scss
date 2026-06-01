@@ -442,12 +442,26 @@
             pointer-events: none;
             border-radius: var(--block-border-radius);
             z-index: var(--zindex-block-mask-inner);
-            // backdrop-filter guarantees this element composites above all
-            // composited-scroll children (xterm-viewport with overflow-y:scroll).
-            // backdrop-filter elements MUST render above the layers they sample —
-            // unlike will-change:opacity/transform which Chromium may squash or
-            // reorder. 0.1px blur is imperceptible at any DPR.
-            backdrop-filter: blur(0.1px);
+            // Promote to a compositor layer so the focus border composites
+            // above xterm's `.xterm-viewport` GPU-scroll layer
+            // (`overflow-y:scroll` triggers Blink's scroll-layer promotion).
+            //
+            // Previously this was `backdrop-filter: blur(0.1px)` — the most
+            // expensive layer-promoter in Chromium (creates a backdrop layer
+            // that samples + blurs the layers below every frame, even at
+            // 0.1px). On Linux Chromium-Ozone-Wayland that sampling cost
+            // dominated `PaintArtifactCompositor::Update` at ~5ms per pane,
+            // scaling linearly with pane count and tipping the renderer
+            // below the 16ms frame budget under sysinfo's 1Hz invalidation.
+            //
+            // `will-change: transform` is the cheapest layer-promoter that
+            // still guarantees a composite layer (no backdrop sample, no
+            // filter, no blend). The squash/reorder concern cited in the
+            // original comment is a non-issue here: the explicit
+            // `z-index: var(--zindex-block-mask-inner)` above sets paint
+            // order within the parent stacking context, and squashing
+            // groups preserve relative z-order across squashed siblings.
+            will-change: transform;
 
             &.show-block-mask {
                 user-select: none;
@@ -475,15 +489,16 @@
         &.block-focused {
             // No z-index here intentionally: adding z-index would create a
             // stacking context that isolates xterm's overflow-y:scroll GPU layer
-            // from .block-mask's backdrop-filter, making the ring invisible on
+            // from .block-mask's compositor layer, making the ring invisible on
             // terminal panes. Without a stacking context, .block-mask at z-index:50
-            // is in the parent stacking context and backdrop-filter correctly
-            // composites above xterm's scroll layer.
+            // is in the parent stacking context and its will-change:transform
+            // layer correctly composites above xterm's scroll layer.
 
             .block-mask {
                 // Focused: switch to accent color border.
-                // backdrop-filter guarantees this ring is visible above xterm's
-                // composited-scroll layer (z-index:50 > xterm's auto in parent ctx).
+                // will-change:transform on .block-mask promotes it to its own
+                // compositor layer; z-index:50 > xterm's auto in the parent
+                // stacking context places it above xterm's scroll layer.
                 border-color: var(--accent-color);
                 // z-index must exceed any in-block overlay (termstickers = 20)
                 z-index: 50;
