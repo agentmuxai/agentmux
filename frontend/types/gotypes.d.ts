@@ -1304,6 +1304,8 @@ declare global {
         "term:transparency"?: number;
         "term:allowbracketedpaste"?: boolean;
         "term:shiftenternewline"?: boolean;
+        "term:predictiveecho"?: boolean;
+        "term:predictiveecho:thresholdms"?: number;
         "cmd:env"?: {[key: string]: string};
         "blockheader:*"?: boolean;
         "blockheader:showblockids"?: boolean;
