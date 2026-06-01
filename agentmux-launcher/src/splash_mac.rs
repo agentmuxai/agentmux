@@ -359,6 +359,6 @@ unsafe fn build_window() -> (id, id) {
     // Bring the app + window up immediately.
     send_void(app, sel(b"finishLaunching\0"));
     send_void_bool(app, sel(b"activateIgnoringOtherApps:\0"), 1);
-    send_void_id(window, sel(b"orderFrontRegardless\0"), NIL);
+    send_void(window, sel(b"orderFrontRegardless\0"));
     (window, image_view)
 }

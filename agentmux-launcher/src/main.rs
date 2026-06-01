@@ -85,11 +85,19 @@ fn main() {
         std::thread::Builder::new()
             .name("launcher-supervisor".into())
             .spawn(|| {
-                tokio::runtime::Runtime::new()
-                    .expect("failed to build Tokio runtime")
-                    .block_on(launcher_main());
-                // Supervisor finished (host exited / fatal) — end the process;
-                // this unblocks the parked main thread and tears the splash down.
+                // Catch panics so a supervisor crash always exits the process
+                // rather than leaving the main-thread AppKit runloop spinning
+                // as an invisible orphan.
+                let result = std::panic::catch_unwind(|| {
+                    tokio::runtime::Runtime::new()
+                        .expect("failed to build Tokio runtime")
+                        .block_on(launcher_main());
+                });
+                if result.is_err() {
+                    eprintln!("AgentMux launcher supervisor panicked — exiting");
+                    std::process::exit(1);
+                }
+                // Supervisor finished cleanly (host exited / fatal).
                 std::process::exit(0);
             })
             .expect("failed to spawn launcher supervisor thread");
