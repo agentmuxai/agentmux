@@ -39,10 +39,12 @@ function harness(opts: Partial<PredictiveEchoOptions> = {}) {
         },
         /** Simulate the PTY emitting `chunk`: reconcile (may erase via the sink),
          *  THEN append the authoritative remainder. Two statements so the erase
-         *  lands before we read `screen` for the append. */
+         *  lands before we read `screen` for the append. reconcile now accepts
+         *  Uint8Array — test chunks are ASCII so the round-trip is lossless. */
         echo(chunk: string) {
-            const auth = pe.reconcile(chunk);
-            screen += auth;
+            const bytes = new TextEncoder().encode(chunk);
+            const { auth, rest } = pe.reconcile(bytes);
+            screen += auth + new TextDecoder().decode(rest);
         },
         sweep() {
             pe.sweep();

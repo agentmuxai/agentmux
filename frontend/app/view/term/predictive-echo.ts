@@ -148,51 +148,43 @@ export class PredictiveEcho {
 
     /**
      * Reconcile an authoritative PTY chunk against outstanding predictions
-     * (spec §6.3). Call BEFORE writing to xterm; returns the bytes the caller
-     * must write authoritatively:
-     *  - a PAINTED prediction's echo is CONSUMED (the glyph is already on screen);
-     *  - an arming OBSERVATION's echo is PASSED THROUGH (nothing was painted, so
-     *    the real echo must still be written);
-     *  - on the first divergence, ALL outstanding painted predictions roll back
-     *    and the remaining bytes (incl. the diverging bytes) pass through.
-     * The visible buffer therefore always converges to exactly the PTY stream.
+     * (spec §6.3). Accepts raw bytes to avoid TextDecoder corruption of
+     * multibyte UTF-8 sequences split across WS chunks. Returns:
+     *  - `auth`: ASCII observation echoes the caller must write as a string
+     *    (these were NOT painted — the real echo must appear on screen).
+     *  - `rest`: the unconsumed tail as the ORIGINAL Uint8Array — never
+     *    passed through TextDecoder, so split multibyte chars are preserved.
+     * Queue entries are always single printable ASCII bytes (0x20-0x7e),
+     * so byte-exact comparison is safe and sufficient.
      */
-    reconcile(chunk: string): string {
-        // Mode-changing output: a full-screen app entering the alt buffer no
-        // longer line-echoes. Abandon predictions and disarm BEFORE the switch
-        // lands (the erase here is still on the normal buffer), so we never
-        // mispredict a TUI command nor run a CSI-K rollback inside the alt
-        // screen. Track locally so the confirmation loop below doesn't
-        // re-arm us for the same chunk (codex P2 on #1223 — a chunk
-        // containing both an echo confirmation AND an alt-screen enter would
-        // disarm then immediately re-arm at `this.armed = true`).
-        const altScreenEntered = ALT_SCREEN_ENTER.test(chunk);
+    reconcile(chunk: Uint8Array): { auth: string; rest: Uint8Array } {
+        // Alt-screen sequences are pure ASCII control chars — safe to decode
+        // for the regex check only. We never output this decoded string.
+        const chunkStr = new TextDecoder().decode(chunk);
+        const altScreenEntered = ALT_SCREEN_ENTER.test(chunkStr);
         if (altScreenEntered) {
             this.rollback();
             this.armed = false;
         }
-        if (this.queue.length === 0) return chunk;
+        if (this.queue.length === 0) return { auth: "", rest: chunk };
         const now = this.now();
-        let rest = chunk;
+        let i = 0;
         let auth = "";
-        while (this.queue.length > 0 && rest.length > 0) {
+        while (this.queue.length > 0 && i < chunk.length) {
             const head = this.queue[0];
-            if (rest.startsWith(head.expected)) {
+            if (chunk[i] === head.expected.charCodeAt(0)) {
                 this.queue.shift();
                 this.recordRtt(now - head.at);
-                // Don't re-arm if we just disarmed for alt-screen in this chunk.
                 if (!altScreenEntered) this.armed = true;
-                if (!head.painted) auth += head.expected; // observation: must still write
-                rest = rest.slice(head.expected.length);
+                if (!head.painted) auth += head.expected;
+                i++;
             } else {
                 this.rollback();
                 this.enterCooldown(now);
-                auth += rest;
-                rest = "";
-                break;
+                return { auth, rest: chunk.subarray(i) };
             }
         }
-        return auth + rest;
+        return { auth, rest: chunk.subarray(i) };
     }
 
     /** Time out unconfirmed predictions (spec §6.3 step 3) — the echo-off /

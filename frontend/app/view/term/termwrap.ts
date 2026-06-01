@@ -431,8 +431,6 @@ export class TermWrap {
     // frame, reconciled against the authoritative PTY echo. Null until init().
     // Spec: docs/specs/SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31.md.
     private predict: PredictiveEcho | null = null;
-    // Stateless decode — stream:false so no cross-chunk buffering accumulates.
-    private echoDecoder = new TextDecoder();
 
     handleTermData(data: string) {
         if (!this.loaded) {
@@ -514,31 +512,6 @@ export class TermWrap {
         // outstanding predictions (spec §6.3): consume already-painted echoes,
         // roll back on divergence, write only what the user can't already see.
         // ptyOffset still advances by the FULL chunk — these are real PTY bytes.
-        let toWrite: string | Uint8Array = data;
-        if (this.predict && data instanceof Uint8Array) {
-            if (this.predict.isEnabled()) {
-                // Skip the decode + reconcile entirely when fully dormant (nothing
-                // painted, not armed) — zero cost on the authoritative path until
-                // the first confirmation arms the predictor (reagent #1223 P2).
-                if (this.predict.pending > 0 || this.predict.isArmed) {
-                    // stream: false — don't buffer across WS chunks. If a multibyte
-                    // UTF-8 sequence is split between chunks and the predict path is
-                    // later disabled/flushed before the continuation arrives, the
-                    // leading bytes would be stranded in the decoder while subsequent
-                    // chunks bypass it and go directly to xterm, corrupting output.
-                    // Using stream:false (stateless per-call) produces U+FFFD for an
-                    // incomplete sequence at chunk boundaries — same as xterm's own
-                    // behaviour on the raw Uint8Array path (codex P2 on #1223).
-                    const str = this.echoDecoder.decode(data, { stream: false });
-                    toWrite = this.predict.reconcile(str);
-                    this.predict.sweep();
-                }
-            } else if (this.predict.pending > 0) {
-                // Setting toggled off mid-prediction: roll back any speculative
-                // glyph before the authoritative echo lands (codex #1223 P2).
-                this.predict.reset();
-            }
-        }
         let resolve: () => void = null;
         let prtn = new Promise<void>((presolve, _) => {
             resolve = presolve;
@@ -554,11 +527,39 @@ export class TermWrap {
             if (isSmall) markEnd('term-echo-render', 'rendered');
             resolve();
         };
-        if (typeof toWrite === "string" && toWrite.length === 0) {
-            settle(); // fully consumed by prediction — nothing left to render
-        } else {
-            this.terminal.write(toWrite, settle);
+
+        if (this.predict && data instanceof Uint8Array) {
+            if (this.predict.isEnabled()) {
+                // Skip reconcile entirely when fully dormant (reagent #1223 P2).
+                if (this.predict.pending > 0 || this.predict.isArmed) {
+                    // reconcile operates on raw bytes — the queue only holds single
+                    // ASCII chars, so byte comparison is exact. `rest` is the
+                    // unconsumed tail returned as the ORIGINAL Uint8Array so
+                    // multibyte UTF-8 sequences split across WS chunks are NEVER
+                    // decoded, preserving all non-ASCII output (codex P2 on #1223).
+                    const { auth, rest } = this.predict.reconcile(data);
+                    this.predict.sweep();
+                    const hasAuth = auth.length > 0;
+                    const hasRest = rest.length > 0;
+                    if (!hasAuth && !hasRest) {
+                        settle(); // fully consumed by prediction
+                    } else if (hasAuth && !hasRest) {
+                        this.terminal.write(auth, settle);
+                    } else if (!hasAuth && hasRest) {
+                        this.terminal.write(rest, settle);
+                    } else {
+                        // Write observations first, then the unconsumed tail.
+                        // settle fires after the second write.
+                        this.terminal.write(auth, () => this.terminal.write(rest, settle));
+                    }
+                    return prtn;
+                }
+            } else if (this.predict.pending > 0) {
+                this.predict.reset(); // roll back on disable (codex #1223 P2)
+            }
         }
+        // Default / pass-through path.
+        this.terminal.write(data, settle);
         return prtn;
     }
 
