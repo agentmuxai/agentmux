@@ -356,6 +356,53 @@ wrap_app! {
                 let val = CefString::from("CalculateNativeWinOcclusion");
                 cmd.append_switch_with_value(Some(&key), Some(&val));
 
+                // ── GPU channel + frame-production tuning ─────────────────────
+                // Symptom this addresses (Linux Chromium-Ozone-Wayland on
+                // Mutter): the compositor receives ~6 Hz `BeginFrame` signals
+                // from Mutter but responds `DidNotProduceFrame` 89 % of the
+                // time. `BeginMainFrame` only fires at the sysinfo-status-bar
+                // invalidation cadence (~1 Hz). Result: xterm.js
+                // `requestAnimationFrame` callbacks (including predictive
+                // local echo's render path, #1223) are gated on those 1 Hz
+                // frames, so a held key visibly lags up to a second behind
+                // the keypress.
+                //
+                // VSCode (Electron, same Chromium codebase) does NOT have
+                // this stall on the same hardware and compositor. Its
+                // renderer + utility processes ship with:
+                //
+                //   --enable-features=EarlyEstablishGpuChannel,
+                //                     EstablishGpuChannelAsync
+                //
+                // confirmed via `/proc/<pid>/cmdline` on a running VSCode +
+                // documented in Chromium's `chrome/browser/about_flags.cc`.
+                // Both features ship enabled in stable Chrome on Linux; CEF
+                // does not enable them by default. They (a) request the GPU
+                // process channel before the renderer's first paint instead
+                // of synchronously on first paint and (b) treat the channel
+                // establishment as non-blocking, which lets the compositor
+                // start producing frames against the GPU process sooner and
+                // without serialising on the channel handshake.
+                //
+                // Hypothesis: the synchronous + late channel establishment
+                // contributes to the `DidNotProduceFrame` storm on Wayland
+                // here. Confirming empirically: trace with
+                // `scripts/capture-trace-ipv6.cjs`, look at
+                // `ProxyMain::BeginMainFrame` cadence and the
+                // `cc::Scheduler::SendDidNotProduceFrame` count before/after.
+                //
+                // Spec: docs/specs/SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31.md
+                //       (host-side complement — predictive echo is renderer-
+                //       side; this is the upstream frame-production fix).
+                let gpu_features_key = CefString::from("enable-features");
+                let gpu_features_val = CefString::from(
+                    "EarlyEstablishGpuChannel,EstablishGpuChannelAsync",
+                );
+                cmd.append_switch_with_value(
+                    Some(&gpu_features_key),
+                    Some(&gpu_features_val),
+                );
+
                 // Initial background color, ARGB hex. alpha=00 → fully
                 // transparent → first-frame paint is alpha-aware so the
                 // CSS body background's rgba() composes with the desktop
