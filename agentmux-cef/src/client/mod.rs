@@ -30,6 +30,26 @@ const CRASH_BUDGET: usize = 3;
 /// renderer that genuinely needed 2 retries to stabilise across a minute.
 const CRASH_BUDGET_WINDOW: Duration = Duration::from_secs(10);
 
+/// Commit-free (available page file) floor, in MB, below which an OOM renderer
+/// termination is treated as transient SYSTEM memory pressure rather than a
+/// broken renderer. Below this, recovery does NOT consume the wedged-slot crash
+/// budget and the browser is shown a recoverable "low memory" page instead of
+/// the give-up page. A fresh renderer's initial commit is ~100-200 MB; 512 MB
+/// leaves margin so a manual Resume doesn't instantly re-OOM.
+/// See docs/specs/SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md §6.B/§7.
+const RESUME_FLOOR_MB: u64 = 512;
+
+/// Backstop for the memory-pause path: if a browser enters memory-pause more
+/// than this many times within `MEMORY_PAUSE_WINDOW` — i.e. commit is so
+/// totally exhausted that even the tiny low-memory page can't render and
+/// re-fires this handler — fall through to the give-up page so we stop
+/// re-spawning a renderer that instantly dies. Deliberately more lenient than
+/// `CRASH_BUDGET`: this path is *expected* to repeat under sustained pressure,
+/// so it must not converge as fast. (Native-overlay handling of total
+/// exhaustion — rendering the paused UI without a renderer — is Phase 1b.)
+const MEMORY_PAUSE_BUDGET: usize = 5;
+const MEMORY_PAUSE_WINDOW: Duration = Duration::from_secs(30);
+
 // Phase B.9.3 — close-pool-browser task. Used by Stage 1 to defer
 // `close_browser` onto the CEF UI thread via `cef::post_task`, so
 // the call runs AFTER the current `on_before_close` unwinds.
@@ -101,6 +121,13 @@ pub struct AgentMuxHandler {
     /// window are dropped); when a browser closes cleanly its entry is
     /// removed in `on_before_close`.
     crash_history: HashMap<i32, VecDeque<Instant>>,
+    /// Per-browser ring of memory-pause timestamps (OOM under low system
+    /// commit). Separate from `crash_history` so transient system-memory
+    /// pressure never trips the wedged-slot crash budget. Bounded by
+    /// `MEMORY_PAUSE_BUDGET` within `MEMORY_PAUSE_WINDOW`; pruned in place and
+    /// removed on clean close, exactly like `crash_history`.
+    /// See docs/specs/SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md §6.B.
+    memory_pause_history: HashMap<i32, VecDeque<Instant>>,
 }
 
 mod handlers;
@@ -127,7 +154,47 @@ impl AgentMuxHandler {
             ipc_port,
             is_browser_pane,
             crash_history: HashMap::new(),
+            memory_pause_history: HashMap::new(),
         }))
+    }
+
+    /// Reverse-lookup this browser's window label from the reducer's browsers
+    /// map (label → browser), by object identity. Mirrors the find-by-identity
+    /// loop in `on_before_close`. Used by the crash-recovery navigation so a
+    /// resumed *secondary* window preserves its `windowLabel` instead of
+    /// defaulting to `main` (the frontend treats a missing label as `main`,
+    /// which would re-register/route the recovered window as the wrong one).
+    /// (codex P2 on #1229.)
+    fn window_label_for(&self, browser: &mut Browser) -> Option<String> {
+        self.state
+            .list_browsers()
+            .into_iter()
+            .find(|(_, b)| {
+                let mut b = b.clone();
+                b.is_same(Some(&mut *browser)) != 0
+            })
+            .map(|(k, _)| k)
+    }
+
+    /// Best navigation target for bringing a crashed window back. Prefers the
+    /// window's OWN pre-crash URL (read from its main frame before we load any
+    /// recovery page over it): it already carries every creation-time param —
+    /// `windowLabel` and, for tear-off / floating-pane windows, `workspaceId`
+    /// / `floatingPaneId` — plus the still-valid in-process `ipc_port` /
+    /// `ipc_token`, so reusing it verbatim re-projects the exact window. Falls
+    /// back to a reconstructed `?ipc_port&ipc_token&windowLabel` URL only when
+    /// the frame URL isn't a live app URL (renderer died before committing one,
+    /// or it's a prior data: recovery page). codex P2 #1229.
+    fn recovery_target_url(&self, owned: &mut Browser, base_url: &str) -> String {
+        let pre_crash = owned
+            .main_frame()
+            .map(|f| CefString::from(&f.url()).to_string())
+            .filter(|u| u.starts_with("http://127.0.0.1"));
+        if let Some(u) = pre_crash {
+            return u;
+        }
+        let label = self.window_label_for(owned);
+        recovery_navigation_url(base_url, self.ipc_port, &self.state.ipc_token, label.as_deref())
     }
 
     fn on_title_change(&mut self, browser: Option<&mut Browser>, title: Option<&CefString>) {
@@ -654,6 +721,7 @@ impl AgentMuxHandler {
         // cleanly so its budget is reset. Without this the map would
         // accumulate one stale entry per closed browser over a session.
         self.crash_history.remove(&browser.identifier());
+        self.memory_pause_history.remove(&browser.identifier());
 
         // Unregister browser from the reducer's `browsers` map and get its
         // label. Phase H.2.d — legacy `state.browsers.lock().remove` removed;
@@ -1389,6 +1457,79 @@ impl AgentMuxHandler {
             );
         }
 
+        // ── Gated renderer recovery (SPEC_GATED_RENDERER_RECOVERY §6.B) ──
+        // A renderer OOM while the system commit limit is exhausted is
+        // transient OS pressure, NOT a broken renderer — no amount of retrying
+        // helps until memory frees, and the standard 3-crashes-in-10s budget
+        // would wrongly declare "give up" on a window that is fully recoverable
+        // once commit drops. So: if the termination is PROCESS_OOM and
+        // commit-free is below RESUME_FLOOR_MB, do NOT consume the crash
+        // budget; show a recoverable "low memory" page (state is durable in
+        // srv, so Resume re-projects everything). Bounded separately by
+        // MEMORY_PAUSE_BUDGET so that *total* exhaustion — where even this tiny
+        // page can't render and re-fires the handler — still converges on the
+        // give-up page rather than looping. (Auto-resume + a renderer-free
+        // native overlay for total exhaustion are Phase 1b.)
+        if status == TerminationStatus::PROCESS_OOM {
+            let commit_free = crate::memory_heartbeat::commit_free_mb();
+            if commit_free < RESUME_FLOOR_MB {
+                if let Some(bid) = browser.as_ref().map(|b| b.identifier()) {
+                    // Resolve the live app URL up front: if the frontend assets
+                    // are unavailable that's a *different* failure (the
+                    // 2026-05-28 rm-while-running pattern), so leave the
+                    // memory-pause history untouched and fall through to the
+                    // normal path, which has the assets-missing handling.
+                    if let Ok(base_url) =
+                        crate::commands::window::resolve_frontend_base_url(self.ipc_port)
+                    {
+                        let now = Instant::now();
+                        let hist = self.memory_pause_history.entry(bid).or_default();
+                        let within_budget = record_memory_pause(hist, now);
+                        let pauses_in_window = hist.len();
+                        if within_budget {
+                            // Clone to an owned Browser (mirrors on_before_close)
+                            // for the label lookup + navigation; the original
+                            // `browser` Option stays intact for the fall-through
+                            // paths below. as_deref().cloned() borrows, not moves.
+                            if let Some(mut owned) = browser.as_deref().cloned() {
+                                let app_url = self.recovery_target_url(&mut owned, &base_url);
+                                tracing::warn!(
+                                    target: "crash",
+                                    kind = "renderer_memory_paused",
+                                    browser_id = bid,
+                                    commit_free_mb = commit_free,
+                                    resume_floor_mb = RESUME_FLOOR_MB,
+                                    pauses_in_window,
+                                    "renderer OOM under low system commit — paused (NOT counted against the crash budget)",
+                                );
+                                let html = memory_paused_page(reason, error_code, commit_free, &app_url);
+                                let b64 = cef::base64_encode(Some(html.as_bytes()));
+                                let b64_str = CefString::from(&b64).to_string();
+                                let data_uri = format!("data:text/html;base64,{}", b64_str);
+                                let uri = CefString::from(data_uri.as_str());
+                                if let Some(frame) = owned.main_frame() {
+                                    frame.load_url(Some(&uri));
+                                }
+                                return;
+                            }
+                            // browser was None (unusual on this path) — fall
+                            // through to the normal crash-budget handling below.
+                        } else {
+                            tracing::error!(
+                                target: "crash",
+                                kind = "memory_pause_budget_exceeded",
+                                browser_id = bid,
+                                pauses_in_window,
+                                window_secs = MEMORY_PAUSE_WINDOW.as_secs(),
+                                "memory-pause budget exceeded (commit totally exhausted) — falling through to the give-up page",
+                            );
+                            // fall through to the crash-budget path below.
+                        }
+                    }
+                }
+            }
+        }
+
         // Crash budget — if this browser has crashed more than
         // CRASH_BUDGET times in CRASH_BUDGET_WINDOW, abandon
         // auto-recovery and load a terminal "give up" page that does
@@ -1451,14 +1592,22 @@ impl AgentMuxHandler {
         // short-circuit to the "install broken" static page instead of
         // pointing the Reload button at a URL that would itself crash.
         // See docs/retro/retro-portable-rm-running-install-2026-05-28.md.
+        // Reload must bring a recovered window back as ITSELF — preserving
+        // windowLabel and (for tear-off / floating-pane windows) workspaceId /
+        // floatingPaneId. recovery_target_url reuses the window's own pre-crash
+        // URL when possible. as_deref().cloned() borrows browser (a clone),
+        // leaving the original intact for the load below. (codex P2 #1229.)
+        let mut recovery_owned = browser.as_deref().cloned();
         let app_url = match crate::commands::window::resolve_frontend_base_url(self.ipc_port) {
-            Ok(base_url) => {
-                let separator = if base_url.contains('?') { "&" } else { "?" };
-                format!(
-                    "{}{}ipc_port={}&ipc_token={}",
-                    base_url, separator, self.ipc_port, self.state.ipc_token
-                )
-            }
+            Ok(base_url) => match recovery_owned.as_mut() {
+                Some(owned) => self.recovery_target_url(owned, &base_url),
+                None => recovery_navigation_url(
+                    &base_url,
+                    self.ipc_port,
+                    &self.state.ipc_token,
+                    None,
+                ),
+            },
             Err(e) => {
                 tracing::error!(
                     target: "crash",
@@ -1860,4 +2009,154 @@ setTimeout(tick, 1000);
     )
 }
 
+/// Build the navigation URL a crash-recovery / low-memory page sends the user
+/// back to. Carries `ipc_port` + `ipc_token` and — critically — the window's
+/// `windowLabel` when known, so a recovered secondary window doesn't
+/// reinitialize as `main` (creation.rs adds the same `windowLabel` param on
+/// first load; the frontend defaults a missing label to `main`). codex P2 #1229.
+fn recovery_navigation_url(
+    base_url: &str,
+    ipc_port: u16,
+    ipc_token: &str,
+    window_label: Option<&str>,
+) -> String {
+    let sep = if base_url.contains('?') { "&" } else { "?" };
+    match window_label {
+        Some(lbl) => format!(
+            "{base_url}{sep}ipc_port={ipc_port}&ipc_token={ipc_token}&windowLabel={lbl}"
+        ),
+        None => format!("{base_url}{sep}ipc_port={ipc_port}&ipc_token={ipc_token}"),
+    }
+}
 
+/// Record a memory-pause for `now` into `hist`, pruning entries older than
+/// `MEMORY_PAUSE_WINDOW` first, and return whether we are still within
+/// `MEMORY_PAUSE_BUDGET`. Extracted from `on_render_process_terminated` so the
+/// bounded-recovery logic — the part that must converge on the give-up page
+/// under *total* commit exhaustion rather than loop forever — is unit-testable
+/// without a live CEF browser. (SPEC_GATED_RENDERER_RECOVERY §6.B.)
+fn record_memory_pause(hist: &mut VecDeque<Instant>, now: Instant) -> bool {
+    while hist.front().is_some_and(|t| now.duration_since(*t) > MEMORY_PAUSE_WINDOW) {
+        hist.pop_front();
+    }
+    hist.push_back(now);
+    hist.len() <= MEMORY_PAUSE_BUDGET
+}
+
+/// Low-memory "paused" page — shown when a renderer is OOM-terminated while the
+/// system commit limit is exhausted (SPEC_GATED_RENDERER_RECOVERY §6.B). Unlike
+/// the give-up page this state is RECOVERABLE: all durable state lives in the
+/// sidecar, so "Resume" navigates to the live app URL and re-projects
+/// everything — losing nothing. The Resume is manual and memory-guided: an
+/// automatic retry before commit recovers would just re-OOM, so we tell the
+/// user to free memory first (host-driven, memory-gated auto-resume is Phase
+/// 1b). `app_url` is the live frontend URL Resume navigates to (spawns a fresh
+/// renderer); it already carries the ipc_token, same as the recovery page.
+fn memory_paused_page(reason: &str, error_code: i32, commit_free_mb: u64, app_url: &str) -> String {
+    use crate::client::helpers::{html_escape, js_string_literal};
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>AgentMux — Low memory</title>
+<style>
+:root {{ color-scheme: dark; }}
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+       background: #1e1e2e; color: #cdd6f4;
+       display: flex; justify-content: center; align-items: center;
+       min-height: 100vh; margin: 0; padding: 24px; box-sizing: border-box; }}
+.box {{ text-align: center; max-width: 560px; padding: 36px;
+       background: #181825; border: 1px solid #313244; border-radius: 10px;
+       box-shadow: 0 8px 32px rgba(0,0,0,0.4); }}
+.icon {{ font-size: 36px; line-height: 1; margin-bottom: 12px; }}
+h1 {{ color: #f9e2af; font-size: 22px; margin: 0 0 6px 0; }}
+.reason {{ color: #a6adc8; font-size: 14px; margin: 0 0 20px 0; font-style: italic; }}
+p {{ color: #bac2de; line-height: 1.55; margin: 0 0 12px 0; font-size: 14px; }}
+strong {{ color: #f9e2af; }}
+.actions {{ display: flex; gap: 10px; justify-content: center; margin-top: 24px; flex-wrap: wrap; }}
+button {{ padding: 10px 22px; border: 1px solid #45475a; border-radius: 6px;
+         background: #313244; color: #cdd6f4; cursor: pointer;
+         font-size: 13px; font-family: inherit; }}
+button:hover {{ background: #45475a; border-color: #585b70; }}
+button.primary {{ background: #89b4fa; color: #1e1e2e; border-color: #89b4fa; font-weight: 600; }}
+button.primary:hover {{ background: #74a0f8; border-color: #74a0f8; }}
+.footer {{ color: #6c7086; font-size: 11px; margin-top: 18px; font-family: ui-monospace, monospace; }}
+</style></head>
+<body><div class="box" role="alertdialog">
+<div class="icon">⏳</div>
+<h1>Paused — system memory low</h1>
+<p class="reason">Reason: {reason_safe}</p>
+<p>This window paused because the system ran out of memory
+(only {commit_free_mb} MB of commit was free). <strong>Your work is safe</strong> —
+everything is saved in the background and will be restored exactly when this
+window resumes.</p>
+<p><strong>Free some memory first</strong> — close other AgentMux windows or
+other apps — then click Resume. Resuming before memory recovers will just
+pause again.</p>
+<div class="actions">
+<button class="primary" onclick="location.href = {app_url_js}">Resume</button>
+<button onclick="window.close()">Quit this window</button>
+</div>
+<div class="footer">error_code={error_code} · commit_free={commit_free_mb}MB</div>
+</div>
+</body></html>"#,
+        reason_safe = html_escape(reason),
+        commit_free_mb = commit_free_mb,
+        error_code = error_code,
+        app_url_js = js_string_literal(app_url),
+    )
+}
+
+
+
+#[cfg(test)]
+mod gated_recovery_tests {
+    use super::{record_memory_pause, MEMORY_PAUSE_BUDGET, MEMORY_PAUSE_WINDOW, RESUME_FLOOR_MB};
+    use std::collections::VecDeque;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn resume_floor_is_above_a_fresh_renderer_commit() {
+        // A fresh renderer commits ~100-200 MB; the floor must leave margin so
+        // a resume doesn't instantly re-OOM. Guards against an accidental
+        // shrink that would make the gate useless.
+        assert!(RESUME_FLOOR_MB >= 256, "RESUME_FLOOR_MB too low to be safe");
+    }
+
+    #[test]
+    fn within_budget_until_exceeded_then_converges() {
+        let mut hist: VecDeque<Instant> = VecDeque::new();
+        let now = Instant::now();
+        // The first MEMORY_PAUSE_BUDGET pauses stay within budget (pause path).
+        for i in 0..MEMORY_PAUSE_BUDGET {
+            assert!(
+                record_memory_pause(&mut hist, now),
+                "pause {} should be within budget",
+                i + 1
+            );
+        }
+        // The next one exceeds → falls through to the give-up path. This is the
+        // total-exhaustion convergence guarantee (no infinite memory-pause loop).
+        assert!(
+            !record_memory_pause(&mut hist, now),
+            "exceeding the budget must return false (fall through to give-up)"
+        );
+    }
+
+    #[test]
+    fn old_pauses_outside_the_window_are_pruned() {
+        let mut hist: VecDeque<Instant> = VecDeque::new();
+        let start = Instant::now();
+        // Fill the budget at t=start.
+        for _ in 0..MEMORY_PAUSE_BUDGET {
+            record_memory_pause(&mut hist, start);
+        }
+        // Later than the window: all prior entries prune, so we're within budget
+        // again — a window that recovered then hit pressure again is NOT treated
+        // as a wedged loop.
+        let later = start + MEMORY_PAUSE_WINDOW + Duration::from_secs(1);
+        assert!(
+            record_memory_pause(&mut hist, later),
+            "pauses older than the window must be pruned, resetting the budget"
+        );
+        assert_eq!(hist.len(), 1, "only the recent pause should remain");
+    }
+}
