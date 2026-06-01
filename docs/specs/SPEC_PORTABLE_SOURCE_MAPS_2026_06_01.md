@@ -65,12 +65,9 @@ session, they work without any code change.
 Pass `VITE_SOURCEMAP=inline` or restore maps manually:
 
 ```bash
-# One-off: build with maps, skip the deletion
-SKIP_MAP_STRIP=1 task package   # not yet wired — use the manual approach below
+# One-off: temporarily comment out the `find … -delete` line in
+# scripts/package.sh for that build only. Do NOT commit that change.
 ```
-
-Or temporarily comment out the `find … -delete` line in `scripts/package.sh`
-for that build only. Do **not** commit that change.
 
 ## For future agents
 

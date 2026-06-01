@@ -93,6 +93,12 @@ fi
 # real data dir, not a branch-scoped dev-portable dir. Set RELEASE_CHANNEL
 # (task package:release does this automatically) to override.
 if [ -n "${RELEASE_CHANNEL:-}" ]; then
+    if [ "$FRESH" -eq 1 ]; then
+        echo "ERROR: --fresh and RELEASE_CHANNEL are mutually exclusive." \
+             "A release portable always uses a fixed channel ('$RELEASE_CHANNEL');" \
+             "a fresh throwaway dir doesn't make sense for a distributed artifact." >&2
+        exit 1
+    fi
     CHANNEL="$RELEASE_CHANNEL"
 fi
 
