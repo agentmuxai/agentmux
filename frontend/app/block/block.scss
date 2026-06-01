@@ -489,15 +489,16 @@
         &.block-focused {
             // No z-index here intentionally: adding z-index would create a
             // stacking context that isolates xterm's overflow-y:scroll GPU layer
-            // from .block-mask's backdrop-filter, making the ring invisible on
+            // from .block-mask's compositor layer, making the ring invisible on
             // terminal panes. Without a stacking context, .block-mask at z-index:50
-            // is in the parent stacking context and backdrop-filter correctly
-            // composites above xterm's scroll layer.
+            // is in the parent stacking context and its will-change:transform
+            // layer correctly composites above xterm's scroll layer.
 
             .block-mask {
                 // Focused: switch to accent color border.
-                // backdrop-filter guarantees this ring is visible above xterm's
-                // composited-scroll layer (z-index:50 > xterm's auto in parent ctx).
+                // will-change:transform on .block-mask promotes it to its own
+                // compositor layer; z-index:50 > xterm's auto in the parent
+                // stacking context places it above xterm's scroll layer.
                 border-color: var(--accent-color);
                 // z-index must exceed any in-block overlay (termstickers = 20)
                 z-index: 50;
