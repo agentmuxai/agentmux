@@ -158,7 +158,18 @@ impl Splash {
         // Inherited by the host spawned later on the supervisor thread.
         std::env::set_var("AGENTMUX_SPLASH_READY_FILE", &ready_file);
 
-        let (window, image_view) = unsafe { build_window() };
+        // NSAutoreleasePool ensures autoreleased objects (NSData, NSImage,
+        // NSColor, NSWindow, NSView) created in build_window() are drained
+        // before we return. Without it, the pool from the thread's implicit
+        // NSApplication runloop hasn't been set up yet and autorelease
+        // messages queue to a nil pool — leaking on pre-macOS-12 targets.
+        let (window, image_view) = unsafe {
+            let pool = send(class(b"NSAutoreleasePool\0"), sel(b"alloc\0"));
+            let pool = send(pool, sel(b"init\0"));
+            let result = build_window();
+            send_void(pool, sel(b"drain\0"));
+            result
+        };
         Splash {
             window,
             image_view,
@@ -235,10 +246,7 @@ unsafe fn build_window() -> (id, id) {
     // NSApplication, as an accessory app: no Dock tile (the host sets .regular
     // and owns the single tile). Accessory == 1.
     let app = send(class(b"NSApplication\0"), sel(b"sharedApplication\0"));
-    {
-        let f: extern "C" fn(id, SEL, i64) -> u8 = std::mem::transmute(objc_msgSend as *const ());
-        f(app, sel(b"setActivationPolicy:\0"), 1);
-    }
+    send_void_i64(app, sel(b"setActivationPolicy:\0"), 1);
 
     // NSImage from the embedded PNG bytes via NSData.
     let data = {

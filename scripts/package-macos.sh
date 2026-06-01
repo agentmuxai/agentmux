@@ -94,6 +94,13 @@ cp dist/cef/agentmux-launcher "$APP/Contents/MacOS/agentmux-launcher"
 cp -R dist/frontend "$APP/Contents/Resources/frontend"
 ln -s "../Resources/frontend" "$APP/Contents/MacOS/frontend"
 
+# Strip .js.map source maps for release DMGs (~28 MB saved). Matches the
+# STRIP_MAPS logic in scripts/package.sh (#1226). Set STRIP_MAPS=0 to keep.
+if [ "${STRIP_MAPS:-1}" = "1" ]; then
+    find "$APP/Contents/Resources/frontend" -name "*.map" -delete
+    echo "  stripped .map files from frontend"
+fi
+
 # Schema files (JSON) — srv resolves these from AGENTMUX_APP_PATH/schema
 # which is Contents/MacOS/ (the host exe's parent directory). Resource files
 # cannot live under Contents/MacOS/ without breaking the bundle seal, so
