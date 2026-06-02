@@ -79,7 +79,7 @@ Two corollaries shape the design:
 
 ---
 
-## 3. Proposed slice: `agent-pane-layout` (Slice #9)
+## 3. Proposed slice: `agent-pane-layout` (Slice #11)
 
 Per-pane (keyed by `blockId`), following the established slice triplet
 (`types.ts` + `reducer.ts` pure core, `agent-pane-layout-store.ts` dispatch layer
@@ -119,6 +119,7 @@ export interface RowHeight {
 export interface AgentPaneLayoutState {
     zoom: number;                                 // INV-2: layout is zoom-INVARIANT; this only scales render
     orderedIds: ReadonlyArray<string>;            // FULL virtualized-region node ids, in order (not just the window)
+    idSet: ReadonlySet<string>;                   // O(1) membership over orderedIds — drops late measures for removed ids
     expansion: ReadonlyMap<string, Expansion>;    // unified — absorbs collapsed/pinned/auto-hold/cancel-thinking
     heights: ReadonlyMap<string, RowHeight>;      // measured, per state, unzoomed CSS px
     estimates: ReadonlyMap<string, RowHeight>;    // estimator output, per state (fallback when unmeasured)

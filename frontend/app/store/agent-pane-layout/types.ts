@@ -51,6 +51,10 @@ export interface AgentPaneLayoutState {
     readonly zoom: number;
     /** FULL virtualized-region node ids, in order (not just the visible window). */
     readonly orderedIds: ReadonlyArray<string>;
+    /** Membership index over `orderedIds`, kept in lockstep by `NodesChanged`.
+     *  O(1) guard so a late `RowMeasured` for an already-removed id is dropped
+     *  instead of re-entering the heights map and surviving the next prune. */
+    readonly idSet: ReadonlySet<string>;
     /** Open rows only (collapsed === absent). */
     readonly expansion: ReadonlyMap<string, Expansion>;
     /** Measured heights, per state, unzoomed CSS px. */
@@ -75,6 +79,7 @@ export const DEFAULT_OVERSCAN = 5;
 export const initialState = (): AgentPaneLayoutState => ({
     zoom: 1,
     orderedIds: [],
+    idSet: new Set(),
     expansion: new Map(),
     heights: new Map(),
     estimates: new Map(),

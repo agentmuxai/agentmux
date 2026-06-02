@@ -114,6 +114,7 @@ export function update(
                 state: {
                     ...state,
                     orderedIds: next,
+                    idSet: keep,
                     heights,
                     estimates,
                     expansion,
@@ -149,6 +150,16 @@ export function update(
         }
 
         case "RowMeasured": {
+            // Drop measurements for ids not in the current document: a late
+            // ResizeObserver callback for an already-removed row would otherwise
+            // write a height back that survives the next prune (it'd re-enter
+            // with a stale measurement). reagent P2 on #1236.
+            if (!state.idSet.has(command.nodeId)) {
+                return {
+                    state,
+                    events: [{ type: "command-dropped", reason: "measure-unknown-id" }],
+                };
+            }
             // Guard the prefix-sum: a NaN/Infinity/negative height would
             // poison every position downstream (INV-1). Drop, don't store.
             if (!isValidPx(command.cssPx)) {
@@ -184,6 +195,12 @@ export function update(
         }
 
         case "EstimateSet": {
+            if (!state.idSet.has(command.nodeId)) {
+                return {
+                    state,
+                    events: [{ type: "command-dropped", reason: "estimate-unknown-id" }],
+                };
+            }
             if (!isValidPx(command.cssPx)) {
                 return {
                     state,
@@ -323,12 +340,18 @@ export interface WindowRange {
     endIndex: number;
 }
 
-export function windowRange(state: AgentPaneLayoutState): WindowRange {
-    const pos = positions(state);
+/** Window over an ALREADY-COMPUTED positions array — lets the store share
+ *  one prefix-sum pass across rows/totalSize/window (O(n), not O(3n)). */
+export function windowRangeOf(
+    pos: ReadonlyArray<RowPosition>,
+    scrollTop: number,
+    viewportPx: number,
+    overscan: number,
+): WindowRange {
     if (pos.length === 0) return { startIndex: 0, endIndex: -1 };
 
-    const top = state.scrollTop;
-    const bottom = state.scrollTop + state.viewportPx;
+    const top = scrollTop;
+    const bottom = scrollTop + viewportPx;
 
     // First row whose `end > top` (lowest index still visible at the top edge).
     let lo = 0;
@@ -361,7 +384,38 @@ export function windowRange(state: AgentPaneLayoutState): WindowRange {
     if (last < first) return { startIndex: 0, endIndex: -1 };
 
     return {
-        startIndex: Math.max(0, first - state.overscan),
-        endIndex: Math.min(pos.length - 1, last + state.overscan),
+        startIndex: Math.max(0, first - overscan),
+        endIndex: Math.min(pos.length - 1, last + overscan),
     };
+}
+
+export function windowRange(state: AgentPaneLayoutState): WindowRange {
+    return windowRangeOf(
+        positions(state),
+        state.scrollTop,
+        state.viewportPx,
+        state.overscan,
+    );
+}
+
+/** The render-ready layout view. Computes the prefix-sum ONCE and derives
+ *  totalSize + window from it — the single O(n) pass the store projects. */
+export interface LayoutView {
+    rows: RowPosition[];
+    totalSize: number;
+    window: WindowRange;
+}
+
+export function computeLayoutView(state: AgentPaneLayoutState): LayoutView {
+    const rows = positions(state);
+    const total = rows.length === 0
+        ? 0
+        : rows[rows.length - 1].end - state.scrollMarginPx;
+    const window = windowRangeOf(
+        rows,
+        state.scrollTop,
+        state.viewportPx,
+        state.overscan,
+    );
+    return { rows, totalSize: total, window };
 }

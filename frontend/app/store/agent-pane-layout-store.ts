@@ -21,10 +21,9 @@
 
 import { type CommandSource, recordDispatch } from "./command-source";
 import {
-    positions,
-    totalSize,
+    computeLayoutView,
     update,
-    windowRange,
+    type LayoutView,
     type RowPosition,
     type WindowRange,
 } from "./agent-pane-layout/reducer";
@@ -34,14 +33,6 @@ import {
     AgentPaneLayoutState,
     initialState,
 } from "./agent-pane-layout/types";
-
-/** The projected, render-ready layout view. Recomputed only when a
- *  layout-affecting field changes (everything except `zoom`). */
-export interface LayoutView {
-    rows: RowPosition[];
-    totalSize: number;
-    window: WindowRange;
-}
 
 /**
  * Setters the slot writes into when reducer state changes. The view owns
@@ -81,14 +72,6 @@ function layoutInputsChanged(
     );
 }
 
-function viewOf(state: AgentPaneLayoutState): LayoutView {
-    return {
-        rows: positions(state),
-        totalSize: totalSize(state),
-        window: windowRange(state),
-    };
-}
-
 /**
  * Register a pane. Call SYNCHRONOUSLY from the agent view's setup, before
  * any handler can dispatch. Re-registering a blockId resets the cell to
@@ -126,7 +109,7 @@ export function dispatch(
     slot.state = result.state;
 
     if (layoutInputsChanged(prev, slot.state)) {
-        slot.proj.layout(viewOf(slot.state));
+        slot.proj.layout(computeLayoutView(slot.state));
     }
     if (slot.state.zoom !== prev.zoom) {
         slot.proj.zoom(slot.state.zoom);
@@ -166,4 +149,4 @@ export function __resetAllSlots(): void {
 }
 
 export type { AgentPaneLayoutCommand, AgentPaneLayoutEvent, AgentPaneLayoutState };
-export type { RowPosition, WindowRange };
+export type { LayoutView, RowPosition, WindowRange };

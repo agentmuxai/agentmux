@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { __resetDispatchLog, dispatchRecordsAtom } from "./command-source";
 import {
     __resetAllSlots,
     dispatch,
@@ -11,6 +12,7 @@ import {
     unregisterPane,
     type LayoutView,
 } from "./agent-pane-layout-store";
+import { DEFAULT_ROW_PX } from "./agent-pane-layout/types";
 
 const BID = "block-123456789";
 
@@ -21,7 +23,12 @@ function mkPane() {
     return { layout, zoom };
 }
 
-afterEach(() => __resetAllSlots());
+afterEach(() => {
+    __resetAllSlots();
+    // Reset the SHARED audit ring too, so the audit test isn't order-dependent
+    // on whatever earlier tests left in it (reagent P2 on #1236).
+    __resetDispatchLog();
+});
 
 describe("agent-pane-layout store", () => {
     it("throws on dispatch to an unregistered pane", () => {
@@ -41,7 +48,7 @@ describe("agent-pane-layout store", () => {
         const last = layout.mock.calls.at(-1)![0];
         expect(last.rows.map((r) => r.nodeId)).toEqual(["a", "b"]);
         expect(last.rows[0].height).toBe(30);
-        expect(last.totalSize).toBe(30 + 32); // measured + default
+        expect(last.totalSize).toBe(30 + DEFAULT_ROW_PX); // measured + default
     });
 
     it("INV-2: ZoomChanged re-emits zoom but NOT the layout view", () => {
@@ -64,13 +71,11 @@ describe("agent-pane-layout store", () => {
         expect(layout.mock.calls.length).toBe(before);
     });
 
-    it("records every dispatch in the audit ring with the slice tag + source", async () => {
-        const { dispatchRecordsAtom, __resetDispatchLog } = await import("./command-source");
-        __resetDispatchLog();
+    it("records every dispatch in the audit ring with the slice tag + source", () => {
+        // afterEach resets the ring, so this starts clean without a manual reset.
         mkPane();
         dispatch(BID, { type: "NodesChanged", orderedIds: ["a"] }, "user");
-        const recs = dispatchRecordsAtom();
-        const mine = recs.filter((r) => r.slice === "agent-pane-layout");
+        const mine = dispatchRecordsAtom().filter((r) => r.slice === "agent-pane-layout");
         expect(mine.length).toBe(1);
         expect(mine[0]).toMatchObject({ key: BID, source: "user" });
     });

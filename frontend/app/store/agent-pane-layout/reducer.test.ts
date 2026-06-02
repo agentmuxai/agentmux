@@ -260,6 +260,22 @@ describe("agent-pane-layout reducer", () => {
             expect(update(s, { type: "NodesChanged", orderedIds: ["a", "b"] }).state).toBe(s);
         });
 
+        it("drops a late measurement for a removed id (no stale re-entry)", () => {
+            // reagent P2 on #1236: a ResizeObserver firing AFTER NodesChanged
+            // removed the row must not write its height back — else re-adding the
+            // id later preserves the obsolete measurement past the prune.
+            let s = initialState();
+            s = apply(s, { type: "NodesChanged", orderedIds: ["a", "b"] });
+            s = apply(s, { type: "RowMeasured", nodeId: "b", state: "collapsed", cssPx: 90 });
+            s = apply(s, { type: "NodesChanged", orderedIds: ["a"] }); // b removed
+            const late = update(s, { type: "RowMeasured", nodeId: "b", state: "collapsed", cssPx: 90 });
+            expect(late.state).toBe(s); // dropped, same ref
+            expect(late.events[0]).toMatchObject({ type: "command-dropped", reason: "measure-unknown-id" });
+            // re-add b → it comes back clean (no stale 90), falling to default
+            const readded = apply(s, { type: "NodesChanged", orderedIds: ["a", "b"] });
+            expect(effectiveHeight(readded, "b")).toBe(DEFAULT_ROW_PX);
+        });
+
         it("a measured row that scrolls out (stays in orderedIds) keeps its height", () => {
             // models the stuck-estimate-after-recycle bug being structurally fixed:
             // scroll-out doesn't change orderedIds, so heights survive.
