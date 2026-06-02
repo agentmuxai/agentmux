@@ -296,6 +296,20 @@
                 margin-top: 0;
                 margin-bottom: 0;
                 opacity: 0;
+                // The overlay body (full tool output) stays in the DOM so the
+                // 120ms collapse transition can animate and so the virtualizer
+                // sees a stable subtree (mounting/unmounting it mid-animation
+                // corrupts row measurements). But `max-height: 0; overflow:
+                // hidden` only CLIPS it — the browser still lays out every
+                // descendant, which made hundreds of KB of invisible tool
+                // output a full-cost layout participant on every subtree
+                // invalidation (most visibly a per-pane CSS `zoom` change:
+                // ~300ms relayout, ~90% of it this hidden content). `content-
+                // visibility: hidden` skips layout + paint of the descendants
+                // while keeping them attached — same perf win as display:none
+                // (~10x) with none of the DOM-mutation fallout.
+                // SPEC_TOOL_BLOCK_COLLAPSED_OVERLAY_LAYOUT_2026_06_02.md.
+                content-visibility: hidden;
             }
 
             // In-flow variant — the only visible mode now that the
