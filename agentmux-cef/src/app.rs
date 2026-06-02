@@ -388,6 +388,46 @@ wrap_app! {
                 );
                 cmd.append_switch_with_value(Some(&key), Some(&val));
 
+                // ── Linux: default to XWayland (X11 ozone) ─────────────────
+                // Native-Wayland Ozone in CEF 146/Chromium 146 has broken
+                // Mutter↔Chromium GPU buffer negotiation
+                // (`WaylandZwpLinuxDmabuf::OnTrancheFlags Not implemented`),
+                // which manifests as `LayerTreeHostImpl::DidNotProduceFrame`
+                // for ~89 % of Mutter `BeginFrame` requests. The renderer's
+                // `requestAnimationFrame` callbacks (including predictive
+                // local echo's render path, #1223) are then gated on
+                // sysinfo's ~1 Hz status-bar invalidation — typing visibly
+                // hangs and pumps out on key release.
+                //
+                // Measured locally with `scripts/capture-trace-ipv6.cjs` +
+                // CDP `Profiler.start`:
+                //
+                //   |                 | Wayland | XWayland |
+                //   | --------------- | ------- | -------- |
+                //   | rAF firing rate | 2.5 Hz  | 6.4 Hz   |
+                //   | rAF gap p95     | 1182 ms | 224 ms   |
+                //   | rAF gap max     | 8280 ms | 1024 ms  |
+                //
+                // XWayland is on the well-trodden X11 present path —
+                // 5–8× fewer stalls on the wire-format Linux Chromium has
+                // shipped reliably for years. CEF 148 may fix native Wayland
+                // (PR #1221 source bump landed, binary still pending); keep
+                // this as the default until then, opt out via
+                //   AGENTMUX_OZONE_PLATFORM=wayland
+                // for native-Wayland regression testing.
+                //
+                // Spec: docs/specs/SPEC_LINUX_X11_OZONE_DEFAULT_2026_06_02.md
+                #[cfg(target_os = "linux")]
+                {
+                    let ozone_choice = std::env::var("AGENTMUX_OZONE_PLATFORM")
+                        .ok()
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| "x11".to_string());
+                    let oz_key = CefString::from("ozone-platform");
+                    let oz_val = CefString::from(ozone_choice.as_str());
+                    cmd.append_switch_with_value(Some(&oz_key), Some(&oz_val));
+                }
+
                 // ── GPU channel + frame-production tuning ─────────────────────
                 let gpu_features_key = CefString::from("enable-features");
                 let gpu_features_val = CefString::from(
