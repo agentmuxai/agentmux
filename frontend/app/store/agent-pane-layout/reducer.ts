@@ -137,6 +137,12 @@ export function update(
             };
         }
 
+        case "ExpansionResolved":
+            // Authoritative resolved value (currentExpansion already applied the
+            // per-kind precedence) — just set it. No "pin wins" guard here.
+            if (!state.idSet.has(command.nodeId)) return droppedUnknownExpansion(state);
+            return setExpansion(state, command.nodeId, command.to);
+
         case "UserExpanded":
             if (!state.idSet.has(command.nodeId)) return droppedUnknownExpansion(state);
             return setExpansion(state, command.nodeId, { open: true, via: "pin" });

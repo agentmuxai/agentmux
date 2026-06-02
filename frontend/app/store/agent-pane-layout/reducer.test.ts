@@ -252,6 +252,25 @@ describe("agent-pane-layout reducer", () => {
             expect(r.state).toBe(s);
             expect(r.events[0]).toMatchObject({ type: "command-dropped", reason: "expansion-unknown-id" });
         });
+
+        it("ExpansionResolved sets the exact value (incl. via:default, which survives a hold-expiry)", () => {
+            let s = withRow();
+            s = apply(s, { type: "ExpansionResolved", nodeId: "t", to: { open: true, via: "default" } });
+            expect(s.expansion.get("t")).toEqual({ open: true, via: "default" });
+            // a via:"default" open is NOT auto, so a hold-expiry is a no-op on it
+            const held = update(s, { type: "AutoExpandHoldExpired", nodeId: "t" });
+            expect(held.state.expansion.get("t")).toEqual({ open: true, via: "default" });
+            // resolving back to collapsed clears the key
+            s = apply(s, { type: "ExpansionResolved", nodeId: "t", to: { open: false } });
+            expect(s.expansion.has("t")).toBe(false);
+        });
+
+        it("ExpansionResolved drops for an unknown id", () => {
+            const s = withRow();
+            const r = update(s, { type: "ExpansionResolved", nodeId: "ghost", to: { open: true, via: "default" } });
+            expect(r.state).toBe(s);
+            expect(r.events[0]).toMatchObject({ type: "command-dropped", reason: "expansion-unknown-id" });
+        });
     });
 
     describe("NodesChanged — pruning by set membership", () => {
