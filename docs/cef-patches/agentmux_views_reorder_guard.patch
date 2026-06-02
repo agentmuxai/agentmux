@@ -1,0 +1,31 @@
+diff --git a/ui/views/view.cc b/ui/views/view.cc
+index 9f4501249543c..cbdadb1b7ad6c 100644
+--- a/ui/views/view.cc
++++ b/ui/views/view.cc
+@@ -331,7 +331,7 @@ void View::ReorderChildView(View* view, size_t index) {
+   }
+ 
+   // Rotate |view| to be at the desired position.
+-  CHECK(!iterating_);
++  if (iterating_) { return; } // AgentMux: guard re-entrant macOS 26 callbacks
+   if (pos < i) {
+     std::rotate(pos, i, std::next(i));
+   } else {
+@@ -3192,7 +3192,7 @@ void View::AddChildViewAtImpl(View* view, size_t index) {
+   }
+ 
+   view->parent_ = this;
+-  CHECK(!iterating_);
++  if (iterating_) { return; } // AgentMux: guard re-entrant macOS 26 callbacks
+   const auto pos = children_.insert(
+       std::next(children_.cbegin(), static_cast<ptrdiff_t>(index)), view);
+ 
+@@ -3345,7 +3345,7 @@ void View::DoRemoveChildView(View* view,
+     view_to_be_deleted.reset(view);
+   }
+ 
+-  CHECK(!iterating_);
++  if (iterating_) { return; } // AgentMux: guard re-entrant macOS 26 callbacks
+   children_.erase(i);
+ 
+   if (update_tool_tip) {
