@@ -29,13 +29,20 @@
  *  in flow), so it is NOT a layout input. Layout is binary. */
 export type ExpansionState = "collapsed" | "expanded";
 
-/** Why a row is open. A user pin outlives an auto-expand: a hold expiry
- *  collapses an `auto` row but is a no-op on a `pin` row. Mirrors today's
- *  `pinnedNodes` ∪ `autoExpanded()`. Collapsed rows are stored as ABSENT
- *  from the expansion map (default), keeping it small. */
+/** Why a row is open:
+ *  - `pin`     — user explicitly pinned it open. Outlives an auto-expand:
+ *                a hold expiry collapses an `auto` row but is a no-op on a pin.
+ *  - `auto`    — auto-expanded because the tool is running / in its
+ *                post-completion hold (mirrors today's `autoExpanded()`).
+ *  - `default` — open by KIND default (agent_message, normal markdown / user
+ *                message, subagent link, open section) rather than by a user or
+ *                lifecycle action. Like `auto`/`pin` for height, but a hold
+ *                expiry never touches it (it has no hold). Added in Phase 1 so
+ *                default-open kinds are modeled (Phase 0 assumed default-closed).
+ *  Collapsed rows are stored as ABSENT from the expansion map, keeping it small. */
 export type Expansion =
     | { open: false }
-    | { open: true; via: "pin" | "auto" };
+    | { open: true; via: "pin" | "auto" | "default" };
 
 export const COLLAPSED: Expansion = { open: false };
 
