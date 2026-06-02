@@ -144,9 +144,13 @@ describe("agent-pane-layout reducer", () => {
             let s = initialState();
             s = apply(s, { type: "NodesChanged", orderedIds: ["a"] });
             for (const bad of [NaN, Infinity, -Infinity, -5]) {
-                const r = update(s, { type: "RowMeasured", nodeId: "a", state: "collapsed", cssPx: bad });
-                expect(r.state).toBe(s); // dropped, same ref
-                expect(r.events[0]).toMatchObject({ type: "command-dropped" });
+                const rm = update(s, { type: "RowMeasured", nodeId: "a", state: "collapsed", cssPx: bad });
+                expect(rm.state).toBe(s); // dropped, same ref
+                expect(rm.events[0]).toMatchObject({ type: "command-dropped", reason: "invalid-measure-px" });
+                // EstimateSet shares the same isValidPx guard.
+                const es = update(s, { type: "EstimateSet", nodeId: "a", state: "collapsed", cssPx: bad });
+                expect(es.state).toBe(s);
+                expect(es.events[0]).toMatchObject({ type: "command-dropped", reason: "invalid-estimate-px" });
             }
             expect(effectiveHeight(s, "a")).toBe(DEFAULT_ROW_PX);
         });
@@ -289,6 +293,15 @@ describe("agent-pane-layout reducer", () => {
             expect(effectiveHeight(readded, "b")).toBe(DEFAULT_ROW_PX);
         });
 
+        it("drops a late EstimateSet for a removed id (same guard as RowMeasured)", () => {
+            let s = initialState();
+            s = apply(s, { type: "NodesChanged", orderedIds: ["a", "b"] });
+            s = apply(s, { type: "NodesChanged", orderedIds: ["a"] }); // b removed
+            const r = update(s, { type: "EstimateSet", nodeId: "b", state: "collapsed", cssPx: 50 });
+            expect(r.state).toBe(s); // dropped, same ref
+            expect(r.events[0]).toMatchObject({ type: "command-dropped", reason: "estimate-unknown-id" });
+        });
+
         it("a measured row that scrolls out (stays in orderedIds) keeps its height", () => {
             // models the stuck-estimate-after-recycle bug being structurally fixed:
             // scroll-out doesn't change orderedIds, so heights survive.
@@ -357,6 +370,9 @@ describe("agent-pane-layout reducer", () => {
             s = apply(s, { type: "RowMeasured", nodeId: "a", state: "collapsed", cssPx: 24 });
             expect(update(s, { type: "RowMeasured", nodeId: "a", state: "collapsed", cssPx: 24 }).state).toBe(s);
             expect(update(s, { type: "UserCollapsed", nodeId: "a" }).state).toBe(s); // already collapsed
+            // EstimateSet with the same value is also a no-op (same ref).
+            s = apply(s, { type: "EstimateSet", nodeId: "a", state: "expanded", cssPx: 200 });
+            expect(update(s, { type: "EstimateSet", nodeId: "a", state: "expanded", cssPx: 200 }).state).toBe(s);
         });
     });
 });

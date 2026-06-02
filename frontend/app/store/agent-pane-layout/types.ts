@@ -107,6 +107,12 @@ export type AgentPaneLayoutCommand =
     | { type: "ZoomChanged"; zoom: number };
 
 export type AgentPaneLayoutEvent =
+    // `delta` is SLOT-SPECIFIC: `cssPx - priorHeightFor(nodeId, state)` for the
+    // measured `state` only. It equals the row's change in prefix-sum
+    // contribution ONLY when `state === inFlowState(expansion.get(nodeId))`
+    // (i.e. the measured slot is the one currently rendered). A consumer must
+    // NOT add `delta` to `totalSize` unconditionally — recompute from the
+    // selectors, or gate on the current in-flow state first.
     | { type: "row-measured"; nodeId: string; state: ExpansionState; delta: number }
     | { type: "expansion-changed"; nodeId: string; from: Expansion; to: Expansion }
     | { type: "measurement-invalidated"; nodeId: string }
