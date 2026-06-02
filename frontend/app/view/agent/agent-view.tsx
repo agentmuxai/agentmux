@@ -212,10 +212,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         createEffect(() => {
             const nodes = agentAtoms().documentAtom[0]();
             const docState = agentAtoms().documentStateAtom[0]();
-            dispatchLayout(model.blockId, {
-                type: "NodesChanged",
-                orderedIds: nodes.map((n) => n.id),
-            });
+            const ids = nodes.map((n) => n.id);
+            dispatchLayout(model.blockId, { type: "NodesChanged", orderedIds: ids });
+            // Prune the diff cache to mirror the slice's own prune. Otherwise a
+            // node removed (slice deletes its expansion) then re-added with an
+            // unchanged resolved value is short-circuited as "unchanged" and
+            // never re-dispatched — the shadow silently diverges in exactly the
+            // prune/re-add churn case. (reagent + codex on #1239.)
+            const idSet = new Set(ids);
+            for (const k of pushed.keys()) if (!idSet.has(k)) pushed.delete(k);
             for (const node of nodes) {
                 const next = currentExpansion(node, docState);
                 const key = JSON.stringify(next);
