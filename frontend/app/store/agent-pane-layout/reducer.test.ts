@@ -21,11 +21,6 @@ const apply = (
     cmd: AgentPaneLayoutCommand,
 ): AgentPaneLayoutState => update(s, cmd).state;
 
-const applyAll = (
-    s: AgentPaneLayoutState,
-    cmds: AgentPaneLayoutCommand[],
-): AgentPaneLayoutState => cmds.reduce(apply, s);
-
 /** Tiny deterministic LCG so property-test failures reproduce. */
 function rng(seed: number): () => number {
     let x = seed >>> 0;
@@ -124,8 +119,16 @@ describe("agent-pane-layout reducer", () => {
                             cmd = { type: "NodesChanged", orderedIds: ids.slice(cut) };
                         }
                     }
-                    if (cmd.type === "RowMeasured" || cmd.type === "EstimateSet") measuresApplied++;
+                    const before = s;
                     s = apply(s, cmd);
+                    // anti-vacuity counts measurements that ACTUALLY wrote to
+                    // state — not ones dropped (unknown id / no-op / invalid px).
+                    if (
+                        (cmd.type === "RowMeasured" || cmd.type === "EstimateSet") &&
+                        s !== before
+                    ) {
+                        measuresApplied++;
+                    }
                     assertPrefixSum(s);
                     // window range is always a valid (possibly empty) slice
                     const w = windowRange(s);
@@ -207,8 +210,11 @@ describe("agent-pane-layout reducer", () => {
     });
 
     describe("expansion semantics — pin outranks auto; hold expiry", () => {
+        // expansion commands are guarded by idSet, so the row must be present.
+        const withRow = () => apply(initialState(), { type: "NodesChanged", orderedIds: ["t"] });
+
         it("AutoExpandStarted then AutoExpandHoldExpired collapses", () => {
-            let s = initialState();
+            let s = withRow();
             s = apply(s, { type: "AutoExpandStarted", nodeId: "t" });
             expect(s.expansion.get("t")).toEqual({ open: true, via: "auto" });
             const r = update(s, { type: "AutoExpandHoldExpired", nodeId: "t" });
@@ -217,7 +223,7 @@ describe("agent-pane-layout reducer", () => {
         });
 
         it("a user pin survives a hold expiry (no-op, audited)", () => {
-            let s = initialState();
+            let s = withRow();
             s = apply(s, { type: "AutoExpandStarted", nodeId: "t" });
             s = apply(s, { type: "UserExpanded", nodeId: "t" }); // pin during hold
             expect(s.expansion.get("t")).toEqual({ open: true, via: "pin" });
@@ -227,11 +233,18 @@ describe("agent-pane-layout reducer", () => {
         });
 
         it("AutoExpandStarted does not downgrade an existing pin", () => {
-            let s = initialState();
+            let s = withRow();
             s = apply(s, { type: "UserExpanded", nodeId: "t" });
             const r = update(s, { type: "AutoExpandStarted", nodeId: "t" });
             expect(r.state).toBe(s);
             expect(s.expansion.get("t")).toEqual({ open: true, via: "pin" });
+        });
+
+        it("drops an expansion command for an id not in the document", () => {
+            const s = withRow();
+            const r = update(s, { type: "UserExpanded", nodeId: "ghost" });
+            expect(r.state).toBe(s);
+            expect(r.events[0]).toMatchObject({ type: "command-dropped", reason: "expansion-unknown-id" });
         });
     });
 
@@ -330,7 +343,8 @@ describe("agent-pane-layout reducer", () => {
         it("scrolled past the end → empty range", () => {
             let s = build();
             s = apply(s, { type: "Scrolled", scrollTop: 9000, viewportPx: 300 });
-            expect(windowRange(s).endIndex).toBeLessThan(windowRange(s).startIndex);
+            const w = windowRange(s);
+            expect(w.endIndex).toBeLessThan(w.startIndex);
         });
     });
 

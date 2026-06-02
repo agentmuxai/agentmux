@@ -47,6 +47,14 @@ function layoutHeightFor(
     return DEFAULT_ROW_PX;
 }
 
+/** An expansion command targeting an id absent from the current document is
+ *  dropped — otherwise it would write expansion that survives the next prune
+ *  and re-enter stale when the id is re-added (same hazard the measurement
+ *  guard covers). reagent P2 on #1236. */
+function droppedUnknownExpansion(state: AgentPaneLayoutState): ReducerResult {
+    return { state, events: [{ type: "command-dropped", reason: "expansion-unknown-id" }] };
+}
+
 /** Set a row's expansion, collapsing === deleting the key (default).
  *  No-op (same state ref) when unchanged. */
 function setExpansion(
@@ -89,23 +97,20 @@ export function update(
             const keep = new Set(next);
             let removed = 0;
             for (const id of state.orderedIds) if (!keep.has(id)) removed++;
-            const sameOrder =
-                next.length === state.orderedIds.length && removed === 0;
-            if (sameOrder) {
-                // Same set AND same length → same order (sets equal + lengths
-                // equal ⇒ permutation; but ids are unique, so identical order is
-                // the only reorder we don't separately track). Treat the common
-                // append/no-op case: only short-circuit when the arrays are
-                // referentially or element-wise identical.
-                let identical = true;
+            // Short-circuit ONLY on an element-wise identical array (same ids,
+            // same order). A same-set-same-length permutation (reorder) is NOT
+            // identical and must fall through so the new order is stored — do
+            // not weaken this to a set/length check.
+            let identical = next.length === state.orderedIds.length;
+            if (identical) {
                 for (let i = 0; i < next.length; i++) {
                     if (next[i] !== state.orderedIds[i]) {
                         identical = false;
                         break;
                     }
                 }
-                if (identical) return { state, events: [] };
             }
+            if (identical) return { state, events: [] };
             // Prune heights/estimates/expansion for ids no longer present.
             const heights = pruneMap(state.heights, keep);
             const estimates = pruneMap(state.estimates, keep);
@@ -124,12 +129,15 @@ export function update(
         }
 
         case "UserExpanded":
+            if (!state.idSet.has(command.nodeId)) return droppedUnknownExpansion(state);
             return setExpansion(state, command.nodeId, { open: true, via: "pin" });
 
         case "UserCollapsed":
+            if (!state.idSet.has(command.nodeId)) return droppedUnknownExpansion(state);
             return setExpansion(state, command.nodeId, { open: false });
 
         case "AutoExpandStarted": {
+            if (!state.idSet.has(command.nodeId)) return droppedUnknownExpansion(state);
             const cur = state.expansion.get(command.nodeId);
             // A user pin outranks auto-expand — leave it.
             if (cur?.open && cur.via === "pin") return { state, events: [] };
@@ -137,6 +145,7 @@ export function update(
         }
 
         case "AutoExpandHoldExpired": {
+            if (!state.idSet.has(command.nodeId)) return droppedUnknownExpansion(state);
             const cur = state.expansion.get(command.nodeId);
             if (!cur?.open || cur.via !== "auto") {
                 // Pinned (or already collapsed) during the hold → expiry is a
