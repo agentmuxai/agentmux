@@ -1,5 +1,26 @@
 # AgentMux Version History
 
+## 0.42.0 — 2026-06-02
+
+- feat(macos): package:macos — signed .app/.dmg with CEF Helper app
+- feat(macos): patched CEF 148 framework + per-type helpers fix the renderer on macOS 26
+- fix(macos): lean notarized DMG (ULMO/LZMA + strip + locale trim) — 167MB
+- feat(macos): launcher-owned instant splash + launcher as packaged entry point
+- fix(cef): guard CreateWindowTask against null client (CrBrowserMain SIGABRT on multi-window tear-off)
+- fix(macos): stop SIGABRT on window close (try_close_browser vs window.close); bundle schema; drop dead per-type helpers
+- perf(package): strip source maps from release portables (~28 MB saved)
+- fix(host): gate renderer OOM recovery on system memory — pause instead of false give-up
+- fix(host): match dev localhost origin in crash-recovery URL reuse
+- fix(agent-pane): normalize zoom in virtualizer measurement — fixes history overlap
+- fix(build): bundle CEF runtime from target/release — deterministic, version-matched
+- fix(agent-pane): set data-index before measureElement so all rows are observed (fixes virtualization overlap)
+- perf(agent-pane): skip layout of collapsed tool overlays via content-visibility (cuts zoom/scroll relayout ~10x); guard virtualizer against undefined virtual item
+- feat(agent-pane): add layout state-machine slice (Phase 0 — pure reducer + store + tests; no wiring)
+- fix(agent-pane): keep tool body visible during collapse animation (content-visibility allow-discrete)
+- feat(agent-pane): Phase 1a — pure currentExpansion mapper + via:default for the layout slice
+- feat(agent-pane): Phase 1b — populate layout slice expansion from the live document (dev shadow)
+
+
 ## 0.41.1 — 2026-06-01
 
 - fix(launcher): include build version in pipe name hash — two releases no longer share single-instance domain
