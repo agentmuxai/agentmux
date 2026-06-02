@@ -504,13 +504,21 @@ tasks:
         platforms: [windows]
         cmds:
             - cmd: |
-                cefDir=$(find target/release -name 'libcef.dll' 2>/dev/null | head -1)
-                [ -z "$cefDir" ] && cefDir=$(find target -name 'libcef.dll' 2>/dev/null | head -1)
-                if [ -z "$cefDir" ]; then
-                  echo "❌ libcef.dll not found in target/ — run build:host first"
+                # cargo/cef-dll-sys copies the ACTIVE build's full CEF runtime
+                # (libcef.dll + paks + icudtl.dat + GL dlls + en-US locale) into
+                # target/release/ alongside the linked host — always matching the
+                # host's CEF version. Source from there directly: deterministic and
+                # version-correct. The old `find … | head -1` was non-deterministic
+                # and could grab a STALE cef-dll-sys build-dir copy from a previous
+                # CEF version — after the 146→148 bump (#1221) it picked a 146
+                # libcef.dll, so the 148-linked host died with "unsupported CEF API
+                # version 14800". (Avoids `ls -t`/`find -printf` too — task's shell
+                # uses a limited Go coreutils that rejects those flags.)
+                cefDir=target/release
+                if [ ! -f "$cefDir/libcef.dll" ] || [ ! -f "$cefDir/icudtl.dat" ]; then
+                  echo "❌ incomplete CEF runtime in $cefDir (need libcef.dll + icudtl.dat) — run 'task build:host' first"
                   exit 1
                 fi
-                cefDir=$(dirname "$cefDir")
                 echo "Found runtime binaries in: $cefDir"
                 mkdir -p dist/cef/locales
                 # Core DLLs (required)
