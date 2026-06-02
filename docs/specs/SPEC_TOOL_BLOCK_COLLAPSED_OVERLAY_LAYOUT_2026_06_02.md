@@ -219,4 +219,6 @@ touch. It is present on `main` independent of this work, reproduces with
 `content-visibility` toggled off, and is a separate, deeper virtualizer
 re-measurement issue (the cache not reconverging after dynamic height changes).
 The `virtualItem` guard (§4.3) stops the *crash*; the *drift* is a follow-up,
-tracked separately, not in this PR.
+**tracked in issue #1235**, not in this PR. Clean controlled repro recorded there
+(fresh reload 0/0 → 9 expand/collapse cycles → 5 mismatched rows incl. non-tool, 1
+overlap).
