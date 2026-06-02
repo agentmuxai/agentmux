@@ -1,6 +1,6 @@
 # Collapsed Tool Overlays Are Laid Out While Hidden → Slow Zoom/Scroll
 
-**Status:** Root cause empirically verified (§3); fix implemented (§4)
+**Status:** Fix = `content-visibility: hidden` (§4) + virtualizer crash guard (§4.3); verified live. Lazy-mount approach tried and abandoned (§4.1).
 **Date:** 2026-06-02
 **Author:** AgentA
 **Tracking:** open
@@ -89,96 +89,105 @@ strictly the *expanded-markup-kept-while-collapsed* decision in `ToolBlock`.
 
 ---
 
-## 4. Fix — lazy-mount the overlay child
+## 4. Fix — `content-visibility: hidden` on the collapsed panel
 
-Keep the lightweight panel **container** always mounted (so the `max-height`
-transition still has a stable element to animate), but mount the heavy
-`<ToolBlockOverlay>` **only** while the tool is expanded or animating closed:
+Keep the overlay **mounted** (DOM stable — see §4.2 for why this matters) but tell
+the browser to **skip laying it out** while collapsed:
 
-```tsx
-// ToolBlock.tsx
-const COLLAPSE_UNMOUNT_MS = 160; // > the 120ms collapse transition
-const [mountOverlay, setMountOverlay] = createSignal(expanded());
-let unmountTimer: ReturnType<typeof setTimeout> | null = null;
-
-createEffect(() => {
-    const exp = expanded();              // the ONLY reactive dep
-    if (exp) {
-        if (unmountTimer) { clearTimeout(unmountTimer); unmountTimer = null; }
-        setMountOverlay(true);
-    } else {
-        if (!untrack(mountOverlay)) return;   // already unmounted — no timer
-        if (unmountTimer) clearTimeout(unmountTimer);
-        unmountTimer = setTimeout(() => { setMountOverlay(false); unmountTimer = null; }, COLLAPSE_UNMOUNT_MS);
-    }
-});
-onCleanup(() => { if (unmountTimer) clearTimeout(unmountTimer); });
+```scss
+// _document-nodes.scss
+.agent-tool-panel--hidden {
+    max-height: 0;
+    /* …existing padding/margin/opacity:0… */
+    content-visibility: hidden;   // skip layout + paint of descendants
+}
 ```
 
+`content-visibility: hidden` applies `contain: size layout style paint` to the
+element and **does not render its descendants** — their layout and paint are
+skipped entirely (the element sizes from `contain-intrinsic-size`, here 0, which
+agrees with `max-height: 0`). It is the CSS primitive for exactly this case:
+"present in the DOM, but cheap." It gives the same ~10× win as `display:none`
+(§3.2) while keeping the subtree attached and its rendering state, so showing it
+again is fast and — critically — nothing mounts or unmounts.
+
+### 4.1 Why NOT lazy-mount (`<Show>`) — the abandoned approach
+
+The first implementation gated `<ToolBlockOverlay>` behind a `mountOverlay()`
+signal so collapsed tools rendered an empty container. It hit the perf target but
+**regressed two ways**, both traced live via CDP:
+
+1. **Virtualizer measurement corruption.** Mounting/unmounting the overlay
+   changes a virtualized row's height *abruptly, mid-animation*. The virtualizer
+   re-measures during that churn and cached transient/garbage sizes — observed a
+   collapsed row at virtualizer-size **0** (real 24 → its neighbor placed 24px too
+   high = **−20.9px overlap**) and an expanded row at **784** (≈50vh, real 149 →
+   phantom gap). These stuck in the measurement cache and did not self-correct.
+2. **Crash.** The extra mount/unmount per expand amplified a latent virtualizer
+   render race (§4.3) into a reproducible `TypeError: Cannot read properties of
+   undefined (reading 'index')` that tore down the whole list via the error
+   boundary.
+
+`content-visibility` avoids both because **the DOM never mutates** on collapse/
+expand — it is a pure paint/layout-containment toggle, exactly like the old
+`max-height` animation the virtualizer already handled cleanly. The collapse
+transition also keeps working (the container animates `max-height`; the content
+becomes visible/again-hidden via `content-visibility`).
+
+### 4.2 Why the overlay must stay mounted
+
+The virtualizer measures each row and positions the next via `translateY`. Any
+mechanism that changes a row's height **as a DOM mutation** (mount/unmount) rather
+than a **style change** (max-height / content-visibility) feeds the virtualizer
+abrupt transients it caches wrong. Keep height changes in the CSS layer.
+
+### 4.3 Companion: guard the virtualizer against an undefined virtual item
+
+Independently of the overlay work, `AgentDocumentVirtualList`'s
+`<For each={virtualizer.getVirtualItems()}>` callback read `virtualItem.index`
+with no guard. During the reflow that follows *any* tool expand/collapse height
+change, `getVirtualItems()` can transiently yield an `undefined` entry, throwing
+`Cannot read properties of undefined (reading 'index')` **during render** — caught
+by the error boundary, which tears down the entire list. This is latent on `main`;
+the abandoned lazy-mount made it frequent. Fix:
+
 ```tsx
-<div class={clsx("agent-tool-panel", { "--hidden": …, "--flow": … })}
-     inert={!expanded()} aria-hidden={!expanded()}>
-    <Show when={mountOverlay()}>
-        <ToolBlockOverlay … />
-    </Show>
-</div>
+{(virtualItem) => {
+    if (!virtualItem) return null;   // drop one transient row, don't crash the list
+    const nodeAccessor = () => partition().virtualizedNodes[virtualItem.index];
+    …
+}}
 ```
-
-### 4.1 Why this preserves the animation where it matters
-
-- **History tools** (the bulk — the 32 above) load already-collapsed:
-  `expanded()` is `false` at init, so `mountOverlay()` starts `false`, the
-  `untrack` guard skips even the timer, and the overlay is **never mounted**.
-  These never animate (they were never open), so there is nothing to lose — and
-  ~90 % of the zoom cost plus 1,220 DOM nodes disappear.
-- **Open animation** (pin / auto-expand): `expanded()` → `true` mounts the
-  overlay *and* flips the class to `--flow` in the same tick; the panel container
-  was sitting at `max-height: 0`, so it animates `0 → 50vh` with content present.
-- **Live auto-collapse** (running → 3 s hold → collapse): `expanded()` → `false`
-  keeps the overlay mounted for `COLLAPSE_UNMOUNT_MS` so the `max-height → 0`
-  shrink animates with content, then the child unmounts and stops costing layout.
-- **Re-expand during the collapse window**: the effect re-runs, clears the
-  pending unmount timer, and re-asserts `mountOverlay(true)`.
-
-### 4.2 Reactivity discipline
-
-The effect subscribes to **`expanded()` only**; `mountOverlay` is read via
-`untrack` and written via `setMountOverlay`, so it never subscribes to its own
-write (avoids the self-loop class of bug already documented in this file's
-`postCompletionHold` history). The unmount timer is a plain captured variable,
-cleared on cleanup and on re-expand.
 
 ---
 
 ## 5. Edge cases
 
-- **Overlap-safety (virtualizer):** a collapsed row already measures only its
-  summary line (`max-height: 0` panel), so removing the hidden child does **not**
-  change the row's measured height — no virtualization-overlap regression
-  (cross-ref `SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01`).
-- **Streaming live-tail:** the collapsed summary row's `↳ live-tail` line lives in
-  `.agent-tool-summary`, not the overlay, so it is unaffected by lazy-mounting the
-  overlay.
-- **Bookmark / open-in-pane actions** live in the overlay action bar; they are
-  only reachable when expanded (overlay mounted), which is unchanged from today
-  (`inert` already blocked them while collapsed).
-- **`inert` / `aria-hidden`:** still applied to the (now possibly empty) panel
-  container based on `expanded()`; harmless on an empty container.
+- **Overlap-safety (virtualizer):** the DOM is identical to before this change
+  (overlay still mounted); `content-visibility: hidden` keeps the collapsed
+  panel at 0 height (as `max-height: 0` already did), so row measurements are
+  unchanged — no virtualization-overlap regression (cross-ref
+  `SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01`).
+- **Open animation:** removing `--hidden` drops `content-visibility: hidden`; the
+  content lays out and the container animates `max-height 0 → 50vh`. A one-frame
+  content "pop" is possible (content-visibility transitions aren't interpolated)
+  but is masked by `overflow: hidden` + the opacity fade.
+- **Streaming live-tail / bookmark / open-in-pane:** unaffected — live-tail is in
+  `.agent-tool-summary`; the action bar is only reachable when expanded.
 
 ---
 
-## 6. Testing
+## 6. Testing (verified live via CDP)
 
-- **Live A/B re-run (verification of record):** re-run the §3.2 benchmark after the
-  fix; collapsed-tool zoom-reflow median should drop from ~300 ms toward the
-  ~30 ms `display:none` floor. (jsdom can't exercise CSS `zoom`/layout — the CDP
-  probe is the verification of record.)
-- **Animation manual check:** pin/unpin a tool → smooth open + 120 ms shrink;
-  let a running tool complete → 3 s hold then animated collapse.
-- **DOM census:** on-screen `.agent-tool-panel--hidden` should contain ~0 child
-  nodes for history tools after the fix.
-- **Overlap sweep:** re-run the zoom 0.5–2.0 virtualization sweep; still 0 stuck
-  rows / 0 overlaps.
+- **Zoom-reflow:** median **299 ms → 31 ms** with `content-visibility: hidden`
+  (matches the `display:none` floor) — overlay still mounted (32/32),
+  `content-visibility: hidden` confirmed applied.
+- **Static overlap sweep:** 0 stuck rows / 0 overlaps across scroll, fresh load.
+- **Exception:** none on gentle expand/collapse after the `virtualItem` guard;
+  the abandoned lazy-mount reproduced the `(reading 'index')` crash.
+- **Known pre-existing (OUT OF SCOPE, see §8):** repeated *rapid* expand/collapse
+  churn still accumulates measurement drift (mismatched sizes on **non-tool** rows
+  too), present on `main` independent of this change. Not addressed here.
 
 ---
 
@@ -186,19 +195,28 @@ cleared on cleanup and on re-expand.
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/components/ToolBlock.tsx` | `mountOverlay()` signal + effect; gate `<ToolBlockOverlay>` behind `<Show>` |
+| `frontend/app/view/agent/styles/_document-nodes.scss` | `content-visibility: hidden` on `.agent-tool-panel--hidden` |
+| `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` | guard `<For>` callback against an undefined `virtualItem` (§4.3) |
 | `docs/specs/SPEC_TOOL_BLOCK_COLLAPSED_OVERLAY_LAYOUT_2026_06_02.md` | this spec |
 
 ---
 
-## 8. Risks
+## 8. Risks & out-of-scope
 
-- **First-expand paint cost:** the overlay now mounts on first expand instead of
-  being pre-built. For a single tool that's a one-row render — negligible, and far
-  cheaper than laying out all 32 every zoom. If a specific huge tool ever janks on
-  first open, revisit with `content-visibility` on the overlay rather than
-  reverting to always-mounted.
-- **Animation timing coupling:** `COLLAPSE_UNMOUNT_MS` (160) must stay `>` the CSS
-  collapse transition (120 ms) or the content unmounts mid-shrink. Both are
-  constants in their respective files; keep them in sync if the transition is
-  retuned.
+- **First-show paint after content-visibility:** showing a previously-hidden
+  panel re-renders its descendants. For one tool that's a single-row render —
+  negligible, and far cheaper than laying out all 32 on every zoom.
+- **`content-visibility` browser support:** stable in the bundled CEF/Chromium
+  runtime (Chrome 85+). No fallback needed; on an unsupporting engine it degrades
+  to the prior always-laid-out behaviour (slow, not broken).
+
+### Out of scope — pre-existing measurement drift under churn
+
+Repeated **rapid** expand/collapse (and scroll) churn accumulates virtualizer
+measurement drift: rows whose cached size diverges from their rendered height,
+including **non-tool** (markdown / user-message) rows that this change does not
+touch. It is present on `main` independent of this work, reproduces with
+`content-visibility` toggled off, and is a separate, deeper virtualizer
+re-measurement issue (the cache not reconverging after dynamic height changes).
+The `virtualItem` guard (§4.3) stops the *crash*; the *drift* is a follow-up,
+tracked separately, not in this PR.
