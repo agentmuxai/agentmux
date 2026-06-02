@@ -71,6 +71,20 @@ describe("agent-pane-layout store", () => {
         expect(layout.mock.calls.length).toBe(before);
     });
 
+    it("does not re-project an off-flow measurement (codex P2)", () => {
+        const { layout } = mkPane();
+        dispatch(BID, { type: "NodesChanged", orderedIds: ["a"] }); // a is collapsed by default
+        dispatch(BID, { type: "RowMeasured", nodeId: "a", state: "collapsed", cssPx: 20 });
+        const before = layout.mock.calls.length;
+        // Measuring the EXPANDED slot of a collapsed row changes `heights` but
+        // not any position → must NOT project a layout change.
+        dispatch(BID, { type: "RowMeasured", nodeId: "a", state: "expanded", cssPx: 200 });
+        expect(layout.mock.calls.length).toBe(before);
+        // …and when the row is later expanded, the cached expanded height applies.
+        dispatch(BID, { type: "UserExpanded", nodeId: "a" });
+        expect(layout.mock.calls.at(-1)![0].rows[0].height).toBe(200);
+    });
+
     it("records every dispatch in the audit ring with the slice tag + source", () => {
         // afterEach resets the ring, so this starts clean without a manual reset.
         mkPane();

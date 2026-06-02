@@ -27,10 +27,14 @@ import {
 
 // ── Internal helpers ─────────────────────────────────────────────────
 
-/** A height is usable iff finite and non-negative — anything else would
- *  poison the prefix-sum (INV-1). */
+/** A height is usable iff finite and STRICTLY positive. Zero is rejected on
+ *  purpose: a real row is never 0 tall (it has at least a summary line), so a
+ *  `getBoundingClientRect().height` of 0 is a transient bad read during
+ *  mount/expansion — storing it is exactly the stale-`0` class behind the
+ *  #1234 overlap. A rejected row keeps its estimate/default until a real >0
+ *  measurement arrives. (codex P1 on #1236.) */
 function isValidPx(n: number): boolean {
-    return Number.isFinite(n) && n >= 0;
+    return Number.isFinite(n) && n > 0;
 }
 
 /** Height the layout is CURRENTLY using for (nodeId, state): measured,

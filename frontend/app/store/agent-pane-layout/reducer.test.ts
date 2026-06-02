@@ -140,10 +140,12 @@ describe("agent-pane-layout reducer", () => {
             }
         });
 
-        it("rejects non-finite / negative measurements (keeps the sum clean)", () => {
+        it("rejects non-finite / non-positive measurements incl. 0 (keeps the sum clean)", () => {
             let s = initialState();
             s = apply(s, { type: "NodesChanged", orderedIds: ["a"] });
-            for (const bad of [NaN, Infinity, -Infinity, -5]) {
+            // 0 is rejected on purpose — a real row is never 0 tall, so a 0 read
+            // is a transient mount/expansion glitch (the stale-0 class). codex P1.
+            for (const bad of [NaN, Infinity, -Infinity, -5, 0]) {
                 const rm = update(s, { type: "RowMeasured", nodeId: "a", state: "collapsed", cssPx: bad });
                 expect(rm.state).toBe(s); // dropped, same ref
                 expect(rm.events[0]).toMatchObject({ type: "command-dropped", reason: "invalid-measure-px" });

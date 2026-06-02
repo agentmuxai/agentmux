@@ -49,9 +49,31 @@ export interface AgentPaneLayoutProjections {
 interface Slot {
     state: AgentPaneLayoutState;
     proj: AgentPaneLayoutProjections;
+    /** Last view projected to the consumer — lets us suppress a spurious
+     *  re-projection when a state change did not actually move the layout
+     *  (e.g. an off-flow measurement: writing the non-current expansion slot
+     *  changes the `heights` map ref but not any position). codex P2 on #1236. */
+    lastView: LayoutView | null;
 }
 
 const slots = new Map<string, Slot>();
+
+/** Structural equality of two layout views (rows + total + window). Compared
+ *  field-wise because `computeLayoutView` returns fresh objects each call. */
+function viewsEqual(a: LayoutView, b: LayoutView): boolean {
+    if (a.totalSize !== b.totalSize) return false;
+    if (a.window.startIndex !== b.window.startIndex) return false;
+    if (a.window.endIndex !== b.window.endIndex) return false;
+    if (a.rows.length !== b.rows.length) return false;
+    for (let i = 0; i < a.rows.length; i++) {
+        const ra = a.rows[i];
+        const rb = b.rows[i];
+        if (ra.nodeId !== rb.nodeId || ra.start !== rb.start || ra.height !== rb.height) {
+            return false;
+        }
+    }
+    return true;
+}
 
 /** Fields whose change requires recomputing the projected layout view.
  *  `zoom` is deliberately excluded (INV-2). All of these are replaced by a
@@ -81,7 +103,7 @@ export function registerPane(
     blockId: string,
     proj: AgentPaneLayoutProjections,
 ): void {
-    slots.set(blockId, { state: initialState(), proj });
+    slots.set(blockId, { state: initialState(), proj, lastView: null });
 }
 
 export function unregisterPane(blockId: string): void {
@@ -109,7 +131,14 @@ export function dispatch(
     slot.state = result.state;
 
     if (layoutInputsChanged(prev, slot.state)) {
-        slot.proj.layout(computeLayoutView(slot.state));
+        // The ref-level gate above is cheap but coarse: an off-flow measurement
+        // changes the `heights` ref without moving any position. Recompute the
+        // view and project only if it actually differs (codex P2 on #1236).
+        const view = computeLayoutView(slot.state);
+        if (slot.lastView === null || !viewsEqual(view, slot.lastView)) {
+            slot.lastView = view;
+            slot.proj.layout(view);
+        }
     }
     if (slot.state.zoom !== prev.zoom) {
         slot.proj.zoom(slot.state.zoom);
