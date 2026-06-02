@@ -104,6 +104,12 @@ export type AgentPaneLayoutCommand =
     | { type: "UserCollapsed"; nodeId: string }
     | { type: "AutoExpandStarted"; nodeId: string }
     | { type: "AutoExpandHoldExpired"; nodeId: string }
+    // Set a row's expansion to a fully-resolved value. The Phase-1 wiring
+    // computes `currentExpansion(node, documentState)` (which already encodes
+    // the pin > auto > default precedence per kind) and pushes it here, so the
+    // slice mirrors the rendered open/closed state from one source. The
+    // semantic commands above remain for Phase-2 transient timing (the hold).
+    | { type: "ExpansionResolved"; nodeId: string; to: Expansion }
     // ── measurement ingest (normalized ÷zoom at the boundary) ───────
     | { type: "RowMeasured"; nodeId: string; state: ExpansionState; cssPx: number }
     | { type: "EstimateSet"; nodeId: string; state: ExpansionState; cssPx: number }
