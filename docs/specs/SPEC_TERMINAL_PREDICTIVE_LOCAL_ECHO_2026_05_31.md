@@ -128,7 +128,12 @@ To remove even the within-burst edge (an app turns echo off mid-line), the sidec
 
 ### 7.3 Cooldown
 
-After any rollback (§6.3) or explicit `echo=false`, enter `cooldown`: unarmed for `COOLDOWN_MS`, re-armed only by a fresh observed confirmation. Prevents flapping in ambiguous states.
+Two distinct cooldowns prevent different failure modes:
+
+- **Divergence cooldown** (`COOLDOWN_MS`, default 1200 ms): after a `reconcile()` rollback (PTY bytes didn't match the prediction) or explicit `echo=false`. Re-arms only on a fresh observed echo confirmation. Rides out mode changes without flapping.
+- **Stall cooldown** (`STALL_COOLDOWN_MS`, default 100 ms): after a `sweep()` timeout (no echo arrived within `PREDICT_TIMEOUT_MS`). **Not** a divergence — just a slow echo (e.g. an rAF stall on Linux). Re-arms on the next rAF cycle so predictions resume within ~100 ms instead of being locked out for the full `COOLDOWN_MS`.
+
+Before this split, sweep timeouts used the divergence cooldown, causing a visible "10 chars → ~1 s pause → burst" pattern on Linux when rAF stalled past `PREDICT_TIMEOUT_MS`.
 
 ## 8. RTT telemetry + latency gate
 
