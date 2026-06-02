@@ -1269,6 +1269,9 @@ impl AgentMuxHandler {
             if let Some(window) = bv.window() {
                 if window.is_visible() == 0 {
                     window.show();
+                    // macOS: AppKit handles focus on window show automatically;
+                    // explicit set_focus(1) enters CEF Views → CHECK(!iterating_).
+                    #[cfg(not(target_os = "macos"))]
                     if let Some(ref mut b) = browser_cloned {
                         if let Some(host) = b.host() {
                             host.set_focus(1);
