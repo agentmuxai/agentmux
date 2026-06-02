@@ -21,10 +21,12 @@
  * `pending_approval` tool maps to `{ open: true, via: "auto" }`, matching what
  * actually renders.
  *
- * NOT captured here (component-local transients that Phase 2 moves into the
- * slice via commands, since they are not derivable from `documentState`):
+ * NOT captured here (component-local transients, not derivable from a node /
+ * `documentState`, that Phase 2 moves into the slice via commands):
  *   - a tool's 3 s post-completion hold (`ToolBlock.postCompletionHold`)
- *   - a canceled-thinking block's local expand (`MarkdownBlock.expanded`)
+ *   - a user's expand CLICK on a canceled-thinking block (`MarkdownBlock.expanded`).
+ *     NOTE the canceled block's collapsed *default* IS captured below (it's
+ *     `metadata.canceled`); only the click that overrides it is component-local.
  * Until then these are handled by the store-layer hold timer / a click-time
  * `UserExpanded` dispatch in the wiring layer, not by this pure mapper.
  */
@@ -71,9 +73,14 @@ export function currentExpansion(
             return node.collapsed ? CLOSED : OPEN_DEFAULT;
 
         case "markdown":
+            // Canceled-thinking renders COLLAPSED by default — and that default
+            // IS derivable here (`metadata.canceled`); only the user's expand
+            // click is component-local (Phase 2). Capturing it improves on
+            // `estimateMarkdown`, which ignores the collapse (the same gap this
+            // mapper fixes for running tools).
+            return node.metadata?.canceled ? CLOSED : OPEN_DEFAULT;
+
         case "subagent_link":
-            // No documentState-driven collapse (markdown's canceled-thinking
-            // expand is component-local — see header note). Always in flow.
             return OPEN_DEFAULT;
     }
 }

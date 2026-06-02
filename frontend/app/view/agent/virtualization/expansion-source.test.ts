@@ -82,11 +82,13 @@ describe("currentExpansion — parity with the per-kind expansion rules", () => 
         });
     });
 
-    describe("markdown / subagent_link — always in flow", () => {
-        it("are open by default (canceled-thinking local expand is not documentState-derived)", () => {
+    describe("markdown / subagent_link", () => {
+        it("normal markdown + subagent link are open by default", () => {
             expect(currentExpansion(markdown("m"), inputs())).toEqual({ open: true, via: "default" });
-            expect(currentExpansion(markdown("m", true), inputs())).toEqual({ open: true, via: "default" });
             expect(currentExpansion(subagent("g"), inputs())).toEqual({ open: true, via: "default" });
+        });
+        it("canceled-thinking markdown is collapsed by default (its default IS derivable; only the expand click is local)", () => {
+            expect(currentExpansion(markdown("m", true), inputs())).toEqual({ open: false });
         });
     });
 });
