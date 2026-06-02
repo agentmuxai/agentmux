@@ -518,7 +518,7 @@ tasks:
                 if [ ! -f "$cefDir/libcef.dll" ] || [ ! -f "$cefDir/icudtl.dat" ]; then
                   cefDir=$(dirname "$(find target -name 'libcef.dll' 2>/dev/null | head -1)")
                 fi
-                if [ -z "$cefDir" ] || [ ! -f "$cefDir/libcef.dll" ]; then
+                if [ ! -f "$cefDir/libcef.dll" ]; then
                   echo "❌ no CEF runtime (libcef.dll) found in target/ — run build:host first"
                   exit 1
                 fi
