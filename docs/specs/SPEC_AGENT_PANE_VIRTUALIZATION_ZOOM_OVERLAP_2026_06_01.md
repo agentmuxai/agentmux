@@ -196,8 +196,10 @@ priority; do only if jank-on-scroll-in remains visible after 4.1/4.2.
 
 ## 5. Edge cases
 
-- **Zoom mid-scroll:** §4.1's `createEffect` on `zoomFactor()` re-measures, so a
-  zoom change while scrolled deep doesn't strand stale offsets.
+- **Zoom mid-scroll:** no special handling needed (§4.1). A value cached at one
+  zoom (`GBCR/Z₁ = h` CSS px) stays correct at any other zoom, and the browser
+  re-applies the new `zoom` to the whole subtree (offsets *and* heights), so a
+  zoom change while scrolled deep does not strand stale offsets.
 - **`getBoundingClientRect` vs `offsetHeight`:** §3.0 measured `offsetHeight` as
   zoom-neutral in cef-146, so it *would* work — but we use `GBCR / zoomFactor`
   for fractional precision and to avoid silently depending on that neutrality
@@ -249,7 +251,7 @@ priority; do only if jank-on-scroll-in remains visible after 4.1/4.2.
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` | `measureElement` ÷ `zoomFactor`; `createEffect`s to re-measure on zoom + collapse/pin change; new `zoomFactor` prop; (Phase 2) per-row ResizeObserver |
+| `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` | **(Phase 1)** `measureElement` ÷ `zoomFactor`; new `zoomFactor` prop. **(Phase 2)** `createEffect` to re-measure on collapse/pin change + per-row ResizeObserver |
 | `frontend/app/view/agent/components/AgentDocumentView.tsx` | pass `zoomFactor` through; (Phase 2) optional `expandedNodes` in `documentState` |
 | `frontend/app/view/agent/agent-view.tsx` | pass `zoomFactor` (line 640) into `AgentDocumentView` |
 | `frontend/app/view/agent/components/MarkdownBlock.tsx` | (Phase 2) route canceled-thinking `expanded` into `documentState`, or rely on the row ResizeObserver |
