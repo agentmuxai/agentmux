@@ -1,9 +1,19 @@
 # Agent-Pane Virtualization Overlap Under Zoom
 
-**Status:** Root cause empirically verified (§3.0); Phase 1 implementing
+**Status:** Phase 1 (zoom) MERGED #1231; **Phase 1.5 (data-index measure race) is the dominant residual cause — §3.4 / §4.4**, fix verified live
 **Date:** 2026-06-01
 **Author:** AgentA
 **Tracking:** open
+
+> **Update 2026-06-01 (post-#1231):** Phase 1 shipped and reduced — but did **not
+> eliminate** — the overlap ("still overlaps when zoomed"). Live CDP inspection of
+> the *running* virtualizer (not a synthetic probe) found the **dominant** cause
+> was orthogonal to zoom: a **`data-index` / `measureElement` ref race** that
+> leaves a subset of rows permanently stuck at their `estimateSize`, overlapping
+> at **any** zoom. See **§3.4** (root cause, empirically isolated) and **§4.4**
+> (fix). Phase 1's zoom normalization is still correct and necessary — it makes
+> the rows that *do* measure land in the right unit; §3.4 ensures all rows
+> actually measure.
 
 ---
 
@@ -93,17 +103,34 @@ matching the symptom. As rows transition from *estimated* (unzoomed) to
 inconsistent, which is what tips tall **thinking** rows into their neighbors
 first.
 
-### 3.2 SECONDARY — no re-measure on collapse / expand / pin (any zoom)
+### 3.2 SECONDARY — re-measure on collapse / expand / pin — **NOT a bug (corrected)**
 
-`estimateSize` reads `props.documentState()` (line 166) and `estimateNode`
-adjusts for `collapsedNodes` / `pinnedNodes`, but **nothing invalidates the
-virtualizer's cached measurements when that state changes.** `measureElement`
-runs once per row at first paint. So:
+> **Correction (2026-06-01, verified against installed `@tanstack/virtual-core`
+> 3.14.0):** an earlier draft claimed rows are "measured once at first paint,
+> never re-measured on height change." **That is wrong for this version.** The
+> `ref={virtualizer.measureElement}` on each row (line 418) wires TanStack's
+> built-in **`ResizeObserver`** (`this.observer.observe(node)` in
+> `measureElement`, virtual-core L633; the observer callback re-measures via
+> `this.options.measureElement(...)`, L220 → `resizeItem` updates the cache and
+> corrects scroll position). So **any** row whose height changes — collapse,
+> expand, the canceled-thinking local `expanded()` toggle, async markdown /
+> syntax-highlight settle — is re-measured automatically, and the measured size
+> is cached per item key so it survives scroll-recycle. After **Phase 1** those
+> re-measures route through the zoom-normalized `measureElement`, so they are
+> correct at every zoom.
+>
+> Net: there is **no separate "collapse/expand overlap" to fix** at the
+> virtualizer layer — the library already handles it and Phase 1 made it
+> zoom-correct. Building a manual per-row `ResizeObserver` + a
+> `virtualizer.measure()` `createEffect` (the original Phase 2) would
+> **double-observe** rows and force full-list re-measures where the library does
+> surgical per-row ones — net negative. **Phase 2 is therefore dropped** unless
+> empirical testing surfaces a *specific* residual gap (see §7), in which case
+> the fix targets that gap, not this speculative design.
 
-- Toggling a tool/agent-message collapse (`AgentDocumentView.tsx` `toggleCollapse`/`togglePin`) changes a row's real height, but the virtualizer keeps the stale measured size → neighbors overlap until a remount.
-- Canceled-thinking blocks expand via a **local** signal inside `MarkdownBlock.tsx` (`expanded()`), changing height entirely outside the virtualizer's knowledge.
-
-This is a real overlap source independent of zoom; it compounds 3.1.
+The only residual TanStack does NOT auto-correct is a transient: a row that
+resizes *during* an active fast scroll is gated by `shouldMeasureDuringScroll`
+and settles a frame later — self-correcting, not a persistent overlap.
 
 ### 3.3 TERTIARY — thinking-block height under-estimate
 
@@ -112,6 +139,50 @@ with markdown/code/lists renders much taller than `chars/80 × 24px` predicts.
 On its own this causes a one-time settle jump (acceptable once 3.1/3.2 are
 fixed), not persistent overlap — but it makes the transient worse and is worth a
 modest correction.
+
+### 3.4 DOMINANT (post-#1231) — `data-index` is set AFTER the `measureElement` ref fires
+
+After Phase 1 the user still saw overlap. Live CDP inspection of the running
+virtualizer at zoom 0.63 (not a synthetic probe) found, repeatedly and
+**persistently**, that a *subset* of on-screen rows held their `estimateSize`
+fallback (**32 px**) as their virtualizer size while rendering at a completely
+different real height — e.g.:
+
+| row | virtualizer size (`translateY` Δ) | real `offsetHeight` | result |
+|---|---|---|---|
+| measured rows (0,1,2,4,5,7…) | = `offsetHeight` ✓ | — | flush (Phase 1 working) |
+| 3 | **32** (estimate) | 23 | +5.6px gap |
+| 6 | **32** (estimate) | 46 | **−9.2px OVERLAP** |
+| 8, 9, 10 | **32** (estimate) | 23/24 | gaps/overlap |
+
+Two diagnostics isolated it:
+1. A **scroll nudge** (±1px) did **not** fix the stuck rows → not a transient
+   mid-scroll skip.
+2. A forced **container width change** — which fires the `ResizeObserver` on
+   every *observed* row — **also** did not re-measure them. That is the tell:
+   **the stuck rows were never being observed at all.**
+
+**Mechanism.** TanStack's `measureElement(node)` reads
+`node.getAttribute("data-index")` **first**, and if it is `null` it
+**returns early — before `this.observer.observe(node)`**. So a row whose
+`data-index` is absent at the instant the ref fires is *never* registered with
+the `ResizeObserver` and is *never* re-measured for the rest of its life; it is
+frozen at `estimateSize`.
+
+In this codebase `data-index` is bound **reactively** — `data-index={props.dataIndex}`
+on the row wrapper (`DocumentRow.tsx`), fed by `dataIndex={virtualItem.index}`.
+SolidJS sets reactive attributes in a **render-effect that races the `ref`
+callback**. When the ref (`virtualizer.measureElement`) wins, `data-index` is
+still `null` → early return → row stranded at the estimate. It's a **race**,
+which is exactly why only *some* rows are affected, and why it's **stable**
+(a stranded row never gets a second chance until scroll-recycle recreates it).
+
+This is **orthogonal to zoom**: the estimate (32) vs real height mismatch
+produces overlap/gaps at *every* zoom including 100%. Phase 1's symptom framing
+("largely absent at 100%") was the *zoom double-count* component; the data-index
+race is a *second, independent* contributor that Phase 1 didn't touch. With both
+fixed, a 50-row virtualized region at zoom 0.63 shows **0 stuck rows** (verified
+live).
 
 ---
 
@@ -185,6 +256,34 @@ The ResizeObserver approach is the most robust general fix (it makes *any*
 post-mount height change self-correcting) and subsumes 3.3; the cost is one
 observer per on-screen virtualized row (bounded by overscan + viewport).
 
+### 4.4 Set `data-index` synchronously in the ref (fixes 3.4) — **Phase 1.5**
+
+Eliminate the race by writing `data-index` **inside the ref callback, on the line
+before** `measureElement` reads it — so it is never `null` at measure time and
+the row is always observed:
+
+```ts
+// AgentDocumentVirtualList.tsx — the <For> over getVirtualItems()
+ref={(el) => {
+    el.setAttribute("data-index", String(virtualItem.index));
+    virtualizer.measureElement(el);
+}}
+dataIndex={virtualItem.index}   // reactive binding retained for index shifts
+```
+
+The reactive `dataIndex` binding is kept (it keeps the attribute fresh if a row's
+index shifts), but the synchronous set in the ref wins the initial race
+deterministically. `virtualItem.index` is fixed for a row's lifetime (TanStack
+recreates the row object on window change, so the `<For>` remounts rather than
+mutating index), so the value written is always correct.
+
+**Verification of record (CDP, live):** before — rows 3/6/8/9/10 stuck at the
+32px estimate at zoom 0.63; a forced width-change did not rescue them (never
+observed). After — a 50-row virtualized region at the same zoom reports **0
+stuck rows**; the `−9.2px` overlap at row 6 is gone. Re-run the live probe (not
+jsdom — Solid ref/attribute ordering and the `ResizeObserver` early-return can't
+be exercised there) after a TanStack or Solid bump.
+
 ### 4.3 Estimator correction (mitigates 3.3) — optional
 
 Add a modest buffer for thinking/markdown blocks (e.g. account for the
@@ -234,16 +333,22 @@ priority; do only if jank-on-scroll-in remains visible after 4.1/4.2.
 
 ## 7. Phasing
 
-- **Phase 1 (the overlap fix):** §4.1 zoom-normalized `measureElement` + plumb
-  `zoomFactor` down (no zoom-change re-measure needed — normalization is
-  zoom-invariant). This alone removes the zoom-correlated overlap (the reported
-  bug). Empirically verified mechanism (§3.0).
-- **Phase 2 (state-change correctness):** §4.2 re-measure on
-  collapse/expand/pin + the ResizeObserver (or `expandedNodes` in
-  `documentState`) for in-renderer height changes. Removes the
-  any-zoom collapse/expand overlap.
+- **Phase 1 (zoom double-count) — MERGED #1231:** §4.1 zoom-normalized
+  `measureElement` + plumb `zoomFactor` down. Removes the *zoom-correlated*
+  component of the overlap. Necessary but **not sufficient** — see Phase 1.5.
+- **Phase 1.5 (data-index measure race) — THE residual fix, §4.4:** set
+  `data-index` synchronously in the row ref before `measureElement`. Without it,
+  a subset of rows are never observed and stay stuck at `estimateSize`,
+  overlapping at any zoom (§3.4). This is what was still visible after #1231.
+  Verified live (0 stuck rows post-fix).
+- **Phase 2 — DROPPED (see §3.2 correction).** TanStack 3.14's built-in
+  per-row `ResizeObserver` already re-measures on any height change, and Phase 1
+  made those re-measures zoom-correct; a manual observer/`measure()` would be
+  redundant and net-negative. Reinstate ONLY if testing surfaces a *specific*
+  residual overlap that the built-in observer demonstrably misses — and then fix
+  that gap, not the original speculative design.
 - **Phase 3 (polish):** §4.3 estimator correction, only if scroll-in jank
-  persists.
+  persists. Independent of Phase 2.
 
 ---
 
@@ -251,7 +356,7 @@ priority; do only if jank-on-scroll-in remains visible after 4.1/4.2.
 
 | File | Change |
 |---|---|
-| `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` | **(Phase 1)** `measureElement` ÷ `zoomFactor`; new `zoomFactor` prop. **(Phase 2)** `createEffect` to re-measure on collapse/pin change + per-row ResizeObserver |
+| `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` | **(Phase 1)** `measureElement` ÷ `zoomFactor`; new `zoomFactor` prop. **(Phase 1.5)** set `data-index` synchronously in the row `ref` before `measureElement` (fixes the never-observed-stuck-at-estimate race, §3.4/§4.4) |
 | `frontend/app/view/agent/components/AgentDocumentView.tsx` | pass `zoomFactor` through; (Phase 2) optional `expandedNodes` in `documentState` |
 | `frontend/app/view/agent/agent-view.tsx` | pass `zoomFactor` (line 640) into `AgentDocumentView` |
 | `frontend/app/view/agent/components/MarkdownBlock.tsx` | (Phase 2) route canceled-thinking `expanded` into `documentState`, or rely on the row ResizeObserver |
