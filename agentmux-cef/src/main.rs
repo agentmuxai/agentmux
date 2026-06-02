@@ -77,6 +77,43 @@ fn suppress_os_crash_dialogs() {
 #[cfg(not(target_os = "windows"))]
 fn suppress_os_crash_dialogs() {}
 
+/// Resolve CEF's `browser_subprocess_path` (the executable CEF spawns for
+/// renderer / GPU / utility processes).
+///
+/// On a packaged macOS `.app`, return the dedicated `AgentMux Helper`
+/// executable inside `Contents/Frameworks/AgentMux Helper.app` — re-execing
+/// the main bundle binary for subprocesses is rejected by the macOS process
+/// model (every child would inherit the main bundle's identity), which makes
+/// the renderers crash-loop. When no Helper.app is present (dev: a bare binary
+/// with no bundle) fall back to the current exe — self-reexec works there.
+/// Windows/Linux always use the current exe (self-reexec is fine off-bundle).
+#[cfg(target_os = "macos")]
+fn resolve_browser_subprocess_path() -> String {
+    let exe = std::env::current_exe().unwrap();
+    // exe = AgentMux.app/Contents/MacOS/agentmux-cef
+    // → AgentMux.app/Contents/Frameworks/AgentMux Helper.app/Contents/MacOS/AgentMux Helper
+    if let Some(contents) = exe.parent().and_then(|macos| macos.parent()) {
+        let helper = contents
+            .join("Frameworks")
+            .join("AgentMux Helper.app")
+            .join("Contents")
+            .join("MacOS")
+            .join("AgentMux Helper");
+        if helper.exists() {
+            return helper.to_string_lossy().into_owned();
+        }
+    }
+    exe.to_string_lossy().into_owned()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn resolve_browser_subprocess_path() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_owned()))
+        .unwrap_or_default()
+}
+
 /// True when a launcher is THIS host's actual parent process this run.
 ///
 /// The launcher (which spawns the host directly) stamps
@@ -159,8 +196,18 @@ fn main() {
     // macOS: load the CEF framework library explicitly.
     #[cfg(target_os = "macos")]
     let _library = {
-        let loader =
-            library_loader::LibraryLoader::new(&std::env::current_exe().unwrap(), false);
+        let exe = std::env::current_exe().unwrap();
+        // Inside a packaged .app, renderer/GPU/utility subprocesses run as the
+        // bundled "AgentMux Helper" at
+        // …/Contents/Frameworks/AgentMux Helper.app/Contents/MacOS/AgentMux Helper
+        // — 4 levels below the framework — so it must resolve the framework via
+        // the deeper `../../../../Frameworks/…` path (helper=true). The main
+        // host (Contents/MacOS/) and the bare dev binary use `../Frameworks/…`
+        // (helper=false). Detect the helper by its exe path; the main bundle
+        // binary is never under Contents/Frameworks/. See
+        // docs/specs/SPEC_MACOS_PACKAGING_2026_05_30.md.
+        let is_helper = exe.to_string_lossy().contains(".app/Contents/Frameworks/");
+        let loader = library_loader::LibraryLoader::new(&exe, is_helper);
         assert!(loader.load(), "Failed to load CEF framework");
         loader
     };
@@ -629,10 +676,14 @@ fn main() {
         framework_dir_path: framework_dir,
         log_file: cef_log_file,
         log_severity: LogSeverity::INFO,
-        // CEF subprocess (renderer, GPU) uses the same exe
-        browser_subprocess_path: CefString::from(
-            std::env::current_exe().unwrap().to_str().unwrap_or("")
-        ),
+        // CEF subprocess (renderer, GPU, utility) executable. On a packaged
+        // macOS .app this is the dedicated "AgentMux Helper" (distinct bundle
+        // id, LSUIElement) — re-execing the main bundle binary is rejected by
+        // the macOS process model and the renderers crash-loop. In dev (bare
+        // binary, no Helper.app) and on Windows/Linux it's the current exe
+        // (self-reexec, which works there). See
+        // docs/specs/SPEC_MACOS_PACKAGING_2026_05_30.md.
+        browser_subprocess_path: CefString::from(resolve_browser_subprocess_path().as_str()),
         ..Default::default()
     };
 

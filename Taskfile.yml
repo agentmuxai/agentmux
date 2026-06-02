@@ -111,10 +111,21 @@ tasks:
             - pwsh -File scripts/package-msix.ps1 {{.CLI_ARGS}}
 
     package:macos:
-        desc: "[TODO] Package the application for macOS."
+        desc: >-
+            Package the application as a signed macOS .app + .dmg (Developer ID,
+            hardened runtime). Output to ~/Desktop by default. Notarization is
+            attempted via the `notarytool` keychain profile and degrades to a
+            signed-only DMG if it's unavailable (see scripts/package-macos.sh and
+            docs/macos-signing.md). Set NOTARIZE=0 to skip notarization.
         platforms: [darwin]
+        deps:
+            - build:host
+            - build:backend
+            - build:frontend
+            - copy:schema
         cmds:
-            - echo "macOS packaging not yet implemented."
+            - task: bundle
+            - bash scripts/package-macos.sh {{.CLI_ARGS}}
 
     package:linux:
         desc: Package the application as a portable AppImage (Linux). Output to ~/Desktop by default.
