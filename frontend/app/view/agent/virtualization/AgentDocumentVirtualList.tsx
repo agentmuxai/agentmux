@@ -418,6 +418,17 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             >
                 <For each={virtualizer.getVirtualItems()}>
                     {(virtualItem) => {
+                        // Defensive: during the reflow that follows a tool
+                        // expand/collapse height change, getVirtualItems() can
+                        // transiently yield an undefined entry. Without this
+                        // guard the `virtualItem.index` reads below throw
+                        // "Cannot read properties of undefined (reading 'index')"
+                        // *during render*, which the agent-pane error boundary
+                        // catches by tearing down the ENTIRE virtualized list.
+                        // Dropping one transient row for a frame is recoverable;
+                        // crashing the list is not. (Observed live under rapid
+                        // expand/collapse churn.)
+                        if (!virtualItem) return null;
                         const nodeAccessor = (): DocumentNode => {
                             return partition().virtualizedNodes[virtualItem.index];
                         };
