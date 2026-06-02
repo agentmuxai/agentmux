@@ -126,8 +126,10 @@ wrap_window_delegate! {
                 return 1;
             };
             if let Some(browser) = browser_view.browser() {
-                let browser_host = browser.host().expect("BrowserHost is None");
-                browser_host.try_close_browser()
+                match browser.host() {
+                    Some(host) => host.try_close_browser(),
+                    None => 1, // no host yet (pre-init teardown) — allow close
+                }
             } else {
                 1
             }
@@ -352,48 +354,41 @@ wrap_app! {
         ) {
             if let Some(cmd) = command_line {
                 // Prevent empty browser on visibility change (CEF #3638).
+                //
+                // Also disable MediaRouter: Chromium's Cast/DIAL device
+                // discovery probes the local network (mDNS/SSDP), which trips
+                // the macOS "AgentMux would like to find devices on your local
+                // network" prompt at launch. AgentMux never casts, so this is
+                // pure overhead — disabling it keeps the app off the local
+                // network entirely unless the user explicitly turns on LAN
+                // instance discovery (`network:lan_discovery`, off by default
+                // and lazily started). See feedback_no_os_notices_at_launch.
+                // Disabled features (comma-joined; one switch — a second
+                // --disable-features would override the first):
+                //   CalculateNativeWinOcclusion — empty browser on visibility (CEF #3638)
+                //   MediaRouter                  — Cast/DIAL local-network discovery (TCC prompt)
+                //   PreconnectToSearch           — Chromium warms the default search engine
+                //                                  (Google) at startup → www/accounts.google.com
+                //   AutofillServerCommunication  — Autofill field-metadata downloads
+                //                                  → content-autofill.googleapis.com
+                // The last two were the actual Google QUIC traffic observed via
+                // net-log; AgentMux makes no such calls itself.
                 let key = CefString::from("disable-features");
-                let val = CefString::from("CalculateNativeWinOcclusion");
+                // MachPortRendezvous{Validate,Enforce}PeerRequirements: belt-and-
+                // suspenders flags kept for defence in depth. NOTE: the actual fix
+                // for the macOS-26 renderer crash (-67030 / errSecCSReqFailed) is
+                // the source patch in docs/cef-patches/ (GetPeerValidationPolicy →
+                // kNoValidation) — the policy is read before FeatureList init so
+                // this runtime flag cannot apply in time and is NOT the load-bearing
+                // mechanism. Do not remove the patch thinking these flags cover it.
+                let val = CefString::from(
+                    "CalculateNativeWinOcclusion,MediaRouter,PreconnectToSearch,\
+                     AutofillServerCommunication,MachPortRendezvousValidatePeerRequirements,\
+                     MachPortRendezvousEnforcePeerRequirements",
+                );
                 cmd.append_switch_with_value(Some(&key), Some(&val));
 
                 // ── GPU channel + frame-production tuning ─────────────────────
-                // Symptom this addresses (Linux Chromium-Ozone-Wayland on
-                // Mutter): the compositor receives ~6 Hz `BeginFrame` signals
-                // from Mutter but responds `DidNotProduceFrame` 89 % of the
-                // time. `BeginMainFrame` only fires at the sysinfo-status-bar
-                // invalidation cadence (~1 Hz). Result: xterm.js
-                // `requestAnimationFrame` callbacks (including predictive
-                // local echo's render path, #1223) are gated on those 1 Hz
-                // frames, so a held key visibly lags up to a second behind
-                // the keypress.
-                //
-                // VSCode (Electron, same Chromium codebase) does NOT have
-                // this stall on the same hardware and compositor. Its
-                // renderer + utility processes ship with:
-                //
-                //   --enable-features=EarlyEstablishGpuChannel,
-                //                     EstablishGpuChannelAsync
-                //
-                // confirmed via `/proc/<pid>/cmdline` on a running VSCode +
-                // documented in Chromium's `chrome/browser/about_flags.cc`.
-                // Both features ship enabled in stable Chrome on Linux; CEF
-                // does not enable them by default. They (a) request the GPU
-                // process channel before the renderer's first paint instead
-                // of synchronously on first paint and (b) treat the channel
-                // establishment as non-blocking, which lets the compositor
-                // start producing frames against the GPU process sooner and
-                // without serialising on the channel handshake.
-                //
-                // Hypothesis: the synchronous + late channel establishment
-                // contributes to the `DidNotProduceFrame` storm on Wayland
-                // here. Confirming empirically: trace with
-                // `scripts/capture-trace-ipv6.cjs`, look at
-                // `ProxyMain::BeginMainFrame` cadence and the
-                // `cc::Scheduler::SendDidNotProduceFrame` count before/after.
-                //
-                // Spec: docs/specs/SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31.md
-                //       (host-side complement — predictive echo is renderer-
-                //       side; this is the upstream frame-production fix).
                 let gpu_features_key = CefString::from("enable-features");
                 let gpu_features_val = CefString::from(
                     "EarlyEstablishGpuChannel,EstablishGpuChannelAsync",
@@ -402,6 +397,19 @@ wrap_app! {
                     Some(&gpu_features_key),
                     Some(&gpu_features_val),
                 );
+
+                // Stop Chromium's background phone-home — the QUIC connections
+                // to Google (1e100.net) that an embedded CEF app neither needs
+                // nor should make. `disable-background-networking` covers most
+                // background subsystems; the rest get an explicit switch because
+                // Chromium leaves them on otherwise.
+                cmd.append_switch(Some(&CefString::from("disable-background-networking")));
+                cmd.append_switch(Some(&CefString::from("disable-component-update")));
+                cmd.append_switch(Some(&CefString::from("disable-domain-reliability")));
+                cmd.append_switch(Some(&CefString::from("disable-field-trial-config")));
+                let vurl = CefString::from("variations-server-url");
+                let vempty = CefString::from("");
+                cmd.append_switch_with_value(Some(&vurl), Some(&vempty));
 
                 // Initial background color, ARGB hex. alpha=00 → fully
                 // transparent → first-frame paint is alpha-aware so the

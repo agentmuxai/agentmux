@@ -1,0 +1,34 @@
+diff --git a/base/apple/mach_port_rendezvous_mac.cc b/base/apple/mach_port_rendezvous_mac.cc
+index 42c732389886b..111d2119cd0cc 100644
+--- a/base/apple/mach_port_rendezvous_mac.cc
++++ b/base/apple/mach_port_rendezvous_mac.cc
+@@ -405,14 +405,21 @@ GetPeerValidationPolicyFromEnvironment() {
+ }
+ 
+ MachPortRendezvousPeerValidationPolicy GetPeerValidationPolicy() {
+-  if (base::FeatureList::GetInstance()) {
+-    return GetPeerValidationPolicyFromFeatureList();
+-  }
+-
+-  // In child processes, MachPortRendezvousClient is used during feature list
+-  // initialization so the validation policy is passed via an environment
+-  // variable.
+-  return GetPeerValidationPolicyFromEnvironment();
++  // AgentMux patch: force kNoValidation. AgentMux's self-reexec CEF helper
++  // fails Chromium's Mach-port peer process_requirement check on macOS 26
++  // (process_requirement.cc -67030 / errSecCSReqFailed), so the rendezvous
++  // denies the renderer its ports -> renderer crash-loop. The runtime
++  // --disable-features path does not apply early enough (rendezvous runs
++  // before the FeatureList is ready), so disable it at the source. Acceptable
++  // for a local single-user desktop app.
++  //
++  // Evaluate the original resolution to keep the helpers referenced (avoids
++  // -Wunused-function), but ignore the result.
++  MachPortRendezvousPeerValidationPolicy original =
++      base::FeatureList::GetInstance() ? GetPeerValidationPolicyFromFeatureList()
++                                       : GetPeerValidationPolicyFromEnvironment();
++  (void)original;
++  return MachPortRendezvousPeerValidationPolicy::kNoValidation;
+ }
+ 
+ }  // namespace
