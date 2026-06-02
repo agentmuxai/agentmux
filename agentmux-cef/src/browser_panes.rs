@@ -492,11 +492,17 @@ impl BrowserPaneManager {
         // Phase H.1.b + H.2.b — read live labels via reducer-aware helper,
         // then look up each browser via reducer-aware helper. Both with
         // fallback + drift logging.
-        let labels = state.live_browser_pane_labels();
-        for label in &labels {
-            if let Some(browser) = state.get_browser(label) {
-                if let Some(host) = browser.host() {
-                    host.set_focus(0);
+        // macOS: AppKit owns focus; explicit set_focus(0) enters CEF Views
+        // and can trigger the same reentrancy CHECK(!iterating_) crash as
+        // set_focus(1). Skip on macOS — AppKit clears pane focus automatically.
+        #[cfg(not(target_os = "macos"))]
+        {
+            let labels = state.live_browser_pane_labels();
+            for label in &labels {
+                if let Some(browser) = state.get_browser(label) {
+                    if let Some(host) = browser.host() {
+                        host.set_focus(0);
+                    }
                 }
             }
         }
@@ -802,6 +808,10 @@ impl BrowserPaneManager {
     pub fn focus(&self, block_id: &str, state: &Arc<AppState>) {
         if let Some(browser) = self.live_browser(state, block_id) {
             if let Some(host) = browser.host() {
+                // macOS: AppKit propagates focus through the responder chain
+                // automatically — explicit set_focus(1) enters CEF Views and
+                // can trigger CHECK(!iterating_) reentrancy → SIGABRT.
+                #[cfg(not(target_os = "macos"))]
                 host.set_focus(1);
                 #[cfg(target_os = "windows")]
                 {

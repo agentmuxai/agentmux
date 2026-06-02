@@ -920,6 +920,15 @@ wrap_task! {
                 }
             };
 
+            // macOS: AppKit propagates focus automatically through the responder
+            // chain when the user clicks — calling host.set_focus(1) here enters
+            // CEF Views' focus manager which calls ReorderChildView while AppKit
+            // drag/focus callbacks are already iterating, triggering the reentrancy
+            // CHECK(!iterating_) → SIGABRT on CrBrowserMain. Skip it; AppKit owns
+            // focus on macOS 26 and doesn't need the explicit push.
+            // Windows/Linux: explicit set_focus is required (Win32/Aura don't
+            // auto-propagate focus the way AppKit does).
+            #[cfg(not(target_os = "macos"))]
             if let Some(host) = browser.host() {
                 host.set_focus(1);
                 tracing::info!("[main-focus-reclaim] host.set_focus(1) on label={}", self.label);
