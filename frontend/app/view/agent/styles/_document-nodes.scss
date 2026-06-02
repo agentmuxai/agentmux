@@ -287,7 +287,13 @@
                 max-height 120ms cubic-bezier(0.4, 0, 0.2, 1),
                 padding 120ms cubic-bezier(0.4, 0, 0.2, 1),
                 margin 120ms cubic-bezier(0.4, 0, 0.2, 1),
-                opacity 100ms ease-out;
+                opacity 100ms ease-out,
+                // `content-visibility` is discrete; `allow-discrete` lets it
+                // animate with the collapse — it flips to `hidden` at the END of
+                // the close (body stays rendered through the 120ms shrink) and to
+                // visible at the START of the open. Without it the body pops out
+                // the instant `--hidden` is added. (Chromium 117+.)
+                content-visibility 120ms allow-discrete;
 
             &--hidden {
                 max-height: 0;
