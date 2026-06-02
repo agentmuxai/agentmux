@@ -65,6 +65,14 @@ export interface AgentDocumentVirtualListProps {
     onToggleCollapse: (id: string) => void;
     onTogglePin: (id: string) => void;
     /**
+     * Live per-pane zoom factor (the same value applied as CSS `zoom` on
+     * `.agent-view` in agent-view.tsx). Used to normalize `measureElement`
+     * into unzoomed CSS px so virtualizer row offsets don't double-count zoom
+     * and overlap — see SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01.
+     * Defaults to 1 (no zoom) when not supplied.
+     */
+    zoomFactor?: Accessor<number>;
+    /**
      * Content rendered inside the scroll container, above the
      * virtualized region. Used by AgentDocumentView for the
      * auth-url box and the loading-older banner. Affects scroll math
@@ -179,7 +187,15 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         // any kind whose miss-rate stays high so we recalibrate.
         // No-op in production builds (agentPerfStore short-circuits).
         measureElement: (element) => {
-            const measured = element.getBoundingClientRect().height;
+            // Normalize OUT the per-pane CSS `zoom`: getBoundingClientRect is
+            // zoom-scaled (verified cef-146: css×zoom), but estimateSize returns
+            // fixed unzoomed CSS px. Without this, the two units disagree at
+            // zoom≠1 and the cumulative translateY offsets double-count zoom →
+            // rows overlap (zoom<1) or gap (zoom>1). Dividing by the live zoom
+            // factor keeps the virtualizer entirely in zoom-independent CSS px.
+            // SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01 §4.1.
+            const zoom = props.zoomFactor?.() ?? 1;
+            const measured = element.getBoundingClientRect().height / (zoom || 1);
             const indexAttr = element.getAttribute("data-index");
             if (indexAttr != null) {
                 const idx = Number(indexAttr);

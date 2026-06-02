@@ -794,6 +794,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 scrollToBottomRef={(fn) => { scrollToBottomFn = fn; }}
                 highlightNodeId={search.highlightId}
                 registerHistoryReadyCallback={(fn) => { historyReadyFn = fn; }}
+                zoomFactor={zoomFactor}
             />
 
             <Show when={status.canRetry()}>
