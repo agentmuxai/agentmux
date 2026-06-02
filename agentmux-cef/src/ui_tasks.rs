@@ -803,6 +803,41 @@ pub fn post_create_window(
     post_task(ThreadId::UI, Some(&mut task));
 }
 
+// ── ShowWindow (macOS deferred — avoids on_load_end reentrancy) ───────────
+// On macOS 26 + CEF 148, calling window.show() directly from on_load_end
+// triggers AppKit focus callbacks that reenter CEF Views while the
+// on_load_end stack is still iterating → CHECK(!iterating_). Posting as a
+// separate UI task lets on_load_end unwind first.
+#[cfg(target_os = "macos")]
+wrap_task! {
+    pub struct ShowWindowTask {
+        state: Arc<AppState>,
+        label: String,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let mut browser = match self.state.get_browser(&self.label) {
+                Some(b) => b,
+                None => return,
+            };
+            if let Some(bv) = cef::browser_view_get_for_browser(Some(&mut browser)) {
+                if let Some(window) = bv.window() {
+                    if window.is_visible() == 0 {
+                        window.show();
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub fn post_show_window(state: &Arc<AppState>, label: String) {
+    let mut task = ShowWindowTask::new(state.clone(), label);
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
 // ── DevTools (toggle) ─────────────────────────────────────────────────────
 
 wrap_task! {
