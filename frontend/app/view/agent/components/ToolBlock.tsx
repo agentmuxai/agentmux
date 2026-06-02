@@ -32,7 +32,7 @@
  */
 
 import clsx from "clsx";
-import { Show, createEffect, createSignal, onCleanup, type JSX } from "solid-js";
+import { Show, createEffect, createSignal, onCleanup, untrack, type JSX } from "solid-js";
 import { createBlock } from "@/store/global";
 import type { ToolNode } from "../types";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
@@ -137,6 +137,47 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // gone with the hover trigger.
     const panelMode = (): "hidden" | "flow" => (expanded() ? "flow" : "hidden");
 
+    // Lazy-mount the heavy <ToolBlockOverlay> child. The panel CONTAINER
+    // stays mounted (so the 120ms max-height collapse transition has a
+    // stable element to animate), but the overlay content — which holds
+    // the FULL tool output and is the bulk of the DOM — only exists while
+    // expanded or during the close animation. `max-height: 0; overflow:
+    // hidden` clips the collapsed panel visually but the browser STILL
+    // lays out its descendants, so keeping every collapsed tool's body
+    // mounted made any full-subtree layout invalidation (most visibly a
+    // per-pane CSS `zoom` change) re-lay-out hundreds of KB of invisible
+    // content — ~90% of the measured zoom-reflow cost. History tools load
+    // already-collapsed (expanded()===false at init), so their overlay is
+    // never mounted at all; live auto-collapse keeps it for the transition
+    // then drops it. See
+    // docs/specs/SPEC_TOOL_BLOCK_COLLAPSED_OVERLAY_LAYOUT_2026_06_02.md.
+    const COLLAPSE_UNMOUNT_MS = 160; // must stay > the 120ms collapse transition
+    const [mountOverlay, setMountOverlay] = createSignal(expanded());
+    let unmountTimer: ReturnType<typeof setTimeout> | null = null;
+    createEffect(() => {
+        const exp = expanded(); // the ONLY reactive dependency of this effect
+        if (exp) {
+            if (unmountTimer) {
+                clearTimeout(unmountTimer);
+                unmountTimer = null;
+            }
+            setMountOverlay(true);
+        } else {
+            // Read mountOverlay WITHOUT subscribing — writing a signal you
+            // also subscribe to in the same effect is the self-loop footgun
+            // documented above for postCompletionHold.
+            if (!untrack(mountOverlay)) return; // already unmounted — no timer needed
+            if (unmountTimer) clearTimeout(unmountTimer);
+            unmountTimer = setTimeout(() => {
+                setMountOverlay(false);
+                unmountTimer = null;
+            }, COLLAPSE_UNMOUNT_MS);
+        }
+    });
+    onCleanup(() => {
+        if (unmountTimer) clearTimeout(unmountTimer);
+    });
+
     const statusIcon = (): string => STATUS_ICON[props.node.status] || "•";
 
     return (
@@ -224,12 +265,17 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 aria-hidden={!expanded()}
                 onClick={(e) => e.stopPropagation()}
             >
-                <ToolBlockOverlay
-                    node={props.node}
-                    isBookmarked={props.isBookmarked}
-                    onBookmark={props.onBookmark}
-                    onOpenInPane={props.onOpenInPane}
-                />
+                {/* Overlay mounted only while expanded or animating closed
+                    (see mountOverlay above) — collapsed history tools render
+                    an empty container, eliminating the hidden-layout cost. */}
+                <Show when={mountOverlay()}>
+                    <ToolBlockOverlay
+                        node={props.node}
+                        isBookmarked={props.isBookmarked}
+                        onBookmark={props.onBookmark}
+                        onOpenInPane={props.onOpenInPane}
+                    />
+                </Show>
             </div>
         </div>
     );
