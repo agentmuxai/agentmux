@@ -261,10 +261,11 @@ priority; do only if jank-on-scroll-in remains visible after 4.1/4.2.
 
 ## 9. Risks
 
-- **Re-measure storms:** a `createEffect` calling `virtualizer.measure()` on every
-  `documentState` write could thrash during streaming. Scope the effect to the
-  specific sets (`collapsedNodes`, `pinnedNodes`, `zoomFactor`) — NOT the whole
-  document — so it fires only on the genuine size-affecting toggles, not on every
+- **Re-measure storms (Phase 2):** the Phase 2 `createEffect` calling
+  `virtualizer.measure()` on every `documentState` write could thrash during
+  streaming. Scope it to the specific size-affecting sets (`collapsedNodes`,
+  `pinnedNodes`) — NOT the whole document, and NOT `zoomFactor` (zoom needs no
+  re-measure per §4.1) — so it fires only on genuine toggles, not on every
   token. (Cross-ref the input-responsiveness rules: no layout reads in the
   keystroke path; this effect is off the input path.)
 - **ResizeObserver cost** (Phase 2): bounded to on-screen rows; disconnect on row
