@@ -431,7 +431,22 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                 highlightNodeId={props.highlightNodeId}
                                 onToggleCollapse={props.onToggleCollapse}
                                 onTogglePin={props.onTogglePin}
-                                ref={virtualizer.measureElement}
+                                // data-index is also bound reactively below
+                                // (dataIndex prop), but that binding is a Solid
+                                // render-effect that RACES this ref callback. If
+                                // the ref wins, TanStack's measureElement reads a
+                                // null data-index and returns *before*
+                                // observer.observe(node) — so the row is never
+                                // observed and stays pinned at estimateSize
+                                // forever, overlapping its neighbors. Setting the
+                                // attribute synchronously here, right before
+                                // measureElement, closes that race. Verified via
+                                // live CDP: rows mounting on the losing side of
+                                // the race were stuck at the 32px estimate.
+                                ref={(el) => {
+                                    el.setAttribute("data-index", String(virtualItem.index));
+                                    virtualizer.measureElement(el);
+                                }}
                                 dataIndex={virtualItem.index}
                                 style={{
                                     position: "absolute",
