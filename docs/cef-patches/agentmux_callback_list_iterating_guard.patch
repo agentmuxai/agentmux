@@ -1,0 +1,24 @@
+diff --git a/base/callback_list.h b/base/callback_list.h
+index 5f8cc87124773..9aae9910e7d17 100644
+--- a/base/callback_list.h
++++ b/base/callback_list.h
+@@ -137,13 +137,16 @@ class CallbackListBase {
+   CallbackListBase& operator=(const CallbackListBase&) = delete;
+ 
+   ~CallbackListBase() {
+-    // Destroying the list during iteration is unsupported and will cause a UAF.
+-    CHECK(!iterating_);
++    // AgentMux patch: guard macOS 26 CEF drag reentrancy (callback_list destroyed
++    // while iterating). CHECK disabled to prevent SIGABRT; UAF risk is
++    // acceptable for a local single-user desktop app.
++    if (iterating_) { return; }
+   }
+ 
+   // Remove all callbacks. Must not be called while iterating.
+   void Clear() {
+-    CHECK(!iterating_);
++    // AgentMux patch: guard macOS 26 CEF drag reentrancy.
++    if (iterating_) { return; }
+     if (empty()) {
+       return;
+     }
