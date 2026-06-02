@@ -279,6 +279,14 @@ describe("agent-pane-layout reducer", () => {
             expect(update(s, { type: "NodesChanged", orderedIds: ["a", "b"] }).state).toBe(s);
         });
 
+        it("snapshots the orderedIds payload — caller mutation can't desync state (codex P2)", () => {
+            const mutable = ["a", "b"];
+            const s = apply(initialState(), { type: "NodesChanged", orderedIds: mutable });
+            mutable.pop(); // caller mutates the array AFTER dispatch
+            expect(s.orderedIds).toEqual(["a", "b"]); // state unaffected
+            expect([...s.idSet].sort()).toEqual(["a", "b"]); // idSet still in lockstep
+        });
+
         it("drops a late measurement for a removed id (no stale re-entry)", () => {
             // reagent P2 on #1236: a ResizeObserver firing AFTER NodesChanged
             // removed the row must not write its height back — else re-adding the

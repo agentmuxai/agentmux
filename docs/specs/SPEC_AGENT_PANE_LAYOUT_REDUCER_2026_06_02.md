@@ -205,7 +205,7 @@ Highlights:
   from the prior layout height, that's the *only* thing that shifts subsequent
   positions — deterministically, via the prefix-sum selector, all at once (never
   a partial cache update).
-- **`ExpansionSet`/`AutoExpand*`** change `expansion[nodeId]`; the projected height
+- **`UserExpanded/UserCollapsed`/`AutoExpand*`** change `expansion[nodeId]`; the projected height
   immediately switches to the cached measurement for the new state (or estimate).
   **No DOM round-trip needed to know the target height** — kills the expand race.
 - **`NodesChanged`** replaces `orderedIds` and **prunes** `expansion`/`heights`/
@@ -219,7 +219,7 @@ Mirrors `browser-pane-state-store.ts`: `Map<blockId, Slot{state, proj}>`,
 `registerPane`/`unregisterPane`/`dispatch(blockId, cmd, source)`, project only
 changed fields to Solid signals, `recordDispatch({slice:"agent-pane-layout", ...})`.
 The two **timers** (post-completion hold; user-message hover-expand delay) live
-here as side effects that *dispatch* `AutoExpandHoldExpired` / `ExpansionSet` — the
+here as side effects that *dispatch* `AutoExpandHoldExpired` / `UserExpanded/UserCollapsed` — the
 reducer stays pure (cf. the `postCompletionHold` self-loop bug already documented
 in `ToolBlock.tsx`).
 
@@ -238,7 +238,7 @@ slice.totalSize()     → spacer height
 
 - On a row's `ResizeObserver`/ref fire → `dispatch(RowMeasured{nodeId, state, gbcr.height / zoom})`.
   (The ÷zoom normalization lives at this single boundary — INV-2.)
-- On expand/collapse/pin interaction → `dispatch(ExpansionSet{...})`.
+- On expand/collapse/pin interaction → `dispatch(UserExpanded/UserCollapsed{...})`.
 - On scroll → `dispatch(Scrolled{...})`; on zoom meta change → `dispatch(ZoomChanged)`.
 
 ### 4.1 Relationship to TanStack `@tanstack/virtual-core`
@@ -272,7 +272,7 @@ become thin:
 
 | Today (ad-hoc) | file | Becomes |
 |---|---|---|
-| `documentState.collapsedNodes` / `pinnedNodes` | `types.ts`, `AgentDocumentView` toggles | dispatch `ExpansionSet`; selector reads `expansion` |
+| `documentState.collapsedNodes` / `pinnedNodes` | `types.ts`, `AgentDocumentView` toggles | dispatch `UserExpanded/UserCollapsed`; selector reads `expansion` |
 | `ToolBlock.postCompletionHold` (3s timer) + `autoExpanded()` | `ToolBlock.tsx` | store-layer timer → `AutoExpandStarted` / `AutoExpandHoldExpired`; `expanded()` reads slice |
 | `MarkdownBlock.expanded()` (canceled-thinking) | `MarkdownBlock.tsx` | `UserExpanded` / `UserCollapsed` on click |
 | `UserMessageBlock.hovering` → `bodyMode "overlay"` | `UserMessageBlock.tsx` | **stays component-local** — it's presentational (absolute peek; summary stays in flow) and does **not** change in-flow height, so it is **not** a layout input (resolved OQ-2). |
@@ -294,7 +294,7 @@ reducer would add state with no layout meaning.
   the model against live traffic with zero user-visible change. Ship behind the
   existing dev-only instrumentation.
 - **Phase 1 — unify expansion (§5).** Move `collapsed/pinned/hold/hover/cancel`
-  into the slice; components dispatch `ExpansionSet`. **This alone removes the
+  into the slice; components dispatch `UserExpanded/UserCollapsed`. **This alone removes the
   component-local desync** and makes expansion testable. Still TanStack-measured.
 - **Phase 2 — route measurement (4.1-A).** `estimateSize`/`measureElement` read/
   dispatch through the slice; measurements keyed by `(nodeId, state)` (INV-3).
@@ -317,12 +317,12 @@ The whole point of moving to a reducer is that correctness becomes **provable**,
 per the project's state-machine testing discipline:
 
 - **Property test — non-overlap (INV-1).** For *any* sequence of commands
-  (random `NodesChanged`/`ExpansionSet`/`RowMeasured`/`Scrolled`/`ZoomChanged`),
+  (random `NodesChanged`/`UserExpanded/UserCollapsed`/`RowMeasured`/`Scrolled`/`ZoomChanged`),
   assert `positions()` is monotonic: `start[i+1] === end[i]` for all i. This is the
   invariant #1235 violates; here it holds by construction and is *tested* to stay
   so under churn. (Anti-vacuity: assert the generated sequence actually produced
   ≥1 measurement that changed a height.)
-- **State cross-product.** `expansion ∈ {collapsed, expanded, overlay}` ×
+- **State cross-product.** `expansion ∈ {collapsed, expanded}` ×
   `measured? ∈ {yes,no}` × `zoom ∈ {0.5,1,2}` × `churn ∈ {toggle, stream-grow,
   prune}` — table-drive the reducer; assert effective height + position for each
   cell. Build this table *before* coding (cf. the orchestrator-test lesson from
@@ -380,7 +380,7 @@ per the project's state-machine testing discipline:
 | `frontend/app/store/agent-pane-layout-store.ts` | new — dispatch layer, projections, timers, `recordDispatch` |
 | `frontend/app/store/agent-pane-layout/reducer.test.ts` | new — property + cross-product tests (§7) |
 | `frontend/app/view/agent/components/ToolBlock.tsx` | read expansion from slice; dispatch on pin; store-layer hold timer |
-| `frontend/app/view/agent/components/UserMessageBlock.tsx`, `MarkdownBlock.tsx`, `AgentDocumentView.tsx` | dispatch `ExpansionSet`; drop local expansion signals |
+| `frontend/app/view/agent/components/UserMessageBlock.tsx`, `MarkdownBlock.tsx`, `AgentDocumentView.tsx` | dispatch `UserExpanded/UserCollapsed`; drop local expansion signals |
 | `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx` | (Ph2/3) read positions/window from slice; route measurement |
 | `frontend/app/view/agent/virtualization/renderers.ts` | estimators become `EstimateSet` producers keyed by state |
 | `frontend/app/devtools/diag-panel.tsx` | surfaces the new slice automatically (audit ring) |

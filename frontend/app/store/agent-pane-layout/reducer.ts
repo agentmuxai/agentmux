@@ -122,7 +122,12 @@ export function update(
             return {
                 state: {
                     ...state,
-                    orderedIds: next,
+                    // Snapshot the payload: `ReadonlyArray` is a compile-time
+                    // contract, not a runtime guarantee. A caller could pass a
+                    // live array and later mutate it, which would silently change
+                    // `orderedIds` without rebuilding `idSet` / re-pruning the
+                    // maps. (codex P2 on #1236.)
+                    orderedIds: [...next],
                     idSet: keep,
                     heights,
                     estimates,
