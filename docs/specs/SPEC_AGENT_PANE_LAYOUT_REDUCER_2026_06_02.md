@@ -168,7 +168,7 @@ expiry becomes a no-op).
 ```ts
 export type AgentPaneLayoutEvent =
     | { type: "row-measured"; nodeId: string; state: ExpansionState; delta: number }
-    | { type: "expansion-changed"; nodeId: string; from: ExpansionState; to: ExpansionState }
+    | { type: "expansion-changed"; nodeId: string; from: Expansion; to: Expansion } // Expansion = {open:false}|{open:true;via:"pin"|"auto"} — carries `via` so consumers can tell a user-pin from an auto-hold
     | { type: "measurement-invalidated"; nodeId: string }
     | { type: "zoom-changed-no-relayout"; zoom: number }   // explicit: proves INV-2 held
     | { type: "ids-pruned"; removed: number }
@@ -178,10 +178,11 @@ export type AgentPaneLayoutEvent =
 ### 3.4 Selectors (pure projections — the renderer reads these)
 
 ```ts
-// effective in-flow height of a row, current state, unzoomed CSS px
+// effective in-flow height of a row, current state, unzoomed CSS px.
+// (Matches the shipped impl: no "overlay" branch — overlay is presentational,
+// not a layout state, per OQ-2/§3.1/§5. state = inFlowState(expansion.get(id)).)
 effectiveHeight(s, id): number =
-    s.expansion.get(id) === "overlay" ? 0
-    : (s.heights.get(id)?.[state] ?? s.estimates.get(id)?.[state] ?? DEFAULT_ESTIMATE)
+    s.heights.get(id)?.[state] ?? s.estimates.get(id)?.[state] ?? DEFAULT_ROW_PX
 
 // prefix-sum positions — THE guarantee (INV-1). O(n); see §7 perf note.
 positions(s): Array<{ id; start; height }>   // start[i+1] = start[i] + height[i]
