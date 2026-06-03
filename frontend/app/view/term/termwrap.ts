@@ -591,17 +591,18 @@ export class TermWrap {
 
     // FitAddon v0.11.0 subtracts `overviewRuler.width || 14` from available width
     // whenever scrollback > 0. We don't use the overview ruler or Monaco-style scrollbar —
-    // our CSS webkit scrollbar is 6px and overlaps the content. This corrects for the
-    // discrepancy so the terminal fills the pane correctly.
+    // our CSS webkit scrollbar is now 14px (term.scss .xterm-viewport). With the
+    // scrollbar matching FitAddon's 14px reservation the correction is currently 0,
+    // but the constants remain so a future width change re-derives it automatically.
     //
     // FITADDON_SCROLLBAR_ASSUMPTION: the width FitAddon reserves for the right-side
     // scrollbar/overview ruler when no overviewRuler is configured (hardcoded in addon-fit.js).
     // CSS_SCROLLBAR_WIDTH: our actual webkit scrollbar width (term.scss .xterm-viewport).
     // If either value changes, update both constants to match.
     private static readonly FITADDON_SCROLLBAR_ASSUMPTION = 14; // px — FitAddon's `overviewRuler.width || 14`
-    private static readonly CSS_SCROLLBAR_WIDTH = 6;            // px — our webkit scrollbar (term.scss)
+    private static readonly CSS_SCROLLBAR_WIDTH = 14;           // px — our webkit scrollbar (term.scss)
     private static readonly FIT_WIDTH_CORRECTION =
-        TermWrap.FITADDON_SCROLLBAR_ASSUMPTION - TermWrap.CSS_SCROLLBAR_WIDTH; // = 8px
+        TermWrap.FITADDON_SCROLLBAR_ASSUMPTION - TermWrap.CSS_SCROLLBAR_WIDTH; // = 0px
 
     private customFit() {
         const dims = this.fitAddon.proposeDimensions();
