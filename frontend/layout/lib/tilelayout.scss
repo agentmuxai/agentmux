@@ -173,9 +173,9 @@
         // the whole point of the two-div split. 120ms matches the
         // inner `.placeholder` opacity/scale transitions so the
         // visual response is uniform across enter / drag-move / exit.
-        // `!important`: same essential-motion exemption as `.tile-node` above —
-        // the drag-rearrange placeholder glide is a spatial cue and must beat
-        // the global reduced-motion reset.
+        // `!important`: the drag-rearrange placeholder glide is essential spatial
+        // motion (a cue, not decoration), so it must beat the global
+        // reduced-motion reset in app.scss.
         .placeholder-sizer {
             transition: transform 120ms ease-out !important;
         }
