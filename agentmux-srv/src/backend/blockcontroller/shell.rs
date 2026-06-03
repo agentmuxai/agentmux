@@ -631,7 +631,8 @@ impl Controller for ShellController {
         let is_agent = agent_id_for_jekt.is_some()
             || cmd_str.to_lowercase().contains("claude")
             || cmd_str.to_lowercase().contains("codex")
-            || cmd_str.to_lowercase().contains("gemini");
+            || cmd_str.to_lowercase().contains("gemini")
+            || cmd_str.to_lowercase().contains("qwen");
 
         // Register PID and record spawn metadata.
         let spawn_ts_ms = SystemTime::now()
