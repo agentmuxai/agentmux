@@ -92,9 +92,11 @@ export function buildRuntimeArgs(
         args.push(...permFlags);
     }
 
-    // --model: claude + gemini use the Claude-named ModelChoice. Codex is handled
-    // separately below (its own gpt-5.x namespace). --effort: claude only.
-    const supportsModel = !providerId || providerId === "claude" || providerId === "gemini";
+    // --model: claude only. ModelChoice values (opus/sonnet/haiku) are Claude
+    // model names; codex (handled below) and gemini use their own model
+    // namespaces, so a Claude name is rejected. gemini falls back to its CLI
+    // default until a per-provider model list lands. --effort: claude only.
+    const supportsModel = !providerId || providerId === "claude";
     if (supportsModel) {
         args.push("--model", config.model);
     }
