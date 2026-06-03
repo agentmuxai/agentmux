@@ -341,12 +341,11 @@ const DisplayNode = (props: DisplayNodeProps) => {
     let leafRef: HTMLDivElement | undefined;
     const addlProps = () => nodeModel.additionalProps();
 
-    // Ping the shared reflow signal whenever this node's geometry changes
-    // while animations are live (i.e. not during the first-paint reveal gate
-    // and not during a resize drag). Native browser panes read the signal to
-    // drive per-frame SetWindowPos so their HWND glides in lockstep with the
-    // CSS-animating DOM. DOM panes need nothing here — they ride the CSS
-    // transitions directly. See SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md.
+    // Ping the shared settle signal whenever this node's geometry changes
+    // outside the first-paint reveal gate and a resize drag. Native browser
+    // panes read the signal to re-sample + SetWindowPos their HWND onto the new
+    // rect. (The CSS reflow animation this once tracked was removed; DOM panes
+    // just take the new rect directly.) See SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md.
     let prevGeomKey: string | undefined;
     createEffect(() => {
         const t = addlProps()?.transform as JSX.CSSProperties | undefined;
