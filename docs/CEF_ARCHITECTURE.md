@@ -74,12 +74,13 @@ CEF maintains branches that track Chromium release milestones:
 - **LTS (Long-Term Support)** — Every 6th branch starting with M138 receives extended support (~8 additional months of security fixes after exiting stable).
 - **Legacy** — Old branches (back to 2704) available but unsupported.
 
-Current branch-to-Chromium mapping (as of early 2026):
+Current branch-to-Chromium mapping (as of mid-2026):
 
 | Branch | Chromium | Channel |
 |--------|----------|---------|
-| 7727 | 147 | Beta |
-| 7680 | 146 | Stable |
+| 7778 | 148 | Stable (AgentMux ships) |
+| 7727 | 147 | (now demoted past Stable) |
+| 7680 | 146 | (previous Stable; AgentMux shipped from this branch through v0.40.x) |
 | 7204 | 138 | LTS |
 
 The `CHROMIUM_BUILD_COMPATIBILITY.txt` file in the CEF repo specifies the exact Chromium version for any given branch/commit. The generated `cef_version.h` header contains all version information at compile time.
