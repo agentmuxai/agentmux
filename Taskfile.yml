@@ -520,6 +520,14 @@ tasks:
                   exit 1
                 fi
                 echo "Found runtime binaries in: $cefDir"
+                # Guard: the bundled libcef.dll MUST match the linked `cef` crate
+                # major. target/release can hold a STALE DLL from a previous CEF
+                # version that an incremental build never refreshed (the 146→148
+                # regression: a 148-linked host bundled a 146 libcef.dll → died at
+                # startup with "unsupported CEF API version 14800", splash then no
+                # window). Fail loudly here instead of shipping a broken build.
+                # See docs/specs/SPEC_WINDOWS_CEF_BUNDLE_VERSION_INTEGRITY_2026_06_03.md.
+                bash scripts/verify-cef-version.sh "$cefDir" || exit 1
                 mkdir -p dist/cef/locales
                 # Core DLLs (required)
                 cp -f "$cefDir/libcef.dll" dist/cef/
@@ -913,6 +921,43 @@ tasks:
               ignore_error: true
             - cmd: '{{.RMRF}} "dist/cef-dev"'
               ignore_error: true
+
+    clean:cef:
+        desc: >-
+            Remove the extracted/bundled CEF runtime so the next build
+            re-materializes one matching the linked `cef` crate. Use after a CEF
+            version bump if target/release holds a stale libcef (see
+            SPEC_WINDOWS_CEF_BUNDLE_VERSION_INTEGRITY_2026_06_03.md).
+        cmds:
+            # ROOT CAUSE of the 148-host/146-runtime skew: the `cef` crate's
+            # build-util stages a pinned CEF SDK here and REUSES it across crate
+            # version bumps (the staging is NOT version-keyed), so a 146→148 crate
+            # bump kept serving the old 146 libcef. Remove it so the next build
+            # re-downloads the CEF matching the linked crate.
+            - cmd: '{{.RMRF}} "target/cef-sdk"'
+              ignore_error: true
+            # Drop cef-dll-sys build dirs so cargo re-runs its build script and
+            # re-copies the correct CEF runtime into target/ on the next build.
+            # Use `bash -c` so the globs expand on EVERY OS: {{.RMRF}} double-
+            # quotes its path, and POSIX `rm -rf` does not glob inside quotes
+            # (only Windows PowerShell Remove-Item expands a quoted wildcard),
+            # so a quoted glob would silently leave the cef-dll-sys-<hash> dirs
+            # behind off-Windows. bash is already a build dependency everywhere
+            # (build:host:linux/windows, package, scripts/* all shell out to it).
+            - cmd: bash -c 'rm -rf target/release/build/cef-dll-sys-* target/fast-release/build/cef-dll-sys-* target/debug/build/cef-dll-sys-*'
+              ignore_error: true
+            # Drop the top-level runtime copies that bundle:* reads from.
+            - cmd: '{{.RMRF}} "target/release/libcef.dll"'
+              ignore_error: true
+            - cmd: '{{.RMRF}} "target/release/libcef.so"'
+              ignore_error: true
+            - cmd: '{{.RMRF}} "target/release/icudtl.dat"'
+              ignore_error: true
+            - cmd: '{{.RMRF}} "target/release/v8_context_snapshot.bin"'
+              ignore_error: true
+            - cmd: '{{.RMRF}} "target/release/locales"'
+              ignore_error: true
+            - echo "✓ Cleared CEF runtime artifacts — next 'task build:host' will re-materialize CEF"
 
     # ========================================
     # End Host Tasks

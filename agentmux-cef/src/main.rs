@@ -730,6 +730,39 @@ fn main() {
                     exit_code,
                     "CEF initialization failed; see ~/.agentmux/logs/cef-debug.log for details"
                 );
+                // Surface a user-facing error instead of a silent splash-then-exit.
+                // The most common cause is a bundled CEF runtime whose version does
+                // not match the linked `cef` crate (e.g. a stale libcef.dll) — that
+                // path logs "Request for unsupported CEF API version NNNNN" to
+                // cef-debug.log and would otherwise just vanish after the splash.
+                // See docs/specs/SPEC_WINDOWS_CEF_BUNDLE_VERSION_INTEGRITY_2026_06_03.md.
+                #[cfg(target_os = "windows")]
+                {
+                    use windows_sys::Win32::UI::WindowsAndMessaging::{
+                        MessageBoxW, MB_ICONERROR, MB_OK,
+                    };
+                    let title: Vec<u16> =
+                        "AgentMux — startup failed\0".encode_utf16().collect();
+                    let body = format!(
+                        "AgentMux couldn't start its browser engine (CEF init failed, code {}).\n\n\
+                         This usually means the bundled browser runtime is incompatible with this \
+                         build — for example a stale or mismatched libcef.dll from an incomplete build.\n\n\
+                         Details were written to:\n    %USERPROFILE%\\.agentmux\\logs\\cef-debug.log\n\n\
+                         If you built this locally, run:  task clean:cef && task build:host",
+                        exit_code
+                    );
+                    let body_w: Vec<u16> =
+                        body.encode_utf16().chain(std::iter::once(0)).collect();
+                    // SAFETY: null parent HWND with valid NUL-terminated wide strings.
+                    unsafe {
+                        MessageBoxW(
+                            std::ptr::null_mut(),
+                            body_w.as_ptr(),
+                            title.as_ptr(),
+                            MB_OK | MB_ICONERROR,
+                        );
+                    }
+                }
                 std::process::exit(exit_code);
             }
         }
