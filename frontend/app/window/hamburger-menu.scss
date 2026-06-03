@@ -1,0 +1,45 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Hamburger (☰) button. Top-level (un-nested) so the same rule applies
+// whether the button is rendered inside `.tab-bar` (Windows/Linux) or as a
+// direct child of `.window-header` (macOS far-right). Moved here from
+// tabbar.scss when the menu was extracted into <HamburgerMenu>.
+
+.hamburger-btn {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 27px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: var(--accent-color);
+    -webkit-app-region: no-drag;
+    cursor: pointer;
+    align-self: center;
+
+    &:hover {
+        color: color-mix(in srgb, var(--accent-color), white 25%);
+    }
+
+    // Inline SVG (replaces fa-bars icon font). Icon fonts rasterize
+    // each glyph independently at the zoomed size; tiny sub-pixel
+    // boundary differences caused one of the three hamburger bars
+    // to render thinner than the other two, with a different bar
+    // affected at each zoom level. SVG rectangles fill uniformly
+    // and scale predictably with parent zoom.
+    svg {
+        display: block;
+    }
+
+    // macOS: pinned to the far right of the title bar, after the action
+    // widgets. Add breathing room so it doesn't sit flush against the
+    // window's right frame.
+    &--right {
+        margin-left: 4px;
+        margin-right: 8px;
+    }
+}

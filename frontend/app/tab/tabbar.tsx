@@ -1,21 +1,14 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, createTab, getApi, setActiveTab, settingsAtom } from "@/store/global";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
-import { THEME_OPTIONS } from "@/app/menu/base-menus";
-import { FlyoutMenu } from "@/app/element/flyoutmenu";
-import { invokeCommand } from "@/app/platform/ipc";
+import { atoms, getApi, setActiveTab } from "@/store/global";
 import { fireAndForget } from "@/util/util";
-import { openModal } from "@/app/store/modalmodel";
-import { CommandPaletteModal } from "@/app/modals/command-palette";
-import { openBundleManager } from "@/app/modals/bundle-manager-modal";
 import { isMacOS } from "@/util/platformutil";
+import { HamburgerMenu } from "@/app/window/hamburger-menu";
 import { getTabGrabOffset } from "./tab-grab-offset";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { createMemo, For, onCleanup, onMount, Show } from "solid-js";
+import { For, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import { ObjectService, WorkspaceService } from "../store/services";
 import { makeORef, getObjectValue } from "../store/wos";
@@ -602,148 +595,15 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     const activeIndex = () => tabIds().indexOf(activeTabId());
 
-    const tabBarMenuItems = createMemo((): MenuItem[] => {
-        const settings = settingsAtom() ?? ({} as any);
-
-        const currentTheme = (settings["window:theme"] as string) || "default";
-        const themeSubItems: MenuItem[] = THEME_OPTIONS.map((opt) => ({
-            label: opt.label,
-            checked: currentTheme === opt.id,
-            onClick: () => {
-                fireAndForget(() =>
-                    RpcApi.SetConfigCommand(TabRpcClient, { "window:theme": opt.id } as any),
-                );
-            },
-        }));
-
-        const rawOpacity = (settings["window:opacity"] as number) ?? 0.8;
-        const isTransparent = (settings["window:transparent"] as boolean) ?? false;
-        const effectiveOpacity = isTransparent ? rawOpacity : 1.0;
-        const opacityStep = Math.round(effectiveOpacity * 20) / 20;
-        const opacitySubItems: MenuItem[] = [];
-        for (let pct = 100; pct >= 35; pct -= 5) {
-            const value = pct / 100;
-            opacitySubItems.push({
-                label: `${pct}%`,
-                checked: Math.abs(value - opacityStep) < 0.001,
-                onClick: () => {
-                    fireAndForget(() =>
-                        value < 1.0
-                            ? RpcApi.SetConfigCommand(TabRpcClient, {
-                                  "window:opacity": value,
-                                  "window:transparent": true,
-                              } as any)
-                            : RpcApi.SetConfigCommand(TabRpcClient, {
-                                  "window:opacity": 1.0,
-                                  "window:transparent": false,
-                              } as any),
-                    );
-                },
-            });
-        }
-
-        const mac = isMacOS();
-        const kbd = (m: string, w: string) => (mac ? m : w);
-
-        return [
-            {
-                label: "New Tab",
-                icon: "plus",
-                shortcut: kbd("⌘T", "Ctrl+T"),
-                onClick: () => createTab(),
-            },
-            { label: "", divider: true },
-            {
-                label: "New Window",
-                icon: "window-restore",
-                shortcut: kbd("⌘⇧N", "Ctrl+Shift+N"),
-                onClick: () => getApi().openNewWindow().catch(console.error),
-            },
-            { label: "", divider: true },
-            {
-                label: "Theme",
-                icon: "palette",
-                subItems: themeSubItems,
-            },
-            {
-                label: "Opacity",
-                icon: "circle-half-stroke",
-                subItems: opacitySubItems,
-            },
-            { label: "", divider: true },
-            {
-                label: "Settings",
-                icon: "cog",
-                onClick: () =>
-                    fireAndForget(async () => {
-                        const path = await invokeCommand<string>("ensure_settings_file");
-                        await invokeCommand("open_in_editor", { path });
-                    }),
-            },
-            {
-                label: "Command Palette",
-                icon: "magnifying-glass",
-                shortcut: kbd("⌘P", "Ctrl+P"),
-                onClick: () => openModal(CommandPaletteModal),
-            },
-            {
-                // Bundle-management PR 4 (Feature 2) — the app-wide
-                // Identity & Memory bundle manager. Opens the manager
-                // modal here when the app-wide singleton is free; when it
-                // is held in another window, focuses that window instead
-                // (the persistent "open elsewhere" banner stays the
-                // durable affordance). See SPEC_BUNDLE_MANAGEMENT §3.
-                label: "Identity & Memory",
-                icon: "id-card",
-                onClick: () => openBundleManager(),
-            },
-            {
-                label: "DevTools",
-                icon: "code",
-                onClick: () => getApi().toggleDevtools(),
-            },
-            {
-                label: "Online Docs",
-                icon: "book",
-                onClick: () => getApi().openExternal("https://docs.agentmux.ai"),
-            },
-            { label: "", divider: true },
-            {
-                label: "Exit",
-                icon: "right-from-bracket",
-                onClick: () => fireAndForget(() => invokeCommand("close_window", {})),
-            },
-        ];
-    });
-
     return (
         <div class="tab-bar" {...dragProps}>
-            <FlyoutMenu
-                items={tabBarMenuItems()}
-                placement="bottom-start"
-            >
-                <button class="hamburger-btn" title="Menu" data-drag-region="false">
-                    {/*
-                     * Inline SVG with three filled rects instead of
-                     * `fa fa-bars`. Icon-font glyphs rasterized one of
-                     * the three lines on a fractional pixel boundary at
-                     * different chrome zoom levels, making it noticeably
-                     * thinner — and the affected line shifted as zoom
-                     * changed. Filled rects scale uniformly with the
-                     * parent's CSS zoom, no rasterization unevenness.
-                     */}
-                    <svg
-                        width="26"
-                        height="22"
-                        viewBox="0 0 26 22"
-                        fill="currentColor"
-                    >
-                        <rect x="2" y="3" width="22" height="3" rx="1" />
-                        <rect x="2" y="10" width="22" height="3" rx="1" />
-                        <rect x="2" y="17" width="22" height="3" rx="1" />
-                    </svg>
-                </button>
-            </FlyoutMenu>
+            {/* Windows/Linux: hamburger sits at the LEFT of the tab strip.
+                On macOS it's rendered at the far right of the window header
+                instead (see window-header.tsx) so it clears the native
+                traffic-light controls. */}
+            <Show when={!isMacOS()}>
+                <HamburgerMenu />
+            </Show>
             <div ref={tabBarScrollRef!} class="tab-bar-scroll" data-drag-region="false">
                 <For each={tabIds()}>
                     {(tabId, i) => (

@@ -26,6 +26,16 @@ type MenuProps = {
     items: MenuItem[];
     className?: string;
     placement?: Placement;
+    /**
+     * Mirror the menu for a right-anchored (left-opening) placement: items are
+     * laid out right-to-left (icon on the right, label right-aligned, chevron
+     * on the left pointing left) and submenus prefer to open to the LEFT.
+     * Use for menus anchored to the right edge (e.g. the macOS far-right
+     * hamburger). Best practice for edge-anchored menus — the disclosure arrow
+     * points the same way the submenu actually opens. Default off; every other
+     * menu keeps the standard left-to-right layout.
+     */
+    mirrored?: boolean;
     onOpenChange?: (isOpen: boolean) => void;
     children?: JSX.Element;
     renderMenu?: (subMenu: JSX.Element, props: any) => JSX.Element;
@@ -167,7 +177,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
             <Show when={isOpen()}>
                 <Portal>
                     <div
-                        class={clsx("menu", props.className)}
+                        class={clsx("menu", props.className, { "menu--mirrored": props.mirrored })}
                         ref={registerFloating}
                         style={floatingStyle()}
                         data-pane-overlay
@@ -232,6 +242,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
                                                 handleOnClick={handleOnClick}
                                                 renderMenu={props.renderMenu}
                                                 renderMenuItem={props.renderMenuItem}
+                                                mirrored={props.mirrored}
                                             />
                                         </Show>
                                     </>
@@ -267,6 +278,7 @@ type SubMenuProps = {
     handleOnClick: (e: MouseEvent, item: MenuItem) => void;
     renderMenu?: (subMenu: JSX.Element, props: any) => JSX.Element;
     renderMenuItem?: (item: MenuItem, props: any) => JSX.Element;
+    mirrored?: boolean;
 };
 
 const SubMenu = (props: SubMenuProps): JSX.Element => {
@@ -287,8 +299,14 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
             const update = async () => {
                 const cur = position();
                 if (!cur) return;
+                // Mirrored (right-anchored) menus prefer to open submenus to
+                // the LEFT; flip() still sends them right if there's no room.
+                // Standard menus prefer right, flipping left near the edge.
                 const computed = await computeMenuPosition(
-                    { anchor: cur.anchorRect, placement: "right-start" },
+                    {
+                        anchor: cur.anchorRect,
+                        placement: props.mirrored ? "left-start" : "right-start",
+                    },
                     el,
                 );
                 setSubStyle(styleToString(computed.style));
@@ -311,7 +329,7 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
     const subMenu = (
         <div
             ref={registerSubMenu}
-            class="menu sub-menu"
+            class={clsx("menu sub-menu", { "menu--mirrored": props.mirrored })}
             style={subStyle()}
             data-pane-overlay
         >
@@ -375,6 +393,7 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
                                     handleOnClick={props.handleOnClick}
                                     renderMenu={props.renderMenu}
                                     renderMenuItem={props.renderMenuItem}
+                                    mirrored={props.mirrored}
                                 />
                             </Show>
                         </>
