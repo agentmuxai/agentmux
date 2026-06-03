@@ -907,16 +907,21 @@ function bumpEvent(
 }
 
 /**
- * Mirror of the prior finalizeTurn merge: prefer the explicit stats from
- * the result event, but inject live turn-token totals because the result
- * event sometimes lacks them.
+ * Mirror of the prior finalizeTurn merge: prefer live turn-token totals when
+ * present (the result event sometimes lacks them), else keep the stats the
+ * event itself carried. Codex sets input/output from `total_usage` and emits
+ * no Anthropic-style live tokens, so an unconditional overwrite blanks them.
  */
 function mergeStats(
     stats: AgentPaneState["sessionStats"],
     tokens: AgentPaneState["turnTokens"],
 ): AgentPaneState["sessionStats"] {
     if (stats) {
-        return { ...stats, input_tokens: tokens?.input, output_tokens: tokens?.output };
+        return {
+            ...stats,
+            input_tokens: tokens?.input ?? stats.input_tokens,
+            output_tokens: tokens?.output ?? stats.output_tokens,
+        };
     }
     if (tokens) {
         return { input_tokens: tokens.input, output_tokens: tokens.output };
