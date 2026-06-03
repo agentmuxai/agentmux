@@ -69,11 +69,14 @@ describe("buildRuntimeArgs", () => {
         });
     });
 
-    describe("gemini (unchanged)", () => {
-        it("uses --yolo for a non-default permission mode, never the Claude bypass flag", () => {
+    describe("gemini", () => {
+        it("uses --yolo for a non-default mode; no Claude bypass flag and no Claude --model", () => {
             const out = buildRuntimeArgs(["--output-format", "stream-json", "-p", ""], cfg(), "gemini");
             expect(out).toContain("--yolo");
             expect(out).not.toContain("--dangerously-skip-permissions");
+            // gemini no longer receives the Claude-named ModelChoice (it rejects it)
+            expect(out).not.toContain("--model");
+            expect(out).not.toContain("sonnet");
         });
 
         it("no --yolo when the permission mode is default", () => {

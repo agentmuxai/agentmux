@@ -1,7 +1,7 @@
 // Copyright 2025, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { StreamEvent, ToolCallEvent, ToolResultEvent } from "../types";
+import type { SessionStats, StreamEvent, ToolCallEvent, ToolResultEvent } from "../types";
 import type { OutputTranslator } from "./translator";
 
 /**
@@ -31,9 +31,21 @@ export class GeminiTranslator implements OutputTranslator {
 
         switch (type) {
             case "init":
-            case "result":
-                // Lifecycle events — no display content
+                // Lifecycle event — no display content
                 return [];
+
+            case "result": {
+                // Gemini's turn-end → the provider-agnostic `session_end` the
+                // conversation reducer uses to finalize the turn (which stops the
+                // working spinner). Mirrors the claude/codex translators.
+                const stats: SessionStats = {};
+                const s = rawEvent.stats;
+                if (s && typeof s === "object") {
+                    if (typeof s.input_tokens === "number") stats.input_tokens = s.input_tokens;
+                    if (typeof s.output_tokens === "number") stats.output_tokens = s.output_tokens;
+                }
+                return [{ type: "session_end", stats }];
+            }
 
             case "message": {
                 if (rawEvent.role !== "assistant") return [];
