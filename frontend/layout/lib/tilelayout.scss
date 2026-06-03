@@ -162,26 +162,6 @@
     }
 
     &.animate {
-        // `.tile-node` inline styles include width/height alongside
-        // transform — pane split/close/rebalance needs all three
-        // animated for the resize to be smooth. Codex P2 on PR #829.
-        .tile-node {
-            // ease-out (fast start, gentle settle) reads better than linear
-            // for a discrete open/close reflow. The same curve is used by the
-            // `.block-content` size transition (block.scss) so wrapper and
-            // content stay visually in sync.
-            //
-            // `!important` is a DELIBERATE essential-motion exemption: pane
-            // open/close/split is a spatial cue (where did my pane go?), not
-            // decoration, so it animates even when the user prefers reduced
-            // motion. The global accessibility reset in app.scss
-            // (`.prefers-reduced-motion * { transition-property: none !important }`)
-            // would otherwise kill it; a higher-specificity `!important` rule
-            // beats that blanket. Product decision, 2026-05-29.
-            transition-duration: var(--animation-time-s) !important;
-            transition-timing-function: cubic-bezier(0.2, 0, 0, 1) !important;
-            transition-property: width, height, transform !important;
-        }
         // `.placeholder-sizer` only changes transform during drag-move
         // (width/height are set once per zone change and snap instantly
         // — that's the whole point of the two-div split). Use a
@@ -193,9 +173,9 @@
         // the whole point of the two-div split. 120ms matches the
         // inner `.placeholder` opacity/scale transitions so the
         // visual response is uniform across enter / drag-move / exit.
-        // `!important`: same essential-motion exemption as `.tile-node` above —
-        // the drag-rearrange placeholder glide is a spatial cue and must beat
-        // the global reduced-motion reset.
+        // `!important`: the drag-rearrange placeholder glide is essential spatial
+        // motion (a cue, not decoration), so it must beat the global
+        // reduced-motion reset in app.scss.
         .placeholder-sizer {
             transition: transform 120ms ease-out !important;
         }
@@ -246,12 +226,10 @@
     }
 
     // NOTE — no `prefers-reduced-motion` suppression here by design.
-    // Pane reflow (`.tile-node`, `.block-content`) and the drag-rearrange
-    // glide (`.placeholder-sizer`) are treated as ESSENTIAL spatial motion
-    // and animate regardless of the reduced-motion preference — see the
-    // `!important` exemptions above. The inner `.placeholder` opacity/scale
-    // fade is decorative and intentionally left subject to the global
-    // accessibility reset in app.scss (no `!important`), so it still snaps
-    // for reduced-motion users while the position glide survives.
-    // Product decision, 2026-05-29.
+    // The drag-rearrange glide (`.placeholder-sizer`) is treated as ESSENTIAL
+    // spatial motion and animates regardless of the reduced-motion preference —
+    // see the `!important` exemption above. The inner `.placeholder`
+    // opacity/scale fade is decorative and intentionally left subject to the
+    // global accessibility reset in app.scss (no `!important`), so it still
+    // snaps for reduced-motion users while the position glide survives.
 }

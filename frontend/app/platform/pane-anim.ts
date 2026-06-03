@@ -1,40 +1,42 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Shared "a pane reflow animation is in flight" signal.
+// Shared "a pane geometry change just happened — settle native panes" signal.
 //
-// Native browser panes are real child windows (HWNDs) that CSS cannot move,
-// so they can't ride the `.tile-node` / `.block-content` CSS transitions the
-// way DOM panes do. Instead, while a reflow animation is playing, the tiling
-// layout pings `notifyPaneReflow()` (on any node geometry change that isn't a
-// resize drag), and each browser pane (`browser-view.tsx`) re-samples its
-// placeholder's live `getBoundingClientRect()` every frame and forwards it via
-// `browser_pane_resize` → `SetWindowPos`. The native window therefore tracks
-// exactly what its CSS-animating DOM placeholder is doing — one clock, no drift.
+// Native browser panes are real child windows (HWNDs) that CSS cannot move, so
+// a layout change doesn't reposition them the way it does DOM panes. On any node
+// geometry change that isn't a resize drag the tiling layout pings
+// `notifyPaneReflow()`, opening a short window during which each browser pane
+// (`browser-view.tsx`) re-samples its placeholder's live
+// `getBoundingClientRect()` and forwards it via `browser_pane_resize` →
+// `SetWindowPos`, settling the HWND onto the new rect. (The pane reflow CSS
+// animation this once tracked frame-by-frame was removed; the placeholder no
+// longer animates, so the window just covers rAF/scheduler slack before the
+// rect is final.)
 //
 // See docs/specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md.
 
 import { createSignal } from "solid-js";
 
-// A little longer than the 150ms layout animation so the per-frame sampling
-// covers the easing tail and any rAF/scheduler slack before settling.
+// Short settle window after the layout applies the new rect synchronously —
+// covers rAF/scheduler slack so the per-frame sampling lands on the final rect.
 const REFLOW_WINDOW_MS = 220;
 
-// Wall-clock instant (performance.now() ms) until which a reflow is considered
-// active. Stored in a signal so consumers can reactively start their sampling
-// loop the moment a reflow begins.
+// Wall-clock instant (performance.now() ms) until which the post-change settle
+// window is open. Stored in a signal so consumers can reactively start their
+// sampling loop the moment a change begins.
 const [animatingUntil, setAnimatingUntil] = createSignal(0);
 
-/** Called by the layout when a pane's geometry changes during an animation. */
+/** Called by the layout on a pane geometry change (open/close/split/rebalance). */
 export function notifyPaneReflow(): void {
     setAnimatingUntil(performance.now() + REFLOW_WINDOW_MS);
 }
 
 /**
- * True while a reflow is in flight. Reads the `animatingUntil` signal (so a
- * `createEffect` calling this re-runs when a reflow begins) and compares it to
- * the current time (so a per-frame loop calling this stops once the window
- * elapses).
+ * True while the post-change settle window is open. Reads the `animatingUntil`
+ * signal (so a `createEffect` calling this re-runs when a change begins) and
+ * compares it to the current time (so a per-frame loop calling this stops once
+ * the window elapses).
  */
 export function paneReflowActive(): boolean {
     return performance.now() < animatingUntil();

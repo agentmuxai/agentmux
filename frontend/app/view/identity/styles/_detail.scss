@@ -49,10 +49,10 @@
     padding: var(--space-2) var(--space-3);
 
     &::-webkit-scrollbar {
-        width: 4px;
+        width: 14px;
     }
     &::-webkit-scrollbar-thumb {
-        background: var(--border-color);
+        background: var(--scrollbar-thumb-color);
         border-radius: 0;
     }
 }

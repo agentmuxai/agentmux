@@ -18,7 +18,9 @@
  * simplified: the status icon, tool name, summary, and duration are on
  * the collapsed row above, so the header carries only the status label.
  * The on-hover timestamp slot was later removed. The header is omitted
- * while running — the body's "Thinking…" spinner already conveys that.
+ * while running (the body's "Thinking…" spinner conveys that) and on
+ * success (the collapsed row already shows the outcome) — so it appears
+ * only for failed / denied / canceled / awaiting-approval statuses.
  */
 
 import { type JSX } from "solid-js";
@@ -48,7 +50,12 @@ export const ToolBlockOverlay = (props: ToolBlockOverlayProps): JSX.Element => (
     <div class="agent-tool-overlay" data-node-id={props.node.id}>
         <div
             class="agent-tool-overlay-header"
-            style={{ display: props.node.status === "running" ? "none" : "" }}
+            style={{
+                display:
+                    props.node.status === "running" || props.node.status === "success"
+                        ? "none"
+                        : "",
+            }}
         >
             <span class="agent-tool-overlay-status-label">
                 {STATUS_LABEL[props.node.status]}

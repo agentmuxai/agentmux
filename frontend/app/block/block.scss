@@ -514,26 +514,6 @@
     }
 }
 
-// ── Pane reflow animation: content tracks the wrapper ───────────────────────
-// On open/close/split/rebalance the layout applies the new inner rect to
-// `.block-content` immediately (layoutModelHooks), and the `.tile-node`
-// wrapper eases to its new box. Transition the content's width/height with
-// the SAME duration + curve so the pane's body glides in lockstep instead of
-// snapping. Gated on `.tile-layout.animate`, which is OFF during a resize
-// drag (so the body follows the cursor instantly) and absent for the first
-// 150ms after mount (reveal gate). The size change drives a one-shot reflow
-// of the pane's content (xterm/CodeMirror) over the animation window.
-// See docs/specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md.
-// `!important` is a deliberate essential-motion exemption (matches `.tile-node`
-// in tilelayout.scss): the pane body glides with its wrapper even under reduced
-// motion, beating the global `.prefers-reduced-motion * { transition-property:
-// none !important }` reset in app.scss. Product decision, 2026-05-29.
-.tile-layout.animate .block-content {
-    transition:
-        width var(--animation-time-s) cubic-bezier(0.2, 0, 0, 1),
-        height var(--animation-time-s) cubic-bezier(0.2, 0, 0, 1) !important;
-}
-
 // ── Per-block error boundary fallback ───────────────────────────────────────
 // Localized "this pane crashed" panel that replaces ONLY the broken pane's
 // body. Other panes in the tab + the layout chrome stay alive.
