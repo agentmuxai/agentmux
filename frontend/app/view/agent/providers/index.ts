@@ -184,6 +184,38 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "session_id",
         controllerType: "subprocess",
     },
+    // Qwen Code — Alibaba's open-source coding agent, a fork of Gemini CLI.
+    // Same stream-json headless surface → reuses the gemini translator
+    // (styledOutputFormat "gemini-json"). Backend is OpenAI-compatible: set
+    // OPENAI_BASE_URL=https://openrouter.ai/api/v1 + OPENAI_API_KEY (+ OPENAI_MODEL)
+    // to run any OpenRouter model. The Qwen OAuth free tier was retired
+    // (2026-04-15), so this is treated as api-key.
+    // NOTE: authCheck/authLogin below are provisional — the intended path is
+    // an env-injected key from the identity bundle, not an interactive CLI login.
+    qwen: {
+        id: "qwen",
+        displayName: "Qwen Code",
+        cliCommand: "qwen",
+        defaultArgs: [],
+        styledArgs: ["--output-format", "stream-json", "--yolo", "-p", ""],
+        outputFormat: "raw",
+        styledOutputFormat: "gemini-json",
+        authType: "api-key",
+        authCheckCommand: ["--version"],
+        authLoginCommand: ["auth"],
+        npmPackage: "@qwen-code/qwen-code",
+        pinnedVersion: "latest",
+        docsUrl: "https://qwenlm.github.io/qwen-code-docs",
+        windowsInstallCommand: "npm install -g @qwen-code/qwen-code",
+        unixInstallCommand: "npm install -g @qwen-code/qwen-code",
+        icon: "feather",
+        authConfigDirEnvVar: "QWEN_HOME",
+        authDirName: "qwen",
+        launchArgs: ["--output-format", "stream-json", "--yolo", "-p", ""],
+        resumeFlag: null,
+        sessionIdField: "session_id",
+        controllerType: "subprocess",
+    },
     // OpenClaw — model-agnostic personal AI assistant from openclaw.ai.
     // We launch its `openclaw acp` bridge: speaks ACP over stdio (our
     // side) and forwards turns to OpenClaw's local Gateway daemon over
@@ -335,6 +367,8 @@ const PROVIDER_ALIASES: Record<string, string> = {
     "claude_code": "claude",
     "codex-cli": "codex",
     "gemini-cli": "gemini",
+    "qwen-code": "qwen",
+    "qwen3-coder": "qwen",
     "kimi-cli": "kimi",
     "kimi_code": "kimi",
     "openclaw-cli": "openclaw",
