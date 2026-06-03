@@ -29,7 +29,7 @@
  */
 
 import { createVirtualizer } from "@tanstack/solid-virtual";
-import { createEffect, createMemo, createSignal, For, Index, onMount, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Index, onCleanup, onMount, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
@@ -255,6 +255,25 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
             });
         }
+    });
+
+    // Re-apply sticky-bottom on hidden → visible. An inactive tab is
+    // display:none (0×0), so the nodes()-driven scroll above is a no-op
+    // while hidden and nothing re-issues it on reactivation. Watch the
+    // container's clientHeight 0 → non-zero transition; re-scroll only
+    // when already sticky (never engages stick, so a user who scrolled
+    // up stays put).
+    onMount(() => {
+        let wasHidden = scrollRef.clientHeight === 0;
+        const ro = new ResizeObserver(() => {
+            const h = scrollRef.clientHeight;
+            if (h > 0 && wasHidden && props.viewState.stickToBottom()) {
+                scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
+            }
+            wasHidden = h === 0;
+        });
+        ro.observe(scrollRef);
+        onCleanup(() => ro.disconnect());
     });
 
     // jumpToBottom: forced scroll-to-bottom that re-engages stick.
