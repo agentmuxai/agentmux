@@ -59,7 +59,7 @@ fn is_api_key_provider(provider_id: &str) -> bool {
     // `openclaw models auth login --provider openai-codex` which emits
     // an OpenAI OAuth URL (auth.openai.com). The same `match_codex_url`
     // we use for Codex matches it.
-    matches!(provider_id, "kimi" | "pi")
+    matches!(provider_id, "kimi" | "pi" | "qwen")
 }
 
 type LineMatcher = fn(&str) -> Option<AuthPatternMatch>;
@@ -78,7 +78,7 @@ fn patterns_for(provider_id: &str) -> &'static [LineMatcher] {
         // API-key providers don't OAuth — these patterns never match.
         // Listed here so the dispatch is exhaustive and adding a new
         // provider always lands a code edit in this table.
-        "kimi" | "pi" => &[],
+        "kimi" | "pi" | "qwen" => &[],
         _ => &[],
     }
 }
@@ -362,7 +362,7 @@ mod tests {
         // kimi / pi don't have OAuth flow. Even if their output includes
         // an https URL during onboarding, we don't want to misinterpret
         // it as OAuth.
-        for provider in ["kimi", "pi"] {
+        for provider in ["kimi", "pi", "qwen"] {
             let m = match_line(provider, "Get your API key at https://example.com/keys");
             assert!(m.is_none(), "provider {provider} unexpectedly matched");
         }
@@ -414,7 +414,7 @@ mod tests {
         // for kimi/pi at all. (OpenClaw moved out — see
         // openclaw_matches_openai_oauth_url; its `models auth login
         // --provider openai-codex` emits a real OAuth URL.)
-        for provider in ["kimi", "pi"] {
+        for provider in ["kimi", "pi", "qwen"] {
             let line = "Get your API key at https://example.com/auth/keys";
             assert!(match_line(provider, line).is_none(), "{provider} matched");
         }

@@ -88,4 +88,24 @@ describe("buildRuntimeArgs", () => {
             expect(out).not.toContain("--yolo");
         });
     });
+
+    describe("qwen (Gemini-CLI fork — same --yolo permission model)", () => {
+        // qwen's real launchArgs include --yolo; PERMISSION_STRIP removes it,
+        // then a non-default mode must re-add it (the regression this guards —
+        // without "qwen" in the branch it fell through to Claude-style flags).
+        const QWEN_BASE = ["--output-format", "stream-json", "--yolo", "-p", ""];
+
+        it("strips then re-adds --yolo for a non-default mode; no Claude bypass flag / no --model leak", () => {
+            const out = buildRuntimeArgs(QWEN_BASE, cfg(), "qwen");
+            expect(out).toContain("--yolo");
+            expect(out).not.toContain("--dangerously-skip-permissions");
+            expect(out).not.toContain("--model");
+            expect(out).not.toContain("sonnet");
+        });
+
+        it("no --yolo when the permission mode is default", () => {
+            const out = buildRuntimeArgs(QWEN_BASE, cfg({ permissionMode: "default" }), "qwen");
+            expect(out).not.toContain("--yolo");
+        });
+    });
 });

@@ -297,6 +297,8 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "claude" => "claude-stream-json",
                     "codex" => "codex-json",
                     "gemini" => "gemini-json",
+                    // Qwen Code is a Gemini-CLI fork → same stream-json schema.
+                    "qwen" => "gemini-json",
                     "kimi" => "kimi-stream-json",
                     _ => "claude-stream-json",
                 };

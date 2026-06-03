@@ -87,6 +87,20 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         containerImage: "agentmux/gemini:latest",
     },
     {
+        provider: "qwen",
+        displayName: "Qwen Code",
+        icon: "❖",
+        blurb: "Alibaba's open-source coding agent",
+        primaryContextFile: "QWEN.md",
+        mcpSupport: "stdio+http",
+        popoverMarkdown:
+            "Alibaba's open-source coding agent (a fork of Gemini CLI) tuned for the Qwen3-Coder models. Runs on any OpenAI-compatible endpoint — point it at OpenRouter and use a huge range of models with a single key. Good when you want broad open-model coverage or a low-cost backend.",
+        hostSupported: true,
+        // No agentmux/qwen container image is built yet — host-only for now.
+        // Flip to true + add containerImage once the image ships.
+        containerSupported: false,
+    },
+    {
         provider: "kimi",
         displayName: "Kimi Code",
         icon: "◈",

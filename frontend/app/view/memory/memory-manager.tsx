@@ -218,6 +218,7 @@ export const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element =>
                                     <option value="claude">Claude Code</option>
                                     <option value="codex">Codex CLI</option>
                                     <option value="gemini">Gemini CLI</option>
+                                    <option value="qwen">Qwen Code</option>
                                 </select>
                             </label>
 

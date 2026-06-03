@@ -12,7 +12,7 @@ import type { ProviderDefinition } from "./index";
 //     SPEC_OPENCLAW_AGENT_2026_05_17.md §4), pi (api-key). Both
 //     `outputFormat: "acp"`.
 const OAUTH_CLI_IDS = ["claude", "codex", "gemini"] as const;
-const API_KEY_CLI_IDS = ["kimi"] as const;
+const API_KEY_CLI_IDS = ["kimi", "qwen"] as const;
 const ACP_IDS = ["openclaw", "pi"] as const;
 // ACP sub-partition by auth type. Kept separate from the unified
 // `ACP_IDS` so the "ACP providers use the ACP output format"
