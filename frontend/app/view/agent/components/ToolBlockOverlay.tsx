@@ -48,7 +48,12 @@ export const ToolBlockOverlay = (props: ToolBlockOverlayProps): JSX.Element => (
     <div class="agent-tool-overlay" data-node-id={props.node.id}>
         <div
             class="agent-tool-overlay-header"
-            style={{ display: props.node.status === "running" ? "none" : "" }}
+            style={{
+                display:
+                    props.node.status === "running" || props.node.status === "success"
+                        ? "none"
+                        : "",
+            }}
         >
             <span class="agent-tool-overlay-status-label">
                 {STATUS_LABEL[props.node.status]}
