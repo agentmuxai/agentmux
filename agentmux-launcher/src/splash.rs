@@ -96,13 +96,18 @@ pub fn spawn_splash(dir_hash: &str) -> Option<String> {
         return None;
     }
 
+    // Per-instance window class so concurrent instances never contend on a
+    // single global RegisterClassExW name — keeps every named OS object keyed
+    // on dir_hash (the splash dismiss event already is). See
+    // docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md.
+    let class_name = format!("AgentMuxSplash-{}", dir_hash);
     let handle = SendHandle(ev);
-    thread::spawn(move || unsafe { run_splash(handle.take()) });
+    thread::spawn(move || unsafe { run_splash(handle.take(), class_name) });
     Some(event_name)
 }
 
-unsafe fn run_splash(dismiss_ev: HANDLE) {
-    let class: Vec<u16> = "AgentMuxSplash\0".encode_utf16().collect();
+unsafe fn run_splash(dismiss_ev: HANDLE, class_name: String) {
+    let class: Vec<u16> = format!("{}\0", class_name).encode_utf16().collect();
     let hinst = GetModuleHandleW(std::ptr::null());
 
     let wc = WNDCLASSEXW {
