@@ -10,6 +10,9 @@ import { type JSX } from "solid-js";
 import { createTabBarMenu } from "@/app/menu/base-menus";
 import { SystemStatus } from "@/app/window/system-status";
 import { WindowControlsLeft } from "@/app/window/window-controls.platform";
+import { HamburgerMenu } from "@/app/window/hamburger-menu";
+import { isMacOS } from "@/util/platformutil";
+import { Show } from "solid-js";
 import "./window-header.platform.scss";
 
 
@@ -46,6 +49,14 @@ const WindowHeader = (props: WindowHeaderProps): JSX.Element => {
             <TabBar workspace={props.workspace} />
 
             <SystemStatus />
+
+            {/* macOS: the hamburger lives at the far right of the header,
+                after the action widgets — the native traffic-light controls
+                occupy the left, so a left-side hamburger crowds them. On
+                Windows/Linux it stays in the tab strip (see TabBar). */}
+            <Show when={isMacOS()}>
+                <HamburgerMenu position="right" />
+            </Show>
         </div>
     );
 };

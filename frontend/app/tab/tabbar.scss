@@ -93,35 +93,9 @@
         }
     }
 
-    .hamburger-btn {
-        flex-shrink: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 27px;
-        padding: 0;
-        background: transparent;
-        border: none;
-        color: var(--accent-color);
-        -webkit-app-region: no-drag;
-        cursor: pointer;
-        align-self: center;
-
-        &:hover {
-            color: color-mix(in srgb, var(--accent-color), white 25%);
-        }
-
-        // Inline SVG (replaces fa-bars icon font). Icon fonts rasterize
-        // each glyph independently at the zoomed size; tiny sub-pixel
-        // boundary differences caused one of the three hamburger bars
-        // to render thinner than the other two, with a different bar
-        // affected at each zoom level. SVG rectangles fill uniformly
-        // and scale predictably with parent zoom.
-        svg {
-            display: block;
-        }
-    }
+    // .hamburger-btn styles moved to window/hamburger-menu.scss (top-level,
+    // un-nested) when the menu was extracted into <HamburgerMenu> — on macOS
+    // the button renders in the window header, outside .tab-bar.
 
     // --- Drag-and-drop wrapper for each tab ---
     // Wrapper floor MUST match the inner `.tab` floor. With

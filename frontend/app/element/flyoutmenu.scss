@@ -62,6 +62,44 @@
     }
 }
 
+// Mirrored layout for right-anchored (left-opening) menus — e.g. the macOS
+// far-right hamburger. Items run right-to-left: icon on the right, label
+// right-aligned, shortcut/chevron on the left, and the submenu chevron flips
+// to point LEFT (the direction the submenu opens). Best practice for
+// edge-anchored menus; scoped to .menu--mirrored so standard menus are
+// unaffected. See window/hamburger-menu.tsx + the `mirrored` prop on FlyoutMenu.
+.menu--mirrored {
+    align-items: flex-end;
+
+    .menu-item {
+        flex-direction: row-reverse;
+
+        .label {
+            text-align: right;
+        }
+
+        // Icon moves to the right edge of the row.
+        .menu-item-icon {
+            margin-right: 0;
+            margin-left: var(--space-1);
+        }
+
+        // Keyboard shortcut hints are dropped in the mirrored menu — on the
+        // left, next to the right-aligned labels, they read awkwardly.
+        .menu-item-shortcut {
+            display: none;
+        }
+
+        // Chevron moves to the left and mirrors to point left (▶ → ◀),
+        // matching the direction the submenu opens.
+        > .fa-chevron-right {
+            margin-left: 0;
+            margin-right: var(--space-1);
+            transform: scaleX(-1);
+        }
+    }
+}
+
 .menu-divider {
     height: 1px;
     background-color: rgba(255, 255, 255, 0.1);
