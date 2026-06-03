@@ -62,6 +62,12 @@ interface AgentDocumentViewProps {
      * See PR #1212.
      */
     registerHistoryReadyCallback?: (fn: () => void) => void;
+    /**
+     * Live per-pane zoom factor (the CSS `zoom` applied on `.agent-view`).
+     * Forwarded to the virtual list to normalize measured row heights — see
+     * SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01.
+     */
+    zoomFactor?: Accessor<number>;
 }
 
 export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element => {
@@ -134,6 +140,7 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             scrollToBottomRef={props.scrollToBottomRef}
             onToggleCollapse={toggleCollapse}
             onTogglePin={togglePin}
+            zoomFactor={props.zoomFactor}
             headerSlot={headerSlot()}
         />
     );

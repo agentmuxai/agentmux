@@ -65,6 +65,14 @@ export interface AgentDocumentVirtualListProps {
     onToggleCollapse: (id: string) => void;
     onTogglePin: (id: string) => void;
     /**
+     * Live per-pane zoom factor (the same value applied as CSS `zoom` on
+     * `.agent-view` in agent-view.tsx). Used to normalize `measureElement`
+     * into unzoomed CSS px so virtualizer row offsets don't double-count zoom
+     * and overlap — see SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01.
+     * Defaults to 1 (no zoom) when not supplied.
+     */
+    zoomFactor?: Accessor<number>;
+    /**
      * Content rendered inside the scroll container, above the
      * virtualized region. Used by AgentDocumentView for the
      * auth-url box and the loading-older banner. Affects scroll math
@@ -179,7 +187,15 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         // any kind whose miss-rate stays high so we recalibrate.
         // No-op in production builds (agentPerfStore short-circuits).
         measureElement: (element) => {
-            const measured = element.getBoundingClientRect().height;
+            // Normalize OUT the per-pane CSS `zoom`: getBoundingClientRect is
+            // zoom-scaled (verified cef-146: css×zoom), but estimateSize returns
+            // fixed unzoomed CSS px. Without this, the two units disagree at
+            // zoom≠1 and the cumulative translateY offsets double-count zoom →
+            // rows overlap (zoom<1) or gap (zoom>1). Dividing by the live zoom
+            // factor keeps the virtualizer entirely in zoom-independent CSS px.
+            // SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01 §4.1.
+            const zoom = props.zoomFactor?.() ?? 1;
+            const measured = element.getBoundingClientRect().height / (zoom || 1);
             const indexAttr = element.getAttribute("data-index");
             if (indexAttr != null) {
                 const idx = Number(indexAttr);
@@ -402,6 +418,17 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             >
                 <For each={virtualizer.getVirtualItems()}>
                     {(virtualItem) => {
+                        // Defensive: during the reflow that follows a tool
+                        // expand/collapse height change, getVirtualItems() can
+                        // transiently yield an undefined entry. Without this
+                        // guard the `virtualItem.index` reads below throw
+                        // "Cannot read properties of undefined (reading 'index')"
+                        // *during render*, which the agent-pane error boundary
+                        // catches by tearing down the ENTIRE virtualized list.
+                        // Dropping one transient row for a frame is recoverable;
+                        // crashing the list is not. (Observed live under rapid
+                        // expand/collapse churn.)
+                        if (!virtualItem) return null;
                         const nodeAccessor = (): DocumentNode => {
                             return partition().virtualizedNodes[virtualItem.index];
                         };
@@ -415,7 +442,22 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                 highlightNodeId={props.highlightNodeId}
                                 onToggleCollapse={props.onToggleCollapse}
                                 onTogglePin={props.onTogglePin}
-                                ref={virtualizer.measureElement}
+                                // data-index is also bound reactively below
+                                // (dataIndex prop), but that binding is a Solid
+                                // render-effect that RACES this ref callback. If
+                                // the ref wins, TanStack's measureElement reads a
+                                // null data-index and returns *before*
+                                // observer.observe(node) — so the row is never
+                                // observed and stays pinned at estimateSize
+                                // forever, overlapping its neighbors. Setting the
+                                // attribute synchronously here, right before
+                                // measureElement, closes that race. Verified via
+                                // live CDP: rows mounting on the losing side of
+                                // the race were stuck at the 32px estimate.
+                                ref={(el) => {
+                                    el.setAttribute("data-index", String(virtualItem.index));
+                                    virtualizer.measureElement(el);
+                                }}
                                 dataIndex={virtualItem.index}
                                 style={{
                                     position: "absolute",
