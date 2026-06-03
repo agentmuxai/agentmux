@@ -338,6 +338,53 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     tracing::info!("claude auth check: credentials found, validating via CLI");
                 }
 
+                // Gemini has no real `auth status` subcommand — auth lives in its
+                // interactive TUI — so the generic CLI check below is meaningless
+                // for it. Read the OAuth creds file directly. Gemini honors
+                // GEMINI_CLI_HOME as its config home (paths.homedir() returns it
+                // when set), so creds live at <GEMINI_CLI_HOME or ~>/.gemini/
+                // oauth_creds.json. Definitive: both results return here.
+                if cmd.cli_path.to_lowercase().contains("gemini") {
+                    let gemini_home = cmd
+                        .auth_env
+                        .get("GEMINI_CLI_HOME")
+                        .cloned()
+                        .or_else(|| std::env::var("HOME").ok())
+                        .or_else(|| std::env::var("USERPROFILE").ok())
+                        .unwrap_or_default();
+                    let candidates = [
+                        format!("{gemini_home}/.gemini/oauth_creds.json"),
+                        format!("{gemini_home}/oauth_creds.json"),
+                    ];
+                    let authed = candidates.iter().any(|p| {
+                        std::fs::read_to_string(p)
+                            .ok()
+                            .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                            .map(|json| {
+                                let has = |k: &str| {
+                                    json.get(k)
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| !s.is_empty())
+                                        .unwrap_or(false)
+                                };
+                                has("refresh_token") || has("access_token")
+                            })
+                            .unwrap_or(false)
+                    });
+                    tracing::info!(home = %gemini_home, authed, "gemini auth check (file-based)");
+                    let result = CheckCliAuthResult {
+                        authenticated: authed,
+                        email: None,
+                        auth_method: if authed { Some("oauth".to_string()) } else { None },
+                        raw_output: if authed {
+                            "gemini oauth_creds.json present".to_string()
+                        } else {
+                            "no gemini credentials".to_string()
+                        },
+                    };
+                    return Ok(Some(serde_json::to_value(&result).unwrap()));
+                }
+
                 let output = tokio::time::timeout(
                     std::time::Duration::from_secs(10),
                     {
