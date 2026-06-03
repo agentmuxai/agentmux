@@ -668,38 +668,81 @@ async fn run_cli_login_pty(
 /// Extract an OAuth URL from a line of CLI output.
 /// Strips ANSI escape sequences and looks for `https://...` substrings.
 fn extract_url(line: &str) -> Option<String> {
-    // Strip ANSI escapes (simple approach: remove ESC[...letter sequences)
-    let clean: String = {
-        let mut out = String::with_capacity(line.len());
-        let bytes = line.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i+1] == b'[' {
-                // Skip until we find a letter (end of ANSI sequence)
-                i += 2;
-                while i < bytes.len() && !(bytes[i] as char).is_ascii_alphabetic() {
-                    i += 1;
-                }
-                i += 1;
-            } else {
-                out.push(bytes[i] as char);
+    // Strip ANSI escapes. Two families matter here:
+    //   * CSI  — `ESC [ … <final 0x40..=0x7e>` (colors, cursor moves)
+    //   * OSC  — `ESC ] … (BEL | ST)` — notably OSC-8 hyperlinks, which the
+    //     Claude CLI emits. OSC-8 embeds the URL in the sequence params AND
+    //     repeats it as visible link text, so a naive pass that only knew CSI
+    //     left the raw `]8;;https://…<BEL>` in place and captured the URL
+    //     twice (doubled), producing a broken link. We discard the OSC
+    //     sequence but stash any URI it carried as a fallback.
+    let mut clean = String::with_capacity(line.len());
+    let mut osc_uris: Vec<String> = Vec::new();
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
+            // CSI: ESC [ … <final byte in 0x40..=0x7e>
+            i += 2;
+            while i < bytes.len() && !(0x40..=0x7e).contains(&bytes[i]) {
                 i += 1;
             }
+            i += 1; // consume the final byte
+        } else if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b']' {
+            // OSC: ESC ] … terminated by BEL (0x07) or ST (ESC \).
+            let seq_start = i + 2;
+            i = seq_start;
+            let mut seq_end = bytes.len();
+            while i < bytes.len() {
+                if bytes[i] == 0x07 {
+                    seq_end = i;
+                    i += 1;
+                    break;
+                }
+                if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+                    seq_end = i;
+                    i += 2;
+                    break;
+                }
+                i += 1;
+            }
+            // OSC-8 hyperlink: "8;<params>;<URI>". Stash the URI as a fallback
+            // in case the visible link text isn't itself the URL.
+            if let Ok(seq) = std::str::from_utf8(&bytes[seq_start..seq_end]) {
+                if let Some(rest) = seq.strip_prefix("8;") {
+                    if let Some(uri) = rest.splitn(2, ';').nth(1) {
+                        if !uri.is_empty() {
+                            osc_uris.push(uri.to_string());
+                        }
+                    }
+                }
+            }
+        } else if bytes[i] == 0x1b {
+            // Lone / unrecognised ESC: drop the ESC byte.
+            i += 1;
+        } else {
+            clean.push(bytes[i] as char);
+            i += 1;
         }
-        out
-    };
+    }
 
-    // Find https:// and extract until whitespace or end
-    if let Some(start) = clean.find("https://") {
-        let rest = &clean[start..];
-        let end = rest.find(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+    // Find https:// and extract until whitespace, a quote, or a stray BEL.
+    let pick = |s: &str| -> Option<String> {
+        let start = s.find("https://")?;
+        let rest = &s[start..];
+        let end = rest
+            .find(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '\u{7}')
             .unwrap_or(rest.len());
         let url = &rest[..end];
         if url.contains("oauth") || url.contains("auth") || url.contains("login") {
-            return Some(url.to_string());
+            Some(url.to_string())
+        } else {
+            None
         }
-    }
-    None
+    };
+
+    // Prefer the visible (de-escaped) text; fall back to any OSC-8 URI.
+    pick(&clean).or_else(|| osc_uris.iter().find_map(|u| pick(u)))
 }
 
 /// Kill the in-progress CLI login process. Covers both transports:
