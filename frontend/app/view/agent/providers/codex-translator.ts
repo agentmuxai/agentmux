@@ -47,13 +47,24 @@ export class CodexTranslator implements OutputTranslator {
                 // the conversation reducer uses to finalize the turn — leaving the
                 // Streaming phase (which stops the working spinner). Mirrors the
                 // Claude translator's `result` → `session_end`.
+                const out: StreamEvent[] = [];
+                // A failed turn surfaces its error first, like the item / top-level
+                // error cases — otherwise it stops the spinner silently and reads
+                // as a success.
+                if (type === "turn.failed") {
+                    const msg: string = rawEvent.error?.message ?? rawEvent.message ?? "Codex turn failed";
+                    out.push({ type: "text", content: `**Error:** ${msg}` });
+                }
+                // codex `exec --json` has carried usage under both `total_usage`
+                // and `usage` across versions — accept either.
+                const usage = rawEvent.total_usage ?? rawEvent.usage;
                 const stats: SessionStats = {};
-                const usage = rawEvent.total_usage;
                 if (usage && typeof usage === "object") {
                     if (typeof usage.input_tokens === "number") stats.input_tokens = usage.input_tokens;
                     if (typeof usage.output_tokens === "number") stats.output_tokens = usage.output_tokens;
                 }
-                return [{ type: "session_end", stats }];
+                out.push({ type: "session_end", stats });
+                return out;
             }
 
             case "item.completed": {

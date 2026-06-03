@@ -17,9 +17,24 @@ describe("CodexTranslator", () => {
             ]);
         });
 
-        it("maps turn.failed to session_end too — a failed turn must also finalize", () => {
+        it("turn.failed surfaces the error AND finalizes (not a silent success)", () => {
             const t = new CodexTranslator();
-            expect(t.translate({ type: "turn.failed" })).toEqual([{ type: "session_end", stats: {} }]);
+            expect(t.translate({ type: "turn.failed", error: { message: "rate limited" } })).toEqual([
+                { type: "text", content: "**Error:** rate limited" },
+                { type: "session_end", stats: {} },
+            ]);
+            // falls back to a generic message when none is provided
+            expect(t.translate({ type: "turn.failed" })).toEqual([
+                { type: "text", content: "**Error:** Codex turn failed" },
+                { type: "session_end", stats: {} },
+            ]);
+        });
+
+        it("accepts usage under `usage` as well as `total_usage`", () => {
+            const t = new CodexTranslator();
+            expect(
+                t.translate({ type: "turn.completed", usage: { input_tokens: 7, output_tokens: 9 } }),
+            ).toEqual([{ type: "session_end", stats: { input_tokens: 7, output_tokens: 9 } }]);
         });
 
         it("omits stats fields when total_usage is absent or partial", () => {
