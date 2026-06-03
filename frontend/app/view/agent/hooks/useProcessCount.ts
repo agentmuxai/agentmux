@@ -59,15 +59,21 @@ export function useProcessCount(blockId: string): Accessor<number> {
         // a tiny transient window.
         // Silently tolerate RPC failure — older backends without the
         // command fall back to delta-only mode and still converge.
-        void RpcApi.AgentProcessListCommand(TabRpcClient, { block_id: blockId })
-            .then((res) => {
-                setCount(Math.max(0, res.processes.length + deltaSincePreSeed));
-                seeded = true;
-            })
-            .catch(() => {
-                setCount(Math.max(0, deltaSincePreSeed));
-                seeded = true;
-            });
+        if (!TabRpcClient) {
+            // Client may be unbound this early; seed from buffered deltas only.
+            setCount(Math.max(0, deltaSincePreSeed));
+            seeded = true;
+        } else {
+            void RpcApi.AgentProcessListCommand(TabRpcClient, { block_id: blockId })
+                .then((res) => {
+                    setCount(Math.max(0, res.processes.length + deltaSincePreSeed));
+                    seeded = true;
+                })
+                .catch(() => {
+                    setCount(Math.max(0, deltaSincePreSeed));
+                    seeded = true;
+                });
+        }
 
         onCleanup(() => {
             unsubAdded?.();
