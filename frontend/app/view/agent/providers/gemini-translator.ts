@@ -38,13 +38,23 @@ export class GeminiTranslator implements OutputTranslator {
                 // Gemini's turn-end → the provider-agnostic `session_end` the
                 // conversation reducer uses to finalize the turn (which stops the
                 // working spinner). Mirrors the claude/codex translators.
+                const out: StreamEvent[] = [];
+                // A non-"success" result surfaces its error first, like the codex
+                // turn.failed case — otherwise it stops the spinner silently and
+                // reads as a success.
+                if (rawEvent.status && rawEvent.status !== "success") {
+                    const msg: string =
+                        rawEvent.error?.message ?? rawEvent.error ?? rawEvent.message ?? `gemini turn ${rawEvent.status}`;
+                    out.push({ type: "text", content: `**Error:** ${msg}` });
+                }
                 const stats: SessionStats = {};
                 const s = rawEvent.stats;
                 if (s && typeof s === "object") {
                     if (typeof s.input_tokens === "number") stats.input_tokens = s.input_tokens;
                     if (typeof s.output_tokens === "number") stats.output_tokens = s.output_tokens;
                 }
-                return [{ type: "session_end", stats }];
+                out.push({ type: "session_end", stats });
+                return out;
             }
 
             case "message": {

@@ -6,11 +6,21 @@ import { GeminiTranslator } from "./gemini-translator";
 
 describe("GeminiTranslator", () => {
     describe("turn boundary → session_end (fixes the never-stopping spinner)", () => {
-        it("maps result to session_end, carrying stats tokens", () => {
+        it("maps a success result to session_end, carrying stats tokens", () => {
             const t = new GeminiTranslator();
             expect(
                 t.translate({ type: "result", status: "success", stats: { input_tokens: 800, output_tokens: 210 } }),
             ).toEqual([{ type: "session_end", stats: { input_tokens: 800, output_tokens: 210 } }]);
+        });
+
+        it("a non-success result surfaces the error before session_end", () => {
+            const t = new GeminiTranslator();
+            expect(
+                t.translate({ type: "result", status: "error", error: { message: "quota exceeded" } }),
+            ).toEqual([
+                { type: "text", content: "**Error:** quota exceeded" },
+                { type: "session_end", stats: {} },
+            ]);
         });
 
         it("session_end with empty stats when stats are absent or partial", () => {
