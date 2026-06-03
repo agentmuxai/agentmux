@@ -155,33 +155,9 @@ ws.send(JSON.stringify({
 
 AgentMux is a four-process desktop app. Each process owns one concern, end-to-end. See [Architecture overview](https://docs.agentmux.ai/architecture-overview/) for the full topology.
 
-```
-┌──────────────────┐         named pipe        ┌──────────────────┐
-│  agentmux-       │ ◀────────────────────────▶│  agentmux-cef    │
-│  launcher        │                          │  (the "host")    │
-│  (≈325 KB shim)  │                          │                  │
-└────────┬─────────┘                          └────────┬─────────┘
-         │ spawns                                      │ embeds
-         │                                             ▼
-         │                                      ┌──────────────────┐
-         │                                      │  Chromium 146    │
-         │                                      │  (CEF renderer)  │
-         │                                      └────────┬─────────┘
-         │                                               │ JS bridge
-         │                                               ▼
-         │                                      ┌──────────────────┐
-         │                                      │  SolidJS app     │
-         │                                      │  (the frontend)  │
-         │                                      └────────┬─────────┘
-         │                                               │ websocket
-         ▼                                               ▼
-┌─────────────────────────────────────────────────────────┐
-│                     agentmux-srv                         │
-│                       (sidecar)                          │
-│   • RPC engine (websocket)   • SQLite persistence        │
-│   • saga coordinator         • event bus                 │
-└─────────────────────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="./assets/architecture.svg" alt="AgentMux four-process architecture: agentmux-launcher (×1 per channel, single-instance lock) spawns agentmux-cef (×1 per launcher) and agentmux-srv (×1 per launcher, dynamic port). Host embeds Chromium 148 via CEF (×1 main renderer + ×N per browser pane). The SolidJS frontend runs in the main renderer and talks to srv over WebSocket. Multiple AgentMux instances can run side-by-side, each with its own full stack keyed on data-dir channel." width="860">
+</p>
 
 | Process | Crate | Role |
 |---|---|---|
@@ -194,7 +170,7 @@ A fifth crate, `agentmux-common`, provides shared utilities (path resolution, ru
 
 **Stack:**
 - **Frontend:** SolidJS + TypeScript + Vite (state via SolidJS signals + a 4-layer reducer stack)
-- **Desktop:** CEF 146 via cef-rs — bundles its own Chromium (~148 MB ZIP package, ~150 ms startup, 150–350 MB resident)
+- **Desktop:** CEF 148 via cef-rs — bundles its own Chromium (~160 MB ZIP package, ~150 ms startup, 150–350 MB resident)
 - **Backend:** Rust (Tokio + Axum + SQLite + portable-pty)
 - **Terminal:** xterm.js
 

@@ -216,7 +216,7 @@ pub fn get_host_info(state: &Arc<AppState>) -> serde_json::Value {
         "instanceId": format!("v{}", version),
         "version": version,
         "dataDir": data_dir,
-        "hostType": "CEF 146",
+        "hostType": "CEF 148",
         "pid": pid,
         "ports": {
             "ipc": format!("127.0.0.1:{}", ipc_port),
