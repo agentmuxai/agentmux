@@ -63,6 +63,18 @@ export class ClaudeTranslator implements OutputTranslator {
             if (typeof rawEvent.cost_usd === "number") stats.cost_usd = rawEvent.cost_usd;
             if (typeof rawEvent.duration_ms === "number") stats.duration_ms = rawEvent.duration_ms;
             if (typeof rawEvent.num_turns === "number") stats.num_turns = rawEvent.num_turns;
+            // input_tokens is only the uncached prompt; cache_creation/cache_read
+            // carry the rest of the real prompt size.
+            const usage = rawEvent.usage;
+            if (usage && typeof usage === "object") {
+                const input =
+                    (usage.input_tokens ?? 0) +
+                    (usage.cache_creation_input_tokens ?? 0) +
+                    (usage.cache_read_input_tokens ?? 0);
+                const output = usage.output_tokens ?? 0;
+                if (input > 0) stats.input_tokens = input;
+                if (output > 0) stats.output_tokens = output;
+            }
             return [{ type: "session_end", stats }];
         }
 
