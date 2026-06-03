@@ -41,7 +41,8 @@ import {
     restoreScrollFromAnchor,
 } from "./anchor";
 import { DocumentRow } from "./DocumentRow";
-import { estimateNode } from "./renderers";
+import { estimateNode, estimateNodeForState } from "./renderers";
+import { currentExpansion } from "./expansion-source";
 import type { AgentViewState } from "./state";
 import {
     dispatchIfRegistered as dispatchLayoutIfRegistered,
@@ -174,6 +175,56 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         });
         return result;
     });
+
+    // Phase 3: feed the layout slice from the VIRTUALIZED partition only.
+    // The slice models the prefix-summed region; the streaming buffer is
+    // normal-flow and out of scope. Dispatches NodesChanged + per-node
+    // EstimateSet (both states, INV-3) + ExpansionResolved so positions /
+    // effectiveHeight are authoritative. No-op when blockId is absent.
+    if (props.blockId) {
+        // nodeId → JSON(Expansion) last pushed (expansion diff cache).
+        const pushedExpansion = new Map<string, string>();
+        // nodeIds with EstimateSet pushed for both states; pruned in lockstep
+        // with the slice so a removed-then-re-added node gets fresh values.
+        const estimatesPushed = new Set<string>();
+        createEffect(() => {
+            const blockId = props.blockId!;
+            const vnodes = partition().virtualizedNodes;
+            const docState = props.documentState();
+            const ids = vnodes.map((n) => n.id);
+            dispatchLayoutIfRegistered(blockId, { type: "NodesChanged", orderedIds: ids });
+            const idSet = new Set(ids);
+            for (const k of pushedExpansion.keys()) if (!idSet.has(k)) pushedExpansion.delete(k);
+            for (const k of estimatesPushed) if (!idSet.has(k)) estimatesPushed.delete(k);
+            for (const node of vnodes) {
+                if (!estimatesPushed.has(node.id)) {
+                    estimatesPushed.add(node.id);
+                    dispatchLayoutIfRegistered(blockId, {
+                        type: "EstimateSet",
+                        nodeId: node.id,
+                        state: "collapsed",
+                        cssPx: estimateNodeForState(node, "collapsed", docState),
+                    });
+                    dispatchLayoutIfRegistered(blockId, {
+                        type: "EstimateSet",
+                        nodeId: node.id,
+                        state: "expanded",
+                        cssPx: estimateNodeForState(node, "expanded", docState),
+                    });
+                }
+                const next = currentExpansion(node, docState);
+                const key = JSON.stringify(next);
+                if (pushedExpansion.get(node.id) !== key) {
+                    pushedExpansion.set(node.id, key);
+                    dispatchLayoutIfRegistered(blockId, {
+                        type: "ExpansionResolved",
+                        nodeId: node.id,
+                        to: next,
+                    });
+                }
+            }
+        });
+    }
 
     // Virtualizer over the virtualized head only — streaming buffer is
     // rendered separately as a normal flex list. Per-kind estimators
