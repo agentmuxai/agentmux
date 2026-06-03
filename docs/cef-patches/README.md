@@ -17,16 +17,23 @@ check on macOS 26, so the rendezvous **denies the renderer its ports** → the r
 `--disable-features=MachPortRendezvous*` flag all **failed** to fix it — the policy is read before
 the FeatureList initializes, so the runtime flag never applies.
 
-## The fix (two parts)
+## The fix (three parts)
 
 1. **Patched CEF framework** — `agentmux_disable_mach_rendezvous_validation.patch` forces
    `base/apple/mach_port_rendezvous_mac.cc::GetPeerValidationPolicy()` to return `kNoValidation`,
    disabling the peer validation at the source (the only place it reliably applies). Acceptable for
    a local single-user desktop app (the check is anti-injection hardening; AgentMux's threat model
    doesn't require it — same class of tradeoff as the OSCrypt switches).
-2. **Per-type helper apps** — the from-source CEF framework uses CEF's standard macOS layout:
-   renderer/GPU/utility run as `AgentMux Helper (<Type>).app` (Renderer/GPU/Plugin/Alloy + generic).
-   `scripts/package-macos.sh` now creates all five.
+2. **`dcheck_always_on=false` (CRITICAL build flag).** A from-source Chromium with
+   `is_official_build=false` defaults `dcheck_always_on=true`, enabling DCHECKs — developer-only
+   assertions that production CEF (and the cef-dll-sys prebuilt) compile out. On macOS 26 several
+   macOS-specific DCHECKs fail (`ScopedSendingEvent` CrAppControlProtocol conformance on every drag
+   event, `CefShutdownChecker` on exit, `util_mac::BasicStartupComplete`), causing SIGABRT on pane
+   drag and window close. Building with `dcheck_always_on=false` matches the production config and
+   eliminates them. See `docs/retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md`.
+3. **Per-type helper apps** — the from-source CEF framework uses CEF's standard macOS layout:
+   renderer/GPU/utility run as `AgentMux Helper (<Type>).app` (Renderer/GPU/Plugin/Alloy + generic
+   + Alerts). `scripts/package-macos.sh` creates all six.
 
 Result: the signed + **notarized** `.app` launches with a **working, stable renderer** and a live UI.
 
@@ -38,7 +45,7 @@ mkdir -p ~/cef-build && cd ~/cef-build
 git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
 curl -o code/automate-git.py https://raw.githubusercontent.com/agentmuxai/cef/master/tools/automate/automate-git.py
 export PATH="$PWD/depot_tools:$PATH"
-export GN_DEFINES="is_official_build=false is_debug=false symbol_level=1"
+export GN_DEFINES="is_official_build=false is_debug=false symbol_level=1 dcheck_always_on=false"
 python3 code/automate-git.py --download-dir=$PWD/chromium --depot-tools-dir=$PWD/depot_tools \
   --branch=7778 --arm64-build --no-debug-build --no-build --no-distrib
 
@@ -47,7 +54,7 @@ cd chromium/chromium/src
 git apply <agentmux>/docs/cef-patches/agentmux_disable_mach_rendezvous_validation.patch
 
 # 3. generate + build (just the framework)
-cd cef && GN_DEFINES="is_official_build=false is_debug=false symbol_level=1 target_cpu=\"arm64\"" \
+cd cef && GN_DEFINES="is_official_build=false is_debug=false symbol_level=1 dcheck_always_on=false target_cpu=\"arm64\"" \
   ./cef_create_projects.sh && cd ..
 ninja -C out/Release_GN_arm64 -j8 cef_framework
 # → out/Release_GN_arm64/Chromium Embedded Framework.framework
