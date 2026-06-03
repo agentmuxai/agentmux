@@ -44,6 +44,12 @@ import { DocumentRow } from "./DocumentRow";
 import { estimateNode } from "./renderers";
 import type { AgentViewState } from "./state";
 import {
+    dispatchIfRegistered as dispatchLayoutIfRegistered,
+    snapshot as snapshotLayout,
+} from "@/app/store/agent-pane-layout-store";
+import { effectiveHeight } from "@/app/store/agent-pane-layout/reducer";
+import { inFlowState } from "@/app/store/agent-pane-layout/types";
+import {
     initialStickyFrontierId,
     partitionForVirtualization,
     STREAMING_BUFFER_SIZE,
@@ -79,6 +85,13 @@ export interface AgentDocumentVirtualListProps {
      * via scrollMargin (read from virtualContainerRef.offsetTop).
      */
     headerSlot?: JSX.Element;
+    /**
+     * blockId for the agent-pane-layout slice (Phase 2+). When present,
+     * `estimateSize` reads `effectiveHeight` from the slice (measured >
+     * estimate > default) and `measureElement` dispatches `RowMeasured`
+     * keyed by the row's current expansion state (INV-3).
+     */
+    blockId?: string;
 }
 
 export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): JSX.Element {
@@ -171,7 +184,17 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         getScrollElement: () => scrollRef,
         estimateSize: (index) => {
             const node = partition().virtualizedNodes[index];
-            return node ? estimateNode(node, props.documentState()) : 32;
+            if (!node) return 32;
+            // Phase 2: prefer the slice's effective height (measured > estimate >
+            // DEFAULT_ROW_PX) over the direct per-kind estimator. This is the core
+            // INV-3 fix: when a row switches expansion state the slice immediately
+            // returns the cached height for the NEW state instead of the wrong-state
+            // value TanStack would have kept in its cache.
+            if (props.blockId) {
+                const s = snapshotLayout(props.blockId);
+                if (s) return effectiveHeight(s, node.id);
+            }
+            return estimateNode(node, props.documentState());
         },
         overscan: 5,
         getItemKey: (index) => partition().virtualizedNodes[index]?.id ?? index,
@@ -203,6 +226,21 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 if (node) {
                     const estimated = estimateNode(node, props.documentState());
                     agentPerfStore.recordEstimatorMeasurement(node.type, estimated, measured);
+                    // Phase 2: dispatch RowMeasured keyed by the row's CURRENT
+                    // expansion state (INV-3 — an expanded measurement must land in
+                    // the expanded slot, not the collapsed slot, and vice versa).
+                    // `dispatchLayoutIfRegistered` is a no-op if the pane isn't
+                    // wired (e.g. during tests), so this is always-safe.
+                    if (props.blockId) {
+                        const s = snapshotLayout(props.blockId);
+                        const expState = inFlowState(s?.expansion.get(node.id));
+                        dispatchLayoutIfRegistered(props.blockId, {
+                            type: "RowMeasured",
+                            nodeId: node.id,
+                            state: expState,
+                            cssPx: measured,
+                        });
+                    }
                 }
             }
             return measured;

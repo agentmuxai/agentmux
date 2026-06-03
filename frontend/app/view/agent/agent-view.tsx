@@ -30,6 +30,7 @@ import {
     unregisterPane as unregisterLayoutPane,
 } from "@/app/store/agent-pane-layout-store";
 import { currentExpansion } from "./virtualization/expansion-source";
+import { estimateNodeForState } from "./virtualization/renderers";
 import { isInterruptibleTurn, workingFromPhase } from "@/app/store/agent-pane-state/types";
 import type { SubagentLinkNode } from "./types";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
@@ -196,45 +197,66 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         });
     }
 
-    // ── Phase 1b (DEV-ONLY shadow): populate the agent-pane-layout slice's
-    //    expansion from the live document and validate that it mirrors the
-    //    rendered open/closed state. Nothing renders FROM the slice yet
-    //    (Phase 3), so this is gated to dev — zero production cost, zero
-    //    behaviour change. The adapter pushes `currentExpansion(node, …)`
-    //    (the single per-kind source of truth, PR #1238) via
-    //    `ExpansionResolved`. See SPEC_AGENT_PANE_LAYOUT_REDUCER §6.
-    if (import.meta.env.DEV) {
-        registerLayoutPane(model.blockId, { layout: () => {}, zoom: () => {} });
-        onCleanup(() => unregisterLayoutPane(model.blockId));
-        // nodeId → JSON(Expansion) of the last value pushed, so we only
-        // dispatch genuine changes (most effect re-runs touch few rows).
-        const pushed = new Map<string, string>();
-        createEffect(() => {
-            const nodes = agentAtoms().documentAtom[0]();
-            const docState = agentAtoms().documentStateAtom[0]();
-            const ids = nodes.map((n) => n.id);
-            dispatchLayout(model.blockId, { type: "NodesChanged", orderedIds: ids });
-            // Prune the diff cache to mirror the slice's own prune. Otherwise a
-            // node removed (slice deletes its expansion) then re-added with an
-            // unchanged resolved value is short-circuited as "unchanged" and
-            // never re-dispatched — the shadow silently diverges in exactly the
-            // prune/re-add churn case. (reagent + codex on #1239.)
-            const idSet = new Set(ids);
-            for (const k of pushed.keys()) if (!idSet.has(k)) pushed.delete(k);
-            for (const node of nodes) {
-                const next = currentExpansion(node, docState);
-                const key = JSON.stringify(next);
-                if (pushed.get(node.id) !== key) {
-                    pushed.set(node.id, key);
-                    dispatchLayout(model.blockId, {
-                        type: "ExpansionResolved",
-                        nodeId: node.id,
-                        to: next,
-                    });
-                }
+    // ── Phase 2: layout slice adapter (always-on from Phase 2 onward).
+    //    Phase 1b was DEV-only shadow; Phase 2 promotes to production because
+    //    estimateSize and measureElement now read/write through the slice.
+    //    No-op projections: TanStack still owns positions (Phase 3 replaces it).
+    registerLayoutPane(model.blockId, { layout: () => {}, zoom: () => {} });
+    onCleanup(() => unregisterLayoutPane(model.blockId));
+    // nodeId → JSON(Expansion) of the last value pushed (expansion diff cache).
+    const pushed = new Map<string, string>();
+    // nodeIds for which EstimateSet has been pushed for both states. Pruned in
+    // lockstep with the slice so re-added nodes get fresh estimates.
+    const estimatesPushed = new Set<string>();
+    createEffect(() => {
+        const nodes = agentAtoms().documentAtom[0]();
+        const docState = agentAtoms().documentStateAtom[0]();
+        const ids = nodes.map((n) => n.id);
+        dispatchLayout(model.blockId, { type: "NodesChanged", orderedIds: ids });
+        // Prune diff caches to mirror the slice's own prune. Otherwise a node
+        // removed then re-added with an unchanged expansion/estimate is
+        // short-circuited as "unchanged" and never re-dispatched — the slice
+        // silently diverges. (reagent + codex on #1239.)
+        const idSet = new Set(ids);
+        for (const k of pushed.keys()) if (!idSet.has(k)) pushed.delete(k);
+        for (const k of estimatesPushed) if (!idSet.has(k)) estimatesPushed.delete(k);
+        for (const node of nodes) {
+            // Push EstimateSet for BOTH expansion states on first appearance
+            // (INV-3). The slice then has a sensible height for whichever state
+            // the row enters, so estimateSize returns the right value before
+            // measureElement settles — no stale-0 / stale-784 contamination.
+            if (!estimatesPushed.has(node.id)) {
+                estimatesPushed.add(node.id);
+                dispatchLayout(model.blockId, {
+                    type: "EstimateSet",
+                    nodeId: node.id,
+                    state: "collapsed",
+                    cssPx: estimateNodeForState(node, "collapsed", docState),
+                });
+                dispatchLayout(model.blockId, {
+                    type: "EstimateSet",
+                    nodeId: node.id,
+                    state: "expanded",
+                    cssPx: estimateNodeForState(node, "expanded", docState),
+                });
             }
-        });
-        // CDP validation hook (dev only): read the slice's resolved state.
+            // ExpansionResolved: keep the slice's expansion map in sync so that
+            // measureElement can key RowMeasured to the correct state (INV-3).
+            const next = currentExpansion(node, docState);
+            const key = JSON.stringify(next);
+            if (pushed.get(node.id) !== key) {
+                pushed.set(node.id, key);
+                dispatchLayout(model.blockId, {
+                    type: "ExpansionResolved",
+                    nodeId: node.id,
+                    to: next,
+                });
+            }
+        }
+    });
+    // DEV-only: CDP validation hook — lets engineers run
+    // `__agentLayout()` in the console to snapshot the slice state.
+    if (import.meta.env.DEV) {
         (window as unknown as { __agentLayout?: () => unknown }).__agentLayout = () =>
             layoutSnapshot(model.blockId);
     }
@@ -845,6 +867,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 highlightNodeId={search.highlightId}
                 registerHistoryReadyCallback={(fn) => { historyReadyFn = fn; }}
                 zoomFactor={zoomFactor}
+                blockId={model.blockId}
             />
 
             <Show when={status.canRetry()}>

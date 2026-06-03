@@ -15,6 +15,7 @@ import {
     estimateAgentMessage,
     estimateMarkdown,
     estimateNode,
+    estimateNodeForState,
     estimateSection,
     estimateSubagentLink,
     estimateTextHeight,
@@ -252,6 +253,94 @@ describe("estimateNode dispatch", () => {
         expect(estimateNode(am, state)).toBe(estimateAgentMessage(am, state));
         expect(estimateNode(um, state)).toBe(estimateUserMessage(um, state));
         expect(estimateNode(sl, state)).toBe(estimateSubagentLink(sl));
+    });
+});
+
+describe("estimateNodeForState (Phase 2 — INV-3 per-state estimates)", () => {
+    const state = baseDocState();
+
+    it("tool: collapsed → 32, expanded → 200", () => {
+        const node: ToolNode = {
+            type: "tool", id: "t1", tool: "Bash", params: { command: "ls" },
+            status: "success", collapsed: true, summary: "Bash ls",
+        };
+        expect(estimateNodeForState(node, "collapsed", state)).toBe(32);
+        expect(estimateNodeForState(node, "expanded", state)).toBe(200);
+    });
+
+    it("agent_message: collapsed → 32, expanded → text height", () => {
+        const node: AgentMessageNode = {
+            type: "agent_message", id: "am1", from: "a", to: "b",
+            message: "a".repeat(160), method: "mux", direction: "incoming",
+            timestamp: 0, collapsed: false, summary: "S",
+        };
+        expect(estimateNodeForState(node, "collapsed", state)).toBe(32);
+        // 160 chars → 2 lines × 24 = 48
+        expect(estimateNodeForState(node, "expanded", state)).toBe(48);
+    });
+
+    it("section: both states → same fixed height (no in-flow difference)", () => {
+        const node: SectionNode = {
+            type: "section", id: "s1", level: 1, title: "H",
+            collapsible: false, collapsed: false,
+        };
+        expect(estimateNodeForState(node, "collapsed", state)).toBe(48);
+        expect(estimateNodeForState(node, "expanded", state)).toBe(48);
+    });
+
+    it("user_message (normal): both states → text height (not collapsible)", () => {
+        const node: UserMessageNode = { type: "user_message", id: "um1", message: "hi", timestamp: 0 };
+        // Normal user messages are never collapsed (only startup payloads are).
+        expect(estimateNodeForState(node, "collapsed", state)).toBe(32);
+        expect(estimateNodeForState(node, "expanded", state)).toBe(32);
+    });
+
+    it("user_message (startup): collapsed → 32, expanded → text height", () => {
+        const node: UserMessageNode = {
+            type: "user_message", id: "um2", message: "hi", timestamp: 0, isStartup: true,
+        };
+        expect(estimateNodeForState(node, "collapsed", state)).toBe(32);
+        expect(estimateNodeForState(node, "expanded", state)).toBe(32);
+    });
+
+    it("markdown (normal): collapsed → text height (not canceled), expanded → text height", () => {
+        const node: MarkdownNode = { type: "markdown", id: "m1", content: "a".repeat(160) };
+        // Non-canceled markdown is open by default; collapsed estimate = full text height.
+        expect(estimateNodeForState(node, "collapsed", state)).toBe(48); // 2 lines × 24
+        expect(estimateNodeForState(node, "expanded", state)).toBe(48);
+    });
+
+    it("markdown (canceled-thinking): collapsed → 32 (summary), expanded → text height", () => {
+        const node: MarkdownNode = {
+            type: "markdown", id: "m2", content: "a".repeat(160),
+            metadata: { canceled: true },
+        };
+        expect(estimateNodeForState(node, "collapsed", state)).toBe(32);
+        expect(estimateNodeForState(node, "expanded", state)).toBe(48);
+    });
+
+    it("subagent_link: both states → fixed height", () => {
+        const node: SubagentLinkNode = {
+            type: "subagent_link", id: "sl1", subagentId: "x", slug: "y",
+            parentAgent: "p", sessionId: "s", status: "active", model: null,
+        };
+        expect(estimateNodeForState(node, "collapsed", state)).toBe(56);
+        expect(estimateNodeForState(node, "expanded", state)).toBe(56);
+    });
+
+    it("ignores DocumentState entirely — document collapse/pin signals don't affect per-state estimates", () => {
+        const tool: ToolNode = {
+            type: "tool", id: "t2", tool: "Read", params: { file_path: "x" },
+            status: "success", collapsed: true, summary: "Read x",
+        };
+        const pinned = baseDocState();
+        pinned.pinnedNodes.add("t2");
+        // estimateNodeForState for "collapsed" is always 32 regardless of pin state.
+        expect(estimateNodeForState(tool, "collapsed", pinned)).toBe(32);
+        expect(estimateNodeForState(tool, "expanded", pinned)).toBe(200);
+        // Same result with no pin — it's purely state-driven.
+        expect(estimateNodeForState(tool, "collapsed", state)).toBe(32);
+        expect(estimateNodeForState(tool, "expanded", state)).toBe(200);
     });
 });
 
