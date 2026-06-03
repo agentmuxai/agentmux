@@ -1268,33 +1268,10 @@ impl AgentMuxHandler {
         if let Some(bv) = browser_view_get_for_browser(browser_cloned.as_mut()) {
             if let Some(window) = bv.window() {
                 if window.is_visible() == 0 {
-                    // macOS 26 + CEF 148: calling window.show() directly from
-                    // on_load_end causes AppKit to fire windowDidBecomeKey /
-                    // becomeFirstResponder callbacks that reenter CEF Views'
-                    // ReorderChildView while on_load_end's call stack is still
-                    // iterating → CHECK(!iterating_) → SIGABRT on CrBrowserMain.
-                    // Fix: post window.show() as a deferred UI task so the
-                    // on_load_end stack has fully unwound before AppKit callbacks
-                    // fire. On Windows/Linux this reentrancy doesn't occur, so
-                    // we keep the direct call there.
-                    #[cfg(target_os = "macos")]
-                    {
-                        // Find this browser's label from state to pass to the task.
-                        let browser_id = browser_cloned.as_ref().map(|b| b.identifier());
-                        let win_label = browser_id.and_then(|id| {
-                            self.state.list_browsers().into_iter()
-                                .find(|(_, b)| b.identifier() == id)
-                                .map(|(lbl, _)| lbl)
-                        }).unwrap_or_else(|| "main".to_string());
-                        crate::ui_tasks::post_show_window(&self.state, win_label);
-                    }
-                    #[cfg(not(target_os = "macos"))]
-                    {
-                        window.show();
-                        if let Some(ref mut b) = browser_cloned {
-                            if let Some(host) = b.host() {
-                                host.set_focus(1);
-                            }
+                    window.show();
+                    if let Some(ref mut b) = browser_cloned {
+                        if let Some(host) = b.host() {
+                            host.set_focus(1);
                         }
                     }
                 }
