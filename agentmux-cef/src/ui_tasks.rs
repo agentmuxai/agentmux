@@ -61,16 +61,8 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            // Use try_close_browser rather than window.close() — the latter
-            // calls Widget::Close directly, which CHECKs !on_call_stack_ and
-            // aborts if the widget is already being destroyed (e.g. the OS
-            // sent windowShouldClose on macOS while our close_window IPC task
-            // was already queued). try_close_browser goes through do_close
-            // which sets is_closing and is idempotent on re-entry.
-            if let Some(mut browser) = self.state.get_browser(&self.label) {
-                if let Some(host) = browser.host() {
-                    host.try_close_browser();
-                }
+            if let Some(window) = get_window_on_ui(&self.state, &self.label) {
+                window.close();
             }
         }
     }
@@ -803,41 +795,6 @@ pub fn post_create_window(
     post_task(ThreadId::UI, Some(&mut task));
 }
 
-// ── ShowWindow (macOS deferred — avoids on_load_end reentrancy) ───────────
-// On macOS 26 + CEF 148, calling window.show() directly from on_load_end
-// triggers AppKit focus callbacks that reenter CEF Views while the
-// on_load_end stack is still iterating → CHECK(!iterating_). Posting as a
-// separate UI task lets on_load_end unwind first.
-#[cfg(target_os = "macos")]
-wrap_task! {
-    pub struct ShowWindowTask {
-        state: Arc<AppState>,
-        label: String,
-    }
-
-    impl Task {
-        fn execute(&self) {
-            let mut browser = match self.state.get_browser(&self.label) {
-                Some(b) => b,
-                None => return,
-            };
-            if let Some(bv) = cef::browser_view_get_for_browser(Some(&mut browser)) {
-                if let Some(window) = bv.window() {
-                    if window.is_visible() == 0 {
-                        window.show();
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[cfg(target_os = "macos")]
-pub fn post_show_window(state: &Arc<AppState>, label: String) {
-    let mut task = ShowWindowTask::new(state.clone(), label);
-    post_task(ThreadId::UI, Some(&mut task));
-}
-
 // ── DevTools (toggle) ─────────────────────────────────────────────────────
 
 wrap_task! {
@@ -955,15 +912,6 @@ wrap_task! {
                 }
             };
 
-            // macOS: AppKit propagates focus automatically through the responder
-            // chain when the user clicks — calling host.set_focus(1) here enters
-            // CEF Views' focus manager which calls ReorderChildView while AppKit
-            // drag/focus callbacks are already iterating, triggering the reentrancy
-            // CHECK(!iterating_) → SIGABRT on CrBrowserMain. Skip it; AppKit owns
-            // focus on macOS 26 and doesn't need the explicit push.
-            // Windows/Linux: explicit set_focus is required (Win32/Aura don't
-            // auto-propagate focus the way AppKit does).
-            #[cfg(not(target_os = "macos"))]
             if let Some(host) = browser.host() {
                 host.set_focus(1);
                 tracing::info!("[main-focus-reclaim] host.set_focus(1) on label={}", self.label);

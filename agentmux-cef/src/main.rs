@@ -809,16 +809,6 @@ fn main() {
     let _ = std::fs::remove_file(&port_file);
 
     tracing::info!("AgentMux host shutdown complete");
-
-    // macOS 26 + CEF 148: C++ static destructors that run after main()
-    // returns trigger CEF Views reentrancy (CHECK(!iterating_)) during
-    // object teardown → SIGABRT on CrBrowserMain. shutdown() above has
-    // already cleaned up CEF; bypass the destructor phase entirely.
-    // process::exit(0) is safe here: Rust's own drop glue has already
-    // run (runtime, app_state, etc.) via normal scope exit above; only
-    // C++ static destructors remain, and those are the crash source.
-    #[cfg(target_os = "macos")]
-    std::process::exit(0);
 }
 
 /// macOS 26 Tahoe compatibility shim.
