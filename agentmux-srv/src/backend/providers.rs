@@ -177,6 +177,37 @@ static GEMINI: ProviderConfig = ProviderConfig {
     docs_url: "https://ai.google.dev/gemini-cli",
 };
 
+// Qwen Code — Alibaba's open-source coding agent, a fork of Gemini CLI.
+// Same stream-json headless surface, so it reuses the Gemini translator.
+// Backend is OpenAI-compatible (OPENAI_BASE_URL=https://openrouter.ai/api/v1
+// + OPENAI_API_KEY/OPENAI_MODEL), so it runs any OpenRouter model.
+static QWEN: ProviderConfig = ProviderConfig {
+    id: "qwen",
+    display_name: "Qwen Code",
+    cli_command: "qwen",
+    controller_type: ControllerType::Subprocess,
+    // -p: non-interactive; --output-format stream-json: NDJSON events;
+    // --yolo: auto-approve all tools. Mirrors GEMINI (its upstream).
+    launch_args: &["--output-format", "stream-json", "--yolo", "-p", ""],
+    persistent_launch_args: None,
+    // Docs mention --resume <id>/--continue but it's unconfirmed for the
+    // headless stream-json path; multi-turn re-runs like Codex/Kimi (None).
+    resume_flag: None,
+    session_id_field: "session_id",
+    // Gemini-CLI fork → same stream-json schema; reuse the gemini translator.
+    styled_output_format: "gemini-json",
+    // QWEN_HOME relocates the config/credentials dir (default ~/.qwen),
+    // the Qwen analogue of GEMINI_CLI_HOME — gives per-agent auth isolation.
+    auth_config_dir_env_var: "QWEN_HOME",
+    auth_dir_name: "qwen",
+    auth_extra_env: &[],
+    unset_env: &[],
+    npm_package: "@qwen-code/qwen-code",
+    pinned_version: "latest",
+    icon: "feather",
+    docs_url: "https://qwenlm.github.io/qwen-code-docs",
+};
+
 static KIMI: ProviderConfig = ProviderConfig {
     id: "kimi",
     display_name: "Kimi Code CLI",
@@ -287,6 +318,7 @@ static REGISTRY: LazyLock<HashMap<&'static str, &'static ProviderConfig>> = Lazy
     m.insert(CLAUDE.id, &CLAUDE);
     m.insert(CODEX.id, &CODEX);
     m.insert(GEMINI.id, &GEMINI);
+    m.insert(QWEN.id, &QWEN);
     m.insert(KIMI.id, &KIMI);
     m.insert(OPENCLAW.id, &OPENCLAW);
     m.insert(PI.id, &PI);
@@ -301,6 +333,8 @@ static ALIASES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(||
     m.insert("claude_code", "claude");
     m.insert("codex-cli", "codex");
     m.insert("gemini-cli", "gemini");
+    m.insert("qwen-code", "qwen");
+    m.insert("qwen3-coder", "qwen");
     m.insert("kimi-cli", "kimi");
     m.insert("kimi_code", "kimi");
     m.insert("openclaw-cli", "openclaw");
@@ -345,7 +379,8 @@ pub fn get_provider(id: &str) -> Option<&'static ProviderConfig> {
 /// Return an iterator over all registered providers in insertion order.
 pub fn get_provider_list() -> impl Iterator<Item = &'static ProviderConfig> {
     // Stable canonical order matches the TypeScript PROVIDERS object order.
-    static ORDER: &[&str] = &["claude", "codex", "gemini", "kimi", "openclaw", "pi", "copilot"];
+    static ORDER: &[&str] =
+        &["claude", "codex", "gemini", "qwen", "kimi", "openclaw", "pi", "copilot"];
     ORDER.iter().filter_map(|id| REGISTRY.get(*id).copied())
 }
 
@@ -362,6 +397,7 @@ mod tests {
         assert!(get_provider("gemini").is_some());
         assert!(get_provider("kimi").is_some());
         assert!(get_provider("openclaw").is_some());
+        assert!(get_provider("qwen").is_some());
     }
 
     #[test]
@@ -370,6 +406,8 @@ mod tests {
         assert_eq!(get_provider("claude_code").unwrap().id, "claude");
         assert_eq!(get_provider("codex-cli").unwrap().id, "codex");
         assert_eq!(get_provider("gemini-cli").unwrap().id, "gemini");
+        assert_eq!(get_provider("qwen-code").unwrap().id, "qwen");
+        assert_eq!(get_provider("qwen3-coder").unwrap().id, "qwen");
         assert_eq!(get_provider("kimi-cli").unwrap().id, "kimi");
         assert_eq!(get_provider("openclaw-cli").unwrap().id, "openclaw");
     }
@@ -380,11 +418,11 @@ mod tests {
     }
 
     #[test]
-    fn provider_list_has_seven_entries() {
+    fn provider_list_has_eight_entries() {
         // Update this when a provider is added or removed; a stale
         // count is the cheapest detection mechanism for accidental
         // additions.
-        assert_eq!(get_provider_list().count(), 7);
+        assert_eq!(get_provider_list().count(), 8);
     }
 
     #[test]
