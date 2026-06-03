@@ -122,9 +122,11 @@ crate:
 clean:cef:
   cmds:
     - '{{.RMRF}} "target/cef-sdk"'                       # build-util staging (root cause)
-    - '{{.RMRF}} "target/release/build/cef-dll-sys-*"'
-    - '{{.RMRF}} "target/fast-release/build/cef-dll-sys-*"'
-    - '{{.RMRF}} "target/release/libcef.dll"'            # downstream copies …
+    # Globs go through `bash -c` so they expand on EVERY OS — {{.RMRF}}
+    # double-quotes its path and POSIX `rm -rf` won't glob inside quotes
+    # (only Windows PowerShell expands a quoted wildcard).
+    - bash -c 'rm -rf target/release/build/cef-dll-sys-* target/fast-release/build/cef-dll-sys-* target/debug/build/cef-dll-sys-*'
+    - '{{.RMRF}} "target/release/libcef.dll"'            # downstream literal copies …
 ```
 (Uses `{{.RMRF}}` so it works under the Taskfile shell on every OS.)
 

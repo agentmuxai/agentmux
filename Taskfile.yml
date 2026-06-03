@@ -938,11 +938,13 @@ tasks:
               ignore_error: true
             # Drop cef-dll-sys build dirs so cargo re-runs its build script and
             # re-copies the correct CEF runtime into target/ on the next build.
-            - cmd: '{{.RMRF}} "target/release/build/cef-dll-sys-*"'
-              ignore_error: true
-            - cmd: '{{.RMRF}} "target/fast-release/build/cef-dll-sys-*"'
-              ignore_error: true
-            - cmd: '{{.RMRF}} "target/debug/build/cef-dll-sys-*"'
+            # Use `bash -c` so the globs expand on EVERY OS: {{.RMRF}} double-
+            # quotes its path, and POSIX `rm -rf` does not glob inside quotes
+            # (only Windows PowerShell Remove-Item expands a quoted wildcard),
+            # so a quoted glob would silently leave the cef-dll-sys-<hash> dirs
+            # behind off-Windows. bash is already a build dependency everywhere
+            # (build:host:linux/windows, package, scripts/* all shell out to it).
+            - cmd: bash -c 'rm -rf target/release/build/cef-dll-sys-* target/fast-release/build/cef-dll-sys-* target/debug/build/cef-dll-sys-*'
               ignore_error: true
             # Drop the top-level runtime copies that bundle:* reads from.
             - cmd: '{{.RMRF}} "target/release/libcef.dll"'
