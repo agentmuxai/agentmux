@@ -500,7 +500,15 @@ export function useAgentStream({
                 {
                     const inner = rawEvent.type === "stream_event" ? rawEvent.event : rawEvent;
                     if (inner?.type === "message_start") {
-                        const inputTok = inner.message?.usage?.input_tokens as number | undefined;
+                        // input_tokens is only the uncached prompt; cache_creation/
+                        // cache_read carry the rest of the real prompt size.
+                        const u = inner.message?.usage;
+                        const inputTok =
+                            u?.input_tokens != null
+                                ? (u.input_tokens as number)
+                                  + ((u.cache_creation_input_tokens as number | undefined) ?? 0)
+                                  + ((u.cache_read_input_tokens as number | undefined) ?? 0)
+                                : undefined;
                         if (inputTok != null) {
                             model.dispatchPane({ type: "TokensIn", input: inputTok });
                         }
