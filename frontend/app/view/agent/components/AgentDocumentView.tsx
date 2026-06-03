@@ -68,6 +68,12 @@ interface AgentDocumentViewProps {
      * SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01.
      */
     zoomFactor?: Accessor<number>;
+    /**
+     * blockId for the agent-pane-layout slice (Phase 2+). When present,
+     * forwarded to AgentDocumentVirtualList so it can route estimates and
+     * measurements through the slice (INV-3).
+     */
+    blockId?: string;
 }
 
 export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element => {
@@ -141,6 +147,7 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             onToggleCollapse={toggleCollapse}
             onTogglePin={togglePin}
             zoomFactor={props.zoomFactor}
+            blockId={props.blockId}
             headerSlot={headerSlot()}
         />
     );

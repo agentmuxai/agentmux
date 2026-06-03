@@ -238,3 +238,48 @@ export function estimateNode(node: DocumentNode, state: DocumentState): number {
         case "subagent_link": return estimateSubagentLink(node);
     }
 }
+
+/**
+ * Per-state height estimate for a given node, independent of the
+ * document's current open/collapsed signals. Used by the Phase-2 adapter
+ * to push `EstimateSet` for BOTH expansion states when a node first enters
+ * the layout slice (INV-3: measurements are keyed by (nodeId, state), so
+ * the slice needs an estimate for each state before measureElement settles).
+ *
+ * Intentionally does not receive `DocumentState` — the whole point is to
+ * give a size for the GIVEN state, not the rendered state. `_docState` is
+ * accepted only for call-site symmetry with `estimateNode`.
+ */
+export function estimateNodeForState(
+    node: DocumentNode,
+    expansionState: "collapsed" | "expanded",
+    _docState: DocumentState,
+): number {
+    if (expansionState === "collapsed") {
+        switch (node.type) {
+            case "tool":          return TOOL_COLLAPSED_PX;
+            case "agent_message": return COLLAPSED_MESSAGE_PX;
+            case "user_message":
+                // Startup messages collapse; normal user input doesn't.
+                return node.isStartup
+                    ? COLLAPSED_MESSAGE_PX
+                    : estimateUnwrappedTextHeight(node.message);
+            case "section":       return SECTION_PX;
+            case "markdown":
+                // Canceled-thinking collapses; normal markdown stays full.
+                return node.metadata?.canceled
+                    ? COLLAPSED_MESSAGE_PX
+                    : estimateTextHeight(node.content);
+            case "subagent_link": return SUBAGENT_LINK_PX;
+        }
+    }
+    // expanded
+    switch (node.type) {
+        case "tool":          return TOOL_EXPANDED_PX;
+        case "agent_message": return estimateTextHeight(node.message);
+        case "user_message":  return estimateUnwrappedTextHeight(node.message);
+        case "section":       return SECTION_PX;
+        case "markdown":      return estimateTextHeight(node.content);
+        case "subagent_link": return SUBAGENT_LINK_PX;
+    }
+}
