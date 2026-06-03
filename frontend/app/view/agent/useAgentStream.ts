@@ -222,7 +222,15 @@ export function useAgentStream({
             // PR G: turn-tokens are read from the reducer snapshot
             // instead of a dedicated signal accessor — same source of
             // truth, fewer props threaded into the hook.
-            const tokens = paneSnapshot(blockId)?.turnTokens ?? null;
+            // Codex carries usage only via the session_end stats (it emits no
+            // live turnTokens), so fall back to those for the global aggregate
+            // too — mirroring the per-pane mergeStats.
+            const liveTokens = paneSnapshot(blockId)?.turnTokens ?? null;
+            const tokens =
+                liveTokens ??
+                (stats && (stats.input_tokens != null || stats.output_tokens != null)
+                    ? { input: stats.input_tokens ?? 0, output: stats.output_tokens ?? 0 }
+                    : null);
             // Aggregate the completed turn's tokens into the global
             // session-local token-usage store so the status bar's
             // indicator + breakdown popover stay up to date. Guarded
