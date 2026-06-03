@@ -186,10 +186,15 @@ impl AgentMuxHandler {
     /// the frame URL isn't a live app URL (renderer died before committing one,
     /// or it's a prior data: recovery page). codex P2 #1229.
     fn recovery_target_url(&self, owned: &mut Browser, base_url: &str) -> String {
+        // Only reuse the pre-crash URL if it's on the SAME origin we'd reload
+        // from (`base_url`) — that's `http://127.0.0.1:<ipc_port>` for
+        // installed/portable and `http://localhost:<vite_port>` for dev, so
+        // matching against base_url rather than a hardcoded host covers both
+        // (codex P2 #1229: dev tear-off URLs are localhost).
         let pre_crash = owned
             .main_frame()
             .map(|f| CefString::from(&f.url()).to_string())
-            .filter(|u| u.starts_with("http://127.0.0.1"));
+            .filter(|u| url_on_origin(u, base_url));
         if let Some(u) = pre_crash {
             return u;
         }
@@ -2034,6 +2039,21 @@ setTimeout(tick, 1000);
     )
 }
 
+/// True when `url` is on the same origin as `base_url` (i.e. a live app URL we
+/// can safely reuse for recovery). The boundary check after the prefix guards
+/// against a port that is a numeric prefix of another (e.g. `:5173` matching
+/// `:51730`): the char following the origin must be a path/query/fragment
+/// separator or end-of-string. `base_url` is an origin with no path
+/// (`http://127.0.0.1:<port>` or `http://localhost:<port>`).
+fn url_on_origin(url: &str, base_url: &str) -> bool {
+    url.strip_prefix(base_url).is_some_and(|rest| {
+        rest.is_empty()
+            || rest.starts_with('/')
+            || rest.starts_with('?')
+            || rest.starts_with('#')
+    })
+}
+
 /// Build the navigation URL a crash-recovery / low-memory page sends the user
 /// back to. Carries `ipc_port` + `ipc_token` and — critically — the window's
 /// `windowLabel` when known, so a recovered secondary window doesn't
@@ -2134,9 +2154,32 @@ pause again.</p>
 
 #[cfg(test)]
 mod gated_recovery_tests {
-    use super::{record_memory_pause, MEMORY_PAUSE_BUDGET, MEMORY_PAUSE_WINDOW, RESUME_FLOOR_MB};
+    use super::{
+        record_memory_pause, url_on_origin, MEMORY_PAUSE_BUDGET, MEMORY_PAUSE_WINDOW,
+        RESUME_FLOOR_MB,
+    };
     use std::collections::VecDeque;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn url_on_origin_matches_only_real_same_origin_urls() {
+        let base = "http://localhost:5173";
+        // Exact origin, origin + path / query / fragment — all reuse.
+        assert!(url_on_origin("http://localhost:5173", base));
+        assert!(url_on_origin("http://localhost:5173/", base));
+        assert!(url_on_origin("http://localhost:5173/?windowLabel=w1&workspaceId=ws", base));
+        assert!(url_on_origin("http://localhost:5173?ipc_port=1&ipc_token=t", base));
+        assert!(url_on_origin("http://localhost:5173#/route", base));
+        // Port that merely *extends* the base port must NOT match.
+        assert!(!url_on_origin("http://localhost:51730/?x=1", base));
+        // Different origin, and a non-http (data:) recovery page, must not match.
+        assert!(!url_on_origin("http://127.0.0.1:5173/?x=1", base));
+        assert!(!url_on_origin("data:text/html;base64,abc", base));
+        // Prod origin behaves the same.
+        let prod = "http://127.0.0.1:8080";
+        assert!(url_on_origin("http://127.0.0.1:8080/?ipc_port=8080", prod));
+        assert!(!url_on_origin("http://127.0.0.1:80801/", prod));
+    }
 
     #[test]
     fn resume_floor_is_above_a_fresh_renderer_commit() {

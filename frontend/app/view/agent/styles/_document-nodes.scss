@@ -287,7 +287,13 @@
                 max-height 120ms cubic-bezier(0.4, 0, 0.2, 1),
                 padding 120ms cubic-bezier(0.4, 0, 0.2, 1),
                 margin 120ms cubic-bezier(0.4, 0, 0.2, 1),
-                opacity 100ms ease-out;
+                opacity 100ms ease-out,
+                // `content-visibility` is discrete; `allow-discrete` lets it
+                // animate with the collapse — it flips to `hidden` at the END of
+                // the close (body stays rendered through the 120ms shrink) and to
+                // visible at the START of the open. Without it the body pops out
+                // the instant `--hidden` is added. (Chromium 117+.)
+                content-visibility 120ms allow-discrete;
 
             &--hidden {
                 max-height: 0;
@@ -296,6 +302,20 @@
                 margin-top: 0;
                 margin-bottom: 0;
                 opacity: 0;
+                // The overlay body (full tool output) stays in the DOM so the
+                // 120ms collapse transition can animate and so the virtualizer
+                // sees a stable subtree (mounting/unmounting it mid-animation
+                // corrupts row measurements). But `max-height: 0; overflow:
+                // hidden` only CLIPS it — the browser still lays out every
+                // descendant, which made hundreds of KB of invisible tool
+                // output a full-cost layout participant on every subtree
+                // invalidation (most visibly a per-pane CSS `zoom` change:
+                // ~300ms relayout, ~90% of it this hidden content). `content-
+                // visibility: hidden` skips layout + paint of the descendants
+                // while keeping them attached — same perf win as display:none
+                // (~10x) with none of the DOM-mutation fallout.
+                // SPEC_TOOL_BLOCK_COLLAPSED_OVERLAY_LAYOUT_2026_06_02.md.
+                content-visibility: hidden;
             }
 
             // In-flow variant — the only visible mode now that the
