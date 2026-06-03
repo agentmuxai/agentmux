@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16">
+  <title>AgentMux four-process architecture</title>
+  <desc>agentmux-launcher (1 per channel, enforced via single-instance named-pipe lock) spawns agentmux-cef (1 per launcher) and agentmux-srv (1 per launcher, dynamic port). The host embeds Chromium 148 via CEF (1 main renderer + N renderer subprocesses, one per browser pane). The main renderer loads the SolidJS frontend, which talks to the srv sidecar over a WebSocket. Multiple AgentMux instances may run side-by-side; each gets its own complete 4-process stack keyed on data-dir channel.</desc>
+
+  <defs>
+    <style>
+      .box       { fill: #ffffff; stroke: #8168d3; stroke-width: 1.5; rx: 10; ry: 10; }
+      .box-alt   { fill: #ffffff; stroke: #419fe0; stroke-width: 1.5; rx: 10; ry: 10; }
+      .sidecar   { fill: #ffffff; stroke: #5e8fd9; stroke-width: 1.5; rx: 10; ry: 10; }
+
+      .title     { font-weight: 700; font-size: 18px; fill: #1c1c1f; }
+      .sub       { font-size: 14px; fill: #44444c; }
+      .card      { font-size: 12.5px; font-weight: 600; fill: #8168d3; letter-spacing: 0.3px; }
+      .card-alt  { font-size: 12.5px; font-weight: 600; fill: #419fe0; letter-spacing: 0.3px; }
+      .card-side { font-size: 12.5px; font-weight: 600; fill: #5e8fd9; letter-spacing: 0.3px; }
+
+      .edge        { stroke: #8b8b95; stroke-width: 1.5; fill: none; }
+      .edge-label  { font-size: 13px; fill: #44444c; font-weight: 500; }
+      .ipc         { stroke: #8168d3; stroke-width: 1.6; fill: none; stroke-dasharray: 6 4; }
+      .ipc-label   { font-size: 13px; fill: #8168d3; font-weight: 700; }
+      .bullet      { font-size: 14px; fill: #44444c; }
+      .legend      { font-size: 12px; fill: #6a6a72; font-style: italic; }
+
+      @media (prefers-color-scheme: dark) {
+        .box, .box-alt, .sidecar { fill: #1a1a1e; }
+        .title  { fill: #f0f0f5; }
+        .sub, .bullet, .edge-label { fill: #b8b8c2; }
+        .legend { fill: #9090a0; }
+        .edge   { stroke: #6a6a78; }
+      }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8b8b95"/>
+    </marker>
+    <marker id="arrow-ipc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8168d3"/>
+    </marker>
+  </defs>
+
+  <!-- Row 1: launcher (left) -->
+  <g>
+    <rect class="box" x="40" y="40" width="280" height="110"/>
+    <text class="title" x="180" y="72" text-anchor="middle">agentmux-launcher</text>
+    <text class="sub"   x="180" y="96" text-anchor="middle">~325 KB shim · spawns host + srv</text>
+    <text class="card"  x="180" y="125" text-anchor="middle">×1 per channel</text>
+    <text class="sub"   x="180" y="142" text-anchor="middle" style="font-size:12px;">(single-instance via named-pipe lock)</text>
+  </g>
+
+  <!-- Row 1: cef host (right) -->
+  <g>
+    <rect class="box" x="640" y="40" width="280" height="110"/>
+    <text class="title" x="780" y="72" text-anchor="middle">agentmux-cef</text>
+    <text class="sub"   x="780" y="96" text-anchor="middle">the "host" · Rust + CEF bindings</text>
+    <text class="card"  x="780" y="125" text-anchor="middle">×1 per launcher</text>
+    <text class="sub"   x="780" y="142" text-anchor="middle" style="font-size:12px;">(owns OS window + JS bridge)</text>
+  </g>
+
+  <!-- IPC link: launcher <-> host (named pipe, bidirectional) -->
+  <line class="ipc" x1="320" y1="95" x2="640" y2="95" marker-start="url(#arrow-ipc)" marker-end="url(#arrow-ipc)"/>
+  <text class="ipc-label" x="480" y="86" text-anchor="middle">named pipe</text>
+
+  <!-- Row 2: Chromium 148 (renderer) -->
+  <g>
+    <rect class="box-alt" x="640" y="200" width="280" height="100"/>
+    <text class="title"  x="780" y="232" text-anchor="middle">Chromium 148</text>
+    <text class="sub"    x="780" y="254" text-anchor="middle">CEF renderer (+ utility procs)</text>
+    <text class="card-alt" x="780" y="280" text-anchor="middle">×1 main + ×N per browser pane</text>
+  </g>
+  <path class="edge" d="M780,150 L780,200" marker-end="url(#arrow)"/>
+  <text class="edge-label" x="790" y="178">embeds</text>
+
+  <!-- Row 3: SolidJS frontend -->
+  <g>
+    <rect class="box-alt" x="640" y="340" width="280" height="100"/>
+    <text class="title"  x="780" y="372" text-anchor="middle">SolidJS app</text>
+    <text class="sub"    x="780" y="394" text-anchor="middle">the frontend · Vite-built bundle</text>
+    <text class="card-alt" x="780" y="420" text-anchor="middle">×1 per host (in main renderer)</text>
+  </g>
+  <path class="edge" d="M780,300 L780,340" marker-end="url(#arrow)"/>
+  <text class="edge-label" x="790" y="324">JS bridge</text>
+
+  <!-- Row 4: agentmux-srv sidecar, spanning full width -->
+  <g>
+    <rect class="sidecar" x="40" y="490" width="880" height="90"/>
+    <text class="title"    x="480" y="520" text-anchor="middle">agentmux-srv  ·  sidecar</text>
+    <text class="bullet"   x="180" y="548" text-anchor="middle">RPC engine (websocket)</text>
+    <text class="bullet"   x="430" y="548" text-anchor="middle">saga coordinator · event bus</text>
+    <text class="bullet"   x="700" y="548" text-anchor="middle">SQLite persistence</text>
+    <text class="card-side" x="480" y="570" text-anchor="middle">×1 per launcher · dynamic port · Rust + Tokio + Axum</text>
+  </g>
+
+  <!-- launcher -> srv (spawns) -->
+  <path class="edge" d="M180,150 L180,490" marker-end="url(#arrow)"/>
+  <text class="edge-label" x="190" y="320">spawns</text>
+
+  <!-- solidjs -> srv (websocket) -->
+  <path class="edge" d="M780,440 L780,490" marker-end="url(#arrow)"/>
+  <text class="edge-label" x="790" y="468">websocket</text>
+
+  <!-- Legend / multiplicity note -->
+  <text class="legend" x="480" y="20" text-anchor="middle">
+    Multiple AgentMux instances can run side-by-side — each gets its own full 4-process stack, keyed on data-dir channel (version / branch / --fresh).
+  </text>
+</svg>

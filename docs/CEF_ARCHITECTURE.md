@@ -57,7 +57,7 @@ X.Y.Z+gHHHHHHH+chromium-A.B.C.D
 
 | Component | Meaning |
 |-----------|---------|
-| `X` | Major version = Chromium milestone (e.g., CEF 146 = Chromium 146) |
+| `X` | Major version = Chromium milestone (e.g., CEF 148 = Chromium 148) |
 | `Y` | Increments when C/C++ API changes; resets to 0 per branch |
 | `Z` | Bugfix counter; resets when Y increments |
 | `gHHHHHHH` | 7-character Git commit hash |
@@ -70,7 +70,7 @@ X.Y.Z+gHHHHHHH+chromium-A.B.C.D
 CEF maintains branches that track Chromium release milestones:
 
 - **Master branch** — Tracks Chromium master. Not for production.
-- **Release branches** — Created per Chromium milestone (MXX). Frozen APIs with only security/bug fixes. Example: Branch 7680 = Chromium 146 (Stable).
+- **Release branches** — Created per Chromium milestone (MXX). Frozen APIs with only security/bug fixes. Example: Branch 7778 = Chromium 148 (Stable).
 - **LTS (Long-Term Support)** — Every 6th branch starting with M138 receives extended support (~8 additional months of security fixes after exiting stable).
 - **Legacy** — Old branches (back to 2704) available but unsupported.
 
