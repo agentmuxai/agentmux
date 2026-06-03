@@ -236,6 +236,35 @@ describe("ClaudeTranslator", () => {
                 num_turns: 3,
             });
         });
+
+        it("carries token usage — input sums uncached + cache_creation + cache_read", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "result",
+                duration_ms: 1000,
+                usage: {
+                    input_tokens: 2,
+                    cache_creation_input_tokens: 49164,
+                    cache_read_input_tokens: 20685,
+                    output_tokens: 512,
+                },
+            });
+            expect((events[0] as any).stats).toEqual({
+                duration_ms: 1000,
+                input_tokens: 2 + 49164 + 20685,
+                output_tokens: 512,
+            });
+        });
+
+        it("omits token fields when usage is absent or all-zero", () => {
+            const t = new ClaudeTranslator();
+            expect((t.translate({ type: "result", num_turns: 1 })[0] as any).stats).toEqual({
+                num_turns: 1,
+            });
+            expect(
+                (t.translate({ type: "result", usage: { input_tokens: 0, output_tokens: 0 } })[0] as any).stats,
+            ).toEqual({});
+        });
     });
 
     // ── Edge cases ──────────────────────────────────────────────────────────

@@ -124,6 +124,21 @@ describe("agent-pane-state reducer", () => {
             });
         });
 
+        it("TurnEnd prefers token-bearing result totals over live last-message tokens", () => {
+            // Live turnTokens hold only the last message_start/message_delta
+            // (TokensIn/TokensOut overwrite); the result carries the
+            // cache-inclusive turn total, which must win.
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, { type: "TokensIn", input: 2 }).state;
+            const s3 = update(s2, { type: "TokensOut", output: 300 }).state;
+            const r = update(s3, {
+                type: "TurnEnd",
+                stats: { input_tokens: 70000, output_tokens: 512 } as any,
+            });
+            expect(r.state.sessionStats).toMatchObject({ input_tokens: 70000, output_tokens: 512 });
+        });
+
         it("TurnReset clears turn-scoped state but keeps subscription + pending", () => {
             const s0 = ready(100);
             const s1 = update(s0, {
