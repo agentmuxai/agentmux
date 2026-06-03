@@ -771,6 +771,20 @@ async fn run_windows(
     // distinct pipe names — each version is its own single-instance domain.
     let dir_hash = hash::data_dir_hash16(&paths.data_dir, env!("CARGO_PKG_VERSION"));
     let pipe_path = ipc::pipe_name(&dir_hash);
+    // Isolation telemetry: record exactly which keyed resources this instance
+    // claims, so a cross-instance collision is diagnosable from the log alone
+    // (two live PIDs claiming the same dir_hash) instead of inferred after a
+    // vanished window. The launcher's job object is unnamed, so there is no
+    // shared lifecycle handle to log. See
+    // docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md.
+    log(&format!(
+        "instance_claim pid={} version={} data_dir={} dir_hash={} pipe={}",
+        std::process::id(),
+        env!("CARGO_PKG_VERSION"),
+        paths.data_dir.display(),
+        dir_hash,
+        pipe_path
+    ));
     let first_pipe = match ipc::server::bind_first_pipe_instance(&pipe_path) {
         Ok(p) => p,
         Err(e) => {

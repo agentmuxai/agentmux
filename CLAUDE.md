@@ -91,6 +91,33 @@ This means:
 - `task dev` is always safe alongside a running portable instance.
 - **NEVER kill by image name** (`taskkill //im agentmux-cef.exe`) — it kills ALL instances. Always kill by PID.
 
+#### Isolation invariants (I1–I6)
+
+These are the contract that makes parallel instances safe — launching a new build
+must never crash a running one. Any change to the launcher's process/pipe/job code
+must be reviewed against them (see
+`docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md`):
+
+- **I1 Pipe uniqueness** — the single-instance pipe is keyed on
+  `hash(data_dir + version)` (`agentmux-launcher/src/hash.rs`); no two distinct
+  `(data_dir, version)` pairs collide.
+- **I2 No global lifecycle handles** — the launcher creates only *unnamed* Job
+  Objects and never opens a job/process handle it did not create.
+- **I3 Bounded blast radius** — a launcher failure may terminate only processes in
+  its own job; no path may kill a PID outside its own job (this is why
+  `taskkill //im` is banned).
+- **I4 Forward-only cross-instance contact** — the only contact with another
+  instance is the authenticated `open_new_window` forward; it is side-effect-free
+  w.r.t. that instance's lifecycle.
+- **I5 Keyed shared OS objects** — every named OS object (pipe, event, window
+  class) embeds the `dir_hash`.
+- **I6 Data isolation** — instances of different `(channel, version)` never share a
+  data/logs/cef-cache directory.
+
+A reviewer reading a diff that touches `CreateJobObjectW`, `AssignProcessToJobObject`,
+`OpenProcess`/`TerminateProcess`, or pipe/event/window-class naming should confirm it
+upholds I1–I6.
+
 ### Widgets
 
 Widgets are defined in `agentmux-srv/src/config/widgets.json`. These are the **only** widget types — do not invent or reference widgets that don't exist here.
