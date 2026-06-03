@@ -190,8 +190,13 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     // OPENAI_BASE_URL=https://openrouter.ai/api/v1 + OPENAI_API_KEY (+ OPENAI_MODEL)
     // to run any OpenRouter model. The Qwen OAuth free tier was retired
     // (2026-04-15), so this is treated as api-key.
-    // NOTE: authCheck/authLogin below are provisional — the intended path is
-    // an env-injected key from the identity bundle, not an interactive CLI login.
+    // Auth: the intended path is an env-injected key from the identity bundle
+    // (OPENAI_API_KEY/OPENROUTER_API_KEY), not an interactive CLI login. We use
+    // the Gemini-parent `auth status`/`auth` convention for the check/login:
+    // `auth status` fails-closed (prompts for auth) rather than reporting a
+    // false positive the way `--version` would (checkcliauth treats any
+    // non-JSON zero exit as authenticated — cli_handlers.rs). A deeper fix
+    // would validate the bound env key directly in the api-key flow.
     qwen: {
         id: "qwen",
         displayName: "Qwen Code",
@@ -201,7 +206,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         outputFormat: "raw",
         styledOutputFormat: "gemini-json",
         authType: "api-key",
-        authCheckCommand: ["--version"],
+        authCheckCommand: ["auth", "status"],
         authLoginCommand: ["auth"],
         npmPackage: "@qwen-code/qwen-code",
         pinnedVersion: "latest",
