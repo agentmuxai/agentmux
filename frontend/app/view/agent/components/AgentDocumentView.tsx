@@ -19,7 +19,7 @@
  * `agentmux-ai/AGENT_PANE_ACTIVITY_LOG_SPEC.md`.
  */
 
-import { createSignal, Show, type Accessor, type JSX } from "solid-js";
+import { createSignal, onMount, Show, type Accessor, type JSX } from "solid-js";
 import type { SignalPair } from "../state";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
@@ -164,6 +164,16 @@ function AuthUrlBox(props: AuthUrlBoxProps): JSX.Element {
     const [pasteCode, setPasteCode] = createSignal("");
     const [pasting, setPasting] = createSignal(false);
     const [pasteResult, setPasteResult] = createSignal<string | null>(null);
+    let inputRef: HTMLInputElement | undefined;
+
+    // Grab focus when the box appears so the user's pasted code lands HERE,
+    // not in the main agent message input (which otherwise holds focus and
+    // silently swallows the paste — the login then stalls waiting on stdin).
+    // Deferred past the current focus cycle (the pane's focus-reclaim runs
+    // synchronously on render) so this wins the race.
+    onMount(() => {
+        requestAnimationFrame(() => inputRef?.focus());
+    });
 
     const handleSubmitCode = async (): Promise<void> => {
         const code = pasteCode().trim();
@@ -198,6 +208,7 @@ function AuthUrlBox(props: AuthUrlBoxProps): JSX.Element {
             </div>
             <div class="agent-auth-paste-row">
                 <input
+                    ref={inputRef}
                     class="agent-auth-paste-input"
                     type="text"
                     placeholder="Paste auth code from Anthropic..."
