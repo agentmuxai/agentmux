@@ -156,15 +156,15 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         registerPaneRect(model.blockId, paneRectCss());
     };
 
-    // Per-frame tracking during a pane reflow animation.
+    // Native browser-pane HWND settle on a layout change.
     //
-    // DOM panes ride the `.tile-node` / `.block-content` CSS transitions, but
-    // a native browser-pane HWND can't be moved by CSS — so while a reflow is
-    // in flight we re-sample this pane's (CSS-animating) placeholder rect every
-    // frame and push it to the host. `syncPosition` dedupes, so frames with no
-    // change are free. The native window thus tracks its DOM placeholder
-    // exactly (one clock, no drift). Reduced-motion users skip this — the
-    // layout snaps and the ResizeObserver/poll sends the final rect.
+    // A native browser-pane HWND can't be moved by CSS. On a pane geometry
+    // change `notifyPaneReflow()` opens a short window during which we re-sample
+    // this pane's placeholder rect per frame and push it to the host
+    // (`syncPosition` dedupes, so unchanged frames are free). The pane reflow CSS
+    // animation has since been removed, so the placeholder no longer animates —
+    // this now just settles the HWND onto the final rect; the ResizeObserver/poll
+    // is the steady-state path.
     // See docs/specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md.
     let reflowRAF: number | null = null;
     const sampleReflowFrame = () => {
@@ -172,18 +172,17 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         if (paneReflowActive()) {
             reflowRAF = requestAnimationFrame(sampleReflowFrame);
         } else {
-            // One final settle frame so the HWND lands exactly on the
-            // post-animation rect even if the last tick fired slightly early.
+            // One final settle frame so the HWND lands exactly on the final
+            // rect even if the last tick fired slightly early.
             reflowRAF = null;
             syncPosition();
         }
     };
     createEffect(() => {
-        // `paneReflowActive()` reads the shared `animatingUntil` signal, so
-        // this effect re-runs the instant a reflow begins. Pane reflow is
-        // treated as essential motion (see tilelayout.scss), so this tracks
-        // regardless of the reduced-motion preference — keeping the native
-        // browser-pane window in lockstep with the animating DOM panes.
+        // `paneReflowActive()` reads the shared `animatingUntil` signal, so this
+        // effect re-runs the instant a pane geometry change opens the settle
+        // window; the per-frame loop then re-syncs the native browser-pane HWND
+        // onto the new placeholder rect.
         if (paneReflowActive() && reflowRAF == null) {
             reflowRAF = requestAnimationFrame(sampleReflowFrame);
         }

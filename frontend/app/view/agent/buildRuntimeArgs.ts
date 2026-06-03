@@ -30,6 +30,13 @@ const PERMISSION_STRIP = new Set([
     "--yolo",
 ]);
 
+// Default codex model. The Claude-named `ModelChoice` (opus/sonnet/haiku) does
+// not apply to codex, and codex 0.116.0's baked default (gpt-5.3-codex) is
+// rejected for ChatGPT-account auth. gpt-5.4 is a current ChatGPT-supported
+// codex model. Per-provider model selection is a follow-up — see
+// docs/analysis/CODEX_AGENT_LAUNCH_DOA_2026_06_02.md.
+const CODEX_DEFAULT_MODEL = "gpt-5.4";
+
 /**
  * Build final CLI args from base provider args and runtime config.
  *
@@ -70,25 +77,40 @@ export function buildRuntimeArgs(
         i++;
     }
 
-    // Apply permission mode
+    // Apply permission mode.
+    // Codex takes no appended permission flag: its bypass
+    // (--dangerously-bypass-approvals-and-sandbox) is baked into its base args,
+    // `codex exec` has no --permission-mode, and its prompt positional `-` must
+    // stay last (anything appended after it is parsed as a stray arg).
     if (providerId === "kimi" || providerId === "gemini" || providerId === "qwen") {
         // Kimi, Gemini, and Qwen (a Gemini-CLI fork) only support --yolo
         // (bypass) vs no flag (default) — not --permission-mode / --dangerously-skip-permissions
         if (config.permissionMode !== "default") {
             args.push("--yolo");
         }
-    } else {
+    } else if (providerId !== "codex") {
         const permFlags = PERMISSION_FLAGS[config.permissionMode] ?? PERMISSION_FLAGS.bypass;
         args.push(...permFlags);
     }
 
-    // --model: supported by claude, codex, gemini. --effort: claude only.
-    const supportsModel = !providerId || providerId === "claude" || providerId === "codex" || providerId === "gemini";
+    // --model: claude only. ModelChoice values (opus/sonnet/haiku) are Claude
+    // model names; codex (handled below) and gemini use their own model
+    // namespaces, so a Claude name is rejected. gemini falls back to its CLI
+    // default until a per-provider model list lands. --effort: claude only.
+    const supportsModel = !providerId || providerId === "claude";
     if (supportsModel) {
         args.push("--model", config.model);
     }
     if (!providerId || providerId === "claude") {
         args.push("--effort", config.effort);
+    }
+
+    // Codex uses a gpt-5.x model (not ModelChoice), and the flag must precede its
+    // trailing `-` prompt positional.
+    if (providerId === "codex") {
+        const promptPositional = args[args.length - 1] === "-" ? args.pop()! : null;
+        args.push("--model", CODEX_DEFAULT_MODEL);
+        if (promptPositional !== null) args.push(promptPositional);
     }
 
     return args;

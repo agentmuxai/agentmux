@@ -108,13 +108,11 @@ export function useDebouncedNodeInnerRect(nodeModel: NodeModel): () => CSSProper
         // `animationTimeS`, which held the pane CONTENT at its old size for
         // the whole animation and then snapped it — so only the empty
         // wrapper box eased while the visible content popped at the end
-        // (the "panes jerk into place" report). The reflow animation now
-        // lives in CSS: the inner rect changes old→new right now, and the
-        // `.block-content` size transition (block.scss, gated on
-        // `.tile-layout.animate`) animates it in lockstep with the
-        // `.tile-node` wrapper. During a resize drag `.animate` is off, so
-        // the content follows the cursor instantly with no transition —
-        // same as before. Reduced-motion zeroes the CSS transition.
+        // (the "panes jerk into place" report). The inner rect now changes
+        // old→new immediately in every case; the CSS reflow transition that
+        // used to ease the `.block-content` / `.tile-node` size over
+        // `.tile-layout.animate` was removed, so pane open/close/resize is
+        // instant.
         // See docs/specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md.
         clearInnerRectDebounce();
         setInnerRect(nodeInnerRect as any);
