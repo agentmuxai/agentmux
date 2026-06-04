@@ -265,7 +265,16 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             dispatchScrollMargin();
             const ro = new ResizeObserver(() => dispatchScrollMargin());
             ro.observe(virtualContainerRef);
-            onCleanup(() => ro.disconnect());
+            // The header (auth box / loading-older banner) sits ABOVE the
+            // container; toggling it changes the container's offsetTop WITHOUT
+            // resizing the container itself, so the RO above never fires for it.
+            // Watch scrollRef's direct children for the header add/remove and
+            // re-read scrollMargin then — keeps the slice's scrollMarginPx in
+            // sync with offsetTop for the render path, windowing, and
+            // scroll-to-node (which all subtract the current offsetTop).
+            const mo = new MutationObserver(() => dispatchScrollMargin());
+            mo.observe(scrollRef, { childList: true });
+            onCleanup(() => { ro.disconnect(); mo.disconnect(); });
         });
     }
 
