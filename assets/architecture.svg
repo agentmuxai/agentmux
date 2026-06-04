@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16">
   <title>AgentMux four-process architecture</title>
-  <desc>agentmux-launcher (1 per channel, enforced via single-instance named-pipe lock) spawns agentmux-cef (1 per launcher) and agentmux-srv (1 per launcher, dynamic port). The host embeds Chromium 148 via CEF (1 main renderer + N renderer subprocesses, one per browser pane). The main renderer loads the SolidJS frontend, which talks to the srv sidecar over a WebSocket. Multiple AgentMux instances may run side-by-side; each gets its own complete 4-process stack keyed on data-dir channel.</desc>
+  <desc>agentmux-launcher (1 per (channel, version) pair, enforced via single-instance named-pipe lock keyed on hash(data_dir + version)) spawns agentmux-cef (1 per launcher) and agentmux-srv (1 per launcher, dynamic port). The host embeds Chromium 148 via CEF (1 main renderer + N renderer subprocesses, one per browser pane). The main renderer loads the SolidJS frontend, which talks to the srv sidecar over a WebSocket. Multiple AgentMux instances may run side-by-side; each (channel, version) pair gets its own complete 4-process stack.</desc>
 
   <defs>
     <style>
+      .surface   { fill: #fafbfc; stroke: none; }
       .box       { fill: #ffffff; stroke: #8168d3; stroke-width: 1.5; rx: 10; ry: 10; }
       .box-alt   { fill: #ffffff; stroke: #419fe0; stroke-width: 1.5; rx: 10; ry: 10; }
       .sidecar   { fill: #ffffff; stroke: #5e8fd9; stroke-width: 1.5; rx: 10; ry: 10; }
@@ -22,13 +23,6 @@
       .bullet      { font-size: 14px; fill: #44444c; }
       .legend      { font-size: 12px; fill: #6a6a72; font-style: italic; }
 
-      @media (prefers-color-scheme: dark) {
-        .box, .box-alt, .sidecar { fill: #1a1a1e; }
-        .title  { fill: #f0f0f5; }
-        .sub, .bullet, .edge-label { fill: #b8b8c2; }
-        .legend { fill: #9090a0; }
-        .edge   { stroke: #6a6a78; }
-      }
     </style>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#8b8b95"/>
@@ -38,12 +32,15 @@
     </marker>
   </defs>
 
+  <!-- Surface — explicit light background so the SVG renders consistently on both light/dark backgrounds (GitHub dark mode, Starlight dark theme, etc.) -->
+  <rect class="surface" x="0" y="0" width="960" height="600"/>
+
   <!-- Row 1: launcher (left) -->
   <g>
     <rect class="box" x="40" y="40" width="280" height="110"/>
     <text class="title" x="180" y="72" text-anchor="middle">agentmux-launcher</text>
     <text class="sub"   x="180" y="96" text-anchor="middle">~325 KB shim · spawns host + srv</text>
-    <text class="card"  x="180" y="125" text-anchor="middle">×1 per channel</text>
+    <text class="card"  x="180" y="125" text-anchor="middle">×1 per (channel, version)</text>
     <text class="sub"   x="180" y="142" text-anchor="middle" style="font-size:12px;">(single-instance via named-pipe lock)</text>
   </g>
 
@@ -98,8 +95,7 @@
   <path class="edge" d="M780,440 L780,490" marker-end="url(#arrow)"/>
   <text class="edge-label" x="790" y="468">websocket</text>
 
-  <!-- Legend / multiplicity note -->
-  <text class="legend" x="480" y="20" text-anchor="middle">
-    Multiple AgentMux instances can run side-by-side — each gets its own full 4-process stack, keyed on data-dir channel (version / branch / --fresh).
-  </text>
+  <!-- Legend / multiplicity note. Split onto two lines so the text never overflows the viewBox. -->
+  <text class="legend" x="480" y="14" text-anchor="middle">Multiple AgentMux instances can run side-by-side —</text>
+  <text class="legend" x="480" y="28" text-anchor="middle">each (channel, version) gets its own full 4-process stack.</text>
 </svg>
