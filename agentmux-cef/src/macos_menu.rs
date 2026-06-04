@@ -206,6 +206,9 @@ unsafe fn install_inner(state: Arc<AppState>) {
     add_cmd(app_menu, target, "Settings…", "dev:open_settings", "", 0);
     add_cmd(app_menu, target, "Identity & Memory…", "app:identity", "", 0);
     add_sep(app_menu);
+    // Docs live here (no "Help" menu — see the SCTSearchManager note below).
+    add_cmd(app_menu, target, &format!("{name} Help"), "help:docs", "", 0);
+    add_sep(app_menu);
     add_std(app_menu, &format!("Hide {name}"), b"hide:\0", "h", MOD_CMD);
     add_std(app_menu, "Hide Others", b"hideOtherApplications:\0", "h", MOD_CMD | MOD_OPT);
     add_std(app_menu, "Show All", b"unhideAllApplications:\0", "", 0);
@@ -253,9 +256,13 @@ unsafe fn install_inner(state: Arc<AppState>) {
     add_cmd(window, target, "Next Tab", "tab:next", "", 0);
     add_cmd(window, target, "Previous Tab", "tab:prev", "", 0);
 
-    // ── Help ──
-    let help = add_submenu(main, "Help");
-    add_cmd(help, target, &format!("{name} Help"), "help:docs", "", 0);
+    // NOTE: no dedicated "Help" menu in Phase 1. AppKit auto-attaches a
+    // Spotlight Help-search field (`SCTSearchManager`) to any menu titled
+    // "Help"; in the bundle-less dev binary that machinery segfaults loading
+    // its nib (EXC_BAD_ACCESS) the moment the menu bar is clicked. The docs
+    // item lives in the AgentMux app menu instead. A proper Help menu can
+    // return in Phase 2 once verified against a packaged .app (where the nib
+    // resources exist). See SPEC_MACOS_NATIVE_MENU_BAR_2026-06-03.
 
     // Install + register the Windows menu (auto window list / Bring-All-to-Front).
     let app = msg(class(b"NSApplication\0") as Id, sel(b"sharedApplication\0"));
