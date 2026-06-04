@@ -28,7 +28,6 @@
  * the state into the DOM but never reads it back.
  */
 
-import { createVirtualizer } from "@tanstack/solid-virtual";
 import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
 import { Key } from "@solid-primitives/keyed";
@@ -51,7 +50,7 @@ import {
     type LayoutView,
     type RowPosition,
 } from "@/app/store/agent-pane-layout-store";
-import { effectiveHeight } from "@/app/store/agent-pane-layout/reducer";
+import { computeLayoutView } from "@/app/store/agent-pane-layout/reducer";
 import { inFlowState } from "@/app/store/agent-pane-layout/types";
 import {
     initialStickyFrontierId,
@@ -270,77 +269,12 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         });
     }
 
-    // Virtualizer over the virtualized head only — streaming buffer is
-    // rendered separately as a normal flex list. Per-kind estimators
-    // come from the renderer registry; measureElement settles each row
-    // to actual height after first paint.
-    const virtualizer = createVirtualizer({
-        get count() { return partition().virtualizedNodes.length; },
-        getScrollElement: () => scrollRef,
-        estimateSize: (index) => {
-            const node = partition().virtualizedNodes[index];
-            if (!node) return 32;
-            // Phase 2: prefer the slice's effective height (measured > estimate >
-            // DEFAULT_ROW_PX) over the direct per-kind estimator. This is the core
-            // INV-3 fix: when a row switches expansion state the slice immediately
-            // returns the cached height for the NEW state instead of the wrong-state
-            // value TanStack would have kept in its cache.
-            if (props.blockId) {
-                const s = snapshotLayout(props.blockId);
-                if (s) return effectiveHeight(s, node.id);
-            }
-            return estimateNode(node, props.documentState());
-        },
-        overscan: 5,
-        getItemKey: (index) => partition().virtualizedNodes[index]?.id ?? index,
-        // scrollMargin: any content rendered above the virtualizer
-        // container (loading-older banner, auth-url box from the
-        // parent) shifts the virtual coordinate system. Read offsetTop
-        // as a getter so it's evaluated each tick.
-        get scrollMargin() {
-            return virtualContainerRef?.offsetTop ?? 0;
-        },
-        // Phase 3 perf probe: validate the per-kind estimator against
-        // the measured size after every measurement. The HUD surfaces
-        // any kind whose miss-rate stays high so we recalibrate.
-        // No-op in production builds (agentPerfStore short-circuits).
-        measureElement: (element) => {
-            // Normalize OUT the per-pane CSS `zoom`: getBoundingClientRect is
-            // zoom-scaled (verified cef-146: css×zoom), but estimateSize returns
-            // fixed unzoomed CSS px. Without this, the two units disagree at
-            // zoom≠1 and the cumulative translateY offsets double-count zoom →
-            // rows overlap (zoom<1) or gap (zoom>1). Dividing by the live zoom
-            // factor keeps the virtualizer entirely in zoom-independent CSS px.
-            // SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01 §4.1.
-            const zoom = props.zoomFactor?.() ?? 1;
-            const measured = element.getBoundingClientRect().height / (zoom || 1);
-            const indexAttr = element.getAttribute("data-index");
-            if (indexAttr != null) {
-                const idx = Number(indexAttr);
-                const node = partition().virtualizedNodes[idx];
-                if (node) {
-                    const estimated = estimateNode(node, props.documentState());
-                    agentPerfStore.recordEstimatorMeasurement(node.type, estimated, measured);
-                    // Phase 2: dispatch RowMeasured keyed by the row's CURRENT
-                    // expansion state (INV-3 — an expanded measurement must land in
-                    // the expanded slot, not the collapsed slot, and vice versa).
-                    // `dispatchLayoutIfRegistered` is a no-op if the pane isn't
-                    // wired (e.g. during tests), so this is always-safe.
-                    if (props.blockId) {
-                        const s = snapshotLayout(props.blockId);
-                        const expState = inFlowState(s?.expansion.get(node.id));
-                        dispatchLayoutIfRegistered(props.blockId, {
-                            type: "RowMeasured",
-                            nodeId: node.id,
-                            state: expState,
-                            cssPx: measured,
-                        });
-                    }
-                }
-            }
-            return measured;
-        },
-    });
+    // Phase 3 Step 6: the TanStack virtualizer is gone. Positions, windowing,
+    // and measurement now come entirely from the agent-pane-layout slice
+    // (rendered above from layoutView + the measure RO). Heights are keyed by
+    // (nodeId, state) in the slice, so a row that scrolls out and back keeps
+    // its measured height — the recycle-stale-estimate class is gone by
+    // construction, and prefix-sum positions make overlap impossible (INV-1).
 
     // Layout-shift observer scoped to .agent-document. Idempotent —
     // subsequent mounts are no-ops. Production: short-circuits.
@@ -439,8 +373,17 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (idx < 0) return;
         const p = partition();
         if (idx < p.splitIndex) {
-            // Virtualized region — virtualizer handles ensure-visible + scroll.
-            virtualizer.scrollToIndex(idx, { align: "center", behavior: "smooth" });
+            // Virtualized region — center the row from the slice's position
+            // (Step 5). row.start/height are unzoomed CSS px; convert the
+            // target back to the scroll element's zoomed scrollTop (×zoom).
+            const v = props.layoutView?.();
+            const row = v?.rows[idx];
+            if (row) {
+                const zoom = props.zoomFactor?.() ?? 1;
+                const viewportPx = scrollRef.clientHeight / (zoom || 1);
+                const center = row.start - viewportPx / 2 + row.height / 2;
+                scrollRef.scrollTo({ top: Math.max(0, center * (zoom || 1)), behavior: "smooth" });
+            }
         } else {
             // Streaming buffer — node is mounted; query DOM and scroll directly.
             const el = scrollRef.querySelector(`[data-node-id="${nodeId}"]`) as HTMLElement | null;
@@ -503,12 +446,18 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             //      is empty, so fall back to the streaming buffer's
             //      first node via DOM. This is the common initial-
             //      pagination case (codex P2 on #784).
-            const items = virtualizer.getVirtualItems();
+            // Step 5: anchor on the topmost visible row from the slice's
+            // window (row.start includes scrollMargin — same basis as the old
+            // TanStack v3 virtualItem.start).
+            const v = props.layoutView?.();
+            const topRow = v && v.window.endIndex >= v.window.startIndex
+                ? v.rows[v.window.startIndex]
+                : undefined;
             let anchorId: string | null = null;
             let anchorOffsetPx = 0;
-            if (items.length > 0) {
-                anchorId = partition().virtualizedNodes[items[0].index]?.id ?? null;
-                anchorOffsetPx = items[0].start;
+            if (topRow) {
+                anchorId = topRow.nodeId;
+                anchorOffsetPx = topRow.start;
             } else if (partition().streamingNodes.length > 0) {
                 anchorId = partition().streamingNodes[0].id;
                 const el = scrollRef.querySelector(
@@ -547,12 +496,15 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                         if (newIdx >= 0) {
                             const newP = partition();
                             if (newIdx < newP.splitIndex) {
-                                // Still virtualized — recompute via virtualizer's offsetForIndex.
-                                // The returned offset already includes scrollMargin in v3,
-                                // so don't add virtualContainerRef.offsetTop again.
-                                const offset = virtualizer.getOffsetForIndex(newIdx, "start");
+                                // Still virtualized — read the new offset from a
+                                // FRESH slice snapshot (the prepend shifted every
+                                // position). Synchronous, so no projection-timing
+                                // dependency. start includes scrollMargin — same
+                                // basis as the captured anchorOffsetPx.
+                                const snap = props.blockId ? snapshotLayout(props.blockId) : null;
+                                const offset = snap ? computeLayoutView(snap).rows[newIdx]?.start : undefined;
                                 if (offset != null) {
-                                    const target = restoreScrollFromAnchor(anchor, offset[0]);
+                                    const target = restoreScrollFromAnchor(anchor, offset);
                                     scrollRef.scrollTo({ top: target, behavior: "auto" });
                                 }
                             } else {
