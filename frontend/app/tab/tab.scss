@@ -178,10 +178,12 @@ body:not(.nohover) .tab.dragging {
     }
 }
 
-// Active tab hover — slight brightness bump, accent bar stays constant
+// Active tab hover — keep the folder-surface bg so the active tab stays
+// continuous with the content below (the top accent carries the active
+// state; the colored-tab variant adds its own brightness on hover).
 body:not(.nohover) .tab.active:hover {
     .tab-inner {
-        background: rgb(from var(--main-text-color) r g b / 0.15);
+        background: var(--block-bg-color);
     }
 }
 
