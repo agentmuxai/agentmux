@@ -25,17 +25,16 @@
     // memory / etc.) automatically inherit window transparency.
     --main-bg-color: rgba(34, 34, 34, var(--window-opacity, 0.45));
     --border-color: rgba(255, 255, 255, 0.16);
-    // Tab separator — the constant gap between adjacent tabs. The
-    // optional centered line is currently set to 0px (no visible
-    // bar; pure 4px whitespace), but the v-separator mixin still
-    // honours the parity rule if it's ever bumped to a non-zero
-    // value: slot/line widths MUST share parity (both even or both
+    // Tab separator — a flush 1px hairline divider between adjacent
+    // tabs (VSCode-style; slot equals line, so no whitespace gap).
+    // The v-separator mixin honours the parity rule: slot/line
+    // widths MUST share parity (both even or both
     // odd) so the line centers on a device pixel. See
     // SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25 +
     // RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26 §1.5.
-    --tab-separator-width: 4px;
-    --tab-separator-line: 0px;
-    --tab-separator-color: rgb(from var(--main-text-color) r g b / 0.35);
+    --tab-separator-width: 1px;
+    --tab-separator-line: 1px;
+    --tab-separator-color: var(--border-color);
 
     // ─── Pixel-snap primitives — RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26 §4.1 ───
     // --dpr is updated by JS at startup and on resolution change
@@ -79,6 +78,11 @@
     --hover-bg-color: rgba(255, 255, 255, 0.1);
     --block-bg-color: rgba(0, 0, 0, 0.5);
     --block-bg-solid-color: rgb(0, 0, 0);
+    // Folder model (SPEC_TAB_CONTENT_FOLDER_SURFACE_2026_06_03): Layer B is the
+    // workspace content surface the active tab opens into; Layer A is the
+    // recessed tab-strip behind it.
+    --workspace-surface: var(--block-bg-color);
+    --tab-strip-bg: rgba(255, 255, 255, 0.03);
     --block-border-radius: 0;
 
     --keybinding-color: #e0e0e0;

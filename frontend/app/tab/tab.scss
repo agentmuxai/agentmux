@@ -20,7 +20,7 @@
     height: 100%;
     padding: 0 0 0 0;
     box-sizing: border-box;
-    font-weight: bold;
+    font-weight: 400;
     color: var(--secondary-text-color);
     opacity: 0;
     display: flex;
@@ -67,7 +67,7 @@
 
     &.active {
         .tab-inner {
-            background: rgb(from var(--main-text-color) r g b / 0.1);
+            background: var(--block-bg-color);
 
             &::after {
                 content: "";
@@ -103,11 +103,10 @@
         user-select: none;
         z-index: var(--zindex-tab-name);
         font-size: 11px;
-        font-weight: 500;
-        text-shadow: 0px 0px 4px rgb(from var(--main-bg-color) r g b / 0.25);
+        font-weight: 400;
         overflow: hidden;
         text-overflow: ellipsis;
-        text-align: center;
+        text-align: left;
         flex: 1 1 auto;
         min-width: 0;
 
@@ -155,10 +154,7 @@
         }
         /* stylelint-enable declaration-no-important */
         .wave-button {
-            color: rgba(255, 255, 255, 0.65);
-            &:hover {
-                color: rgba(255, 255, 255, 1);
-            }
+            color: rgba(255, 255, 255, 1);
         }
     }
 }
@@ -182,10 +178,12 @@ body:not(.nohover) .tab.dragging {
     }
 }
 
-// Active tab hover — slight brightness bump, accent bar stays constant
+// Active tab hover — keep the folder-surface bg so the active tab stays
+// continuous with the content below (the top accent carries the active
+// state; the colored-tab variant adds its own brightness on hover).
 body:not(.nohover) .tab.active:hover {
     .tab-inner {
-        background: rgb(from var(--main-text-color) r g b / 0.15);
+        background: var(--block-bg-color);
     }
 }
 
