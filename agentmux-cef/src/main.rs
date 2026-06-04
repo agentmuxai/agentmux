@@ -358,6 +358,12 @@ fn main() {
     #[cfg(target_os = "macos")]
     unsafe { disable_macos_drag_slideback() };
 
+    // Give the bundle-less dev/flat binary a friendly Dock + app-menu name
+    // ("AgentMux DEV") instead of the raw process name "agentmux-cef". Must
+    // run before AppKit synthesizes the default main menu (pre-init).
+    #[cfg(target_os = "macos")]
+    unsafe { set_macos_app_display_name() };
+
     // Phase B.6 (post-fix): the named-pipe bind in the launcher is
     // the AUTHORITATIVE single-instance lock — a second launcher
     // hits ERROR_ACCESS_DENIED and never reaches the host. We still
@@ -1061,6 +1067,84 @@ unsafe fn disable_macos_drag_slideback() {
     tracing::info!(
         "macOS drag polish: swizzled NSView beginDraggingSession to disable cancel/fail slide-back"
     );
+}
+
+/// Set the macOS app display name (Dock tile + app-menu title).
+///
+/// A bundle-less binary (`task dev` direct-invoke, the launcher's flat
+/// `dist/cef-dev/` layout) has no `Info.plist`, so AppKit derives the app name
+/// from the process name — `agentmux-cef` — which is what shows in the Dock and
+/// the menu bar's app menu. Override it with a friendly name: **dev** builds get
+/// `AgentMux DEV` (so they're visibly distinct from a packaged `AgentMux` and
+/// from each other when several instances run), everything else gets `AgentMux`.
+/// A packaged `.app` carries `CFBundleName` in its `Info.plist`; this still runs
+/// and simply matches it.
+///
+/// Uses `-[NSProcessInfo setProcessName:]`, which AppKit reads when it
+/// synthesizes the default main menu and the Dock label — so this must run
+/// before that menu is built (pre-`cef::initialize`). Raw libobjc FFI, mirroring
+/// the other macOS shims.
+#[cfg(target_os = "macos")]
+unsafe fn set_macos_app_display_name() {
+    use std::ffi::{c_char, c_void};
+
+    type Id    = *mut c_void;
+    type Sel   = *const c_void;
+    type Class = *mut c_void;
+
+    extern "C" {
+        fn objc_getClass(name: *const c_char) -> Class;
+        fn sel_registerName(name: *const c_char) -> Sel;
+        fn objc_msgSend();
+    }
+
+    // Resolve dev vs. not the same way `commands::platform::get_is_dev` does.
+    let mode = agentmux_common::RuntimeMode::from_env().or_else(|| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            .map(|d| agentmux_common::RuntimeMode::current(&d))
+    });
+    let is_dev = matches!(mode, Some(agentmux_common::RuntimeMode::Dev { .. }));
+    let name = if is_dev { "AgentMux DEV" } else { "AgentMux" };
+
+    // NSString *ns = [NSString stringWithUTF8String:name]
+    let cls_str = objc_getClass(b"NSString\0".as_ptr() as _);
+    if cls_str.is_null() {
+        return;
+    }
+    let sel_with = sel_registerName(b"stringWithUTF8String:\0".as_ptr() as _);
+    let make: extern "C" fn(Class, Sel, *const c_char) -> Id =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    let cname = match std::ffi::CString::new(name) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let ns_name = make(cls_str, sel_with, cname.as_ptr());
+    if ns_name.is_null() {
+        return;
+    }
+
+    // pi = [NSProcessInfo processInfo]
+    let cls_pi = objc_getClass(b"NSProcessInfo\0".as_ptr() as _);
+    if cls_pi.is_null() {
+        return;
+    }
+    let sel_pi = sel_registerName(b"processInfo\0".as_ptr() as _);
+    let get_pi: extern "C" fn(Class, Sel) -> Id =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    let pi = get_pi(cls_pi, sel_pi);
+    if pi.is_null() {
+        return;
+    }
+
+    // [pi setProcessName:ns_name]
+    let sel_set = sel_registerName(b"setProcessName:\0".as_ptr() as _);
+    let set_name: extern "C" fn(Id, Sel, Id) =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    set_name(pi, sel_set, ns_name);
+
+    tracing::info!(app_name = name, "macOS: set app display name (Dock + app menu)");
 }
 
 /// macOS accessibility activation governor — Layer 1 of
