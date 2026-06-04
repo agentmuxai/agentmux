@@ -86,8 +86,8 @@
         // Constant inter-tab separator. Uses the v-separator mixin which
         // emits `border-right` on the slot itself — borders participate
         // in spec-defined pixel snapping (Brosset 2024) while a child
-        // <div> does not. Slot/line widths must share parity (both even)
-        // so the line centers on a device pixel. See
+        // <div> does not. Slot/line widths must share parity (both even or
+        // both odd) so the line centers on a device pixel. See
         // RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26 §1.5 / §4.2.
         .tab-separator {
             @include mixins.v-separator(
