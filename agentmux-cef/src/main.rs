@@ -861,16 +861,37 @@ fn main() {
     // Clean shutdown.
     shutdown();
 
-    // Drop the tokio runtime after CEF shutdown.
-    drop(runtime);
-
     // Phase B.6 (post-fix): clean up the forwarding hint so a stale
     // file doesn't survive a graceful exit. (Hard crashes will leave
     // it behind; harmless because pipe-bind on next launch is
     // authoritative — see comment at the port_file declaration.)
     let _ = std::fs::remove_file(&port_file);
 
-    tracing::info!("AgentMux host shutdown complete");
+    // `drop(runtime)` blocks forever here on macOS after the last window
+    // closes: the multi-thread runtime's drop waits for every background
+    // task/blocking thread to finish, and at least one `spawn_blocking`
+    // (a pipe/PTY reader) is parked on a blocking read that never returns.
+    // The window is already destroyed at this point, so the user sees it
+    // close — but the host wedges in the runtime drop and never exits, and
+    // the launcher (which waits for the host to exit) wedges with it → the
+    // instance "stays open hidden". Reaching this code at all means the CEF
+    // message loop returned, which only happens on the intended
+    // LastWindowClosed quit — so a hard exit here is correct, not a crash.
+    //
+    // `shutdown_background()` initiates runtime teardown without blocking;
+    // then exit the process explicitly so a parked blocking thread can't
+    // keep it resident. macOS-only; other platforms keep the plain drop.
+    #[cfg(target_os = "macos")]
+    {
+        runtime.shutdown_background();
+        tracing::info!("AgentMux host shutdown complete (fast exit)");
+        std::process::exit(0);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        drop(runtime);
+        tracing::info!("AgentMux host shutdown complete");
+    }
 }
 
 /// macOS 26 Tahoe compatibility shim.
