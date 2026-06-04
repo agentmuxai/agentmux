@@ -325,13 +325,14 @@ pub fn ensure_settings_file(state: &Arc<AppState>) -> Result<serde_json::Value, 
 /// writes the OAuth code / pasted token here.
 pub enum CliLoginStdin {
     /// Plain pipe — `tokio::process::Command` with `Stdio::piped()`.
-    /// AsyncWrite via tokio. Used by Claude, Codex, Gemini, Copilot,
-    /// Kimi — anything that doesn't strictly require a TTY for its
-    /// auth subcommand.
+    /// AsyncWrite via tokio. Used by Codex, Gemini, Copilot, Kimi —
+    /// anything that doesn't require a TTY for its auth subcommand.
     Pipe(tokio::process::ChildStdin),
     /// PTY writer — `portable_pty` master writer. Sync `std::io::Write`.
-    /// Used by providers whose auth subcommand bails on `isatty()==0`
-    /// (currently OpenClaw's `openclaw models auth login`).
+    /// Used by providers whose auth subcommand needs an interactive TTY:
+    /// Claude (`claude auth login` exits ~5s early when spawned
+    /// terminal-less) and OpenClaw (`openclaw models auth login` bails on
+    /// `isatty()==0`).
     Pty(Box<dyn std::io::Write + Send>),
 }
 
@@ -435,45 +436,74 @@ pub async fn run_cli_login(
         *stored_stdin = child.stdin.take().map(CliLoginStdin::Pipe);
     }
 
-    // Capture the OAuth URL from stdout/stderr. The CLI prints it within the
-    // first few hundred ms after spawn. We read until we find "https://..."
-    // or time out after 2s.
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
+    // Capture the OAuth URL from stdout/stderr (the CLI prints it within a few
+    // hundred ms). CRITICAL: the readers must SURVIVE this capture and keep
+    // draining for the child's whole lifetime (see the drain tasks below).
+    //
+    // The original code dropped these readers right after the URL was found.
+    // That closes the read end of the CLI's stdout pipe; the CLI's next write —
+    // its `Paste code here >` prompt — then hits a broken pipe and the Node
+    // process EPIPE-exits (cleanly, exit 0) within seconds, BEFORE the user can
+    // paste the code. That is the login hang: by the time the user finishes
+    // browser auth the CLI is already gone, so the pasted code has nothing to
+    // be delivered to. (Verified by reproducing the CLI with stdout → a file,
+    // where it stays alive at the prompt.)
+    use tokio::io::AsyncBufReadExt;
+    let mut stdout_lines = child
+        .stdout
+        .take()
+        .map(|s| tokio::io::BufReader::new(s).lines());
+    let mut stderr_lines = child
+        .stderr
+        .take()
+        .map(|s| tokio::io::BufReader::new(s).lines());
 
     let auth_url: Option<String> = tokio::time::timeout(
         std::time::Duration::from_secs(2),
         async {
-            use tokio::io::AsyncBufReadExt;
-            let mut combined = Vec::new();
-            if let Some(s) = stdout {
-                let mut lines = tokio::io::BufReader::new(s).lines();
+            let mut count = 0usize;
+            if let Some(lines) = stdout_lines.as_mut() {
                 while let Ok(Some(line)) = lines.next_line().await {
                     if let Some(url) = extract_url(&line) {
                         return Some(url);
                     }
-                    combined.push(line);
-                    if combined.len() > 20 { break; }
+                    count += 1;
+                    if count > 20 { break; }
                 }
             }
-            if let Some(s) = stderr {
-                let mut lines = tokio::io::BufReader::new(s).lines();
+            if let Some(lines) = stderr_lines.as_mut() {
                 while let Ok(Some(line)) = lines.next_line().await {
                     if let Some(url) = extract_url(&line) {
                         return Some(url);
                     }
-                    if combined.len() > 40 { break; }
-                    combined.push(line);
+                    count += 1;
+                    if count > 40 { break; }
                 }
             }
             None
         },
-    ).await.unwrap_or(None);
+    )
+    .await
+    .ok()
+    .flatten();
 
     if let Some(ref url) = auth_url {
         tracing::info!(url = %url, "run_cli_login: captured auth URL");
     } else {
         tracing::warn!("run_cli_login: no auth URL captured within 2s");
+    }
+
+    // Keep draining stdout+stderr for the rest of the child's life so the CLI
+    // can write its `Paste code here >` prompt (and any progress) without
+    // hitting a closed pipe and EPIPE-exiting. The drain tasks own the readers
+    // and end at EOF when the CLI finally exits. This is the fix for the login
+    // hang described above — without it the CLI dies seconds after printing the
+    // URL, before the user can paste the code.
+    if let Some(mut lines) = stdout_lines {
+        tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
+    }
+    if let Some(mut lines) = stderr_lines {
+        tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
     }
 
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
@@ -510,9 +540,10 @@ pub async fn run_cli_login(
 }
 
 /// PTY-backed variant of run_cli_login. Used for providers whose auth
-/// subcommand requires an interactive TTY (currently OpenClaw —
-/// `openclaw models auth login --provider <id>` exits immediately with
-/// "requires an interactive TTY" when stdin is a pipe).
+/// subcommand requires an interactive TTY: Claude (`claude auth login`
+/// exits cleanly ~5s after printing the URL when spawned terminal-less)
+/// and OpenClaw (`openclaw models auth login --provider <id>` exits
+/// immediately with "requires an interactive TTY" when stdin is a pipe).
 ///
 /// Same return shape as run_cli_login: `{ auth_url: <url or null> }`.
 /// Writes the master writer into `state.cli_login_stdin` so
