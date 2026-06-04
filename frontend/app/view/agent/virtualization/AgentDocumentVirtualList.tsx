@@ -234,12 +234,12 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         });
     }
 
-    // ── Phase 3 Step 2: feed the layout slice's VIEWPORT inputs ─────────
-    // Shadow wiring — the slice records scrollTop / viewport / scrollMargin /
-    // zoom, but nothing renders from them until the Step-3 cutover. All
+    // ── Phase 3: feed the layout slice's VIEWPORT inputs ────────────────
+    // The slice records scrollTop / viewport / scrollMargin / zoom and the
+    // render path (windowing + prefix-sum row positions) reads them back. All
     // blockId-gated and reducer-deduped (an unchanged value returns the same
     // state ref). Slice positions are unzoomed CSS px, so scroll + viewport
-    // are normalized by the live zoom — the same ÷zoom basis as measureElement.
+    // are normalized by the live zoom — the same ÷zoom basis as the measure RO.
     // (scrollTop ÷zoom under CSS `zoom` is pending CDP confirmation at zoom
     // 0.5 / 2 per the Phase-3 plan.)
     let lastScrollMarginPx = -1;
@@ -346,9 +346,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (h > 0 && wasHidden && props.viewState.stickToBottom()) {
                 scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
             }
-            // Phase 3 Step 2 (shadow): the scroll container resizing changes the
-            // viewport the slice windows against — feed it (covers hidden→visible
-            // 0→N and pane resize). blockId-gated, reducer-deduped.
+            // Phase 3: the scroll container resizing changes the viewport the
+            // slice windows against — feed it (covers hidden→visible 0→N and
+            // pane resize). blockId-gated, reducer-deduped.
             if (props.blockId && h > 0) {
                 const zoom = props.zoomFactor?.() ?? 1;
                 dispatchLayoutIfRegistered(props.blockId, {
@@ -414,8 +414,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (!scrollRef) return;
         const { scrollTop, scrollHeight, clientHeight } = scrollRef;
 
-        // Phase 3 Step 2 (shadow): push scroll position + viewport into the
-        // slice as unzoomed CSS px. Reducer-deduped; blockId-gated.
+        // Phase 3: push scroll position + viewport into the slice as unzoomed
+        // CSS px. Reducer-deduped; blockId-gated.
         if (props.blockId) {
             const zoom = props.zoomFactor?.() ?? 1;
             dispatchLayoutIfRegistered(props.blockId, {
