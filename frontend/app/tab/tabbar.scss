@@ -13,14 +13,15 @@
     // unrecoverable from the bar today, unlike editor tabs which clip).
     // Spec: specs/SPEC_WORKSPACE_TAB_SIZING_2026-05-27.md.
     // Basis ~ VS Code "fit" mode default (~240px) — enough room for
-    // ~25 chars of file/title before ellipsis. Floor at 100px keeps
-    // a crowded tab readable rather than collapsing into a pill. Cap
+    // ~25 chars of file/title before ellipsis. Floor at 56px is the
+    // thin end a crowded tab shrinks to (a few chars + ellipsis) once
+    // widget labels have collapsed, before the scroll safety-net. Cap
     // at 320px so a near-empty bar with one or two tabs still gives
     // each tab a generous ~30-char window. Editor tabs run narrower
     // (140 basis) because the editor pane itself is narrower than
     // the workspace title bar.
     --ws-tab-basis: 240px;
-    --ws-tab-min: 100px;
+    --ws-tab-min: 56px;
     --ws-tab-max: 320px;
 
     display: flex;
@@ -36,7 +37,7 @@
         display: flex;
         flex-direction: row;
         align-items: flex-end;
-        flex: 0 1 auto;
+        flex: 1 1 auto;
         min-width: 0;
         height: 100%;
         overflow-x: auto;
