@@ -111,6 +111,16 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authType: "oauth",
         authCheckCommand: ["auth", "status", "--json"],
         authLoginCommand: ["auth", "login"],
+        // Run `claude auth login` under a PTY (run_cli_login's PTY branch).
+        // Spawned with plain pipes from the GUI host, the CLI exits cleanly
+        // ~5s after printing the OAuth URL — before the user can return from
+        // the browser and paste the code — so the login always appeared stuck
+        // on the URL. (Reproduced extensively: standalone runs with a
+        // controlling terminal stay alive at the "Paste code here >" prompt;
+        // only the host's terminal-less pipe spawn exits early.) A PTY makes
+        // the CLI fully interactive (isTTY + a controlling terminal), so it
+        // stays alive for the paste. See docs / run_cli_login_pty.
+        requiresLoginTty: true,
         npmPackage: "@anthropic-ai/claude-code",
         pinnedVersion: "latest",
         docsUrl: "https://docs.anthropic.com/claude-code",
