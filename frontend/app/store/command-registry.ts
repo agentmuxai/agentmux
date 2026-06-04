@@ -17,6 +17,10 @@ import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { invokeCommand } from "@/app/platform/ipc";
 import { fireAndForget } from "@/util/util";
+import { openModal } from "@/app/store/modalmodel";
+import { CommandPaletteModal } from "@/app/modals/command-palette";
+import { openBundleManager } from "@/app/modals/bundle-manager-modal";
+import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom.platform";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -331,6 +335,56 @@ export function registerDefaultCommands(): void {
             }
         },
     });
+
+    // ---- view / app (added for the native macOS menu bar — Phase 1) ----
+    commandRegistry.register({
+        id: "view:command-palette",
+        label: "Command Palette",
+        category: "View",
+        icon: "magnifying-glass",
+        execute: () => {
+            openModal(CommandPaletteModal);
+        },
+    });
+    commandRegistry.register({
+        id: "view:zoom:in",
+        label: "Zoom In",
+        category: "View",
+        icon: "magnifying-glass-plus",
+        execute: () => zoomIn(),
+    });
+    commandRegistry.register({
+        id: "view:zoom:out",
+        label: "Zoom Out",
+        category: "View",
+        icon: "magnifying-glass-minus",
+        execute: () => zoomOut(),
+    });
+    commandRegistry.register({
+        id: "view:zoom:reset",
+        label: "Actual Size",
+        category: "View",
+        icon: "magnifying-glass",
+        execute: () => zoomReset(),
+    });
+    commandRegistry.register({
+        id: "app:identity",
+        label: "Identity & Memory",
+        category: "App",
+        icon: "id-card",
+        execute: () => {
+            openBundleManager();
+        },
+    });
+    commandRegistry.register({
+        id: "help:docs",
+        label: "Online Docs",
+        category: "Help",
+        icon: "book",
+        execute: () => {
+            getApi().openExternal("https://docs.agentmux.ai");
+        },
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -342,6 +396,22 @@ window.addEventListener("agentmux-run-command", ((e: CustomEvent) => {
     const id = e.detail?.id as string;
     if (!commandRegistry.run(id)) {
         console.warn(`[command-palette] Unknown command: ${id}`);
+    }
+}) as EventListener);
+
+// Native macOS menu bar (Phase 1, SPEC_MACOS_NATIVE_MENU_BAR_2026-06-03): the
+// host broadcasts `menu:invoke` (via the generic `agentmux-event` channel) to
+// every top-level window; only the FOCUSED window runs the command, so a menu
+// action lands in the window the user is actually in. Routed through the same
+// registry as the palette + hamburger — the spec's single source of truth.
+window.addEventListener("agentmux-event", ((e: CustomEvent) => {
+    const detail = e.detail;
+    if (!detail || detail.event !== "menu:invoke") return;
+    if (!document.hasFocus()) return;
+    const id = detail.payload?.commandId as string;
+    if (!id) return;
+    if (!commandRegistry.run(id)) {
+        console.warn(`[menu] Unknown command: ${id}`);
     }
 }) as EventListener);
 

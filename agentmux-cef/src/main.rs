@@ -45,6 +45,8 @@ mod sidecar;
 mod state;
 mod ui_tasks;
 mod wrr;
+#[cfg(target_os = "macos")]
+mod macos_menu;
 
 use std::sync::Arc;
 
@@ -357,6 +359,12 @@ fn main() {
     // drop-rejected slide-back anywhere in the app.
     #[cfg(target_os = "macos")]
     unsafe { disable_macos_drag_slideback() };
+
+    // Name the app early (sets CFBundleName on the main bundle, which AppKit
+    // may read when it first builds a menu). Also re-run post-init below, since
+    // Chromium can reset the process name during cef::initialize.
+    #[cfg(target_os = "macos")]
+    unsafe { set_macos_app_display_name() };
 
     // Phase B.6 (post-fix): the named-pipe bind in the launcher is
     // the AUTHORITATIVE single-instance lock — a second launcher
@@ -780,6 +788,12 @@ fn main() {
     // before icon.
     #[cfg(target_os = "macos")]
     unsafe {
+        // Friendly Dock + app-menu name ("AgentMux DEV" in dev) instead of the
+        // raw process name "agentmux-cef". Done POST-init: Chromium overwrites
+        // the process name during cef::initialize, so a pre-init set didn't
+        // stick — set it here, right before the activation policy + our menu
+        // bar are established.
+        set_macos_app_display_name();
         set_macos_activation_policy_regular();
         set_macos_dock_icon();
         // Layer 1 of SPEC_MACOS_ACCESSIBILITY_ROBUSTNESS_2026-06-03: govern
@@ -790,6 +804,14 @@ fn main() {
         // exists.
         install_macos_accessibility_governor();
     }
+
+    // Native macOS menu bar (File/Edit/View/Window/Help) — Phase 1 of
+    // SPEC_MACOS_NATIVE_MENU_BAR_2026-06-03. After cef::initialize (NSApplication
+    // exists) and after set_macos_app_display_name (the app-menu title follows
+    // the process name). Standard Edit/Window items route to the focused web
+    // view; custom items dispatch through the frontend command registry.
+    #[cfg(target_os = "macos")]
+    macos_menu::install_menu_bar(app_state.clone());
 
     // Start memory heartbeat — logs system/process memory stats every 20s.
     // Provides forensic data if the process later crashes from OOM / VA exhaustion.
@@ -1061,6 +1083,122 @@ unsafe fn disable_macos_drag_slideback() {
     tracing::info!(
         "macOS drag polish: swizzled NSView beginDraggingSession to disable cancel/fail slide-back"
     );
+}
+
+/// Set the macOS app display name (Dock tile + app-menu title).
+///
+/// A bundle-less binary (`task dev` direct-invoke, the launcher's flat
+/// `dist/cef-dev/` layout) has no `Info.plist`, so AppKit derives the app name
+/// from the process name — `agentmux-cef` — which is what shows in the Dock and
+/// the menu bar's app menu. Override it with a friendly name: **dev** builds get
+/// `AgentMux DEV` (so they're visibly distinct from a packaged `AgentMux` and
+/// from each other when several instances run), everything else gets `AgentMux`.
+/// A packaged `.app` carries `CFBundleName` in its `Info.plist`; this still runs
+/// and simply matches it.
+///
+/// Uses `-[NSProcessInfo setProcessName:]`, which AppKit reads for the Dock
+/// label and the app-menu title. Must run AFTER `cef::initialize` — Chromium
+/// overwrites the process name during init, so a pre-init set is clobbered;
+/// setting it here (right before our menu bar is built) is what sticks. Raw
+/// libobjc FFI, mirroring the other macOS shims.
+#[cfg(target_os = "macos")]
+unsafe fn set_macos_app_display_name() {
+    use std::ffi::{c_char, c_void};
+
+    type Id    = *mut c_void;
+    type Sel   = *const c_void;
+    type Class = *mut c_void;
+
+    extern "C" {
+        fn objc_getClass(name: *const c_char) -> Class;
+        fn sel_registerName(name: *const c_char) -> Sel;
+        fn objc_msgSend();
+    }
+
+    // Resolve dev vs. not the same way `commands::platform::get_is_dev` does.
+    let mode = agentmux_common::RuntimeMode::from_env().or_else(|| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            .map(|d| agentmux_common::RuntimeMode::current(&d))
+    });
+    let is_dev = matches!(mode, Some(agentmux_common::RuntimeMode::Dev { .. }));
+    let name = if is_dev { "AgentMux DEV" } else { "AgentMux" };
+
+    // NSString *ns = [NSString stringWithUTF8String:name]
+    let cls_str = objc_getClass(b"NSString\0".as_ptr() as _);
+    if cls_str.is_null() {
+        return;
+    }
+    let sel_with = sel_registerName(b"stringWithUTF8String:\0".as_ptr() as _);
+    let make: extern "C" fn(Class, Sel, *const c_char) -> Id =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    let cname = match std::ffi::CString::new(name) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let ns_name = make(cls_str, sel_with, cname.as_ptr());
+    if ns_name.is_null() {
+        return;
+    }
+
+    // pi = [NSProcessInfo processInfo]
+    let cls_pi = objc_getClass(b"NSProcessInfo\0".as_ptr() as _);
+    if cls_pi.is_null() {
+        return;
+    }
+    let sel_pi = sel_registerName(b"processInfo\0".as_ptr() as _);
+    let get_pi: extern "C" fn(Class, Sel) -> Id =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    let pi = get_pi(cls_pi, sel_pi);
+    if pi.is_null() {
+        return;
+    }
+
+    // [pi setProcessName:ns_name]
+    let sel_set = sel_registerName(b"setProcessName:\0".as_ptr() as _);
+    let set_name: extern "C" fn(Id, Sel, Id) =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    set_name(pi, sel_set, ns_name);
+
+    // The app-menu title + Dock label for an unbundled binary come from the
+    // main bundle's CFBundleName/CFBundleDisplayName, NOT the process name
+    // (setProcessName above doesn't move them). Set them on the main bundle's
+    // info dictionary, which is backed by a mutable dictionary. Guard on
+    // isKindOfClass:NSMutableDictionary so an unexpected immutable dict is a
+    // skip rather than a throw (an uncaught ObjC exception would terminate the
+    // host on macOS 26).
+    let cls_bundle = objc_getClass(b"NSBundle\0".as_ptr() as _);
+    if !cls_bundle.is_null() {
+        let sel_main = sel_registerName(b"mainBundle\0".as_ptr() as _);
+        let get_main: extern "C" fn(Class, Sel) -> Id =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        let bundle = get_main(cls_bundle, sel_main);
+        if !bundle.is_null() {
+            let sel_info = sel_registerName(b"infoDictionary\0".as_ptr() as _);
+            let get_info: extern "C" fn(Id, Sel) -> Id =
+                std::mem::transmute(objc_msgSend as *const c_void);
+            let info = get_info(bundle, sel_info);
+            let cls_mut = objc_getClass(b"NSMutableDictionary\0".as_ptr() as _);
+            let sel_kind = sel_registerName(b"isKindOfClass:\0".as_ptr() as _);
+            let is_kind: extern "C" fn(Id, Sel, Class) -> u8 =
+                std::mem::transmute(objc_msgSend as *const c_void);
+            if !info.is_null() && !cls_mut.is_null() && is_kind(info, sel_kind, cls_mut) != 0 {
+                let sel_set_obj = sel_registerName(b"setObject:forKey:\0".as_ptr() as _);
+                let set_obj: extern "C" fn(Id, Sel, Id, Id) =
+                    std::mem::transmute(objc_msgSend as *const c_void);
+                let k_name = make(cls_str, sel_with, b"CFBundleName\0".as_ptr() as _);
+                let k_disp = make(cls_str, sel_with, b"CFBundleDisplayName\0".as_ptr() as _);
+                set_obj(info, sel_set_obj, ns_name, k_name);
+                set_obj(info, sel_set_obj, ns_name, k_disp);
+                tracing::info!("macOS: set CFBundleName/CFBundleDisplayName on main bundle");
+            } else {
+                tracing::warn!("macOS: main bundle info dict not mutable; app name unchanged");
+            }
+        }
+    }
+
+    tracing::info!(app_name = name, "macOS: set app display name (Dock + app menu)");
 }
 
 /// macOS accessibility activation governor — Layer 1 of
