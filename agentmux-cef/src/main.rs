@@ -1168,7 +1168,11 @@ unsafe fn install_macos_accessibility_governor() {
         orig(this, cmd, value, attribute);
     }
 
-    HONOR_ENHANCED = std::env::var("AGENTMUX_A11Y_HONOR_ENHANCED").is_ok();
+    // Honor only an explicit truthy value — keying on presence would make
+    // `AGENTMUX_A11Y_HONOR_ENHANCED=0` *enable* the override (reagent P2).
+    HONOR_ENHANCED = std::env::var("AGENTMUX_A11Y_HONOR_ENHANCED")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
 
     // app = [NSApplication sharedApplication]
     let cls_nsapp = objc_getClass(b"NSApplication\0".as_ptr() as _);
@@ -1185,47 +1189,7 @@ unsafe fn install_macos_accessibility_governor() {
         return;
     }
 
-    // Swizzle on the *actual* app class (the CEF NSApplication subclass).
     let app_cls = object_getClass(app);
-    let sel_set = sel_registerName(b"accessibilitySetValue:forAttribute:\0".as_ptr() as _);
-    let method = class_getInstanceMethod(app_cls, sel_set);
-    if method.is_null() {
-        tracing::warn!(
-            "a11y governor: accessibilitySetValue:forAttribute: not found on app class — \
-             AX activation path differs on this macOS; governor inactive (see spec L1)"
-        );
-        return;
-    }
-    ORIGINAL_SET_AX = method_getImplementation(method);
-    method_setImplementation(method, governed_set_ax as Imp);
-
-    // --- Layer 2a guard: -[NSApplication accessibilityParent] → nil ---
-    //
-    // The observed crash (EXC_BREAKPOINT, both reports) is an *incoming* AX
-    // READ — an external client (Magnet/Synergy) calls CopyAttributeValue on
-    // the app, which routes through:
-    //   -[NSApplication accessibilityParent]
-    //     → NSAccessibilityGetObjectForAttributeUsingLegacyAPI
-    //     → NSAccessibilitySetUnsupportedAttributeError
-    //     → +[NSString stringWithFormat:]  → CF string trap (with a CEF AX
-    //        object as the %@ arg — CEF #3512).
-    // NSApplication is the AX root; its parent is legitimately nil. Returning
-    // nil DIRECTLY short-circuits before the crashy legacy bridge runs, so the
-    // unsupported-attribute error path is never reached for this query. Safe
-    // and semantically correct (no real AX parent exists), and it does not
-    // disable accessibility — windows/title still answer.
-    unsafe extern "C" fn accessibility_parent_nil(_this: Id, _cmd: Sel) -> Id {
-        std::ptr::null_mut()
-    }
-    let sel_parent = sel_registerName(b"accessibilityParent\0".as_ptr() as _);
-    let m_parent = class_getInstanceMethod(app_cls, sel_parent);
-    if !m_parent.is_null() {
-        method_setImplementation(m_parent, accessibility_parent_nil as Imp);
-        tracing::info!("a11y governor: guarded -[NSApplication accessibilityParent] → nil (SPEC L2a)");
-    } else {
-        tracing::warn!("a11y governor: accessibilityParent not found on app class");
-    }
-
     let cls_name = {
         let p = class_getName(app_cls);
         if p.is_null() {
@@ -1234,11 +1198,55 @@ unsafe fn install_macos_accessibility_governor() {
             std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
         }
     };
-    tracing::info!(
-        app_class = %cls_name,
-        honor_enhanced = HONOR_ENHANCED,
-        "a11y governor: swizzled accessibilitySetValue:forAttribute: (SPEC L1)"
-    );
+
+    // --- Layer 2a guard (LOAD-BEARING): -[NSApplication accessibilityParent] → nil ---
+    //
+    // Installed FIRST and INDEPENDENTLY of the Layer 1 setter swizzle below, so a
+    // macOS/CEF build that lacks the legacy setter still gets this fix (reagent P1
+    // — the setter was previously a gate that skipped this guard on early return).
+    //
+    // The observed crash (EXC_BREAKPOINT, both reports) is an *incoming* AX READ —
+    // an external client (Magnet/Synergy) calls CopyAttributeValue on the app,
+    // which routes through:
+    //   -[NSApplication accessibilityParent]
+    //     → NSAccessibilityGetObjectForAttributeUsingLegacyAPI
+    //     → NSAccessibilitySetUnsupportedAttributeError
+    //     → +[NSString stringWithFormat:]  → CF string trap (with a CEF AX object
+    //        as the %@ arg — CEF #3512).
+    // NSApplication is the AX root; its parent is legitimately nil. Returning nil
+    // DIRECTLY short-circuits before the crashy legacy bridge runs. Safe and
+    // semantically correct, and it does not disable accessibility — windows/title
+    // still answer.
+    unsafe extern "C" fn accessibility_parent_nil(_this: Id, _cmd: Sel) -> Id {
+        std::ptr::null_mut()
+    }
+    let sel_parent = sel_registerName(b"accessibilityParent\0".as_ptr() as _);
+    let m_parent = class_getInstanceMethod(app_cls, sel_parent);
+    if !m_parent.is_null() {
+        method_setImplementation(m_parent, accessibility_parent_nil as Imp);
+        tracing::info!(app_class = %cls_name, "a11y governor: guarded -[NSApplication accessibilityParent] → nil (SPEC L2a)");
+    } else {
+        tracing::warn!(app_class = %cls_name, "a11y governor: accessibilityParent not found on app class");
+    }
+
+    // --- Layer 1 (defense in depth): govern AXEnhancedUserInterface activation ---
+    // Independent of L2a above; if the legacy setter is absent we just log and the
+    // load-bearing parent guard still stands.
+    let sel_set = sel_registerName(b"accessibilitySetValue:forAttribute:\0".as_ptr() as _);
+    let method = class_getInstanceMethod(app_cls, sel_set);
+    if !method.is_null() {
+        ORIGINAL_SET_AX = method_getImplementation(method);
+        method_setImplementation(method, governed_set_ax as Imp);
+        tracing::info!(
+            honor_enhanced = HONOR_ENHANCED,
+            "a11y governor: swizzled accessibilitySetValue:forAttribute: (SPEC L1)"
+        );
+    } else {
+        tracing::warn!(
+            "a11y governor: accessibilitySetValue:forAttribute: not found on app class — \
+             activation governor inactive (parent guard still installed)"
+        );
+    }
 }
 
 /// Promote the process to a regular, Dock-visible macOS app.
