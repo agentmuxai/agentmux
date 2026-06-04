@@ -268,6 +268,12 @@ const ActionWidgets = (): JSX.Element => {
     // dropped. The collapse point still auto-tracks the widget count via the
     // mirror's measured width; this only floors the tab bar's share.
     const MIN_TAB_WIDTH = 120;
+    // Per-tab COLLAPSE-TRIGGER width: widget labels drop once each open tab
+    // would fall below this. Deliberately NOT the CSS shrink floor
+    // (`--ws-tab-min`, 56px) — labels collapse first (at this comfortable
+    // width), THEN tabs shrink toward the smaller floor. Reserve =
+    // `tabCount * this`.
+    const TAB_COLLAPSE_RESERVE_PX = 100;
 
     // More dropdown state
     const [moreOpen, setMoreOpen] = createSignal(false);
@@ -309,18 +315,29 @@ const ActionWidgets = (): JSX.Element => {
         const buttons = containerRef?.parentElement?.querySelector(
             ".window-action-buttons"
         ) as HTMLElement | null;
+        const tabScroll = header.querySelector(".tab-bar-scroll") as HTMLElement | null;
         const measure = () => {
             const labeledW = mirrorRef?.offsetWidth ?? 0;
             const headerW = header.clientWidth;
             if (labeledW === 0 || headerW === 0) return;
             const buttonsW = buttons?.offsetWidth ?? 0;
-            setTooNarrow(labeledW + buttonsW + MIN_TAB_WIDTH > headerW);
+            const tabCount = tabScroll?.querySelectorAll(".tab").length ?? 0;
+            const tabsNeeded = Math.max(MIN_TAB_WIDTH, tabCount * TAB_COLLAPSE_RESERVE_PX);
+            setTooNarrow(labeledW + buttonsW + tabsNeeded > headerW);
         };
         const ro = new ResizeObserver(measure);
         ro.observe(header);
         ro.observe(mirrorRef);
+        // Adding/removing a tab doesn't resize the header, so the ResizeObserver
+        // won't fire — watch the tab strip's child list to re-measure on a
+        // tab-count change.
+        const mo = tabScroll ? new MutationObserver(measure) : null;
+        if (mo && tabScroll) mo.observe(tabScroll, { childList: true });
         measure();
-        onCleanup(() => ro.disconnect());
+        onCleanup(() => {
+            ro.disconnect();
+            mo?.disconnect();
+        });
     });
 
     const handlePointerDown = (key: string, e: PointerEvent) => {
