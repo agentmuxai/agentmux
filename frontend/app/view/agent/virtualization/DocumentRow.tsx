@@ -43,16 +43,9 @@ export interface DocumentRowProps {
      *  passes absolute positioning + translateY; streaming parent
      *  passes nothing (normal flow). */
     style?: JSX.CSSProperties;
-    /** Ref forwarded to the wrapper element. Virtualized parent
-     *  passes virtualizer.measureElement; streaming parent omits. */
+    /** Ref forwarded to the wrapper element. Virtualized parent passes the
+     *  measure-RO observer (keyed by nodeId); streaming parent omits. */
     ref?: (el: HTMLElement) => void;
-    /**
-     * Virtual item index — set as `data-index` on the wrapper. TanStack
-     * Virtual's measureElement requires this attribute to match
-     * measurements back to virtual items. Streaming parent omits.
-     * (codex P1 on #784.)
-     */
-    dataIndex?: number;
 }
 
 // Kinds whose hover-strip surfaces an Expand/Collapse control.
@@ -157,7 +150,6 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
                 "agent-node-search-match": isSearchMatch(),
             }}
             data-node-id={props.node().id}
-            data-index={props.dataIndex}
             tabindex="0"
             onKeyDown={handleRowKey}
             onContextMenu={handleContextMenu}
