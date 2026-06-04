@@ -242,7 +242,12 @@ unsafe fn install_inner(state: Arc<AppState>) {
 
     // ── Window (standard + tab nav) ──
     let window = add_submenu(main, "Window");
-    add_std(window, "Minimize", b"performMiniaturize:\0", "m", MOD_CMD);
+    // No ⌘M key equivalent in Phase 1: AppKit's performKeyEquivalent: would
+    // consume ⌘M before the web content, stealing it from the existing
+    // magnify-pane shortcut (keymodel.ts `Cmd:m`). The standard ⌘M→Minimize
+    // assignment lands in Phase 2, together with the magnify→⌃⌘M remap and the
+    // keymodel cession (see SPEC_MACOS_NATIVE_MENU_BAR_2026-06-03 §4).
+    add_std(window, "Minimize", b"performMiniaturize:\0", "", 0);
     add_std(window, "Zoom", b"performZoom:\0", "", 0);
     add_sep(window);
     add_cmd(window, target, "Next Tab", "tab:next", "", 0);
