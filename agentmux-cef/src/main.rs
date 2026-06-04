@@ -45,6 +45,8 @@ mod sidecar;
 mod state;
 mod ui_tasks;
 mod wrr;
+#[cfg(target_os = "macos")]
+mod macos_menu;
 
 use std::sync::Arc;
 
@@ -796,6 +798,14 @@ fn main() {
         // exists.
         install_macos_accessibility_governor();
     }
+
+    // Native macOS menu bar (File/Edit/View/Window/Help) — Phase 1 of
+    // SPEC_MACOS_NATIVE_MENU_BAR_2026-06-03. After cef::initialize (NSApplication
+    // exists) and after set_macos_app_display_name (the app-menu title follows
+    // the process name). Standard Edit/Window items route to the focused web
+    // view; custom items dispatch through the frontend command registry.
+    #[cfg(target_os = "macos")]
+    macos_menu::install_menu_bar(app_state.clone());
 
     // Start memory heartbeat — logs system/process memory stats every 20s.
     // Provides forensic data if the process later crashes from OOM / VA exhaustion.
