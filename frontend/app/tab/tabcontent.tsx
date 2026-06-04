@@ -94,6 +94,7 @@ function TabContent(props: { tabId: string }): JSX.Element {
 
     const rootStyle = (): JSX.CSSProperties => ({
         "padding-top": "1px",
+        background: "var(--workspace-surface)",
     });
 
     return (
