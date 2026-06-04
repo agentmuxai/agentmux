@@ -144,3 +144,30 @@ Layer B is the smallest structural addition that makes the connection real and r
 - Changing tab sizing/responsive behavior (covered by #1262).
 - Reworking the TileLayout's gap/resize mechanics — only its *background reveal*.
 - Floating/torn-off pane chrome.
+
+---
+
+## 9. Shipped (PR #1269) — lightweight, perf-safe realization
+
+The first cut implements the *look* with the cheapest CSS that's safe on the
+streaming hot path; the full model above (recessed strip Layer A, the
+negative-margin boundary-break) is deferred.
+
+- **Surface — full-bleed, not gap-only.** Painted on the tab content root behind
+  the whole TileLayout, so the translucent panes composite over it and read a
+  touch darker (~0.75 effective) while the gaps show it directly. The gap-only
+  variant (§7 Q1, no pane double-darkening) is a future refinement; full-bleed was
+  accepted as-is.
+- **Boundary via `.tab:not(.active)`** — the active tab omits the hairline and
+  opens into the surface. NOT the §5 negative-margin overlap, and NOT `:has()`.
+- **Perf constraint (mandatory): no `:has()` on tab selectors, no stacked
+  semi-transparent layers.** Tab-switch speed rides a keep-alive cache + a reveal
+  gate (`frontend/app/store/tab-reveal.ts`) that lifts after 80ms of no >50ms
+  long-tasks (else an 800ms cap). An earlier `:has()`+stacked-fill cut fired
+  long-tasks on every streaming recalc/paint and pinned the gate at 800ms
+  ("frozen" switches); the shipped version is 1 long-task (68ms) per switch.
+- **Active-tab hover** keeps the folder bg (no repaint to a highlight) so
+  continuity holds while hovered.
+
+Deferred: recessed strip (Layer A), gap-only surface, the negative-margin
+boundary-break, editor-strip token unification (§7 Q4).
