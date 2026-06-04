@@ -226,6 +226,41 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         });
     }
 
+    // ── Phase 3 Step 2: feed the layout slice's VIEWPORT inputs ─────────
+    // Shadow wiring — the slice records scrollTop / viewport / scrollMargin /
+    // zoom, but nothing renders from them until the Step-3 cutover. All
+    // blockId-gated and reducer-deduped (an unchanged value returns the same
+    // state ref). Slice positions are unzoomed CSS px, so scroll + viewport
+    // are normalized by the live zoom — the same ÷zoom basis as measureElement.
+    // (scrollTop ÷zoom under CSS `zoom` is pending CDP confirmation at zoom
+    // 0.5 / 2 per the Phase-3 plan.)
+    let lastScrollMarginPx = -1;
+    const dispatchScrollMargin = (): void => {
+        if (!props.blockId) return;
+        const px = virtualContainerRef?.offsetTop ?? 0;
+        if (px === lastScrollMarginPx) return; // skip redundant dispatches
+        lastScrollMarginPx = px;
+        dispatchLayoutIfRegistered(props.blockId, { type: "ScrollMarginChanged", px });
+    };
+    if (props.blockId) {
+        // Mirror the live zoom into the slice (INV-2: stored, never relayouts).
+        createEffect(() => {
+            const blockId = props.blockId!;
+            const zoom = props.zoomFactor?.() ?? 1;
+            dispatchLayoutIfRegistered(blockId, { type: "ZoomChanged", zoom });
+        });
+        // scrollMargin = the virtualized container's offsetTop (the header
+        // above it). Re-read on every region reflow; handleScroll + the dedup
+        // cover the header-shift cases (auth box / loading-older banner).
+        onMount(() => {
+            if (!virtualContainerRef) return;
+            dispatchScrollMargin();
+            const ro = new ResizeObserver(() => dispatchScrollMargin());
+            ro.observe(virtualContainerRef);
+            onCleanup(() => ro.disconnect());
+        });
+    }
+
     // Virtualizer over the virtualized head only — streaming buffer is
     // rendered separately as a normal flex list. Per-kind estimators
     // come from the renderer registry; measureElement settles each row
@@ -359,6 +394,17 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (h > 0 && wasHidden && props.viewState.stickToBottom()) {
                 scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
             }
+            // Phase 3 Step 2 (shadow): the scroll container resizing changes the
+            // viewport the slice windows against — feed it (covers hidden→visible
+            // 0→N and pane resize). blockId-gated, reducer-deduped.
+            if (props.blockId && h > 0) {
+                const zoom = props.zoomFactor?.() ?? 1;
+                dispatchLayoutIfRegistered(props.blockId, {
+                    type: "Scrolled",
+                    scrollTop: scrollRef.scrollTop / (zoom || 1),
+                    viewportPx: h / (zoom || 1),
+                });
+            }
             wasHidden = h === 0;
         });
         ro.observe(scrollRef);
@@ -406,6 +452,18 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     const handleScroll = (): void => {
         if (!scrollRef) return;
         const { scrollTop, scrollHeight, clientHeight } = scrollRef;
+
+        // Phase 3 Step 2 (shadow): push scroll position + viewport into the
+        // slice as unzoomed CSS px. Reducer-deduped; blockId-gated.
+        if (props.blockId) {
+            const zoom = props.zoomFactor?.() ?? 1;
+            dispatchLayoutIfRegistered(props.blockId, {
+                type: "Scrolled",
+                scrollTop: scrollTop / (zoom || 1),
+                viewportPx: clientHeight / (zoom || 1),
+            });
+            dispatchScrollMargin();
+        }
 
         // Engage stick when user scrolls back near bottom; disengage
         // otherwise. Engaging clears any captured headAnchor (atomic).
