@@ -360,9 +360,9 @@ fn main() {
     #[cfg(target_os = "macos")]
     unsafe { disable_macos_drag_slideback() };
 
-    // Give the bundle-less dev/flat binary a friendly Dock + app-menu name
-    // ("AgentMux DEV") instead of the raw process name "agentmux-cef". Must
-    // run before AppKit synthesizes the default main menu (pre-init).
+    // Name the app early (sets CFBundleName on the main bundle, which AppKit
+    // may read when it first builds a menu). Also re-run post-init below, since
+    // Chromium can reset the process name during cef::initialize.
     #[cfg(target_os = "macos")]
     unsafe { set_macos_app_display_name() };
 
@@ -788,6 +788,12 @@ fn main() {
     // before icon.
     #[cfg(target_os = "macos")]
     unsafe {
+        // Friendly Dock + app-menu name ("AgentMux DEV" in dev) instead of the
+        // raw process name "agentmux-cef". Done POST-init: Chromium overwrites
+        // the process name during cef::initialize, so a pre-init set didn't
+        // stick — set it here, right before the activation policy + our menu
+        // bar are established.
+        set_macos_app_display_name();
         set_macos_activation_policy_regular();
         set_macos_dock_icon();
         // Layer 1 of SPEC_MACOS_ACCESSIBILITY_ROBUSTNESS_2026-06-03: govern
@@ -1090,10 +1096,11 @@ unsafe fn disable_macos_drag_slideback() {
 /// A packaged `.app` carries `CFBundleName` in its `Info.plist`; this still runs
 /// and simply matches it.
 ///
-/// Uses `-[NSProcessInfo setProcessName:]`, which AppKit reads when it
-/// synthesizes the default main menu and the Dock label — so this must run
-/// before that menu is built (pre-`cef::initialize`). Raw libobjc FFI, mirroring
-/// the other macOS shims.
+/// Uses `-[NSProcessInfo setProcessName:]`, which AppKit reads for the Dock
+/// label and the app-menu title. Must run AFTER `cef::initialize` — Chromium
+/// overwrites the process name during init, so a pre-init set is clobbered;
+/// setting it here (right before our menu bar is built) is what sticks. Raw
+/// libobjc FFI, mirroring the other macOS shims.
 #[cfg(target_os = "macos")]
 unsafe fn set_macos_app_display_name() {
     use std::ffi::{c_char, c_void};
@@ -1153,6 +1160,43 @@ unsafe fn set_macos_app_display_name() {
     let set_name: extern "C" fn(Id, Sel, Id) =
         std::mem::transmute(objc_msgSend as *const c_void);
     set_name(pi, sel_set, ns_name);
+
+    // The app-menu title + Dock label for an unbundled binary come from the
+    // main bundle's CFBundleName/CFBundleDisplayName, NOT the process name
+    // (setProcessName above doesn't move them). Set them on the main bundle's
+    // info dictionary, which is backed by a mutable dictionary. Guard on
+    // isKindOfClass:NSMutableDictionary so an unexpected immutable dict is a
+    // skip rather than a throw (an uncaught ObjC exception would terminate the
+    // host on macOS 26).
+    let cls_bundle = objc_getClass(b"NSBundle\0".as_ptr() as _);
+    if !cls_bundle.is_null() {
+        let sel_main = sel_registerName(b"mainBundle\0".as_ptr() as _);
+        let get_main: extern "C" fn(Class, Sel) -> Id =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        let bundle = get_main(cls_bundle, sel_main);
+        if !bundle.is_null() {
+            let sel_info = sel_registerName(b"infoDictionary\0".as_ptr() as _);
+            let get_info: extern "C" fn(Id, Sel) -> Id =
+                std::mem::transmute(objc_msgSend as *const c_void);
+            let info = get_info(bundle, sel_info);
+            let cls_mut = objc_getClass(b"NSMutableDictionary\0".as_ptr() as _);
+            let sel_kind = sel_registerName(b"isKindOfClass:\0".as_ptr() as _);
+            let is_kind: extern "C" fn(Id, Sel, Class) -> u8 =
+                std::mem::transmute(objc_msgSend as *const c_void);
+            if !info.is_null() && !cls_mut.is_null() && is_kind(info, sel_kind, cls_mut) != 0 {
+                let sel_set_obj = sel_registerName(b"setObject:forKey:\0".as_ptr() as _);
+                let set_obj: extern "C" fn(Id, Sel, Id, Id) =
+                    std::mem::transmute(objc_msgSend as *const c_void);
+                let k_name = make(cls_str, sel_with, b"CFBundleName\0".as_ptr() as _);
+                let k_disp = make(cls_str, sel_with, b"CFBundleDisplayName\0".as_ptr() as _);
+                set_obj(info, sel_set_obj, ns_name, k_name);
+                set_obj(info, sel_set_obj, ns_name, k_disp);
+                tracing::info!("macOS: set CFBundleName/CFBundleDisplayName on main bundle");
+            } else {
+                tracing::warn!("macOS: main bundle info dict not mutable; app name unchanged");
+            }
+        }
+    }
 
     tracing::info!(app_name = name, "macOS: set app display name (Dock + app menu)");
 }
