@@ -27,6 +27,7 @@ import {
     registerPane as registerLayoutPane,
     snapshot as layoutSnapshot,
     unregisterPane as unregisterLayoutPane,
+    type LayoutView,
 } from "@/app/store/agent-pane-layout-store";
 import { isInterruptibleTurn, workingFromPhase } from "@/app/store/agent-pane-state/types";
 import type { SubagentLinkNode } from "./types";
@@ -199,7 +200,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     //    scope `NodesChanged` to the virtualized region (the slice must model
     //    ONLY the prefix-summed rows, not the streaming buffer). Here we only
     //    register/unregister the per-pane slot.
-    registerLayoutPane(model.blockId, { layout: () => {}, zoom: () => {} });
+    // Phase 3 Step 0: own the derived layout-view signal the list renders
+    // from. The store recomputes computeLayoutView and calls this setter on
+    // every layout-input change (deduped by viewsEqual). `zoom` stays a no-op
+    // — INV-2: the single CSS `zoom` on `.agent-view` does the visual scaling.
+    const [layoutView, setLayoutView] = createSignal<LayoutView | null>(null);
+    registerLayoutPane(model.blockId, { layout: setLayoutView, zoom: () => {} });
     onCleanup(() => unregisterLayoutPane(model.blockId));
     // DEV-only: CDP validation hook — lets engineers run
     // `__agentLayout()` in the console to snapshot the slice state.
@@ -815,6 +821,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 registerHistoryReadyCallback={(fn) => { historyReadyFn = fn; }}
                 zoomFactor={zoomFactor}
                 blockId={model.blockId}
+                layoutView={layoutView}
             />
 
             <Show when={status.canRetry()}>

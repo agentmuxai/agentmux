@@ -47,6 +47,7 @@ import type { AgentViewState } from "./state";
 import {
     dispatchIfRegistered as dispatchLayoutIfRegistered,
     snapshot as snapshotLayout,
+    type LayoutView,
 } from "@/app/store/agent-pane-layout-store";
 import { effectiveHeight } from "@/app/store/agent-pane-layout/reducer";
 import { inFlowState } from "@/app/store/agent-pane-layout/types";
@@ -93,6 +94,12 @@ export interface AgentDocumentVirtualListProps {
      * keyed by the row's current expansion state (INV-3).
      */
     blockId?: string;
+    /**
+     * Derived layout view from the agent-pane-layout slice (Phase 3). When
+     * present, rows render from `layoutView().rows` (prefix-sum positions)
+     * instead of TanStack's virtual items.
+     */
+    layoutView?: Accessor<LayoutView | null>;
 }
 
 export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): JSX.Element {
