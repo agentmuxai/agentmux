@@ -325,13 +325,14 @@ pub fn ensure_settings_file(state: &Arc<AppState>) -> Result<serde_json::Value, 
 /// writes the OAuth code / pasted token here.
 pub enum CliLoginStdin {
     /// Plain pipe — `tokio::process::Command` with `Stdio::piped()`.
-    /// AsyncWrite via tokio. Used by Claude, Codex, Gemini, Copilot,
-    /// Kimi — anything that doesn't strictly require a TTY for its
-    /// auth subcommand.
+    /// AsyncWrite via tokio. Used by Codex, Gemini, Copilot, Kimi —
+    /// anything that doesn't require a TTY for its auth subcommand.
     Pipe(tokio::process::ChildStdin),
     /// PTY writer — `portable_pty` master writer. Sync `std::io::Write`.
-    /// Used by providers whose auth subcommand bails on `isatty()==0`
-    /// (currently OpenClaw's `openclaw models auth login`).
+    /// Used by providers whose auth subcommand needs an interactive TTY:
+    /// Claude (`claude auth login` exits ~5s early when spawned
+    /// terminal-less) and OpenClaw (`openclaw models auth login` bails on
+    /// `isatty()==0`).
     Pty(Box<dyn std::io::Write + Send>),
 }
 
@@ -539,9 +540,10 @@ pub async fn run_cli_login(
 }
 
 /// PTY-backed variant of run_cli_login. Used for providers whose auth
-/// subcommand requires an interactive TTY (currently OpenClaw —
-/// `openclaw models auth login --provider <id>` exits immediately with
-/// "requires an interactive TTY" when stdin is a pipe).
+/// subcommand requires an interactive TTY: Claude (`claude auth login`
+/// exits cleanly ~5s after printing the URL when spawned terminal-less)
+/// and OpenClaw (`openclaw models auth login --provider <id>` exits
+/// immediately with "requires an interactive TTY" when stdin is a pipe).
 ///
 /// Same return shape as run_cli_login: `{ auth_url: <url or null> }`.
 /// Writes the master writer into `state.cli_login_stdin` so
