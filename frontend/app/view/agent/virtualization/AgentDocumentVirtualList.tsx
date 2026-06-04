@@ -29,8 +29,9 @@
  */
 
 import { createVirtualizer } from "@tanstack/solid-virtual";
-import { createEffect, createMemo, createSignal, For, Index, onCleanup, onMount, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
+import { Key } from "@solid-primitives/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import { agentPerfStore, startAgentLayoutShiftObserver } from "./perf-probe";
@@ -48,6 +49,7 @@ import {
     dispatchIfRegistered as dispatchLayoutIfRegistered,
     snapshot as snapshotLayout,
     type LayoutView,
+    type RowPosition,
 } from "@/app/store/agent-pane-layout-store";
 import { effectiveHeight } from "@/app/store/agent-pane-layout/reducer";
 import { inFlowState } from "@/app/store/agent-pane-layout/types";
@@ -573,6 +575,75 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         }
     };
 
+    // ── Phase 3 Step 3+4: render from the slice + a standalone measure RO ──
+    // Rows render from the slice's prefix-sum positions (computeLayoutView →
+    // the layoutView signal), keyed by stable nodeId so the fresh RowPosition
+    // objects each recompute produces don't remount rows. Heights come from a
+    // single ResizeObserver that dispatches RowMeasured keyed by (nodeId,
+    // state) — replacing measureElement + the data-index dance. The virtualizer
+    // stays instantiated for scrollToNode / older-history until Step 5.
+
+    // The visible rows, sliced from the slice's full positions array. Empty
+    // window (endIndex < startIndex) → render nothing.
+    const windowedRows = createMemo<RowPosition[]>(() => {
+        const v = props.layoutView?.();
+        if (!v || v.window.endIndex < v.window.startIndex) return [];
+        return v.rows.slice(v.window.startIndex, v.window.endIndex + 1);
+    });
+
+    // nodeId → live DocumentNode for the virtualized partition, so a row
+    // renders the CURRENT node at its id (streaming updates propagate without
+    // remount). A windowed row whose node isn't in the partition this frame is
+    // skipped — the same recoverable drop the old getVirtualItems guard did.
+    const nodeById = createMemo(() => {
+        const m = new Map<string, DocumentNode>();
+        for (const n of partition().virtualizedNodes) m.set(n.id, n);
+        return m;
+    });
+
+    // One measure RO for all virtualized rows; el→nodeId lets the callback
+    // dispatch RowMeasured keyed by the row's current in-flow state, ÷zoom to
+    // stay in unzoomed CSS px (INV-2/3). Rows observe on mount, unobserve on
+    // unmount (the Key child's onCleanup).
+    const elNodeId = new WeakMap<Element, string>();
+    const measureRO = typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver((entries) => {
+            const blockId = props.blockId;
+            if (!blockId) return;
+            const zoom = props.zoomFactor?.() ?? 1;
+            const snap = snapshotLayout(blockId);
+            const nodes = nodeById();
+            for (const entry of entries) {
+                const nodeId = elNodeId.get(entry.target);
+                if (!nodeId) continue;
+                const cssPx = entry.target.getBoundingClientRect().height / (zoom || 1);
+                const node = nodes.get(nodeId);
+                if (node) {
+                    agentPerfStore.recordEstimatorMeasurement(
+                        node.type,
+                        estimateNode(node, props.documentState()),
+                        cssPx,
+                    );
+                }
+                dispatchLayoutIfRegistered(blockId, {
+                    type: "RowMeasured",
+                    nodeId,
+                    state: inFlowState(snap?.expansion.get(nodeId)),
+                    cssPx,
+                });
+            }
+        })
+        : undefined;
+    onCleanup(() => measureRO?.disconnect());
+    const observeRow = (el: HTMLElement, nodeId: string): void => {
+        elNodeId.set(el, nodeId);
+        measureRO?.observe(el);
+    };
+    const unobserveRow = (el: HTMLElement): void => {
+        measureRO?.unobserve(el);
+        elNodeId.delete(el);
+    };
+
     // Render: scroll container holds the optional header, the
     // virtualized head, and the streaming buffer. headerSlot offsets
     // the virtualizer; scrollMargin (above) handles that automatically.
@@ -584,65 +655,48 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 ref={(el) => { virtualContainerRef = el; }}
                 class="agent-document-virtualizer"
                 style={{
-                    height: `${virtualizer.getTotalSize()}px`,
+                    height: `${props.layoutView?.()?.totalSize ?? 0}px`,
                     position: "relative",
                     width: "100%",
                 }}
             >
-                <For each={virtualizer.getVirtualItems()}>
-                    {(virtualItem) => {
-                        // Defensive: during the reflow that follows a tool
-                        // expand/collapse height change, getVirtualItems() can
-                        // transiently yield an undefined entry. Without this
-                        // guard the `virtualItem.index` reads below throw
-                        // "Cannot read properties of undefined (reading 'index')"
-                        // *during render*, which the agent-pane error boundary
-                        // catches by tearing down the ENTIRE virtualized list.
-                        // Dropping one transient row for a frame is recoverable;
-                        // crashing the list is not. (Observed live under rapid
-                        // expand/collapse churn.)
-                        if (!virtualItem) return null;
-                        const nodeAccessor = (): DocumentNode => {
-                            return partition().virtualizedNodes[virtualItem.index];
-                        };
+                <Key each={windowedRows()} by={(r) => r.nodeId}>
+                    {(row) => {
+                        let rowEl: HTMLElement | undefined;
+                        // The live node at this row's id; skip a frame if it's
+                        // momentarily absent from the partition (recoverable,
+                        // like the old getVirtualItems undefined guard).
+                        const node = (): DocumentNode | undefined => nodeById().get(row().nodeId);
+                        onCleanup(() => { if (rowEl) unobserveRow(rowEl); });
                         return (
-                            <DocumentRow
-                                node={nodeAccessor}
-                                documentState={props.documentState}
-                                bookmarkedNodeIds={props.bookmarkedNodeIds}
-                                onBookmark={props.onBookmark}
-                                onSubagentClick={props.onSubagentClick}
-                                highlightNodeId={props.highlightNodeId}
-                                onToggleCollapse={props.onToggleCollapse}
-                                onTogglePin={props.onTogglePin}
-                                // data-index is also bound reactively below
-                                // (dataIndex prop), but that binding is a Solid
-                                // render-effect that RACES this ref callback. If
-                                // the ref wins, TanStack's measureElement reads a
-                                // null data-index and returns *before*
-                                // observer.observe(node) — so the row is never
-                                // observed and stays pinned at estimateSize
-                                // forever, overlapping its neighbors. Setting the
-                                // attribute synchronously here, right before
-                                // measureElement, closes that race. Verified via
-                                // live CDP: rows mounting on the losing side of
-                                // the race were stuck at the 32px estimate.
-                                ref={(el) => {
-                                    el.setAttribute("data-index", String(virtualItem.index));
-                                    virtualizer.measureElement(el);
-                                }}
-                                dataIndex={virtualItem.index}
-                                style={{
-                                    position: "absolute",
-                                    top: "0",
-                                    left: "0",
-                                    width: "100%",
-                                    transform: `translateY(${virtualItem.start - (virtualContainerRef?.offsetTop ?? 0)}px)`,
-                                }}
-                            />
+                            <Show when={node()}>
+                                {(n) => (
+                                    <DocumentRow
+                                        node={n}
+                                        documentState={props.documentState}
+                                        bookmarkedNodeIds={props.bookmarkedNodeIds}
+                                        onBookmark={props.onBookmark}
+                                        onSubagentClick={props.onSubagentClick}
+                                        highlightNodeId={props.highlightNodeId}
+                                        onToggleCollapse={props.onToggleCollapse}
+                                        onTogglePin={props.onTogglePin}
+                                        // Step 4: ref carries the measure RO
+                                        // (keyed by nodeId), not measureElement —
+                                        // no data-index, no measure race.
+                                        ref={(el) => { rowEl = el; observeRow(el, row().nodeId); }}
+                                        style={{
+                                            position: "absolute",
+                                            top: "0",
+                                            left: "0",
+                                            width: "100%",
+                                            transform: `translateY(${row().start - (virtualContainerRef?.offsetTop ?? 0)}px)`,
+                                        }}
+                                    />
+                                )}
+                            </Show>
                         );
                     }}
-                </For>
+                </Key>
             </div>
 
             {/* Streaming buffer — always-mounted trailing nodes.
