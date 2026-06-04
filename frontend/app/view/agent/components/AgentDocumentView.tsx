@@ -23,6 +23,7 @@ import { createSignal, onMount, Show, type Accessor, type JSX } from "solid-js";
 import type { SignalPair } from "../state";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
+import type { LayoutView } from "@/app/store/agent-pane-layout-store";
 import { AgentDocumentVirtualList } from "../virtualization/AgentDocumentVirtualList";
 import { createAgentViewState } from "../virtualization/state";
 
@@ -74,6 +75,9 @@ interface AgentDocumentViewProps {
      * measurements through the slice (INV-3).
      */
     blockId?: string;
+    /** Derived layout view from the agent-pane-layout slice (Phase 3) —
+     *  forwarded to the list, which renders rows from its prefix-sum positions. */
+    layoutView?: Accessor<LayoutView | null>;
 }
 
 export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element => {
@@ -148,6 +152,7 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             onTogglePin={togglePin}
             zoomFactor={props.zoomFactor}
             blockId={props.blockId}
+            layoutView={props.layoutView}
             headerSlot={headerSlot()}
         />
     );
