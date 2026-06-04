@@ -268,9 +268,12 @@ const ActionWidgets = (): JSX.Element => {
     // dropped. The collapse point still auto-tracks the widget count via the
     // mirror's measured width; this only floors the tab bar's share.
     const MIN_TAB_WIDTH = 120;
-    // Per-tab minimum readable width — mirrors `--ws-tab-min` in tabbar.scss.
-    // The collapse threshold reserves `tabCount * this`.
-    const WS_TAB_MIN_PX = 100;
+    // Per-tab COLLAPSE-TRIGGER width: widget labels drop once each open tab
+    // would fall below this. Deliberately NOT the CSS shrink floor
+    // (`--ws-tab-min`, 56px) — labels collapse first (at this comfortable
+    // width), THEN tabs shrink toward the smaller floor. Reserve =
+    // `tabCount * this`.
+    const TAB_COLLAPSE_RESERVE_PX = 100;
 
     // More dropdown state
     const [moreOpen, setMoreOpen] = createSignal(false);
@@ -319,7 +322,7 @@ const ActionWidgets = (): JSX.Element => {
             if (labeledW === 0 || headerW === 0) return;
             const buttonsW = buttons?.offsetWidth ?? 0;
             const tabCount = tabScroll?.querySelectorAll(".tab").length ?? 0;
-            const tabsNeeded = Math.max(MIN_TAB_WIDTH, tabCount * WS_TAB_MIN_PX);
+            const tabsNeeded = Math.max(MIN_TAB_WIDTH, tabCount * TAB_COLLAPSE_RESERVE_PX);
             setTooNarrow(labeledW + buttonsW + tabsNeeded > headerW);
         };
         const ro = new ResizeObserver(measure);
