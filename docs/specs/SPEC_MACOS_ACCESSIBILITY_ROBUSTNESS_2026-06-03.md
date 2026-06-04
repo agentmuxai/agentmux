@@ -127,7 +127,11 @@ web-content nodes → no crash, and AgentMux is *not* globally inaccessible. Rea
 
 **Risks / care:**
 - Must not break CEF's own `CefAppProtocol` `NSApplication`; wrap/swizzle, never replace.
-- Swizzle once, before `cef::initialize`, alongside the existing `main.rs` shim.
+- Swizzle once, immediately **after** `cef::initialize` — the CEF `NSApplication`
+  subclass that owns the legacy AX setter only exists post-init (this is why the
+  governor installs in the post-init macOS-setup block, not alongside the
+  pre-init `patch_nsapp_unrecognized_selector` shim). See `main.rs` call site
+  (post-`initialize`) and the function's own doc comment.
 - Verify macOS-26 still activates via `AXEnhancedUserInterface` (refs §8) — confirm the exact
   selector/attribute names empirically (Accessibility Inspector + a probe build).
 
