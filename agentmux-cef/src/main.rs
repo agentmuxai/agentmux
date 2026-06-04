@@ -782,6 +782,13 @@ fn main() {
     unsafe {
         set_macos_activation_policy_regular();
         set_macos_dock_icon();
+        // Layer 1 of SPEC_MACOS_ACCESSIBILITY_ROBUSTNESS_2026-06-03: govern
+        // Chromium's macOS accessibility activation so a window manager / KVM
+        // poking the AX tree (Magnet, Synergy, …) can't force the crash-prone
+        // web-content AX mode (CEF #3512). Must run after cef::initialize so
+        // the CEF NSApplication subclass (which owns the legacy AX setter)
+        // exists.
+        install_macos_accessibility_governor();
     }
 
     // Start memory heartbeat — logs system/process memory stats every 20s.
@@ -1053,6 +1060,184 @@ unsafe fn disable_macos_drag_slideback() {
     method_setImplementation(method, begin_drag_no_slideback as Imp);
     tracing::info!(
         "macOS drag polish: swizzled NSView beginDraggingSession to disable cancel/fail slide-back"
+    );
+}
+
+/// macOS accessibility activation governor — Layer 1 of
+/// `docs/specs/SPEC_MACOS_ACCESSIBILITY_ROBUSTNESS_2026-06-03.md`.
+///
+/// Chromium enables its web-content accessibility tree the moment an AX client
+/// sets `AXEnhancedUserInterface` on the application. That tree's macOS
+/// implementation faults under external iteration on macOS-26 / CEF M114+
+/// (CEF #3512: `AXPlatformNodeCocoa::AXChildren()` SEGV; here it surfaced as an
+/// `EXC_BREAKPOINT` through the legacy `NSAccessibility…` accessor when a user
+/// clicked the title-bar menu). The trigger attribute is **overloaded**:
+/// VoiceOver sets it, but so do ordinary window managers / KVMs — Magnet,
+/// Synergy — see Firefox bug 1664992. So a window manager merely doing its job
+/// forces AgentMux into the crash-prone full-AX mode.
+///
+/// This swizzles the application's legacy `accessibilitySetValue:forAttribute:`
+/// and applies a policy:
+///   * `AXEnhancedUserInterface` (the window-manager/KVM path) does **not**
+///     auto-enable web-content AX — unless `AGENTMUX_A11Y_HONOR_ENHANCED=1`.
+///   * `AXManualAccessibility` (explicit assistive-technology / app intent —
+///     the path Electron documents for enabling AX) **is** honored.
+///   * every set is logged so the real activation path is observable in the
+///     field (this is also how we confirm the fix against Magnet/Synergy).
+///
+/// Window-level AX (windows, buttons, title) is unaffected — only the descent
+/// into the crash-prone web-content tree is gated. Full screen-reader support
+/// returns unconditionally once the AX path itself is made non-fatal (Phase 2 /
+/// Layer 2 of the spec). Not a blanket `--disable-renderer-accessibility`: that
+/// would make AgentMux permanently inaccessible; this keeps the explicit
+/// (`AXManualAccessibility`) enable path working.
+///
+/// Must run AFTER `cef::initialize` — the CEF `NSApplication` subclass that
+/// implements the legacy AX setter only exists then. FFI mirrors
+/// `disable_macos_drag_slideback`. Idempotent enough for once-at-startup.
+#[cfg(target_os = "macos")]
+unsafe fn install_macos_accessibility_governor() {
+    use std::ffi::{c_char, c_void};
+
+    type Id     = *mut c_void;
+    type Sel    = *const c_void;
+    type Class  = *mut c_void;
+    type Method = *mut c_void;
+    type Imp    = *const c_void;
+
+    extern "C" {
+        fn objc_getClass(name: *const c_char) -> Class;
+        fn object_getClass(obj: Id) -> Class;
+        fn class_getName(cls: Class) -> *const c_char;
+        fn sel_registerName(name: *const c_char) -> Sel;
+        fn class_getInstanceMethod(cls: Class, sel: Sel) -> Method;
+        fn method_getImplementation(m: Method) -> Imp;
+        fn method_setImplementation(m: Method, imp: Imp) -> Imp;
+        fn objc_msgSend();
+    }
+
+    // Original Chromium IMP, saved so the governed replacement can chain to it.
+    // Single-threaded startup write; main-thread-only AX reads afterward.
+    static mut ORIGINAL_SET_AX: Imp = std::ptr::null();
+    // Read the override once at install (env reads in the hot path are wasteful
+    // and AX sets are rare, but a static keeps the IMP allocation-free).
+    static mut HONOR_ENHANCED: bool = false;
+
+    // [attr isEqualToString:@literal] without bringing in a string crate.
+    unsafe fn attr_is(attr: Id, literal: &[u8]) -> bool {
+        if attr.is_null() {
+            return false;
+        }
+        let objc_get_class: extern "C" fn(*const c_char) -> Class =
+            std::mem::transmute(objc_getClass as *const c_void);
+        let cls = objc_get_class(b"NSString\0".as_ptr() as _);
+        if cls.is_null() {
+            return false;
+        }
+        let sel_with = sel_registerName(b"stringWithUTF8String:\0".as_ptr() as _);
+        let make: extern "C" fn(Class, Sel, *const c_char) -> Id =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        let lit = make(cls, sel_with, literal.as_ptr() as *const c_char);
+        if lit.is_null() {
+            return false;
+        }
+        let sel_eq = sel_registerName(b"isEqualToString:\0".as_ptr() as _);
+        let eq: extern "C" fn(Id, Sel, Id) -> u8 =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        eq(attr, sel_eq, lit) != 0
+    }
+
+    // Replacement for -[<app> accessibilitySetValue:(id)value forAttribute:(NSString*)attr].
+    unsafe extern "C" fn governed_set_ax(this: Id, cmd: Sel, value: Id, attribute: Id) {
+        if attr_is(attribute, b"AXEnhancedUserInterface\0") {
+            if !HONOR_ENHANCED {
+                tracing::warn!(
+                    "a11y governor: blocked AXEnhancedUserInterface activation \
+                     (window-manager/KVM path — CEF #3512). \
+                     Set AGENTMUX_A11Y_HONOR_ENHANCED=1 to allow."
+                );
+                return; // swallow → web-content AX stays off
+            }
+            tracing::warn!("a11y governor: honoring AXEnhancedUserInterface (override enabled)");
+        } else if attr_is(attribute, b"AXManualAccessibility\0") {
+            tracing::info!("a11y governor: honoring AXManualAccessibility (explicit enable)");
+        } else {
+            tracing::debug!("a11y governor: passthrough accessibilitySetValue:forAttribute:");
+        }
+        let orig: extern "C" fn(Id, Sel, Id, Id) = std::mem::transmute(ORIGINAL_SET_AX);
+        orig(this, cmd, value, attribute);
+    }
+
+    HONOR_ENHANCED = std::env::var("AGENTMUX_A11Y_HONOR_ENHANCED").is_ok();
+
+    // app = [NSApplication sharedApplication]
+    let cls_nsapp = objc_getClass(b"NSApplication\0".as_ptr() as _);
+    if cls_nsapp.is_null() {
+        tracing::warn!("a11y governor: NSApplication class not found; skipping");
+        return;
+    }
+    let sel_shared = sel_registerName(b"sharedApplication\0".as_ptr() as _);
+    let shared: extern "C" fn(Class, Sel) -> Id =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    let app = shared(cls_nsapp, sel_shared);
+    if app.is_null() {
+        tracing::warn!("a11y governor: sharedApplication nil; skipping");
+        return;
+    }
+
+    // Swizzle on the *actual* app class (the CEF NSApplication subclass).
+    let app_cls = object_getClass(app);
+    let sel_set = sel_registerName(b"accessibilitySetValue:forAttribute:\0".as_ptr() as _);
+    let method = class_getInstanceMethod(app_cls, sel_set);
+    if method.is_null() {
+        tracing::warn!(
+            "a11y governor: accessibilitySetValue:forAttribute: not found on app class — \
+             AX activation path differs on this macOS; governor inactive (see spec L1)"
+        );
+        return;
+    }
+    ORIGINAL_SET_AX = method_getImplementation(method);
+    method_setImplementation(method, governed_set_ax as Imp);
+
+    // --- Layer 2a guard: -[NSApplication accessibilityParent] → nil ---
+    //
+    // The observed crash (EXC_BREAKPOINT, both reports) is an *incoming* AX
+    // READ — an external client (Magnet/Synergy) calls CopyAttributeValue on
+    // the app, which routes through:
+    //   -[NSApplication accessibilityParent]
+    //     → NSAccessibilityGetObjectForAttributeUsingLegacyAPI
+    //     → NSAccessibilitySetUnsupportedAttributeError
+    //     → +[NSString stringWithFormat:]  → CF string trap (with a CEF AX
+    //        object as the %@ arg — CEF #3512).
+    // NSApplication is the AX root; its parent is legitimately nil. Returning
+    // nil DIRECTLY short-circuits before the crashy legacy bridge runs, so the
+    // unsupported-attribute error path is never reached for this query. Safe
+    // and semantically correct (no real AX parent exists), and it does not
+    // disable accessibility — windows/title still answer.
+    unsafe extern "C" fn accessibility_parent_nil(_this: Id, _cmd: Sel) -> Id {
+        std::ptr::null_mut()
+    }
+    let sel_parent = sel_registerName(b"accessibilityParent\0".as_ptr() as _);
+    let m_parent = class_getInstanceMethod(app_cls, sel_parent);
+    if !m_parent.is_null() {
+        method_setImplementation(m_parent, accessibility_parent_nil as Imp);
+        tracing::info!("a11y governor: guarded -[NSApplication accessibilityParent] → nil (SPEC L2a)");
+    } else {
+        tracing::warn!("a11y governor: accessibilityParent not found on app class");
+    }
+
+    let cls_name = {
+        let p = class_getName(app_cls);
+        if p.is_null() {
+            "<unknown>".to_owned()
+        } else {
+            std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
+        }
+    };
+    tracing::info!(
+        app_class = %cls_name,
+        honor_enhanced = HONOR_ENHANCED,
+        "a11y governor: swizzled accessibilitySetValue:forAttribute: (SPEC L1)"
     );
 }
 
