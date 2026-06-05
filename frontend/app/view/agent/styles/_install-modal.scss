@@ -47,8 +47,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+    // Functional loading indicator (and already a discrete flip, not a
+    // continuous spin) — keep it moving, gentler, rather than freezing it.
     .agent-install-modal-spinner {
-        animation: none;
+        animation-duration: 3.2s;
     }
 }
 
