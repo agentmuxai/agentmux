@@ -228,6 +228,15 @@ wrap_task! {
                             self.label
                         );
                     }
+                    // Notify the renderer that the OS drag is done so it can
+                    // reset its dragging flag. BeginWindowDrag may not re-deliver
+                    // a DOM mouseup to the renderer (F3 verification pending);
+                    // this event is the safety-net reset for non-Windows.
+                    crate::events::emit_event_to_top_level_windows(
+                        &self.state,
+                        "window_drag_ended",
+                        &serde_json::json!({ "label": &self.label, "moved": false }),
+                    );
                 }
             } else {
                 tracing::warn!("[start_window_drag] no window for label={}", self.label);
@@ -266,6 +275,7 @@ wrap_task! {
     impl Task {
         fn execute(&self) {
             use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
+            use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
             use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
                 GetAsyncKeyState, GetCapture, ReleaseCapture, SetCapture, VK_ESCAPE, VK_LBUTTON,
             };
@@ -346,7 +356,18 @@ wrap_task! {
                         if PeekMessageW(&mut up, h, WM_LBUTTONUP, WM_LBUTTONUP, PM_REMOVE) != 0 {
                             DispatchMessageW(&up);
                         } else {
-                            SendMessageW(h, WM_LBUTTONUP, 0, 0);
+                            // Synthesize a balancing WM_LBUTTONUP so Chromium's
+                            // mousedown is balanced. Encode the ACTUAL cursor
+                            // position in lParam (client coords) so the DOM
+                            // MouseEvent carries correct screenX/Y for redock.
+                            // lParam=0 would encode client (0,0) = floater
+                            // top-left, giving tryRedockAtCursor the wrong point.
+                            let mut release_pt = POINT { x: 0, y: 0 };
+                            GetCursorPos(&mut release_pt);
+                            ScreenToClient(h, &mut release_pt);
+                            let lp = (release_pt.x as u16 as i32)
+                                | ((release_pt.y as u16 as i32) << 16);
+                            SendMessageW(h, WM_LBUTTONUP, 0, lp as isize);
                         }
                         break;
                     }
@@ -359,7 +380,11 @@ wrap_task! {
                         break;
                     }
                     match msg.message {
-                        WM_MOUSEMOVE => {
+                        // Guard both arms against messages sent to other
+                        // HWNDs that arrived on this thread (accessibility
+                        // tools, test automation). Messages for other windows
+                        // fall through to the _ arm for normal dispatch.
+                        WM_MOUSEMOVE if msg.hwnd == h => {
                             // After Esc-cancel we keep looping (so the renderer
                             // still gets its balancing WM_LBUTTONUP on release)
                             // but stop moving the window.
@@ -375,6 +400,17 @@ wrap_task! {
                                     0,
                                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                                 );
+                                // Signal the renderer on the first actual move so it
+                                // can arm the hasMoved flag and allow redock-on-release.
+                                if moves == 0 {
+                                    crate::events::emit_event_to_top_level_windows(
+                                        &self.state,
+                                        "window_drag_first_move",
+                                        &serde_json::json!({
+                                            "label": self.source_label.as_deref().unwrap_or("main")
+                                        }),
+                                    );
+                                }
                                 moves += 1;
                                 // Floater: emit redock-hover at 50ms cadence so the
                                 // drop-target highlight tracks the cursor while the
@@ -399,7 +435,7 @@ wrap_task! {
                                 }
                             }
                         }
-                        WM_LBUTTONUP => {
+                        WM_LBUTTONUP if msg.hwnd == h => {
                             // Let Chromium see the up so its input state stays
                             // balanced against the mousedown the renderer got
                             // (SPEC §5.1).
@@ -422,6 +458,12 @@ wrap_task! {
                                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                             );
                             cancelled = true;
+                            // Tear down the hover overlay immediately so the
+                            // drop-target placeholder doesn't outlive the cancel.
+                            let _ = crate::commands::window::clear_floating_redock_hover(
+                                &self.state,
+                                &serde_json::Value::Null,
+                            );
                             // Signal the renderer to suppress redock-on-release
                             // for this drag (§2.3 / §3.2 of the spec).
                             crate::events::emit_event_to_top_level_windows(
@@ -449,6 +491,18 @@ wrap_task! {
                 // 4. Stop the wake tick and release capture.
                 KillTimer(h, DRAG_TICK_ID);
                 ReleaseCapture();
+                // Notify the renderer that the drag is done so it can reset
+                // its dragging flag regardless of whether it received a DOM
+                // mouseup. Carries moved:bool so the renderer can distinguish
+                // a real drag from a stationary hold.
+                crate::events::emit_event_to_top_level_windows(
+                    &self.state,
+                    "window_drag_ended",
+                    &serde_json::json!({
+                        "label": self.source_label.as_deref().unwrap_or("main"),
+                        "moved": moves > 0,
+                    }),
+                );
                 tracing::info!(
                     "[start_window_drag] manual move loop end hwnd={:#x} moves={}",
                     self.hwnd, moves
