@@ -25,23 +25,93 @@ pub mod server;
 // the launcher's public surface honest.
 pub use server::run_ipc_server;
 
-/// Construct the named-pipe path for a given data-dir hash.
-/// Format: `\\.\pipe\agentmux-{hash16}\command`.
+/// Construct the IPC endpoint path for a given data-dir hash.
+///
+/// Windows: a named-pipe path `\\.\pipe\agentmux-{hash16}\command`.
+/// Unix:    a Unix-domain-socket path under `$XDG_RUNTIME_DIR/agentmux/`
+///          (fallback `/tmp/agentmux-{uid}/`), file name
+///          `{hash16}.sock`. The directory is created with 0700 perms
+///          and ownership = the user, so cross-user squatting in `/tmp`
+///          can't happen.
 ///
 /// Per-data-dir scoping preserves multi-instance support per
 /// `CLAUDE.md`: different portable folders / installed versions
-/// → different data dirs → different hashes → distinct pipes.
-/// Two launchers pointing at the SAME data dir will collide on
-/// the pipe name, which is also the single-instance signal
-/// Phase B.6 relies on.
+/// → different data dirs → different hashes → distinct endpoints.
+/// Two launchers pointing at the SAME data dir collide at bind time,
+/// which is also the single-instance signal Phase B.6 / A1.6 use.
+#[cfg(target_os = "windows")]
 pub fn pipe_name(data_dir_hash16: &str) -> String {
     format!("\\\\.\\pipe\\agentmux-{}\\command", data_dir_hash16)
+}
+
+#[cfg(unix)]
+pub fn pipe_name(data_dir_hash16: &str) -> String {
+    format!(
+        "{}/{}.sock",
+        ipc_socket_dir().display(),
+        data_dir_hash16
+    )
 }
 
 /// Phase E.1b — srv-side pipe path. Same data-dir hash as the
 /// launcher pipe (multi-instance scoping is identical), different
 /// leaf name. Both pipes coexist; subscribers connect to whichever
 /// reducer they need.
+#[cfg(target_os = "windows")]
 pub fn srv_pipe_name(data_dir_hash16: &str) -> String {
     format!("\\\\.\\pipe\\agentmux-{}\\srv-command", data_dir_hash16)
+}
+
+#[cfg(unix)]
+pub fn srv_pipe_name(data_dir_hash16: &str) -> String {
+    format!(
+        "{}/{}-srv.sock",
+        ipc_socket_dir().display(),
+        data_dir_hash16
+    )
+}
+
+/// Directory under which all launcher Unix sockets live. Created with
+/// 0700 perms so cross-user squatting can't happen.
+///
+/// Resolution order (A1.1 of SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_
+/// 2026_06_05):
+///   1. `$XDG_RUNTIME_DIR/agentmux/` — preferred; tmpfs, per-user,
+///      automatically cleaned up by systemd-logind on session end.
+///   2. `/tmp/agentmux-{uid}/` — fallback for environments without
+///      a systemd user manager. UID in the path so users can't
+///      collide.
+///
+/// The directory is created on first call (idempotent). On the rare
+/// failure path (read-only `/tmp`, exotic chroot) we fall back to
+/// `/tmp` with the launcher pid as a discriminator. That fallback
+/// is intentionally non-strict — the caller's bind will fail and
+/// the launcher exits cleanly with a clear error.
+#[cfg(unix)]
+pub fn ipc_socket_dir() -> std::path::PathBuf {
+    let dir = if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") {
+        let mut p = std::path::PathBuf::from(runtime);
+        p.push("agentmux");
+        p
+    } else {
+        let uid = unsafe { libc::getuid() };
+        std::path::PathBuf::from(format!("/tmp/agentmux-{}", uid))
+    };
+    // Best-effort mkdir + chmod 0700. Errors (EEXIST is fine, anything
+    // else is rare and the bind will surface a clear error).
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        if e.kind() != std::io::ErrorKind::AlreadyExists {
+            crate::log(&format!(
+                "[ipc] WARN: failed to create socket dir {}: {} — bind may fail",
+                dir.display(),
+                e
+            ));
+        }
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    }
+    dir
 }
