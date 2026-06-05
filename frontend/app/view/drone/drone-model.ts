@@ -26,6 +26,7 @@ import {
 import { waveEventSubscribe } from "@/app/store/wps";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, createSignal, type Accessor } from "solid-js";
+import { createStore, produce, reconcile, type SetStoreFunction } from "solid-js/store";
 
 import { blockMeta } from "./block-registry";
 import {
@@ -71,9 +72,28 @@ export class DroneViewModel implements ViewModel {
     setList = this._list[1];
 
     // --- the drone currently open in the canvas (a draft until saved)
-    private _draft = createSignal<DroneDefinition>(BLANK_DRONE());
-    draftAtom: Accessor<DroneDefinition> = this._draft[0];
-    setDraft = this._draft[1];
+    //
+    // Backed by a Solid STORE, not a signal. A signal holding the whole
+    // DroneDefinition replaces the object on every edit, so any reader
+    // of `graph.nodes` re-runs — fatal for smooth node dragging at 50+
+    // nodes. A store proxies each node/field independently, so moving
+    // one node touches only that node's `position` binding. See
+    // SPEC_DRONE_CANVAS_NODE_EDITOR_2026_06_05.md §8.
+    private _draftStore = createStore<DroneDefinition>(BLANK_DRONE());
+    private draft: DroneDefinition = this._draftStore[0];
+    private setDraftStore: SetStoreFunction<DroneDefinition> = this._draftStore[1];
+
+    // Stable accessor — the rest of the codebase keeps calling
+    // `m.draftAtom()`. Returns the live store proxy; property reads on
+    // it (`.graph.nodes`) stay fine-grained inside a tracking scope.
+    draftAtom: Accessor<DroneDefinition> = () => this.draft;
+
+    /** Replace the entire draft (load / new / post-save normalize).
+     *  Uses `reconcile` (keyed on node/edge `id`) so surviving DOM nodes
+     *  and edges are diffed in place rather than torn down + rebuilt. */
+    private setDraft(next: DroneDefinition): void {
+        this.setDraftStore(reconcile(next));
+    }
 
     // --- which node is selected in the canvas (for the InspectorPanel)
     private _selected = createSignal<string | null>(null);
@@ -414,65 +434,55 @@ export class DroneViewModel implements ViewModel {
             data: { kind, ...meta.defaultData },
             type: kind,
         };
-        this.setDraft((prev) => ({
-            ...prev,
-            graph: { ...prev.graph, nodes: [...prev.graph.nodes, node] },
-        }));
+        // Append keeps `<For>`'s keying intact (new id → new row); the
+        // existing node DOM is untouched.
+        this.setDraftStore("graph", "nodes", (nodes) => [...nodes, node]);
         return node;
     }
 
     removeNode(id: string): void {
-        this.setDraft((prev) => ({
-            ...prev,
-            graph: {
-                nodes: prev.graph.nodes.filter((n) => n.id !== id),
-                edges: prev.graph.edges.filter((e) => e.source !== id && e.target !== id),
-            },
-        }));
+        // `produce` for the two-array cascade (drop the node + its edges)
+        // in one granular transaction.
+        this.setDraftStore(
+            produce((d) => {
+                d.graph.nodes = d.graph.nodes.filter((n) => n.id !== id);
+                d.graph.edges = d.graph.edges.filter(
+                    (e) => e.source !== id && e.target !== id,
+                );
+            }),
+        );
         if (this.selectedAtom() === id) this.setSelected(null);
     }
 
     updateNodeData(id: string, patch: Record<string, unknown>): void {
-        this.setDraft((prev) => ({
-            ...prev,
-            graph: {
-                ...prev.graph,
-                nodes: prev.graph.nodes.map((n) =>
-                    n.id === id ? { ...n, data: { ...n.data, ...patch } } : n,
-                ),
-            },
-        }));
+        // Path mutation: touches only the matched node's `data` binding.
+        this.setDraftStore(
+            "graph",
+            "nodes",
+            (n) => n.id === id,
+            "data",
+            (data) => ({ ...data, ...patch }),
+        );
     }
 
     moveNode(id: string, position: { x: number; y: number }): void {
-        this.setDraft((prev) => ({
-            ...prev,
-            graph: {
-                ...prev.graph,
-                nodes: prev.graph.nodes.map((n) =>
-                    n.id === id ? { ...n, position } : n,
-                ),
-            },
-        }));
+        // The hot path during a drag — updates ONLY this node's
+        // `position`, so its `<For>` row's transform binding re-runs and
+        // nothing else does. This is the whole point of the store.
+        this.setDraftStore("graph", "nodes", (n) => n.id === id, "position", position);
     }
 
     addEdge(edge: Omit<FlowEdge, "id">): void {
         const e: FlowEdge = { id: `e_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, ...edge };
-        this.setDraft((prev) => ({
-            ...prev,
-            graph: { ...prev.graph, edges: [...prev.graph.edges, e] },
-        }));
+        this.setDraftStore("graph", "edges", (edges) => [...edges, e]);
     }
 
     removeEdge(id: string): void {
-        this.setDraft((prev) => ({
-            ...prev,
-            graph: { ...prev.graph, edges: prev.graph.edges.filter((e) => e.id !== id) },
-        }));
+        this.setDraftStore("graph", "edges", (edges) => edges.filter((e) => e.id !== id));
     }
 
     setName(name: string): void {
-        this.setDraft((prev) => ({ ...prev, name }));
+        this.setDraftStore("name", name);
     }
 
     /** Validation surface read by the Toolbar before enabling Run. */
