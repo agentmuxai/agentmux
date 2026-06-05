@@ -334,6 +334,34 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         return Ok(Some(serde_json::to_value(&result).unwrap()));
                     }
 
+                    // Bootstrap the isolated CLAUDE_CONFIG_DIR from the global login.
+                    // Phase 2 (and the spawned agent) validate against the isolated dir;
+                    // if the tokens were found only in the global ~/.claude fallback above
+                    // but the isolated dir is empty, phase 2 reports loggedIn:false forever
+                    // — credentials "found" yet "not logged in", an unrecoverable spin.
+                    // Copy the global credentials in once so an existing login works
+                    // per-instance without a re-login. Only when the isolated file is
+                    // ABSENT, so a real per-instance login still wins (multi-account stays
+                    // isolated).
+                    if let Some(config_dir) = cmd.auth_env.get("CLAUDE_CONFIG_DIR") {
+                        let iso = format!("{}/.credentials.json", config_dir);
+                        let global = format!("{}/.claude/.credentials.json", home);
+                        if !std::path::Path::new(&iso).exists()
+                            && std::path::Path::new(&global).exists()
+                        {
+                            match std::fs::create_dir_all(config_dir)
+                                .and_then(|_| std::fs::copy(&global, &iso))
+                            {
+                                Ok(_) => tracing::info!(
+                                    "claude auth: seeded isolated CLAUDE_CONFIG_DIR from global ~/.claude"
+                                ),
+                                Err(e) => tracing::warn!(
+                                    "claude auth: failed to seed isolated creds from global: {e}"
+                                ),
+                            }
+                        }
+                    }
+
                     // Tokens exist on disk — validate with the CLI (10 s timeout).
                     tracing::info!("claude auth check: credentials found, validating via CLI");
                 }
