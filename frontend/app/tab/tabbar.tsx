@@ -633,9 +633,15 @@ function TabBar(props: TabBarProps): JSX.Element {
                         </>
                     )}
                 </For>
+                {/* Fill lives INSIDE the scroll container so the genuine empty
+                    space to the right of the last tab is draggable. isInDragRegion
+                    walks UP the DOM from the clicked element: the fill's own
+                    data-drag-region="true" is found before the scroll container's
+                    "false", so a click here starts a window drag. Moving it outside
+                    the scroll (as a sibling) left a dead zone — the empty interior
+                    of the scroll container looked draggable but wasn't. */}
+                <div class="tab-bar-fill" data-drag-region="true" />
             </div>
-            {/* Empty right-side space — draggable so the user can grab the window from here */}
-            <div class="tab-bar-fill" data-drag-region="true" />
         </div>
     );
 }
