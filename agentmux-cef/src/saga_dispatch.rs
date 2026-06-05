@@ -322,12 +322,13 @@ fn build_and_run_report<R: SagaActionRunner>(
 // Wraps real host code paths. Kept thin so the test runner can
 // substitute deterministic stubs without pulling in CEF.
 
-#[cfg(target_os = "windows")]
+// (A1.2 — gate removed; body is platform-neutral and the Unix IPC
+// client now also needs it. The original gate was defensive because
+// the only caller was Windows-only.)
 pub struct LiveActionRunner {
     pub state: Arc<crate::state::AppState>,
 }
 
-#[cfg(target_os = "windows")]
 impl SagaActionRunner for LiveActionRunner {
     fn spawn_pool_window(&self) -> String {
         // Fire the real spawn. The host's existing

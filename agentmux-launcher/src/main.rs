@@ -487,18 +487,198 @@ async fn next_signal(s: &mut Option<tokio::signal::unix::Signal>) {
     }
 }
 
-/// Unix (macOS/Linux) main flow, Phase 1: resolve paths → spawn srv →
-/// spawn host with srv endpoints in env → supervised wait → cleanup.
+/// Bind the launcher's IPC socket with single-instance enforcement +
+/// crash-safe stale-socket recovery, serialized across concurrent
+/// launchers via `flock(2)`.
+///
+/// Returns a bound `UnixListener` on success. Calls `std::process::exit`
+/// on:
+///   * second-instance detection (exit code 0)
+///   * a hard bind failure that isn't `EADDRINUSE` (exit code 2)
+///   * unable to acquire the recovery lock (exit code 2)
+///
+/// Why the lockfile (codex P1 + reagent P1 on PR #1288): see the call-
+/// site comment. Two-launcher concurrent stale-cleanup would otherwise
+/// produce two live launchers for one data dir.
+#[cfg(not(target_os = "windows"))]
+fn bind_socket_with_recovery(socket_path: &str) -> tokio::net::UnixListener {
+    use std::os::unix::io::AsRawFd as _;
+
+    // Fast path: bind without contention.
+    match ipc::server::bind_first_unix_socket(socket_path) {
+        Ok(l) => return l,
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => { /* slow path below */ }
+        Err(e) => {
+            log(&format!("FATAL: bind {} failed: {}", socket_path, e));
+            eprintln!(
+                "AgentMux failed to start: could not bind IPC socket.\n\nSocket: {}\nError: {}",
+                socket_path, e
+            );
+            std::process::exit(2);
+        }
+    }
+
+    // Slow path: contention. Acquire the recovery lock so only one
+    // launcher at a time does the connect-probe + unlink + rebind.
+    let lock_path = format!("{}.lock", socket_path);
+    let lock_file = match std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+    {
+        Ok(f) => f,
+        Err(e) => {
+            log(&format!(
+                "FATAL: could not open recovery lockfile {}: {}",
+                lock_path, e
+            ));
+            eprintln!(
+                "AgentMux failed to start: could not open IPC recovery lockfile.\n\nLockfile: {}\nError: {}",
+                lock_path, e
+            );
+            std::process::exit(2);
+        }
+    };
+    // Block until we have the lock — another launcher's recovery
+    // window is bounded by a single bind + a single connect-probe;
+    // we won't wait long. flock(2) is auto-released on close (when
+    // the OS reaps the launcher process), so a SIGKILL'd holder
+    // doesn't leak the lock.
+    if unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        let errno = std::io::Error::last_os_error();
+        log(&format!(
+            "FATAL: flock({}, LOCK_EX) failed: {}",
+            lock_path, errno
+        ));
+        eprintln!(
+            "AgentMux failed to start: could not acquire IPC recovery lock.\n\nLockfile: {}\nError: {}",
+            lock_path, errno
+        );
+        std::process::exit(2);
+    }
+
+    // Retry the bind under the lock — another launcher may have
+    // already cleaned up the stale file while we were waiting on
+    // flock, leaving us free to bind directly.
+    match ipc::server::bind_first_unix_socket(socket_path) {
+        Ok(l) => return l,
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => { /* probe below */ }
+        Err(e) => {
+            log(&format!(
+                "FATAL: post-lock bind {} failed: {}",
+                socket_path, e
+            ));
+            eprintln!(
+                "AgentMux failed to start: post-lock IPC bind failed.\n\nSocket: {}\nError: {}",
+                socket_path, e
+            );
+            std::process::exit(2);
+        }
+    }
+
+    // Disambiguate: is the existing socket a real running launcher,
+    // or a stale file?
+    match std::os::unix::net::UnixStream::connect(socket_path) {
+        Ok(_) => {
+            // Real second-instance. Exit cleanly so the existing
+            // launcher's window gets focus (Phase-2 arg-forwarding
+            // is a separate PR).
+            eprintln!(
+                "AgentMux is already running for this data directory.\n\nSocket: {}",
+                socket_path
+            );
+            log(&format!(
+                "[ipc] second-instance detected — existing launcher owns {}",
+                socket_path
+            ));
+            std::process::exit(0);
+        }
+        Err(connect_err)
+            if connect_err.kind() == std::io::ErrorKind::ConnectionRefused
+                || connect_err.raw_os_error() == Some(libc::ENOENT) =>
+        {
+            // Stale socket file from a crashed launcher. Unlink and
+            // rebind. The lock serializes us against other launchers
+            // ALSO doing recovery, but it does NOT block a fresh
+            // launcher taking the fast-path bind() above — that
+            // launcher is lock-free and can win the socket in the
+            // microsecond window between our `remove_file` and our
+            // `bind`. If that happens, AddrInUse means a real
+            // launcher just claimed the socket and WE are now the
+            // losing second instance, not a failed start.
+            // (Reagent P2 on PR #1288.)
+            log(&format!(
+                "[ipc] stale socket file at {} — unlinking and rebinding (under recovery lock)",
+                socket_path
+            ));
+            let _ = std::fs::remove_file(socket_path);
+            match ipc::server::bind_first_unix_socket(socket_path) {
+                Ok(l) => l,
+                Err(retry_e) if retry_e.kind() == std::io::ErrorKind::AddrInUse => {
+                    eprintln!(
+                        "AgentMux is already running for this data directory.\n\nSocket: {}",
+                        socket_path
+                    );
+                    log(&format!(
+                        "[ipc] post-recovery bind lost the race to a fresh launcher on {} — exiting as second instance",
+                        socket_path
+                    ));
+                    std::process::exit(0);
+                }
+                Err(retry_e) => {
+                    log(&format!(
+                        "FATAL: bind retry after stale-socket unlink failed: {}",
+                        retry_e
+                    ));
+                    eprintln!(
+                        "AgentMux failed to start: IPC rebind after stale cleanup failed.\n\nSocket: {}\nError: {}",
+                        socket_path, retry_e
+                    );
+                    std::process::exit(2);
+                }
+            }
+        }
+        Err(other) => {
+            log(&format!(
+                "[ipc] AddrInUse but connect probe failed in an unexpected way: {} — \
+                 treating as second instance and exiting cleanly",
+                other
+            ));
+            std::process::exit(0);
+        }
+    }
+    // `lock_file` drops here; flock auto-released on close.
+}
+
+/// Unix (macOS/Linux) main flow: resolve paths → bind launcher IPC
+/// socket (single-instance signal) → set up reducer / event log / saga
+/// coordinator / IPC server → spawn srv → spawn host with srv endpoints
+/// AND the launcher socket path in env → supervised wait → cleanup.
+///
+/// As of A1 (SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05.md §4)
+/// the launcher's window/pool/instance reducer + durable saga
+/// coordinator are now live on Linux. The 17 host-side `report_*` IPC
+/// calls reach the reducer; the saga log persists at
+/// `<data-dir>/db/launcher-sagas.db`; second-instance launches are
+/// detected via socket-bind contention.
 ///
 /// Differs from `run_windows` only where the OS forces it:
-///   * No Job Object — children inherit the launcher's process group, so
-///     a terminal Ctrl+C (SIGINT to the foreground group) already reaches
-///     host + srv directly. We additionally install SIGINT/SIGTERM
-///     handlers so `kill <launcher-pid>` (signal to the launcher alone)
-///     also tears the tree down deterministically.
-///   * No named-pipe IPC yet (Phase 2): srv is launched WITHOUT an
-///     AGENTMUX_SRV_PIPE_PATH, so it skips binding its IPC pipe — exactly
-///     as in today's `task dev` direct-invoke mode.
+///   * No Job Object — A0 (`PR_SET_PDEATHSIG` in `spawn_host_unix` and
+///     `srv_spawner`) gives the equivalent kernel-side reap when the
+///     launcher dies abnormally. Terminal Ctrl+C reaches the process
+///     group; explicit SIGINT/SIGTERM handlers cover the
+///     `kill <launcher-pid>` case.
+///   * Unix-domain-socket IPC (A1) instead of named pipes; protocol on
+///     the wire is identical (newline-delimited JSON Command/Event).
+///     The launcher-side server uses `tokio::net::UnixListener`; the
+///     host-side client uses `tokio::net::UnixStream`. See
+///     `ipc::server::run_ipc_server` (Unix arm) and
+///     `agentmux-cef/src/launcher_ipc.rs::connect_to_launcher` (Unix arm).
+///   * srv-side IPC is still skipped on Linux (srv is launched with an
+///     empty `srv_pipe_path`); follow-up PR will bring srv's Unix
+///     socket online too.
 ///   * Cleanup is SIGTERM-then-SIGKILL (we own the reap) rather than
 ///     KILL_ON_JOB_CLOSE.
 ///
@@ -538,9 +718,166 @@ async fn run_unix(
         std::process::exit(1);
     }
 
-    // 2. Spawn srv. Empty pipe path → srv skips its IPC bind (Phase 2
-    //    wires the Unix-socket transport). spawn_srv is already
-    //    Unix-clean (the job_handle param is #[cfg(windows)]).
+    // -----------------------------------------------------------------
+    // A1.1 — IPC server setup on Linux (the wire is up). Mirrors the
+    // Windows path at the equivalent point in `run_windows`. Once this
+    // lands the host's 17 `report_*` IPC calls reach the (already
+    // platform-neutral) reducer, the window-pool / single-instance /
+    // instance-numbering logic activates, sagas get persisted to the
+    // launcher_saga.db SQLite log, and `--diag sagas` reads something
+    // useful.
+    //
+    // Spec: docs/specs/SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05.md §4
+    // -----------------------------------------------------------------
+
+    // Compute the socket path from a data-dir hash + version, identical
+    // scoping rule to the Windows pipe namespace. `pipe_name` is now
+    // pure on both platforms — the side-effecting ensure step lives
+    // in `ensure_ipc_socket_dir` and is invoked separately below so
+    // that any future read-only inspector (e.g. a Linux `--diag`
+    // port) can call `pipe_name` without mutating the filesystem.
+    let dir_hash = hash::data_dir_hash16(&paths.data_dir, version);
+    let socket_path = ipc::pipe_name(&dir_hash);
+    log(&format!(
+        "launcher IPC socket = {} (data_dir={} version={})",
+        socket_path,
+        paths.data_dir.display(),
+        version
+    ));
+    // Ensure the socket dir exists with safe ownership/perms BEFORE
+    // any bind attempts. This may call std::process::exit(2) on a
+    // hostile-dir-on-disk scenario (cross-user squatting attack).
+    let _ = ipc::ensure_ipc_socket_dir();
+
+    // Single-instance handshake (A1.6). The bind is the authoritative
+    // signal: a second launcher pointing at the same data dir gets
+    // `EADDRINUSE`. The Windows path enjoys atomic `first_pipe_
+    // instance(true)`; Unix bind isn't atomic with respect to stale-
+    // file recovery, so we serialize that recovery via an `flock(2)`
+    // lockfile (codex P1 + reagent P1 on PR #1288).
+    //
+    // Concurrent-cleanup race the lockfile defends against:
+    //   1. Stale socket file remains from a crashed prior launcher.
+    //   2. Launcher A and B start concurrently. Both `bind` returns
+    //      EADDRINUSE because the file exists.
+    //   3. Without the lock: both A and B `connect` → ECONNREFUSED
+    //      (no listener on the stale file), both `unlink`, both
+    //      `bind` succeeds → two live launchers for one data dir,
+    //      and B's `unlink` may have removed A's freshly-bound
+    //      socket file before B bound its own.
+    //   4. With the lock: A holds the lock → does probe + unlink +
+    //      rebind atomically. B blocks on the lock. When A releases,
+    //      B's retry-bind sees A's running listener (file exists) and
+    //      B's `connect` succeeds → B exits cleanly as second
+    //      instance. No double-recovery.
+    //
+    // The lockfile lives next to the socket as `<socket>.lock`. It is
+    // intentionally NOT removed on clean shutdown — the inode is
+    // tiny, and leaving it lets the next launcher reuse it without a
+    // create-race. (Stale-lock-file scenarios are bounded: flock(2)
+    // is auto-released on process exit even for SIGKILL.)
+    let first_socket = bind_socket_with_recovery(&socket_path);
+
+    // Broadcast bus for reducer-emitted events. Same capacity (1024)
+    // and rationale as the Windows path.
+    let (events_tx, _) =
+        tokio::sync::broadcast::channel::<agentmux_common::ipc::Event>(1024);
+
+    // Event log: in-memory ring + disk persistence at
+    // <data-dir>/launcher-events.log. Disk writer task spawned next.
+    let log_disk_path = paths.data_dir.join("launcher-events.log");
+    let event_log = std::sync::Arc::new(event_log::EventLog::new(Some(log_disk_path)));
+    let event_log_for_writer = std::sync::Arc::clone(&event_log);
+    let disk_writer_rx = events_tx.subscribe();
+    tokio::spawn(event_log::run_disk_writer(
+        event_log_for_writer,
+        disk_writer_rx,
+    ));
+
+    // Canonical state shared between IPC server + saga coordinator.
+    let state = std::sync::Arc::new(tokio::sync::Mutex::new(state::State::default()));
+
+    // Durable saga log at <data-dir>/db/launcher-sagas.db.
+    let saga_log_path = data_dir::launcher_saga_log_path(&paths.data_dir);
+    let saga_log = match saga::LauncherSagaLog::open(&saga_log_path) {
+        Ok(l) => std::sync::Arc::new(l),
+        Err(e) => {
+            log(&format!(
+                "FATAL: failed to open launcher saga log at {:?}: {}",
+                saga_log_path, e
+            ));
+            std::process::exit(2);
+        }
+    };
+
+    // Startup recovery walker: mark any saga left running from a prior
+    // crashed run as failed_compensation. Must run BEFORE coordinator
+    // spawn (LSD-3).
+    if let Err(e) = saga::compensate_unresolved_launcher_sagas(&saga_log).await {
+        log(&format!(
+            "[saga-recovery] WARN: walker failed: {} — coordinator will still spawn",
+            e
+        ));
+    }
+
+    // Startup retention vacuum (LSD-4).
+    let retention_days = config::load_saga_retention_days(&paths.user_home_dir, |w| log(w));
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
+    match saga_log.vacuum_older_than(cutoff) {
+        Ok(removed) => log(&format!(
+            "[saga-log] vacuumed {} sagas older than {} (retention {} days)",
+            removed, cutoff, retention_days
+        )),
+        Err(e) => log(&format!("[saga-log] WARN: vacuum failed: {}", e)),
+    }
+
+    // Host pipe wrapper for saga-issued Commands → host. The IPC
+    // server's per-connection handler installs the host's writer once
+    // the host registers (see ipc/server.rs handle_connection's
+    // ClientKind::Host branch).
+    let host_pipe = std::sync::Arc::new(host_pipe::HostPipe::new(
+        events_tx.clone(),
+        std::sync::Arc::clone(&state),
+    ));
+
+    // Saga coordinator. Same construction + error handling as the
+    // Windows path; the coordinator itself is platform-neutral.
+    let saga_coord_inner =
+        saga::SagaCoordinator::new(events_tx.clone(), std::sync::Arc::clone(&state))
+            .with_log(std::sync::Arc::clone(&saga_log))
+            .unwrap_or_else(|e| {
+                log(&format!(
+                    "[main] FATAL: failed to seed saga_id allocator: {}",
+                    e
+                ));
+                std::process::exit(1);
+            })
+            .with_host_pipe(std::sync::Arc::clone(&host_pipe));
+    let saga_coord = std::sync::Arc::new(saga_coord_inner);
+    let saga_rx = events_tx.subscribe();
+    tokio::spawn(saga::run_coordinator(
+        std::sync::Arc::clone(&saga_coord),
+        saga_rx,
+    ));
+
+    let _ipc_handle = ipc::run_ipc_server(
+        socket_path.clone(),
+        first_socket,
+        ipc::server::ServerCtx {
+            launcher_pid: std::process::id(),
+            launcher_version: env!("CARGO_PKG_VERSION").to_string(),
+            state,
+            events_tx,
+            event_log,
+            host_pipe: std::sync::Arc::clone(&host_pipe),
+        },
+    );
+    log(&format!("IPC server started on {}", socket_path));
+
+    // 2. Spawn srv. The srv pipe path is the launcher-owned socket
+    //    path scope (srv will gain its own Unix-socket bind in a
+    //    follow-up; for now we still pass an empty string so srv's
+    //    Windows-only IPC code stays disabled).
     let srv_pipe_path = String::new();
     let (srv_result, mut srv_child) =
         match srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path).await {
@@ -558,9 +895,30 @@ async fn run_unix(
     let _srv_stdin_keepalive = srv_child.stdin.take();
 
     // 3. Spawn the host with srv endpoints in env.
-    let dir_hash_unix = hash::data_dir_hash16(&paths.data_dir, version);
+    // dir_hash was computed once above for socket_path; reuse it here
+    // instead of re-hashing the same paths.data_dir + version.
     let mut host_env = paths.common.to_env_vars();
-    host_env.push(("AGENTMUX_IPC_HASH", std::ffi::OsString::from(&dir_hash_unix)));
+    host_env.push(("AGENTMUX_IPC_HASH", std::ffi::OsString::from(&dir_hash)));
+    // A1.3 — IPC env handshake. Tell the host where to find the
+    // launcher socket. The env var name `AGENTMUX_LAUNCHER_PIPE` is
+    // reused from the Windows side even though the underlying resource
+    // is a Unix-domain socket — keeps the 17 `report_*` call sites in
+    // `agentmux-cef/src/launcher_ipc.rs` unchanged and avoids touching
+    // the host's connect-on-startup code in `agentmux-cef/src/app.rs`.
+    host_env.push((
+        "AGENTMUX_LAUNCHER_PIPE",
+        std::ffi::OsString::from(&socket_path),
+    ));
+    // AGENTMUX_HOME = the host's runtime directory (siblings of the
+    // host binary — libcef.so, paks, locales, etc). Mirrors the
+    // Windows path so the host's asset-resolution code finds its
+    // co-located data without searching $PATH-like fallbacks.
+    if let Some(host_runtime) = real_exe.parent() {
+        host_env.push((
+            "AGENTMUX_HOME",
+            std::ffi::OsString::from(host_runtime),
+        ));
+    }
     let mut host_child = match spawn_host_unix(real_exe, args, &srv_result, &host_env, false) {
         Some(c) => c,
         None => {
