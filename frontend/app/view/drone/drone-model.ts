@@ -545,15 +545,11 @@ export class DroneViewModel implements ViewModel {
         if (!src || !dst) return false;
         const srcH = c.sourceHandle ?? "out";
         const dstH = c.targetHandle ?? "in";
-        if (
-            graph.edges.some(
-                (e) =>
-                    e.source === c.source &&
-                    e.target === c.target &&
-                    (e.sourceHandle ?? "out") === srcH &&
-                    (e.targetHandle ?? "in") === dstH,
-            )
-        )
+        // Single-input occupancy: each declared input handle takes exactly
+        // one wire, so reject a second edge into an already-wired input
+        // (this also covers exact duplicates). A multi-incoming join would
+        // require the registry to declare multiple input handles.
+        if (graph.edges.some((e) => e.target === c.target && (e.targetHandle ?? "in") === dstH))
             return false;
         const outType =
             blockMeta(src.data.kind as BlockKind).outputs.find((h) => h.id === srcH)?.type ?? "any";

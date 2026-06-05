@@ -148,6 +148,9 @@
     &:active {
         cursor: grabbing;
     }
+    &:focus {
+        outline: none; // focusable (tabindex=-1) only to scope keydown
+    }
 }
 
 // The transformed layer. A zero-size origin point at (0,0) flow-space;

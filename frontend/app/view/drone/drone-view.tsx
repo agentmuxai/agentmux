@@ -131,11 +131,10 @@ const NodeChip = (p: { model: DroneViewModel; kind: BlockKind }): JSX.Element =>
 // xyflow-shaped, so we own the canvas and borrow only math where it pays
 // off. The viewport transform + pointer drag are hand-rolled (spec §3.1).
 // Supports: drag-from-bar to create, node drag, pan/zoom + fit, and
-// Shift-click wiring. See SPEC_DRONE_CANVAS_NODE_EDITOR_2026_06_05.md.
+// port-to-port drag wiring. See SPEC_DRONE_CANVAS_NODE_EDITOR_2026_06_05.md.
 
 const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
     const m = p.model;
-    let edgeStartId: string | null = null;
     let canvasEl!: HTMLDivElement;
 
     // ── viewport transform (pan / zoom) ─────────────────────────────
@@ -218,8 +217,7 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
         window.removeEventListener("pointermove", onNodeMove);
     };
     const onNodePointerDown = (e: PointerEvent, n: FlowNode) => {
-        // Left-button only; Shift is reserved for click-to-wire.
-        if (e.button !== 0 || e.shiftKey) return;
+        if (e.button !== 0) return; // left-button drag only
         const t = e.target as HTMLElement;
         if (t.closest(".nodrag") || t.closest(".drone-node-close")) return;
         e.stopPropagation(); // don't let the canvas start a pan
@@ -308,7 +306,15 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
         sync();
         const ro = new ResizeObserver(sync);
         ro.observe(canvasEl);
-        onCleanup(() => ro.disconnect());
+        // Focus the canvas on any pointer-down within it (capture phase, so
+        // it runs even when a node/edge/port handler stops propagation) —
+        // this is what scopes the Delete/Escape keydown to this pane.
+        const focusOnDown = () => canvasEl.focus({ preventScroll: true });
+        canvasEl.addEventListener("pointerdown", focusOnDown, true);
+        onCleanup(() => {
+            ro.disconnect();
+            canvasEl.removeEventListener("pointerdown", focusOnDown, true);
+        });
     });
 
     // ── port → port connection drag ─────────────────────────────────
@@ -321,10 +327,17 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
         const p = screenToFlow(e.clientX, e.clientY);
         setConn({ ...c, x2: p.x, y2: p.y });
     };
-    const onConnUp = (e: PointerEvent) => {
+    // Tear down a connection drag — removes BOTH window listeners (the
+    // pointerup is registered `once`, but an Escape-cancel resolves before
+    // it fires, so we must remove it explicitly) and clears the preview.
+    const cancelConn = () => {
         window.removeEventListener("pointermove", onConnMove);
-        const c = conn();
+        window.removeEventListener("pointerup", onConnUp);
         setConn(null);
+    };
+    const onConnUp = (e: PointerEvent) => {
+        const c = conn();
+        cancelConn();
         if (!c) return;
         // Drop target = whatever input port is under the cursor.
         const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
@@ -350,11 +363,15 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
     };
 
     // ── keyboard: delete selection · escape cancels ─────────────────
+    // Bound to the canvas element (not window) and the canvas is focused
+    // on any pointer-down within it (capture phase, below), so Delete only
+    // affects the pane the user is actually interacting with — never
+    // another drone pane's selection in the same window.
     const onKey = (e: KeyboardEvent) => {
         const tag = (e.target as HTMLElement | null)?.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
         if (e.key === "Escape") {
-            setConn(null);
+            cancelConn();
             m.setSelected(null);
             m.setSelectedEdge(null);
             return;
@@ -371,63 +388,19 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
             }
         }
     };
-    onMount(() => {
-        window.addEventListener("keydown", onKey);
-        onCleanup(() => window.removeEventListener("keydown", onKey));
+    onCleanup(() => {
+        window.removeEventListener("pointermove", onConnMove);
+        window.removeEventListener("pointerup", onConnUp);
     });
-    onCleanup(() => window.removeEventListener("pointermove", onConnMove));
-
-    const onNodeClick = (e: MouseEvent, n: FlowNode) => {
-        e.stopPropagation();
-        if (e.shiftKey) {
-            // Shift-click toggles edge-draw mode.
-            if (edgeStartId == null) {
-                edgeStartId = n.id;
-                return;
-            }
-            if (edgeStartId !== n.id) {
-                // For edges sourced from a Condition block, auto-assign
-                // the branch handle by edge-order: first connection =
-                // "true" branch, second = "false". The executor's
-                // branch-pruning logic (engine.rs `edge_is_active`)
-                // gates on this handle, so without it BOTH branches
-                // run and fire API/agent side effects on the path
-                // that should have been skipped. Phase 1 trades
-                // discoverability for simplicity; Phase 2 / canvas
-                // polish PR introduces a UI affordance (color, label,
-                // right-click "swap branches"). See codex review on
-                // PR #755.
-                const srcId = edgeStartId;
-                const srcNode = m
-                    .draftAtom()
-                    .graph.nodes.find((x) => x.id === srcId);
-                const isCondition =
-                    (srcNode?.data?.kind as string | undefined) === "condition";
-                let sourceHandle: string | undefined;
-                if (isCondition) {
-                    const existing = m
-                        .draftAtom()
-                        .graph.edges.filter((edge) => edge.source === srcId);
-                    sourceHandle = existing.length === 0 ? "true" : "false";
-                }
-                m.addEdge({
-                    source: srcId,
-                    target: n.id,
-                    ...(sourceHandle ? { sourceHandle } : {}),
-                });
-            }
-            edgeStartId = null;
-            return;
-        }
-        m.setSelected(n.id);
-    };
 
     return (
         <div
             class="drone-canvas"
             ref={canvasEl}
+            tabindex={-1}
             onWheel={onWheel}
             onPointerDown={onCanvasPointerDown}
+            onKeyDown={onKey}
             onDragOver={onDragOver}
             onDrop={onDrop}
         >
@@ -490,7 +463,6 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
                                     "--block-color": meta.color,
                                 }}
                                 onPointerDown={(e) => onNodePointerDown(e, n)}
-                                onClick={(e) => onNodeClick(e, n)}
                             >
                                 <header class="drone-node-header">
                                     <span class="drone-node-emoji">{meta.emoji}</span>
