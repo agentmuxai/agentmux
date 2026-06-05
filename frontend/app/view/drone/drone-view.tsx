@@ -125,13 +125,13 @@ const NodeChip = (p: { model: DroneViewModel; kind: BlockKind }): JSX.Element =>
 
 // ── Canvas ────────────────────────────────────────────────────────────
 //
-// Phase 1 ships a minimal SVG-based canvas instead of the full
-// `@dschz/solid-flow` integration. Rationale: the xyflow runtime expects
-// SolidJS reactive primitives wired through a `<SolidFlow>` provider
-// component which conflicts with our existing Solid root setup; the
-// integration spike is its own follow-up. This canvas covers the demo
-// path (drop nodes, click to select, draw edges by clicking source then
-// target). The Phase 1 PR-4 polish issue tracks the swap.
+// A custom SolidJS SVG/HTML canvas (NOT a flow library). There is no
+// production-grade SolidJS flow lib — React Flow is React-only and the one
+// Solid port is a single-maintainer alpha — and the model is already
+// xyflow-shaped, so we own the canvas and borrow only math where it pays
+// off. The viewport transform + pointer drag are hand-rolled (spec §3.1).
+// Supports: drag-from-bar to create, node drag, pan/zoom + fit, and
+// Shift-click wiring. See SPEC_DRONE_CANVAS_NODE_EDITOR_2026_06_05.md.
 
 const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
     const m = p.model;
@@ -488,8 +488,15 @@ const InspectorPanel = (p: { model: DroneViewModel }): JSX.Element => {
     const m = p.model;
     // Slide-over overlay: only mounted while a node is selected, so the
     // canvas stays full-bleed otherwise.
+    //
+    // `keyed` on the selected NODE: switching selection re-runs the child
+    // and remounts InspectorForm with the new node, so the title / fields
+    // / actions can never stay bound to a previously-selected node. The
+    // store keeps each node's proxy reference stable, so editing a field
+    // does NOT change the key (no remount → the focused input is kept) —
+    // only changing which node is selected does.
     return (
-        <Show when={m.selectedNodeAtom()}>
+        <Show when={m.selectedNodeAtom()} keyed>
             {(node) => (
                 <aside class="drone-inspector" aria-label="Inspector">
                     <button
@@ -499,7 +506,7 @@ const InspectorPanel = (p: { model: DroneViewModel }): JSX.Element => {
                     >
                         ×
                     </button>
-                    <InspectorForm model={m} node={node()} />
+                    <InspectorForm model={m} node={node} />
                 </aside>
             )}
         </Show>
