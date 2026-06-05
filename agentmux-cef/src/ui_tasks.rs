@@ -403,17 +403,6 @@ wrap_task! {
                                     0,
                                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                                 );
-                                // Signal the renderer on the first actual move so it
-                                // can arm the hasMoved flag and allow redock-on-release.
-                                if moves == 0 {
-                                    crate::events::emit_event_to_top_level_windows(
-                                        &self.state,
-                                        "window_drag_first_move",
-                                        &serde_json::json!({
-                                            "label": self.source_label.as_deref().unwrap_or("main")
-                                        }),
-                                    );
-                                }
                                 moves += 1;
                                 // Floater: emit redock-hover at 50ms cadence so the
                                 // drop-target highlight tracks the cursor while the

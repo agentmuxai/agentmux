@@ -104,12 +104,26 @@ wrap_task! {
                 );
             };
 
-            let owner_hwnd_raw = unsafe { crate::commands::window::find_own_top_level_window() };
+            // Use the MAIN window as owner, not whichever top-level happens
+            // to be focused at tear-off time. On Win32, destroying an owner
+            // window cascades to all owned windows — if a secondary window
+            // (Window B) were the owner, closing Window B would destroy the
+            // floater. Using the main window means the floater survives closing
+            // any secondary window and is only destroyed with the whole app.
+            let owner_hwnd_raw = unsafe {
+                let h = crate::commands::window::find_main_window();
+                if h.is_null() {
+                    // Fallback: take whatever top-level is visible
+                    crate::commands::window::find_own_top_level_window()
+                } else {
+                    h
+                }
+            };
             if owner_hwnd_raw.is_null() {
                 tracing::error!(
                     pane_id = %self.pane_id,
                     label = %self.window_label,
-                    "[floating-pane] cannot find source main HWND — aborting",
+                    "[floating-pane] cannot find main HWND — aborting floater creation",
                 );
                 dequeue();
                 return;
