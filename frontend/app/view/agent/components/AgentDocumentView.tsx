@@ -175,15 +175,18 @@ function AuthUrlBox(props: AuthUrlBoxProps): JSX.Element {
         requestAnimationFrame(() => inputRef?.focus());
     });
 
-    const handleSubmitCode = async (): Promise<void> => {
-        const code = pasteCode().trim();
+    const submitCode = async (explicit?: string): Promise<void> => {
+        // Read from the live input element as a fallback. If focus desynced and
+        // the controlled signal missed the paste, the DOM value still holds it —
+        // otherwise a pasted-then-submitted code can be silently dropped.
+        const code = (explicit ?? inputRef?.value ?? pasteCode()).trim();
         if (!code) return;
         setPasting(true);
         setPasteResult(null);
         try {
             const { getApi } = await import("@/app/store/global");
             await getApi().setProviderAuth(props.authProviderId ?? "claude", code);
-            setPasteResult("Code accepted — waiting for confirmation...");
+            setPasteResult("Code accepted — signing you in…");
             setPasteCode("");
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -195,7 +198,12 @@ function AuthUrlBox(props: AuthUrlBoxProps): JSX.Element {
 
     return (
         <div class="agent-auth-url-box">
-            <div class="agent-auth-url-label">Open this URL to log in:</div>
+            <div class="agent-auth-title">Sign in to Claude</div>
+
+            <div class="agent-auth-url-label">1 · Authorize in your browser</div>
+            <div class="agent-auth-hint">
+                A browser window should have opened. If it didn't, open this link:
+            </div>
             <div class="agent-auth-url-row">
                 <span class="agent-auth-url-text">{props.url}</span>
                 <button
@@ -206,35 +214,47 @@ function AuthUrlBox(props: AuthUrlBoxProps): JSX.Element {
                     Copy
                 </button>
             </div>
+
+            <div class="agent-auth-url-label agent-auth-step-2">2 · Paste the code from that page</div>
+            <div class="agent-auth-hint">
+                After you authorize, the page shows an <strong>authorization code</strong> — copy it and paste it here.
+            </div>
             <div class="agent-auth-paste-row">
                 <input
                     ref={inputRef}
                     class="agent-auth-paste-input"
                     type="text"
-                    placeholder="Paste auth code from Anthropic..."
+                    placeholder="Paste the authorization code…"
                     value={pasteCode()}
                     onInput={(e) => setPasteCode((e.target as HTMLInputElement).value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") void handleSubmitCode(); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") void submitCode(); }}
+                    onPaste={(e) => {
+                        // Auto-submit on paste — pasting the code IS the intent to
+                        // submit, so the user doesn't have to also click a button.
+                        const text = (e.clipboardData?.getData("text") ?? "").trim();
+                        if (text) { setPasteCode(text); void submitCode(text); }
+                    }}
                 />
                 <button
                     class="agent-auth-url-copy"
-                    title="Paste from clipboard"
+                    title="Paste from clipboard and submit"
                     onClick={() => {
                         import("@/util/clipboard").then(c => c.readText()).then(text => {
-                            if (text) setPasteCode(text.trim());
+                            const trimmed = (text ?? "").trim();
+                            if (trimmed) { setPasteCode(trimmed); void submitCode(trimmed); }
                         }).catch(() => {
                             setPasteResult("Could not read clipboard — paste manually");
                         });
                     }}
                 >
-                    Paste
+                    Paste &amp; submit
                 </button>
                 <button
                     class="agent-auth-url-copy"
-                    onClick={() => { void handleSubmitCode(); }}
-                    disabled={!pasteCode().trim() || pasting()}
+                    onClick={() => { void submitCode(); }}
+                    disabled={pasting()}
                 >
-                    {pasting() ? "..." : "Submit"}
+                    {pasting() ? "…" : "Submit"}
                 </button>
             </div>
             <Show when={pasteResult()}>
