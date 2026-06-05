@@ -16,9 +16,8 @@ follow below so the warning is never pushed below the fold. -->
 > - **Platform gaps** — Windows is the primary target; macOS and Linux
 >   builds lag behind and have additional known issues.
 >
-> If you hit a problem, **please file a GitHub issue** at
-> https://github.com/agentmuxai/agentmux/issues rather than leaving a store
-> review — it's how alpha gets to beta.
+> If you hit a problem, **please report it as a GitHub issue** at
+> https://github.com/agentmuxai/agentmux/issues — it's how alpha gets to beta.
 
 ---
 
