@@ -11,7 +11,7 @@ import { getFileSubject, waveEventSubscribe } from "@/app/store/wps";
 import * as WOS from "@/app/store/wos";
 import { base64ToArray } from "@/util/util";
 import { trail } from "@/log/render-trail";
-import { createEffect, onCleanup, onMount } from "solid-js";
+import { batch, createEffect, onCleanup, onMount } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import type { PendingMessage, SignalPair } from "./state";
 import { ClaudeCodeStreamParser, STARTUP_HEADING_RE } from "./stream-parser";
@@ -173,19 +173,33 @@ export function useAgentStream({
         pendingNew = [];
         pendingUpdates = [];
 
-        // Document mutation — the reducer owns dedup, in-place updates,
-        // and the markdown-content merge. See agent-document-store.ts.
-        model.dispatchDoc({
-            type: "StreamFlush",
-            newNodes: batchNew,
-            updatedNodes: batchUpdates,
-        });
-        // Lifecycle counter bump — agent-pane-state owns streaming
-        // metadata (active flag + bufferSize + lastEventTime).
-        model.dispatchPane({
-            type: "StreamFlushObserved",
-            addedCount: batchNew.length,
-            at: Date.now(),
+        // Wrap both store writes in a single Solid batch so all reactive
+        // effects (partition memo → <Index> reconciler, DocumentRow
+        // re-renders, pane-state observers) settle together in one
+        // synchronous pass. Without batch(), the two sequential writes
+        // can interleave reactive re-renders: the first write triggers
+        // the <Index> outer reconciler, which starts inserting new DOM
+        // rows; the second write (or a concurrent DocumentRow update
+        // triggered by the first) then mutates the same DOM subtree
+        // mid-reconcile, causing reconcileArrays to call replaceChild on
+        // a node that was just moved — the confirmed crash root cause
+        // (render_trail 2026-06-05: replaceChild / reconcileArrays /
+        // insertExpression in solid-js/web).
+        batch(() => {
+            // Document mutation — the reducer owns dedup, in-place updates,
+            // and the markdown-content merge. See agent-document-store.ts.
+            model.dispatchDoc({
+                type: "StreamFlush",
+                newNodes: batchNew,
+                updatedNodes: batchUpdates,
+            });
+            // Lifecycle counter bump — agent-pane-state owns streaming
+            // metadata (active flag + bufferSize + lastEventTime).
+            model.dispatchPane({
+                type: "StreamFlushObserved",
+                addedCount: batchNew.length,
+                at: Date.now(),
+            });
         });
     }
 

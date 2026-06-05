@@ -32,6 +32,8 @@ import {
 import { isInterruptibleTurn, workingFromPhase } from "@/app/store/agent-pane-state/types";
 import type { SubagentLinkNode } from "./types";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
+import { getRecentDispatches } from "@/app/store/command-source";
+import { getTrail } from "@/log/render-trail";
 import { useAgentStream } from "./useAgentStream";
 import { useActivityLog } from "./hooks/useActivityLog";
 import { useSessionDigest } from "./hooks/useSessionDigest";
@@ -190,6 +192,29 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         });
         registerAgentActivity(model.blockId, a.turnPhaseAtom[0]);
         onCleanup(() => {
+            // [DIAGNOSTIC] Capture WHY this pane disposed. The "pane went blank
+            // mid-stream" failure is a SILENT dispose by an OUTER owner (e.g.
+            // block.tsx <Show> on blockData→null from a backend block-delete): it
+            // never throws, so BlockErrorBoundary never fires and no render_trail
+            // is dumped — we only ever saw the aftermath (CASCADE_DETECTED). This
+            // runs on EVERY dispose path; the stack distinguishes which owner tore
+            // us down. If we're disposed while the turn is still WORKING, that's
+            // unexpected — also dump the render-trail + recent reducer-dispatch
+            // ring so the next reproduction yields a root cause.
+            // See PLAN_PANE_CRASH_DIAGNOSTICS_2026-06-05.md.
+            const phase = a.turnPhaseAtom[0]();
+            const midTurn = workingFromPhase(phase);
+            if (midTurn) {
+                console.warn(
+                    `[agent-view] DISPOSE UNEXPECTED(mid-turn) blockId=${model.blockId.slice(0, 7)} turnPhase=${JSON.stringify(phase)} stack=${new Error().stack}`,
+                );
+                try {
+                    console.warn(`[agent-view] DISPOSE mid-turn render_trail=${JSON.stringify(getTrail())}`);
+                    console.warn(
+                        `[agent-view] DISPOSE mid-turn recent_dispatches=${JSON.stringify(getRecentDispatches(40))}`,
+                    );
+                } catch { /* best-effort diagnostic */ }
+            }
             unregisterAgentPane(model.blockId);
             unregisterAgentActivity(model.blockId);
         });
