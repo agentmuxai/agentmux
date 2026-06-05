@@ -158,6 +158,12 @@ export function useAgentStream({
         },
     });
 
+    // Own the tool_chunk subscription at body scope so it is torn down even if
+    // onMount early-returns (e.g. enabled:false). Its only other teardown lives
+    // inside onMount's onCleanup, which is skipped on early-return — so without
+    // this the global handler would leak one per mount.
+    onCleanup(() => { try { blockChunkUnsub(); } catch { /* ignore */ } });
+
     function flushPendingNodes() {
         flushRafId = null;
         if (pendingNew.length === 0 && pendingUpdates.length === 0) return;
@@ -590,8 +596,9 @@ export function useAgentStream({
         onCleanup(() => {
             if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
             subscription.unsubscribe();
-            // Tear down the per-block tool_chunk subscription.
-            try { blockChunkUnsub(); } catch { /* ignore */ }
+            // (the tool_chunk subscription is torn down by its own body-scope
+            // onCleanup registered where blockChunkUnsub is created — so it is
+            // cleaned up even when this onMount early-returns.)
             // StreamUnsubscribe transitions a working turn into the
             // Disconnected phase (so a crash or exit without
             // session_end doesn't leave "Working…" stuck).
