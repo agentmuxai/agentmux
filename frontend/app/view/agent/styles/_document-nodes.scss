@@ -253,9 +253,9 @@
         // Phase A of SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md replaced
         // the portal-based overlay with this inline panel. The panel sits
         // in normal document flow underneath the summary row. Variable-
-        // height — the existing virtualizer + measureElement handles
-        // re-measurement when the panel opens/closes (§4.8 of the spec
-        // recommended option B; verified working).
+        // height — the measure RO handles re-measurement when the panel
+        // opens/closes (§4.8 of the spec recommended option B; verified
+        // working).
         //
         // Visual: indented under the summary row, with a faint accent
         // border-left to tie it visually to the running/streaming state.

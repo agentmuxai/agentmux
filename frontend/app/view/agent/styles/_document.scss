@@ -128,7 +128,7 @@
     .agent-document-streaming-buffer {
         // Trailing nodes rendered in normal flex flow — no
         // virtualization. Always mounted so streaming token batches
-        // don't have to wait for measureElement to settle.
+        // don't have to wait for the measure RO to settle.
         display: flex;
         flex-direction: column;
         gap: 4px;
