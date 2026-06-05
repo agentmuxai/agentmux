@@ -96,7 +96,7 @@ information. Decorative content should not push the warning below the fold.
 
 ### Exact edit
 
-Prepend to `/workspace/agentmux/README.md`:
+Prepend to `README.md` (at the repo root):
 
 ```markdown
 > ## ⚠️ EARLY ALPHA — Use At Your Own Risk
