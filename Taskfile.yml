@@ -622,6 +622,16 @@ tasks:
                 cp -f "$CEF_DIR/icudtl.dat" dist/cef/
                 cp -f "$CEF_DIR/snapshot_blob.bin" dist/cef/ 2>/dev/null || true
                 cp -f "$CEF_DIR/v8_context_snapshot.bin" dist/cef/ 2>/dev/null || true
+                # CEF 148+ ships Vulkan SwiftShader as the software-rasterizer
+                # fallback (replacing the GLES SwiftShader path that 146 used).
+                # Chromium's GPU process loads vk_swiftshader_icd.json via
+                # VK_ICD_FILENAMES → libvk_swiftshader.so, and libvulkan.so.1
+                # is the loader. All three are required for the renderer/GPU
+                # processes to start on machines without a system Vulkan loader;
+                # missing them shows up as a renderer SIGTRAP at gpu init.
+                cp -f "$CEF_DIR/libvk_swiftshader.so" dist/cef/ 2>/dev/null || true
+                cp -f "$CEF_DIR/vk_swiftshader_icd.json" dist/cef/ 2>/dev/null || true
+                cp -f "$CEF_DIR/libvulkan.so.1" dist/cef/ 2>/dev/null || true
                 cp -f "$CEF_DIR"/*.pak dist/cef/
                 cp -f "$CEF_DIR/locales/en-US.pak" dist/cef/locales/ 2>/dev/null || true
                 echo "✓ Bundled runtime for Linux"
