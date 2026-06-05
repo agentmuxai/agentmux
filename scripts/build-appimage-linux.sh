@@ -24,7 +24,8 @@
 #     install-linux-desktop.sh        → invoked by AppRun on first run to register
 #                                       the user's desktop entry + hicolor icons
 #     assets/linux/...                → source-of-truth tree the installer reads
-#     usr/bin/agentmux                → the host binary (renamed from agentmux-cef)
+#     usr/bin/agentmux-launcher       → entry point execed by AppRun; supervises srv + host
+#     usr/bin/agentmux-cef             → CEF host binary; launcher's find_cef_binary final fallback
 #     usr/bin/agentmux-srv-X.Y.Z-...  → backend sidecar
 #     usr/bin/libcef.so + paks + ...  → CEF runtime, colocated per CEF convention
 #     usr/bin/frontend/index.html     → bundled frontend (served by IPC HTTP server)
@@ -62,6 +63,7 @@ require() {
     fi
 }
 require dist/cef/agentmux-cef
+require dist/cef/agentmux-launcher
 require dist/cef/libcef.so
 require dist/bin/agentmux-srv-${VERSION}-linux.x64
 # `task build:frontend` outputs to dist/frontend (per vite.config.ts outDir).
@@ -80,8 +82,16 @@ mkdir -p "$APPDIR/usr/share/icons/hicolor"
 mkdir -p "$APPDIR/usr/share/applications"
 mkdir -p "$APPDIR/assets"
 
-# --- 2. Host binary (rename agentmux-cef → agentmux) ---
-cp dist/cef/agentmux-cef "$APPDIR/usr/bin/agentmux"
+# --- 2. Host binary (keep cargo name agentmux-cef so the launcher's
+#        find_cef_binary final fallback resolves it without a launcher
+#        code change — see SPEC §3 step 1a) ---
+cp dist/cef/agentmux-cef "$APPDIR/usr/bin/agentmux-cef"
+
+# --- 2b. Launcher binary — the AppRun's exec target. The launcher
+#         supervises srv + host as a process group (A0). Without this
+#         the AppImage host binary runs alone; every launcher_ipc
+#         report_* call from the host silently no-ops. ---
+cp dist/cef/agentmux-launcher "$APPDIR/usr/bin/agentmux-launcher"
 
 # --- 3. Backend sidecar (versioned filename — host's resolve_backend_binary
 #        looks for `agentmux-srv-<VERSION>-linux.x64` next to the host) ---
