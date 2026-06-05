@@ -162,12 +162,36 @@
         box-shadow: 0 0 12px rgba(74, 158, 255, 0.15);
     }
 
+    .agent-auth-title {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--main-text-color);
+        margin-bottom: var(--space-2);
+    }
+
     .agent-auth-url-label {
         font-size: 11px;
         color: var(--accent-color);
-        margin-bottom: var(--space-1-5);
+        margin-bottom: var(--space-1);
         font-weight: 600;
         letter-spacing: 0.3px;
+
+        // Second step gets breathing room from the URL row above it.
+        &.agent-auth-step-2 {
+            margin-top: var(--space-3);
+        }
+    }
+
+    .agent-auth-hint {
+        font-size: 10px;
+        color: var(--secondary-text-color, rgba(140, 200, 255, 0.55));
+        margin-bottom: var(--space-1-5);
+        line-height: 1.4;
+
+        strong {
+            color: var(--accent-color);
+            font-weight: 600;
+        }
     }
 
     .agent-auth-url-row {
