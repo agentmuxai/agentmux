@@ -538,9 +538,196 @@ async fn run_unix(
         std::process::exit(1);
     }
 
-    // 2. Spawn srv. Empty pipe path → srv skips its IPC bind (Phase 2
-    //    wires the Unix-socket transport). spawn_srv is already
-    //    Unix-clean (the job_handle param is #[cfg(windows)]).
+    // -----------------------------------------------------------------
+    // A1.1 — IPC server setup on Linux (the wire is up). Mirrors the
+    // Windows path at the equivalent point in `run_windows`. Once this
+    // lands the host's 17 `report_*` IPC calls reach the (already
+    // platform-neutral) reducer, the window-pool / single-instance /
+    // instance-numbering logic activates, sagas get persisted to the
+    // launcher_saga.db SQLite log, and `--diag sagas` reads something
+    // useful.
+    //
+    // Spec: docs/specs/SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05.md §4
+    // -----------------------------------------------------------------
+
+    // Compute the socket path from a data-dir hash + version, identical
+    // scoping rule to the Windows pipe namespace.
+    let dir_hash = hash::data_dir_hash16(&paths.data_dir, version);
+    let socket_path = ipc::pipe_name(&dir_hash);
+    log(&format!(
+        "launcher IPC socket = {} (data_dir={} version={})",
+        socket_path,
+        paths.data_dir.display(),
+        version
+    ));
+
+    // Single-instance handshake (A1.6). The bind is the authoritative
+    // signal: a second launcher pointing at the same data dir gets
+    // `EADDRINUSE`. Handle stale-socket cleanup with the canonical
+    // pattern: `connect → ECONNREFUSED → unlink → bind`.
+    let first_socket = match ipc::server::bind_first_unix_socket(&socket_path) {
+        Ok(l) => l,
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            // Could be a real running launcher OR a stale socket file
+            // left over from a crash. Try to connect to disambiguate.
+            match std::os::unix::net::UnixStream::connect(&socket_path) {
+                Ok(_) => {
+                    // Another launcher is listening — second-instance
+                    // case. Exit cleanly so the existing instance's
+                    // window gets focus (Phase-2 will forward args via
+                    // a Command frame; today we just exit).
+                    eprintln!(
+                        "AgentMux is already running for this data directory.\n\nSocket: {}",
+                        socket_path
+                    );
+                    log(&format!(
+                        "[ipc] second-instance detected — existing launcher owns {}",
+                        socket_path
+                    ));
+                    std::process::exit(0);
+                }
+                Err(connect_err)
+                    if connect_err.kind() == std::io::ErrorKind::ConnectionRefused
+                        || connect_err.raw_os_error() == Some(libc::ENOENT) =>
+                {
+                    // Stale socket file from a crashed launcher. Unlink
+                    // and retry the bind.
+                    log(&format!(
+                        "[ipc] stale socket file at {} — unlinking and rebinding",
+                        socket_path
+                    ));
+                    let _ = std::fs::remove_file(&socket_path);
+                    match ipc::server::bind_first_unix_socket(&socket_path) {
+                        Ok(l) => l,
+                        Err(retry_e) => {
+                            log(&format!(
+                                "FATAL: bind retry after stale-socket unlink failed: {}",
+                                retry_e
+                            ));
+                            std::process::exit(2);
+                        }
+                    }
+                }
+                Err(other) => {
+                    log(&format!(
+                        "[ipc] AddrInUse but connect probe failed in an unexpected way: {} — \
+                         treating as second instance and exiting cleanly",
+                        other
+                    ));
+                    std::process::exit(0);
+                }
+            }
+        }
+        Err(e) => {
+            log(&format!("FATAL: bind {} failed: {}", socket_path, e));
+            eprintln!(
+                "AgentMux failed to start: could not bind IPC socket.\n\nSocket: {}\nError: {}",
+                socket_path, e
+            );
+            std::process::exit(2);
+        }
+    };
+
+    // Broadcast bus for reducer-emitted events. Same capacity (1024)
+    // and rationale as the Windows path.
+    let (events_tx, _) =
+        tokio::sync::broadcast::channel::<agentmux_common::ipc::Event>(1024);
+
+    // Event log: in-memory ring + disk persistence at
+    // <data-dir>/launcher-events.log. Disk writer task spawned next.
+    let log_disk_path = paths.data_dir.join("launcher-events.log");
+    let event_log = std::sync::Arc::new(event_log::EventLog::new(Some(log_disk_path)));
+    let event_log_for_writer = std::sync::Arc::clone(&event_log);
+    let disk_writer_rx = events_tx.subscribe();
+    tokio::spawn(event_log::run_disk_writer(
+        event_log_for_writer,
+        disk_writer_rx,
+    ));
+
+    // Canonical state shared between IPC server + saga coordinator.
+    let state = std::sync::Arc::new(tokio::sync::Mutex::new(state::State::default()));
+
+    // Durable saga log at <data-dir>/db/launcher-sagas.db.
+    let saga_log_path = data_dir::launcher_saga_log_path(&paths.data_dir);
+    let saga_log = match saga::LauncherSagaLog::open(&saga_log_path) {
+        Ok(l) => std::sync::Arc::new(l),
+        Err(e) => {
+            log(&format!(
+                "FATAL: failed to open launcher saga log at {:?}: {}",
+                saga_log_path, e
+            ));
+            std::process::exit(2);
+        }
+    };
+
+    // Startup recovery walker: mark any saga left running from a prior
+    // crashed run as failed_compensation. Must run BEFORE coordinator
+    // spawn (LSD-3).
+    if let Err(e) = saga::compensate_unresolved_launcher_sagas(&saga_log).await {
+        log(&format!(
+            "[saga-recovery] WARN: walker failed: {} — coordinator will still spawn",
+            e
+        ));
+    }
+
+    // Startup retention vacuum (LSD-4).
+    let retention_days = config::load_saga_retention_days(&paths.user_home_dir, |w| log(w));
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
+    match saga_log.vacuum_older_than(cutoff) {
+        Ok(removed) => log(&format!(
+            "[saga-log] vacuumed {} sagas older than {} (retention {} days)",
+            removed, cutoff, retention_days
+        )),
+        Err(e) => log(&format!("[saga-log] WARN: vacuum failed: {}", e)),
+    }
+
+    // Host pipe wrapper for saga-issued Commands → host. The IPC
+    // server's per-connection handler installs the host's writer once
+    // the host registers (see ipc/server.rs handle_connection's
+    // ClientKind::Host branch).
+    let host_pipe = std::sync::Arc::new(host_pipe::HostPipe::new(
+        events_tx.clone(),
+        std::sync::Arc::clone(&state),
+    ));
+
+    // Saga coordinator. Same construction + error handling as the
+    // Windows path; the coordinator itself is platform-neutral.
+    let saga_coord_inner =
+        saga::SagaCoordinator::new(events_tx.clone(), std::sync::Arc::clone(&state))
+            .with_log(std::sync::Arc::clone(&saga_log))
+            .unwrap_or_else(|e| {
+                log(&format!(
+                    "[main] FATAL: failed to seed saga_id allocator: {}",
+                    e
+                ));
+                std::process::exit(1);
+            })
+            .with_host_pipe(std::sync::Arc::clone(&host_pipe));
+    let saga_coord = std::sync::Arc::new(saga_coord_inner);
+    let saga_rx = events_tx.subscribe();
+    tokio::spawn(saga::run_coordinator(
+        std::sync::Arc::clone(&saga_coord),
+        saga_rx,
+    ));
+
+    let _ipc_handle = ipc::run_ipc_server(
+        socket_path.clone(),
+        first_socket,
+        ipc::server::ServerCtx {
+            launcher_pid: std::process::id(),
+            launcher_version: env!("CARGO_PKG_VERSION").to_string(),
+            state,
+            events_tx,
+            event_log,
+            host_pipe: std::sync::Arc::clone(&host_pipe),
+        },
+    );
+    log(&format!("IPC server started on {}", socket_path));
+
+    // 2. Spawn srv. The srv pipe path is the launcher-owned socket
+    //    path scope (srv will gain its own Unix-socket bind in a
+    //    follow-up; for now we still pass an empty string so srv's
+    //    Windows-only IPC code stays disabled).
     let srv_pipe_path = String::new();
     let (srv_result, mut srv_child) =
         match srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path).await {
@@ -561,6 +748,26 @@ async fn run_unix(
     let dir_hash_unix = hash::data_dir_hash16(&paths.data_dir, version);
     let mut host_env = paths.common.to_env_vars();
     host_env.push(("AGENTMUX_IPC_HASH", std::ffi::OsString::from(&dir_hash_unix)));
+    // A1.3 — IPC env handshake. Tell the host where to find the
+    // launcher socket. The env var name `AGENTMUX_LAUNCHER_PIPE` is
+    // reused from the Windows side even though the underlying resource
+    // is a Unix-domain socket — keeps the 17 `report_*` call sites in
+    // `agentmux-cef/src/launcher_ipc.rs` unchanged and avoids touching
+    // the host's connect-on-startup code in `agentmux-cef/src/app.rs`.
+    host_env.push((
+        "AGENTMUX_LAUNCHER_PIPE",
+        std::ffi::OsString::from(&socket_path),
+    ));
+    // AGENTMUX_HOME = the host's runtime directory (siblings of the
+    // host binary — libcef.so, paks, locales, etc). Mirrors the
+    // Windows path so the host's asset-resolution code finds its
+    // co-located data without searching $PATH-like fallbacks.
+    if let Some(host_runtime) = real_exe.parent() {
+        host_env.push((
+            "AGENTMUX_HOME",
+            std::ffi::OsString::from(host_runtime),
+        ));
+    }
     let mut host_child = match spawn_host_unix(real_exe, args, &srv_result, &host_env, false) {
         Some(c) => c,
         None => {

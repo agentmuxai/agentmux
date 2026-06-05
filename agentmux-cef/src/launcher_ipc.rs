@@ -58,8 +58,18 @@ pub struct LauncherIpcHandle {
     reader_task: tokio::task::JoinHandle<()>,
 }
 
-#[cfg(not(target_os = "windows"))]
-pub struct LauncherIpcHandle;
+#[cfg(unix)]
+pub struct LauncherIpcHandle {
+    /// Held purely as a keepalive; same shape as the Windows variant.
+    #[allow(dead_code)]
+    writer: Arc<Mutex<tokio::io::WriteHalf<tokio::net::UnixStream>>>,
+    /// Read-half task handle; A1.2 — the body of the reader task is
+    /// shared with the Windows path (parses HostFrame envelopes, falls
+    /// back to bare Event for legacy launchers, dispatches saga
+    /// Commands).
+    #[allow(dead_code)]
+    reader_task: tokio::task::JoinHandle<()>,
+}
 
 /// If `AGENTMUX_LAUNCHER_PIPE` is set, connect, Register as Host,
 /// and return a handle the caller (host main.rs) holds for the
@@ -295,7 +305,202 @@ pub async fn connect_to_launcher(
     })
 }
 
-#[cfg(not(target_os = "windows"))]
+/// A1.2 — Unix-domain-socket variant. Mirrors the Windows path above:
+/// connect → Register → spawn drain task → spawn reader task → return
+/// handle. Protocol on the wire is identical (newline-delimited JSON
+/// `Command` / `Event` / `HostFrame`) so the launcher's
+/// `handle_connection` generic body serves both transports unchanged.
+///
+/// Env var name: reuses `AGENTMUX_LAUNCHER_PIPE` even though the
+/// underlying resource is a Unix-domain socket. Lets the 17 host-side
+/// `report_*` call sites in this file stay platform-agnostic. The
+/// launcher's `spawn_host_unix` exports the socket path under this
+/// name (see `agentmux-launcher/src/main.rs::run_unix`).
+#[cfg(unix)]
+pub async fn connect_to_launcher(
+    state: std::sync::Arc<crate::state::AppState>,
+) -> Option<LauncherIpcHandle> {
+    use tokio::net::UnixStream;
+
+    let sock_path = match std::env::var("AGENTMUX_LAUNCHER_PIPE") {
+        Ok(p) if !p.is_empty() => p,
+        _ => {
+            tracing::info!(
+                "AGENTMUX_LAUNCHER_PIPE unset — running without launcher IPC (dev mode)"
+            );
+            return None;
+        }
+    };
+
+    let stream = match UnixStream::connect(&sock_path).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(
+                "[launcher-ipc] failed to connect {}: {} — continuing without launcher IPC",
+                sock_path,
+                e
+            );
+            return None;
+        }
+    };
+    tracing::info!("[launcher-ipc] connected to {}", sock_path);
+
+    let (read_half, write_half) = tokio::io::split(stream);
+    let writer = Arc::new(Mutex::new(write_half));
+
+    // Send Register FIRST — same race-avoidance discipline as the
+    // Windows path: COMMAND_TX is only published after Register
+    // flushes successfully.
+    let register = Command::Register {
+        kind: ClientKind::Host,
+        pid: std::process::id(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    };
+    let mut buf = match serde_json::to_vec(&register) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!(
+                "[launcher-ipc] failed to serialize Register: {} — continuing without IPC",
+                e
+            );
+            return None;
+        }
+    };
+    buf.push(b'\n');
+    {
+        let mut w = writer.lock().await;
+        if let Err(e) = w.write_all(&buf).await {
+            tracing::error!(
+                "[launcher-ipc] failed to send Register: {} — continuing without IPC",
+                e
+            );
+            return None;
+        }
+        if let Err(e) = w.flush().await {
+            tracing::error!(
+                "[launcher-ipc] failed to flush Register: {} — continuing without IPC",
+                e
+            );
+            return None;
+        }
+    }
+
+    // Outbound command drain task — same shape as Windows variant.
+    let (tx, mut rx) = mpsc::unbounded_channel::<Command>();
+    if COMMAND_TX.set(tx).is_err() {
+        tracing::warn!("[launcher-ipc] COMMAND_TX already set — connect_to_launcher called twice");
+    }
+    let writer_for_drain = Arc::clone(&writer);
+    tokio::spawn(async move {
+        while let Some(cmd) = rx.recv().await {
+            let mut buf = match serde_json::to_vec(&cmd) {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!("[launcher-ipc] failed to serialize {:?}: {}", cmd, e);
+                    continue;
+                }
+            };
+            buf.push(b'\n');
+            let mut w = writer_for_drain.lock().await;
+            if let Err(e) = w.write_all(&buf).await {
+                tracing::warn!(
+                    "[launcher-ipc] write failed for {:?}: {} — dropping further commands",
+                    cmd, e
+                );
+                return;
+            }
+            if let Err(e) = w.flush().await {
+                tracing::warn!("[launcher-ipc] flush failed: {}", e);
+                return;
+            }
+        }
+    });
+
+    // Reader task — identical body to the Windows variant.
+    let state_for_reader = std::sync::Arc::clone(&state);
+    let saga_lru = std::sync::Arc::new(parking_lot::Mutex::new(
+        crate::saga_dispatch::SagaIdempotencyLru::with_default_cap(),
+    ));
+    let reply_tx = COMMAND_TX
+        .get()
+        .expect("COMMAND_TX set before reader task spawn")
+        .clone();
+    let saga_runner = std::sync::Arc::new(crate::saga_dispatch::LiveActionRunner {
+        state: std::sync::Arc::clone(&state),
+    });
+    let reader_task = tokio::spawn(async move {
+        let reader = BufReader::new(read_half);
+        let mut lines = reader.lines();
+        loop {
+            match lines.next_line().await {
+                Ok(Some(line)) if line.trim().is_empty() => continue,
+                Ok(Some(line)) => {
+                    match serde_json::from_str::<HostFrame>(&line) {
+                        Ok(HostFrame::Event(event)) => {
+                            tracing::info!("[launcher-ipc] received event: {:?}", event);
+                            apply_event_to_shadow(&state_for_reader, &event);
+                        }
+                        Ok(HostFrame::Command(cmd)) => {
+                            tracing::info!(
+                                "[launcher-ipc] received saga command: {:?}",
+                                cmd
+                            );
+                            let outcome = crate::saga_dispatch::dispatch_host_command(
+                                &cmd,
+                                saga_runner.as_ref(),
+                                &saga_lru,
+                                &reply_tx,
+                            );
+                            tracing::debug!(
+                                "[launcher-ipc] saga command outcome: {:?}",
+                                outcome
+                            );
+                        }
+                        Err(_envelope_err) => {
+                            match serde_json::from_str::<Event>(&line) {
+                                Ok(event) => {
+                                    tracing::info!(
+                                        "[launcher-ipc] received event (legacy bare-Event): {:?}",
+                                        event
+                                    );
+                                    apply_event_to_shadow(&state_for_reader, &event);
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "[launcher-ipc] could not parse line as HostFrame or Event ({}): {}",
+                                        e,
+                                        line
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(None) => {
+                    tracing::info!("[launcher-ipc] launcher socket EOF — connection closed");
+                    return;
+                }
+                Err(e) => {
+                    tracing::warn!("[launcher-ipc] read error: {}", e);
+                    return;
+                }
+            }
+        }
+    });
+
+    Some(LauncherIpcHandle {
+        writer,
+        reader_task,
+    })
+}
+
+/// Non-Windows + non-Unix fallback (e.g., WASM if we ever ship it). Should be
+/// unreachable in practice — every Tier-1 platform we ship is either Windows
+/// or Unix.
+#[cfg(not(any(target_os = "windows", unix)))]
+pub struct LauncherIpcHandle;
+
+#[cfg(not(any(target_os = "windows", unix)))]
 pub async fn connect_to_launcher(
     _state: std::sync::Arc<crate::state::AppState>,
 ) -> Option<LauncherIpcHandle> {
