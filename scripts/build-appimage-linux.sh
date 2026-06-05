@@ -90,7 +90,9 @@ cp "dist/bin/agentmux-srv-${VERSION}-linux.x64" "$APPDIR/usr/bin/"
 # --- 4. CEF runtime (libcef.so, GL libs, paks, snapshots, sandbox) ---
 for f in libcef.so libEGL.so libGLESv2.so chrome-sandbox chrome_crashpad_handler \
          icudtl.dat snapshot_blob.bin v8_context_snapshot.bin \
-         chrome_100_percent.pak chrome_200_percent.pak resources.pak; do
+         chrome_100_percent.pak chrome_200_percent.pak resources.pak \
+         headless_command_resources.pak \
+         libvk_swiftshader.so vk_swiftshader_icd.json libvulkan.so.1; do
     if [ -f "dist/cef/$f" ]; then
         cp "dist/cef/$f" "$APPDIR/usr/bin/"
     fi
@@ -101,7 +103,8 @@ done
 # debugging in dist/cef/ but huge for distribution. `strip` removes the local
 # (non-dynamic) symbol table but keeps .dynsym so dlopen + relocations still
 # work; saves ~210MB on libcef.so alone (~33% AppImage reduction).
-for so in libcef.so libEGL.so libGLESv2.so; do
+# libvk_swiftshader.so + libvulkan.so.1 added for CEF 148 — same treatment.
+for so in libcef.so libEGL.so libGLESv2.so libvk_swiftshader.so libvulkan.so.1; do
     if [ -f "$APPDIR/usr/bin/$so" ]; then
         strip "$APPDIR/usr/bin/$so"
     fi
