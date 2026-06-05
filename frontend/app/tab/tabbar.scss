@@ -159,17 +159,21 @@
     }
 
     .tab-bar-fill {
-        flex: 1 1 auto;
-        min-width: 0;
-        height: 100%;
+        // Lives inside .tab-bar-scroll, AFTER the tab items. Takes all space
+        // to the right of the last tab so the entire visual "empty bar" area
+        // is draggable. isInDragRegion walks UP the DOM: the fill's own
+        // data-drag-region="true" is found before the scroll container's
+        // "false", so a mousedown here starts a window drag.
+        //
         // NOTE: intentionally HTCLIENT (not -webkit-app-region: drag).
         // Chromium suppresses ALL events on drag elements before the renderer
         // sees them, so contextmenu wouldn't fire. Window drag is JS-driven
-        // (see frontend/app/hook/useWindowDrag.linux.ts) — a 4px-threshold
-        // mousedown handler sends start_window_drag IPC →
-        // CefWindow::BeginWindowDrag(), which dispatches xdg_toplevel.move
-        // (Wayland) / _NET_WM_MOVERESIZE (X11). Right-click reaches the
-        // renderer normally.
+        // (a 4px-threshold mousedown → start_window_drag IPC). Right-click
+        // reaches the renderer normally.
+        flex: 1 1 auto;
+        min-width: 0;
+        height: 100%;
+        align-self: stretch;
     }
 
 }
