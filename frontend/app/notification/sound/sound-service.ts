@@ -30,10 +30,12 @@ import { createEffect, createRoot } from "solid-js";
 import { notify, subscribeSoundEvents, type SoundEvent } from "./sound-events";
 import { SOUNDS, type SoundId } from "./sounds";
 import { SoundPlayer } from "./sound-player";
+import { ToolTonesPlayer } from "./tool-tones-player";
 
 let installed = false;
 let replayMode = false;
 const player = new SoundPlayer();
+const toolTones = new ToolTonesPlayer();
 const lastFiredAt = new Map<SoundId, number>();
 
 /**
@@ -63,20 +65,32 @@ export function installSoundService(): () => void {
     const windowFocused = makeWindowFocusSignal();
 
     // Prime AudioContext on the first user gesture, exactly once.
+    // After priming, hook the tool-tones chain into the same context +
+    // master gain so a single OS volume slider controls both subsystems.
     const onceOpts: AddEventListenerOptions = { capture: true, once: true };
-    const primeOnce = () => {
-        void player.prime();
+    const primeOnce = async () => {
         document.removeEventListener("pointerdown", primeOnce, true);
         document.removeEventListener("keydown", primeOnce, true);
+        await player.prime();
+        const ctx = player.getAudioContext();
+        const master = player.getMasterGain();
+        if (ctx && master && !toolTones.isAttached()) {
+            toolTones.attach(ctx, master);
+        }
     };
     document.addEventListener("pointerdown", primeOnce, onceOpts);
     document.addEventListener("keydown", primeOnce, onceOpts);
 
-    // Reactively thread the master-volume setting into the player.
+    // Reactively thread the master-volume + tool-tones-volume settings
+    // into their respective gain nodes.
     const volumeDispose = createRoot((dispose) => {
         createEffect(() => {
             const vol = getSettingsKeyAtom("notify:sounds:volume")();
             player.setMasterGain(typeof vol === "number" ? vol : 0.6);
+        });
+        createEffect(() => {
+            const vol = getSettingsKeyAtom("notify:tooltones:volume")();
+            toolTones.setVolume(typeof vol === "number" ? vol : 0.15);
         });
         return dispose;
     });
@@ -118,6 +132,9 @@ export function installSoundService(): () => void {
 
 function mapAgentPaneEvent(blockId: string, event: AgentPaneEvent): void {
     switch (event.type) {
+        case "tool-started":
+            playToolToneIfAllowed(blockId, event.name);
+            return;
         case "turn-ended":
             if (event.outcome === "completed") {
                 notify("agent.turn.complete", { sourceBlockId: blockId });
@@ -150,6 +167,39 @@ function mapAgentPaneEvent(blockId: string, event: AgentPaneEvent): void {
     }
 }
 
+/**
+ * Tool-tone playback path. Separate from the SoundEvent bus because
+ * the policy is different (on-by-default, scope-based instead of
+ * focus-suppressing) and the player is a different chain.
+ *
+ * Spec: docs/specs/SPEC_AGENT_TOOL_CALL_TONES_2026_06_05.md §6.
+ */
+function playToolToneIfAllowed(blockId: string, tool: string): void {
+    if (replayMode) return;
+    // v1 master kill-switch silences tool tones too (shared chain).
+    if (getSettingsKeyAtom("notify:sounds:enabled")() === false) return;
+    // Tool-tones enable; absence = default on.
+    if (getSettingsKeyAtom("notify:tooltones:enabled")() === false) return;
+    const scope = getSettingsKeyAtom("notify:tooltones:scope")() ?? "all";
+    if (scope === "focused") {
+        const windowFocused = makeWindowFocusSignal();
+        if (
+            focusManager.blockFocusAtom() !== blockId ||
+            !windowFocused()
+        ) {
+            return;
+        }
+    }
+    // "window" mode (v1.5) falls through to "all" for now; see spec §8.5.
+    const ctx = player.getAudioContext();
+    if (!ctx || !toolTones.isAttached()) return; // not primed yet
+    try {
+        toolTones.play(ctx, tool);
+    } catch (e) {
+        console.warn(`[sound] tool-tone play threw for ${tool}`, e);
+    }
+}
+
 function shouldPlay(ev: SoundEvent, windowFocused: () => boolean): boolean {
     const master = getSettingsKeyAtom("notify:sounds:enabled")();
     if (master === false) return false;
@@ -179,8 +229,13 @@ export function __resetSoundService(): void {
     installed = false;
     replayMode = false;
     lastFiredAt.clear();
+    toolTones.__resetCoalesce();
 }
 
 export function __getSoundPlayer(): SoundPlayer {
     return player;
+}
+
+export function __getToolTonesPlayer(): ToolTonesPlayer {
+    return toolTones;
 }

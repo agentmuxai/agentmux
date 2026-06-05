@@ -1352,6 +1352,9 @@ declare global {
         "notify:sound:agent.message.accepted"?: boolean;
         "notify:sound:agent.message.rejected"?: boolean;
         "notify:sound:agent.stream.stalled"?: boolean;
+        "notify:tooltones:enabled"?: boolean;
+        "notify:tooltones:volume"?: number;
+        "notify:tooltones:scope"?: "all" | "focused";
         "dnd:*"?: boolean;
         "dnd:enabled"?: boolean;
         "dnd:maxfilesizemb"?: number;

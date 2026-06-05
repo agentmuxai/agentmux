@@ -256,6 +256,26 @@ pub struct SettingsType {
     #[serde(rename = "notify:sound:agent.stream.stalled", default, skip_serializing_if = "Option::is_none")]
     pub notify_sound_agent_stream_stalled: Option<bool>,
 
+    // -- Tool-call tones (subliminal per-tool "voice") --
+    //
+    // Spec: docs/specs/SPEC_AGENT_TOOL_CALL_TONES_2026_06_05.md.
+    //
+    // Master enable. Default at the UX layer is "on" — absence is on
+    // by design (see spec §7).
+    #[serde(rename = "notify:tooltones:enabled", default, skip_serializing_if = "Option::is_none")]
+    pub notify_tooltones_enabled: Option<bool>,
+
+    // Independent gain (0.0–1.0; default 0.15). Layered below the
+    // shared master gain so master kill-switches both subsystems.
+    #[serde(rename = "notify:tooltones:volume", default, skip_serializing_if = "Option::is_none")]
+    pub notify_tooltones_volume: Option<f32>,
+
+    // Scope: "all" (default) plays for every pane in every window;
+    // "focused" plays only for the focused pane in the focused window.
+    // The intermediate "window" mode is reserved for v1.5.
+    #[serde(rename = "notify:tooltones:scope", default, skip_serializing_if = "Option::is_none")]
+    pub notify_tooltones_scope: Option<String>,
+
     /// Catch-all for unknown/dynamic keys (e.g. `widget:hidden@defwidget@sysinfo`).
     /// These pass through serde unchanged so the frontend can access them as flat settings keys.
     #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]

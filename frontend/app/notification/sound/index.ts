@@ -22,3 +22,8 @@ export {
     type SoundDef,
     type SoundCategory,
 } from "./sounds";
+export {
+    paramsForTool,
+    hashToolToParams,
+    type SyllableParams,
+} from "./tool-tones";

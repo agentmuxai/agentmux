@@ -59,6 +59,7 @@ vi.mock("@/app/store/agent-pane-state-store", () => ({
 
 import {
     __getSoundPlayer,
+    __getToolTonesPlayer,
     __resetSoundService,
     installSoundService,
     setReplayMode,
@@ -193,5 +194,135 @@ describe("sound-service policy", () => {
         captured("blk-1", { type: "pending-accepted", id: "m1", wasPresent: true });
         expect(playSpy).toHaveBeenCalledTimes(1);
         expect((playSpy.mock.calls[0][0] as { id: string }).id).toBe("agent.message.accepted");
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Tool-tones policy — separate describe so we can stub the player as
+// "primed + attached" without affecting the notification-sound suite.
+// ──────────────────────────────────────────────────────────────────────
+describe("sound-service tool-tones policy", () => {
+    let toolPlaySpy: ReturnType<typeof vi.spyOn>;
+    let ctxSpy: ReturnType<typeof vi.spyOn>;
+    let attachedSpy: ReturnType<typeof vi.spyOn>;
+    let cleanup: () => void;
+
+    beforeEach(() => {
+        resetSettings();
+        focusState.focusedBlockId = null;
+        focusState.windowFocused = true;
+        __resetSoundService();
+        __resetSoundListeners();
+        captured = null;
+
+        // Stub the player as if it had already primed so the gate that
+        // checks `getAudioContext()` and `isAttached()` lets the call
+        // through. The actual play is then captured by the spy below.
+        const fakeCtx = { currentTime: 0 } as unknown as AudioContext;
+        ctxSpy = vi
+            .spyOn(__getSoundPlayer(), "getAudioContext")
+            .mockReturnValue(fakeCtx);
+        attachedSpy = vi
+            .spyOn(__getToolTonesPlayer(), "isAttached")
+            .mockReturnValue(true);
+        toolPlaySpy = vi
+            .spyOn(__getToolTonesPlayer(), "play")
+            .mockImplementation(() => {});
+
+        cleanup = installSoundService();
+    });
+
+    afterEach(() => {
+        cleanup();
+        ctxSpy.mockRestore();
+        attachedSpy.mockRestore();
+        toolPlaySpy.mockRestore();
+        setReplayMode(false);
+    });
+
+    function fireToolStarted(blockId: string, tool: string): void {
+        if (!captured) throw new Error("multicast listener was never installed");
+        captured(blockId, { type: "tool-started", name: tool });
+    }
+
+    it("plays the tool tone by default (no settings = on)", () => {
+        fireToolStarted("blk-1", "Read");
+        expect(toolPlaySpy).toHaveBeenCalledTimes(1);
+        expect(toolPlaySpy.mock.calls[0][1]).toBe("Read");
+    });
+
+    it("notify:tooltones:enabled=false silences", () => {
+        setSetting("notify:tooltones:enabled", false);
+        fireToolStarted("blk-1", "Read");
+        expect(toolPlaySpy).not.toHaveBeenCalled();
+    });
+
+    it("v1 master notify:sounds:enabled=false silences tool tones too", () => {
+        setSetting("notify:sounds:enabled", false);
+        fireToolStarted("blk-1", "Read");
+        expect(toolPlaySpy).not.toHaveBeenCalled();
+    });
+
+    it("scope=all plays for unfocused panes too (the default mode)", () => {
+        focusState.focusedBlockId = "blk-OTHER";
+        focusState.windowFocused = true;
+        fireToolStarted("blk-1", "Read");
+        expect(toolPlaySpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("scope=all plays when the window is blurred (default)", () => {
+        focusState.windowFocused = false;
+        fireToolStarted("blk-1", "Read");
+        expect(toolPlaySpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("scope=focused plays for the focused pane in the focused window", () => {
+        setSetting("notify:tooltones:scope", "focused");
+        focusState.focusedBlockId = "blk-1";
+        focusState.windowFocused = true;
+        fireToolStarted("blk-1", "Read");
+        expect(toolPlaySpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("scope=focused drops calls for unfocused panes", () => {
+        setSetting("notify:tooltones:scope", "focused");
+        focusState.focusedBlockId = "blk-OTHER";
+        focusState.windowFocused = true;
+        fireToolStarted("blk-1", "Read");
+        expect(toolPlaySpy).not.toHaveBeenCalled();
+    });
+
+    it("scope=focused drops calls when the window is blurred", () => {
+        setSetting("notify:tooltones:scope", "focused");
+        focusState.focusedBlockId = "blk-1";
+        focusState.windowFocused = false;
+        fireToolStarted("blk-1", "Read");
+        expect(toolPlaySpy).not.toHaveBeenCalled();
+    });
+
+    it("replay mode drops every tool tone", () => {
+        setReplayMode(true);
+        fireToolStarted("blk-1", "Read");
+        expect(toolPlaySpy).not.toHaveBeenCalled();
+    });
+
+    it("forwards the raw tool name (no normalization) to the player", () => {
+        fireToolStarted("blk-1", "mcp__weatherserver__get_forecast");
+        expect(toolPlaySpy).toHaveBeenCalledTimes(1);
+        expect(toolPlaySpy.mock.calls[0][1]).toBe(
+            "mcp__weatherserver__get_forecast",
+        );
+    });
+
+    it("no-op when the player is not yet primed (no audio context)", () => {
+        ctxSpy.mockReturnValueOnce(null);
+        fireToolStarted("blk-1", "Read");
+        expect(toolPlaySpy).not.toHaveBeenCalled();
+    });
+
+    it("no-op when the tool-tones chain is not yet attached", () => {
+        attachedSpy.mockReturnValueOnce(false);
+        fireToolStarted("blk-1", "Read");
+        expect(toolPlaySpy).not.toHaveBeenCalled();
     });
 });
