@@ -11,16 +11,12 @@
 // pure reducer property test (INV-1) can't make: that the SLICE's positions
 // match what the browser actually paints.
 //
-// Models the CDP harness on bench-agent-keystroke.mjs.
+// Models the CDP harness on bench-agent-keystroke.mjs. Spec: §7 of
+// SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02. Closes the verification leg of #1235.
 //
-// Spec: SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02 §7. Closes the verification
-// leg of #1235. Pre-Phase-3 baseline (TanStack): ~5 mismatches / 1 overlap
-// after 9 expand/collapse cycles. Target: 0 overlap, max |gap| ≤ tolerance.
-//
-// ⚠ Prereq: AgentMux running (CDP 127.0.0.1:9223) with an agent pane whose
-// history EXCEEDS the streaming buffer, so `.agent-document-virtualizer` holds
-// ≥ 2 rows. Fresh panes freeze the sticky-frontier at node 0 (empty virtualized
-// head) and do NOT exercise Phase 3 — load older history first.
+// ⚠ A FRESH/reloaded pane is all-streaming (sticky-frontier frozen at node 0,
+// empty virtualized head). The harness pages in older history (scroll-to-top →
+// onLoadOlder) until the virtualized region is non-empty, THEN runs the cycles.
 
 import { WebSocket } from "ws";
 
@@ -34,16 +30,18 @@ if (hasFlag("--help")) {
   --cycles <n>          Expand/collapse cycles (default 12)
   --toggles <n>         Rows toggled per cycle (default 6)
   --tolerance-px <n>    Max allowed |gap| between consecutive rows (default 1.5)
-  --inter-ms <ms>       Pause after each toggle for reflow (default 120)
-  --no-cleanup          Leave toggles applied (default: restore)
-  --help`);
+  --seed-scrolls <n>    Max scroll-to-top passes to page in history (default 30)
+  --inter-ms <ms>       Pause after each toggle for reflow (default 140)
+  --no-reload           Skip the initial Page.reload`);
     process.exit(0);
 }
 const CDP_PORT = parseInt(getArg("--cdp-port", "9223"), 10);
 const CYCLES = parseInt(getArg("--cycles", "12"), 10);
 const TOGGLES = parseInt(getArg("--toggles", "6"), 10);
 const TOL = parseFloat(getArg("--tolerance-px", "1.5"));
-const INTER_MS = parseInt(getArg("--inter-ms", "120"), 10);
+const SEED_SCROLLS = parseInt(getArg("--seed-scrolls", "30"), 10);
+const INTER_MS = parseInt(getArg("--inter-ms", "140"), 10);
+const NO_RELOAD = hasFlag("--no-reload");
 
 // ── CDP session (minimal client, from bench-agent-keystroke.mjs) ─────────────
 class CdpSession {
@@ -78,8 +76,6 @@ async function evaluate(session, expression, awaitPromise = false) {
     return res.result?.value;
 }
 
-// Pick the workspace page (not a warm-pool window): the main page's URL has no
-// windowLabel=window-pool / pool param.
 async function findWorkspaceTarget(port) {
     const res = await fetch(`http://127.0.0.1:${port}/json`).catch((e) => { throw new Error(`CDP :${port} unreachable: ${e.message} — is AgentMux running?`); });
     const targets = (await res.json()).filter((t) => t.type === "page");
@@ -88,48 +84,73 @@ async function findWorkspaceTarget(port) {
     return main;
 }
 
-// ── DOM probe: rendered-row gaps in the virtualized container ────────────────
-// Returns { n, overlaps, maxAbsGap, worst:[{a,b,gap}], err }.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ── DOM probe ────────────────────────────────────────────────────────────────
+// { n (virtualized rows), streaming, panes, overlaps, maxAbsGap, worst, err }
 const PROBE = `
 (() => {
   const c = document.querySelector('.agent-document-virtualizer');
-  if (!c) return { err: 'no .agent-document-virtualizer' };
+  const panes = document.querySelectorAll('.agent-document').length;
+  const streaming = document.querySelectorAll('.agent-document-streaming-buffer .agent-document-row').length;
+  const base = { panes, streaming };
+  if (!c) return { ...base, err: 'no .agent-document-virtualizer' };
   const rows = [...c.querySelectorAll('.agent-document-row')];
-  if (rows.length < 2) return { err: 'virtualized region has < 2 rows — need a long-history pane', n: rows.length };
+  if (rows.length < 2) return { ...base, n: rows.length, err: 'virtualized region < 2 rows' };
   const r = rows.map(el => { const b = el.getBoundingClientRect(); return { id: el.getAttribute('data-node-id'), top: b.top, bottom: b.bottom }; })
                .sort((a,b) => a.top - b.top);
   let overlaps = 0, maxAbsGap = 0; const worst = [];
   for (let i = 1; i < r.length; i++) {
-    const gap = r[i].top - r[i-1].bottom;          // 0 == flush; <0 == overlap
+    const gap = r[i].top - r[i-1].bottom;
     if (gap < 0) overlaps++;
     if (Math.abs(gap) > maxAbsGap) maxAbsGap = Math.abs(gap);
     if (Math.abs(gap) > 1.0) worst.push({ a: r[i-1].id, b: r[i].id, gap: +gap.toFixed(2) });
   }
   worst.sort((x,y) => Math.abs(y.gap) - Math.abs(x.gap));
-  return { n: r.length, overlaps, maxAbsGap: +maxAbsGap.toFixed(2), worst: worst.slice(0, 5) };
+  return { ...base, n: r.length, overlaps, maxAbsGap: +maxAbsGap.toFixed(2), worst: worst.slice(0, 5) };
 })()`;
 
-// Toggle expansion on up to `count` virtualized rows by focusing each and
-// pressing 'e' (DocumentRow.handleRowKey maps 'e' → onExpand for the
-// expandable kinds: tool / agent_message / section). Returns the ids toggled.
-async function toggleRows(session, count) {
-    const ids = await evaluate(session, `
-      (() => {
-        const c = document.querySelector('.agent-document-virtualizer');
-        if (!c) return [];
-        const rows = [...c.querySelectorAll('.agent-document-row[tabindex]')];
-        const picked = [];
-        for (let i = 0; i < rows.length && picked.length < ${count}; i += Math.max(1, Math.floor(rows.length / ${count}))) {
-          rows[i].focus();
-          rows[i].dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true }));
-          picked.push(rows[i].getAttribute('data-node-id'));
-        }
-        return picked;
-      })()`);
-    return ids || [];
+// Scroll the agent document to the top to trigger onLoadOlder, paging older
+// history into the virtualized region. Repeat until it stops growing or we
+// have a healthy number of virtualized rows.
+async function seedHistory(session) {
+    let prev = -1, stable = 0;
+    for (let i = 0; i < SEED_SCROLLS; i++) {
+        const s = await evaluate(session, `
+          (() => {
+            const doc = document.querySelector('.agent-document');
+            if (!doc) return { v: -1 };
+            doc.scrollTop = 0;
+            doc.dispatchEvent(new Event('scroll'));
+            const c = document.querySelector('.agent-document-virtualizer');
+            return { v: c ? c.querySelectorAll('.agent-document-row').length : 0 };
+          })()`);
+        if (s.v < 0) return -1;
+        if (s.v >= 8) return s.v;                 // plenty to exercise overlap
+        if (s.v === prev) { if (++stable >= 3) return s.v; } else stable = 0;
+        prev = s.v;
+        await sleep(450);                          // let onLoadOlder fetch + prepend + restore
+    }
+    return prev;
 }
 
 const fmt = (n) => (n == null ? "—" : `${n}`);
+
+async function toggleRows(session, count) {
+    return evaluate(session, `
+      (() => {
+        const c = document.querySelector('.agent-document-virtualizer');
+        if (!c) return 0;
+        const rows = [...c.querySelectorAll('.agent-document-row[tabindex]')];
+        let n = 0;
+        for (let i = 0; i < rows.length && n < ${count}; i += Math.max(1, Math.floor(rows.length / ${count}))) {
+          rows[i].focus();
+          rows[i].dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true }));
+          n++;
+        }
+        return n;
+      })()`);
+}
 
 async function main() {
     console.log(`agent-layout-drift: CDP 127.0.0.1:${CDP_PORT}, ${CYCLES} cycles × ${TOGGLES} toggles, tol ${TOL}px`);
@@ -138,32 +159,47 @@ async function main() {
     const session = new CdpSession(target.webSocketDebuggerUrl);
     await session.connect();
     await session.send("Runtime.enable");
-
-    // Fresh reload so we start from a known render (spec §7: "fresh reload → …").
     await session.send("Page.enable").catch(() => {});
-    await session.send("Page.reload", { ignoreCache: false }).catch(() => {});
-    await new Promise((r) => setTimeout(r, 2500)); // let history + first paint settle
 
-    const base = await evaluate(session, PROBE);
-    if (base.err) throw new Error(`${base.err} (n=${fmt(base.n)})`);
-    console.log(`  baseline: ${base.n} rows, ${base.overlaps} overlap, maxAbsGap ${base.maxAbsGap}px`);
+    if (!NO_RELOAD) {
+        await session.send("Page.reload", { ignoreCache: false }).catch(() => {});
+        await sleep(3000);
+    }
 
-    let worstOverlaps = base.overlaps, worstGap = base.maxAbsGap, worstDetail = base.worst;
+    let p = await evaluate(session, PROBE);
+    console.log(`  post-reload: panes=${fmt(p.panes)} streaming=${fmt(p.streaming)} virtualized=${fmt(p.n)}${p.err ? " (" + p.err + ")" : ""}`);
+
+    if (p.err || (p.n ?? 0) < 2) {
+        console.log(`  paging in older history (≤${SEED_SCROLLS} scroll passes)...`);
+        const seeded = await seedHistory(session);
+        await sleep(300);
+        p = await evaluate(session, PROBE);
+        console.log(`  after seeding: virtualized=${fmt(p.n)} (seedHistory→${fmt(seeded)})`);
+    }
+
+    if (p.err || (p.n ?? 0) < 2) {
+        session.close();
+        console.error(`\n✗ INCONCLUSIVE: couldn't populate the virtualized region (panes=${fmt(p.panes)} streaming=${fmt(p.streaming)} virtualized=${fmt(p.n)}). This pane has no virtualizable history — open/seed a long-history agent pane.`);
+        process.exit(3);
+    }
+
+    console.log(`  baseline: ${p.n} virtualized rows, ${p.overlaps} overlap, maxAbsGap ${p.maxAbsGap}px`);
+    let worstOverlaps = p.overlaps, worstGap = p.maxAbsGap, worstDetail = p.worst;
+
     for (let cy = 1; cy <= CYCLES; cy++) {
         await toggleRows(session, TOGGLES);
-        await new Promise((r) => setTimeout(r, INTER_MS));
-        const p = await evaluate(session, PROBE);
-        if (p.err) { console.log(`  cycle ${cy}: ${p.err}`); continue; }
-        if (p.overlaps > worstOverlaps) { worstOverlaps = p.overlaps; worstDetail = p.worst; }
-        if (p.maxAbsGap > worstGap) worstGap = p.maxAbsGap;
-        console.log(`  cycle ${cy.toString().padStart(2)}: ${p.n} rows, overlaps ${p.overlaps}, maxAbsGap ${p.maxAbsGap}px`);
+        await sleep(INTER_MS);
+        const q = await evaluate(session, PROBE);
+        if (q.err) { console.log(`  cycle ${cy}: ${q.err} (re-seeding)`); await seedHistory(session); continue; }
+        if (q.overlaps > worstOverlaps) { worstOverlaps = q.overlaps; worstDetail = q.worst; }
+        if (q.maxAbsGap > worstGap) worstGap = q.maxAbsGap;
+        console.log(`  cycle ${cy.toString().padStart(2)}: ${q.n} rows, overlaps ${q.overlaps}, maxAbsGap ${q.maxAbsGap}px`);
     }
 
     session.close();
     console.log("─".repeat(60));
     console.log(`worst over ${CYCLES} cycles: overlaps=${worstOverlaps}, maxAbsGap=${worstGap}px (tolerance ${TOL})`);
     if (worstDetail?.length) console.log(`  worst gaps: ${JSON.stringify(worstDetail)}`);
-
     const pass = worstOverlaps === 0 && worstGap <= TOL;
     console.log(pass ? "\n✓ PASS — 0 overlap, rows flush within tolerance" : "\n✗ FAIL — overlap or drift exceeded tolerance");
     process.exit(pass ? 0 : 1);
