@@ -32,6 +32,24 @@ export class SoundPlayer {
     }
 
     /**
+     * Direct access to the AudioContext. Returns null before `prime()`
+     * has been called. Used by sibling subsystems (e.g. the tool-tones
+     * player) to hook into the same context.
+     */
+    getAudioContext(): AudioContext | null {
+        return this.ctx;
+    }
+
+    /**
+     * Direct access to the master GainNode. Returns null before
+     * `prime()` has been called. Used by sibling subsystems to layer
+     * additional gain/filter chains below the master volume.
+     */
+    getMasterGain(): GainNode | null {
+        return this.masterGain;
+    }
+
+    /**
      * Initialize the AudioContext and preload assets. Idempotent.
      * Must be invoked from a user-gesture handler under Chromium's
      * autoplay policy.

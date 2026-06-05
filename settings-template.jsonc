@@ -69,6 +69,11 @@
     // "notify:sound:agent.message.rejected":    true,
     // "notify:sound:agent.stream.stalled":      true,
 
+    // -- Tool-call tones (subliminal per-tool "voice") --
+    // "notify:tooltones:enabled":               true,
+    // "notify:tooltones:volume":                0.15,
+    // "notify:tooltones:scope":                 "all",  // "all" or "focused"
+
     // -- Other --
     // "widget:icononly":           false,
     // "blockheader:showblockids": false,
