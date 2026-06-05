@@ -44,6 +44,22 @@ use cef::*;
 
 use crate::state::AppState;
 
+/// Return the Win32 window-class name for floating panes, suffixed with
+/// the launcher-supplied `AGENTMUX_IPC_HASH` (= `hash(data_dir, version)`)
+/// so that two parallel AgentMux instances register distinct class atoms
+/// and their `wndproc`/`hInstance` pointers never collide (I5 invariant).
+/// Falls back to the bare name in dev/test builds where the launcher may
+/// not have set the env var.
+pub(crate) fn floater_class_name() -> &'static str {
+    static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    NAME.get_or_init(|| {
+        match std::env::var("AGENTMUX_IPC_HASH") {
+            Ok(h) if !h.is_empty() => format!("AgentMuxFloatingPane-{}", h),
+            _ => "AgentMuxFloatingPane".to_string(),
+        }
+    })
+}
+
 wrap_task! {
     pub struct CreateFloatingWindowTask {
         state: Arc<AppState>,
@@ -478,9 +494,13 @@ fn create_owned_popup(
 
     // ---- Register the class once per process ----
     static CLASS_REGISTERED: std::sync::Once = std::sync::Once::new();
-    static CLASS_NAME: &str = "AgentMuxFloatingPane";
 
-    let mut class_name_utf16: Vec<u16> = OsStr::new(CLASS_NAME).encode_wide().collect();
+    // I5 compliance: embed AGENTMUX_IPC_HASH (= hash(data_dir, version),
+    // set by the launcher) so two parallel instances register distinct
+    // class atoms and their wndproc/hInstance pointers don't collide.
+    // Falls back to the bare name in dev/test builds without the launcher.
+    let class_name = crate::floating_pane::floater_class_name();
+    let mut class_name_utf16: Vec<u16> = OsStr::new(class_name).encode_wide().collect();
     class_name_utf16.push(0);
 
     // TODO(phase-6, codex P1 on #811 — explicitly deferred): The
@@ -521,7 +541,8 @@ fn create_owned_popup(
         let atom = RegisterClassExW(&wnd_class);
         if atom == 0 {
             tracing::error!(
-                "[floating-pane] RegisterClassExW failed for {CLASS_NAME}; CreateWindowExW will fail",
+                "[floating-pane] RegisterClassExW failed for '{}'; CreateWindowExW will fail",
+                class_name,
             );
         }
     });

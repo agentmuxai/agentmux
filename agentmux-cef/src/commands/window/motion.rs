@@ -319,7 +319,15 @@ pub fn resolve_window_at_cursor(
         let exclude_hwnd: Option<isize> = if exclude_label.is_empty() {
             None
         } else {
-            hwnds_by_label.get(exclude_label).copied()
+            hwnds_by_label.get(exclude_label).copied().or_else(|| {
+                // Cache miss: floater HWND was created but its label hasn't
+                // been inserted into window_hwnds yet (brief race between
+                // CreateFloatingWindowTask::execute and the caller). Fall back
+                // to the label-aware HWND lookup used by start_window_drag so
+                // the floater is always excluded from its own hit-test.
+                let h = resolve_window_hwnd(state, exclude_label);
+                if h.is_null() { None } else { Some(h as isize) }
+            })
         };
 
         // Deterministic "main" fallback. `window_hwnds["main"]` is populated
