@@ -564,6 +564,15 @@ pub struct AppState {
     /// pasted token. See `commands::platform::CliLoginStdin`.
     pub cli_login_stdin: Mutex<Option<crate::commands::platform::CliLoginStdin>>,
 
+    /// Monotonic login-attempt counter. `run_cli_login` bumps it on every
+    /// attempt. A login's reaper task captures the value at spawn and only
+    /// clears the shared `cli_login_*` slots if it still matches — so a
+    /// SUPERSEDED login (whose child is killed by the next attempt) cannot
+    /// null out the slots the new attempt just repopulated. Clearing the new
+    /// login's stdin handle out from under it is exactly the "stuck login"
+    /// bug, where the pasted code has nowhere to be delivered.
+    pub cli_login_generation: std::sync::atomic::AtomicU64,
+
     /// IPC HTTP server port
     pub ipc_port: Mutex<u16>,
 
@@ -825,6 +834,7 @@ impl Default for AppState {
             cli_login_cancel: Mutex::new(None),
             cli_login_pty_pid: Mutex::new(None),
             cli_login_stdin: Mutex::new(None),
+            cli_login_generation: std::sync::atomic::AtomicU64::new(0),
             ipc_port: Mutex::new(0),
             ipc_token: uuid::Uuid::new_v4().to_string(),
             // browsers field removed in H.2.e — see comment near struct decl.

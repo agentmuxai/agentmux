@@ -363,6 +363,13 @@ impl CliLoginStdin {
     }
 }
 
+/// Hard cap on how long a login CLI may sit at its paste prompt before the
+/// reaper kills it. Slightly longer than the frontend's 5-minute auth poll so
+/// the frontend (which also reaps on completion/cancel) wins normal cases;
+/// this is the backstop for a login whose frontend driver vanished (e.g. the
+/// pane was closed without its cleanup firing).
+const LOGIN_REAP_TIMEOUT_SECS: u64 = 6 * 60;
+
 /// Spawn a CLI auth login flow.
 pub async fn run_cli_login(
     state: Arc<AppState>,
@@ -408,8 +415,19 @@ pub async fn run_cli_login(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    // Supersede any in-progress login so we never accumulate orphaned
+    // `auth login` children (one per attempt — the confirmed leak). cancel_cli_login
+    // kills both transports (pipe oneshot + PTY kill-by-PID) and is idempotent —
+    // a no-op when nothing is in flight. We then bump the generation so this
+    // attempt's reaper can tell itself apart from the one we just superseded.
+    let _ = cancel_cli_login(&state);
+    let generation = state
+        .cli_login_generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        + 1;
+
     if requires_tty {
-        return run_cli_login_pty(state, cli_path, login_args, auth_env).await;
+        return run_cli_login_pty(state, cli_path, login_args, auth_env, generation).await;
     }
 
     let mut cmd = make_cli_cmd(&cli_path);
@@ -531,9 +549,20 @@ pub async fn run_cli_login(
                 tracing::info!("run_cli_login: cancel signal received, killing child");
                 let _ = child.kill().await;
             }
+            _ = tokio::time::sleep(std::time::Duration::from_secs(LOGIN_REAP_TIMEOUT_SECS)) => {
+                tracing::warn!("run_cli_login: login timed out, killing child");
+                let _ = child.kill().await;
+            }
         }
-        // Clear the stored stdin handle once the process is done.
-        *state_for_cleanup.cli_login_stdin.lock() = None;
+        // Clear the stored stdin handle once the process is done — but only if a
+        // newer login hasn't superseded us and repopulated the slot.
+        if state_for_cleanup
+            .cli_login_generation
+            .load(std::sync::atomic::Ordering::SeqCst)
+            == generation
+        {
+            *state_for_cleanup.cli_login_stdin.lock() = None;
+        }
     });
 
     Ok(serde_json::json!({ "auth_url": auth_url }))
@@ -559,6 +588,7 @@ async fn run_cli_login_pty(
     cli_path: String,
     login_args: Vec<String>,
     auth_env: std::collections::HashMap<String, String>,
+    generation: u64,
 ) -> Result<serde_json::Value, String> {
     use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
@@ -677,20 +707,49 @@ async fn run_cli_login_pty(
     let state_for_cleanup = state.clone();
     tokio::task::spawn_blocking(move || {
         let mut child = child;
-        match child.wait() {
-            Ok(status) => tracing::info!(
-                exit_code = ?status.exit_code(),
-                "run_cli_login_pty: child exited"
-            ),
-            Err(e) => tracing::warn!(
-                error = %e,
-                "run_cli_login_pty: child wait error"
-            ),
+        // Poll for exit with a hard timeout. The previous blocking wait() could
+        // only end when the child self-exited, so an abandoned login (user never
+        // pastes, or completes OAuth out-of-band) sat at the paste prompt
+        // forever — the confirmed process leak.
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(LOGIN_REAP_TIMEOUT_SECS);
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    tracing::info!(
+                        exit_code = ?status.exit_code(),
+                        "run_cli_login_pty: child exited"
+                    );
+                    break;
+                }
+                Ok(None) => {
+                    if std::time::Instant::now() >= deadline {
+                        tracing::warn!("run_cli_login_pty: login timed out, killing child");
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "run_cli_login_pty: child wait error");
+                    break;
+                }
+            }
         }
-        // pair drops here, after child.wait() returns
+        // pair drops here, after the child reaps (ConPTY lifetime contract).
         drop(pair);
-        *state_for_cleanup.cli_login_stdin.lock() = None;
-        *state_for_cleanup.cli_login_pty_pid.lock() = None;
+        // Only clear the slots if we still own them — a newer login may have
+        // superseded us and repopulated them; clearing would strand the new
+        // login's stdin handle (the "stuck login" bug).
+        if state_for_cleanup
+            .cli_login_generation
+            .load(std::sync::atomic::Ordering::SeqCst)
+            == generation
+        {
+            *state_for_cleanup.cli_login_stdin.lock() = None;
+            *state_for_cleanup.cli_login_pty_pid.lock() = None;
+        }
     });
 
     Ok(serde_json::json!({ "auth_url": auth_url }))
