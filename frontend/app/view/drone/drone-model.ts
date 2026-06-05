@@ -119,6 +119,15 @@ export class DroneViewModel implements ViewModel {
         this._canvasSize[1](size);
     };
 
+    // --- which EDGE is selected (for delete). Mutually exclusive with
+    // node selection.
+    private _selectedEdge = createSignal<string | null>(null);
+    selectedEdgeAtom: Accessor<string | null> = this._selectedEdge[0];
+    setSelectedEdge = (id: string | null): void => {
+        this._selectedEdge[1](id);
+        if (id) this._selected[1](null);
+    };
+
     // --- run state
     //
     // `_running` is the in-flight `await RunDroneCommand` flag — bound
@@ -515,6 +524,69 @@ export class DroneViewModel implements ViewModel {
 
     removeEdge(id: string): void {
         this.setDraftStore("graph", "edges", (edges) => edges.filter((e) => e.id !== id));
+        if (this.selectedEdgeAtom() === id) this.setSelectedEdge(null);
+    }
+
+    /** Validate a proposed connection before it becomes an edge:
+     *  - no self-loop,
+     *  - no duplicate (same source/handle → same target/handle),
+     *  - compatible port types (`any` matches anything),
+     *  - no cycle (keeps the graph a DAG for the executor's topo sort). */
+    canConnect(c: {
+        source: string;
+        sourceHandle?: string;
+        target: string;
+        targetHandle?: string;
+    }): boolean {
+        if (c.source === c.target) return false;
+        const graph = this.draftAtom().graph;
+        const src = graph.nodes.find((n) => n.id === c.source);
+        const dst = graph.nodes.find((n) => n.id === c.target);
+        if (!src || !dst) return false;
+        const srcH = c.sourceHandle ?? "out";
+        const dstH = c.targetHandle ?? "in";
+        // Single-input occupancy: each declared input handle takes exactly
+        // one wire, so reject a second edge into an already-wired input
+        // (this also covers exact duplicates). A multi-incoming join would
+        // require the registry to declare multiple input handles.
+        if (graph.edges.some((e) => e.target === c.target && (e.targetHandle ?? "in") === dstH))
+            return false;
+        const outType =
+            blockMeta(src.data.kind as BlockKind).outputs.find((h) => h.id === srcH)?.type ?? "any";
+        const inType =
+            blockMeta(dst.data.kind as BlockKind).inputs.find((h) => h.id === dstH)?.type ?? "any";
+        if (outType !== "any" && inType !== "any" && outType !== inType) return false;
+        // Cycle check: if the target can already reach the source, adding
+        // source→target would close a loop.
+        if (this.reaches(c.target, c.source)) return false;
+        return true;
+    }
+
+    /** Can `from` reach `to` by following edge direction? (iterative DFS) */
+    private reaches(from: string, to: string): boolean {
+        const edges = this.draftAtom().graph.edges;
+        const seen = new Set<string>();
+        const stack = [from];
+        while (stack.length) {
+            const cur = stack.pop() as string;
+            if (cur === to) return true;
+            if (seen.has(cur)) continue;
+            seen.add(cur);
+            for (const e of edges) if (e.source === cur) stack.push(e.target);
+        }
+        return false;
+    }
+
+    /** Validate then add an edge. Returns whether it was added. */
+    connect(c: {
+        source: string;
+        sourceHandle?: string;
+        target: string;
+        targetHandle?: string;
+    }): boolean {
+        if (!this.canConnect(c)) return false;
+        this.addEdge(c);
+        return true;
     }
 
     setName(name: string): void {
