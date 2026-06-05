@@ -224,6 +224,7 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
         if (t.closest(".nodrag") || t.closest(".drone-node-close")) return;
         e.stopPropagation(); // don't let the canvas start a pan
         m.setSelected(n.id);
+        m.setSelectedEdge(null);
         drag = {
             id: n.id,
             sx: e.clientX,
@@ -310,6 +311,72 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
         onCleanup(() => ro.disconnect());
     });
 
+    // ── port → port connection drag ─────────────────────────────────
+    const [conn, setConn] = createSignal<
+        { sourceId: string; sourceHandle: string; x1: number; y1: number; x2: number; y2: number } | null
+    >(null);
+    const onConnMove = (e: PointerEvent) => {
+        const c = conn();
+        if (!c) return;
+        const p = screenToFlow(e.clientX, e.clientY);
+        setConn({ ...c, x2: p.x, y2: p.y });
+    };
+    const onConnUp = (e: PointerEvent) => {
+        window.removeEventListener("pointermove", onConnMove);
+        const c = conn();
+        setConn(null);
+        if (!c) return;
+        // Drop target = whatever input port is under the cursor.
+        const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+        const port = el?.closest(".drone-port--in") as HTMLElement | null;
+        if (port?.dataset.node) {
+            m.connect({
+                source: c.sourceId,
+                sourceHandle: c.sourceHandle,
+                target: port.dataset.node,
+                targetHandle: port.dataset.handle ?? "in",
+            });
+        }
+    };
+    const startConn = (e: PointerEvent, nodeId: string, handleId: string) => {
+        if (e.button !== 0) return;
+        e.stopPropagation(); // don't start a node drag
+        const node = m.draftAtom().graph.nodes.find((n) => n.id === nodeId);
+        if (!node) return;
+        const sp = portFlowPos(node, "out", handleId);
+        setConn({ sourceId: nodeId, sourceHandle: handleId, x1: sp.x, y1: sp.y, x2: sp.x, y2: sp.y });
+        window.addEventListener("pointermove", onConnMove);
+        window.addEventListener("pointerup", onConnUp, { once: true });
+    };
+
+    // ── keyboard: delete selection · escape cancels ─────────────────
+    const onKey = (e: KeyboardEvent) => {
+        const tag = (e.target as HTMLElement | null)?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        if (e.key === "Escape") {
+            setConn(null);
+            m.setSelected(null);
+            m.setSelectedEdge(null);
+            return;
+        }
+        if (e.key === "Delete" || e.key === "Backspace") {
+            const edgeId = m.selectedEdgeAtom();
+            const nodeId = m.selectedAtom();
+            if (edgeId) {
+                m.removeEdge(edgeId);
+                e.preventDefault();
+            } else if (nodeId) {
+                m.removeNode(nodeId);
+                e.preventDefault();
+            }
+        }
+    };
+    onMount(() => {
+        window.addEventListener("keydown", onKey);
+        onCleanup(() => window.removeEventListener("keydown", onKey));
+    });
+    onCleanup(() => window.removeEventListener("pointermove", onConnMove));
+
     const onNodeClick = (e: MouseEvent, n: FlowNode) => {
         e.stopPropagation();
         if (e.shiftKey) {
@@ -365,26 +432,47 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
             onDrop={onDrop}
         >
             <div class="drone-viewport" style={vpStyle()}>
-                <svg class="drone-canvas-edges" aria-hidden="true">
+                <svg class="drone-canvas-edges">
                     <For each={m.draftAtom().graph.edges}>
                         {(edge) => {
                             const src = () =>
                                 m.draftAtom().graph.nodes.find((n) => n.id === edge.source);
                             const dst = () =>
                                 m.draftAtom().graph.nodes.find((n) => n.id === edge.target);
+                            const d = () => {
+                                const a = portFlowPos(src()!, "out", edge.sourceHandle ?? "out");
+                                const b = portFlowPos(dst()!, "in", edge.targetHandle ?? "in");
+                                return bezierPath(a.x, a.y, b.x, b.y);
+                            };
                             return (
                                 <Show when={src() && dst()}>
-                                    <line
+                                    <path
+                                        class="drone-edge-hit"
+                                        d={d()}
+                                        onPointerDown={(e) => {
+                                            e.stopPropagation();
+                                            m.setSelectedEdge(edge.id);
+                                        }}
+                                    />
+                                    <path
                                         class="drone-edge"
-                                        x1={src()!.position.x + 80}
-                                        y1={src()!.position.y + 28}
-                                        x2={dst()!.position.x}
-                                        y2={dst()!.position.y + 28}
+                                        classList={{
+                                            "drone-edge--selected": m.selectedEdgeAtom() === edge.id,
+                                        }}
+                                        d={d()}
                                     />
                                 </Show>
                             );
                         }}
                     </For>
+                    <Show when={conn()}>
+                        {(c) => (
+                            <path
+                                class="drone-edge-preview"
+                                d={bezierPath(c().x1, c().y1, c().x2, c().y2)}
+                            />
+                        )}
+                    </Show>
                 </svg>
                 <For each={m.draftAtom().graph.nodes}>
                     {(n) => {
@@ -419,6 +507,37 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
                                     </button>
                                 </header>
                                 <div class="drone-node-body">{nodeSummary(n)}</div>
+                                <For each={meta.inputs}>
+                                    {(h, i) => (
+                                        <div
+                                            class="drone-port drone-port--in nodrag"
+                                            data-node={n.id}
+                                            data-handle={h.id}
+                                            title={`input: ${h.label}`}
+                                            style={{ top: `${portOffsetY(meta.inputs.length, i()) - 6}px` }}
+                                        />
+                                    )}
+                                </For>
+                                <For each={meta.outputs}>
+                                    {(h, i) => (
+                                        <div
+                                            class="drone-port drone-port--out nodrag"
+                                            data-node={n.id}
+                                            data-handle={h.id}
+                                            title={`output: ${h.label}`}
+                                            style={{
+                                                top: `${portOffsetY(meta.outputs.length, i()) - 6}px`,
+                                                background:
+                                                    h.id === "true"
+                                                        ? "#10b981"
+                                                        : h.id === "false"
+                                                          ? "#6b7280"
+                                                          : meta.color,
+                                            }}
+                                            onPointerDown={(e) => startConn(e, n.id, h.id)}
+                                        />
+                                    )}
+                                </For>
                             </div>
                         );
                     }}
@@ -427,7 +546,8 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
             <Show when={m.draftAtom().graph.nodes.length === 0}>
                 <div class="drone-canvas-hint">
                     Drag a block from the top bar onto the canvas · drag nodes to move ·
-                    scroll to zoom · drag the canvas to pan · Shift-click two nodes to wire
+                    drag a right port → a left port to wire · scroll to zoom · drag the
+                    canvas to pan · Del removes the selection
                 </div>
             </Show>
             <div class="drone-controls">
@@ -480,6 +600,36 @@ function nodeSummary(n: FlowNode): string {
 
 function truncate(s: string, max = 40): string {
     return s.length > max ? s.slice(0, max - 1) + "…" : s;
+}
+
+// ── Port + edge geometry ──────────────────────────────────────────────
+// Node body is NODE_W wide; ports sit on the left (inputs) and right
+// (outputs) edges, distributed vertically around the header. These
+// helpers are the single source of truth for where a wire attaches, used
+// by both the rendered ports and the edge paths so they always line up.
+
+const NODE_W = 160;
+
+/** Vertical offset (px, node-relative) of port `idx` of `count`. */
+function portOffsetY(count: number, idx: number): number {
+    return 26 + (idx - (count - 1) / 2) * 20;
+}
+
+/** Flow-space center of a node's port. */
+function portFlowPos(node: FlowNode, side: "in" | "out", handleId: string): { x: number; y: number } {
+    const meta = blockMeta(node.data.kind as BlockKind);
+    const list = side === "out" ? meta.outputs : meta.inputs;
+    const idx = Math.max(0, list.findIndex((h) => h.id === handleId));
+    return {
+        x: side === "out" ? node.position.x + NODE_W : node.position.x,
+        y: node.position.y + portOffsetY(list.length, idx),
+    };
+}
+
+/** Horizontal cubic bezier between two points (left→right flow). */
+function bezierPath(x1: number, y1: number, x2: number, y2: number): string {
+    const dx = Math.max(40, Math.abs(x2 - x1) * 0.5);
+    return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
 }
 
 // ── Inspector ─────────────────────────────────────────────────────────
