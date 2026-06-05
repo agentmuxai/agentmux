@@ -58,7 +58,10 @@ pub struct ProviderConfig {
     /// Environment variable that redirects the provider's config / auth
     /// directory, e.g. `"CLAUDE_CONFIG_DIR"`.
     pub auth_config_dir_env_var: &'static str,
-    /// Sub-directory name under `{dataDir}/auth/`, e.g. `"claude"`.
+    /// Sub-directory name for this provider's auth/config dir, e.g. `"claude"`.
+    /// Resolved under `shared/providers/<name>/` (the default, account-wide and
+    /// instance-independent) and `shared/identities/<bundle>/<name>/` (per-identity)
+    /// — see `DataPaths::provider_auth_dir` and `identity_dir`.
     pub auth_dir_name: &'static str,
     /// Extra environment variables required for auth isolation.
     /// Each entry is a `(key, value)` pair.
