@@ -38,6 +38,7 @@ import {
     type DroneDefinition,
     type DroneGraph,
     type DroneRun,
+    type DroneViewport,
 } from "./drone-types";
 
 const BLANK_DRONE = (): DroneDefinition => ({
@@ -99,6 +100,16 @@ export class DroneViewModel implements ViewModel {
     private _selected = createSignal<string | null>(null);
     selectedAtom: Accessor<string | null> = this._selected[0];
     setSelected = this._selected[1];
+
+    // --- canvas viewport (pan + zoom). Deliberately SEPARATE from the
+    // draft store: panning/zooming updates only this one transform, so
+    // it never re-runs a node binding. Synced into draft.viewport at
+    // save time (so it persists). See spec §8.2.
+    private _viewport = createSignal<DroneViewport>(defaultViewport());
+    viewportAtom: Accessor<DroneViewport> = this._viewport[0];
+    setViewport = (patch: Partial<DroneViewport>): void => {
+        this._viewport[1]((v) => ({ ...v, ...patch }));
+    };
 
     // --- run state
     //
@@ -213,6 +224,7 @@ export class DroneViewModel implements ViewModel {
             if (wf) {
                 this.setDraft(wf);
                 this.setSelected(null);
+                this.setViewport(wf.viewport ?? defaultViewport());
                 this.dispatchIfAlive({ type: "Reset" }, "user");
                 await this.refreshRuns(id);
             }
@@ -225,6 +237,7 @@ export class DroneViewModel implements ViewModel {
     newDrone(): void {
         this.setDraft(BLANK_DRONE());
         this.setSelected(null);
+        this.setViewport(defaultViewport());
         this.setRuns([]);
         this.dispatchIfAlive({ type: "Reset" }, "user");
         if (this.activeRunUnsub) {
@@ -235,6 +248,9 @@ export class DroneViewModel implements ViewModel {
 
     /** Persist the current draft. Returns the saved id. */
     async save(): Promise<string | null> {
+        // Fold the live canvas viewport into the draft store so it
+        // persists with the graph.
+        this.setDraftStore("viewport", { ...this.viewportAtom() });
         const wf = this.draftAtom();
         try {
             const saved = await RpcApi.UpsertDroneCommand(TabRpcClient, wf);

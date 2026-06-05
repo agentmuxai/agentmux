@@ -154,14 +154,33 @@
 .drone-canvas {
     position: absolute;
     inset: 0;
-    overflow: auto;
+    overflow: hidden;
+    touch-action: none; // we own pan/zoom via pointer + wheel
+    cursor: grab;
+    &:active {
+        cursor: grabbing;
+    }
+}
+
+// The transformed layer. A zero-size origin point at (0,0) flow-space;
+// all nodes + edges are positioned absolutely in flow coordinates and
+// this single transform pans/zooms the whole graph at once.
+.drone-viewport {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
+    will-change: transform;
 }
 
 .drone-canvas-edges {
     position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: 1px;
+    overflow: visible; // lines drawn at flow coords must not clip
     pointer-events: none;
 }
 
@@ -173,12 +192,43 @@
 
 .drone-canvas-hint {
     position: absolute;
-    bottom: 8px;
-    left: 8px;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    max-width: 360px;
+    text-align: center;
+    line-height: 1.6;
     color: var(--secondary-text-color);
-    font-size: 10px;
-    opacity: 0.7;
+    font-size: 12px;
+    opacity: 0.8;
     pointer-events: none;
+}
+
+.drone-controls {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    z-index: 5;
+}
+
+.drone-ctrl {
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
+    color: inherit;
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    &:hover {
+        background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+    }
 }
 
 .drone-node {
@@ -188,8 +238,12 @@
     border: 1px solid var(--border-color);
     border-radius: 0;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    cursor: pointer;
+    cursor: grab;
+    user-select: none;
     transition: border-color 80ms ease;
+    &:active {
+        cursor: grabbing;
+    }
     &--selected {
         border-color: var(--accent-color);
         box-shadow: 0 0 0 1px var(--accent-color);
@@ -199,13 +253,22 @@
 .drone-node-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 6px;
     padding: 4px 8px;
     background: var(--block-color, var(--accent-color));
     color: white;
     border-radius: 0;
     font-size: 11px;
     font-weight: 500;
+}
+
+.drone-node-emoji {
+    font-size: 13px;
+    line-height: 1;
+}
+
+.drone-node-label {
+    flex: 1;
 }
 
 .drone-node-close {
