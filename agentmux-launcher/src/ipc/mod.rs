@@ -89,6 +89,8 @@ pub fn srv_pipe_name(data_dir_hash16: &str) -> String {
 /// the launcher exits cleanly with a clear error.
 #[cfg(unix)]
 pub fn ipc_socket_dir() -> std::path::PathBuf {
+    use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
+
     let dir = if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") {
         let mut p = std::path::PathBuf::from(runtime);
         p.push("agentmux");
@@ -97,21 +99,94 @@ pub fn ipc_socket_dir() -> std::path::PathBuf {
         let uid = unsafe { libc::getuid() };
         std::path::PathBuf::from(format!("/tmp/agentmux-{}", uid))
     };
-    // Best-effort mkdir + chmod 0700. Errors (EEXIST is fine, anything
-    // else is rare and the bind will surface a clear error).
-    if let Err(e) = std::fs::create_dir_all(&dir) {
-        if e.kind() != std::io::ErrorKind::AlreadyExists {
-            crate::log(&format!(
-                "[ipc] WARN: failed to create socket dir {}: {} — bind may fail",
+
+    // Security (codex P1 on PR #1288): the /tmp fallback is reachable
+    // by any local user. If an attacker pre-creates the path with a
+    // permissive mode, the naive `create_dir_all` + best-effort chmod
+    // pattern silently lets us bind the launcher socket inside an
+    // attacker-controlled directory, where they can connect as the
+    // first IPC client and impersonate the host. Defense:
+    //   1. Create the directory atomically with mode 0700.
+    //   2. If the directory already exists, stat it and refuse to
+    //      proceed unless: (a) it's a real directory (not a symlink),
+    //      (b) it's owned by the current uid, (c) its mode masks 0700.
+    //   3. On refusal, abort the launcher with a clear error rather
+    //      than continuing to bind in an unsafe location.
+    let our_uid = unsafe { libc::getuid() };
+    match std::fs::symlink_metadata(&dir) {
+        Ok(meta) => {
+            let file_type = meta.file_type();
+            if file_type.is_symlink() {
+                eprintln!(
+                    "AgentMux refusing to start: IPC socket dir {} is a symlink (potential squatting attack).",
+                    dir.display()
+                );
+                std::process::exit(2);
+            }
+            if !file_type.is_dir() {
+                eprintln!(
+                    "AgentMux refusing to start: IPC socket path {} exists but is not a directory.",
+                    dir.display()
+                );
+                std::process::exit(2);
+            }
+            if meta.uid() != our_uid {
+                eprintln!(
+                    "AgentMux refusing to start: IPC socket dir {} is owned by uid {}, not our uid {} (potential squatting attack).",
+                    dir.display(),
+                    meta.uid(),
+                    our_uid
+                );
+                std::process::exit(2);
+            }
+            // Tighten mode if it's looser than 0700. Use the chmod
+            // (rather than a fresh create) so we never widen perms.
+            let mode = meta.mode() & 0o777;
+            if mode & 0o077 != 0 {
+                use std::os::unix::fs::PermissionsExt as _;
+                if let Err(e) = std::fs::set_permissions(
+                    &dir,
+                    std::fs::Permissions::from_mode(0o700),
+                ) {
+                    eprintln!(
+                        "AgentMux refusing to start: IPC socket dir {} has mode {:o} (group/other accessible) and chmod 0700 failed: {}.",
+                        dir.display(),
+                        mode,
+                        e
+                    );
+                    std::process::exit(2);
+                }
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // Atomically create with mode 0700. `DirBuilder::mode(0700)`
+            // applies via mkdir(2)'s `mode` arg under our umask, so the
+            // directory's actual perms are the requested mode masked by
+            // the umask. We set the mode explicitly via `set_permissions`
+            // immediately after creation as a belt + suspenders against
+            // any inherited umask quirk.
+            let mut builder = std::fs::DirBuilder::new();
+            builder.recursive(true).mode(0o700);
+            if let Err(e) = builder.create(&dir) {
+                eprintln!(
+                    "AgentMux refusing to start: failed to create IPC socket dir {}: {}.",
+                    dir.display(),
+                    e
+                );
+                std::process::exit(2);
+            }
+            use std::os::unix::fs::PermissionsExt as _;
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+        }
+        Err(e) => {
+            eprintln!(
+                "AgentMux refusing to start: failed to stat IPC socket dir {}: {}.",
                 dir.display(),
                 e
-            ));
+            );
+            std::process::exit(2);
         }
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
-    }
+
     dir
 }
