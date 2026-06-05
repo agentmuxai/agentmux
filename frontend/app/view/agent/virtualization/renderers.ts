@@ -34,7 +34,7 @@ export interface NodeKindRenderer<K extends NodeKind = NodeKind> {
      *  reactively (no destructuring) so prop changes propagate. */
     component: Component<{ node: NodeOf<K>; state: DocumentState }>;
     /**
-     * Initial height estimate in pixels. Used until measureElement
+     * Initial height estimate in pixels. Used until the measure RO
      * settles each row to its real size. Should be close to the p50
      * actual height for the kind — Phase 3's perf probe surfaces
      * estimator misses > 30% in the dev HUD so we can recalibrate.
@@ -92,8 +92,8 @@ export function estimateTextHeight(
  * `_document-nodes.scss`, so the char-count heuristic in
  * `estimateTextHeight` would over-allocate for long URLs / paths
  * (300-char URL → 4 estimated lines vs 1 actual line) and cause
- * blank gaps / scroll jumps in the virtualized list until
- * measureElement caught up. Codex P2 round 4 on PR #1020.
+ * blank gaps / scroll jumps in the virtualized list until the
+ * measure RO caught up. Codex P2 round 4 on PR #1020.
  */
 export function estimateUnwrappedTextHeight(
     content: string,
@@ -236,5 +236,51 @@ export function estimateNode(node: DocumentNode, state: DocumentState): number {
         case "agent_message": return estimateAgentMessage(node, state);
         case "user_message": return estimateUserMessage(node, state);
         case "subagent_link": return estimateSubagentLink(node);
+    }
+}
+
+/**
+ * Per-state height estimate for a given node, independent of the
+ * document's current open/collapsed signals. Used by the layout
+ * slice-feeding effect to push `EstimateSet` for BOTH expansion states when a
+ * node first enters the slice (INV-3: measurements are keyed by (nodeId,
+ * state), so the slice needs an estimate for each state until the measure RO
+ * settles a real height for it).
+ *
+ * Intentionally does not receive `DocumentState` — the whole point is to
+ * give a size for the GIVEN state, not the rendered state. `_docState` is
+ * accepted only for call-site symmetry with `estimateNode`.
+ */
+export function estimateNodeForState(
+    node: DocumentNode,
+    expansionState: "collapsed" | "expanded",
+    _docState: DocumentState,
+): number {
+    if (expansionState === "collapsed") {
+        switch (node.type) {
+            case "tool":          return TOOL_COLLAPSED_PX;
+            case "agent_message": return COLLAPSED_MESSAGE_PX;
+            case "user_message":
+                // Startup messages collapse; normal user input doesn't.
+                return node.isStartup
+                    ? COLLAPSED_MESSAGE_PX
+                    : estimateUnwrappedTextHeight(node.message);
+            case "section":       return SECTION_PX;
+            case "markdown":
+                // Canceled-thinking collapses; normal markdown stays full.
+                return node.metadata?.canceled
+                    ? COLLAPSED_MESSAGE_PX
+                    : estimateTextHeight(node.content);
+            case "subagent_link": return SUBAGENT_LINK_PX;
+        }
+    }
+    // expanded
+    switch (node.type) {
+        case "tool":          return TOOL_EXPANDED_PX;
+        case "agent_message": return estimateTextHeight(node.message);
+        case "user_message":  return estimateUnwrappedTextHeight(node.message);
+        case "section":       return SECTION_PX;
+        case "markdown":      return estimateTextHeight(node.content);
+        case "subagent_link": return SUBAGENT_LINK_PX;
     }
 }
