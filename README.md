@@ -1,3 +1,26 @@
+<!-- The early-alpha warning is the first content block by design — see
+docs/specs/SPEC_EARLY_ALPHA_WARNING_2026_06_05.md. Decorative logo/title
+follow below so the warning is never pushed below the fold. -->
+
+> ## ⚠️ EARLY ALPHA — Use At Your Own Risk
+>
+> **AgentMux is in early alpha.** Many features are incomplete, partially
+> broken, or change between releases without notice. Expect:
+>
+> - **Broken features** — pieces of the UI may not function, or may regress
+>   from one release to the next.
+> - **Data loss** — settings, pane layouts, and agent state may not migrate
+>   cleanly across versions. Don't store anything you can't reproduce.
+> - **Breaking changes** — config files, identity bundles, memory bundles,
+>   and the App API may change shape with no migration path during alpha.
+> - **Platform gaps** — Windows is the primary target; macOS and Linux
+>   builds lag behind and have additional known issues.
+>
+> If you hit a problem, **please report it as a GitHub issue** at
+> https://github.com/agentmuxai/agentmux/issues — it's how alpha gets to beta.
+
+---
+
 <p align="center">
   <img src="./frontend/logos/agentmux-logo-brain-alternate.svg" alt="AgentMux Logo" width="120">
 </p>
