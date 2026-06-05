@@ -10,10 +10,10 @@
  *
  *  ┌─ scrollRef (.agent-document) ─────────────────────────┐
  *  │  ┌─ virtualized region ─────────────────────────────┐ │
- *  │  │  height = virtualizer.getTotalSize()             │ │
+ *  │  │  height = layoutView().totalSize (slice)         │ │
  *  │  │  position: relative                              │ │
  *  │  │  rows: position: absolute, translateY(start)     │ │
- *  │  │  measureElement on each row                      │ │
+ *  │  │  measure ResizeObserver on each row              │ │
  *  │  └──────────────────────────────────────────────────┘ │
  *  │  ┌─ streaming buffer ───────────────────────────────┐ │
  *  │  │  trailing N nodes, normal flex flow              │ │
@@ -28,9 +28,9 @@
  * the state into the DOM but never reads it back.
  */
 
-import { createVirtualizer } from "@tanstack/solid-virtual";
-import { createEffect, createMemo, createSignal, For, Index, onCleanup, onMount, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
+import { Key } from "@solid-primitives/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import { agentPerfStore, startAgentLayoutShiftObserver } from "./perf-probe";
@@ -41,8 +41,17 @@ import {
     restoreScrollFromAnchor,
 } from "./anchor";
 import { DocumentRow } from "./DocumentRow";
-import { estimateNode } from "./renderers";
+import { estimateNode, estimateNodeForState } from "./renderers";
+import { currentExpansion } from "./expansion-source";
 import type { AgentViewState } from "./state";
+import {
+    dispatchIfRegistered as dispatchLayoutIfRegistered,
+    snapshot as snapshotLayout,
+    type LayoutView,
+    type RowPosition,
+} from "@/app/store/agent-pane-layout-store";
+import { computeLayoutView } from "@/app/store/agent-pane-layout/reducer";
+import { inFlowState } from "@/app/store/agent-pane-layout/types";
 import {
     initialStickyFrontierId,
     partitionForVirtualization,
@@ -66,9 +75,10 @@ export interface AgentDocumentVirtualListProps {
     onTogglePin: (id: string) => void;
     /**
      * Live per-pane zoom factor (the same value applied as CSS `zoom` on
-     * `.agent-view` in agent-view.tsx). Used to normalize `measureElement`
-     * into unzoomed CSS px so virtualizer row offsets don't double-count zoom
-     * and overlap — see SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01.
+     * `.agent-view` in agent-view.tsx). Used to normalize the measure RO + the
+     * Scrolled / scrollToNode math into unzoomed CSS px so slice positions don't
+     * double-count zoom and overlap — see
+     * SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01.
      * Defaults to 1 (no zoom) when not supplied.
      */
     zoomFactor?: Accessor<number>;
@@ -79,6 +89,19 @@ export interface AgentDocumentVirtualListProps {
      * via scrollMargin (read from virtualContainerRef.offsetTop).
      */
     headerSlot?: JSX.Element;
+    /**
+     * blockId for the agent-pane-layout slice. When present, the list feeds the
+     * slice (nodes / estimates / expansion / viewport / measurements) and the
+     * measure RO dispatches `RowMeasured` keyed by the row's current expansion
+     * state (INV-3). Required for the slice-driven render path (Phase 3).
+     */
+    blockId?: string;
+    /**
+     * Derived layout view from the agent-pane-layout slice (Phase 3). When
+     * present, rows render from `layoutView().rows` (prefix-sum positions)
+     * instead of TanStack's virtual items.
+     */
+    layoutView?: Accessor<LayoutView | null>;
 }
 
 export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): JSX.Element {
@@ -116,12 +139,11 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // defer), so they cascade regardless. (reagent P1 on #1212.)
     const [animateEnabled, setAnimateEnabled] = createSignal(false);
 
-    // Memoized — partition is read inside virtualizer's reactive
-    // count getter, estimateSize, getItemKey, the streaming buffer
-    // <For>, and each virtual item's nodeAccessor. Without
-    // createMemo, every read re-slices the document (O(n)) on every
-    // token of streaming, defeating the streaming buffer's purpose.
-    // (reagent P1 on #784.)
+    // Memoized — partition is read inside the slice-feeding effect,
+    // nodeById, scrollToNode / older-history, and the streaming buffer
+    // <Index>. Without createMemo, every read re-slices the document
+    // (O(n)) on every token of streaming, defeating the streaming
+    // buffer's purpose. (reagent P1 on #784.)
     const partition = createMemo(() => {
         const nodes = props.viewState.nodes();
 
@@ -162,52 +184,124 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         return result;
     });
 
-    // Virtualizer over the virtualized head only — streaming buffer is
-    // rendered separately as a normal flex list. Per-kind estimators
-    // come from the renderer registry; measureElement settles each row
-    // to actual height after first paint.
-    const virtualizer = createVirtualizer({
-        get count() { return partition().virtualizedNodes.length; },
-        getScrollElement: () => scrollRef,
-        estimateSize: (index) => {
-            const node = partition().virtualizedNodes[index];
-            return node ? estimateNode(node, props.documentState()) : 32;
-        },
-        overscan: 5,
-        getItemKey: (index) => partition().virtualizedNodes[index]?.id ?? index,
-        // scrollMargin: any content rendered above the virtualizer
-        // container (loading-older banner, auth-url box from the
-        // parent) shifts the virtual coordinate system. Read offsetTop
-        // as a getter so it's evaluated each tick.
-        get scrollMargin() {
-            return virtualContainerRef?.offsetTop ?? 0;
-        },
-        // Phase 3 perf probe: validate the per-kind estimator against
-        // the measured size after every measurement. The HUD surfaces
-        // any kind whose miss-rate stays high so we recalibrate.
-        // No-op in production builds (agentPerfStore short-circuits).
-        measureElement: (element) => {
-            // Normalize OUT the per-pane CSS `zoom`: getBoundingClientRect is
-            // zoom-scaled (verified cef-146: css×zoom), but estimateSize returns
-            // fixed unzoomed CSS px. Without this, the two units disagree at
-            // zoom≠1 and the cumulative translateY offsets double-count zoom →
-            // rows overlap (zoom<1) or gap (zoom>1). Dividing by the live zoom
-            // factor keeps the virtualizer entirely in zoom-independent CSS px.
-            // SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01 §4.1.
-            const zoom = props.zoomFactor?.() ?? 1;
-            const measured = element.getBoundingClientRect().height / (zoom || 1);
-            const indexAttr = element.getAttribute("data-index");
-            if (indexAttr != null) {
-                const idx = Number(indexAttr);
-                const node = partition().virtualizedNodes[idx];
-                if (node) {
-                    const estimated = estimateNode(node, props.documentState());
-                    agentPerfStore.recordEstimatorMeasurement(node.type, estimated, measured);
+    // Phase 3: feed the layout slice from the VIRTUALIZED partition only.
+    // The slice models the prefix-summed region; the streaming buffer is
+    // normal-flow and out of scope. Dispatches NodesChanged + per-node
+    // EstimateSet (both states, INV-3) + ExpansionResolved so positions /
+    // effectiveHeight are authoritative. No-op when blockId is absent.
+    if (props.blockId) {
+        // nodeId → JSON(Expansion) last pushed (expansion diff cache).
+        const pushedExpansion = new Map<string, string>();
+        // nodeIds with EstimateSet pushed for both states; pruned in lockstep
+        // with the slice so a removed-then-re-added node gets fresh values.
+        const estimatesPushed = new Set<string>();
+        createEffect(() => {
+            const blockId = props.blockId!;
+            const vnodes = partition().virtualizedNodes;
+            const docState = props.documentState();
+            const ids = vnodes.map((n) => n.id);
+            dispatchLayoutIfRegistered(blockId, { type: "NodesChanged", orderedIds: ids });
+            const idSet = new Set(ids);
+            for (const k of pushedExpansion.keys()) if (!idSet.has(k)) pushedExpansion.delete(k);
+            for (const k of estimatesPushed) if (!idSet.has(k)) estimatesPushed.delete(k);
+            for (const node of vnodes) {
+                if (!estimatesPushed.has(node.id)) {
+                    estimatesPushed.add(node.id);
+                    dispatchLayoutIfRegistered(blockId, {
+                        type: "EstimateSet",
+                        nodeId: node.id,
+                        state: "collapsed",
+                        cssPx: estimateNodeForState(node, "collapsed", docState),
+                    });
+                    dispatchLayoutIfRegistered(blockId, {
+                        type: "EstimateSet",
+                        nodeId: node.id,
+                        state: "expanded",
+                        cssPx: estimateNodeForState(node, "expanded", docState),
+                    });
+                }
+                const next = currentExpansion(node, docState);
+                const key = JSON.stringify(next);
+                if (pushedExpansion.get(node.id) !== key) {
+                    pushedExpansion.set(node.id, key);
+                    dispatchLayoutIfRegistered(blockId, {
+                        type: "ExpansionResolved",
+                        nodeId: node.id,
+                        to: next,
+                    });
                 }
             }
-            return measured;
-        },
-    });
+        });
+    }
+
+    // ── Phase 3: feed the layout slice's VIEWPORT inputs ────────────────
+    // The slice records scrollTop / viewport / scrollMargin / zoom and the
+    // render path (windowing + prefix-sum row positions) reads them back. All
+    // blockId-gated and reducer-deduped (an unchanged value returns the same
+    // state ref). Slice positions are unzoomed CSS px, so scroll + viewport
+    // are normalized by the live zoom — the same ÷zoom basis as the measure RO.
+    // (scrollTop ÷zoom under CSS `zoom` is pending CDP confirmation at zoom
+    // 0.5 / 2 per the Phase-3 plan.)
+    let lastScrollMarginPx = -1;
+    const dispatchScrollMargin = (): void => {
+        if (!props.blockId) return;
+        const px = virtualContainerRef?.offsetTop ?? 0;
+        if (px === lastScrollMarginPx) return; // skip redundant dispatches
+        lastScrollMarginPx = px;
+        dispatchLayoutIfRegistered(props.blockId, { type: "ScrollMarginChanged", px });
+    };
+    if (props.blockId) {
+        // Mirror the live zoom into the slice (INV-2: stored, never relayouts).
+        createEffect(() => {
+            const blockId = props.blockId!;
+            const zoom = props.zoomFactor?.() ?? 1;
+            dispatchLayoutIfRegistered(blockId, { type: "ZoomChanged", zoom });
+        });
+        // scrollMargin = the virtualized container's offsetTop (the header
+        // above it). Re-read on every region reflow; handleScroll + the dedup
+        // cover the header-shift cases (auth box / loading-older banner).
+        onMount(() => {
+            if (!virtualContainerRef) return;
+            dispatchScrollMargin();
+            const ro = new ResizeObserver(() => dispatchScrollMargin());
+            ro.observe(virtualContainerRef);
+            // The header (auth box / loading-older banner) sits ABOVE the
+            // container; it shifts the container's offsetTop WITHOUT resizing
+            // the container itself, so the RO above never fires for it. The
+            // header moves offsetTop two ways, and we watch both:
+            //   • add/remove (a Show toggles the banner/auth box) → childList
+            //     on scrollRef.
+            //   • internal resize (AuthUrlBox grows when its paste-result
+            //     appears inside the existing box) → no childList mutation, so
+            //     a ResizeObserver on the header element itself catches it.
+            // headerRO observes only the 0-2 header elements that precede the
+            // container (never the virtualized rows), so there's no scroll-time
+            // reflow storm. Keeping scrollMarginPx in sync matters because row
+            // starts include it while the render path, windowing, and
+            // scroll-to-node subtract the live offsetTop.
+            const headerRO = new ResizeObserver(() => dispatchScrollMargin());
+            const observeHeaders = (): void => {
+                for (const child of Array.from(scrollRef.children)) {
+                    if (child === virtualContainerRef) break;
+                    headerRO.observe(child); // idempotent per element
+                }
+            };
+            observeHeaders();
+            const mo = new MutationObserver(() => {
+                dispatchScrollMargin();
+                observeHeaders();
+            });
+            mo.observe(scrollRef, { childList: true });
+            onCleanup(() => { ro.disconnect(); headerRO.disconnect(); mo.disconnect(); });
+        });
+    }
+
+    // Phase 3 Step 6: the TanStack virtualizer is gone. Positions, windowing,
+    // and measurement now come entirely from the agent-pane-layout slice
+    // (rendered above from layoutView + the measure RO). Heights are keyed by
+    // (nodeId, state) in the slice, so a row that scrolls out and back keeps
+    // its measured height — the recycle-stale-estimate class is gone by
+    // construction, and prefix-sum positions make overlap impossible (INV-1).
 
     // Layout-shift observer scoped to .agent-document. Idempotent —
     // subsequent mounts are no-ops. Production: short-circuits.
@@ -270,6 +364,17 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (h > 0 && wasHidden && props.viewState.stickToBottom()) {
                 scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
             }
+            // Phase 3: the scroll container resizing changes the viewport the
+            // slice windows against — feed it (covers hidden→visible 0→N and
+            // pane resize). blockId-gated, reducer-deduped.
+            if (props.blockId && h > 0) {
+                const zoom = props.zoomFactor?.() ?? 1;
+                dispatchLayoutIfRegistered(props.blockId, {
+                    type: "Scrolled",
+                    scrollTop: scrollRef.scrollTop / (zoom || 1),
+                    viewportPx: h / (zoom || 1),
+                });
+            }
             wasHidden = h === 0;
         });
         ro.observe(scrollRef);
@@ -286,17 +391,26 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     if (props.scrollToBottomRef) props.scrollToBottomRef(jumpToBottom);
 
     // scrollToNode: jump the named node into view. Disengages stick
-    // (user wants to stay where they jumped). Routes through the
-    // virtualizer if the target is in the virtualized head, else uses
-    // the streaming buffer's natural DOM offset.
+    // (user wants to stay where they jumped). Uses the slice's row
+    // position if the target is in the virtualized head, else the
+    // streaming buffer's natural DOM offset.
     const scrollToNode = (nodeId: string): void => {
         if (!scrollRef) return;
         const idx = props.viewState.indexOf(nodeId);
         if (idx < 0) return;
         const p = partition();
         if (idx < p.splitIndex) {
-            // Virtualized region — virtualizer handles ensure-visible + scroll.
-            virtualizer.scrollToIndex(idx, { align: "center", behavior: "smooth" });
+            // Virtualized region — center the row from the slice's position
+            // (Step 5). row.start/height are unzoomed CSS px; convert the
+            // target back to the scroll element's zoomed scrollTop (×zoom).
+            const v = props.layoutView?.();
+            const row = v?.rows[idx];
+            if (row) {
+                const zoom = props.zoomFactor?.() ?? 1;
+                const viewportPx = scrollRef.clientHeight / (zoom || 1);
+                const center = row.start - viewportPx / 2 + row.height / 2;
+                scrollRef.scrollTo({ top: Math.max(0, center * (zoom || 1)), behavior: "smooth" });
+            }
         } else {
             // Streaming buffer — node is mounted; query DOM and scroll directly.
             const el = scrollRef.querySelector(`[data-node-id="${nodeId}"]`) as HTMLElement | null;
@@ -309,14 +423,31 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     };
 
     // React to jump commands from the parent's useScrollToNode hook.
+    // untrack the scroll so this effect depends ONLY on the command signal:
+    // scrollToNode reads layoutView / zoom / partition, all of which change on
+    // every scroll, and useScrollToNode holds the last command rather than
+    // clearing it — tracking them would re-fire the jump on each scroll and pin
+    // the user on the old target.
     createEffect(() => {
         const cmd = props.scrollCommand?.();
-        if (cmd) scrollToNode(cmd.nodeId);
+        if (cmd) untrack(() => scrollToNode(cmd.nodeId));
     });
 
     const handleScroll = (): void => {
         if (!scrollRef) return;
         const { scrollTop, scrollHeight, clientHeight } = scrollRef;
+
+        // Phase 3: push scroll position + viewport into the slice as unzoomed
+        // CSS px. Reducer-deduped; blockId-gated.
+        if (props.blockId) {
+            const zoom = props.zoomFactor?.() ?? 1;
+            dispatchLayoutIfRegistered(props.blockId, {
+                type: "Scrolled",
+                scrollTop: scrollTop / (zoom || 1),
+                viewportPx: clientHeight / (zoom || 1),
+            });
+            dispatchScrollMargin();
+        }
 
         // Engage stick when user scrolls back near bottom; disengage
         // otherwise. Engaging clears any captured headAnchor (atomic).
@@ -338,21 +469,24 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             !(props.loadingOlder?.())
         ) {
             // Capture anchor from the topmost visible node. Two cases:
-            //   1) Document is large enough to virtualize → use the
-            //      topmost virtual item. Note: in TanStack Virtual v3
-            //      `virtualItem.start` ALREADY includes scrollMargin
-            //      so we read it directly without re-adding the margin.
+            //   1) Document is large enough to virtualize → anchor on the
+            //      topmost visible row from the slice's window. row.start
+            //      already includes scrollMargin, so it's read directly
+            //      without re-adding the margin (same basis as the old
+            //      TanStack v3 virtualItem.start).
             //   2) Document fits entirely in the streaming buffer
-            //      (≤ STREAMING_BUFFER_SIZE nodes) → getVirtualItems()
-            //      is empty, so fall back to the streaming buffer's
-            //      first node via DOM. This is the common initial-
-            //      pagination case (codex P2 on #784).
-            const items = virtualizer.getVirtualItems();
+            //      (≤ STREAMING_BUFFER_SIZE nodes) → the window is empty, so
+            //      fall back to the streaming buffer's first node via DOM.
+            //      This is the common initial-pagination case (codex P2 #784).
+            const v = props.layoutView?.();
+            const topRow = v && v.window.endIndex >= v.window.startIndex
+                ? v.rows[v.window.startIndex]
+                : undefined;
             let anchorId: string | null = null;
             let anchorOffsetPx = 0;
-            if (items.length > 0) {
-                anchorId = partition().virtualizedNodes[items[0].index]?.id ?? null;
-                anchorOffsetPx = items[0].start;
+            if (topRow) {
+                anchorId = topRow.nodeId;
+                anchorOffsetPx = topRow.start;
             } else if (partition().streamingNodes.length > 0) {
                 anchorId = partition().streamingNodes[0].id;
                 const el = scrollRef.querySelector(
@@ -380,10 +514,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                     // `partitionForVirtualization()` here would use a
                     // count-based split that ignores the sticky
                     // frontier, so an anchor that's actually in the
-                    // streaming buffer could be classified as
-                    // virtualized, then `getOffsetForIndex(newIdx)`
-                    // would be called with an index past the
-                    // virtualizer's count and the restore would
+                    // streaming buffer could be misclassified as
+                    // virtualized and read a slice row index past the
+                    // virtualized region, and the restore would
                     // silently fail. Codex P2 on PR #1101.
                     const anchor = props.viewState.headAnchor();
                     if (anchor != null && scrollRef) {
@@ -391,12 +524,15 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                         if (newIdx >= 0) {
                             const newP = partition();
                             if (newIdx < newP.splitIndex) {
-                                // Still virtualized — recompute via virtualizer's offsetForIndex.
-                                // The returned offset already includes scrollMargin in v3,
-                                // so don't add virtualContainerRef.offsetTop again.
-                                const offset = virtualizer.getOffsetForIndex(newIdx, "start");
+                                // Still virtualized — read the new offset from a
+                                // FRESH slice snapshot (the prepend shifted every
+                                // position). Synchronous, so no projection-timing
+                                // dependency. start includes scrollMargin — same
+                                // basis as the captured anchorOffsetPx.
+                                const snap = props.blockId ? snapshotLayout(props.blockId) : null;
+                                const offset = snap ? computeLayoutView(snap).rows[newIdx]?.start : undefined;
                                 if (offset != null) {
-                                    const target = restoreScrollFromAnchor(anchor, offset[0]);
+                                    const target = restoreScrollFromAnchor(anchor, offset);
                                     scrollRef.scrollTo({ top: target, behavior: "auto" });
                                 }
                             } else {
@@ -419,9 +555,77 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         }
     };
 
+    // ── Phase 3 Step 3+4: render from the slice + a standalone measure RO ──
+    // Rows render from the slice's prefix-sum positions (computeLayoutView →
+    // the layoutView signal), keyed by stable nodeId so the fresh RowPosition
+    // objects each recompute produces don't remount rows. Heights come from a
+    // single ResizeObserver that dispatches RowMeasured keyed by (nodeId,
+    // state) — replacing measureElement + the data-index dance.
+
+    // The visible rows, sliced from the slice's full positions array. Empty
+    // window (endIndex < startIndex) → render nothing.
+    const windowedRows = createMemo<RowPosition[]>(() => {
+        const v = props.layoutView?.();
+        if (!v || v.window.endIndex < v.window.startIndex) return [];
+        return v.rows.slice(v.window.startIndex, v.window.endIndex + 1);
+    });
+
+    // nodeId → live DocumentNode for the virtualized partition, so a row
+    // renders the CURRENT node at its id (streaming updates propagate without
+    // remount). A windowed row whose node isn't in the partition this frame is
+    // skipped — the same recoverable drop the old getVirtualItems guard did.
+    const nodeById = createMemo(() => {
+        const m = new Map<string, DocumentNode>();
+        for (const n of partition().virtualizedNodes) m.set(n.id, n);
+        return m;
+    });
+
+    // One measure RO for all virtualized rows; el→nodeId lets the callback
+    // dispatch RowMeasured keyed by the row's current in-flow state, ÷zoom to
+    // stay in unzoomed CSS px (INV-2/3). Rows observe on mount, unobserve on
+    // unmount (the Key child's onCleanup).
+    const elNodeId = new WeakMap<Element, string>();
+    const measureRO = typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver((entries) => {
+            const blockId = props.blockId;
+            if (!blockId) return;
+            const zoom = props.zoomFactor?.() ?? 1;
+            const snap = snapshotLayout(blockId);
+            const nodes = nodeById();
+            for (const entry of entries) {
+                const nodeId = elNodeId.get(entry.target);
+                if (!nodeId) continue;
+                const cssPx = entry.target.getBoundingClientRect().height / (zoom || 1);
+                const node = nodes.get(nodeId);
+                if (node) {
+                    agentPerfStore.recordEstimatorMeasurement(
+                        node.type,
+                        estimateNode(node, props.documentState()),
+                        cssPx,
+                    );
+                }
+                dispatchLayoutIfRegistered(blockId, {
+                    type: "RowMeasured",
+                    nodeId,
+                    state: inFlowState(snap?.expansion.get(nodeId)),
+                    cssPx,
+                });
+            }
+        })
+        : undefined;
+    onCleanup(() => measureRO?.disconnect());
+    const observeRow = (el: HTMLElement, nodeId: string): void => {
+        elNodeId.set(el, nodeId);
+        measureRO?.observe(el);
+    };
+    const unobserveRow = (el: HTMLElement): void => {
+        measureRO?.unobserve(el);
+        elNodeId.delete(el);
+    };
+
     // Render: scroll container holds the optional header, the
     // virtualized head, and the streaming buffer. headerSlot offsets
-    // the virtualizer; scrollMargin (above) handles that automatically.
+    // the rows; the slice's scrollMargin (fed above) accounts for it.
     return (
         <div class="agent-document" ref={scrollRef} onScroll={handleScroll}>
             {props.headerSlot}
@@ -430,65 +634,48 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 ref={(el) => { virtualContainerRef = el; }}
                 class="agent-document-virtualizer"
                 style={{
-                    height: `${virtualizer.getTotalSize()}px`,
+                    height: `${props.layoutView?.()?.totalSize ?? 0}px`,
                     position: "relative",
                     width: "100%",
                 }}
             >
-                <For each={virtualizer.getVirtualItems()}>
-                    {(virtualItem) => {
-                        // Defensive: during the reflow that follows a tool
-                        // expand/collapse height change, getVirtualItems() can
-                        // transiently yield an undefined entry. Without this
-                        // guard the `virtualItem.index` reads below throw
-                        // "Cannot read properties of undefined (reading 'index')"
-                        // *during render*, which the agent-pane error boundary
-                        // catches by tearing down the ENTIRE virtualized list.
-                        // Dropping one transient row for a frame is recoverable;
-                        // crashing the list is not. (Observed live under rapid
-                        // expand/collapse churn.)
-                        if (!virtualItem) return null;
-                        const nodeAccessor = (): DocumentNode => {
-                            return partition().virtualizedNodes[virtualItem.index];
-                        };
+                <Key each={windowedRows()} by={(r) => r.nodeId}>
+                    {(row) => {
+                        let rowEl: HTMLElement | undefined;
+                        // The live node at this row's id; skip a frame if it's
+                        // momentarily absent from the partition (recoverable,
+                        // like the old getVirtualItems undefined guard).
+                        const node = (): DocumentNode | undefined => nodeById().get(row().nodeId);
+                        onCleanup(() => { if (rowEl) unobserveRow(rowEl); });
                         return (
-                            <DocumentRow
-                                node={nodeAccessor}
-                                documentState={props.documentState}
-                                bookmarkedNodeIds={props.bookmarkedNodeIds}
-                                onBookmark={props.onBookmark}
-                                onSubagentClick={props.onSubagentClick}
-                                highlightNodeId={props.highlightNodeId}
-                                onToggleCollapse={props.onToggleCollapse}
-                                onTogglePin={props.onTogglePin}
-                                // data-index is also bound reactively below
-                                // (dataIndex prop), but that binding is a Solid
-                                // render-effect that RACES this ref callback. If
-                                // the ref wins, TanStack's measureElement reads a
-                                // null data-index and returns *before*
-                                // observer.observe(node) — so the row is never
-                                // observed and stays pinned at estimateSize
-                                // forever, overlapping its neighbors. Setting the
-                                // attribute synchronously here, right before
-                                // measureElement, closes that race. Verified via
-                                // live CDP: rows mounting on the losing side of
-                                // the race were stuck at the 32px estimate.
-                                ref={(el) => {
-                                    el.setAttribute("data-index", String(virtualItem.index));
-                                    virtualizer.measureElement(el);
-                                }}
-                                dataIndex={virtualItem.index}
-                                style={{
-                                    position: "absolute",
-                                    top: "0",
-                                    left: "0",
-                                    width: "100%",
-                                    transform: `translateY(${virtualItem.start - (virtualContainerRef?.offsetTop ?? 0)}px)`,
-                                }}
-                            />
+                            <Show when={node()}>
+                                {(n) => (
+                                    <DocumentRow
+                                        node={n}
+                                        documentState={props.documentState}
+                                        bookmarkedNodeIds={props.bookmarkedNodeIds}
+                                        onBookmark={props.onBookmark}
+                                        onSubagentClick={props.onSubagentClick}
+                                        highlightNodeId={props.highlightNodeId}
+                                        onToggleCollapse={props.onToggleCollapse}
+                                        onTogglePin={props.onTogglePin}
+                                        // Step 4: ref carries the measure RO
+                                        // (keyed by nodeId), not measureElement —
+                                        // no data-index, no measure race.
+                                        ref={(el) => { rowEl = el; observeRow(el, row().nodeId); }}
+                                        style={{
+                                            position: "absolute",
+                                            top: "0",
+                                            left: "0",
+                                            width: "100%",
+                                            transform: `translateY(${row().start - (virtualContainerRef?.offsetTop ?? 0)}px)`,
+                                        }}
+                                    />
+                                )}
+                            </Show>
                         );
                     }}
-                </For>
+                </Key>
             </div>
 
             {/* Streaming buffer — always-mounted trailing nodes.
