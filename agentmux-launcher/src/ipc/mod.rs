@@ -170,51 +170,56 @@ pub fn ensure_ipc_socket_dir() -> std::path::PathBuf {
     //   3. On refusal, abort the launcher with a clear error rather
     //      than continuing to bind in an unsafe location.
     let our_uid = unsafe { libc::getuid() };
-    match std::fs::symlink_metadata(&dir) {
-        Ok(meta) => {
-            let file_type = meta.file_type();
-            if file_type.is_symlink() {
+
+    // Validate an existing directory (whether we found it via the
+    // initial stat or via a same-user-race AlreadyExists from create).
+    // Returns Ok on safe-to-use, exits(2) with a clear error otherwise.
+    // Side-effect: tightens mode to 0700 if it's looser.
+    let validate_existing = |meta: std::fs::Metadata| {
+        let file_type = meta.file_type();
+        if file_type.is_symlink() {
+            eprintln!(
+                "AgentMux refusing to start: IPC socket dir {} is a symlink (potential squatting attack).",
+                dir.display()
+            );
+            std::process::exit(2);
+        }
+        if !file_type.is_dir() {
+            eprintln!(
+                "AgentMux refusing to start: IPC socket path {} exists but is not a directory.",
+                dir.display()
+            );
+            std::process::exit(2);
+        }
+        if meta.uid() != our_uid {
+            eprintln!(
+                "AgentMux refusing to start: IPC socket dir {} is owned by uid {}, not our uid {} (potential squatting attack).",
+                dir.display(),
+                meta.uid(),
+                our_uid
+            );
+            std::process::exit(2);
+        }
+        let mode = meta.mode() & 0o777;
+        if mode & 0o077 != 0 {
+            use std::os::unix::fs::PermissionsExt as _;
+            if let Err(e) = std::fs::set_permissions(
+                &dir,
+                std::fs::Permissions::from_mode(0o700),
+            ) {
                 eprintln!(
-                    "AgentMux refusing to start: IPC socket dir {} is a symlink (potential squatting attack).",
-                    dir.display()
-                );
-                std::process::exit(2);
-            }
-            if !file_type.is_dir() {
-                eprintln!(
-                    "AgentMux refusing to start: IPC socket path {} exists but is not a directory.",
-                    dir.display()
-                );
-                std::process::exit(2);
-            }
-            if meta.uid() != our_uid {
-                eprintln!(
-                    "AgentMux refusing to start: IPC socket dir {} is owned by uid {}, not our uid {} (potential squatting attack).",
+                    "AgentMux refusing to start: IPC socket dir {} has mode {:o} (group/other accessible) and chmod 0700 failed: {}.",
                     dir.display(),
-                    meta.uid(),
-                    our_uid
+                    mode,
+                    e
                 );
                 std::process::exit(2);
-            }
-            // Tighten mode if it's looser than 0700. Use the chmod
-            // (rather than a fresh create) so we never widen perms.
-            let mode = meta.mode() & 0o777;
-            if mode & 0o077 != 0 {
-                use std::os::unix::fs::PermissionsExt as _;
-                if let Err(e) = std::fs::set_permissions(
-                    &dir,
-                    std::fs::Permissions::from_mode(0o700),
-                ) {
-                    eprintln!(
-                        "AgentMux refusing to start: IPC socket dir {} has mode {:o} (group/other accessible) and chmod 0700 failed: {}.",
-                        dir.display(),
-                        mode,
-                        e
-                    );
-                    std::process::exit(2);
-                }
             }
         }
+    };
+
+    match std::fs::symlink_metadata(&dir) {
+        Ok(meta) => validate_existing(meta),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             // Non-recursive create with mode 0700. `recursive(true)`
             // (= create_dir_all semantics) would return Ok even if an
@@ -234,42 +239,55 @@ pub fn ensure_ipc_socket_dir() -> std::path::PathBuf {
             // weird is going on and we should abort).
             let mut builder = std::fs::DirBuilder::new();
             builder.recursive(false).mode(0o700);
-            if let Err(create_err) = builder.create(&dir) {
-                eprintln!(
-                    "AgentMux refusing to start: failed to create IPC socket dir {} (mode 0700, non-recursive): {}.",
-                    dir.display(),
-                    create_err
-                );
-                std::process::exit(2);
-            }
-            // Belt-and-suspenders post-create verification. The mkdir(2)
-            // syscall is atomic, so the dir we just created is OURS at
-            // this instant. Re-stat anyway to defend against any future
-            // refactor that loosens the create flags.
-            let post_meta = match std::fs::symlink_metadata(&dir) {
-                Ok(m) => m,
-                Err(stat_err) => {
+            match builder.create(&dir) {
+                Ok(()) => {
+                    // Belt-and-suspenders post-create verification.
+                    // mkdir(2) is atomic; the dir we just created is
+                    // OURS at this instant. Re-stat to defend against
+                    // any future refactor that loosens the flags.
+                    match std::fs::symlink_metadata(&dir) {
+                        Ok(m) => validate_existing(m),
+                        Err(stat_err) => {
+                            eprintln!(
+                                "AgentMux refusing to start: post-create stat of {} failed: {}.",
+                                dir.display(),
+                                stat_err
+                            );
+                            std::process::exit(2);
+                        }
+                    }
+                }
+                Err(create_err)
+                    if create_err.kind() == std::io::ErrorKind::AlreadyExists =>
+                {
+                    // Legitimate same-user race (codex P2 on PR #1288):
+                    // a concurrent launcher created the dir between our
+                    // initial NotFound and this create. NOT necessarily
+                    // a squatting attack — re-stat + run the same
+                    // owner/mode/symlink validation we'd run on a
+                    // pre-existing dir. If validation passes, the
+                    // concurrent launcher created a safe dir for us
+                    // both and we can proceed.
+                    match std::fs::symlink_metadata(&dir) {
+                        Ok(m) => validate_existing(m),
+                        Err(stat_err) => {
+                            eprintln!(
+                                "AgentMux refusing to start: re-stat after AlreadyExists race on {} failed: {}.",
+                                dir.display(),
+                                stat_err
+                            );
+                            std::process::exit(2);
+                        }
+                    }
+                }
+                Err(create_err) => {
                     eprintln!(
-                        "AgentMux refusing to start: post-create stat of {} failed: {}.",
+                        "AgentMux refusing to start: failed to create IPC socket dir {} (mode 0700, non-recursive): {}.",
                         dir.display(),
-                        stat_err
+                        create_err
                     );
                     std::process::exit(2);
                 }
-            };
-            if !post_meta.file_type().is_dir()
-                || post_meta.file_type().is_symlink()
-                || post_meta.uid() != our_uid
-                || post_meta.mode() & 0o077 != 0
-            {
-                eprintln!(
-                    "AgentMux refusing to start: IPC socket dir {} failed post-create verification (uid={}, mode={:o}, symlink={}).",
-                    dir.display(),
-                    post_meta.uid(),
-                    post_meta.mode() & 0o777,
-                    post_meta.file_type().is_symlink()
-                );
-                std::process::exit(2);
             }
         }
         Err(e) => {
