@@ -77,7 +77,10 @@ pub fn get_user_home_dir(state: &Arc<AppState>) -> Result<serde_json::Value, Str
 }
 
 /// Ensure a provider auth directory exists and return its absolute path.
-/// Auth dirs are version-isolated under the version-specific config dir.
+/// The DEFAULT provider auth lives in the account-wide, version- and
+/// channel-independent `~/.agentmux/shared/providers/<provider>/` — the
+/// per-identity bundle override (identity_handlers) still wins for explicit
+/// multi-account.
 pub fn ensure_auth_dir(
     state: &Arc<AppState>,
     args: &serde_json::Value,
