@@ -301,30 +301,77 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         .or_else(|_| std::env::var("USERPROFILE"))
                         .unwrap_or_default();
 
-                    // Build candidate paths: isolated dir first, then global ~/.claude/
-                    let mut creds_candidates: Vec<String> = Vec::new();
+                    // First-run bootstrap of the SHARED provider auth dir
+                    // (~/.agentmux/shared/providers/claude). It is account-wide, so the
+                    // user's existing global ~/.claude login is imported into it ONCE,
+                    // gated on a sentinel so a later `claude auth logout` in this provider
+                    // space sticks. This is a one-time bootstrap of the single shared
+                    // auth, NOT per-instance reseeding. Retro:
+                    // docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md
                     if let Some(config_dir) = cmd.auth_env.get("CLAUDE_CONFIG_DIR") {
-                        creds_candidates.push(format!("{}/.credentials.json", config_dir));
-                    }
-                    creds_candidates.push(format!("{}/.claude/.credentials.json", home));
-
-                    let tokens_exist = creds_candidates.iter().any(|p| {
-                        if let Ok(content) = std::fs::read_to_string(p) {
-                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                                let oauth = json.get("claudeAiOauth");
-                                let has_token = oauth.and_then(|o| o.get("accessToken"))
-                                    .and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false);
-                                let has_refresh = oauth.and_then(|o| o.get("refreshToken"))
-                                    .and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false);
-                                return has_token || has_refresh;
+                        let iso = format!("{}/.credentials.json", config_dir);
+                        let seeded = format!("{}/.agentmux-cred-seeded", config_dir);
+                        let global = format!("{}/.claude/.credentials.json", home);
+                        if !std::path::Path::new(&iso).exists()
+                            && !std::path::Path::new(&seeded).exists()
+                            && std::path::Path::new(&global).exists()
+                        {
+                            match std::fs::create_dir_all(config_dir)
+                                .and_then(|_| std::fs::copy(&global, &iso))
+                            {
+                                Ok(_) => {
+                                    let _ = std::fs::write(
+                                        &seeded,
+                                        b"imported from global ~/.claude on first run\n",
+                                    );
+                                    tracing::info!(
+                                        "claude auth: imported global ~/.claude into shared provider dir (first run)"
+                                    );
+                                }
+                                Err(e) => tracing::warn!(
+                                    "claude auth: failed to import global creds into shared provider dir: {e}"
+                                ),
                             }
                         }
-                        false
-                    });
+                    }
+
+                    // §4 INVARIANT (provider-auth-isolation.md): validate the SAME dir
+                    // the agent runs in — the isolated CLAUDE_CONFIG_DIR if set, else
+                    // global ~/.claude. NEVER "isolated OR global": that "check global /
+                    // run isolated" split is the validate-spin regression's root cause
+                    // (phase 2 below runs `claude auth status --json` against this exact
+                    // dir, so phase 1 must check the same one).
+                    let creds_path = cmd
+                        .auth_env
+                        .get("CLAUDE_CONFIG_DIR")
+                        .map(|d| format!("{}/.credentials.json", d))
+                        .unwrap_or_else(|| format!("{}/.claude/.credentials.json", home));
+
+                    let tokens_exist = match std::fs::read_to_string(&creds_path) {
+                        Ok(content) => serde_json::from_str::<serde_json::Value>(&content)
+                            .ok()
+                            .map(|json| {
+                                let oauth = json.get("claudeAiOauth");
+                                let has_token = oauth
+                                    .and_then(|o| o.get("accessToken"))
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| !s.is_empty())
+                                    .unwrap_or(false);
+                                let has_refresh = oauth
+                                    .and_then(|o| o.get("refreshToken"))
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| !s.is_empty())
+                                    .unwrap_or(false);
+                                has_token || has_refresh
+                            })
+                            .unwrap_or(false),
+                        Err(_) => false,
+                    };
 
                     if !tokens_exist {
-                        // No credentials file or empty tokens — definitely not authenticated.
-                        tracing::info!("claude auth check: no credentials file, skipping CLI");
+                        // No credentials in the dir the agent will run in — not
+                        // authenticated. Fast path: no CLI spawn, so no spin.
+                        tracing::info!("claude auth check: no credentials in provider dir, skipping CLI");
                         let result = CheckCliAuthResult {
                             authenticated: false,
                             email: None,
@@ -334,7 +381,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         return Ok(Some(serde_json::to_value(&result).unwrap()));
                     }
 
-                    // Tokens exist on disk — validate with the CLI (10 s timeout).
+                    // Tokens exist in the provider dir — validate with the CLI (10 s timeout).
                     tracing::info!("claude auth check: credentials found, validating via CLI");
                 }
 

@@ -100,13 +100,21 @@ pub fn ensure_auth_dir(
         ));
     }
 
-    let config_dir = state.version_config_dir.lock();
-    let config_dir = config_dir
+    // The DEFAULT provider auth/config dir lives under the account-wide, version-
+    // and channel-independent shared root (`~/.agentmux/shared/providers/<provider>/`),
+    // NOT the per-channel config dir. One login is shared across every instance /
+    // channel / version — the structural fix for the per-channel validate-spin
+    // regression (docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md).
+    // The per-identity bundle override (identity_handlers) still wins for explicit
+    // multi-account. `user_home_dir` is the AgentMux root (`~/.agentmux/`).
+    let home = state.user_home_dir.lock();
+    let home = home
         .as_ref()
-        .ok_or_else(|| "Config dir not initialized yet".to_string())?;
+        .ok_or_else(|| "Home dir not initialized yet".to_string())?;
 
-    let auth_dir = std::path::PathBuf::from(config_dir)
-        .join("auth")
+    let auth_dir = std::path::PathBuf::from(home)
+        .join("shared")
+        .join("providers")
         .join(provider_id);
     std::fs::create_dir_all(&auth_dir)
         .map_err(|e| format!("Failed to create auth dir for {}: {}", provider_id, e))?;
