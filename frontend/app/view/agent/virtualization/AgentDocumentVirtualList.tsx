@@ -119,6 +119,12 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // `replaceChild` crash on send-message
     // (docs/analysis/AGENT_PANE_REPLACECHILD_CRASH_ON_SEND_2026_05_27.md).
     //
+    // The replaceChild crash (root-caused from render_trail 2026-06-05:
+    // streamCount 50→53-57 across turns → Solid <Index> crash) is fixed
+    // at the dispatch level in useAgentStream.ts: wrapping StreamFlush +
+    // StreamFlushObserved in batch() so all reactive effects settle in one
+    // pass — no interleaved renders that could move a DOM node mid-reconcile.
+    //
     // Cleared whenever the anchor node is truncated away (e.g.,
     // history reset / pane re-mount); the next partition recompute
     // re-anchors against the new tail.
