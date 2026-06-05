@@ -26,6 +26,7 @@ import {
 import { waveEventSubscribe } from "@/app/store/wps";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, createSignal, type Accessor } from "solid-js";
+import { createStore, produce, reconcile, type SetStoreFunction } from "solid-js/store";
 
 import { blockMeta } from "./block-registry";
 import {
@@ -37,6 +38,7 @@ import {
     type DroneDefinition,
     type DroneGraph,
     type DroneRun,
+    type DroneViewport,
 } from "./drone-types";
 
 const BLANK_DRONE = (): DroneDefinition => ({
@@ -71,19 +73,56 @@ export class DroneViewModel implements ViewModel {
     setList = this._list[1];
 
     // --- the drone currently open in the canvas (a draft until saved)
-    private _draft = createSignal<DroneDefinition>(BLANK_DRONE());
-    draftAtom: Accessor<DroneDefinition> = this._draft[0];
-    setDraft = this._draft[1];
+    //
+    // Backed by a Solid STORE, not a signal. A signal holding the whole
+    // DroneDefinition replaces the object on every edit, so any reader
+    // of `graph.nodes` re-runs — fatal for smooth node dragging at 50+
+    // nodes. A store proxies each node/field independently, so moving
+    // one node touches only that node's `position` binding. See
+    // SPEC_DRONE_CANVAS_NODE_EDITOR_2026_06_05.md §8.
+    private _draftStore = createStore<DroneDefinition>(BLANK_DRONE());
+    private draft: DroneDefinition = this._draftStore[0];
+    private setDraftStore: SetStoreFunction<DroneDefinition> = this._draftStore[1];
+
+    // Stable accessor — the rest of the codebase keeps calling
+    // `m.draftAtom()`. Returns the live store proxy; property reads on
+    // it (`.graph.nodes`) stay fine-grained inside a tracking scope.
+    draftAtom: Accessor<DroneDefinition> = () => this.draft;
+
+    /** Replace the entire draft (load / new / post-save normalize).
+     *  Uses `reconcile` (keyed on node/edge `id`) so surviving DOM nodes
+     *  and edges are diffed in place rather than torn down + rebuilt. */
+    private setDraft(next: DroneDefinition): void {
+        this.setDraftStore(reconcile(next));
+    }
 
     // --- which node is selected in the canvas (for the InspectorPanel)
     private _selected = createSignal<string | null>(null);
     selectedAtom: Accessor<string | null> = this._selected[0];
     setSelected = this._selected[1];
 
+    // --- canvas viewport (pan + zoom). Deliberately SEPARATE from the
+    // draft store: panning/zooming updates only this one transform, so
+    // it never re-runs a node binding. Synced into draft.viewport at
+    // save time (so it persists). See spec §8.2.
+    private _viewport = createSignal<DroneViewport>(defaultViewport());
+    viewportAtom: Accessor<DroneViewport> = this._viewport[0];
+    setViewport = (patch: Partial<DroneViewport>): void => {
+        this._viewport[1]((v) => ({ ...v, ...patch }));
+    };
+
+    // --- canvas pixel size, kept current by the Canvas via a
+    // ResizeObserver. Used to place a node at the visible center when a
+    // top-bar chip is clicked (the no-drag fallback).
+    private _canvasSize = createSignal<{ w: number; h: number }>({ w: 0, h: 0 });
+    setCanvasSize = (size: { w: number; h: number }): void => {
+        this._canvasSize[1](size);
+    };
+
     // --- run state
     //
     // `_running` is the in-flight `await RunDroneCommand` flag — bound
-    // to the Toolbar's button disable. It's a UI thing, separate from the
+    // to the NodeTypeBar's Run button disable. It's a UI thing, separate from the
     // slot's `status` (which is "idle"|"running"|"done"|"failed", folded
     // from `dronerun:<id>` events). Keeping it in the view.
     private _running = createSignal<boolean>(false);
@@ -193,6 +232,7 @@ export class DroneViewModel implements ViewModel {
             if (wf) {
                 this.setDraft(wf);
                 this.setSelected(null);
+                this.setViewport(wf.viewport ?? defaultViewport());
                 this.dispatchIfAlive({ type: "Reset" }, "user");
                 await this.refreshRuns(id);
             }
@@ -205,6 +245,7 @@ export class DroneViewModel implements ViewModel {
     newDrone(): void {
         this.setDraft(BLANK_DRONE());
         this.setSelected(null);
+        this.setViewport(defaultViewport());
         this.setRuns([]);
         this.dispatchIfAlive({ type: "Reset" }, "user");
         if (this.activeRunUnsub) {
@@ -215,6 +256,9 @@ export class DroneViewModel implements ViewModel {
 
     /** Persist the current draft. Returns the saved id. */
     async save(): Promise<string | null> {
+        // Fold the live canvas viewport into the draft store so it
+        // persists with the graph.
+        this.setDraftStore("viewport", { ...this.viewportAtom() });
         const wf = this.draftAtom();
         try {
             const saved = await RpcApi.UpsertDroneCommand(TabRpcClient, wf);
@@ -414,68 +458,70 @@ export class DroneViewModel implements ViewModel {
             data: { kind, ...meta.defaultData },
             type: kind,
         };
-        this.setDraft((prev) => ({
-            ...prev,
-            graph: { ...prev.graph, nodes: [...prev.graph.nodes, node] },
-        }));
+        // Append keeps `<For>`'s keying intact (new id → new row); the
+        // existing node DOM is untouched.
+        this.setDraftStore("graph", "nodes", (nodes) => [...nodes, node]);
         return node;
     }
 
+    /** Add a node at the center of the currently visible canvas — the
+     *  click-a-chip (no-drag) fallback. Inverts the viewport transform
+     *  for the screen-center point, then offsets to roughly center the
+     *  node body under that point. */
+    addNodeAtCenter(kind: BlockKind): FlowNode {
+        const v = this.viewportAtom();
+        const { w, h } = this._canvasSize[0]();
+        const cx = (w / 2 - v.x) / v.zoom - 80;
+        const cy = (h / 2 - v.y) / v.zoom - 30;
+        return this.addNode(kind, { x: cx, y: cy });
+    }
+
     removeNode(id: string): void {
-        this.setDraft((prev) => ({
-            ...prev,
-            graph: {
-                nodes: prev.graph.nodes.filter((n) => n.id !== id),
-                edges: prev.graph.edges.filter((e) => e.source !== id && e.target !== id),
-            },
-        }));
+        // `produce` for the two-array cascade (drop the node + its edges)
+        // in one granular transaction.
+        this.setDraftStore(
+            produce((d) => {
+                d.graph.nodes = d.graph.nodes.filter((n) => n.id !== id);
+                d.graph.edges = d.graph.edges.filter(
+                    (e) => e.source !== id && e.target !== id,
+                );
+            }),
+        );
         if (this.selectedAtom() === id) this.setSelected(null);
     }
 
     updateNodeData(id: string, patch: Record<string, unknown>): void {
-        this.setDraft((prev) => ({
-            ...prev,
-            graph: {
-                ...prev.graph,
-                nodes: prev.graph.nodes.map((n) =>
-                    n.id === id ? { ...n, data: { ...n.data, ...patch } } : n,
-                ),
-            },
-        }));
+        // Path mutation: touches only the matched node's `data` binding.
+        this.setDraftStore(
+            "graph",
+            "nodes",
+            (n) => n.id === id,
+            "data",
+            (data) => ({ ...data, ...patch }),
+        );
     }
 
     moveNode(id: string, position: { x: number; y: number }): void {
-        this.setDraft((prev) => ({
-            ...prev,
-            graph: {
-                ...prev.graph,
-                nodes: prev.graph.nodes.map((n) =>
-                    n.id === id ? { ...n, position } : n,
-                ),
-            },
-        }));
+        // The hot path during a drag — updates ONLY this node's
+        // `position`, so its `<For>` row's transform binding re-runs and
+        // nothing else does. This is the whole point of the store.
+        this.setDraftStore("graph", "nodes", (n) => n.id === id, "position", position);
     }
 
     addEdge(edge: Omit<FlowEdge, "id">): void {
         const e: FlowEdge = { id: `e_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, ...edge };
-        this.setDraft((prev) => ({
-            ...prev,
-            graph: { ...prev.graph, edges: [...prev.graph.edges, e] },
-        }));
+        this.setDraftStore("graph", "edges", (edges) => [...edges, e]);
     }
 
     removeEdge(id: string): void {
-        this.setDraft((prev) => ({
-            ...prev,
-            graph: { ...prev.graph, edges: prev.graph.edges.filter((e) => e.id !== id) },
-        }));
+        this.setDraftStore("graph", "edges", (edges) => edges.filter((e) => e.id !== id));
     }
 
     setName(name: string): void {
-        this.setDraft((prev) => ({ ...prev, name }));
+        this.setDraftStore("name", name);
     }
 
-    /** Validation surface read by the Toolbar before enabling Run. */
+    /** Validation surface read by the NodeTypeBar before enabling Run. */
     validate(): { ok: boolean; errors: string[] } {
         const errors: string[] = [];
         const graph = this.draftAtom().graph;
