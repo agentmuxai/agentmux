@@ -218,6 +218,44 @@ pub struct SettingsType {
     #[serde(rename = "voice:enabled", default, skip_serializing_if = "Option::is_none")]
     pub voice_enabled: Option<bool>,
 
+    // -- Notification sounds --
+    //
+    // Spec: docs/specs/SPEC_SOUND_NOTIFICATIONS_2026_06_05.md §5.1.
+    //
+    // Master enable. Default at the UX layer is "on" — the frontend treats
+    // `undefined`/absent as enabled, so absence means sounds play. Users
+    // set this to `false` to fully silence the app.
+    #[serde(rename = "notify:sounds:enabled", default, skip_serializing_if = "Option::is_none")]
+    pub notify_sounds_enabled: Option<bool>,
+
+    // 0.0 to 1.0; default 0.6 if unset.
+    #[serde(rename = "notify:sounds:volume", default, skip_serializing_if = "Option::is_none")]
+    pub notify_sounds_volume: Option<f32>,
+
+    // Suppress a pane's sound when that pane is focused AND the window
+    // is in foreground. Default: true.
+    #[serde(rename = "notify:sounds:suppresswhenfocused", default, skip_serializing_if = "Option::is_none")]
+    pub notify_sounds_suppress_when_focused: Option<bool>,
+
+    // Per-event opt-out. Absence = on (default behavior).
+    #[serde(rename = "notify:sound:agent.turn.complete", default, skip_serializing_if = "Option::is_none")]
+    pub notify_sound_agent_turn_complete: Option<bool>,
+
+    #[serde(rename = "notify:sound:agent.turn.error", default, skip_serializing_if = "Option::is_none")]
+    pub notify_sound_agent_turn_error: Option<bool>,
+
+    #[serde(rename = "notify:sound:agent.turn.interrupted", default, skip_serializing_if = "Option::is_none")]
+    pub notify_sound_agent_turn_interrupted: Option<bool>,
+
+    #[serde(rename = "notify:sound:agent.message.accepted", default, skip_serializing_if = "Option::is_none")]
+    pub notify_sound_agent_message_accepted: Option<bool>,
+
+    #[serde(rename = "notify:sound:agent.message.rejected", default, skip_serializing_if = "Option::is_none")]
+    pub notify_sound_agent_message_rejected: Option<bool>,
+
+    #[serde(rename = "notify:sound:agent.stream.stalled", default, skip_serializing_if = "Option::is_none")]
+    pub notify_sound_agent_stream_stalled: Option<bool>,
+
     /// Catch-all for unknown/dynamic keys (e.g. `widget:hidden@defwidget@sysinfo`).
     /// These pass through serde unchanged so the frontend can access them as flat settings keys.
     #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]

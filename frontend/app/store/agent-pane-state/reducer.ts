@@ -425,6 +425,7 @@ export function update(
                 events: [
                     {
                         type: "turn-ended",
+                        outcome,
                         statsMerged: merged != null,
                         stoppingCleared: stoppingWasSet,
                     },

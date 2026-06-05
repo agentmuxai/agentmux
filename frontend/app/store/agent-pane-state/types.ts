@@ -507,7 +507,22 @@ export type AgentPaneEvent =
           thresholdMs: number;
       }
     | { type: "turn-started"; at: number }
-    | { type: "turn-ended"; statsMerged: boolean; stoppingCleared: boolean }
+    | {
+          /**
+           * A turn finished and the phase transitioned to `Done`. Since
+           * the sound-notifications subsystem (SPEC_SOUND_NOTIFICATIONS_
+           * 2026_06_05.md §3.2), the event carries the outcome directly
+           * so downstream consumers (notification sounds, telemetry,
+           * future UI affordances) don't have to snapshot the slot to
+           * read it back from `state.turnPhase.outcome`. The reducer
+           * already computes `outcome` two lines earlier — this is a
+           * pure forwarding of an existing value.
+           */
+          type: "turn-ended";
+          outcome: TurnOutcome;
+          statsMerged: boolean;
+          stoppingCleared: boolean;
+      }
     | { type: "turn-reset" }
     | {
           /**

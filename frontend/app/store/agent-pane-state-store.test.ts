@@ -21,6 +21,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     __resetAllSlots,
+    __resetListeners,
+    addEventListener,
+    type AgentPaneEvent,
     type AgentPaneProjections,
     dispatch,
     dispatchIfRegistered,
@@ -43,6 +46,7 @@ function noopProj(): AgentPaneProjections {
 describe("agent-pane-state-store (cascade contracts)", () => {
     afterEach(() => {
         __resetAllSlots();
+        __resetListeners();
         setEventSink(() => {});
     });
 
@@ -184,6 +188,88 @@ describe("agent-pane-state-store (cascade contracts)", () => {
                 "Interrupting", // RequestStop while working
                 "Done", // TurnEnd
             ]);
+        });
+    });
+
+    // ────────────────────────────────────────────────────────────────
+    // Multicast event listeners — sound-notifications subsystem path.
+    // See docs/specs/SPEC_SOUND_NOTIFICATIONS_2026_06_05.md §4.4 Path B.
+    // ────────────────────────────────────────────────────────────────
+    describe("addEventListener (multicast)", () => {
+        it("delivers every emitted event to subscribers in addition to the single sink", () => {
+            const singleSink = vi.fn();
+            const listener = vi.fn();
+            setEventSink(singleSink);
+            addEventListener(listener);
+
+            registerPane("blockX", "agentX", noopProj());
+            dispatch("blockX", { type: "InitReady", at: 100 });
+
+            // The single sink and the listener both saw the same event.
+            expect(singleSink).toHaveBeenCalledTimes(1);
+            expect(listener).toHaveBeenCalledTimes(1);
+            expect(singleSink.mock.calls[0][0]).toBe("blockX");
+            expect(listener.mock.calls[0][0]).toBe("blockX");
+            expect(listener.mock.calls[0][1]).toMatchObject({ type: "init-ready" });
+        });
+
+        it("unsubscribe stops further delivery to the listener but not the sink", () => {
+            const sink = vi.fn();
+            const listener = vi.fn();
+            setEventSink(sink);
+            const unsub = addEventListener(listener);
+
+            registerPane("blockY", "agentY", noopProj());
+            dispatch("blockY", { type: "InitReady", at: 100 });
+            unsub();
+            dispatch("blockY", { type: "StreamSubscribe", at: 110 });
+
+            expect(listener).toHaveBeenCalledTimes(1); // only the first
+            expect(sink).toHaveBeenCalledTimes(2); // both
+        });
+
+        it("a throwing listener does not poison the sink or other listeners", () => {
+            const sink = vi.fn();
+            const thrower = vi.fn(() => {
+                throw new Error("listener boom");
+            });
+            const good = vi.fn();
+            setEventSink(sink);
+            addEventListener(thrower);
+            addEventListener(good);
+
+            const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+            registerPane("blockZ", "agentZ", noopProj());
+            dispatch("blockZ", { type: "InitReady", at: 100 });
+
+            expect(sink).toHaveBeenCalledTimes(1);
+            expect(thrower).toHaveBeenCalledTimes(1);
+            expect(good).toHaveBeenCalledTimes(1);
+            expect(warn).toHaveBeenCalled();
+            warn.mockRestore();
+        });
+
+        it("turn-ended event carries the outcome for sound-notifications consumers", () => {
+            const seen: AgentPaneEvent[] = [];
+            setEventSink(() => {});
+            addEventListener((_blockId, ev) => {
+                seen.push(ev);
+            });
+
+            registerPane("blockTE", "agentTE", noopProj());
+            dispatch("blockTE", { type: "InitReady", at: 100 });
+            dispatch("blockTE", { type: "StreamSubscribe", at: 100 });
+            dispatch("blockTE", { type: "TurnStart", at: 110 });
+            dispatch("blockTE", { type: "StreamFlushObserved", addedCount: 1, at: 120 });
+            dispatch("blockTE", { type: "TurnEnd", stats: null });
+
+            const turnEnded = seen.find((e) => e.type === "turn-ended");
+            expect(turnEnded).toBeDefined();
+            expect(turnEnded).toMatchObject({
+                type: "turn-ended",
+                // Completed because no RequestStop happened.
+                outcome: "completed",
+            });
         });
     });
 });
