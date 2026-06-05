@@ -418,6 +418,31 @@ fn spawn_host_unix(
     if disable_gpu {
         host_cmd.arg("--disable-gpu");
     }
+    // Linux process-tree reap: PR_SET_PDEATHSIG asks the kernel to SIGKILL
+    // this child the moment its parent (the launcher) dies, even abnormally
+    // (e.g. launcher panic, OOM, SIGKILL from outside). This is the Linux
+    // analogue of Windows' Job Object KILL_ON_JOB_CLOSE that A0 wires up
+    // (SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05 §3 step 3 and
+    // §A1.4). Without it, a launcher crash orphans the CEF host onto PID 1
+    // and the user is left with a zombie tree until manual cleanup.
+    //
+    // The closure runs between fork() and execve() in the child; per
+    // POSIX it MUST NOT allocate, take locks, or call async-signal-unsafe
+    // functions. `prctl(2)` is async-signal-safe. macOS lacks prctl, so
+    // this is gated to Linux; macOS uses NSTask's auto-reap behavior.
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::CommandExt as _;
+        // Safety: prctl is async-signal-safe. No allocation, no syscalls
+        // beyond prctl itself. Errors from prctl are non-fatal — the host
+        // still spawns; we just lose the auto-reap guarantee.
+        unsafe {
+            host_cmd.pre_exec(|| {
+                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0);
+                Ok(())
+            });
+        }
+    }
     match host_cmd.spawn() {
         Ok(c) => {
             let pid = c.id().unwrap_or(0);

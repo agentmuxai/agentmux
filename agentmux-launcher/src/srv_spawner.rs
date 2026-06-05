@@ -156,6 +156,24 @@ pub async fn spawn_srv(
         cmd.creation_flags(CREATE_SUSPENDED | CREATE_NO_WINDOW);
     }
 
+    // Linux process-tree reap (A0): PR_SET_PDEATHSIG → SIGKILL on
+    // launcher death so srv is reaped even if the launcher exits
+    // abnormally (panic/OOM/external SIGKILL). Linux analogue of the
+    // Windows Job Object cleanup the launcher already does. Same
+    // safety contract as the host pre_exec — async-signal-safe call
+    // only. macOS lacks prctl; the macOS launcher reap path is
+    // handled by tokio's child supervision in `run_unix`.
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::CommandExt as _;
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0);
+                Ok(())
+            });
+        }
+    }
+
     let mut child = cmd
         .spawn()
         .map_err(|e| SrvSpawnError::SpawnFailed(e.to_string()))?;

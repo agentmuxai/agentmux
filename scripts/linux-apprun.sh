@@ -27,7 +27,15 @@ this_dir="$(readlink -f "$(dirname "$0")")"
 
 # ---- run_normally: shared body for both "ran from extract dir" and
 # ---- "ran from FUSE mount as fallback". Sets env, registers desktop file,
-# ---- exec's the host binary. ------------------------------------------
+# ---- exec's the LAUNCHER (which then supervises srv + the CEF host).
+# ----
+# ---- Exec target changed in A0 (SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH
+# ---- 2026_06_05 §3). Previously this execed `usr/bin/agentmux` directly,
+# ---- which left the launcher's window/pool/instance reducer and saga
+# ---- coordinator dormant (host's launcher_ipc::connect_to_launcher
+# ---- returned None on non-Windows). Now AppRun → launcher → host so the
+# ---- supervision tree exists; A1 (a follow-up PR) implements the Unix
+# ---- IPC server that drives the reducer.
 run_normally() {
     export APPDIR="$this_dir"
     if [ -n "$APPIMAGE" ] && [ -x "$this_dir/install-linux-desktop.sh" ]; then
@@ -36,7 +44,7 @@ run_normally() {
     # libcef.so + EGL/GLESv2 sit in usr/bin alongside agentmux-cef. Binary
     # is built without RPATH so we set LD_LIBRARY_PATH explicitly.
     export LD_LIBRARY_PATH="$this_dir/usr/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    exec "$this_dir/usr/bin/agentmux" "$@"
+    exec "$this_dir/usr/bin/agentmux-launcher" "$@"
 }
 
 # ---- Detect a re-exec from the cache so we don't loop. ----------------
@@ -53,7 +61,7 @@ fi
 # If extraction succeeds, we re-exec from the cached copy. If it fails for
 # any reason (no $HOME, full disk, denied perms), fall through to running
 # from the FUSE mount unchanged — slow but correct.
-if [ ! -x "$EXTRACT_DIR/usr/bin/agentmux" ]; then
+if [ ! -x "$EXTRACT_DIR/usr/bin/agentmux-launcher" ]; then
     if mkdir -p "$(dirname "$EXTRACT_DIR")" 2>/dev/null; then
         # Extract to a temp dir, then rename. If interrupted, the next run
         # sees a missing or partial $EXTRACT_DIR and retries; the final
@@ -94,7 +102,7 @@ if [ ! -x "$EXTRACT_DIR/usr/bin/agentmux" ]; then
 fi
 
 # If extraction succeeded, re-exec from the cached copy.
-if [ -x "$EXTRACT_DIR/usr/bin/agentmux" ] && [ -x "$EXTRACT_DIR/AppRun" ]; then
+if [ -x "$EXTRACT_DIR/usr/bin/agentmux-launcher" ] && [ -x "$EXTRACT_DIR/AppRun" ]; then
     export AGENTMUX_EXTRACTED_RUN=1
     exec "$EXTRACT_DIR/AppRun" "$@"
 fi
