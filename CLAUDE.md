@@ -145,7 +145,7 @@ These views exist in the codebase but are **not** widget-bar entries — do not 
 | **Identity** | Tab inside an Agent pane (cog → settings panel → Identity tab). The `view: "identity"` registration and `IdentityPaneViewModel` exist for `pane.open` RPC and right-click menu paths; no widget-bar entry. |
 | **Memory** | Tab inside an Agent pane (cog → settings panel → Memory tab). Same shape as Identity — view registered for programmatic access only. Replaces the old Forge concept. The `block.tsx` migration shim still redirects `view: "forge"` blocks to `view: "agent"` for backward compatibility. |
 | **Settings** | Hamburger menu (≡) in the top tab bar → Settings. Opens `settings.json` in the user's default editor. |
-| **DevTools** | Hamburger menu (≡) in the top tab bar → Dev Tools. Toggles Chromium DevTools — does not open a pane. Was a `defwidget@devtools` widget-bar entry until PR #936. |
+| **DevTools** | View ▸ Toggle DevTools (macOS native menu bar) or the hamburger menu on other platforms; also the `dev:devtools` command. Toggles Chromium DevTools — does not open a pane. It is **not** a widget (no `defwidget@devtools`). |
 | **Subagent** | Spawned by clicking a sub-agent in the Swarm pane's overview. Not a top-level pane type the user opens directly. |
 
 ---
