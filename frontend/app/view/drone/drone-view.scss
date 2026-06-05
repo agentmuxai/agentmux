@@ -12,22 +12,27 @@
     overflow: hidden;
 }
 
-.drone-toolbar {
+// ── Top node-type bar ─────────────────────────────────────────────────
+
+.drone-bar {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 8px 12px;
+    padding: 6px 12px;
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
     position: relative;
+    flex-wrap: wrap;
 }
 
-.drone-toolbar-name {
-    flex: 1;
+.drone-bar-name {
+    width: 160px;
+    flex-shrink: 0;
     background: transparent;
     border: 1px solid transparent;
     color: inherit;
     font-size: 14px;
+    font-weight: 500;
     padding: 4px 8px;
     border-radius: 0;
     &:focus, &:hover {
@@ -36,9 +41,52 @@
     }
 }
 
-.drone-toolbar-actions {
+.drone-bar-types {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.drone-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px 4px 8px;
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
+    border-left: 3px solid var(--block-color, var(--accent-color));
+    border-radius: 0;
+    color: inherit;
+    cursor: grab;
+    font-size: 12px;
+    white-space: nowrap;
+    user-select: none;
+    &:hover {
+        background: color-mix(in srgb, var(--block-color) 12%, transparent);
+        border-color: var(--block-color, var(--border-color));
+    }
+    &:active {
+        cursor: grabbing;
+    }
+}
+
+.drone-chip-emoji {
+    font-size: 14px;
+    line-height: 1;
+}
+
+.drone-chip-label {
+    font-weight: 500;
+}
+
+.drone-bar-actions {
     display: flex;
     gap: 6px;
+    flex-shrink: 0;
+    margin-left: auto;
 }
 
 .drone-btn {
@@ -75,72 +123,12 @@
     z-index: 5;
 }
 
-.drone-body {
-    display: grid;
-    grid-template-columns: 200px 1fr 280px;
+// ── Stage: everything below the bar is canvas ─────────────────────────
+
+.drone-stage {
+    position: relative;
     flex: 1;
     min-height: 0;
-}
-
-.drone-palette {
-    border-right: 1px solid var(--border-color);
-    padding: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    overflow-y: auto;
-}
-
-.drone-palette-title {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--secondary-text-color);
-    padding: 4px;
-}
-
-.drone-palette-section {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--secondary-text-color);
-    padding: 8px 4px 4px;
-    border-top: 1px solid var(--border-color);
-    margin-top: 4px;
-}
-
-.drone-palette-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 8px;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 0;
-    cursor: pointer;
-    color: inherit;
-    text-align: left;
-    font-size: 12px;
-    &:hover {
-        border-color: var(--border-color);
-        background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
-    }
-    &--drone {
-        font-style: italic;
-        opacity: 0.85;
-    }
-}
-
-.drone-palette-item-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--block-color, var(--accent-color));
-    flex-shrink: 0;
-}
-
-.drone-canvas-wrap {
-    position: relative;
     overflow: hidden;
     background: color-mix(in srgb, var(--main-text-color) 2%, var(--main-bg-color));
     background-image: radial-gradient(
@@ -154,14 +142,33 @@
 .drone-canvas {
     position: absolute;
     inset: 0;
-    overflow: auto;
+    overflow: hidden;
+    touch-action: none; // we own pan/zoom via pointer + wheel
+    cursor: grab;
+    &:active {
+        cursor: grabbing;
+    }
+}
+
+// The transformed layer. A zero-size origin point at (0,0) flow-space;
+// all nodes + edges are positioned absolutely in flow coordinates and
+// this single transform pans/zooms the whole graph at once.
+.drone-viewport {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
+    will-change: transform;
 }
 
 .drone-canvas-edges {
     position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: 1px;
+    overflow: visible; // lines drawn at flow coords must not clip
     pointer-events: none;
 }
 
@@ -173,12 +180,43 @@
 
 .drone-canvas-hint {
     position: absolute;
-    bottom: 8px;
-    left: 8px;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    max-width: 360px;
+    text-align: center;
+    line-height: 1.6;
     color: var(--secondary-text-color);
-    font-size: 10px;
-    opacity: 0.7;
+    font-size: 12px;
+    opacity: 0.8;
     pointer-events: none;
+}
+
+.drone-controls {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    z-index: 12; // above the run-log overlay so zoom stays reachable
+}
+
+.drone-ctrl {
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
+    color: inherit;
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    &:hover {
+        background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+    }
 }
 
 .drone-node {
@@ -188,8 +226,12 @@
     border: 1px solid var(--border-color);
     border-radius: 0;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    cursor: pointer;
+    cursor: grab;
+    user-select: none;
     transition: border-color 80ms ease;
+    &:active {
+        cursor: grabbing;
+    }
     &--selected {
         border-color: var(--accent-color);
         box-shadow: 0 0 0 1px var(--accent-color);
@@ -199,13 +241,22 @@
 .drone-node-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 6px;
     padding: 4px 8px;
     background: var(--block-color, var(--accent-color));
     color: white;
     border-radius: 0;
     font-size: 11px;
     font-weight: 500;
+}
+
+.drone-node-emoji {
+    font-size: 13px;
+    line-height: 1;
+}
+
+.drone-node-label {
+    flex: 1;
 }
 
 .drone-node-close {
@@ -229,11 +280,36 @@
     white-space: nowrap;
 }
 
+// ── Inspector: right-side slide-over overlay ──────────────────────────
+
 .drone-inspector {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 320px;
     border-left: 1px solid var(--border-color);
+    background: var(--main-bg-color);
+    box-shadow: -4px 0 16px rgba(0, 0, 0, 0.25);
     overflow-y: auto;
     padding: 8px 12px;
     font-size: 12px;
+    z-index: 10;
+}
+
+.drone-inspector-close {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    background: transparent;
+    border: none;
+    color: var(--secondary-text-color);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    &:hover {
+        color: var(--main-text-color);
+    }
 }
 
 .drone-inspector-empty {
@@ -300,13 +376,19 @@
     gap: 4px;
 }
 
+// ── Run log: bottom overlay drawer ────────────────────────────────────
+
 .drone-runpanel {
-    border-top: 1px solid var(--border-color);
-    flex-shrink: 0;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
     max-height: 180px;
     display: flex;
     flex-direction: column;
-    background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+    border-top: 1px solid var(--border-color);
+    background: color-mix(in srgb, var(--main-text-color) 6%, var(--main-bg-color));
+    z-index: 8;
 }
 
 .drone-runpanel-title {
