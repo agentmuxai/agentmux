@@ -731,7 +731,11 @@ async fn run_unix(
     // -----------------------------------------------------------------
 
     // Compute the socket path from a data-dir hash + version, identical
-    // scoping rule to the Windows pipe namespace.
+    // scoping rule to the Windows pipe namespace. `pipe_name` is now
+    // pure on both platforms — the side-effecting ensure step lives
+    // in `ensure_ipc_socket_dir` and is invoked separately below so
+    // that any future read-only inspector (e.g. a Linux `--diag`
+    // port) can call `pipe_name` without mutating the filesystem.
     let dir_hash = hash::data_dir_hash16(&paths.data_dir, version);
     let socket_path = ipc::pipe_name(&dir_hash);
     log(&format!(
@@ -740,6 +744,10 @@ async fn run_unix(
         paths.data_dir.display(),
         version
     ));
+    // Ensure the socket dir exists with safe ownership/perms BEFORE
+    // any bind attempts. This may call std::process::exit(2) on a
+    // hostile-dir-on-disk scenario (cross-user squatting attack).
+    let _ = ipc::ensure_ipc_socket_dir();
 
     // Single-instance handshake (A1.6). The bind is the authoritative
     // signal: a second launcher pointing at the same data dir gets

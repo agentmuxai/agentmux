@@ -46,9 +46,20 @@ pub fn pipe_name(data_dir_hash16: &str) -> String {
 
 #[cfg(unix)]
 pub fn pipe_name(data_dir_hash16: &str) -> String {
+    // PURE — no filesystem mutation. `ipc_socket_dir_path` returns
+    // the path string without creating or validating the directory.
+    // Callers that need the directory to actually exist + be safe
+    // (only the launcher's startup path needs that) must call
+    // `ensure_ipc_socket_dir()` separately before binding/connecting.
+    //
+    // Reagent P2 on PR #1288: pipe_name on Windows is a pure string
+    // formatter; making the Unix variant filesystem-mutating + able
+    // to std::process::exit was a footgun for any future read-only
+    // inspector (e.g. the planned Linux `--diag` port) that calls
+    // pipe_name purely to locate the socket.
     format!(
         "{}/{}.sock",
-        ipc_socket_dir().display(),
+        ipc_socket_dir_path().display(),
         data_dir_hash16
     )
 }
@@ -64,11 +75,32 @@ pub fn srv_pipe_name(data_dir_hash16: &str) -> String {
 
 #[cfg(unix)]
 pub fn srv_pipe_name(data_dir_hash16: &str) -> String {
+    // PURE — see comment on `pipe_name` above.
     format!(
         "{}/{}-srv.sock",
-        ipc_socket_dir().display(),
+        ipc_socket_dir_path().display(),
         data_dir_hash16
     )
+}
+
+/// Pure computation of the IPC socket directory path. No I/O, no
+/// process-exit. Used by `pipe_name` / `srv_pipe_name` so they
+/// behave like their Windows counterparts (pure string formatters).
+///
+/// Resolution order (A1.1 of SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_
+/// 2026_06_05):
+///   1. `$XDG_RUNTIME_DIR/agentmux/` — preferred.
+///   2. `/tmp/agentmux-{uid}/` — fallback.
+#[cfg(unix)]
+pub fn ipc_socket_dir_path() -> std::path::PathBuf {
+    if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") {
+        let mut p = std::path::PathBuf::from(runtime);
+        p.push("agentmux");
+        p
+    } else {
+        let uid = unsafe { libc::getuid() };
+        std::path::PathBuf::from(format!("/tmp/agentmux-{}", uid))
+    }
 }
 
 /// Directory under which all launcher Unix sockets live. Created with
@@ -101,18 +133,29 @@ pub fn srv_pipe_name(data_dir_hash16: &str) -> String {
 ///   * Refusal = `std::process::exit(2)` with a clear error. We do
 ///     NOT try to recover by picking a different path; that would
 ///     enlarge the trust boundary.
+/// Ensure the IPC socket directory exists with safe ownership + mode.
+///
+/// This is the SIDE-EFFECTING half of the path/ensure split — callers
+/// that need the directory to actually exist (only the launcher's
+/// startup path) call this BEFORE binding/connecting. Read-only
+/// inspectors (e.g. future `--diag` tools) use `ipc_socket_dir_path`
+/// directly and never reach this code.
+///
+/// Returns the validated directory path on success. Calls
+/// `std::process::exit(2)` on any verification failure — we do NOT
+/// recover by picking a different path; that would enlarge the trust
+/// boundary.
+///
+/// (Reagent P2 on PR #1288: previously this logic was inside the
+/// `ipc_socket_dir` function which `pipe_name` called, making
+/// `pipe_name` a filesystem-mutating + process-exiting function on
+/// Unix while it's a pure string formatter on Windows. Split into a
+/// pure `ipc_socket_dir_path` + this ensure-step.)
 #[cfg(unix)]
-pub fn ipc_socket_dir() -> std::path::PathBuf {
+pub fn ensure_ipc_socket_dir() -> std::path::PathBuf {
     use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
 
-    let dir = if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") {
-        let mut p = std::path::PathBuf::from(runtime);
-        p.push("agentmux");
-        p
-    } else {
-        let uid = unsafe { libc::getuid() };
-        std::path::PathBuf::from(format!("/tmp/agentmux-{}", uid))
-    };
+    let dir = ipc_socket_dir_path();
 
     // Security (codex P1 on PR #1288): the /tmp fallback is reachable
     // by any local user. If an attacker pre-creates the path with a
