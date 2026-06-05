@@ -270,8 +270,14 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // Falls back to ~/.agentmux/config for non-portable installs.
                 let config_home = std::env::var("AGENTMUX_CONFIG_HOME")
                     .unwrap_or_else(|_| format!("{}/.agentmux/config", home));
-                // Auth dir
-                let auth_dir = format!("{}/auth/{}", config_home, provider.auth_dir_name);
+                // Auth dir — the DEFAULT provider auth lives in the shared,
+                // instance/channel/version-independent providers area so a single
+                // login is shared everywhere (the structural fix for the per-channel
+                // validate-spin regression). The per-identity bundle override
+                // (identity_handlers) still wins for explicit multi-account.
+                let auth_dir = agentmux_common::DataPaths::from_env()
+                    .map(|p| p.provider_auth_dir(provider.auth_dir_name).to_string_lossy().into_owned())
+                    .unwrap_or_else(|| format!("{}/.agentmux/shared/providers/{}", home, provider.auth_dir_name));
                 let _ = std::fs::create_dir_all(&auth_dir);
                 env_vars.insert(provider.auth_config_dir_env_var.to_string(), json!(auth_dir));
                 for (k, v) in provider.auth_extra_env {

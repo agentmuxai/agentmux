@@ -413,10 +413,11 @@ export class AgentViewModel implements ViewModel {
         // GIT_CONFIG_GLOBAL is intentionally not set: we use the 4 identity
         // env vars above which git always honours, avoiding any path-handling edge cases.
 
-        // Provider auth isolation: shared per-version auth dir (not per-agent)
-        // Each AgentMux version gets its own auth space via the Tauri app data dir,
-        // which already includes the version in its identifier (ai.agentmux.app.vX-Y-Z).
-        // Skip if provider has no isolated auth dir configured (e.g. Claude uses ~/.claude/ globally).
+        // Provider auth: the default lives in the account-wide, version- and
+        // channel-independent shared dir (~/.agentmux/shared/providers/<provider>/),
+        // resolved by ensureAuthDir → ensure_auth_dir; one login is shared across
+        // every instance / channel / version. Skip the env var only for providers
+        // with no isolated auth dir configured.
         if (provider.authConfigDirEnvVar) {
             const authDir = await getApi().ensureAuthDir(provider.id);
             envVars[provider.authConfigDirEnvVar] = authDir;
