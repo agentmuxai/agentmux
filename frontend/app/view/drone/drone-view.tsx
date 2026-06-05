@@ -483,7 +483,7 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
                                 <Show
                                     when={selected()}
                                     fallback={
-                                        <div class="drone-node-body drone-node-summary">
+                                        <div class="drone-node-summary">
                                             {nodeSummary(n)}
                                         </div>
                                     }
@@ -640,6 +640,7 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                 <NodeField label="Task">
                     <textarea
                         class="drone-input drone-input--grow nodrag nowheel"
+                        ref={(el) => autoGrow(el)}
                         value={(p.node.data["task"] as string) ?? ""}
                         placeholder="{{...}} interpolation supported"
                         onInput={(e) => {
@@ -676,6 +677,7 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                 <NodeField label="Body">
                     <textarea
                         class="drone-input drone-input--grow nodrag nowheel"
+                        ref={(el) => autoGrow(el)}
                         value={(p.node.data["body"] as string) ?? ""}
                         placeholder='{"key": "{{var.x}}"}'
                         onInput={(e) => {
@@ -700,6 +702,7 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                 <NodeField label="Template">
                     <textarea
                         class="drone-input drone-input--grow nodrag nowheel"
+                        ref={(el) => autoGrow(el)}
                         value={(p.node.data["template"] as string) ?? ""}
                         placeholder="Hello {{var.name}}!"
                         onInput={(e) => {

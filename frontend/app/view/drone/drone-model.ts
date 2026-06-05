@@ -178,8 +178,6 @@ export class DroneViewModel implements ViewModel {
     // teardown. Codex P2 on PR #844.
     private disposed = false;
 
-    selectedNodeAtom: Accessor<FlowNode | null>;
-
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
@@ -187,11 +185,6 @@ export class DroneViewModel implements ViewModel {
         this.viewName = createMemo(() => {
             const block = this.blockAtom();
             return (block?.meta?.["frame:title"] as string) ?? this.draftAtom().name;
-        });
-        this.selectedNodeAtom = createMemo(() => {
-            const id = this.selectedAtom();
-            if (!id) return null;
-            return this.draftAtom().graph.nodes.find((n) => n.id === id) ?? null;
         });
 
         // Register the slot SYNCHRONOUSLY so the first dispatch (in
