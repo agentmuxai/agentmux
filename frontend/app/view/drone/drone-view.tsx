@@ -23,7 +23,6 @@ export const DroneView = (props: { model: DroneViewModel }): JSX.Element => {
             <NodeTypeBar model={m} />
             <div class="drone-stage">
                 <Canvas model={m} />
-                <InspectorPanel model={m} />
                 <RunPanel model={m} />
             </div>
         </div>
@@ -150,6 +149,9 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
     const clampZoom = (z: number) => Math.min(ZMAX, Math.max(ZMIN, z));
 
     const onWheel = (e: WheelEvent) => {
+        // Let scrollable areas inside nodes (class "nowheel") scroll
+        // their content instead of zooming the canvas.
+        if ((e.target as HTMLElement | null)?.closest(".nowheel")) return;
         e.preventDefault();
         const rect = canvasEl.getBoundingClientRect();
         const mx = e.clientX - rect.left;
@@ -478,7 +480,19 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
                                         ×
                                     </button>
                                 </header>
-                                <div class="drone-node-body">{nodeSummary(n)}</div>
+                                <Show
+                                    when={selected()}
+                                    fallback={
+                                        <div class="drone-node-body drone-node-summary">
+                                            {nodeSummary(n)}
+                                        </div>
+                                    }
+                                >
+                                    <NodeFields
+                                        model={m}
+                                        node={n}
+                                    />
+                                </Show>
                                 <For each={meta.inputs}>
                                     {(h, i) => (
                                         <div
@@ -580,7 +594,7 @@ function truncate(s: string, max = 40): string {
 // helpers are the single source of truth for where a wire attaches, used
 // by both the rendered ports and the edge paths so they always line up.
 
-const NODE_W = 160;
+const NODE_W = 248;
 
 /** Vertical offset (px, node-relative) of port `idx` of `count`. */
 function portOffsetY(count: number, idx: number): number {
@@ -604,66 +618,46 @@ function bezierPath(x1: number, y1: number, x2: number, y2: number): string {
     return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
 }
 
-// ── Inspector ─────────────────────────────────────────────────────────
+// ── NodeFields — inline in-node parameter editing ────────────────────
+//
+// Rendered inside the node body when the node is selected. Replaces the
+// old right-side InspectorPanel: no more slide-over. Every interactive
+// element carries class "nodrag" so interacting with a field never drags
+// the node or pans/zooms the canvas.
+//
+// Long text fields (task, body, template) use auto-grow textareas capped
+// at 5 lines. The Variables list stays inline here in PR1; a popover
+// escalation for complex fields lands in PR2.
 
-const InspectorPanel = (p: { model: DroneViewModel }): JSX.Element => {
-    const m = p.model;
-    // Slide-over overlay: only mounted while a node is selected, so the
-    // canvas stays full-bleed otherwise.
-    //
-    // `keyed` on the selected NODE: switching selection re-runs the child
-    // and remounts InspectorForm with the new node, so the title / fields
-    // / actions can never stay bound to a previously-selected node. The
-    // store keeps each node's proxy reference stable, so editing a field
-    // does NOT change the key (no remount → the focused input is kept) —
-    // only changing which node is selected does.
-    return (
-        <Show when={m.selectedNodeAtom()} keyed>
-            {(node) => (
-                <aside class="drone-inspector" aria-label="Inspector">
-                    <button
-                        class="drone-inspector-close"
-                        aria-label="Close inspector"
-                        onClick={() => m.setSelected(null)}
-                    >
-                        ×
-                    </button>
-                    <InspectorForm model={m} node={node} />
-                </aside>
-            )}
-        </Show>
-    );
-};
-
-const InspectorForm = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element => {
-    // The parent <Show> is keyed on the node, so this form remounts on each
-    // selection change — `p.node` is fixed for this instance's lifetime and
-    // `meta` can be computed once. (A node's kind never changes; only its
-    // data fields do, which the field bindings below read reactively.)
+const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element => {
+    // Node kind never changes during its lifetime, so meta is stable.
     const meta = blockMeta(p.node.data.kind as BlockKind);
     const update = (patch: Record<string, unknown>) =>
         p.model.updateNodeData(p.node.id, patch);
+    void meta; // used below in AgentRefEditor / result panel
 
     return (
-        <div class="drone-inspector-form">
-            <div class="drone-inspector-title">{meta.label}</div>
-            <div class="drone-inspector-id">{p.node.id}</div>
+        <div class="drone-node-fields">
             <Show when={p.node.data.kind === "agent"}>
                 <AgentRefEditor node={p.node} update={update} />
-                <Field label="Task ({{...}} interpolation supported)">
+                <NodeField label="Task">
                     <textarea
-                        class="drone-input"
-                        rows="4"
+                        class="drone-input drone-input--grow nodrag nowheel"
                         value={(p.node.data["task"] as string) ?? ""}
-                        onInput={(e) => update({ task: e.currentTarget.value })}
+                        placeholder="{{...}} interpolation supported"
+                        onInput={(e) => {
+                            update({ task: e.currentTarget.value });
+                            autoGrow(e.currentTarget);
+                        }}
+                        onFocus={(e) => autoGrow(e.currentTarget)}
                     />
-                </Field>
+                </NodeField>
                 <AgentResultPanel model={p.model} blockId={p.node.id} />
             </Show>
             <Show when={p.node.data.kind === "api"}>
-                <Field label="Method">
+                <NodeField label="Method">
                     <select
-                        class="drone-input"
+                        class="drone-input nodrag"
                         value={(p.node.data["method"] as string) ?? "GET"}
                         onChange={(e) => update({ method: e.currentTarget.value })}
                     >
@@ -673,44 +667,51 @@ const InspectorForm = (p: { model: DroneViewModel; node: FlowNode }): JSX.Elemen
                         <option>PATCH</option>
                         <option>DELETE</option>
                     </select>
-                </Field>
-                <Field label="URL">
+                </NodeField>
+                <NodeField label="URL">
                     <input
-                        class="drone-input"
+                        class="drone-input nodrag"
                         value={(p.node.data["url"] as string) ?? ""}
                         onInput={(e) => update({ url: e.currentTarget.value })}
-                        placeholder="https://example.com/{{var.endpoint}}"
+                        placeholder="https://…/{{var.path}}"
                     />
-                </Field>
-                <Field label="Body">
+                </NodeField>
+                <NodeField label="Body">
                     <textarea
-                        class="drone-input"
-                        rows="4"
+                        class="drone-input drone-input--grow nodrag nowheel"
                         value={(p.node.data["body"] as string) ?? ""}
-                        onInput={(e) => update({ body: e.currentTarget.value })}
+                        placeholder='{"key": "{{var.x}}"}'
+                        onInput={(e) => {
+                            update({ body: e.currentTarget.value });
+                            autoGrow(e.currentTarget);
+                        }}
+                        onFocus={(e) => autoGrow(e.currentTarget)}
                     />
-                </Field>
+                </NodeField>
             </Show>
             <Show when={p.node.data.kind === "condition"}>
-                <Field label="Expression (e.g. {{var.x}} > 10)">
+                <NodeField label="if">
                     <input
-                        class="drone-input"
+                        class="drone-input nodrag"
                         value={(p.node.data["expr"] as string) ?? ""}
                         onInput={(e) => update({ expr: e.currentTarget.value })}
                         placeholder="{{var.count}} > 0"
                     />
-                </Field>
+                </NodeField>
             </Show>
             <Show when={p.node.data.kind === "response"}>
-                <Field label="Template (final drone output)">
+                <NodeField label="Template">
                     <textarea
-                        class="drone-input"
-                        rows="4"
+                        class="drone-input drone-input--grow nodrag nowheel"
                         value={(p.node.data["template"] as string) ?? ""}
-                        onInput={(e) => update({ template: e.currentTarget.value })}
                         placeholder="Hello {{var.name}}!"
+                        onInput={(e) => {
+                            update({ template: e.currentTarget.value });
+                            autoGrow(e.currentTarget);
+                        }}
+                        onFocus={(e) => autoGrow(e.currentTarget)}
                     />
-                </Field>
+                </NodeField>
             </Show>
             <Show when={p.node.data.kind === "variables"}>
                 <VariablesEditor
@@ -724,12 +725,20 @@ const InspectorForm = (p: { model: DroneViewModel; node: FlowNode }): JSX.Elemen
     );
 };
 
-const Field = (p: { label: string; children: JSX.Element }): JSX.Element => (
-    <label class="drone-field">
-        <span class="drone-field-label">{p.label}</span>
+/** Compact label + control row rendered inside a node. */
+const NodeField = (p: { label: string; children: JSX.Element }): JSX.Element => (
+    <label class="drone-node-field">
+        <span class="drone-node-field-label">{p.label}</span>
         {p.children}
     </label>
 );
+
+/** Auto-grow a textarea up to a CSS max-height cap. */
+function autoGrow(el: HTMLTextAreaElement): void {
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+}
+
 
 const VariablesEditor = (p: {
     entries: Array<{ name: string; value: string }>;
@@ -744,19 +753,19 @@ const VariablesEditor = (p: {
                 {(entry, i) => (
                     <div class="drone-vars-row">
                         <input
-                            class="drone-input"
+                            class="drone-input nodrag"
                             value={entry.name}
                             onInput={(e) => update(i(), { name: e.currentTarget.value })}
                             placeholder="name"
                         />
                         <input
-                            class="drone-input"
+                            class="drone-input nodrag"
                             value={entry.value}
                             onInput={(e) => update(i(), { value: e.currentTarget.value })}
                             placeholder="value"
                         />
                         <button
-                            class="drone-btn drone-btn--small"
+                            class="drone-btn drone-btn--small nodrag"
                             onClick={() => p.onChange(p.entries.filter((_, idx) => idx !== i()))}
                         >
                             ×
@@ -765,7 +774,7 @@ const VariablesEditor = (p: {
                 )}
             </For>
             <button
-                class="drone-btn drone-btn--small"
+                class="drone-btn drone-btn--small nodrag"
                 onClick={() => p.onChange([...p.entries, { name: "", value: "" }])}
             >
                 + Add
@@ -826,38 +835,38 @@ const AgentRefEditor = (p: {
 
     return (
         <>
-            <Field label="Identity">
+            <NodeField label="Identity">
                 <select
-                    class="drone-input"
+                    class="drone-input nodrag"
                     value={ref().identityId}
                     onChange={(e) => setRef({ identityId: e.currentTarget.value })}
                 >
-                    <option value="">— Blank (ambient creds) —</option>
+                    <option value="">— blank —</option>
                     <For each={(identities() ?? []).filter((b) => !b.is_blank)}>
                         {(bundle) => <option value={bundle.id}>{bundle.name}</option>}
                     </For>
                 </select>
-            </Field>
-            <Field label="Memory">
+            </NodeField>
+            <NodeField label="Memory">
                 <select
-                    class="drone-input"
+                    class="drone-input nodrag"
                     value={ref().memoryId}
                     onChange={(e) => setRef({ memoryId: e.currentTarget.value })}
                 >
-                    <option value="">— Blank (vanilla CLI) —</option>
+                    <option value="">— blank —</option>
                     <For each={(memories() ?? []).filter((m) => !m.is_blank)}>
                         {(memory) => <option value={memory.id}>{memory.name}</option>}
                     </For>
                 </select>
-            </Field>
-            <Field label="Instance name (optional, for named-agent continuation)">
+            </NodeField>
+            <NodeField label="Instance">
                 <input
-                    class="drone-input"
+                    class="drone-input nodrag"
                     value={ref().instanceName}
                     onInput={(e) => setRef({ instanceName: e.currentTarget.value })}
-                    placeholder="leave blank for one-shot"
+                    placeholder="blank = one-shot"
                 />
-            </Field>
+            </NodeField>
         </>
     );
 };
