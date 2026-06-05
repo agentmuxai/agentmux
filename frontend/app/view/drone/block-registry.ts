@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Block kind metadata — drives the BlockPalette, default block data,
+// Block kind metadata — drives the NodeTypeBar chips, default block data,
 // and the InspectorPanel field schema. One source of truth shared by
 // all node components and the validators.
 
@@ -16,11 +16,13 @@ export interface BlockHandleSpec {
 
 export interface BlockKindMeta {
     kind: BlockKind;
+    /** Unicode emoji shown on the top-bar chip + the node header. */
+    emoji: string;
     label: string;
     description: string;
     /** Hex color for the node header strip. */
     color: string;
-    /** FontAwesome-class icon string (used by the canvas + palette). */
+    /** FontAwesome-class icon string (legacy; superseded by `emoji`). */
     icon: string;
     /** Default per-kind data fields the node ships with. */
     defaultData: Record<string, unknown>;
@@ -32,6 +34,7 @@ export interface BlockKindMeta {
 export const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
     variables: {
         kind: "variables",
+        emoji: "🔢",
         label: "Variables",
         description: "Declare drone-scope variables. Read via {{var.name}}.",
         color: "#a855f7",
@@ -44,6 +47,7 @@ export const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
     },
     agent: {
         kind: "agent",
+        emoji: "🤖",
         label: "Agent",
         description: "Run an agent with a per-call task prompt.",
         color: "#3b82f6",
@@ -64,6 +68,7 @@ export const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
     },
     api: {
         kind: "api",
+        emoji: "🌐",
         label: "API",
         description: "Make an HTTP request. Headers and body support {{...}}.",
         color: "#10b981",
@@ -79,6 +84,7 @@ export const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
     },
     condition: {
         kind: "condition",
+        emoji: "🔀",
         label: "Condition",
         description: "Boolean expression. Output `result` is true / false.",
         color: "#eab308",
@@ -94,6 +100,7 @@ export const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
     },
     response: {
         kind: "response",
+        emoji: "🏁",
         label: "Response",
         description: "Terminal output. Exactly one per drone.",
         color: "#ef4444",
@@ -106,7 +113,7 @@ export const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
     },
 };
 
-/** Stable list for the BlockPalette — palette order is rendering order. */
+/** Stable list for the NodeTypeBar — chip order is rendering order. */
 export const BLOCK_KINDS: BlockKind[] = [
     "variables",
     "agent",

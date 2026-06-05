@@ -1358,6 +1358,22 @@ impl AgentMuxHandler {
         let failed_url = failed_url.map(CefString::to_string).unwrap_or_default();
         let error_code_i32 = error_code_raw as i32;
 
+        // JSON-encode the URL so it is a safe JS string literal: a real URL can
+        // contain a single quote (e.g. `?q=can't`), which would otherwise break
+        // the interpolated JS in the Retry handler below.
+        let failed_url_js =
+            serde_json::to_string(&failed_url).unwrap_or_else(|_| "\"\"".to_string());
+        // Auto-retry ONLY for the dev frontend (the main window), which commonly
+        // races the Vite dev server on launch. Browser panes load arbitrary user
+        // URLs through this SAME handler — auto-retrying their failures (offline
+        // site, DNS error, refused service) would be an unbounded reload loop, so
+        // panes get a manual Retry only.
+        let auto_retry = if self.is_browser_pane {
+            String::new()
+        } else {
+            "setTimeout(__amxRetry, 1200);".to_string()
+        };
+
         tracing::error!(
             "Load error: url={} error={} ({})",
             failed_url,
@@ -1414,7 +1430,15 @@ impl AgentMuxHandler {
         <p>Error: {error_text} ({error_code_i32})</p>
         <p>Make sure the Vite dev server is running:<br>
            <code>task dev</code> or <code>npx vite</code></p>
-        <button class="retry" onclick="location.reload()">Retry</button>
+        <button class="retry" onclick="__amxRetry()">Retry</button>
+    <script>
+        // This error page is itself a data: URI, so location.reload() would just
+        // reload THIS page (and a data: reload aborts) — the original URL would
+        // never be re-tried. Navigate to the real failed URL instead.
+        var __amxTarget = {failed_url_js};
+        function __amxRetry() {{ location.href = __amxTarget; }}
+        {auto_retry}
+    </script>
     </div>
 </body>
 </html>"#

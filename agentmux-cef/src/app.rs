@@ -101,6 +101,21 @@ wrap_window_delegate! {
             if self.runtime_style == RuntimeStyle::CHROME {
                 window.show();
             }
+
+            // macOS: a non-frameless popup (DevTools) is meant to have a native
+            // title bar with a close button (works on Windows), but CEF's
+            // Chrome-style window comes up on macOS WITHOUT the standard
+            // traffic-light buttons — so DevTools can't be closed with the red X.
+            // Force the NSWindow to a standard titled+closable style and un-hide
+            // its buttons. The main window is frameless (custom HTML title bar)
+            // and is deliberately left untouched.
+            #[cfg(target_os = "macos")]
+            if !self.frameless {
+                let nsview = window.window_handle() as *mut std::ffi::c_void;
+                if !nsview.is_null() {
+                    unsafe { ensure_macos_native_window_buttons(nsview) };
+                }
+            }
         }
 
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
@@ -334,6 +349,55 @@ wrap_browser_view_delegate! {
             self.runtime_style
         }
     }
+}
+
+/// macOS: ensure a non-frameless CEF Views window (the DevTools popup) shows the
+/// standard title-bar buttons. CEF's Chrome-style popup comes up on macOS without
+/// the close/minimize/zoom traffic-lights, so DevTools can't be closed with the X.
+/// Reach the NSWindow via `[NSView window]`, set a standard
+/// titled+closable+miniaturizable+resizable style mask, and un-hide the three
+/// standard buttons. Raw libobjc FFI, mirroring `set_macos_app_display_name`.
+#[cfg(target_os = "macos")]
+unsafe fn ensure_macos_native_window_buttons(nsview: *mut std::ffi::c_void) {
+    use std::ffi::{c_char, c_void};
+    type Id = *mut c_void;
+    type Sel = *const c_void;
+    extern "C" {
+        fn sel_registerName(name: *const c_char) -> Sel;
+        fn objc_msgSend();
+    }
+
+    // nswindow = [nsview window]
+    let sel_window = sel_registerName(b"window\0".as_ptr() as _);
+    let get_window: extern "C" fn(Id, Sel) -> Id =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    let nswindow = get_window(nsview, sel_window);
+    if nswindow.is_null() {
+        return;
+    }
+
+    // [nswindow setStyleMask: Titled|Closable|Miniaturizable|Resizable]
+    // NSWindowStyleMask bits: Titled=1, Closable=2, Miniaturizable=4, Resizable=8.
+    let sel_set_mask = sel_registerName(b"setStyleMask:\0".as_ptr() as _);
+    let set_mask: extern "C" fn(Id, Sel, usize) =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    set_mask(nswindow, sel_set_mask, 1 | 2 | 4 | 8);
+
+    // Un-hide the standard window buttons (close=0, miniaturize=1, zoom=2).
+    let sel_std_btn = sel_registerName(b"standardWindowButton:\0".as_ptr() as _);
+    let std_btn: extern "C" fn(Id, Sel, usize) -> Id =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    let sel_set_hidden = sel_registerName(b"setHidden:\0".as_ptr() as _);
+    let set_hidden: extern "C" fn(Id, Sel, u8) =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    for btn_kind in [0usize, 1, 2] {
+        let btn = std_btn(nswindow, sel_std_btn, btn_kind);
+        if !btn.is_null() {
+            set_hidden(btn, sel_set_hidden, 0);
+        }
+    }
+
+    tracing::info!("macOS: forced native title-bar buttons on non-frameless popup (DevTools)");
 }
 
 // ---------------------------------------------------------------------------

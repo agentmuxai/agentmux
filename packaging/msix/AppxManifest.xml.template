@@ -42,7 +42,7 @@
     <Application Id="AgentMux" Executable="agentmux.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="AgentMux"
-        Description="Integrated agentic workflow environment — run multiple AI agents side by side"
+        Description="EARLY ALPHA — expect bugs, broken features, and breaking changes between releases. Please report issues at https://github.com/agentmuxai/agentmux/issues. Integrated agentic workflow environment — run multiple AI agents side by side."
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">

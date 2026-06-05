@@ -61,14 +61,26 @@ pub fn parent_is_agentmux_launcher() -> Option<bool> {
 
 #[cfg(not(target_os = "windows"))]
 pub fn parent_is_agentmux_launcher() -> Option<bool> {
-    // The launcher now drives srv + host on macOS/Linux dev too (Phase 1,
-    // SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30), but the launcher↔host
-    // IPC pipe is still deferred to Phase 2 — so there is no IPC parent-
-    // identity check to perform here yet. (The host's srv-adoption decision
-    // uses a separate, direct getppid == AGENTMUX_LAUNCHER_PID check in
-    // main.rs::launcher_is_genuine_parent.) Return None and let the path-
-    // based guard decide until the Unix IPC transport lands.
-    None
+    // A1 (SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05.md §4) wires
+    // the Unix-socket IPC; the launcher exports its pid in
+    // `AGENTMUX_LAUNCHER_PID` for any host child it spawns directly
+    // (`spawn_host_unix` at agentmux-launcher/src/main.rs:411). If our
+    // getppid matches that env-stamped pid, the launcher IS our parent
+    // and we should attempt the launcher-IPC connect — even in dev
+    // builds where `is_dev_build_exe` would otherwise short-circuit it.
+    //
+    // Without this check, `task dev` on Linux/macOS would skip the
+    // launcher IPC even though `run_unix` has the socket up — leaving
+    // the 17 `report_*` hooks no-opping in dev. (Codex P2 on PR #1288.)
+    let stamped: u32 = match std::env::var("AGENTMUX_LAUNCHER_PID")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        Some(p) => p,
+        None => return None, // No stamp → fall through to path-based guard
+    };
+    let our_ppid = unsafe { libc::getppid() } as u32;
+    Some(our_ppid == stamped)
 }
 
 /// Walk the Toolhelp32 process snapshot in a single pass to:
