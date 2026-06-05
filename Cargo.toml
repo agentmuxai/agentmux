@@ -21,3 +21,28 @@ lto = "thin"        # Thin LTO - parallel and much faster than full LTO
 codegen-units = 16  # Parallel codegen - uses multiple CPU cores
 strip = true
 opt-level = 2       # Still optimized, but not as aggressive as "s"
+
+# ─── CEF 148 binding patch ──────────────────────────────────────────────
+# `cef-dll-sys` 148.3.0+148.0.9 on crates.io is generated from upstream
+# CEF 148 headers, which do NOT include
+# `CefWindow::BeginWindowDrag()` (the AgentMux source patch lives in
+# `agentmuxai/cef@agentmux/7778-drag-rightclick-and-transparency`,
+# PR #3 on that repo). Without the binding-side field, our
+# `--features patched-libcef` flag fails to compile against CEF 148 on
+# Linux (`error[E0609]: no field begin_window_drag on type
+# _cef_window_t` at `agentmux-cef/src/ui_tasks.rs:215`).
+#
+# The fork at `AgentU-asaf/cef-rs@agentmux/148-begin-window-drag`
+# (PR #1 on that fork) appends the `begin_window_drag` slot to the
+# linux_x86_64 binding — same mechanical edit that's been in published
+# `cef-dll-sys 146.7.0+146.0.12` since CEF 146. The fork's branch is
+# pinned by its commit SHA so the build is reproducible.
+#
+# Lifecycle: this `[patch.crates-io]` is temporary — when the patches
+# are upstreamed to chromiumembedded/cef and tauri-apps/cef-rs (or when
+# AgentMux's libcef build becomes the only consumer), remove this block
+# and the workspace can use the public binding directly.
+#
+# See: docs/specs/SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md §5
+[patch.crates-io]
+cef-dll-sys = { git = "https://github.com/AgentU-asaf/cef-rs", branch = "agentmux/148-begin-window-drag" }
