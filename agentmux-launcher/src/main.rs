@@ -487,18 +487,33 @@ async fn next_signal(s: &mut Option<tokio::signal::unix::Signal>) {
     }
 }
 
-/// Unix (macOS/Linux) main flow, Phase 1: resolve paths → spawn srv →
-/// spawn host with srv endpoints in env → supervised wait → cleanup.
+/// Unix (macOS/Linux) main flow: resolve paths → bind launcher IPC
+/// socket (single-instance signal) → set up reducer / event log / saga
+/// coordinator / IPC server → spawn srv → spawn host with srv endpoints
+/// AND the launcher socket path in env → supervised wait → cleanup.
+///
+/// As of A1 (SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05.md §4)
+/// the launcher's window/pool/instance reducer + durable saga
+/// coordinator are now live on Linux. The 17 host-side `report_*` IPC
+/// calls reach the reducer; the saga log persists at
+/// `<data-dir>/db/launcher-sagas.db`; second-instance launches are
+/// detected via socket-bind contention.
 ///
 /// Differs from `run_windows` only where the OS forces it:
-///   * No Job Object — children inherit the launcher's process group, so
-///     a terminal Ctrl+C (SIGINT to the foreground group) already reaches
-///     host + srv directly. We additionally install SIGINT/SIGTERM
-///     handlers so `kill <launcher-pid>` (signal to the launcher alone)
-///     also tears the tree down deterministically.
-///   * No named-pipe IPC yet (Phase 2): srv is launched WITHOUT an
-///     AGENTMUX_SRV_PIPE_PATH, so it skips binding its IPC pipe — exactly
-///     as in today's `task dev` direct-invoke mode.
+///   * No Job Object — A0 (`PR_SET_PDEATHSIG` in `spawn_host_unix` and
+///     `srv_spawner`) gives the equivalent kernel-side reap when the
+///     launcher dies abnormally. Terminal Ctrl+C reaches the process
+///     group; explicit SIGINT/SIGTERM handlers cover the
+///     `kill <launcher-pid>` case.
+///   * Unix-domain-socket IPC (A1) instead of named pipes; protocol on
+///     the wire is identical (newline-delimited JSON Command/Event).
+///     The launcher-side server uses `tokio::net::UnixListener`; the
+///     host-side client uses `tokio::net::UnixStream`. See
+///     `ipc::server::run_ipc_server` (Unix arm) and
+///     `agentmux-cef/src/launcher_ipc.rs::connect_to_launcher` (Unix arm).
+///   * srv-side IPC is still skipped on Linux (srv is launched with an
+///     empty `srv_pipe_path`); follow-up PR will bring srv's Unix
+///     socket online too.
 ///   * Cleanup is SIGTERM-then-SIGKILL (we own the reap) rather than
 ///     KILL_ON_JOB_CLOSE.
 ///
