@@ -600,7 +600,15 @@ fn bind_socket_with_recovery(socket_path: &str) -> tokio::net::UnixListener {
                 || connect_err.raw_os_error() == Some(libc::ENOENT) =>
         {
             // Stale socket file from a crashed launcher. Unlink and
-            // rebind — under the lock, no other launcher can race us.
+            // rebind. The lock serializes us against other launchers
+            // ALSO doing recovery, but it does NOT block a fresh
+            // launcher taking the fast-path bind() above — that
+            // launcher is lock-free and can win the socket in the
+            // microsecond window between our `remove_file` and our
+            // `bind`. If that happens, AddrInUse means a real
+            // launcher just claimed the socket and WE are now the
+            // losing second instance, not a failed start.
+            // (Reagent P2 on PR #1288.)
             log(&format!(
                 "[ipc] stale socket file at {} — unlinking and rebinding (under recovery lock)",
                 socket_path
@@ -608,6 +616,17 @@ fn bind_socket_with_recovery(socket_path: &str) -> tokio::net::UnixListener {
             let _ = std::fs::remove_file(socket_path);
             match ipc::server::bind_first_unix_socket(socket_path) {
                 Ok(l) => l,
+                Err(retry_e) if retry_e.kind() == std::io::ErrorKind::AddrInUse => {
+                    eprintln!(
+                        "AgentMux is already running for this data directory.\n\nSocket: {}",
+                        socket_path
+                    );
+                    log(&format!(
+                        "[ipc] post-recovery bind lost the race to a fresh launcher on {} — exiting as second instance",
+                        socket_path
+                    ));
+                    std::process::exit(0);
+                }
                 Err(retry_e) => {
                     log(&format!(
                         "FATAL: bind retry after stale-socket unlink failed: {}",
