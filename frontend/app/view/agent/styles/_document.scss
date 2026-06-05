@@ -113,13 +113,13 @@
 
     .agent-document-virtualizer {
         // Container for the virtualized region. Children are
-        // absolute-positioned via translateY; the height equals
-        // virtualizer.getTotalSize() so the native scrollbar reflects
-        // the full virtual content.
+        // absolute-positioned via translateY; the height equals the
+        // layout slice's total (layoutView().totalSize) so the native
+        // scrollbar reflects the full virtual content.
         //
         // flex-shrink: 0 — .agent-document is a column flex container,
         // so without this the wrapper would collapse to viewport
-        // height when getTotalSize() exceeds it (codex P1 from #773).
+        // height when totalSize exceeds it (codex P1 from #773).
         position: relative;
         width: 100%;
         flex-shrink: 0;
