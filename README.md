@@ -16,8 +16,9 @@ follow below so the warning is never pushed below the fold. -->
 > - **Platform gaps** — Windows is the primary target; macOS and Linux
 >   builds lag behind and have additional known issues.
 >
-> If you hit a problem, **please report it as a GitHub issue** at
-> https://github.com/agentmuxai/agentmux/issues — it's how alpha gets to beta.
+> If you hit a problem, **please file a GitHub issue** at
+> https://github.com/agentmuxai/agentmux/issues rather than leaving a store
+> review — it's how alpha gets to beta.
 
 ---
 
@@ -77,7 +78,7 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF ho
 Platform-specific:
 - **Windows:** Visual Studio Build Tools (CMake + Ninja ship with VS, but Ninja must be on PATH — see CLAUDE.md)
 - **macOS:** Xcode Command Line Tools, `brew install cmake ninja`
-- **Linux:** `apt install cmake ninja-build build-essential` — CEF bundles Chromium, no WebKitGTK required. See [`docs/linux.md`](docs/linux.md) for the full Linux operator guide.
+- **Linux:** Build essentials, `apt install cmake ninja-build`
 
 ### Development
 

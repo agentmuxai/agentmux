@@ -33,7 +33,7 @@ all looking at the same disclaimer.
 ## Goals
 
 - A user reading either surface immediately understands: this is alpha, things
-  break, and bugs should be reported as GitHub issues.
+  break, file issues instead of leaving reviews.
 - The two surfaces share one canonical wording — when we change one, we change
   the other.
 - The warning survives README restructuring (i.e., it's the first content
@@ -48,17 +48,6 @@ all looking at the same disclaimer.
 - Adding telemetry/feedback widgets.
 - Renaming the product or version-scheme changes.
 
-## Wording constraint — Store review policy
-
-The warning **must not** tell users to file a GitHub issue *instead of* leaving
-a review (e.g. "rather than leaving a review", "don't leave a review"). The
-Microsoft Store has a ratings/reviews-manipulation policy and copy that
-discourages reviews can trip Store certification, especially in shipped
-artifacts (`AppxManifest.xml.template` Description, Partner Center listing
-fields). Phrase the GitHub-issue ask positively: *"please report issues at
-…"* — link to the issue tracker but do not contrast it with the Store review
-flow.
-
 ---
 
 ## Canonical Warning Text
@@ -70,7 +59,7 @@ it).
 ### Short form (one line, used in Store "Short description" and any tight slot)
 
 > **Early alpha — expect bugs, broken features, and breaking changes between
-> releases. Please report issues at https://github.com/agentmuxai/agentmux/issues.**
+> releases. Please file issues on GitHub instead of leaving a review.**
 
 ### Long form (used at top of README and in Store "Description")
 
@@ -88,8 +77,9 @@ it).
 > - **Platform gaps** — Windows is the primary target; macOS and Linux
 >   builds lag behind and have additional known issues.
 >
-> If you hit a problem, **please report it as a GitHub issue** at
-> https://github.com/agentmuxai/agentmux/issues — it's how alpha gets to beta.
+> If you hit a problem, **please file a GitHub issue** at
+> https://github.com/agentmuxai/agentmux/issues rather than leaving a store
+> review — it's how alpha gets to beta.
 
 ---
 
@@ -106,7 +96,7 @@ information. Decorative content should not push the warning below the fold.
 
 ### Exact edit
 
-Prepend to `README.md` (at the repo root):
+Prepend to `/workspace/agentmux/README.md`:
 
 ```markdown
 > ## ⚠️ EARLY ALPHA — Use At Your Own Risk
@@ -123,8 +113,9 @@ Prepend to `README.md` (at the repo root):
 > - **Platform gaps** — Windows is the primary target; macOS and Linux
 >   builds lag behind and have additional known issues.
 >
-> If you hit a problem, **please report it as a GitHub issue** at
-> https://github.com/agentmuxai/agentmux/issues — it's how alpha gets to beta.
+> If you hit a problem, **please file a GitHub issue** at
+> https://github.com/agentmuxai/agentmux/issues rather than leaving a store
+> review — it's how alpha gets to beta.
 
 ---
 
