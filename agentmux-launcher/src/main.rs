@@ -487,6 +487,152 @@ async fn next_signal(s: &mut Option<tokio::signal::unix::Signal>) {
     }
 }
 
+/// Bind the launcher's IPC socket with single-instance enforcement +
+/// crash-safe stale-socket recovery, serialized across concurrent
+/// launchers via `flock(2)`.
+///
+/// Returns a bound `UnixListener` on success. Calls `std::process::exit`
+/// on:
+///   * second-instance detection (exit code 0)
+///   * a hard bind failure that isn't `EADDRINUSE` (exit code 2)
+///   * unable to acquire the recovery lock (exit code 2)
+///
+/// Why the lockfile (codex P1 + reagent P1 on PR #1288): see the call-
+/// site comment. Two-launcher concurrent stale-cleanup would otherwise
+/// produce two live launchers for one data dir.
+#[cfg(not(target_os = "windows"))]
+fn bind_socket_with_recovery(socket_path: &str) -> tokio::net::UnixListener {
+    use std::os::unix::io::AsRawFd as _;
+
+    // Fast path: bind without contention.
+    match ipc::server::bind_first_unix_socket(socket_path) {
+        Ok(l) => return l,
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => { /* slow path below */ }
+        Err(e) => {
+            log(&format!("FATAL: bind {} failed: {}", socket_path, e));
+            eprintln!(
+                "AgentMux failed to start: could not bind IPC socket.\n\nSocket: {}\nError: {}",
+                socket_path, e
+            );
+            std::process::exit(2);
+        }
+    }
+
+    // Slow path: contention. Acquire the recovery lock so only one
+    // launcher at a time does the connect-probe + unlink + rebind.
+    let lock_path = format!("{}.lock", socket_path);
+    let lock_file = match std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+    {
+        Ok(f) => f,
+        Err(e) => {
+            log(&format!(
+                "FATAL: could not open recovery lockfile {}: {}",
+                lock_path, e
+            ));
+            eprintln!(
+                "AgentMux failed to start: could not open IPC recovery lockfile.\n\nLockfile: {}\nError: {}",
+                lock_path, e
+            );
+            std::process::exit(2);
+        }
+    };
+    // Block until we have the lock — another launcher's recovery
+    // window is bounded by a single bind + a single connect-probe;
+    // we won't wait long. flock(2) is auto-released on close (when
+    // the OS reaps the launcher process), so a SIGKILL'd holder
+    // doesn't leak the lock.
+    if unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        let errno = std::io::Error::last_os_error();
+        log(&format!(
+            "FATAL: flock({}, LOCK_EX) failed: {}",
+            lock_path, errno
+        ));
+        eprintln!(
+            "AgentMux failed to start: could not acquire IPC recovery lock.\n\nLockfile: {}\nError: {}",
+            lock_path, errno
+        );
+        std::process::exit(2);
+    }
+
+    // Retry the bind under the lock — another launcher may have
+    // already cleaned up the stale file while we were waiting on
+    // flock, leaving us free to bind directly.
+    match ipc::server::bind_first_unix_socket(socket_path) {
+        Ok(l) => return l,
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => { /* probe below */ }
+        Err(e) => {
+            log(&format!(
+                "FATAL: post-lock bind {} failed: {}",
+                socket_path, e
+            ));
+            eprintln!(
+                "AgentMux failed to start: post-lock IPC bind failed.\n\nSocket: {}\nError: {}",
+                socket_path, e
+            );
+            std::process::exit(2);
+        }
+    }
+
+    // Disambiguate: is the existing socket a real running launcher,
+    // or a stale file?
+    match std::os::unix::net::UnixStream::connect(socket_path) {
+        Ok(_) => {
+            // Real second-instance. Exit cleanly so the existing
+            // launcher's window gets focus (Phase-2 arg-forwarding
+            // is a separate PR).
+            eprintln!(
+                "AgentMux is already running for this data directory.\n\nSocket: {}",
+                socket_path
+            );
+            log(&format!(
+                "[ipc] second-instance detected — existing launcher owns {}",
+                socket_path
+            ));
+            std::process::exit(0);
+        }
+        Err(connect_err)
+            if connect_err.kind() == std::io::ErrorKind::ConnectionRefused
+                || connect_err.raw_os_error() == Some(libc::ENOENT) =>
+        {
+            // Stale socket file from a crashed launcher. Unlink and
+            // rebind — under the lock, no other launcher can race us.
+            log(&format!(
+                "[ipc] stale socket file at {} — unlinking and rebinding (under recovery lock)",
+                socket_path
+            ));
+            let _ = std::fs::remove_file(socket_path);
+            match ipc::server::bind_first_unix_socket(socket_path) {
+                Ok(l) => l,
+                Err(retry_e) => {
+                    log(&format!(
+                        "FATAL: bind retry after stale-socket unlink failed: {}",
+                        retry_e
+                    ));
+                    eprintln!(
+                        "AgentMux failed to start: IPC rebind after stale cleanup failed.\n\nSocket: {}\nError: {}",
+                        socket_path, retry_e
+                    );
+                    std::process::exit(2);
+                }
+            }
+        }
+        Err(other) => {
+            log(&format!(
+                "[ipc] AddrInUse but connect probe failed in an unexpected way: {} — \
+                 treating as second instance and exiting cleanly",
+                other
+            ));
+            std::process::exit(0);
+        }
+    }
+    // `lock_file` drops here; flock auto-released on close.
+}
+
 /// Unix (macOS/Linux) main flow: resolve paths → bind launcher IPC
 /// socket (single-instance signal) → set up reducer / event log / saga
 /// coordinator / IPC server → spawn srv → spawn host with srv endpoints
@@ -578,70 +724,32 @@ async fn run_unix(
 
     // Single-instance handshake (A1.6). The bind is the authoritative
     // signal: a second launcher pointing at the same data dir gets
-    // `EADDRINUSE`. Handle stale-socket cleanup with the canonical
-    // pattern: `connect → ECONNREFUSED → unlink → bind`.
-    let first_socket = match ipc::server::bind_first_unix_socket(&socket_path) {
-        Ok(l) => l,
-        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
-            // Could be a real running launcher OR a stale socket file
-            // left over from a crash. Try to connect to disambiguate.
-            match std::os::unix::net::UnixStream::connect(&socket_path) {
-                Ok(_) => {
-                    // Another launcher is listening — second-instance
-                    // case. Exit cleanly so the existing instance's
-                    // window gets focus (Phase-2 will forward args via
-                    // a Command frame; today we just exit).
-                    eprintln!(
-                        "AgentMux is already running for this data directory.\n\nSocket: {}",
-                        socket_path
-                    );
-                    log(&format!(
-                        "[ipc] second-instance detected — existing launcher owns {}",
-                        socket_path
-                    ));
-                    std::process::exit(0);
-                }
-                Err(connect_err)
-                    if connect_err.kind() == std::io::ErrorKind::ConnectionRefused
-                        || connect_err.raw_os_error() == Some(libc::ENOENT) =>
-                {
-                    // Stale socket file from a crashed launcher. Unlink
-                    // and retry the bind.
-                    log(&format!(
-                        "[ipc] stale socket file at {} — unlinking and rebinding",
-                        socket_path
-                    ));
-                    let _ = std::fs::remove_file(&socket_path);
-                    match ipc::server::bind_first_unix_socket(&socket_path) {
-                        Ok(l) => l,
-                        Err(retry_e) => {
-                            log(&format!(
-                                "FATAL: bind retry after stale-socket unlink failed: {}",
-                                retry_e
-                            ));
-                            std::process::exit(2);
-                        }
-                    }
-                }
-                Err(other) => {
-                    log(&format!(
-                        "[ipc] AddrInUse but connect probe failed in an unexpected way: {} — \
-                         treating as second instance and exiting cleanly",
-                        other
-                    ));
-                    std::process::exit(0);
-                }
-            }
-        }
-        Err(e) => {
-            log(&format!("FATAL: bind {} failed: {}", socket_path, e));
-            eprintln!(
-                "AgentMux failed to start: could not bind IPC socket.\n\nSocket: {}\nError: {}",
-                socket_path, e
-            );
-            std::process::exit(2);
-        }
-    };
+    // `EADDRINUSE`. The Windows path enjoys atomic `first_pipe_
+    // instance(true)`; Unix bind isn't atomic with respect to stale-
+    // file recovery, so we serialize that recovery via an `flock(2)`
+    // lockfile (codex P1 + reagent P1 on PR #1288).
+    //
+    // Concurrent-cleanup race the lockfile defends against:
+    //   1. Stale socket file remains from a crashed prior launcher.
+    //   2. Launcher A and B start concurrently. Both `bind` returns
+    //      EADDRINUSE because the file exists.
+    //   3. Without the lock: both A and B `connect` → ECONNREFUSED
+    //      (no listener on the stale file), both `unlink`, both
+    //      `bind` succeeds → two live launchers for one data dir,
+    //      and B's `unlink` may have removed A's freshly-bound
+    //      socket file before B bound its own.
+    //   4. With the lock: A holds the lock → does probe + unlink +
+    //      rebind atomically. B blocks on the lock. When A releases,
+    //      B's retry-bind sees A's running listener (file exists) and
+    //      B's `connect` succeeds → B exits cleanly as second
+    //      instance. No double-recovery.
+    //
+    // The lockfile lives next to the socket as `<socket>.lock`. It is
+    // intentionally NOT removed on clean shutdown — the inode is
+    // tiny, and leaving it lets the next launcher reuse it without a
+    // create-race. (Stale-lock-file scenarios are bounded: flock(2)
+    // is auto-released on process exit even for SIGKILL.)
+    let first_socket = bind_socket_with_recovery(&socket_path);
 
     // Broadcast bus for reducer-emitted events. Same capacity (1024)
     // and rationale as the Windows path.
