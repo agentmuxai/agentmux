@@ -96,7 +96,7 @@ export class DroneViewModel implements ViewModel {
         this.setDraftStore(reconcile(next));
     }
 
-    // --- which node is selected in the canvas (for the InspectorPanel)
+    // --- which node is selected in the canvas (drives inline NodeFields)
     private _selected = createSignal<string | null>(null);
     selectedAtom: Accessor<string | null> = this._selected[0];
     setSelected = this._selected[1];
@@ -480,7 +480,7 @@ export class DroneViewModel implements ViewModel {
     addNodeAtCenter(kind: BlockKind): FlowNode {
         const v = this.viewportAtom();
         const { w, h } = this._canvasSize[0]();
-        const cx = (w / 2 - v.x) / v.zoom - 80;
+        const cx = (w / 2 - v.x) / v.zoom - 124; // half of NODE_W (248)
         const cy = (h / 2 - v.y) / v.zoom - 30;
         return this.addNode(kind, { x: cx, y: cy });
     }

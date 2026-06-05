@@ -1,9 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Block kind metadata — drives the NodeTypeBar chips, default block data,
-// and the InspectorPanel field schema. One source of truth shared by
-// all node components and the validators.
+// Block kind metadata — drives the NodeTypeBar chips, inline NodeFields,
+// and per-kind default data. One source of truth shared by all node
+// components and the validators.
 
 import type { BlockKind } from "./drone-types";
 

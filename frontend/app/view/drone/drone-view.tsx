@@ -182,7 +182,7 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
             m.setViewport({ x: 0, y: 0, zoom: 1 });
             return;
         }
-        const NW = 180,
+        const NW = NODE_W,
             NH = 76,
             pad = 80;
         let minX = Infinity,
@@ -294,7 +294,7 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
         if (!kind) return;
         const p0 = screenToFlow(e.clientX, e.clientY);
         // Center the node body roughly under the cursor.
-        m.addNode(kind, { x: p0.x - 80, y: p0.y - 20 });
+        m.addNode(kind, { x: p0.x - NODE_W / 2, y: p0.y - 20 });
         setDragKind(null);
     };
 
@@ -630,11 +630,8 @@ function bezierPath(x1: number, y1: number, x2: number, y2: number): string {
 // escalation for complex fields lands in PR2.
 
 const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element => {
-    // Node kind never changes during its lifetime, so meta is stable.
-    const meta = blockMeta(p.node.data.kind as BlockKind);
     const update = (patch: Record<string, unknown>) =>
         p.model.updateNodeData(p.node.id, patch);
-    void meta; // used below in AgentRefEditor / result panel
 
     return (
         <div class="drone-node-fields">
