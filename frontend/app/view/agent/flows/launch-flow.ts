@@ -237,6 +237,12 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             }
             setLoginWaiting(false);
 
+            // Reap the login CLI now the attempt has concluded (success,
+            // timeout, or cancel). On manual-paste success the child self-exits;
+            // if creds appeared without a paste it would otherwise linger at the
+            // prompt. cancelCliLogin is idempotent and host-side.
+            getApi().cancelCliLogin().catch(() => {});
+
             // Always clear auth URL after the login attempt
             setAuthUrl(null);
 
@@ -260,6 +266,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             }
         } catch (err: any) {
             setLoginWaiting(false);
+            getApi().cancelCliLogin().catch(() => {});
             setAuthUrl(null);
             log("auth", `login failed: ${err?.message ?? String(err)}`, "error");
             log("auth", `run: ${provider.cliCommand} ${provider.authLoginCommand.join(" ")}`, "warn");

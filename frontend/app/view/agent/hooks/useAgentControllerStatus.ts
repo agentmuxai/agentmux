@@ -142,10 +142,13 @@ export function useAgentControllerStatus(
     // SolidJS owner context that called useAgentControllerStatus — the
     // agent presentation view's component scope.
     onCleanup(() => {
-        if (loginWaiting()) {
-            loginCancelled = true;
-            getApi().cancelCliLogin().catch(() => {});
-        }
+        // Cancel unconditionally. The login CLI can already be spawned during
+        // the window between runCliLogin() and setLoginWaiting(true) flipping
+        // true, so gating on loginWaiting() can leave the child orphaned if the
+        // pane closes inside that window. cancelCliLogin is idempotent and
+        // swallows errors, so calling it when no login is in flight is safe.
+        loginCancelled = true;
+        getApi().cancelCliLogin().catch(() => {});
     });
 
     return {
