@@ -82,11 +82,25 @@ pub fn srv_pipe_name(data_dir_hash16: &str) -> String {
 ///      a systemd user manager. UID in the path so users can't
 ///      collide.
 ///
-/// The directory is created on first call (idempotent). On the rare
-/// failure path (read-only `/tmp`, exotic chroot) we fall back to
-/// `/tmp` with the launcher pid as a discriminator. That fallback
-/// is intentionally non-strict — the caller's bind will fail and
-/// the launcher exits cleanly with a clear error.
+/// Security (codex P1 + reagent P1 on #1288). The `/tmp` fallback path
+/// is reachable by every local user. The resolver must close every
+/// TOCTOU window:
+///
+///   * If the dir doesn't exist, create it NON-RECURSIVELY (so a race
+///     between our stat and our create fails with `AlreadyExists`,
+///     not silently succeeds the way `create_dir_all` would).
+///   * Immediately after a successful create, RE-STAT and verify
+///     ownership + mode. A `create_dir(0700)` syscall under a 0022
+///     umask still produces a 0700 dir; this re-stat is belt-and-
+///     suspenders against the unlikely case where the dir we just
+///     created has been replaced by an attacker between mkdir and
+///     re-stat.
+///   * If the dir already exists, `symlink_metadata` (NOT `metadata`
+///     — we must not follow symlinks) and refuse to proceed unless
+///     it's a real directory owned by our uid with mode masking 0700.
+///   * Refusal = `std::process::exit(2)` with a clear error. We do
+///     NOT try to recover by picking a different path; that would
+///     enlarge the trust boundary.
 #[cfg(unix)]
 pub fn ipc_socket_dir() -> std::path::PathBuf {
     use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
@@ -159,24 +173,61 @@ pub fn ipc_socket_dir() -> std::path::PathBuf {
             }
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            // Atomically create with mode 0700. `DirBuilder::mode(0700)`
-            // applies via mkdir(2)'s `mode` arg under our umask, so the
-            // directory's actual perms are the requested mode masked by
-            // the umask. We set the mode explicitly via `set_permissions`
-            // immediately after creation as a belt + suspenders against
-            // any inherited umask quirk.
+            // Non-recursive create with mode 0700. `recursive(true)`
+            // (= create_dir_all semantics) would return Ok even if an
+            // attacker pre-created the directory in the race window
+            // between our `symlink_metadata` NotFound and this call —
+            // we'd then bind our socket inside attacker-controlled
+            // space, exactly the squatting attack this resolver is
+            // here to prevent. Non-recursive create fails with
+            // `AlreadyExists` in that race; we treat it as fatal.
+            //
+            // For the XDG path (`$XDG_RUNTIME_DIR/agentmux`), the
+            // parent (`/run/user/{uid}`) is created by systemd-logind
+            // and always exists. For the `/tmp` fallback, `/tmp` is
+            // a standard system directory and always exists. So a
+            // non-recursive create is safe; it only fails when the
+            // parent is missing (which is itself a sign something
+            // weird is going on and we should abort).
             let mut builder = std::fs::DirBuilder::new();
-            builder.recursive(true).mode(0o700);
-            if let Err(e) = builder.create(&dir) {
+            builder.recursive(false).mode(0o700);
+            if let Err(create_err) = builder.create(&dir) {
                 eprintln!(
-                    "AgentMux refusing to start: failed to create IPC socket dir {}: {}.",
+                    "AgentMux refusing to start: failed to create IPC socket dir {} (mode 0700, non-recursive): {}.",
                     dir.display(),
-                    e
+                    create_err
                 );
                 std::process::exit(2);
             }
-            use std::os::unix::fs::PermissionsExt as _;
-            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+            // Belt-and-suspenders post-create verification. The mkdir(2)
+            // syscall is atomic, so the dir we just created is OURS at
+            // this instant. Re-stat anyway to defend against any future
+            // refactor that loosens the create flags.
+            let post_meta = match std::fs::symlink_metadata(&dir) {
+                Ok(m) => m,
+                Err(stat_err) => {
+                    eprintln!(
+                        "AgentMux refusing to start: post-create stat of {} failed: {}.",
+                        dir.display(),
+                        stat_err
+                    );
+                    std::process::exit(2);
+                }
+            };
+            if !post_meta.file_type().is_dir()
+                || post_meta.file_type().is_symlink()
+                || post_meta.uid() != our_uid
+                || post_meta.mode() & 0o077 != 0
+            {
+                eprintln!(
+                    "AgentMux refusing to start: IPC socket dir {} failed post-create verification (uid={}, mode={:o}, symlink={}).",
+                    dir.display(),
+                    post_meta.uid(),
+                    post_meta.mode() & 0o777,
+                    post_meta.file_type().is_symlink()
+                );
+                std::process::exit(2);
+            }
         }
         Err(e) => {
             eprintln!(

@@ -745,9 +745,10 @@ async fn run_unix(
     let _srv_stdin_keepalive = srv_child.stdin.take();
 
     // 3. Spawn the host with srv endpoints in env.
-    let dir_hash_unix = hash::data_dir_hash16(&paths.data_dir, version);
+    // dir_hash was computed once above for socket_path; reuse it here
+    // instead of re-hashing the same paths.data_dir + version.
     let mut host_env = paths.common.to_env_vars();
-    host_env.push(("AGENTMUX_IPC_HASH", std::ffi::OsString::from(&dir_hash_unix)));
+    host_env.push(("AGENTMUX_IPC_HASH", std::ffi::OsString::from(&dir_hash)));
     // A1.3 — IPC env handshake. Tell the host where to find the
     // launcher socket. The env var name `AGENTMUX_LAUNCHER_PIPE` is
     // reused from the Windows side even though the underlying resource
