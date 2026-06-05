@@ -204,21 +204,40 @@ pub fn run_ipc_server(
         let ctx = Arc::new(ctx);
         crate::log(&format!("[ipc] server starting on {}", socket_path));
 
+        // Backoff state — guard against a persistent accept error
+        // (e.g. EMFILE/ENFILE under fd exhaustion, EBADF if the
+        // listener fd is closed out from under us) spinning a hot
+        // loop and flooding the launcher log. Reagent P2 on PR #1288.
+        const MAX_CONSECUTIVE_ACCEPT_ERRORS: u32 = 32;
+        let mut consecutive_errors: u32 = 0;
+
         loop {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
+                    consecutive_errors = 0;
                     tokio::spawn(handle_connection(stream, Arc::clone(&ctx)));
                 }
                 Err(e) => {
-                    // Transient accept errors (EMFILE, ENFILE, ECONNABORTED)
-                    // shouldn't kill the server — log and continue. A
-                    // permanent error (e.g. listener fd closed) keeps
-                    // returning the same error indefinitely; we'd burn CPU
-                    // logging it. Yield to the runtime so the supervisor
-                    // has a chance to abort us if the launcher is shutting
-                    // down. (Mirrors Win32 accept-loop hygiene from above.)
-                    crate::log(&format!("[ipc] accept error: {} — continuing", e));
-                    tokio::task::yield_now().await;
+                    consecutive_errors = consecutive_errors.saturating_add(1);
+                    if consecutive_errors >= MAX_CONSECUTIVE_ACCEPT_ERRORS {
+                        crate::log(&format!(
+                            "[ipc] FATAL: {} consecutive accept errors (last: {}); listener appears permanently broken — stopping IPC server",
+                            consecutive_errors, e
+                        ));
+                        return;
+                    }
+                    // Exponential backoff capped at 1s: 1ms → 2ms → 4ms
+                    // → … → 1024ms → 1024ms. Keeps EMFILE/ENFILE
+                    // recovery responsive (most descriptor pressure
+                    // clears in microseconds) without hot-spinning a
+                    // CPU core on a truly broken listener.
+                    let backoff_ms = 1u64 << consecutive_errors.min(10);
+                    let backoff = std::time::Duration::from_millis(backoff_ms.min(1024));
+                    crate::log(&format!(
+                        "[ipc] accept error #{}: {} — backing off {:?}",
+                        consecutive_errors, e, backoff
+                    ));
+                    tokio::time::sleep(backoff).await;
                 }
             }
         }
