@@ -96,7 +96,7 @@ export class DroneViewModel implements ViewModel {
         this.setDraftStore(reconcile(next));
     }
 
-    // --- which node is selected in the canvas (for the InspectorPanel)
+    // --- which node is selected in the canvas (drives inline NodeFields)
     private _selected = createSignal<string | null>(null);
     selectedAtom: Accessor<string | null> = this._selected[0];
     setSelected = this._selected[1];
@@ -178,8 +178,6 @@ export class DroneViewModel implements ViewModel {
     // teardown. Codex P2 on PR #844.
     private disposed = false;
 
-    selectedNodeAtom: Accessor<FlowNode | null>;
-
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
@@ -187,11 +185,6 @@ export class DroneViewModel implements ViewModel {
         this.viewName = createMemo(() => {
             const block = this.blockAtom();
             return (block?.meta?.["frame:title"] as string) ?? this.draftAtom().name;
-        });
-        this.selectedNodeAtom = createMemo(() => {
-            const id = this.selectedAtom();
-            if (!id) return null;
-            return this.draftAtom().graph.nodes.find((n) => n.id === id) ?? null;
         });
 
         // Register the slot SYNCHRONOUSLY so the first dispatch (in
@@ -480,7 +473,7 @@ export class DroneViewModel implements ViewModel {
     addNodeAtCenter(kind: BlockKind): FlowNode {
         const v = this.viewportAtom();
         const { w, h } = this._canvasSize[0]();
-        const cx = (w / 2 - v.x) / v.zoom - 80;
+        const cx = (w / 2 - v.x) / v.zoom - 124; // half of NODE_W (248)
         const cy = (h / 2 - v.y) / v.zoom - 30;
         return this.addNode(kind, { x: cx, y: cy });
     }

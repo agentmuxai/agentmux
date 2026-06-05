@@ -272,7 +272,7 @@
 
 .drone-node {
     position: absolute;
-    width: 160px;
+    width: 248px;
     background: var(--main-bg-color);
     border: 1px solid var(--border-color);
     border-radius: 0;
@@ -322,8 +322,9 @@
     &:hover { opacity: 1; }
 }
 
-.drone-node-body {
-    padding: 6px 8px;
+// Summary line shown when the node is unselected.
+.drone-node-summary {
+    padding: 5px 8px;
     font-size: 11px;
     color: var(--secondary-text-color);
     overflow: hidden;
@@ -331,88 +332,57 @@
     white-space: nowrap;
 }
 
-// ── Inspector: right-side slide-over overlay ──────────────────────────
-
-.drone-inspector {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: 320px;
-    border-left: 1px solid var(--border-color);
-    background: var(--main-bg-color);
-    box-shadow: -4px 0 16px rgba(0, 0, 0, 0.25);
-    overflow-y: auto;
-    padding: 8px 12px;
-    font-size: 12px;
-    z-index: 10;
-}
-
-.drone-inspector-close {
-    position: absolute;
-    top: 6px;
-    right: 8px;
-    background: transparent;
-    border: none;
-    color: var(--secondary-text-color);
-    font-size: 18px;
-    line-height: 1;
-    cursor: pointer;
-    &:hover {
-        color: var(--main-text-color);
-    }
-}
-
-.drone-inspector-empty {
-    color: var(--secondary-text-color);
-    padding: 16px 4px;
-    font-size: 11px;
-    font-style: italic;
-}
-
-.drone-inspector-form {
+// Inline field stack shown when the node is selected.
+.drone-node-fields {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 1px;
+    padding: 4px 0 4px;
+    border-top: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
 }
 
-.drone-inspector-title {
-    font-size: 14px;
-    font-weight: 500;
-    margin-bottom: -4px;
-}
-
-.drone-inspector-id {
-    font-size: 10px;
-    color: var(--secondary-text-color);
-    font-family: var(--mono-font, monospace);
-    margin-bottom: 4px;
-}
-
-.drone-field {
-    display: flex;
-    flex-direction: column;
+// Compact horizontal label + control row inside a node.
+.drone-node-field {
+    display: grid;
+    grid-template-columns: 58px 1fr;
+    align-items: center;
     gap: 4px;
+    padding: 0 6px;
+    min-height: 26px;
+    cursor: default;
 }
 
-.drone-field-label {
+.drone-node-field-label {
     font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
     color: var(--secondary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
 }
 
 .drone-input {
-    background: var(--main-bg-color);
+    background: color-mix(in srgb, var(--main-text-color) 4%, var(--main-bg-color));
     border: 1px solid var(--border-color);
     border-radius: 0;
-    padding: 4px 8px;
+    padding: 3px 6px;
     color: inherit;
     font-family: inherit;
-    font-size: 12px;
+    font-size: 11px;
     width: 100%;
     box-sizing: border-box;
+    min-width: 0;
     &:focus { border-color: var(--accent-color); outline: none; }
+
+    // Auto-grow textarea: starts at 1 line, caps at ~5 lines, no resize handle.
+    &--grow {
+        resize: none;
+        overflow-y: auto;
+        min-height: 22px;
+        max-height: 110px; // ~5 lines at 22px
+        line-height: 1.4;
+    }
 }
 
 .drone-vars {
