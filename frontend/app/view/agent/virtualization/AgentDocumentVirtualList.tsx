@@ -28,7 +28,7 @@
  * the state into the DOM but never reads it back.
  */
 
-import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
 import { Key } from "@solid-primitives/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
@@ -266,15 +266,33 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             const ro = new ResizeObserver(() => dispatchScrollMargin());
             ro.observe(virtualContainerRef);
             // The header (auth box / loading-older banner) sits ABOVE the
-            // container; toggling it changes the container's offsetTop WITHOUT
-            // resizing the container itself, so the RO above never fires for it.
-            // Watch scrollRef's direct children for the header add/remove and
-            // re-read scrollMargin then — keeps the slice's scrollMarginPx in
-            // sync with offsetTop for the render path, windowing, and
-            // scroll-to-node (which all subtract the current offsetTop).
-            const mo = new MutationObserver(() => dispatchScrollMargin());
+            // container; it shifts the container's offsetTop WITHOUT resizing
+            // the container itself, so the RO above never fires for it. The
+            // header moves offsetTop two ways, and we watch both:
+            //   • add/remove (a Show toggles the banner/auth box) → childList
+            //     on scrollRef.
+            //   • internal resize (AuthUrlBox grows when its paste-result
+            //     appears inside the existing box) → no childList mutation, so
+            //     a ResizeObserver on the header element itself catches it.
+            // headerRO observes only the 0-2 header elements that precede the
+            // container (never the virtualized rows), so there's no scroll-time
+            // reflow storm. Keeping scrollMarginPx in sync matters because row
+            // starts include it while the render path, windowing, and
+            // scroll-to-node subtract the live offsetTop.
+            const headerRO = new ResizeObserver(() => dispatchScrollMargin());
+            const observeHeaders = (): void => {
+                for (const child of Array.from(scrollRef.children)) {
+                    if (child === virtualContainerRef) break;
+                    headerRO.observe(child); // idempotent per element
+                }
+            };
+            observeHeaders();
+            const mo = new MutationObserver(() => {
+                dispatchScrollMargin();
+                observeHeaders();
+            });
             mo.observe(scrollRef, { childList: true });
-            onCleanup(() => { ro.disconnect(); mo.disconnect(); });
+            onCleanup(() => { ro.disconnect(); headerRO.disconnect(); mo.disconnect(); });
         });
     }
 
@@ -405,9 +423,14 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     };
 
     // React to jump commands from the parent's useScrollToNode hook.
+    // untrack the scroll so this effect depends ONLY on the command signal:
+    // scrollToNode reads layoutView / zoom / partition, all of which change on
+    // every scroll, and useScrollToNode holds the last command rather than
+    // clearing it — tracking them would re-fire the jump on each scroll and pin
+    // the user on the old target.
     createEffect(() => {
         const cmd = props.scrollCommand?.();
-        if (cmd) scrollToNode(cmd.nodeId);
+        if (cmd) untrack(() => scrollToNode(cmd.nodeId));
     });
 
     const handleScroll = (): void => {
