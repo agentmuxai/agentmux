@@ -35,7 +35,7 @@ DroneView.displayName = "DroneView";
 // ── Top node-type bar ─────────────────────────────────────────────────
 //
 // The only permanent chrome. Left: drone name + open/new/save/run.
-// Center: the horizontal palette of draggable emoji node-type chips.
+// Center: the horizontal row of draggable emoji node-type chips.
 // Everything below this bar is canvas.
 
 const NodeTypeBar = (p: { model: DroneViewModel }): JSX.Element => {
@@ -514,16 +514,17 @@ const InspectorPanel = (p: { model: DroneViewModel }): JSX.Element => {
 };
 
 const InspectorForm = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element => {
-    // Reactive: the same InspectorForm instance is reused as the selection
-    // changes (the <Show> stays truthy), so `meta` must re-read p.node —
-    // a computed-once const would show the first-selected node's label.
-    const meta = () => blockMeta(p.node.data.kind as BlockKind);
+    // The parent <Show> is keyed on the node, so this form remounts on each
+    // selection change — `p.node` is fixed for this instance's lifetime and
+    // `meta` can be computed once. (A node's kind never changes; only its
+    // data fields do, which the field bindings below read reactively.)
+    const meta = blockMeta(p.node.data.kind as BlockKind);
     const update = (patch: Record<string, unknown>) =>
         p.model.updateNodeData(p.node.id, patch);
 
     return (
         <div class="drone-inspector-form">
-            <div class="drone-inspector-title">{meta().label}</div>
+            <div class="drone-inspector-title">{meta.label}</div>
             <div class="drone-inspector-id">{p.node.id}</div>
             <Show when={p.node.data.kind === "agent"}>
                 <AgentRefEditor node={p.node} update={update} />

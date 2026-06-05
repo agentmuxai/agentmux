@@ -122,7 +122,7 @@ export class DroneViewModel implements ViewModel {
     // --- run state
     //
     // `_running` is the in-flight `await RunDroneCommand` flag — bound
-    // to the Toolbar's button disable. It's a UI thing, separate from the
+    // to the NodeTypeBar's Run button disable. It's a UI thing, separate from the
     // slot's `status` (which is "idle"|"running"|"done"|"failed", folded
     // from `dronerun:<id>` events). Keeping it in the view.
     private _running = createSignal<boolean>(false);
@@ -521,7 +521,7 @@ export class DroneViewModel implements ViewModel {
         this.setDraftStore("name", name);
     }
 
-    /** Validation surface read by the Toolbar before enabling Run. */
+    /** Validation surface read by the NodeTypeBar before enabling Run. */
     validate(): { ok: boolean; errors: string[] } {
         const errors: string[] = [];
         const graph = this.draftAtom().graph;

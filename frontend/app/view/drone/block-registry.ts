@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Block kind metadata — drives the BlockPalette, default block data,
+// Block kind metadata — drives the NodeTypeBar chips, default block data,
 // and the InspectorPanel field schema. One source of truth shared by
 // all node components and the validators.
 
@@ -113,7 +113,7 @@ export const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
     },
 };
 
-/** Stable list for the BlockPalette — palette order is rendering order. */
+/** Stable list for the NodeTypeBar — chip order is rendering order. */
 export const BLOCK_KINDS: BlockKind[] = [
     "variables",
     "agent",
