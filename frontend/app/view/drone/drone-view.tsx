@@ -507,13 +507,16 @@ const InspectorPanel = (p: { model: DroneViewModel }): JSX.Element => {
 };
 
 const InspectorForm = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element => {
-    const meta = blockMeta(p.node.data.kind as BlockKind);
+    // Reactive: the same InspectorForm instance is reused as the selection
+    // changes (the <Show> stays truthy), so `meta` must re-read p.node —
+    // a computed-once const would show the first-selected node's label.
+    const meta = () => blockMeta(p.node.data.kind as BlockKind);
     const update = (patch: Record<string, unknown>) =>
         p.model.updateNodeData(p.node.id, patch);
 
     return (
         <div class="drone-inspector-form">
-            <div class="drone-inspector-title">{meta.label}</div>
+            <div class="drone-inspector-title">{meta().label}</div>
             <div class="drone-inspector-id">{p.node.id}</div>
             <Show when={p.node.data.kind === "agent"}>
                 <AgentRefEditor node={p.node} update={update} />
