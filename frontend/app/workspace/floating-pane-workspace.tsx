@@ -35,8 +35,8 @@
  * Block / view-model / RPC subscriptions all behave the same.
  */
 
-import { invokeCommand } from "@/app/platform/ipc";
-import { isLinux, isWindows } from "@/util/platformutil";
+import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import { isWindows } from "@/util/platformutil";
 import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { CenteredDiv } from "@/app/element/quickelems";
@@ -133,16 +133,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             "button, a, input, select, textarea, [role='button']";
         const HEADER_SELECTOR = '[data-role="block-header"]';
 
-        let currentMouseDownId = 0;
         let dragging = false;
-        let clickScreenX = 0;
-        let clickScreenY = 0;
-        let initWinX = 0;
-        let initWinY = 0;
-        let latestScreenX = 0;
-        let latestScreenY = 0;
-        let setPosInFlight = false;
-        let pendingPos: { x: number; y: number } | null = null;
 
         // Capture once per mount — windowLabel is fixed for the
         // floater's lifetime. Used to route `get/set_window_position`
@@ -282,165 +273,43 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             });
         }
 
-        const sendPos = (x: number, y: number): void => {
-            if (setPosInFlight) {
-                pendingPos = { x, y };
-                return;
-            }
-            setPosInFlight = true;
-            invokeCommand("set_window_position", { x, y, label })
-                .catch(() => {})
-                .finally(() => {
-                    setPosInFlight = false;
-                    if (pendingPos) {
-                        const { x: nx, y: ny } = pendingPos;
-                        pendingPos = null;
-                        sendPos(nx, ny);
-                    }
-                });
-        };
-
-        const onMouseDown = async (e: MouseEvent) => {
+        const onMouseDown = (e: MouseEvent) => {
             if (e.button !== 0) return;
             const target = e.target as HTMLElement | null;
             if (!target) return;
-            // Must be inside the standard pane header
             if (!target.closest(HEADER_SELECTOR)) return;
-            // Skip interactive controls within the header so close /
-            // magnify / mic / endIconButton clicks reach their handlers
             if (target.closest(INTERACTIVE_SELECTOR)) return;
 
-            // Block the HTML5 dragstart pragmatic-dnd would have used —
-            // without this, the click tears the pane off into ANOTHER
-            // floating window (the double-tear-off regression).
+            // Load-bearing: blocks pragmatic-dnd's HTML5 dragstart, preventing
+            // the double-tear-off regression (ANALYSIS_FLOATING_PANE_HEADER_DRAG
+            // §"Tear-off conflict").
             e.preventDefault();
 
-            // Wayland forbids client-driven top-level repositioning, so
-            // the get/set_window_position polling below is a no-op. Hand
-            // the drag to the compositor via the same IPC the main window
-            // uses (see useWindowDrag.linux.ts).
-            if (isLinux()) {
-                invokeCommand("start_window_drag", { label }).catch(() => {});
-                return;
-            }
-
-            currentMouseDownId += 1;
-            const myId = currentMouseDownId;
-            clickScreenX = e.screenX;
-            clickScreenY = e.screenY;
-            latestScreenX = e.screenX;
-            latestScreenY = e.screenY;
-
-            try {
-                const pos = await invokeCommand<{ x: number; y: number }>(
-                    "get_window_position",
-                    { label },
-                );
-                // Race guard: bail if mouseup or a newer mousedown
-                // happened during the IPC round-trip
-                if (myId !== currentMouseDownId) return;
-                initWinX = pos.x;
-                initWinY = pos.y;
-                dragging = true;
-                // Catch-up: if the cursor moved during the IPC, fire
-                // one set_window_position immediately so we don't lose
-                // the first few pixels of motion
-                if (
-                    latestScreenX !== clickScreenX ||
-                    latestScreenY !== clickScreenY
-                ) {
-                    const scale = posScale();
-                    const tx =
-                        initWinX +
-                        Math.round((latestScreenX - clickScreenX) * scale);
-                    const ty =
-                        initWinY +
-                        Math.round((latestScreenY - clickScreenY) * scale);
-                    sendPos(tx, ty);
-                }
-            } catch {
-                // host unavailable — abort drag silently
-            }
-        };
-
-        // Throttled redock-hover push — drives the highlight overlay
-        // on whichever agentmux window the cursor is currently over.
-        // ~50 ms cadence is plenty for highlight tracking and keeps
-        // IPC load minimal during fast drags.
-        const HOVER_PUSH_THROTTLE_MS = 50;
-        let lastHoverPushAt = 0;
-        const pushRedockHover = (screenX: number, screenY: number) => {
-            const now = performance.now();
-            if (now - lastHoverPushAt < HOVER_PUSH_THROTTLE_MS) return;
-            lastHoverPushAt = now;
-            // Host coordinate space: physical px on Windows, DIP on macOS/Linux
-            // (posScale). resolve_window_at_cursor / the hover hit-test compare
-            // against the same space.
-            const scale = posScale();
-            const px = Math.round(screenX * scale);
-            const py = Math.round(screenY * scale);
-            const sourceLabel = windowLabel();
-            if (!sourceLabel) return;
-            invokeCommand("update_floating_redock_hover", {
-                source_label: sourceLabel,
-                x: px,
-                y: py,
-            }).catch(() => {});
-        };
-
-        const onMouseMove = (e: MouseEvent) => {
-            // Track the latest cursor position even before `dragging`
-            // is armed so the catch-up at IPC resolution can use the
-            // most recent value
-            latestScreenX = e.screenX;
-            latestScreenY = e.screenY;
-            if (!dragging) return;
-            // CSS-px delta * posScale() = host-coordinate delta added to the
-            // baseline from get_window_position. On Windows posScale() is the
-            // devicePixelRatio (physical px); on macOS/Linux it's 1 (CEF Views
-            // DIP). Re-read every move so a mid-drag monitor crossing on
-            // Windows picks up the new DPR automatically.
-            const scale = posScale();
-            const tx =
-                initWinX + Math.round((e.screenX - clickScreenX) * scale);
-            const ty =
-                initWinY + Math.round((e.screenY - clickScreenY) * scale);
-            sendPos(tx, ty);
-            pushRedockHover(e.screenX, e.screenY);
+            // Hand the drag to the host. On Windows: Win32BeginMoveTask manual
+            // loop (zero per-move IPC, no DPR math). On macOS/Linux:
+            // CefWindow::BeginWindowDrag via the patched libcef.
+            // Host owns motion + capture from here; renderer sees mouseup via
+            // the dispatched WM_LBUTTONUP balance (PR #1181 §5.1).
+            invokeCommand("start_window_drag", { label }).catch(() => {});
+            dragging = true;
         };
 
         const onMouseUp = (e: MouseEvent) => {
-            // Invalidate any in-flight mousedown handler — incrementing
-            // the id ensures their `myId !== currentMouseDownId` check
-            // fires when they resolve.
-            currentMouseDownId += 1;
-            const wasDragging = dragging;
+            if (!dragging) return;
             dragging = false;
-            // Do NOT clear pendingPos — that would discard the FINAL
-            // queued position (the cursor's location at release time).
-            // Let the in-flight set_window_position complete; its
-            // `.finally` drains pendingPos to the correct end state.
-
-            // Floating-pane re-dock (Phase 4a MVP): if we just finished
-            // a drag and the cursor landed over another agentmux window
-            // in this process, fire RedockFloatingPane to move our
-            // single block into that window's active tab. The source
-            // workspace's tab.blockids becomes empty → the createEffect
-            // above auto-closes this floater.
-            //
-            // Cross-instance / cross-version safety is free: the host's
-            // `resolve_window_at_cursor` looks up HWND in this process's
-            // `window_hwnds` map — another agentmux version's HWNDs
-            // aren't in it, so cross-process drops silently no-op.
-            if (wasDragging) {
-                // Always clear the hover state on release — the highlight
-                // overlay needs to disappear whether or not we ended up
-                // over a target. Fire-and-forget; the redock attempt
-                // below doesn't depend on this completing.
-                invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
-                void tryRedockAtCursor(e.screenX, e.screenY);
-            }
+            // Clear hover overlay and attempt redock. The host dispatches
+            // WM_LBUTTONUP to the renderer (PR #1181 §5.1) so this fires at
+            // the actual release cursor position.
+            invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
+            void tryRedockAtCursor(e.screenX, e.screenY);
         };
+
+        // Suppress redock-on-release when the host's manual move loop
+        // Esc-cancels (§2.3 of SPEC_PANE_RESIZE_AND_FLOATER_DRAG_NATIVE_LOOP).
+        let cancelDragCancelledListener: (() => void) | null = null;
+        listenEvent<unknown>("window_drag_cancelled", () => {
+            dragging = false;
+        }).then(unlisten => { cancelDragCancelledListener = unlisten; }).catch(() => {});
 
         const tryRedockAtCursor = async (screenX: number, screenY: number) => {
             const ourLabel = windowLabel();
@@ -545,13 +414,12 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         // bubble-phase mousedown handler — preventDefault here blocks
         // the HTML5 dragstart it would have triggered.
         document.addEventListener("mousedown", onMouseDown, true);
-        document.addEventListener("mousemove", onMouseMove);
         document.addEventListener("mouseup", onMouseUp);
 
         onCleanup(() => {
             document.removeEventListener("mousedown", onMouseDown, true);
-            document.removeEventListener("mousemove", onMouseMove);
             document.removeEventListener("mouseup", onMouseUp);
+            cancelDragCancelledListener?.();
         });
     });
 

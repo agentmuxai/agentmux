@@ -259,6 +259,8 @@ pub fn post_start_drag(_state: &Arc<AppState>, _label: &str) {}
 wrap_task! {
     pub struct Win32BeginMoveTask {
         hwnd: u64,
+        state: Arc<AppState>,
+        source_label: Option<String>,
     }
 
     impl Task {
@@ -320,6 +322,10 @@ wrap_task! {
                     "[start_window_drag] manual move loop begin hwnd={:#x} anchor=({},{}) origin=({},{})",
                     self.hwnd, anchor.x, anchor.y, x0, y0
                 );
+                // Throttle state for floater redock-hover emit (§3.2 of the spec).
+                // Pre-dated by 50ms so the first WM_MOUSEMOVE emits immediately.
+                let mut last_hover_emit = std::time::Instant::now()
+                    - std::time::Duration::from_millis(50);
 
                 // 3. Modal move loop on the UI thread.
                 let mut msg: MSG = std::mem::zeroed();
@@ -370,6 +376,27 @@ wrap_task! {
                                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                                 );
                                 moves += 1;
+                                // Floater: emit redock-hover at 50ms cadence so the
+                                // drop-target highlight tracks the cursor while the
+                                // renderer's mousemove listener is dark (§2.2 / §3.2).
+                                if let Some(sl) = self.source_label.as_deref() {
+                                    if sl.starts_with("floating-")
+                                        && last_hover_emit.elapsed()
+                                            >= std::time::Duration::from_millis(50)
+                                    {
+                                        let hover_args = serde_json::json!({
+                                            "source_label": sl,
+                                            "x": cur.x,
+                                            "y": cur.y,
+                                        });
+                                        let _ = crate::commands::window
+                                            ::update_floating_redock_hover(
+                                                &self.state,
+                                                &hover_args,
+                                            );
+                                        last_hover_emit = std::time::Instant::now();
+                                    }
+                                }
                             }
                         }
                         WM_LBUTTONUP => {
@@ -395,6 +422,15 @@ wrap_task! {
                                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                             );
                             cancelled = true;
+                            // Signal the renderer to suppress redock-on-release
+                            // for this drag (§2.3 / §3.2 of the spec).
+                            crate::events::emit_event_to_top_level_windows(
+                                &self.state,
+                                "window_drag_cancelled",
+                                &serde_json::json!({
+                                    "label": self.source_label.as_deref().unwrap_or("main")
+                                }),
+                            );
                         }
                         WM_TIMER if msg.wParam == DRAG_TICK_ID => {
                             // Our wake tick — consume ONLY ours; the top-of-loop
@@ -423,8 +459,8 @@ wrap_task! {
 }
 
 #[cfg(target_os = "windows")]
-pub fn post_win32_begin_move(hwnd: u64) {
-    let mut task = Win32BeginMoveTask::new(hwnd);
+pub fn post_win32_begin_move(hwnd: u64, state: Arc<AppState>, source_label: Option<String>) {
+    let mut task = Win32BeginMoveTask::new(hwnd, state, source_label);
     post_task(ThreadId::UI, Some(&mut task));
 }
 

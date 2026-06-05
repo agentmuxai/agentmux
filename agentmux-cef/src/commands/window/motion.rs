@@ -230,7 +230,7 @@ pub fn start_window_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Res
             }
         };
         if !hwnd.is_null() {
-            crate::ui_tasks::post_win32_begin_move(hwnd as usize as u64);
+            crate::ui_tasks::post_win32_begin_move(hwnd as usize as u64, state.clone(), Some(label.to_string()));
         } else {
             tracing::warn!("[start_window_drag] no HWND resolved for label={}", label);
         }
