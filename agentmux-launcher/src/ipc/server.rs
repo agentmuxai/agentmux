@@ -172,16 +172,76 @@ pub fn run_ipc_server(
     })
 }
 
-#[cfg(not(target_os = "windows"))]
+/// Unix counterpart of `bind_first_pipe_instance`: bind a Unix
+/// domain socket. The bind is the single-instance signal — a second
+/// launcher pointing at the same socket path gets `EADDRINUSE`. Caller
+/// is responsible for unlinking a stale socket file first (see the
+/// `connect → ECONNREFUSED → unlink → bind` pattern in `main.rs::run_unix`).
+///
+/// A1.1 of SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05.
+#[cfg(unix)]
+pub fn bind_first_unix_socket(socket_path: &str) -> std::io::Result<tokio::net::UnixListener> {
+    tokio::net::UnixListener::bind(socket_path)
+}
+
+/// Run the Unix-domain-socket IPC server until cancelled (or task panics).
+///
+/// Mirrors the Windows accept loop above. The protocol on the wire is
+/// identical (newline-delimited JSON `Command` / `Event`) so
+/// `handle_connection` is shared between platforms via generics.
+///
+/// The listener is passed in pre-bound by the caller so a collision
+/// (a second launcher pointing at the same data dir) can be surfaced
+/// synchronously before any children spawn. (Same Phase B.6 contract
+/// as the Windows path.)
+#[cfg(unix)]
 pub fn run_ipc_server(
-    _pipe_name: String,
-    _ctx: ServerCtx,
+    socket_path: String,
+    listener: tokio::net::UnixListener,
+    ctx: ServerCtx,
 ) -> tokio::task::JoinHandle<()> {
-    // Non-Windows: pipe IPC isn't built yet. Phase 7 of the broader
-    // tear-off cross-platform work (separate spec) will add Unix
-    // domain socket support. For now return an immediately-finished
-    // task so the caller can hold a handle uniformly.
-    tokio::spawn(async {})
+    tokio::spawn(async move {
+        let ctx = Arc::new(ctx);
+        crate::log(&format!("[ipc] server starting on {}", socket_path));
+
+        // Backoff state — guard against a persistent accept error
+        // (e.g. EMFILE/ENFILE under fd exhaustion, EBADF if the
+        // listener fd is closed out from under us) spinning a hot
+        // loop and flooding the launcher log. Reagent P2 on PR #1288.
+        const MAX_CONSECUTIVE_ACCEPT_ERRORS: u32 = 32;
+        let mut consecutive_errors: u32 = 0;
+
+        loop {
+            match listener.accept().await {
+                Ok((stream, _addr)) => {
+                    consecutive_errors = 0;
+                    tokio::spawn(handle_connection(stream, Arc::clone(&ctx)));
+                }
+                Err(e) => {
+                    consecutive_errors = consecutive_errors.saturating_add(1);
+                    if consecutive_errors >= MAX_CONSECUTIVE_ACCEPT_ERRORS {
+                        crate::log(&format!(
+                            "[ipc] FATAL: {} consecutive accept errors (last: {}); listener appears permanently broken — stopping IPC server",
+                            consecutive_errors, e
+                        ));
+                        return;
+                    }
+                    // Exponential backoff capped at 1s: 1ms → 2ms → 4ms
+                    // → … → 1024ms → 1024ms. Keeps EMFILE/ENFILE
+                    // recovery responsive (most descriptor pressure
+                    // clears in microseconds) without hot-spinning a
+                    // CPU core on a truly broken listener.
+                    let backoff_ms = 1u64 << consecutive_errors.min(10);
+                    let backoff = std::time::Duration::from_millis(backoff_ms.min(1024));
+                    crate::log(&format!(
+                        "[ipc] accept error #{}: {} — backing off {:?}",
+                        consecutive_errors, e, backoff
+                    ));
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
+    })
 }
 
 /// Drive one connection: read newline-delimited JSON Commands,
@@ -199,8 +259,16 @@ pub fn run_ipc_server(
 /// direct writes are reserved for "response-to-this-client-only"
 /// errors (parse failure, register-first violation). (codex P1
 /// PR #605.)
-#[cfg(target_os = "windows")]
-async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
+// (gate removed — platform-neutral body, accessible from cfg(unix) too — A1.1)
+//
+// Generic over the duplex stream type so the same body serves Windows
+// `NamedPipeServer` and Unix `tokio::net::UnixStream` without code
+// duplication. Bounds are what `tokio::io::split` + `Box<dyn AsyncWrite>`
+// need: AsyncRead + AsyncWrite + Unpin + Send + 'static.
+async fn handle_connection<S>(stream: S, ctx: Arc<ServerCtx>)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
     let (read_half, write_half) = tokio::io::split(stream);
     // CPD-2 — wrap the writer in the HostPipe-compatible
     // `Arc<Mutex<Box<dyn AsyncWrite + Unpin + Send>>>` shape so the
@@ -589,7 +657,7 @@ static NEXT_CONN_ID: std::sync::atomic::AtomicU64 =
 /// Without this, the reducer's process record stays Running and a
 /// reconnect from the same live PID hits AlreadyRegistered.
 /// (codex P1 #610.)
-#[cfg(target_os = "windows")]
+// (gate removed — platform-neutral body, accessible from cfg(unix) too — A1.1)
 async fn dispatch_synthetic_goodbye(
     ctx: &Arc<ServerCtx>,
     conn_id: u64,
@@ -637,7 +705,7 @@ fn launcher_start_ms() -> u64 {
 /// Enforce the "first message must be Register" invariant. Returns
 /// `Some(Event::Error)` if the command violates the contract; the
 /// caller sends it and closes the connection.
-#[cfg(target_os = "windows")]
+// (gate removed — platform-neutral body, accessible from cfg(unix) too — A1.1)
 async fn enforce_register_first(
     cmd: &Command,
     registered_kind: &Option<ClientKind>,
@@ -922,7 +990,7 @@ fn patch_launcher_identity(event: Event, ctx: &Arc<ServerCtx>) -> Event {
 /// `Event` JSON to preserve backwards compat with existing host
 /// versions that haven't adopted the envelope yet — CPD-1 lands the
 /// host-side schema migration.
-#[cfg(target_os = "windows")]
+// (gate removed — platform-neutral body, accessible from cfg(unix) too — A1.1)
 async fn send_event_shared(
     writer: &crate::host_pipe::SharedWriter,
     event: Event,

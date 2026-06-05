@@ -62,12 +62,11 @@ pub fn get_config_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String
     }
 }
 
-/// Get the user home directory used by the frontend for per-agent paths
-/// (working dir, `GH_CONFIG_DIR`, etc.).
-///
-/// Portable returns `<portable>/data`; installed returns `~/.agentmux`;
-/// `AGENTMUX_DATA_HOME`, if set at launch, overrides both.
-/// See `docs/specs/portable-agent-working-dirs.md`.
+/// Get the AgentMux account-wide root (`~/.agentmux/`) — `user_home_dir`, set
+/// from `paths.home_dir` (sidecar.rs; the same root in portable / installed /
+/// override modes, not a per-channel or `<portable>/data` subdir). Used by the
+/// frontend for per-agent paths (working dir, `GH_CONFIG_DIR`) and as the root
+/// of the shared provider auth dir (`ensure_auth_dir`).
 pub fn get_user_home_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     let dir = state.user_home_dir.lock();
     match dir.as_ref() {
@@ -669,16 +668,31 @@ async fn run_cli_login_pty(
     tokio::task::spawn_blocking(move || {
         use std::io::BufRead;
         let mut reader = std::io::BufReader::new(reader);
-        let mut found: Option<String> = None;
+        // Wrap the oneshot in an Option so we send the URL exactly once and then
+        // keep reading. Before the URL: scan for it. After: keep draining and LOG
+        // every line — the CLI's `Paste code here >` prompt and, crucially, its
+        // response to the code delivered via set_provider_auth (success vs. an
+        // "invalid code" / error). Without this the host discarded that output,
+        // so a failed login was a black box. Draining also keeps the CLI from
+        // blocking on a full PTY output buffer.
+        let mut url_tx = Some(url_tx);
         let mut line = String::new();
         loop {
             line.clear();
             match reader.read_line(&mut line) {
                 Ok(0) => break, // EOF
                 Ok(_) => {
-                    if let Some(u) = extract_url(&line) {
-                        found = Some(u);
-                        break;
+                    if let Some(tx) = url_tx.take() {
+                        if let Some(u) = extract_url(&line) {
+                            let _ = tx.send(Some(u));
+                        } else {
+                            url_tx = Some(tx); // not the URL line yet
+                        }
+                    } else {
+                        let t = line.trim_end();
+                        if !t.trim().is_empty() {
+                            tracing::info!(target: "login_pty", "[login-pty] {}", t);
+                        }
                     }
                 }
                 Err(e) => {
@@ -687,9 +701,10 @@ async fn run_cli_login_pty(
                 }
             }
         }
-        let _ = url_tx.send(found);
-        // Reader is dropped here. Master keeps living in the wait task
-        // below.
+        // EOF/error before a URL was ever seen — unblock the awaiting caller.
+        if let Some(tx) = url_tx.take() {
+            let _ = tx.send(None);
+        }
     });
 
     let auth_url: Option<String> = match tokio::time::timeout(

@@ -369,20 +369,33 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     };
 
                     if !tokens_exist {
-                        // No credentials in the dir the agent will run in — not
-                        // authenticated. Fast path: no CLI spawn, so no spin.
-                        tracing::info!("claude auth check: no credentials in provider dir, skipping CLI");
-                        let result = CheckCliAuthResult {
-                            authenticated: false,
-                            email: None,
-                            auth_method: None,
-                            raw_output: "no credentials found".to_string(),
-                        };
-                        return Ok(Some(serde_json::to_value(&result).unwrap()));
+                        // On macOS the Claude CLI stores credentials in the
+                        // Keychain ("Claude Safe Storage"), NOT in
+                        // .credentials.json — so a missing file does NOT mean
+                        // logged out. Fall through to `claude auth status`, which
+                        // reads the Keychain (and does so without a prompt — the
+                        // CLI owns that Keychain item). On Windows/Linux the file
+                        // IS the credential store, so the fast "definitely not
+                        // authenticated" short-circuit stays correct there.
+                        #[cfg(not(target_os = "macos"))]
+                        {
+                            tracing::info!("claude auth check: no credentials in provider dir, skipping CLI");
+                            let result = CheckCliAuthResult {
+                                authenticated: false,
+                                email: None,
+                                auth_method: None,
+                                raw_output: "no credentials found".to_string(),
+                            };
+                            return Ok(Some(serde_json::to_value(&result).unwrap()));
+                        }
+                        #[cfg(target_os = "macos")]
+                        tracing::info!(
+                            "claude auth check: no credentials file — checking Keychain via CLI (macOS)"
+                        );
+                    } else {
+                        // Tokens exist in the provider dir — validate with the CLI (10 s timeout).
+                        tracing::info!("claude auth check: credentials found, validating via CLI");
                     }
-
-                    // Tokens exist in the provider dir — validate with the CLI (10 s timeout).
-                    tracing::info!("claude auth check: credentials found, validating via CLI");
                 }
 
                 let output = tokio::time::timeout(
