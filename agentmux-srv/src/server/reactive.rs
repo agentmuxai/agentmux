@@ -200,6 +200,9 @@ pub(super) async fn handle_reactive_unregister(
     // Also remove from cross-instance file registry.
     let data_dir = base::get_wave_data_dir();
     agent_registry::remove(&data_dir, &req.agent_id);
+    // Drop the subagent filesystem watcher (handle + channel + task) — the
+    // symmetric teardown for the watch_agent() call in the register handler.
+    state.subagent_watcher.unwatch_agent(&req.agent_id);
     Json(json!({"success": true}))
 }
 

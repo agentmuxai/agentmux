@@ -234,6 +234,24 @@ impl SubagentWatcher {
         });
     }
 
+    /// Stop watching an agent: drop its filesystem watcher, which closes the
+    /// debounce channel — so the processing task self-terminates on the next
+    /// `rx.recv()` returning `None`. Idempotent: a no-op if the agent isn't
+    /// currently watched.
+    ///
+    /// Without this, `watched_agents` was push-only: every distinct agent that
+    /// ever ran leaked one OS watch handle + channel + idle task for the rest of
+    /// the process lifetime, even after its pane/agent was deleted. (Session
+    /// records in `sessions` are plain data, not handles, and are left as-is.)
+    pub fn unwatch_agent(&self, agent_id: &str) {
+        let mut watched = self.watched_agents.lock().unwrap();
+        let before = watched.len();
+        watched.retain(|w| w.agent_id != agent_id);
+        if watched.len() != before {
+            tracing::info!(agent = %agent_id, "stopped watching subagent dir");
+        }
+    }
+
     /// List all subagents across all sessions (sync — safe to call from RPC dispatch).
     pub fn list_active(&self) -> Vec<SubagentInfo> {
         let sessions = self.sessions.lock().unwrap();
