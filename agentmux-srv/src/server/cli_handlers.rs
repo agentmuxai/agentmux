@@ -400,22 +400,11 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("runclilogin: {e}"))?;
                 tracing::info!(cli = %cmd.cli_path, args = ?cmd.login_args, "RunCliLogin");
 
-                // Spawn the login process. On most platforms it opens the browser
-                // automatically and writes the URL to stderr. On Windows, stderr is
-                // block-buffered when piped so we can't reliably read it in real-time.
-                // Strategy: inherit stdout/stderr so the CLI can open the browser normally,
-                // then return immediately — the frontend polls auth status until done.
-                let mut child = make_cli_cmd(&cmd.cli_path)
-                    .args(&cmd.login_args)
-                    .envs(&cmd.auth_env)
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .spawn()
-                    .map_err(|e| format!("failed to spawn login: {e}"))?;
-
-                // Keep child alive in background — it waits for the user to complete OAuth
-                tokio::spawn(async move { let _ = child.wait().await; });
-
+                // Dead path: the active login flow is the CEF host IPC
+                // `run_cli_login`, which owns the child's lifecycle (supersede-kill
+                // + timeout reaper). This srv-side variant previously spawned a
+                // DETACHED, unkillable `auth login` child here — a process leak if
+                // ever invoked. It has no live caller; do NOT spawn.
                 let result = RunCliLoginResult { auth_url: None, raw_output: String::new() };
                 Ok(Some(serde_json::to_value(&result).unwrap()))
             })
