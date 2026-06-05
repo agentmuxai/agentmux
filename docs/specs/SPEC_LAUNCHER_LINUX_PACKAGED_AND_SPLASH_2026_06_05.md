@@ -35,7 +35,7 @@ run_normally() {
 }
 ```
 
-The launcher binary is **built and shipped** in the AppImage (`task build:host:linux` writes `target/release/agentmux-launcher` → `dist/cef/agentmux-launcher` → `AppDir/usr/bin/agentmux-launcher`) — it's just dead weight: nothing invokes it.
+The launcher binary is **built but not actually shipped**: `task build:host:linux` writes `target/release/agentmux-launcher` → `dist/cef/agentmux-launcher`, but `scripts/build-appimage-linux.sh` never copies it into `AppDir/usr/bin/` (it stages only `agentmux-cef` → renamed to `agentmux` at `:84` and the srv at `:88`). So today the launcher sits in `dist/cef/` unused and the AppImage contains no launcher at all. A0 has to copy it in too — see §3.
 
 ### 1.2 No Linux splash module
 
@@ -106,30 +106,45 @@ The minimum slice that closes the architectural gap. No splash UI yet (§B is se
 
 **Code changes:**
 
-1. **`scripts/linux-apprun.sh`** — last line of `run_normally()`:
+1. **`scripts/build-appimage-linux.sh`** — two edits:
+
+   **(a) Stop renaming the host binary.** Today line 84 does `cp dist/cef/agentmux-cef "$APPDIR/usr/bin/agentmux"`. The launcher's `find_cef_binary` (`agentmux-launcher/src/main.rs:1458-1496`) probes these candidates in order: `agentmux-{VERSION}` → `agentmux-*` dir scan (excludes `agentmux-cef`, `agentmux-srv`, `agentmux-launcher`) → `agentmux-cef-{VERSION}` → `agentmux-cef`. A bare `agentmux` (no dash, no version) matches none of them, so a launcher pointed at the current AppImage layout would fall through to the `agentmux-cef` fallback and fail at `main.rs:203`. The simplest fix: keep the host's cargo name `agentmux-cef` so the existing `agentmux-cef` fallback finds it.
    ```bash
-   # Before:
+   # Before (line 84):
+   cp dist/cef/agentmux-cef "$APPDIR/usr/bin/agentmux"
+   # After:
+   cp dist/cef/agentmux-cef "$APPDIR/usr/bin/agentmux-cef"
+   ```
+   Also update the `require dist/cef/agentmux-cef` check (line 64) — already matches the source name, no edit there.
+
+   **(b) Add the launcher copy.** Insert immediately after the host-cp:
+   ```bash
+   cp dist/cef/agentmux-launcher "$APPDIR/usr/bin/agentmux-launcher"
+   ```
+   And add a `require dist/cef/agentmux-launcher` next to the existing host `require`.
+
+2. **`scripts/linux-apprun.sh`** — exec the launcher instead of the host, in both `run_normally()` and the FUSE-fallback path. AppImage's `$APPIMAGE` invokes `AppRun`, which now execs the launcher; the user's `.desktop` file still points at the AppImage, end-to-end identical from the user's perspective.
+   ```bash
+   # Before (line 39):
    exec "$this_dir/usr/bin/agentmux" "$@"
    # After:
    exec "$this_dir/usr/bin/agentmux-launcher" "$@"
    ```
-   Add `AGENTMUX_HOST_BIN="$this_dir/usr/bin/agentmux"` and `AGENTMUX_SRV_DIR="$this_dir/usr/bin"` exports above the exec so the launcher resolves both siblings without needing a `runtime/` subdir (the Linux AppImage uses the flat dev-style layout, same as macOS — see SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30 §3).
+   No env-var exports needed — the launcher resolves siblings out of its own `exe_dir` (the flat layout case in `launcher_main`).
 
-2. **`agentmux-launcher/src/main.rs`** — `launcher_main()` already resolves the host + srv from `exe_dir` when there's no `runtime/` subdir (lines 130-138). **No code change needed** — Linux falls through the macOS-dev-style flat path that already works in `task dev`. Just verify the search order:
-   - host: `exe_dir.join("agentmux")` (Linux extension-less binary, like macOS)
-   - srv: `exe_dir.join(format!("agentmux-srv-{VERSION}-linux.x64"))`
+3. **`agentmux-launcher/src/main.rs`** — `launcher_main()` already resolves the host + srv from `exe_dir` when there's no `runtime/` subdir (lines 130-138). With change (1a) above (keeping the host at `agentmux-cef`), `find_cef_binary`'s existing `agentmux-cef` fallback returns the right path and no launcher code change is needed for A0.
 
-   `agentmux-launcher/src/srv_spawner.rs` already does the versioned-filename Linux probe — verify it matches `scripts/build-appimage-linux.sh:88`'s `agentmux-srv-${VERSION}-linux.x64` convention.
+   **If we ever want the host renamed to bare `agentmux` instead** (a UX preference), the launcher needs a new `find_cef_binary` candidate that probes `exe_dir.join("agentmux")` before any of the existing ones. Recommend deferring that rename — keep the host at `agentmux-cef` in v1 to land A0 with zero launcher code change.
 
-3. **`scripts/install-linux-desktop.sh`** — currently writes `Exec=$APPIMAGE %F` in `agentmux.desktop`. **No change.** AppImage's `$APPIMAGE` invokes `AppRun`, which now execs the launcher. The user's `.desktop` file still points at the AppImage, the AppImage still runs `AppRun`, `AppRun` runs the launcher. End-to-end identical from the user's perspective.
+4. **`scripts/install-linux-desktop.sh`** — currently writes `Exec=$APPIMAGE %F` in `agentmux.desktop`. **No change.**
 
-4. **Single-instance pipe naming** — `agentmux-launcher/src/host_pipe/` uses platform-specific naming:
+5. **Single-instance pipe naming** — `agentmux-launcher/src/host_pipe/` uses platform-specific naming:
    - Windows: `\\.\pipe\AgentMux-<dir_hash>`
-   - macOS/Linux: `~/.cache/agentmux/launcher-<dir_hash>.sock` (Unix domain socket)
+   - macOS/Linux: `$XDG_RUNTIME_DIR/agentmux/launcher-<dir_hash>.sock` (Unix domain socket)
 
-   The `target_os = "linux"` branch likely already exists from the `task dev` Linux supervisor work (verify before A0 ships). If absent, gate the macOS code under `cfg(unix)` (the macOS impl uses `tokio::net::UnixListener`, which works unmodified on Linux).
+   The macOS impl uses `tokio::net::UnixListener` which works unmodified on Linux. Verify the cfg gate is `cfg(unix)` not `cfg(target_os = "macos")` before A0 ships.
 
-**Workspace changes:** None. The launcher already builds on Linux (`task build:host:linux` does `cargo build --release -p agentmux-launcher`).
+**Workspace changes:** None. The launcher already builds on Linux (`task build:host:linux` does `cargo build --release -p agentmux-launcher`); just `cp` it into the AppImage.
 
 **Risk register for A0:**
 
@@ -283,7 +298,15 @@ When `AGENTMUX_OZONE_PLATFORM=wayland` is set, the launcher checks the same env 
 
 ### B.3 `build.rs` — brain bitmap embedding
 
-`agentmux-launcher/build.rs` already emits `brain_dims.rs` + `brain_bgra.bin` (Win32 BGRA) and `brain_rgba.bin` (macOS RGBA). Add a `target_os = "linux"` arm that emits the **same RGBA bytes as macOS** — X11 `PutImage` with `image_byte_order = LSBFirst` happens to want exactly that layout on every modern X server. Single new `OUT_DIR` file.
+`agentmux-launcher/build.rs` is currently `#[cfg(target_os = "windows")]`-gated end-to-end — it emits `brain_bgra.bin` + `brain_dims.rs` only on Windows. macOS sidesteps build.rs entirely by doing `include_bytes!("../resources/brain.png")` in `splash_mac.rs:37` and letting NSImage decode the PNG at runtime.
+
+Two viable options for Linux:
+
+**Option 1 — extend `build.rs` with a Linux arm.** Add a `#[cfg(target_os = "linux")]` block that decodes the PNG to raw RGBA8 (no pre-multiplication needed — x11rb's `PutImage` accepts straight RGBA on TrueColor depth-24/32 visuals on every modern X server) and emits `brain_rgba.bin` + `brain_dims.rs`. ~30 lines, shares the existing `png` crate dep.
+
+**Option 2 — runtime decode like macOS.** `splash_linux.rs` does `include_bytes!("../resources/brain.png")` and decodes via the `png` crate at module load. Adds ~50 KB to the launcher binary (png + miniz_oxide), no build.rs change.
+
+Recommend **Option 1** for consistency with the Windows path and to keep the splash thread allocation-free at runtime (no PNG decoder running on the cold-start critical path). The `brain_dims.rs` it emits is also reusable verbatim across Windows + Linux — no new code duplication.
 
 ### B.4 Cargo dependencies (new)
 
