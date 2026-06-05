@@ -147,13 +147,36 @@ function BlockErrorFallback(props: {
     onClose?: () => void;
 }): JSX.Element {
     const [stackOpen, setStackOpen] = createSignal(false);
+    const [copiedPos, setCopiedPos] = createSignal<{ x: number; y: number } | null>(null);
     const errName = () => props.error?.name ?? "Error";
     const errMessage = () => props.error?.message ?? String(props.error);
     const errStack = () => props.error?.stack ?? "";
     const shortId = () => props.blockId.substring(0, 7);
 
+    // Copy-on-highlight: when the user releases the mouse with a non-empty
+    // selection inside the error pane, copy to clipboard and show a brief
+    // "Copied" tooltip near the cursor. Uses execCommand as primary path
+    // (synchronous, no permission issues in CEF) with clipboard API fallback.
+    const handleMouseUp = (e: MouseEvent): void => {
+        const sel = window.getSelection();
+        const text = sel?.toString().trim();
+        if (!text) return;
+        const pos = { x: e.clientX, y: e.clientY };
+        const show = (): void => {
+            setCopiedPos(pos);
+            setTimeout(() => setCopiedPos(null), 1500);
+        };
+        // execCommand is synchronous and works reliably in CEF within a user gesture.
+        try {
+            const ok = document.execCommand("copy");
+            if (ok) { show(); return; }
+        } catch (_) { /* fall through */ }
+        // Fallback to async clipboard API.
+        void navigator.clipboard.writeText(text).then(show).catch(() => {});
+    };
+
     return (
-        <div class="block-error-fallback" role="alert" data-testid="block-error-fallback">
+        <div class="block-error-fallback" role="alert" data-testid="block-error-fallback" onMouseUp={handleMouseUp}>
             <div class="block-error-fallback-header">
                 <i class="fa-sharp fa-solid fa-triangle-exclamation block-error-fallback-icon" aria-hidden="true" />
                 <div class="block-error-fallback-title">This pane crashed</div>
@@ -203,6 +226,16 @@ function BlockErrorFallback(props: {
                     </button>
                 </Show>
             </div>
+            <Show when={copiedPos()}>
+                {(pos) => (
+                    <div
+                        class="block-error-fallback-copied"
+                        style={{ left: `${pos().x + 12}px`, top: `${pos().y - 28}px` }}
+                    >
+                        Copied
+                    </div>
+                )}
+            </Show>
         </div>
     );
 }
