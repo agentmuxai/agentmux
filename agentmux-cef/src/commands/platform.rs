@@ -62,12 +62,11 @@ pub fn get_config_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String
     }
 }
 
-/// Get the user home directory used by the frontend for per-agent paths
-/// (working dir, `GH_CONFIG_DIR`, etc.).
-///
-/// Portable returns `<portable>/data`; installed returns `~/.agentmux`;
-/// `AGENTMUX_DATA_HOME`, if set at launch, overrides both.
-/// See `docs/specs/portable-agent-working-dirs.md`.
+/// Get the AgentMux account-wide root (`~/.agentmux/`) — `user_home_dir`, set
+/// from `paths.home_dir` (sidecar.rs; the same root in portable / installed /
+/// override modes, not a per-channel or `<portable>/data` subdir). Used by the
+/// frontend for per-agent paths (working dir, `GH_CONFIG_DIR`) and as the root
+/// of the shared provider auth dir (`ensure_auth_dir`).
 pub fn get_user_home_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     let dir = state.user_home_dir.lock();
     match dir.as_ref() {
@@ -77,7 +76,10 @@ pub fn get_user_home_dir(state: &Arc<AppState>) -> Result<serde_json::Value, Str
 }
 
 /// Ensure a provider auth directory exists and return its absolute path.
-/// Auth dirs are version-isolated under the version-specific config dir.
+/// The DEFAULT provider auth lives in the account-wide, version- and
+/// channel-independent `~/.agentmux/shared/providers/<provider>/` — the
+/// per-identity bundle override (identity_handlers) still wins for explicit
+/// multi-account.
 pub fn ensure_auth_dir(
     state: &Arc<AppState>,
     args: &serde_json::Value,
@@ -100,13 +102,21 @@ pub fn ensure_auth_dir(
         ));
     }
 
-    let config_dir = state.version_config_dir.lock();
-    let config_dir = config_dir
+    // The DEFAULT provider auth/config dir lives under the account-wide, version-
+    // and channel-independent shared root (`~/.agentmux/shared/providers/<provider>/`),
+    // NOT the per-channel config dir. One login is shared across every instance /
+    // channel / version — the structural fix for the per-channel validate-spin
+    // regression (docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md).
+    // The per-identity bundle override (identity_handlers) still wins for explicit
+    // multi-account. `user_home_dir` is the AgentMux root (`~/.agentmux/`).
+    let home = state.user_home_dir.lock();
+    let home = home
         .as_ref()
-        .ok_or_else(|| "Config dir not initialized yet".to_string())?;
+        .ok_or_else(|| "Home dir not initialized yet".to_string())?;
 
-    let auth_dir = std::path::PathBuf::from(config_dir)
-        .join("auth")
+    let auth_dir = std::path::PathBuf::from(home)
+        .join("shared")
+        .join("providers")
         .join(provider_id);
     std::fs::create_dir_all(&auth_dir)
         .map_err(|e| format!("Failed to create auth dir for {}: {}", provider_id, e))?;

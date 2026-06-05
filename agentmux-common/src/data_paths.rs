@@ -372,6 +372,20 @@ impl DataPaths {
     pub fn identity_dir(&self, bundle_id: &str) -> Option<PathBuf> {
         sanitize_path_segment(bundle_id).map(|safe| self.identities_dir().join(safe))
     }
+
+    /// `~/.agentmux/shared/providers/<auth_dir_name>/` — the DEFAULT provider
+    /// config + auth dir. Lives under `shared_dir`, so it is account-wide,
+    /// version-independent, AND channel-independent: every instance / channel /
+    /// version logs in ONCE and shares it. This is the structural fix for the
+    /// per-channel "validate-spin" regression — there is no empty-per-instance
+    /// auth dir to spin on. The per-identity override (`identity_dir`) still
+    /// takes precedence for explicit multi-account bundles. `auth_dir_name`
+    /// comes from the static provider registry (e.g. "claude"), never user
+    /// input. Retro:
+    /// `docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`.
+    pub fn provider_auth_dir(&self, auth_dir_name: &str) -> PathBuf {
+        self.shared_dir.join("providers").join(auth_dir_name)
+    }
 }
 
 /// `~/.agentmux/` root, or the test override via
@@ -896,6 +910,39 @@ mod tests {
             assert_eq!(p.identity_dir("foo*bar"), None);
             assert_eq!(p.identity_dir("foo?bar"), None);
             assert_eq!(p.identity_dir("with\0nul"), None);
+        });
+    }
+
+    #[test]
+    fn provider_auth_dir_is_shared_and_channel_independent() {
+        // The DEFAULT provider auth lives under shared_dir, so it resolves to the
+        // SAME path regardless of channel / version / mode — the structural fix
+        // for the per-channel "validate-spin" regression. It must NOT live under
+        // the per-channel config dir (which is where the regression put it).
+        // Retro: docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md
+        with_home_override(|_root| {
+            clear_channel_env();
+            let installed = DataPaths::resolve("0.42.0", &RuntimeMode::Installed).unwrap();
+            let dev = DataPaths::resolve(
+                "0.42.0",
+                &RuntimeMode::Dev { branch: "some-branch".into(), clone_id: None },
+            )
+            .unwrap();
+
+            let a = installed.provider_auth_dir("claude");
+            assert_eq!(
+                a,
+                dev.provider_auth_dir("claude"),
+                "provider auth dir must not vary by channel / mode (instance-independent)"
+            );
+            assert!(
+                a.ends_with("shared/providers/claude"),
+                "provider auth dir must live under shared/providers/: {a:?}"
+            );
+            assert!(
+                !a.starts_with(&installed.config_dir),
+                "provider auth dir must NOT be under the per-channel config dir"
+            );
         });
     }
 
