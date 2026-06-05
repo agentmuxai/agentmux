@@ -78,9 +78,15 @@
 }
 
 @include mixins.respect-reduced-motion {
+    // Loading spinners are FUNCTIONAL "agent is working" indicators — never
+    // freeze them under reduced motion. A stuck spinner reads as a hung app,
+    // which is worse for everyone (motion-sensitive users included: they then
+    // can't tell it's busy). A small continuous rotate is low vestibular risk;
+    // keep it spinning, just slower/gentler. reduced-motion targets decorative
+    // / large-translation motion, not essential status indicators.
     .agent-composer-strip-spinner,
     .agent-composer-strip-spinner--decelerating {
-        animation: none;
+        animation-duration: 2.4s;
     }
 }
 
