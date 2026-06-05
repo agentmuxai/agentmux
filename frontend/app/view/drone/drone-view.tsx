@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createResource, For, onCleanup, Show, type JSX } from "solid-js";
+import { createResource, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -10,41 +10,68 @@ import type { DroneViewModel } from "./drone-model";
 import type { BlockKind, FlowNode } from "./drone-types";
 import "./drone-view.scss";
 
+// Transient global: which node-kind is being dragged from the top bar.
+// Read by the Canvas's drop handler. Drag is inherently app-global, so a
+// module-level signal is fine even with multiple drone panes open.
+const [dragKind, setDragKind] = createSignal<BlockKind | null>(null);
+
 export const DroneView = (props: { model: DroneViewModel }): JSX.Element => {
     const m = props.model;
 
     return (
         <div class="drone-pane">
-            <Toolbar model={m} />
-            <div class="drone-body">
-                <BlockPalette model={m} />
-                <div class="drone-canvas-wrap">
-                    <Canvas model={m} />
-                </div>
+            <NodeTypeBar model={m} />
+            <div class="drone-stage">
+                <Canvas model={m} />
                 <InspectorPanel model={m} />
+                <RunPanel model={m} />
             </div>
-            <RunPanel model={m} />
         </div>
     );
 };
 
 DroneView.displayName = "DroneView";
 
-// ── Toolbar ───────────────────────────────────────────────────────────
+// ── Top node-type bar ─────────────────────────────────────────────────
+//
+// The only permanent chrome. Left: drone name + open/new/save/run.
+// Center: the horizontal palette of draggable emoji node-type chips.
+// Everything below this bar is canvas.
 
-const Toolbar = (p: { model: DroneViewModel }): JSX.Element => {
+const NodeTypeBar = (p: { model: DroneViewModel }): JSX.Element => {
     const m = p.model;
     const validation = () => m.validate();
     return (
-        <header class="drone-toolbar">
+        <header class="drone-bar">
             <input
-                class="drone-toolbar-name"
+                class="drone-bar-name"
                 value={m.draftAtom().name}
                 onInput={(e) => m.setName(e.currentTarget.value)}
                 placeholder="Untitled Drone"
                 aria-label="Drone name"
             />
-            <div class="drone-toolbar-actions">
+
+            <div class="drone-bar-types" role="toolbar" aria-label="Node types">
+                <For each={BLOCK_KINDS}>{(kind) => <NodeChip model={m} kind={kind} />}</For>
+            </div>
+
+            <div class="drone-bar-actions">
+                <Show when={m.listAtom().length > 0}>
+                    <select
+                        class="drone-btn"
+                        aria-label="Open saved drone"
+                        onChange={(e) => {
+                            const id = e.currentTarget.value;
+                            if (id) void m.openDrone(id);
+                            e.currentTarget.value = "";
+                        }}
+                    >
+                        <option value="">Open…</option>
+                        <For each={m.listAtom()}>
+                            {(wf) => <option value={wf.id}>{wf.name}</option>}
+                        </For>
+                    </select>
+                </Show>
                 <button class="drone-btn" onClick={() => m.newDrone()}>
                     New
                 </button>
@@ -57,9 +84,10 @@ const Toolbar = (p: { model: DroneViewModel }): JSX.Element => {
                     title={validation().errors.join(" · ")}
                     onClick={() => void m.run()}
                 >
-                    {m.runningAtom() ? "Running…" : "Run"}
+                    {m.runningAtom() ? "Running…" : "▶ Run"}
                 </button>
             </div>
+
             <Show when={m.errorAtom()}>
                 <div class="drone-error" role="alert">
                     {m.errorAtom()}
@@ -69,51 +97,29 @@ const Toolbar = (p: { model: DroneViewModel }): JSX.Element => {
     );
 };
 
-// ── Block palette ─────────────────────────────────────────────────────
-
-const BlockPalette = (p: { model: DroneViewModel }): JSX.Element => {
-    const m = p.model;
+const NodeChip = (p: { model: DroneViewModel; kind: BlockKind }): JSX.Element => {
+    const meta = blockMeta(p.kind);
     return (
-        <aside class="drone-palette" aria-label="Block palette">
-            <div class="drone-palette-title">Blocks</div>
-            <For each={BLOCK_KINDS}>
-                {(kind) => {
-                    const meta = blockMeta(kind);
-                    return (
-                        <button
-                            class="drone-palette-item"
-                            style={{ "--block-color": meta.color }}
-                            onClick={() => {
-                                // Naive placement — Phase 2 will use drag + drop
-                                // with cursor coords. For now, drop near origin
-                                // with a small random offset so adds don't stack.
-                                m.addNode(kind, {
-                                    x: 80 + Math.random() * 60,
-                                    y: 80 + Math.random() * 60,
-                                });
-                            }}
-                            title={meta.description}
-                        >
-                            <span class="drone-palette-item-dot" />
-                            <span class="drone-palette-item-label">{meta.label}</span>
-                        </button>
-                    );
-                }}
-            </For>
-            <Show when={m.listAtom().length > 0}>
-                <div class="drone-palette-section">Saved drones</div>
-                <For each={m.listAtom()}>
-                    {(wf) => (
-                        <button
-                            class="drone-palette-item drone-palette-item--drone"
-                            onClick={() => void m.openDrone(wf.id)}
-                        >
-                            <span class="drone-palette-item-label">{wf.name}</span>
-                        </button>
-                    )}
-                </For>
-            </Show>
-        </aside>
+        <button
+            class="drone-chip"
+            style={{ "--block-color": meta.color }}
+            draggable={true}
+            title={meta.description}
+            aria-label={`${meta.label} node — drag onto the canvas, or click to add`}
+            onDragStart={(e) => {
+                setDragKind(p.kind);
+                if (e.dataTransfer) {
+                    e.dataTransfer.effectAllowed = "copy";
+                    // Fallback channel in case the signal is cleared.
+                    e.dataTransfer.setData("application/x-drone-kind", p.kind);
+                }
+            }}
+            onDragEnd={() => setDragKind(null)}
+            onClick={() => p.model.addNodeAtCenter(p.kind)}
+        >
+            <span class="drone-chip-emoji">{meta.emoji}</span>
+            <span class="drone-chip-label">{meta.label}</span>
+        </button>
     );
 };
 
@@ -265,6 +271,45 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
         window.removeEventListener("pointermove", onPanMove);
     });
 
+    // ── drag-from-bar → drop-on-canvas ──────────────────────────────
+    const screenToFlow = (clientX: number, clientY: number) => {
+        const rect = canvasEl.getBoundingClientRect();
+        const v = m.viewportAtom();
+        return {
+            x: (clientX - rect.left - v.x) / v.zoom,
+            y: (clientY - rect.top - v.y) / v.zoom,
+        };
+    };
+    const onDragOver = (e: DragEvent) => {
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    };
+    const onDrop = (e: DragEvent) => {
+        e.preventDefault();
+        const kind =
+            dragKind() ??
+            (e.dataTransfer?.getData("application/x-drone-kind") as BlockKind | undefined) ??
+            null;
+        if (!kind) return;
+        const p0 = screenToFlow(e.clientX, e.clientY);
+        // Center the node body roughly under the cursor.
+        m.addNode(kind, { x: p0.x - 80, y: p0.y - 20 });
+        setDragKind(null);
+    };
+
+    // Keep the model's canvas pixel size current so a chip-click can
+    // place a node at the visible center.
+    onMount(() => {
+        const sync = () => {
+            const r = canvasEl.getBoundingClientRect();
+            m.setCanvasSize({ w: r.width, h: r.height });
+        };
+        sync();
+        const ro = new ResizeObserver(sync);
+        ro.observe(canvasEl);
+        onCleanup(() => ro.disconnect());
+    });
+
     const onNodeClick = (e: MouseEvent, n: FlowNode) => {
         e.stopPropagation();
         if (e.shiftKey) {
@@ -316,6 +361,8 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
             ref={canvasEl}
             onWheel={onWheel}
             onPointerDown={onCanvasPointerDown}
+            onDragOver={onDragOver}
+            onDrop={onDrop}
         >
             <div class="drone-viewport" style={vpStyle()}>
                 <svg class="drone-canvas-edges" aria-hidden="true">
@@ -358,6 +405,7 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
                                 onClick={(e) => onNodeClick(e, n)}
                             >
                                 <header class="drone-node-header">
+                                    <span class="drone-node-emoji">{meta.emoji}</span>
                                     <span class="drone-node-label">{meta.label}</span>
                                     <button
                                         class="drone-node-close"
@@ -438,17 +486,23 @@ function truncate(s: string, max = 40): string {
 
 const InspectorPanel = (p: { model: DroneViewModel }): JSX.Element => {
     const m = p.model;
+    // Slide-over overlay: only mounted while a node is selected, so the
+    // canvas stays full-bleed otherwise.
     return (
-        <aside class="drone-inspector" aria-label="Inspector">
-            <Show
-                when={m.selectedNodeAtom()}
-                fallback={
-                    <div class="drone-inspector-empty">Select a block to edit.</div>
-                }
-            >
-                {(node) => <InspectorForm model={m} node={node()} />}
-            </Show>
-        </aside>
+        <Show when={m.selectedNodeAtom()}>
+            {(node) => (
+                <aside class="drone-inspector" aria-label="Inspector">
+                    <button
+                        class="drone-inspector-close"
+                        aria-label="Close inspector"
+                        onClick={() => m.setSelected(null)}
+                    >
+                        ×
+                    </button>
+                    <InspectorForm model={m} node={node()} />
+                </aside>
+            )}
+        </Show>
     );
 };
 
@@ -717,40 +771,44 @@ const AgentResultPanel = (p: {
 
 const RunPanel = (p: { model: DroneViewModel }): JSX.Element => {
     const m = p.model;
+    // Bottom overlay drawer — only present when there's something to
+    // show, so the empty canvas stays clean.
     return (
-        <footer class="drone-runpanel">
-            <div class="drone-runpanel-title">
-                Runs
-                <Show when={m.activeRunIdAtom()}>
-                    <span class="drone-runpanel-active">
-                        active: {m.activeRunIdAtom()?.slice(0, 8)}
-                    </span>
-                </Show>
-            </div>
-            <div class="drone-runpanel-list">
-                <Show
-                    when={m.runsAtom().length > 0}
-                    fallback={<div class="drone-runpanel-empty">No runs yet.</div>}
-                >
-                    <For each={m.runsAtom()}>
-                        {(r) => (
-                            <div
-                                class="drone-runpanel-row"
-                                classList={{
-                                    "drone-runpanel-row--ok": r.status === "done",
-                                    "drone-runpanel-row--err": r.status === "failed",
-                                }}
-                            >
-                                <span class="drone-runpanel-status">{r.status}</span>
-                                <span class="drone-runpanel-id">{r.id.slice(0, 8)}</span>
-                                <span class="drone-runpanel-output">
-                                    {r.error ? r.error : r.output}
-                                </span>
-                            </div>
-                        )}
-                    </For>
-                </Show>
-            </div>
-        </footer>
+        <Show when={m.runsAtom().length > 0 || m.activeRunIdAtom()}>
+            <footer class="drone-runpanel">
+                <div class="drone-runpanel-title">
+                    Runs
+                    <Show when={m.activeRunIdAtom()}>
+                        <span class="drone-runpanel-active">
+                            active: {m.activeRunIdAtom()?.slice(0, 8)}
+                        </span>
+                    </Show>
+                </div>
+                <div class="drone-runpanel-list">
+                    <Show
+                        when={m.runsAtom().length > 0}
+                        fallback={<div class="drone-runpanel-empty">No runs yet.</div>}
+                    >
+                        <For each={m.runsAtom()}>
+                            {(r) => (
+                                <div
+                                    class="drone-runpanel-row"
+                                    classList={{
+                                        "drone-runpanel-row--ok": r.status === "done",
+                                        "drone-runpanel-row--err": r.status === "failed",
+                                    }}
+                                >
+                                    <span class="drone-runpanel-status">{r.status}</span>
+                                    <span class="drone-runpanel-id">{r.id.slice(0, 8)}</span>
+                                    <span class="drone-runpanel-output">
+                                        {r.error ? r.error : r.output}
+                                    </span>
+                                </div>
+                            )}
+                        </For>
+                    </Show>
+                </div>
+            </footer>
+        </Show>
     );
 };

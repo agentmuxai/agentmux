@@ -111,6 +111,14 @@ export class DroneViewModel implements ViewModel {
         this._viewport[1]((v) => ({ ...v, ...patch }));
     };
 
+    // --- canvas pixel size, kept current by the Canvas via a
+    // ResizeObserver. Used to place a node at the visible center when a
+    // top-bar chip is clicked (the no-drag fallback).
+    private _canvasSize = createSignal<{ w: number; h: number }>({ w: 0, h: 0 });
+    setCanvasSize = (size: { w: number; h: number }): void => {
+        this._canvasSize[1](size);
+    };
+
     // --- run state
     //
     // `_running` is the in-flight `await RunDroneCommand` flag — bound
@@ -454,6 +462,18 @@ export class DroneViewModel implements ViewModel {
         // existing node DOM is untouched.
         this.setDraftStore("graph", "nodes", (nodes) => [...nodes, node]);
         return node;
+    }
+
+    /** Add a node at the center of the currently visible canvas — the
+     *  click-a-chip (no-drag) fallback. Inverts the viewport transform
+     *  for the screen-center point, then offsets to roughly center the
+     *  node body under that point. */
+    addNodeAtCenter(kind: BlockKind): FlowNode {
+        const v = this.viewportAtom();
+        const { w, h } = this._canvasSize[0]();
+        const cx = (w / 2 - v.x) / v.zoom - 80;
+        const cy = (h / 2 - v.y) / v.zoom - 30;
+        return this.addNode(kind, { x: cx, y: cy });
     }
 
     removeNode(id: string): void {
