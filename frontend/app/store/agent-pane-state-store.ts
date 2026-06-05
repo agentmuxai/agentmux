@@ -89,6 +89,30 @@ export function setEventSink(sink: EventSink): void {
 }
 
 /**
+ * Additional listeners that receive a copy of every emitted event
+ * alongside the single `eventSink` above. Multiple subscribers are
+ * supported — used by the sound-notifications subsystem (see
+ * SPEC_SOUND_NOTIFICATIONS_2026_06_05.md §4.4 Path B) without
+ * displacing the existing single-sink consumers in
+ * `browser-model.ts` / `editor-model.ts`. Each listener is invoked
+ * in a try/catch so a throwing subscriber cannot poison the others
+ * or the primary sink.
+ */
+const extraListeners = new Set<EventSink>();
+
+export function addEventListener(sink: EventSink): () => void {
+    extraListeners.add(sink);
+    return () => {
+        extraListeners.delete(sink);
+    };
+}
+
+/** Test helper — wipe all multicast listeners. Never call in production. */
+export function __resetListeners(): void {
+    extraListeners.clear();
+}
+
+/**
  * Register a pane. Call SYNCHRONOUSLY from the component body, before
  * any hook can dispatch. Re-registering a blockId resets the state cell
  * to initialState (useful for hot-reload).
@@ -169,7 +193,19 @@ export function dispatch(
         );
     }
 
-    for (const ev of result.events) eventSink(blockId, ev);
+    for (const ev of result.events) {
+        eventSink(blockId, ev);
+        for (const l of extraListeners) {
+            try {
+                l(blockId, ev);
+            } catch (e) {
+                console.warn(
+                    `[agent-pane-state] multicast listener threw (cmd=${command.type}, ev=${ev.type})`,
+                    e,
+                );
+            }
+        }
+    }
     recordDispatch({
         slice: "agent-pane-state",
         key: blockId,

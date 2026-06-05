@@ -1342,6 +1342,16 @@ declare global {
         "conn:*"?: boolean;
         "network:lan_discovery"?: boolean;
         "voice:enabled"?: boolean;
+        "notify:*"?: boolean;
+        "notify:sounds:enabled"?: boolean;
+        "notify:sounds:volume"?: number;
+        "notify:sounds:suppresswhenfocused"?: boolean;
+        "notify:sound:agent.turn.complete"?: boolean;
+        "notify:sound:agent.turn.error"?: boolean;
+        "notify:sound:agent.turn.interrupted"?: boolean;
+        "notify:sound:agent.message.accepted"?: boolean;
+        "notify:sound:agent.message.rejected"?: boolean;
+        "notify:sound:agent.stream.stalled"?: boolean;
         "dnd:*"?: boolean;
         "dnd:enabled"?: boolean;
         "dnd:maxfilesizemb"?: number;

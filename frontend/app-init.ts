@@ -894,6 +894,13 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     // clipping. See docs/specs/SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md.
     const { startPaneOverlayAutoService } = await import("@/app/platform/pane-overlay-auto");
     startPaneOverlayAutoService();
+
+    // Sound notifications. Subscribes to agent-pane reducer events and
+    // plays a polite SFX on turn-complete (and other configured signals).
+    // See docs/specs/SPEC_SOUND_NOTIFICATIONS_2026_06_05.md.
+    const { installSoundService } = await import("@/app/notification/sound");
+    installSoundService();
+
     tlog("TOTAL initWave", t0);
 
     // Register this window's backend ID with the CEF host so on_before_close

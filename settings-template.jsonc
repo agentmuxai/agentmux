@@ -58,6 +58,17 @@
     // "conn:wshenabled":          true,
     // "conn:askbeforewshinstall": true,
 
+    // -- Notification sounds --
+    // "notify:sounds:enabled":                  true,
+    // "notify:sounds:volume":                   0.6,
+    // "notify:sounds:suppresswhenfocused":      true,
+    // "notify:sound:agent.turn.complete":       true,
+    // "notify:sound:agent.turn.error":          true,
+    // "notify:sound:agent.turn.interrupted":    true,
+    // "notify:sound:agent.message.accepted":    true,
+    // "notify:sound:agent.message.rejected":    true,
+    // "notify:sound:agent.stream.stalled":      true,
+
     // -- Other --
     // "widget:icononly":           false,
     // "blockheader:showblockids": false,
