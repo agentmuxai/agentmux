@@ -727,7 +727,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                     the initial render size. The cap-advance in the
                     partition memo (above) keeps streamingNodes.length ≤
                     STREAMING_BUFFER_SIZE so reconcileArrays always sees
-                    a fixed-size array. (#1301) */}
+                    a fixed-size array. (#1302) */}
             <div class="agent-document-streaming-buffer" data-animate={animateEnabled() || undefined}>
                 <Key each={partition().streamingNodes as DocumentNode[]} by={(n) => n.id}>
                     {(nodeAccessor) => (
