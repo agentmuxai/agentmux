@@ -336,8 +336,8 @@ sudo apt install cmake ninja-build build-essential libssl-dev
 
 **Fix:**
 ```bash
-# Check if port 1420 is in use
-netstat -ano | grep :1420
+# Check if port 5173 is in use
+netstat -ano | grep :5173
 
 # Clear and reinstall
 rm -rf node_modules package-lock.json
