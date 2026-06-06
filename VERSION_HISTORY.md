@@ -1,5 +1,9 @@
 # AgentMux Version History
 
+## 0.43.1 — 2026-06-06
+
+- feat(window-drag): smooth floater header drag via host-side Win32 native move loop (#1280)
+
 ## 0.43.0 — 2026-06-05
 
 - feat(macos): package:macos — signed .app/.dmg with CEF Helper app
