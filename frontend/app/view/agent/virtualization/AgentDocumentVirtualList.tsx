@@ -727,23 +727,39 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                     the initial render size. The cap-advance in the
                     partition memo (above) keeps streamingNodes.length ≤
                     STREAMING_BUFFER_SIZE so reconcileArrays always sees
-                    a fixed-size array. (#1302) */}
-            <div class="agent-document-streaming-buffer" data-animate={animateEnabled() || undefined}>
-                <Key each={partition().streamingNodes as DocumentNode[]} by={(n) => n.id}>
-                    {(nodeAccessor) => (
-                        <DocumentRow
-                            node={nodeAccessor}
-                            documentState={props.documentState}
-                            bookmarkedNodeIds={props.bookmarkedNodeIds}
-                            onBookmark={props.onBookmark}
-                            onSubagentClick={props.onSubagentClick}
-                            highlightNodeId={props.highlightNodeId}
-                            onToggleCollapse={props.onToggleCollapse}
-                            onTogglePin={props.onTogglePin}
-                        />
-                    )}
-                </Key>
-            </div>
+                    a fixed-size array. (#1302)
+
+                <Show when={partition()}> is a belt-and-suspenders guard
+                against the secondary crash class: if the memo is read
+                after its reactive scope is disposed (e.g. mid-error-
+                boundary teardown), the <Show> catches the falsy result
+                before it reaches <Key>, preventing the
+                "Cannot read properties of undefined (reading
+                'streamingNodes')" TypeError. The narrowed accessor
+                form `p()` also isolates <Key> in its own child scope
+                so it is fully disposed before the outer partition memo
+                can produce a stale read.
+                (SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §3.3) */}
+            <Show when={partition()}>
+                {(p) => (
+                    <div class="agent-document-streaming-buffer" data-animate={animateEnabled() || undefined}>
+                        <Key each={p().streamingNodes as DocumentNode[]} by={(n) => n.id}>
+                            {(nodeAccessor) => (
+                                <DocumentRow
+                                    node={nodeAccessor}
+                                    documentState={props.documentState}
+                                    bookmarkedNodeIds={props.bookmarkedNodeIds}
+                                    onBookmark={props.onBookmark}
+                                    onSubagentClick={props.onSubagentClick}
+                                    highlightNodeId={props.highlightNodeId}
+                                    onToggleCollapse={props.onToggleCollapse}
+                                    onTogglePin={props.onTogglePin}
+                                />
+                            )}
+                        </Key>
+                    </div>
+                )}
+            </Show>
         </div>
     );
 }
