@@ -230,7 +230,7 @@ pub fn start_window_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Res
             }
         };
         if !hwnd.is_null() {
-            crate::ui_tasks::post_win32_begin_move(hwnd as usize as u64);
+            crate::ui_tasks::post_win32_begin_move(hwnd as usize as u64, state.clone(), Some(label.to_string()));
         } else {
             tracing::warn!("[start_window_drag] no HWND resolved for label={}", label);
         }
@@ -319,7 +319,16 @@ pub fn resolve_window_at_cursor(
         let exclude_hwnd: Option<isize> = if exclude_label.is_empty() {
             None
         } else {
-            hwnds_by_label.get(exclude_label).copied()
+            hwnds_by_label.get(exclude_label).copied().or_else(|| {
+                // Cache miss: floater HWND was created but its label hasn't
+                // been inserted into window_hwnds yet (brief race between
+                // CreateFloatingWindowTask::execute and the caller). Fall back
+                // to the label-aware HWND lookup used by start_window_drag so
+                // the floater is always excluded from its own hit-test.
+                // resolve_window_hwnd is unsafe — closure body needs its own block.
+                let h = unsafe { resolve_window_hwnd(state, exclude_label) };
+                if h.is_null() { None } else { Some(h as isize) }
+            })
         };
 
         // Deterministic "main" fallback. `window_hwnds["main"]` is populated

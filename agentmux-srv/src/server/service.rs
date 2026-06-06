@@ -2045,23 +2045,30 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             // Direct rootnode writes don't propagate because the
             // LayoutModel doesn't auto-sync from external WaveObj
             // updates — see `queue_target_layout_insert`'s docstring.
+            // Layout writes are required before the Tab broadcast — if
+            // either fails the block becomes invisible (moved in SQLite
+            // but no LayoutState entry in the target). Return error so
+            // the caller can retry; the saga state is dirty but no
+            // visible change has propagated to the renderers yet.
             if let Err(e) = queue_target_layout_insert(store, &target_tab_id, &block_id) {
-                tracing::warn!(
+                tracing::error!(
                     target_tab = %target_tab_id,
-                    "RedockFloatingPane: target layout insert-action enqueue failed: {}",
+                    "RedockFloatingPane: target layout insert failed — aborting broadcast: {}",
                     e
                 );
+                return WebReturnType::error(format!(
+                    "redock layout insert failed: {e}"
+                ));
             }
-            // Source tab: queue a layout-delete action so the source
-            // floater's frontend removes the leaf from its tree. The
-            // tab will then have empty blockids → PR #1089's auto-close
-            // watcher fires → floater window dismisses.
             if let Err(e) = queue_source_layout_delete(store, &source_tab_id, &block_id) {
-                tracing::warn!(
+                tracing::error!(
                     source_tab = %source_tab_id,
-                    "RedockFloatingPane: source layout delete-action enqueue failed: {}",
+                    "RedockFloatingPane: source layout delete failed — aborting broadcast: {}",
                     e
                 );
+                return WebReturnType::error(format!(
+                    "redock layout delete failed: {e}"
+                ));
             }
 
             let mut updates = Vec::new();
