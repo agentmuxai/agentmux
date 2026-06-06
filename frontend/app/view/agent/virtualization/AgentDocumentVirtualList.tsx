@@ -113,8 +113,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     let loadingOlderInFlight = false;
 
     // Sticky frontier id — set once when the document first crosses
-    // STREAMING_BUFFER_SIZE; never advanced on subsequent appends. New
-    // nodes flow into streamingNodes, growing the buffer naturally.
+    // STREAMING_BUFFER_SIZE; advanced whenever the buffer exceeds the
+    // cap (see below) to keep streamingNodes.length ≤ STREAMING_BUFFER_SIZE.
     //
     // Plain `let` rather than a Solid signal: mutating this variable must
     // NOT trigger another memo run while we're inside one.
@@ -165,6 +165,22 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 STREAMING_BUFFER_SIZE,
                 stickyFrontierId,
             );
+        }
+
+        // Cap: across multi-turn sessions the streaming buffer grows
+        // unbounded because the sticky frontier never advances. Solid's
+        // insertExpression passes <Key>'s result array to reconcileArrays
+        // (solid-js/web), which corrupts its sentinel tracking when the
+        // array grows past the initial render size → "replaceChild: node
+        // is not a child" crash (render_trail 2026-06-06; same root cause
+        // as the <Index> crash — the array growth, not the keying strategy,
+        // is what breaks reconcileArrays). Fix: advance the frontier to
+        // pin streamingNodes at ≤ STREAMING_BUFFER_SIZE items. Safe with
+        // <Key by={n => n.id}> — the migrated node leaves the <Key> map
+        // by id; no position-based state leakage. (#1301)
+        if (result.streamingNodes.length > STREAMING_BUFFER_SIZE) {
+            stickyFrontierId = initialStickyFrontierId(nodes, STREAMING_BUFFER_SIZE);
+            result = partitionForVirtualization(nodes, STREAMING_BUFFER_SIZE, stickyFrontierId);
         }
 
         // Crash-trace: every partition recompute is a candidate trigger
