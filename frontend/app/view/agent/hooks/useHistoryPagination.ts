@@ -199,7 +199,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 if (stateResp.content) {
                     const snapshot = JSON.parse(stateResp.content);
                     if (snapshot && snapshot.schemaVersion === SNAPSHOT_SCHEMA_VERSION && Array.isArray(snapshot.nodes)) {
-                        opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes: snapshot.nodes });
+                        batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes: snapshot.nodes }));
 
                         const offset = typeof snapshot.historyOffset === "number" && snapshot.historyOffset >= 0
                             ? snapshot.historyOffset
@@ -271,7 +271,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
 
                 const nodes = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat());
                 if (nodes.length > 0) {
-                    opts.model.dispatchDoc({ type: "HistoryLoaded", nodes });
+                    batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes }));
                 }
 
                 // `resp.total` from the backend is the actual available
