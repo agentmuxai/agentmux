@@ -15,7 +15,7 @@ import { batch, createEffect, onCleanup, onMount } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import type { PendingMessage, SignalPair } from "./state";
 import { ClaudeCodeStreamParser, STARTUP_HEADING_RE } from "./stream-parser";
-import type { DocumentNode, SessionStats, UserMessageNode } from "./types";
+import type { DocumentNode, SessionStats, ToolLogChunk, UserMessageNode } from "./types";
 import { recordTurn } from "@/store/token-usage";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
 import {
@@ -116,6 +116,19 @@ export function useAgentStream({
     let pendingUpdates: DocumentNode[] = [];
     let flushRafId: number | null = null;
 
+    // Tool-chunk accumulator. `tool_chunk` WPS events previously called
+    // dispatchDoc(ToolChunkAppend) directly — one immediate signal write per
+    // chunk. During active tool streaming that means many independent signal
+    // writes, each triggering its own Solid reactive flush. When a chunk write
+    // races with a concurrent RAF StreamFlush (both live in the same browser
+    // task), two separate runUpdates frames can interleave, leaving the <Index>
+    // reconciler holding a stale `current` array → replaceChild NotFoundError.
+    // Fix: accumulate chunks here and flush them inside the same batch() as
+    // StreamFlush, so all documentAtom writes from streaming originate from one
+    // code path and one reactive frame. (Retro: RETRO_REPLACECHILD_CRASH_2026-06-06.md)
+    type PendingChunk = { toolId: string; chunk: ToolLogChunk };
+    let pendingChunks: PendingChunk[] = [];
+
     // Single per-block WPS subscription for `tool_chunk` events.
     // `agentmux-bashwrap exec` publishes every stdout/stderr line to a
     // fixed event name with `scopes: ["block:<id>"]` and the tool_use_id
@@ -134,8 +147,7 @@ export function useAgentStream({
             const toolId = typeof data.tool_id === "string" ? data.tool_id : "";
             if (!toolId) return;
             if (data.op === "terminal") {
-                model.dispatchDoc({
-                    type: "ToolChunkAppend",
+                pendingChunks.push({
                     toolId,
                     chunk: {
                         kind: "system",
@@ -143,11 +155,11 @@ export function useAgentStream({
                         timestamp: data.timestamp ?? Date.now(),
                     },
                 });
+                scheduleFlush();
                 return;
             }
             if (data.op !== "chunk") return;
-            model.dispatchDoc({
-                type: "ToolChunkAppend",
+            pendingChunks.push({
                 toolId,
                 chunk: {
                     kind: data.kind ?? "stdout",
@@ -155,6 +167,7 @@ export function useAgentStream({
                     timestamp: data.timestamp ?? Date.now(),
                 },
             });
+            scheduleFlush();
         },
     });
 
@@ -166,12 +179,14 @@ export function useAgentStream({
 
     function flushPendingNodes() {
         flushRafId = null;
-        if (pendingNew.length === 0 && pendingUpdates.length === 0) return;
+        if (pendingNew.length === 0 && pendingUpdates.length === 0 && pendingChunks.length === 0) return;
 
         const batchNew = pendingNew;
         const batchUpdates = pendingUpdates;
+        const batchChunks = pendingChunks;
         pendingNew = [];
         pendingUpdates = [];
+        pendingChunks = [];
 
         // Wrap both store writes in a single Solid batch so all reactive
         // effects (partition memo → <Index> reconciler, DocumentRow
@@ -186,13 +201,22 @@ export function useAgentStream({
         // (render_trail 2026-06-05: replaceChild / reconcileArrays /
         // insertExpression in solid-js/web).
         batch(() => {
-            // Document mutation — the reducer owns dedup, in-place updates,
-            // and the markdown-content merge. See agent-document-store.ts.
+            // Document mutation first — the reducer owns dedup, in-place
+            // updates, and the markdown-content merge. StreamFlush must run
+            // BEFORE ToolChunkAppend so that any ToolNode created by this
+            // flush exists before we try to append chunks to it. Chunks that
+            // arrive before their ToolNode is created (the WPS late-subscribe
+            // case) are dropped by the reducer's findToolIndex guard; ordering
+            // StreamFlush first is the narrowest window possible.
             model.dispatchDoc({
                 type: "StreamFlush",
                 newNodes: batchNew,
                 updatedNodes: batchUpdates,
             });
+            // Tool-chunk appends after StreamFlush has committed the ToolNode.
+            for (const { toolId, chunk } of batchChunks) {
+                model.dispatchDoc({ type: "ToolChunkAppend", toolId, chunk });
+            }
             // Lifecycle counter bump — agent-pane-state owns streaming
             // metadata (active flag + bufferSize + lastEventTime).
             model.dispatchPane({
@@ -450,6 +474,7 @@ export function useAgentStream({
                 if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
                 pendingNew = [];
                 pendingUpdates = [];
+                pendingChunks = [];
                 lineBuffer = "";
                 translator.reset();
                 parser.reset();
@@ -579,7 +604,8 @@ export function useAgentStream({
                         // node → pendingNew path; the reducer mutates
                         // one ToolNode in place.
                         const { toolId, chunk } = parser.parseToolChunkEvent(event);
-                        model.dispatchDoc({ type: "ToolChunkAppend", toolId, chunk });
+                        pendingChunks.push({ toolId, chunk });
+                        scheduleFlush();
                         continue;
                     }
                     const node = parser.parseLine(JSON.stringify(event));
