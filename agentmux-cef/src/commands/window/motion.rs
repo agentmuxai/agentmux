@@ -325,7 +325,8 @@ pub fn resolve_window_at_cursor(
                 // CreateFloatingWindowTask::execute and the caller). Fall back
                 // to the label-aware HWND lookup used by start_window_drag so
                 // the floater is always excluded from its own hit-test.
-                let h = resolve_window_hwnd(state, exclude_label);
+                // resolve_window_hwnd is unsafe — closure body needs its own block.
+                let h = unsafe { resolve_window_hwnd(state, exclude_label) };
                 if h.is_null() { None } else { Some(h as isize) }
             })
         };

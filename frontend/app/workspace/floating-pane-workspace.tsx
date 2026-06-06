@@ -352,29 +352,40 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             },
         );
 
-        // Host signals drag loop ended. Two jobs:
-        //   1. Reset dragging (safety net if OS didn't re-deliver DOM mouseup).
-        //   2. If moved=true and onMouseUp already saved coords, fire the actual
-        //      redock attempt here. This decouples the "did window move?" question
-        //      from onMouseUp, avoiding the timing race where window_drag_first_move
-        //      and WM_LBUTTONUP arrive via separate CEF IPC channels and compete.
-        const stopEndedListener = safeListenEvent<{ label: string; moved: boolean }>(
+        // Host signals drag loop ended. Always resets dragging and clears hover.
+        // On Windows: cursor_x/cursor_y (physical px) are included so the handler
+        // is self-contained — eliminates the ordering race where DOM mouseup and
+        // this event arrive via separate CEF IPC channels (relative order not
+        // guaranteed). On non-Windows: falls back to pendingRedockCoords set by
+        // onMouseUp if the OS delivered a DOM mouseup (BeginWindowDrag case).
+        const stopEndedListener = safeListenEvent<{
+            label: string;
+            moved: boolean;
+            cursor_x?: number;
+            cursor_y?: number;
+        }>(
             "window_drag_ended",
             (ev) => {
                 if (!ev.label || ev.label !== label) return;
                 dragging = false;
-                if (ev.moved && pendingRedockCoords && !cleaned) {
-                    // onMouseUp already cleared hover; just do the redock.
-                    const coords = pendingRedockCoords;
+                // Always clear hover — safety net for non-Windows where onMouseUp
+                // may not have fired (BeginWindowDrag absorbs the release).
+                invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
+                if (ev.moved && !cleaned) {
+                    // Prefer host-provided cursor coords (physical px → CSS px via
+                    // posScale). On Windows these are always present. On non-Windows
+                    // fall back to pendingRedockCoords saved by onMouseUp if the OS
+                    // delivered a DOM mouseup; otherwise redock is F3-pending.
+                    const coords = (() => {
+                        if (typeof ev.cursor_x === "number" && typeof ev.cursor_y === "number") {
+                            const scale = posScale();
+                            return { x: ev.cursor_x / scale, y: ev.cursor_y / scale };
+                        }
+                        return pendingRedockCoords;
+                    })();
                     pendingRedockCoords = null;
-                    void tryRedockAtCursor(coords.x, coords.y);
+                    if (coords) void tryRedockAtCursor(coords.x, coords.y);
                 } else {
-                    // No movement (stationary hold / fast click) or onMouseUp
-                    // didn't fire (macOS/Linux BeginWindowDrag absorbed mouseup).
-                    // Clear hover as safety net.
-                    if (!pendingRedockCoords) {
-                        invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
-                    }
                     pendingRedockCoords = null;
                 }
             },

@@ -482,17 +482,26 @@ wrap_task! {
 
                 // 4. Stop the wake tick and release capture.
                 KillTimer(h, DRAG_TICK_ID);
+                // Capture cursor position before ReleaseCapture — this is the
+                // actual release point in physical screen px. Included in the
+                // window_drag_ended payload so the renderer can use these
+                // coordinates directly, eliminating the ordering race between
+                // the dispatched WM_LBUTTONUP (DOM mouseup) and this event
+                // (both travel async CEF IPC, relative arrival is not guaranteed).
+                let mut release_cursor = POINT { x: 0, y: 0 };
+                GetCursorPos(&mut release_cursor);
                 ReleaseCapture();
-                // Notify the renderer that the drag is done so it can reset
-                // its dragging flag regardless of whether it received a DOM
-                // mouseup. Carries moved:bool so the renderer can distinguish
-                // a real drag from a stationary hold.
+                // Notify the renderer that the drag is done. cursor_x/cursor_y
+                // are physical screen px; renderer divides by posScale() (DPR on
+                // Windows, 1 elsewhere) to get CSS px for tryRedockAtCursor.
                 crate::events::emit_event_to_top_level_windows(
                     &self.state,
                     "window_drag_ended",
                     &serde_json::json!({
                         "label": self.source_label.as_deref().unwrap_or("main"),
                         "moved": moves > 0,
+                        "cursor_x": release_cursor.x,
+                        "cursor_y": release_cursor.y,
                     }),
                 );
                 tracing::info!(
