@@ -9,14 +9,19 @@
 
 ## What this libcef contains that upstream's doesn't
 
-1. **`CefWindow::BeginWindowDrag()`** — appended to the `_cef_window_t` C struct, called via raw FFI by `agentmux-cef/src/ui_tasks.rs::StartWindowDragTask` to dispatch `xdg_toplevel.move` (Wayland) / `_NET_WM_MOVERESIZE` (X11) on the user's left-click drag of the title-bar area. Without this, AgentMux PR #663's drag IPC is a no-op.
-2. **Transparency broadening** — Chad Nelson's `SetBackgroundOpaque(false)` IPC support extended to views-hosted browsers. Foundation for future Wayland window transparency. Not yet user-visible.
+1. **`CefWindow::BeginWindowDrag()`** — appended to the `_cef_window_t` C struct, called via raw FFI by `agentmux-cef/src/ui_tasks.rs::StartWindowDragTask` to dispatch `xdg_toplevel.move` (Wayland) / `_NET_WM_MOVERESIZE` (X11/XWayland) on the user's left-click drag of the title-bar area.
+2. **Right-click passthrough on HTCAPTION** — lets right-clicks on the drag region reach the renderer (for the pane-header context menu).
+3. **Transparency broadening** — deferred `SetBackgroundOpaque(false)` + WebContents transparency cascade. Foundation for Wayland window transparency. Root cause identified (views::SolidBackground / kColorPrimaryBackground); fix in progress.
 
-Both patches live in the AgentMux fork of CEF:
-- **Repo:** https://github.com/a5af/cef
-- **Branch:** `agentmux/7680-drag-rightclick-and-transparency`
-- **Base:** Chromium 146.0.7680.179
-- **HEAD:** `5ab41b6` at last build (2026-05-01)
+Patches live in the AgentMux fork of CEF:
+- **Repo:** https://github.com/agentmuxai/cef (canonical) / https://github.com/a5af/cef (personal fork, kept in sync)
+- **Branch:** `agentmux/7778-drag-rightclick-and-transparency`
+- **Base:** Chromium 148 (CEF branch 7778)
+- **HEAD:** `c87bca497` ("views: deferred top-level transparent bg + observer cleanup")
+- **Rust binding:** `AgentU-asaf/cef-rs@agentmux/148-begin-window-drag` — adds `begin_window_drag` field to `_cef_window_t` in the linux_x86_64 binding
+- **Workspace patch in `Cargo.toml`:** `[patch.crates-io] cef-dll-sys = { git = "…AgentU-asaf/cef-rs", rev = "515b3ac5…" }`
+
+> **Annotation history:** `BeginWindowDrag` was annotated `added=14600` on the old CEF 146 branch, then briefly changed to `added=NEXT` during the 148 port (this caused a CppToC type-tag mismatch making all drags silently no-op), then corrected to `added=14800`. The current branch has the correct `added=14800` annotation.
 
 ---
 
@@ -50,7 +55,7 @@ wget https://bitbucket.org/chromiumembedded/cef/raw/master/tools/automate/automa
 # First sync (downloads chromium ~99 GB, takes hours)
 python3 automate-git.py \
   --download-dir=$(pwd) \
-  --branch=7680 \
+  --branch=7778 \
   --no-distrib \
   --no-build
 ```
@@ -59,9 +64,9 @@ python3 automate-git.py \
 
 ```bash
 cd ~/cef-build/chromium_git/cef
-git remote add a5af https://github.com/a5af/cef.git
-git fetch a5af agentmux/7680-drag-rightclick-and-transparency
-git checkout a5af/agentmux/7680-drag-rightclick-and-transparency
+git remote add agentmuxai https://github.com/agentmuxai/cef.git
+git fetch agentmuxai agentmux/7778-drag-rightclick-and-transparency
+git checkout agentmuxai/agentmux/7778-drag-rightclick-and-transparency
 
 # Mirror to the chromium-side cef checkout
 rsync -a --delete --exclude=.git ~/cef-build/chromium_git/cef/ ~/cef-build/chromium_git/chromium/src/cef/

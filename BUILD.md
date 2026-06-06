@@ -48,17 +48,20 @@ These instructions cover setting up dependencies and building AgentMux from sour
 
 #### Linux
 
-1. **Install dependencies** (Debian/Ubuntu):
+AgentMux embeds Chromium via CEF — no system WebKitGTK or WebView2 required.
+
+1. **Install build tools** (Debian/Ubuntu):
    ```bash
-   sudo apt install zip libwebkit2gtk-4.1-dev \
-     build-essential curl wget file libssl-dev \
-     libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+   sudo apt install cmake ninja-build build-essential curl wget file libssl-dev git zip
    ```
+   CMake and Ninja are required by `cef-dll-sys`, which builds CEF's C wrapper at compile time.
 
 2. **Install Rust**:
    ```bash
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
    ```
+
+> **Note — `libcef.so`:** Running on Linux requires a compatible `libcef.so`. `task package:linux` downloads the pre-built binary automatically. If you need to rebuild libcef from source (for CEF patches), see [`docs/cef-build/build-patched-libcef.md`](docs/cef-build/build-patched-libcef.md).
 
 ### Install Task
 
@@ -204,8 +207,9 @@ task dev
 
 # 5. Test changes in running app
 
-# 6. Bump version
-./bump-version.sh patch --message "Description of change"
+# 6. Add a changeset (describes your change for the release log)
+task changeset -- patch "fix(area): short description"
+# or: task changeset -- minor "feat(area): description"
 
 # 7. Commit and push
 git add -p
@@ -224,33 +228,43 @@ gh pr create --title "Feature" --body "Description"
 
 After building, you'll have:
 
+#### Windows (portable ZIP)
+
 ```
-dist/bin/
-└── agentmux-srv-{version}-windows.x64.exe       # Rust backend (sidecar)
-
-target/release/
-├── agentmux-cef.exe                              # Host
-└── agentmux-launcher.exe                         # Portable launcher
-
-~/Desktop/
-└── agentmux-{version}-x64-portable/             # Portable build
-    ├── agentmux.exe                             # Launcher
-    └── runtime/
-        ├── agentmux-{version}.exe               # Host
-        ├── agentmux-srv-{version}-windows.x64.exe  # Backend
-        ├── libcef.dll                           # CEF runtime
-        └── frontend/                            # Web UI
+~/Desktop/agentmux-{version}+g{sha}.{stamp}-x64-portable/
+├── agentmux.exe                             # Launcher (entry point)
+└── runtime/
+    ├── agentmux-{version}.exe               # CEF host
+    ├── agentmux-srv-{version}-windows.x64.exe  # Backend
+    ├── libcef.dll                           # CEF runtime
+    └── frontend/                            # Bundled web UI
 ```
 
-### Component Sizes (v0.31.0+)
+#### Linux (AppImage)
 
-| Component | Size | Purpose |
-|-----------|------|---------|
-| `agentmux.exe` (launcher) | ~325 KB | Portable launcher |
-| `agentmux-cef.exe` | ~8 MB | Host (Rust + Chromium) |
-| `agentmux-srv.exe` | ~4 MB | Rust async backend server |
-| CEF runtime (libcef + paks) | ~160 MB | Bundled Chromium |
-| **Portable ZIP** | ~156 MB | Compressed with CEF bundle |
+```
+~/Desktop/AgentMux_{version}+g{sha}.{stamp}_amd64.AppImage
+└── usr/bin/
+    ├── agentmux-launcher    # AppImage entry point (supervises srv + host)
+    ├── agentmux-cef         # CEF host binary
+    ├── agentmux-srv-{version}-linux.x64  # Backend
+    ├── libcef.so            # Chromium runtime
+    ├── libEGL.so / libGLESv2.so          # GPU abstraction
+    ├── *.pak / icudtl.dat / …            # Chromium resources
+    └── frontend/            # Bundled web UI
+```
+
+On first launch the AppImage extracts itself to `~/.local/share/agentmux/extracted/<version>/` for faster subsequent starts (~1 s vs ~3 s cold from FUSE).
+
+### Component Sizes
+
+| Component | Windows | Linux |
+|-----------|---------|-------|
+| Launcher | ~325 KB | ~325 KB |
+| CEF host | ~8 MB | ~17 MB |
+| Backend (agentmux-srv) | ~4 MB | ~4 MB |
+| CEF runtime (libcef + paks) | ~160 MB | ~620 MB |
+| **Portable build** | ~156 MB ZIP | ~220 MB AppImage |
 
 ---
 
@@ -313,7 +327,7 @@ ls -lh dist/bin/agentmux-srv-*
 
 **Fix (Linux):**
 ```bash
-sudo apt install libwebkit2gtk-4.1-dev build-essential libssl-dev
+sudo apt install cmake ninja-build build-essential libssl-dev
 ```
 
 ### Issue: Frontend not loading in dev mode
@@ -322,8 +336,8 @@ sudo apt install libwebkit2gtk-4.1-dev build-essential libssl-dev
 
 **Fix:**
 ```bash
-# Check if port 1420 is in use
-netstat -ano | grep :1420
+# Check if port 5173 is in use
+netstat -ano | grep :5173
 
 # Clear and reinstall
 rm -rf node_modules package-lock.json
@@ -361,8 +375,8 @@ Artifacts are uploaded to GitHub Releases on tagged commits.
 ### Local Release Build
 
 ```bash
-# 1. Bump version
-./bump-version.sh patch --message "v0.31.x release"
+# 1. Add a changeset
+task changeset -- patch "fix(scope): description"
 
 # 2. Rebuild Rust binaries
 task build:backend
@@ -396,8 +410,10 @@ git push origin main --tags
 
 ### Linux
 
-- Uses **DEB** (Debian/Ubuntu) and **AppImage** (universal)
-- WebKitGTK required: `libwebkit2gtk-4.1-dev`
+- **AppImage** (universal) and **DEB** (Debian/Ubuntu) produced by CI.
+- CEF bundles Chromium — no system WebKitGTK required.
+- Default display: **XWayland** (`--ozone-platform=x11`). Set `AGENTMUX_OZONE_PLATFORM=wayland` for native Wayland (experimental).
+- Window drag and right-click on title-bar require the patched `libcef.so` (included in all release AppImages). See `docs/cef-build/build-patched-libcef.md`.
 
 ---
 
@@ -442,6 +458,6 @@ npm run build:prod
 | **Build host** | `task build:host` |
 | **Bundle runtime** | `task bundle` |
 | **Portable ZIP** | `task package` |
-| **Bump version** | `./bump-version.sh patch` |
+| **Add changeset** | `task changeset -- patch "description"` |
 | **Run tests** | `npm test` |
 | **Verify versions** | `bump verify` |
