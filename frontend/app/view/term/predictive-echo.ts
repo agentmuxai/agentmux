@@ -41,8 +41,19 @@ export interface PredictiveEchoOptions {
     thresholdMs?: number;
     /** Unconfirmed predictions older than this (ms) are rolled back. Default 600. */
     predictTimeoutMs?: number;
-    /** After a rollback, stay unarmed this long (ms). Default 1200. */
+    /** After a *divergence* rollback (reconcile saw bytes that didn't match the
+     *  prediction), stay unarmed this long (ms). Default 1200 — long enough to
+     *  ride out a real mode change without thrash. */
     cooldownMs?: number;
+    /** After a *stall* rollback (sweep timed out predictions because no echo
+     *  arrived in `predictTimeoutMs`), stay unarmed this long (ms). Default
+     *  100. Stall ≠ divergence — the echo is just slow, so penalising with the
+     *  full divergence cooldown produces the Linux "10 chars then ~1 s of
+     *  nothing then a burst" pattern where the renderer's `requestAnimationFrame`
+     *  occasionally stalls past 600 ms (PR #1241, broken Mutter/Chromium GPU
+     *  handshake). Keeping this short lets predictions resume the moment the
+     *  next rAF actually fires. */
+    stallCooldownMs?: number;
     /** Hard cap on outstanding predictions before flushing. Default 40. */
     maxQueue?: number;
     /** Clock injection for tests. Default `performance.now`. */
@@ -80,6 +91,7 @@ export class PredictiveEcho {
     private readonly threshold: number;
     private readonly predictTimeout: number;
     private readonly cooldown: number;
+    private readonly stallCooldown: number;
     private readonly maxQueue: number;
     private readonly now: () => number;
 
@@ -90,6 +102,7 @@ export class PredictiveEcho {
         this.threshold = opts.thresholdMs ?? 12;
         this.predictTimeout = opts.predictTimeoutMs ?? 600;
         this.cooldown = opts.cooldownMs ?? 1200;
+        this.stallCooldown = opts.stallCooldownMs ?? 100;
         this.maxQueue = opts.maxQueue ?? 40;
         this.now = opts.now ?? (() => performance.now());
     }
@@ -188,13 +201,19 @@ export class PredictiveEcho {
     }
 
     /** Time out unconfirmed predictions (spec §6.3 step 3) — the echo-off /
-     *  password-prompt catch. Call on a cheap cadence (e.g. each reconcile). */
+     *  password-prompt catch. Call on a cheap cadence (e.g. each reconcile).
+     *  Uses the short *stall* cooldown (not the divergence cooldown): a sweep
+     *  timeout means we never heard back, which is consistent with either a
+     *  password prompt (echo off, we should resume painting almost
+     *  immediately on the next confirmed echo) or a slow rAF stall (the Linux
+     *  symptom). The full `cooldownMs` is reserved for actual byte
+     *  divergence in `reconcile()`. */
     sweep(): void {
         if (this.queue.length === 0) return;
         const now = this.now();
         if (now - this.queue[0].at > this.predictTimeout) {
             this.rollback();
-            this.enterCooldown(now);
+            this.enterStallCooldown(now);
         }
     }
 
@@ -258,6 +277,11 @@ export class PredictiveEcho {
     private enterCooldown(now: number): void {
         this.armed = false;
         this.cooldownUntil = now + this.cooldown;
+    }
+
+    private enterStallCooldown(now: number): void {
+        this.armed = false;
+        this.cooldownUntil = now + this.stallCooldown;
     }
 
     private recordRtt(ms: number): void {
