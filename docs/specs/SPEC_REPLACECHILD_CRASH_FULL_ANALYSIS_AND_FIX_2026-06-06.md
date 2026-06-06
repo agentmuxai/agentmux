@@ -172,11 +172,11 @@ Not the primary fix for `replaceChild` crashes, but eliminates the secondary cra
 |---|-----|------|--------|
 | 1 | `batch(StreamFlush + StreamFlushObserved)` | `useAgentStream.ts` | ✅ PR #1293 |
 | 2 | Route `ToolChunkAppend` through `pendingChunks[]` RAF buffer | `useAgentStream.ts` | ✅ PR #1299 |
-| 3 | `queueMicrotask(SessionEnd)` in `onCleanup` | `useAgentStream.ts` | ❌ **TODO** |
-| 4 | `batch(HistoryLoaded)` in pagination callback | `useHistoryPagination.ts` | ❌ **TODO** |
-| 5 | `<Show when={partition()}>` guard on streaming buffer | `AgentDocumentVirtualList.tsx` | ❌ **TODO** |
+| 3 | `queueMicrotask(SessionEnd)` in `onCleanup` | `useAgentStream.ts` | ✅ PR #1303 |
+| 4 | `batch()` all `HistoryLoaded`/`HistoryRestored` calls | `useHistoryPagination.ts` | ✅ PR #1303 |
+| 5 | `<Show when={partition()}>` guard on streaming buffer (`<Key>`) | `AgentDocumentVirtualList.tsx` | ✅ PR #1303 |
 
-Fixes 3 and 5 are the highest-priority remaining items. Fix 3 addresses the confirmed residual crash path. Fix 5 closes the secondary crash class that surfaces when the primary crash leaves a partially-disposed scope.
+All five fixes are shipped. The streaming buffer now uses `<Key by={n.id}>` (agenta PR #1300, primary crash fix) wrapped in `<Show when={partition()}>` (this PR, secondary-crash guard).
 
 ---
 
