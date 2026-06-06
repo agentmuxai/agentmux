@@ -28,7 +28,7 @@ Seven bugs shipped and required three review cycles to surface:
 
 The 200ms press-duration guard was a proxy for "did the window actually move." A slow deliberate hold (>200ms, zero displacement) passed the guard and called `tryRedockAtCursor`. This caused unexpected redocks when hovering the header before maximising — the hold satisfied the 200ms threshold.
 
-**Fix:** Replaced the time guard with `hasMoved`. On Windows: `Win32BeginMoveTask` emits `window_drag_first_move` on the first `SetWindowPos` call; the renderer sets `hasMoved = true`. On macOS/Linux: the `onMouseMove` handler sets `hasMoved = true` on first move. `onMouseUp` now checks `if (!hasMoved) return` instead of the time guard.
+**Fix:** Replaced the time guard with a split-platform approach. On Windows: the host includes `cursor_x/cursor_y` in `window_drag_ended` (physical px from `GetCursorPos`) and `moves > 0` gates `tryRedockAtCursor` — the renderer's `window_drag_ended` handler drives the redock directly, eliminating the async race between DOM mouseup and the event. On macOS/Linux: the `onMouseMove` handler sets `hasMoved = true` on first pixel move; `onMouseUp` calls `tryRedockAtCursor` directly only when `hasMoved` is true, preventing plain header clicks from false-redocking.
 
 ### BUG-4 (P1) — `window_drag_cancelled` broadcast with no label guard
 
@@ -68,10 +68,10 @@ The backend broadcasts the `Tab` WaveObj update (empty `blockids`) before the `R
 The pattern `listenEvent(...).then(u => { ref = u; })` is inherently unsafe because `onCleanup` runs synchronously on component teardown while `.then()` delivers asynchronously. The `safeListenEvent` helper with a `cleaned` sentinel is the correct pattern and should be used for all IPC listener registrations in async-unmount-sensitive components.
 
 **4. Broadcast IPC events require recipient-side label filtering.**
-`emit_event_to_top_level_windows` is a process-wide broadcast. Any event that carries per-instance semantics (`window_drag_cancelled`, `window_drag_ended`, `window_drag_first_move`) must be filtered by the recipient against its own `windowLabel`. The spec noted "minimal: `{label}`" but did not specify that recipients must match — this is now explicit.
+`emit_event_to_top_level_windows` is a process-wide broadcast. Any event that carries per-instance semantics (`window_drag_cancelled`, `window_drag_ended`) must be filtered by the recipient against its own `windowLabel`. The spec noted "minimal: `{label}`" but did not specify that recipients must match — this is now explicit.
 
 **5. Proxy-based guards are fragile; prefer host-reported signals.**
-Time duration was used as a proxy for window movement. Duration does not imply displacement — a slow touchpad hold satisfies any reasonable time threshold. The `hasMoved` flag driven by a direct host signal (`window_drag_first_move`) is the correct gate for redock.
+Time duration was used as a proxy for window movement. Duration does not imply displacement — a slow touchpad hold satisfies any reasonable time threshold. On Windows the host now surfaces `moves > 0` via `window_drag_ended { cursor_x, cursor_y }` so the renderer gates redock on actual motion. On non-Windows the DOM `onMouseMove`-based `hasMoved` flag serves the same purpose.
 
 **6. Reactive close watchers need in-flight guards for async RPC flows.**
 The `createEffect` pattern that reacts to WaveObj broadcasts is the right teardown mechanism. It becomes dangerous when the same broadcast that triggers close is emitted mid-way through an async operation that the renderer is awaiting. Any component that calls a long-running RPC and then auto-closes on a side-effect of that RPC must guard the auto-close path against the in-flight window.
