@@ -1,5 +1,102 @@
 # AgentMux Version History
 
+## 0.43.0 — 2026-06-05
+
+- feat(macos): package:macos — signed .app/.dmg with CEF Helper app
+- feat(macos): patched CEF 148 framework + per-type helpers fix the renderer on macOS 26
+- fix(macos): lean notarized DMG (ULMO/LZMA + strip + locale trim) — 167MB
+- feat(macos): launcher-owned instant splash + launcher as packaged entry point
+- fix(cef): guard CreateWindowTask against null client (CrBrowserMain SIGABRT on multi-window tear-off)
+- fix(macos): stop SIGABRT on window close (try_close_browser vs window.close); bundle schema; drop dead per-type helpers
+- fix(macos): gate host.set_focus calls to Windows/Linux — stops SIGABRT on pane drag
+- perf(linux): default to XWayland (X11 ozone) — 5–8× fewer frame stalls
+- Linux CEF 146 (Chromium 146) on Mutter (GNOME) has broken native-Wayland
+- GPU buffer negotiation — Chromium logs
+- `WaylandZwpLinuxDmabuf::OnTrancheFlags Not implemented` at startup and
+- then responds `LayerTreeHostImpl::DidNotProduceFrame` to ~89 % of
+- Mutter's `BeginFrame` requests. The renderer's `requestAnimationFrame`
+- callbacks (including predictive local echo's render path, #1223) are
+- gated on those frames, so typing visibly hangs and pumps out on key
+- release.
+- Setting `--ozone-platform=x11` routes the renderer through XWayland's
+- X11 present path — the wire-format Linux Chromium has shipped
+- reliably for years. Measured locally on the same host
+- (`scripts/capture-trace-ipv6.cjs` + CDP `Profiler.start`, 10 panes,
+- sustained held key):
+- |                 | Wayland (native) | XWayland (this PR) |
+- | --------------- | ---------------- | ------------------ |
+- | rAF firing rate | 2.5 Hz           | **6.4 Hz**         |
+- | rAF gap p50     | 138 ms           | 136 ms             |
+- | rAF gap p95     | 1182 ms          | **224 ms**         |
+- | rAF gap max     | 8280 ms          | **1024 ms**        |
+- p50 is unchanged (the 136 ms median is the residual per-frame Blink/CC
+- compositor cost — separate work). p95 and worst-case drop **5×** and
+- **8×**: no more "hold a key, nothing happens, release, dump." VSCode
+- on the same machine (Electron 39 / Chromium 142) sits on the XWayland
+- path by default and runs smoothly here — this PR brings the AgentMux
+- runtime onto the same well-trodden path until native Wayland is fixed
+- upstream.
+- `AGENTMUX_OZONE_PLATFORM=wayland` opt-out remains for regression
+- testing the native-Wayland path (which will be revisited once the CEF
+- 148 binary distribution lands for Linux — the source bump is already
+- in main, #1221, but the patched libcef.so needs a rebuild).
+- Not a complete fix for full VSCode parity — the residual 136 ms median
+- is per-frame compositor work that still needs CSS layer-tree audit
+- follow-ups — but this is the largest single Linux user-visible win
+- since predictive echo (#1223) and removes the worst pathological
+- stalls.
+- feat(providers): add Qwen Code provider
+- feat(macos): notarized CEF 148 DMG — patched renderer, launcher splash, DCHECK-off build
+- fix(codex): functional codex provider (launch args, gpt-5.4 model, turn-boundary session_end)
+- fix(agent-pane): remove open/close pane animations, thicken high-contrast scrollbars, drop tool ok label
+- fix(auth): auto-focus OAuth code box + strip OSC-8 escapes so Claude login code lands
+- fix(gemini): stop Claude model leak + map turn-end to session_end
+- fix(macos): move hamburger menu to far-right of title bar; mirror right-anchored menus
+- fix(build): guard bundled CEF version against linked cef crate; surface a user-facing dialog on CEF init failure instead of a silent splash
+- fix(agent): status-bar token stats — record claude usage (cache-inclusive)
+- fix(agent-pane): HMR-safe useProcessCount RPC guard
+- feat(launcher): log instance_claim isolation telemetry and key the splash window class per instance; document isolation invariants (I1-I6)
+- fix(agent-pane): restore scroll-to-bottom when a pane returns from hidden
+- docs(arch): replace ASCII architecture diagram with SVG (clean alignment + cardinality + brand colors); sweep stale CEF 146 -> 148 across README, host metadata, .cargo/config.toml example, CEF_ARCHITECTURE.md
+- fix(macos): survive external accessibility queries (Magnet/Synergy) without crashing
+- fix(window): collapse widget labels then shrink tabs when the title bar is crowded
+- feat(macos): native menu bar (File/Edit/View/Window/Help) + name dev instance 'AgentMux DEV'
+- docs(arch): SVG readability + accuracy — light surface for cross-theme rendering, 2-line legend (no overflow), launcher cardinality bumped from per-channel to per-(channel, version) per the I1 isolation invariant
+- fix(auth): run Claude login under a PTY so the CLI survives to receive the OAuth code
+- revert(arch): restore the original architecture SVG from PR #1258 (the one that renders dark on GitHub dark theme) — undoes the readability fixes from #1264 that made it permanently light
+- fix(macos): window close now exits the instance instead of hanging hidden
+- feat(tab): VSCode-style flush tabs + folder content surface
+- refactor(agent-pane): retire the TanStack virtualizer; render the agent pane from the layout-reducer slice (Phase 3)
+- fix(auth): clearer 2-step Claude login box with paste-to-submit
+- fix(auth): single-flight login CLI lifecycle — supersede-kill + timeout reaper
+- fix(agent): stop and drop subagent file watcher on agent unregister
+- fix(linux): patch cef-dll-sys to AgentU-asaf/cef-rs fork to restore --features patched-libcef on CEF 148
+- fix(agent): own tool_chunk sub at body scope; drop dead detached login spawn
+- fix(linux): bundle CEF 148 Vulkan SwiftShader + headless resources so renderer process can start
+- fix(macos): native close button on the DevTools window
+- fix(dev): frontend-load error Retry navigates to the real URL + auto-retry
+- refactor(drone): store-backed draft graph for fine-grained canvas reactivity
+- feat(drone): pan/zoom canvas, zoom-aware node drag, zoom/fit controls
+- feat(drone): top emoji node-type bar + drag-from-bar onto full-bleed canvas
+- feat(linux): launcher in the AppImage launch path + PR_SET_PDEATHSIG reap parity (A0)
+- fix(auth): macOS Claude login completes — detect Keychain-stored creds
+- fix(drone): inspector title tracks selected node (was stale)
+- feat(linux): Unix-domain-socket IPC + reducer + saga coordinator on Linux (A1)
+- feat(drone): port-based drag-to-connect wiring with typed/acyclic validation
+- fix(auth): shared provider auth dir; restore the validate-the-dir-you-run-in invariant
+- fix(a11y): keep loading spinners spinning under reduced-motion (macOS)
+- fix(virt): batch StreamFlush dispatches to prevent replaceChild crash
+- feat(drone): inline in-node parameter editing — remove right-side inspector
+- feat(error-pane): copy-on-highlight with cursor tooltip
+- fix(tabbar): move fill inside scroll so empty tab-bar space is draggable
+- fix(error-pane): copy-on-highlight with tooltip and full-height stack
+- docs: prominent early-alpha warning at top of README and in MSIX manifest
+- Adds a callout to the top of README.md and updates the AppxManifest
+- Description so the Microsoft Store listing carries the same disclaimer.
+- Canonical wording lives in
+- docs/specs/SPEC_EARLY_ALPHA_WARNING_2026_06_05.md.
+
+
 ## 0.42.0 — 2026-06-02
 
 - feat(macos): package:macos — signed .app/.dmg with CEF Helper app
