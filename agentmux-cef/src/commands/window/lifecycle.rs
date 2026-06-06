@@ -112,8 +112,13 @@ pub fn close_window_by_label(
 /// (`agentmux-cef/src/floating_pane.rs::CLASS_NAME`). Kept in sync so
 /// `find_main_window` can EnumWindows-skip floaters when CEF Views
 /// hides the main window's HWND.
+// Use floater_class_name() (not a const) so both files agree on the
+// runtime-suffixed name that embeds AGENTMUX_IPC_HASH (I5 invariant).
 #[cfg(target_os = "windows")]
-const FLOATING_PANE_CLASS_NAME: &str = "AgentMuxFloatingPane";
+#[inline(always)]
+fn floating_pane_class_name() -> &'static str {
+    crate::floating_pane::floater_class_name()
+}
 
 /// X-coordinate threshold (in screen px) below which a top-level window is
 /// treated as an off-screen warm-pool member, not a real user window.
@@ -155,7 +160,7 @@ unsafe fn is_offscreen_pool_window(hwnd: *mut std::ffi::c_void) -> bool {
 /// skip, the floater (owned, drawn ABOVE its owner) would be
 /// enumerated first and we'd target it instead.
 #[cfg(target_os = "windows")]
-pub(super) unsafe fn find_main_window() -> *mut std::ffi::c_void {
+pub unsafe fn find_main_window() -> *mut std::ffi::c_void {
     use windows_sys::Win32::System::Threading::GetCurrentProcessId;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -182,7 +187,7 @@ pub(super) unsafe fn find_main_window() -> *mut std::ffi::c_void {
         let len = GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
         if len > 0 {
             let class = String::from_utf16_lossy(&buf[..len as usize]);
-            if class == FLOATING_PANE_CLASS_NAME {
+            if class == floating_pane_class_name() {
                 return 1;
             }
         }

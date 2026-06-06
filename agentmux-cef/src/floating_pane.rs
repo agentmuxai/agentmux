@@ -44,6 +44,22 @@ use cef::*;
 
 use crate::state::AppState;
 
+/// Return the Win32 window-class name for floating panes, suffixed with
+/// the launcher-supplied `AGENTMUX_IPC_HASH` (= `hash(data_dir, version)`)
+/// so that two parallel AgentMux instances register distinct class atoms
+/// and their `wndproc`/`hInstance` pointers never collide (I5 invariant).
+/// Falls back to the bare name in dev/test builds where the launcher may
+/// not have set the env var.
+pub(crate) fn floater_class_name() -> &'static str {
+    static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    NAME.get_or_init(|| {
+        match std::env::var("AGENTMUX_IPC_HASH") {
+            Ok(h) if !h.is_empty() => format!("AgentMuxFloatingPane-{}", h),
+            _ => "AgentMuxFloatingPane".to_string(),
+        }
+    })
+}
+
 wrap_task! {
     pub struct CreateFloatingWindowTask {
         state: Arc<AppState>,
@@ -88,12 +104,26 @@ wrap_task! {
                 );
             };
 
-            let owner_hwnd_raw = unsafe { crate::commands::window::find_own_top_level_window() };
+            // Use the MAIN window as owner, not whichever top-level happens
+            // to be focused at tear-off time. On Win32, destroying an owner
+            // window cascades to all owned windows — if a secondary window
+            // (Window B) were the owner, closing Window B would destroy the
+            // floater. Using the main window means the floater survives closing
+            // any secondary window and is only destroyed with the whole app.
+            let owner_hwnd_raw = unsafe {
+                let h = crate::commands::window::find_main_window();
+                if h.is_null() {
+                    // Fallback: take whatever top-level is visible
+                    crate::commands::window::find_own_top_level_window()
+                } else {
+                    h
+                }
+            };
             if owner_hwnd_raw.is_null() {
                 tracing::error!(
                     pane_id = %self.pane_id,
                     label = %self.window_label,
-                    "[floating-pane] cannot find source main HWND — aborting",
+                    "[floating-pane] cannot find main HWND — aborting floater creation",
                 );
                 dequeue();
                 return;
@@ -478,9 +508,13 @@ fn create_owned_popup(
 
     // ---- Register the class once per process ----
     static CLASS_REGISTERED: std::sync::Once = std::sync::Once::new();
-    static CLASS_NAME: &str = "AgentMuxFloatingPane";
 
-    let mut class_name_utf16: Vec<u16> = OsStr::new(CLASS_NAME).encode_wide().collect();
+    // I5 compliance: embed AGENTMUX_IPC_HASH (= hash(data_dir, version),
+    // set by the launcher) so two parallel instances register distinct
+    // class atoms and their wndproc/hInstance pointers don't collide.
+    // Falls back to the bare name in dev/test builds without the launcher.
+    let class_name = crate::floating_pane::floater_class_name();
+    let mut class_name_utf16: Vec<u16> = OsStr::new(class_name).encode_wide().collect();
     class_name_utf16.push(0);
 
     // TODO(phase-6, codex P1 on #811 — explicitly deferred): The
@@ -521,7 +555,8 @@ fn create_owned_popup(
         let atom = RegisterClassExW(&wnd_class);
         if atom == 0 {
             tracing::error!(
-                "[floating-pane] RegisterClassExW failed for {CLASS_NAME}; CreateWindowExW will fail",
+                "[floating-pane] RegisterClassExW failed for '{}'; CreateWindowExW will fail",
+                class_name,
             );
         }
     });

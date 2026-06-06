@@ -15,6 +15,8 @@
 mod lifecycle;
 // Cross-platform command handlers dispatched by ipc.rs.
 pub use lifecycle::{close_window, close_window_by_label};
+#[cfg(target_os = "windows")]
+pub use lifecycle::find_main_window;
 // Windows-only helpers other modules resolve as `commands::window::<name>`
 // (browser_pane / client / backend call sites are all `#[cfg(windows)]`).
 #[cfg(target_os = "windows")]

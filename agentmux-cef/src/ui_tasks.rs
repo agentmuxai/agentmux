@@ -228,6 +228,20 @@ wrap_task! {
                             self.label
                         );
                     }
+                    // Notify the renderer that the OS drag is done so it can
+                    // reset its dragging flag. BeginWindowDrag may not re-deliver
+                    // a DOM mouseup to the renderer (F3 verification pending).
+                    // moved:false — we cannot detect pixel motion from the
+                    // BeginWindowDrag return value, so we conservatively emit
+                    // false here. On non-Windows, tryRedockAtCursor is driven
+                    // directly from onMouseUp (gated on the DOM mousemove-based
+                    // hasMoved flag) rather than from window_drag_ended, so this
+                    // event is only needed as a dragging-reset safety net.
+                    crate::events::emit_event_to_top_level_windows(
+                        &self.state,
+                        "window_drag_ended",
+                        &serde_json::json!({ "label": &self.label, "moved": false }),
+                    );
                 }
             } else {
                 tracing::warn!("[start_window_drag] no window for label={}", self.label);
@@ -259,11 +273,14 @@ pub fn post_start_drag(_state: &Arc<AppState>, _label: &str) {}
 wrap_task! {
     pub struct Win32BeginMoveTask {
         hwnd: u64,
+        state: Arc<AppState>,
+        source_label: Option<String>,
     }
 
     impl Task {
         fn execute(&self) {
             use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
+            use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
             use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
                 GetAsyncKeyState, GetCapture, ReleaseCapture, SetCapture, VK_ESCAPE, VK_LBUTTON,
             };
@@ -320,6 +337,10 @@ wrap_task! {
                     "[start_window_drag] manual move loop begin hwnd={:#x} anchor=({},{}) origin=({},{})",
                     self.hwnd, anchor.x, anchor.y, x0, y0
                 );
+                // Throttle state for floater redock-hover emit (§3.2 of the spec).
+                // Pre-dated by 50ms so the first WM_MOUSEMOVE emits immediately.
+                let mut last_hover_emit = std::time::Instant::now()
+                    - std::time::Duration::from_millis(50);
 
                 // 3. Modal move loop on the UI thread.
                 let mut msg: MSG = std::mem::zeroed();
@@ -340,7 +361,18 @@ wrap_task! {
                         if PeekMessageW(&mut up, h, WM_LBUTTONUP, WM_LBUTTONUP, PM_REMOVE) != 0 {
                             DispatchMessageW(&up);
                         } else {
-                            SendMessageW(h, WM_LBUTTONUP, 0, 0);
+                            // Synthesize a balancing WM_LBUTTONUP so Chromium's
+                            // mousedown is balanced. Encode the ACTUAL cursor
+                            // position in lParam (client coords) so the DOM
+                            // MouseEvent carries correct screenX/Y for redock.
+                            // lParam=0 would encode client (0,0) = floater
+                            // top-left, giving tryRedockAtCursor the wrong point.
+                            let mut release_pt = POINT { x: 0, y: 0 };
+                            GetCursorPos(&mut release_pt);
+                            ScreenToClient(h, &mut release_pt);
+                            let lp = (release_pt.x as u16 as i32)
+                                | ((release_pt.y as u16 as i32) << 16);
+                            SendMessageW(h, WM_LBUTTONUP, 0, lp as isize);
                         }
                         break;
                     }
@@ -353,7 +385,11 @@ wrap_task! {
                         break;
                     }
                     match msg.message {
-                        WM_MOUSEMOVE => {
+                        // Guard both arms against messages sent to other
+                        // HWNDs that arrived on this thread (accessibility
+                        // tools, test automation). Messages for other windows
+                        // fall through to the _ arm for normal dispatch.
+                        WM_MOUSEMOVE if msg.hwnd == h => {
                             // After Esc-cancel we keep looping (so the renderer
                             // still gets its balancing WM_LBUTTONUP on release)
                             // but stop moving the window.
@@ -370,9 +406,30 @@ wrap_task! {
                                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                                 );
                                 moves += 1;
+                                // Floater: emit redock-hover at 50ms cadence so the
+                                // drop-target highlight tracks the cursor while the
+                                // renderer's mousemove listener is dark (§2.2 / §3.2).
+                                if let Some(sl) = self.source_label.as_deref() {
+                                    if sl.starts_with("floating-")
+                                        && last_hover_emit.elapsed()
+                                            >= std::time::Duration::from_millis(50)
+                                    {
+                                        let hover_args = serde_json::json!({
+                                            "source_label": sl,
+                                            "x": cur.x,
+                                            "y": cur.y,
+                                        });
+                                        let _ = crate::commands::window
+                                            ::update_floating_redock_hover(
+                                                &self.state,
+                                                &hover_args,
+                                            );
+                                        last_hover_emit = std::time::Instant::now();
+                                    }
+                                }
                             }
                         }
-                        WM_LBUTTONUP => {
+                        WM_LBUTTONUP if msg.hwnd == h => {
                             // Let Chromium see the up so its input state stays
                             // balanced against the mousedown the renderer got
                             // (SPEC §5.1).
@@ -395,6 +452,21 @@ wrap_task! {
                                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                             );
                             cancelled = true;
+                            // Tear down the hover overlay immediately so the
+                            // drop-target placeholder doesn't outlive the cancel.
+                            let _ = crate::commands::window::clear_floating_redock_hover(
+                                &self.state,
+                                &serde_json::Value::Null,
+                            );
+                            // Signal the renderer to suppress redock-on-release
+                            // for this drag (§2.3 / §3.2 of the spec).
+                            crate::events::emit_event_to_top_level_windows(
+                                &self.state,
+                                "window_drag_cancelled",
+                                &serde_json::json!({
+                                    "label": self.source_label.as_deref().unwrap_or("main")
+                                }),
+                            );
                         }
                         WM_TIMER if msg.wParam == DRAG_TICK_ID => {
                             // Our wake tick — consume ONLY ours; the top-of-loop
@@ -412,7 +484,28 @@ wrap_task! {
 
                 // 4. Stop the wake tick and release capture.
                 KillTimer(h, DRAG_TICK_ID);
+                // Capture cursor position before ReleaseCapture — this is the
+                // actual release point in physical screen px. Included in the
+                // window_drag_ended payload so the renderer can use these
+                // coordinates directly, eliminating the ordering race between
+                // the dispatched WM_LBUTTONUP (DOM mouseup) and this event
+                // (both travel async CEF IPC, relative arrival is not guaranteed).
+                let mut release_cursor = POINT { x: 0, y: 0 };
+                GetCursorPos(&mut release_cursor);
                 ReleaseCapture();
+                // Notify the renderer that the drag is done. cursor_x/cursor_y
+                // are physical screen px; renderer divides by posScale() (DPR on
+                // Windows, 1 elsewhere) to get CSS px for tryRedockAtCursor.
+                crate::events::emit_event_to_top_level_windows(
+                    &self.state,
+                    "window_drag_ended",
+                    &serde_json::json!({
+                        "label": self.source_label.as_deref().unwrap_or("main"),
+                        "moved": !cancelled && moves > 0,
+                        "cursor_x": release_cursor.x,
+                        "cursor_y": release_cursor.y,
+                    }),
+                );
                 tracing::info!(
                     "[start_window_drag] manual move loop end hwnd={:#x} moves={}",
                     self.hwnd, moves
@@ -423,8 +516,8 @@ wrap_task! {
 }
 
 #[cfg(target_os = "windows")]
-pub fn post_win32_begin_move(hwnd: u64) {
-    let mut task = Win32BeginMoveTask::new(hwnd);
+pub fn post_win32_begin_move(hwnd: u64, state: Arc<AppState>, source_label: Option<String>) {
+    let mut task = Win32BeginMoveTask::new(hwnd, state, source_label);
     post_task(ThreadId::UI, Some(&mut task));
 }
 

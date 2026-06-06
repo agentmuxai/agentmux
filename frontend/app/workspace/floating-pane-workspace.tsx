@@ -17,26 +17,29 @@
  *  - no extra title bar — the floater renders the block's standard
  *    `BlockFrame_Header` (33 CSS px, `--header-height` in
  *    `theme.scss:97`) as its sole chrome.
- *  - window drag is **JS-driven**, installed by the `onMount` below:
+ *  - window drag is **host-driven**, installed by the `onMount` below:
  *    a targeted document mousedown listener scoped to
- *    `[data-role="block-header"]` (and skipping interactive elements
- *    via `target.closest('button, a, input, ...')`) drives
- *    `get/set_window_position` IPC on Windows and macOS. On Linux
- *    (Wayland forbids client-driven top-level repositioning) it instead
- *    fires a single `start_window_drag` IPC that hands the drag to the
- *    compositor — same path as the main window's `useWindowDrag.linux`.
+ *    `[data-role="block-header"]` fires `start_window_drag` IPC on all
+ *    platforms. On Windows the host runs `Win32BeginMoveTask` (manual
+ *    SetCapture + GetMessage + SetWindowPos loop, zero per-move IPC).
+ *    On macOS/Linux the host calls `CefWindow::BeginWindowDrag`. The
+ *    renderer's `mousemove` listener is retained on non-Windows to emit
+ *    `update_floating_redock_hover` (drop-target highlight) while the
+ *    host owns capture; on Windows this is emitted from within
+ *    `Win32BeginMoveTask` (§3.2 of
+ *    `docs/specs/SPEC_PANE_RESIZE_AND_FLOATER_DRAG_NATIVE_LOOP_2026_06_05.md`).
  *    `preventDefault` on mousedown blocks the HTML5 dragstart
  *    pragmatic-dnd would otherwise have used, suppressing a "double
  *    tear-off" regression. See
  *    `docs/analyses/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md`
- *    for why we use JS-driven drag rather than OS HTCAPTION.
+ *    for why we use this approach rather than OS HTCAPTION.
  *
  * The frontend code path is otherwise identical to the docked case:
  * Block / view-model / RPC subscriptions all behave the same.
  */
 
-import { invokeCommand } from "@/app/platform/ipc";
-import { isLinux, isWindows } from "@/util/platformutil";
+import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import { isWindows } from "@/util/platformutil";
 import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { CenteredDiv } from "@/app/element/quickelems";
@@ -45,7 +48,7 @@ import { TabContent } from "@/app/tab/tabcontent";
 import { WorkspaceService } from "@/store/services";
 import { atoms, getApi } from "@/store/global";
 import * as WOS from "@/store/wos";
-import { Show, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 
 import "./floating-pane-workspace.scss";
 
@@ -89,6 +92,10 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     // subscription whenever tabId changes (the prior effect run's
     // cleanup decrements the previous refcount).
     let hadBlocks = false;
+    // Signal so createEffect re-runs when redockInProgress changes — a plain
+    // JS boolean is non-reactive, so the effect would never see the flag go
+    // false again after the RPC completes, leaving the floater open after dock.
+    const [redockInProgress, setRedockInProgress] = createSignal(false);
     createEffect(() => {
         const tid = tabId();
         if (!tid) return;
@@ -98,7 +105,10 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         const blockids = t.blockids ?? [];
         if (blockids.length > 0) {
             hadBlocks = true;
-        } else if (hadBlocks) {
+        } else if (hadBlocks && !redockInProgress()) {
+            // Skip close while a RedockFloatingPane RPC is in-flight —
+            // the backend broadcasts the Tab update before the RPC response
+            // arrives, so the watcher would otherwise destroy the window mid-op.
             const label = windowLabel();
             if (label) {
                 getApi()
@@ -113,13 +123,13 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         }
     });
 
-    // Pane-header drag — JS-driven window move, scoped to the standard
-    // docked-pane header (`[data-role="block-header"]`). Mirrors the
-    // main-window pattern in `frontend/app/hook/useWindowDrag.win32.ts`
-    // (one-in-flight + coalesce, DPR scaling, catch-up move on IPC
-    // resolution, per-mousedown sequence token) — minus the
-    // `data-drag-region` traversal because we scope explicitly to the
-    // pane header instead of opting in via attributes.
+    // Pane-header drag — host-driven window move (PR #1276 / spec
+    // SPEC_PANE_RESIZE_AND_FLOATER_DRAG_NATIVE_LOOP_2026_06_05). A
+    // targeted mousedown listener fires `start_window_drag` IPC on all
+    // platforms; the host owns motion from there. On macOS/Linux a
+    // `mousemove` listener emits `update_floating_redock_hover` so the
+    // drop-target highlight stays live (on Windows that emission lives
+    // inside Win32BeginMoveTask while the renderer's mousemove is dark).
     //
     // `preventDefault()` on the qualifying mousedown is load-bearing:
     // it suppresses the HTML5 dragstart pragmatic-dnd would otherwise
@@ -133,21 +143,23 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             "button, a, input, select, textarea, [role='button']";
         const HEADER_SELECTOR = '[data-role="block-header"]';
 
-        let currentMouseDownId = 0;
         let dragging = false;
-        let clickScreenX = 0;
-        let clickScreenY = 0;
-        let initWinX = 0;
-        let initWinY = 0;
-        let latestScreenX = 0;
-        let latestScreenY = 0;
-        let setPosInFlight = false;
-        let pendingPos: { x: number; y: number } | null = null;
+        // On Windows: coords saved here by onMouseUp; consumed by the
+        // window_drag_ended handler which carries host cursor_x/cursor_y
+        // (eliminating the async ordering race with DOM mouseup).
+        // On non-Windows: tryRedockAtCursor is called directly from onMouseUp
+        // when hasMoved=true, so pendingRedockCoords is only a fallback.
+        let pendingRedockCoords: { x: number; y: number } | null = null;
+        // Non-Windows only: set by onMouseMove when dragging. Gates
+        // tryRedockAtCursor in onMouseUp so a plain header click (no pixel
+        // motion) doesn't false-redock when the floater overlaps another window.
+        let hasMoved = false;
+        // redockInProgress is a signal at component scope (above this onMount)
+        // so createEffect re-runs when it changes.
+        // Sentinel for the listenEvent .then() race: if the component unmounts
+        // before the Promise resolves, the .then() immediately calls unlisten.
+        let cleaned = false;
 
-        // Capture once per mount — windowLabel is fixed for the
-        // floater's lifetime. Used to route `get/set_window_position`
-        // IPC to OUR HWND (not whichever top-level the OS happens to
-        // enumerate first in Z-order).
         const label = windowLabel();
 
         // ── Edge-resize (floater only) ──────────────────────────────────
@@ -282,169 +294,154 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             });
         }
 
-        const sendPos = (x: number, y: number): void => {
-            if (setPosInFlight) {
-                pendingPos = { x, y };
-                return;
-            }
-            setPosInFlight = true;
-            invokeCommand("set_window_position", { x, y, label })
-                .catch(() => {})
-                .finally(() => {
-                    setPosInFlight = false;
-                    if (pendingPos) {
-                        const { x: nx, y: ny } = pendingPos;
-                        pendingPos = null;
-                        sendPos(nx, ny);
-                    }
-                });
-        };
-
-        const onMouseDown = async (e: MouseEvent) => {
+        const onMouseDown = (e: MouseEvent) => {
             if (e.button !== 0) return;
             const target = e.target as HTMLElement | null;
             if (!target) return;
-            // Must be inside the standard pane header
             if (!target.closest(HEADER_SELECTOR)) return;
-            // Skip interactive controls within the header so close /
-            // magnify / mic / endIconButton clicks reach their handlers
             if (target.closest(INTERACTIVE_SELECTOR)) return;
 
-            // Block the HTML5 dragstart pragmatic-dnd would have used —
-            // without this, the click tears the pane off into ANOTHER
-            // floating window (the double-tear-off regression).
+            // Load-bearing: blocks pragmatic-dnd's HTML5 dragstart, preventing
+            // the double-tear-off regression (ANALYSIS_FLOATING_PANE_HEADER_DRAG
+            // §"Tear-off conflict").
             e.preventDefault();
 
-            // Wayland forbids client-driven top-level repositioning, so
-            // the get/set_window_position polling below is a no-op. Hand
-            // the drag to the compositor via the same IPC the main window
-            // uses (see useWindowDrag.linux.ts).
-            if (isLinux()) {
-                invokeCommand("start_window_drag", { label }).catch(() => {});
-                return;
-            }
-
-            currentMouseDownId += 1;
-            const myId = currentMouseDownId;
-            clickScreenX = e.screenX;
-            clickScreenY = e.screenY;
-            latestScreenX = e.screenX;
-            latestScreenY = e.screenY;
-
-            try {
-                const pos = await invokeCommand<{ x: number; y: number }>(
-                    "get_window_position",
-                    { label },
-                );
-                // Race guard: bail if mouseup or a newer mousedown
-                // happened during the IPC round-trip
-                if (myId !== currentMouseDownId) return;
-                initWinX = pos.x;
-                initWinY = pos.y;
-                dragging = true;
-                // Catch-up: if the cursor moved during the IPC, fire
-                // one set_window_position immediately so we don't lose
-                // the first few pixels of motion
-                if (
-                    latestScreenX !== clickScreenX ||
-                    latestScreenY !== clickScreenY
-                ) {
-                    const scale = posScale();
-                    const tx =
-                        initWinX +
-                        Math.round((latestScreenX - clickScreenX) * scale);
-                    const ty =
-                        initWinY +
-                        Math.round((latestScreenY - clickScreenY) * scale);
-                    sendPos(tx, ty);
-                }
-            } catch {
-                // host unavailable — abort drag silently
-            }
-        };
-
-        // Throttled redock-hover push — drives the highlight overlay
-        // on whichever agentmux window the cursor is currently over.
-        // ~50 ms cadence is plenty for highlight tracking and keeps
-        // IPC load minimal during fast drags.
-        const HOVER_PUSH_THROTTLE_MS = 50;
-        let lastHoverPushAt = 0;
-        const pushRedockHover = (screenX: number, screenY: number) => {
-            const now = performance.now();
-            if (now - lastHoverPushAt < HOVER_PUSH_THROTTLE_MS) return;
-            lastHoverPushAt = now;
-            // Host coordinate space: physical px on Windows, DIP on macOS/Linux
-            // (posScale). resolve_window_at_cursor / the hover hit-test compare
-            // against the same space.
-            const scale = posScale();
-            const px = Math.round(screenX * scale);
-            const py = Math.round(screenY * scale);
-            const sourceLabel = windowLabel();
-            if (!sourceLabel) return;
-            invokeCommand("update_floating_redock_hover", {
-                source_label: sourceLabel,
-                x: px,
-                y: py,
-            }).catch(() => {});
-        };
-
-        const onMouseMove = (e: MouseEvent) => {
-            // Track the latest cursor position even before `dragging`
-            // is armed so the catch-up at IPC resolution can use the
-            // most recent value
-            latestScreenX = e.screenX;
-            latestScreenY = e.screenY;
-            if (!dragging) return;
-            // CSS-px delta * posScale() = host-coordinate delta added to the
-            // baseline from get_window_position. On Windows posScale() is the
-            // devicePixelRatio (physical px); on macOS/Linux it's 1 (CEF Views
-            // DIP). Re-read every move so a mid-drag monitor crossing on
-            // Windows picks up the new DPR automatically.
-            const scale = posScale();
-            const tx =
-                initWinX + Math.round((e.screenX - clickScreenX) * scale);
-            const ty =
-                initWinY + Math.round((e.screenY - clickScreenY) * scale);
-            sendPos(tx, ty);
-            pushRedockHover(e.screenX, e.screenY);
+            // Hand the drag to the host. On Windows: Win32BeginMoveTask manual
+            // loop (zero per-move IPC, no DPR math). On macOS/Linux:
+            // CefWindow::BeginWindowDrag via the patched libcef.
+            // Host owns motion + capture from here; renderer sees mouseup via
+            // the dispatched WM_LBUTTONUP balance (PR #1181 §5.1).
+            invokeCommand("start_window_drag", { label }).catch(() => {});
+            dragging = true;
+            hasMoved = false;
+            pendingRedockCoords = null;
         };
 
         const onMouseUp = (e: MouseEvent) => {
-            // Invalidate any in-flight mousedown handler — incrementing
-            // the id ensures their `myId !== currentMouseDownId` check
-            // fires when they resolve.
-            currentMouseDownId += 1;
-            const wasDragging = dragging;
+            if (!dragging) return;
             dragging = false;
-            // Do NOT clear pendingPos — that would discard the FINAL
-            // queued position (the cursor's location at release time).
-            // Let the in-flight set_window_position complete; its
-            // `.finally` drains pendingPos to the correct end state.
-
-            // Floating-pane re-dock (Phase 4a MVP): if we just finished
-            // a drag and the cursor landed over another agentmux window
-            // in this process, fire RedockFloatingPane to move our
-            // single block into that window's active tab. The source
-            // workspace's tab.blockids becomes empty → the createEffect
-            // above auto-closes this floater.
-            //
-            // Cross-instance / cross-version safety is free: the host's
-            // `resolve_window_at_cursor` looks up HWND in this process's
-            // `window_hwnds` map — another agentmux version's HWNDs
-            // aren't in it, so cross-process drops silently no-op.
-            if (wasDragging) {
-                // Always clear the hover state on release — the highlight
-                // overlay needs to disappear whether or not we ended up
-                // over a target. Fire-and-forget; the redock attempt
-                // below doesn't depend on this completing.
-                invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
+            invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
+            if (isWindows()) {
+                // On Windows: save coords; window_drag_ended carries
+                // cursor_x/cursor_y from the host (physical px) and drives
+                // tryRedockAtCursor — no ordering race with this event.
+                pendingRedockCoords = { x: e.screenX, y: e.screenY };
+            } else if (hasMoved) {
+                // Non-Windows: BeginWindowDrag may deliver mousemove+mouseup.
+                // Only attempt redock if onMouseMove confirmed actual motion —
+                // prevents a plain header click (no mousemove → hasMoved=false)
+                // from false-redocking when the floater overlaps another window.
                 void tryRedockAtCursor(e.screenX, e.screenY);
             }
         };
 
+        // Helper: safe unlisten registration using the `cleaned` sentinel.
+        // If the component unmounts before listenEvent's Promise resolves,
+        // the .then() calls unlisten immediately rather than storing into a
+        // stale closure — prevents accumulated listener leaks across tear-off
+        // / remount cycles.
+        const safeListenEvent = <T,>(
+            event: string,
+            handler: (payload: T) => void,
+        ): (() => void) => {
+            let unlisten: (() => void) | null = null;
+            listenEvent<T>(event, handler).then(u => {
+                if (cleaned) { u(); } else { unlisten = u; }
+            }).catch(() => {});
+            return () => { unlisten?.(); };
+        };
+
+        // Esc-cancel from host — clear pending redock coords to prevent a
+        // spurious dock attempt on the next mouseup.
+        const stopCancelListener = safeListenEvent<{ label: string }>(
+            "window_drag_cancelled",
+            (ev) => {
+                if (!ev.label || ev.label === label) {
+                    dragging = false;
+                    hasMoved = false;
+                    pendingRedockCoords = null;
+                }
+            },
+        );
+
+        // Host signals drag loop ended. Always resets dragging and clears hover.
+        // On Windows: cursor_x/cursor_y (physical px) are included so the handler
+        // is self-contained — eliminates the ordering race where DOM mouseup and
+        // this event arrive via separate CEF IPC channels (relative order not
+        // guaranteed). On non-Windows: falls back to pendingRedockCoords set by
+        // onMouseUp if the OS delivered a DOM mouseup (BeginWindowDrag case).
+        const stopEndedListener = safeListenEvent<{
+            label: string;
+            moved: boolean;
+            cursor_x?: number;
+            cursor_y?: number;
+        }>(
+            "window_drag_ended",
+            (ev) => {
+                if (!ev.label || ev.label !== label) return;
+                dragging = false;
+                // Always clear hover — safety net for non-Windows where onMouseUp
+                // may not have fired (BeginWindowDrag absorbs the release).
+                invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
+                if (ev.moved && !cleaned) {
+                    // Prefer host-provided cursor coords (physical px → CSS px via
+                    // posScale). On Windows these are always present. On non-Windows
+                    // fall back to pendingRedockCoords saved by onMouseUp if the OS
+                    // delivered a DOM mouseup; otherwise redock is F3-pending.
+                    const coords = (() => {
+                        if (typeof ev.cursor_x === "number" && typeof ev.cursor_y === "number") {
+                            const scale = posScale();
+                            return { x: ev.cursor_x / scale, y: ev.cursor_y / scale };
+                        }
+                        return pendingRedockCoords;
+                    })();
+                    pendingRedockCoords = null;
+                    if (coords) void tryRedockAtCursor(coords.x, coords.y);
+                } else {
+                    pendingRedockCoords = null;
+                }
+            },
+        );
+
+        // On macOS/Linux, BeginWindowDrag may still deliver mousemove to the
+        // renderer (F3 verification pending). Keep the hover emit here for
+        // those platforms — on Windows Win32BeginMoveTask handles it while
+        // the renderer's mousemove is dark (§3.2 / §3.3 of spec).
+        let unlistenMouseMove: (() => void) | null = null;
+        if (!isWindows()) {
+            const HOVER_THROTTLE_MS = 50;
+            let lastHoverAt = 0;
+            const onMouseMove = (e: MouseEvent) => {
+                if (!dragging) return;
+                hasMoved = true;
+                const now = performance.now();
+                if (now - lastHoverAt < HOVER_THROTTLE_MS) return;
+                lastHoverAt = now;
+                const scale = posScale();
+                const sourceLabel = windowLabel();
+                if (!sourceLabel) return;
+                invokeCommand("update_floating_redock_hover", {
+                    source_label: sourceLabel,
+                    x: Math.round(e.screenX * scale),
+                    y: Math.round(e.screenY * scale),
+                }).catch(() => {});
+            };
+            document.addEventListener("mousemove", onMouseMove);
+            unlistenMouseMove = () => document.removeEventListener("mousemove", onMouseMove);
+        }
+
         const tryRedockAtCursor = async (screenX: number, screenY: number) => {
+            setRedockInProgress(true);
+            try {
+                await tryRedockAtCursorInner(screenX, screenY);
+            } finally {
+                setRedockInProgress(false);
+            }
+        };
+
+        const tryRedockAtCursorInner = async (screenX: number, screenY: number) => {
             const ourLabel = windowLabel();
-            if (!ourLabel) return;
+            if (!ourLabel || cleaned) return;
             // `mouseup.screenX/Y` are CSS px. Host coordinate space: physical px
             // on Windows (× DPR), DIP on macOS/Linux (× 1) — posScale().
             const scale = posScale();
@@ -469,6 +466,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 console.error("[floating-pane] resolve_window_at_cursor failed", e);
                 return;
             }
+            if (cleaned) return;
             if (!target.label || !target.window_id) {
                 // Cursor over desktop, external app, or our own floater
                 // — leave floater at the dropped position.
@@ -497,6 +495,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 );
                 return;
             }
+            if (cleaned) return;
             const targetTabId = targetWs.activetabid;
             const targetWsId = targetWs.oid;
             if (!targetTabId || !targetWsId) {
@@ -541,17 +540,21 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             }
         };
 
-        // Capture-phase listeners so we run BEFORE pragmatic-dnd's
-        // bubble-phase mousedown handler — preventDefault here blocks
-        // the HTML5 dragstart it would have triggered.
+        // Both mousedown and mouseup are capture-phase so they always fire
+        // before any child stopPropagation call can suppress them. mousedown
+        // must be capture to pre-empt pragmatic-dnd's dragstart; mouseup must
+        // be capture to ensure dragging is always reset (a bubble-phase mouseup
+        // blocked by a child would silently leave dragging=true).
         document.addEventListener("mousedown", onMouseDown, true);
-        document.addEventListener("mousemove", onMouseMove);
-        document.addEventListener("mouseup", onMouseUp);
+        document.addEventListener("mouseup", onMouseUp, true);
 
         onCleanup(() => {
+            cleaned = true;
             document.removeEventListener("mousedown", onMouseDown, true);
-            document.removeEventListener("mousemove", onMouseMove);
-            document.removeEventListener("mouseup", onMouseUp);
+            document.removeEventListener("mouseup", onMouseUp, true);
+            stopCancelListener();
+            stopEndedListener();
+            unlistenMouseMove?.();
         });
     });
 
