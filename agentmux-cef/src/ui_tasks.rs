@@ -501,7 +501,7 @@ wrap_task! {
                     "window_drag_ended",
                     &serde_json::json!({
                         "label": self.source_label.as_deref().unwrap_or("main"),
-                        "moved": moves > 0,
+                        "moved": !cancelled && moves > 0,
                         "cursor_x": release_cursor.x,
                         "cursor_y": release_cursor.y,
                     }),
