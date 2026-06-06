@@ -230,15 +230,17 @@ wrap_task! {
                     }
                     // Notify the renderer that the OS drag is done so it can
                     // reset its dragging flag. BeginWindowDrag may not re-deliver
-                    // a DOM mouseup to the renderer (F3 verification pending);
-                    // this event is the safety-net reset for non-Windows.
-                    // moved:true because the drag did run (we dispatched
-                    // BeginWindowDrag); the renderer uses this to gate
-                    // tryRedockAtCursor if onMouseUp fires with hasMoved=true.
+                    // a DOM mouseup to the renderer (F3 verification pending).
+                    // moved:false — we cannot detect pixel motion from the
+                    // BeginWindowDrag return value, so we conservatively emit
+                    // false here. On non-Windows, tryRedockAtCursor is driven
+                    // directly from onMouseUp (gated on the DOM mousemove-based
+                    // hasMoved flag) rather than from window_drag_ended, so this
+                    // event is only needed as a dragging-reset safety net.
                     crate::events::emit_event_to_top_level_windows(
                         &self.state,
                         "window_drag_ended",
-                        &serde_json::json!({ "label": &self.label, "moved": true }),
+                        &serde_json::json!({ "label": &self.label, "moved": false }),
                     );
                 }
             } else {

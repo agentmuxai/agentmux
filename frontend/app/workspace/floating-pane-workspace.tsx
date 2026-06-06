@@ -144,11 +144,16 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         const HEADER_SELECTOR = '[data-role="block-header"]';
 
         let dragging = false;
-        // Saved in onMouseUp; consumed by the window_drag_ended handler to
-        // call tryRedockAtCursor. Avoids the window_drag_first_move timing
-        // race: the first-move event and WM_LBUTTONUP both go through CEF
-        // async IPC, so hasMoved could be unset when onMouseUp fires.
+        // On Windows: coords saved here by onMouseUp; consumed by the
+        // window_drag_ended handler which carries host cursor_x/cursor_y
+        // (eliminating the async ordering race with DOM mouseup).
+        // On non-Windows: tryRedockAtCursor is called directly from onMouseUp
+        // when hasMoved=true, so pendingRedockCoords is only a fallback.
         let pendingRedockCoords: { x: number; y: number } | null = null;
+        // Non-Windows only: set by onMouseMove when dragging. Gates
+        // tryRedockAtCursor in onMouseUp so a plain header click (no pixel
+        // motion) doesn't false-redock when the floater overlaps another window.
+        let hasMoved = false;
         // redockInProgress is a signal at component scope (above this onMount)
         // so createEffect re-runs when it changes.
         // Sentinel for the listenEvent .then() race: if the component unmounts
@@ -308,20 +313,26 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             // the dispatched WM_LBUTTONUP balance (PR #1181 §5.1).
             invokeCommand("start_window_drag", { label }).catch(() => {});
             dragging = true;
-            pendingRedockCoords = null; // clear any stale coords from prior drag
+            hasMoved = false;
+            pendingRedockCoords = null;
         };
 
         const onMouseUp = (e: MouseEvent) => {
             if (!dragging) return;
             dragging = false;
-            // Save release coords for the window_drag_ended handler. The host
-            // emits window_drag_ended { moved } AFTER this mouseup fires (after
-            // ReleaseCapture / BeginWindowDrag returns), so we can't gate on
-            // 'moved' here — but we can save the position and let the handler
-            // decide. On Windows the host encodes the actual cursor position in
-            // the WM_LBUTTONUP lParam (lParam fix) so e.screenX/Y is correct.
-            pendingRedockCoords = { x: e.screenX, y: e.screenY };
             invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
+            if (isWindows()) {
+                // On Windows: save coords; window_drag_ended carries
+                // cursor_x/cursor_y from the host (physical px) and drives
+                // tryRedockAtCursor — no ordering race with this event.
+                pendingRedockCoords = { x: e.screenX, y: e.screenY };
+            } else if (hasMoved) {
+                // Non-Windows: BeginWindowDrag may deliver mousemove+mouseup.
+                // Only attempt redock if onMouseMove confirmed actual motion —
+                // prevents a plain header click (no mousemove → hasMoved=false)
+                // from false-redocking when the floater overlaps another window.
+                void tryRedockAtCursor(e.screenX, e.screenY);
+            }
         };
 
         // Helper: safe unlisten registration using the `cleaned` sentinel.
@@ -347,6 +358,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             (ev) => {
                 if (!ev.label || ev.label === label) {
                     dragging = false;
+                    hasMoved = false;
                     pendingRedockCoords = null;
                 }
             },
@@ -401,6 +413,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             let lastHoverAt = 0;
             const onMouseMove = (e: MouseEvent) => {
                 if (!dragging) return;
+                hasMoved = true;
                 const now = performance.now();
                 if (now - lastHoverAt < HOVER_THROTTLE_MS) return;
                 lastHoverAt = now;
