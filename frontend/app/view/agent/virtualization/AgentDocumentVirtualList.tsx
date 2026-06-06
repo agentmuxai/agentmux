@@ -121,11 +121,12 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // `replaceChild` crash on send-message
     // (docs/analysis/AGENT_PANE_REPLACECHILD_CRASH_ON_SEND_2026_05_27.md).
     //
-    // The replaceChild crash (root-caused from render_trail 2026-06-05:
-    // streamCount 50→53-57 across turns → Solid <Index> crash) is fixed
-    // at the dispatch level in useAgentStream.ts: wrapping StreamFlush +
-    // StreamFlushObserved in batch() so all reactive effects settle in one
-    // pass — no interleaved renders that could move a DOM node mid-reconcile.
+    // The replaceChild crash (render_trail 2026-06-05: streamCount 50→53-57
+    // across turns) has two mitigations: (1) batch() in useAgentStream.ts
+    // prevents interleaved StreamFlush / StreamFlushObserved renders, and (2)
+    // the cap-advance below (streamingNodes.length > STREAMING_BUFFER_SIZE)
+    // keeps <Index>'s array at ≤ 50 items so reconcileArrays never sees a
+    // larger array than its initial size — the structural root cause.
     //
     // Cleared whenever the anchor node is truncated away (e.g.,
     // history reset / pane re-mount); the next partition recompute
@@ -168,10 +169,30 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         );
 
         // Stale frontier (anchor node was truncated). Re-anchor and
-        // recompute once. The re-anchor is the ONLY place a node
-        // crosses subtrees, and it happens only on
-        // truncate/clear/reset — never during normal streaming.
+        // recompute once.
         if (result.splitIndex === -1) {
+            stickyFrontierId = initialStickyFrontierId(nodes, STREAMING_BUFFER_SIZE);
+            result = partitionForVirtualization(
+                nodes,
+                STREAMING_BUFFER_SIZE,
+                stickyFrontierId,
+            );
+        }
+
+        // Cap the streaming buffer at STREAMING_BUFFER_SIZE. The
+        // sticky frontier is set once (when the document first exceeds
+        // 50 nodes) but never advanced on subsequent appends, so
+        // streamingNodes grows unboundedly across turns. SolidJS's
+        // position-keyed <Index> tracks a fixed-length DOM range; when
+        // its array grows beyond the initial size, reconcileArrays
+        // corrupts its internal DOM tracking on the NEXT reconcile and
+        // throws "replaceChild: node is not a child". Re-anchoring
+        // whenever the buffer exceeds the cap advances the frontier
+        // to keep the streaming region at ≤ 50 nodes. Safe: the memo
+        // runs synchronously before either <Key> or <Index> reconciles,
+        // so both see the new consistent partition in a single reactive
+        // pass — no node crosses subtrees mid-render.
+        if (result.streamingNodes.length > STREAMING_BUFFER_SIZE) {
             stickyFrontierId = initialStickyFrontierId(nodes, STREAMING_BUFFER_SIZE);
             result = partitionForVirtualization(
                 nodes,
