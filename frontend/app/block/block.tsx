@@ -31,7 +31,7 @@ import {
     unregisterBlockComponentModel,
 } from "@/store/global";
 import { getWaveObjectAtom, makeORef, useWaveObjectValue } from "@/store/wos";
-import { focusedBlockId, getElemAsStr } from "@/util/focusutil";
+import { focusedBlockId } from "@/util/focusutil";
 import { isBlank, useAtomValueSafe } from "@/util/util";
 import { HelpViewModel } from "@/view/helpview/helpview";
 import { TermViewModel } from "@/view/term/term";
@@ -188,9 +188,7 @@ function BlockFull({ nodeModel, viewModel }: FullBlockProps): JSX.Element {
     );
 
     const handleChildFocus = (event: FocusEvent) => {
-        console.log("setFocusedChild", nodeModel.blockId, getElemAsStr(event.target));
         if (!isFocused()) {
-            console.log("focusedChild focus", nodeModel.blockId);
             nodeModel.focusNode();
         }
         // Any DOM element gaining focus lives in the main window's
