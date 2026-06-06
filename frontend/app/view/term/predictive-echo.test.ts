@@ -202,6 +202,31 @@ describe("PredictiveEcho — mode-transition safety", () => {
         expect(h.screen).not.toContain("b");
     });
 
+    it("sweep rollback uses the short stall cooldown, not the long divergence cooldown — Linux \"10 chars then ~1 s then burst\" fix", () => {
+        // Linux's broken Mutter/Chromium GPU handoff can stall the renderer's
+        // rAF past predictTimeoutMs, triggering sweep(). That's a slow echo,
+        // not a divergence — penalising it with the full divergence cooldown
+        // (1200 ms) is exactly the symptom users report: type ~10 chars, then
+        // ~1 s of nothing while the long cooldown blocks any new prediction,
+        // then everything pours out at once.
+        const h = harness({ stallCooldownMs: 100, cooldownMs: 1200 });
+        h.arm();
+        h.input("b"); // painted, queue=[b]
+        h.advance(700); // > predictTimeout 600 — echo stalled, no chunk
+        h.sweep(); // rollback fires from the timeout
+        expect(h.pe.isArmed).toBe(false); // disarmed during stall cooldown
+        // Now advance past the SHORT stall cooldown but well shy of the long
+        // divergence cooldown. A normal echo cycle should re-arm + predict,
+        // proving we're not stuck in the wrong (long) cooldown.
+        h.advance(120);
+        h.input("a");
+        h.advance(5);
+        h.echo("a");
+        expect(h.pe.isArmed).toBe(true);
+        h.input("c");
+        expect(h.ops).toContain("paint:c");
+    });
+
     it("reset() rolls back a pending painted prediction so the authoritative echo writes cleanly (disable mid-prediction, codex P2)", () => {
         const h = harness();
         h.arm();
