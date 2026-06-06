@@ -80,7 +80,7 @@ The `createEffect` pattern that reacts to WaveObj broadcasts is the right teardo
 
 ## What this retro does NOT cover
 
-- **`AgentMuxFloatingPane` window class without `dir_hash`** (I5 violation) — tracked as a separate item; dormant when only one instance runs.
+- **`AgentMuxFloatingPane` window class without `dir_hash`** (I5 violation) — **fixed in this PR** via `floater_class_name()` in `floating_pane.rs` (suffixes `AGENTMUX_IPC_HASH`) and the matching filter update in `lifecycle.rs`.
 - **`GetMessageW(nullptr)` HWND guard** — added in this fix; root cause documented above.
 - **Backend layout write atomicity outside saga boundary** — pre-existing gap F1.A; out of scope for this PR.
 - **macOS/Linux redock cursor coordinates** — `BeginWindowDrag` F3 spike still pending; `window_drag_ended { moved: false }` now resets `dragging` but does not yet surface cursor coordinates for `tryRedockAtCursor` on non-Windows.
