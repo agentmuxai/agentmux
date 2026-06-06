@@ -138,7 +138,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
 
     // Memoized — partition is read inside the slice-feeding effect,
     // nodeById, scrollToNode / older-history, and the streaming buffer
-    // <Index>. Without createMemo, every read re-slices the document
+    // <Key>. Without createMemo, every read re-slices the document
     // (O(n)) on every token of streaming, defeating the streaming
     // buffer's purpose. (reagent P1 on #784.)
     const partition = createMemo(() => {
