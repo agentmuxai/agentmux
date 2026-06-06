@@ -175,9 +175,21 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         // is not a child" crash (render_trail 2026-06-06; same root cause
         // as the <Index> crash — the array growth, not the keying strategy,
         // is what breaks reconcileArrays). Fix: advance the frontier to
-        // pin streamingNodes at ≤ STREAMING_BUFFER_SIZE items. Safe with
-        // <Key by={n => n.id}> — the migrated node leaves the <Key> map
-        // by id; no position-based state leakage. (#1301)
+        // pin streamingNodes at exactly STREAMING_BUFFER_SIZE items.
+        //
+        // WHY THIS DOESN'T REINTRODUCE THE COUNT-BASED CRASH: the cap
+        // runs inside createMemo, before any render effect reads the
+        // result. The memo returns the final 50-item array in a single
+        // synchronous step; the intermediate 51-item state is never
+        // observable by <Key> or the layout effect. <Key> always sees a
+        // fixed-size 50-item array (50 → 50, not 50 → 51), so
+        // reconcileArrays never encounters a growing array.
+        // The streaming-buffer.ts "no count-based mode" warning targets
+        // the old pattern where the memo was read TWICE with a moving
+        // split point — not a single sticky re-anchor inside one memo
+        // call. Migration is safe with <Key by={n => n.id}>: the
+        // departing node's slot is disposed by id; no position-keyed
+        // state leaks to the replacement. (#1302)
         if (result.streamingNodes.length > STREAMING_BUFFER_SIZE) {
             stickyFrontierId = initialStickyFrontierId(nodes, STREAMING_BUFFER_SIZE);
             result = partitionForVirtualization(nodes, STREAMING_BUFFER_SIZE, stickyFrontierId);
@@ -698,12 +710,13 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                     would unmount/remount the row on every token.
                     (reagent P1 on #784.)
                   - <Index> is position-keyed and passes a signal, which
-                    avoids the remount, but its reconcileArrays
-                    implementation corrupts internal DOM tracking when
-                    the array grows past its initial size — causing the
-                    "replaceChild: node is not a child" crash when
-                    streamingNodes grows from 50 to 53–57 across turns.
-                    (render_trail 2026-06-05; fixed in #1300.)
+                    avoids the remount, but has two problems: (a) the
+                    same reconcileArrays array-growth crash as <For> and
+                    <Key> — keying strategy doesn't matter, growth does;
+                    and (b) cap-advance migration leaks position-keyed
+                    slot state (prevStatus, expanded flag) to the node
+                    now at that position. Both are solved: <Key> by id
+                    (no slot leak), cap-advance (no growth). (#1302.)
                   - <Key by={n => n.id}> keys each slot by stable node
                     id. Token updates (new object, same id) fire the
                     slot's accessor signal — no remount, no position
