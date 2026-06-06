@@ -644,7 +644,18 @@ export function useAgentStream({
             // session_end doesn't leave "Working…" stuck).
             const at = Date.now();
             model.dispatchPane({ type: "StreamUnsubscribe", at });
-            model.dispatchDoc({ type: "SessionEnd", at });
+            // Defer SessionEnd to a microtask so it fires AFTER the synchronous
+            // disposal chain completes. During error-boundary cleanup the <Index>
+            // streaming-buffer scope is still partially live while onCleanup runs;
+            // a synchronous documentAtom write here re-triggers reconcileArrays
+            // on a half-torn-down DOM → replaceChild NotFoundError (observed
+            // 2026-06-06 crash 2, confirmed in
+            // SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §3.1).
+            // By microtask time all scope disposal is complete and the <Index>
+            // effect is removed from the computation graph. model.dispatchDoc
+            // uses the soft dispatchIfRegistered variant, so a gone slot is a
+            // silent no-op rather than a throw.
+            queueMicrotask(() => model.dispatchDoc({ type: "SessionEnd", at }));
         });
     });
 }

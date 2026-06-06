@@ -31,7 +31,7 @@
  *                       user scrolls near the top
  */
 
-import { createSignal, onCleanup, onMount, type Accessor } from "solid-js";
+import { batch, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
@@ -127,7 +127,14 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
 
             const newNodes = parseHistoryLines(resp.lines ?? [], opts.outputFormat());
             if (newNodes.length > 0) {
-                opts.model.dispatchDoc({ type: "HistoryLoaded", nodes: newNodes });
+                // batch() ensures HistoryLoaded's documentAtom write is not a
+                // standalone runUpdates frame that could interleave with a
+                // concurrent RAF StreamFlush if both land in the same browser
+                // task. Without batch(), two independent documentAtom writes
+                // can race to trigger <Index> reconcileArrays from separate
+                // frames → replaceChild NotFoundError.
+                // (SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §3.2)
+                batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes: newNodes }));
             }
 
             setHistoryOffset(newOffset);
