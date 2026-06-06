@@ -18,9 +18,10 @@ interface SubagentLinkBlockProps {
 export const SubagentLinkBlock = (props: SubagentLinkBlockProps): JSX.Element => {
     // Don't destructure -- see family of fixes on virt redesign:
     // AgentMessageBlock, MarkdownBlock have the same change. The
-    // streaming buffer's Index keeps the row mounted across status
-    // transitions (active to completed); a destructured node would
-    // freeze the active class. (codex P2 on PR #786.)
+    // streaming buffer's <Key by={n => n.id}> keeps the row mounted
+    // across status transitions (active to completed) by firing the
+    // node accessor signal; a destructured node would freeze the
+    // active class. (codex P2 on PR #786, comment updated #1300.)
     const isActive = () => props.node.status === "active";
 
     return (
