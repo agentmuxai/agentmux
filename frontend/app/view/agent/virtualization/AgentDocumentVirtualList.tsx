@@ -75,9 +75,11 @@ export interface AgentDocumentVirtualListProps {
     onTogglePin: (id: string) => void;
     /**
      * Live per-pane zoom factor (the same value applied as CSS `zoom` on
-     * `.agent-view` in agent-view.tsx). Used to normalize the measure RO + the
-     * Scrolled / scrollToNode math into unzoomed CSS px so slice positions don't
-     * double-count zoom and overlap — see
+     * `.agent-view` in agent-view.tsx). Normalizes the SINGLE zoomed read —
+     * the measure RO's getBoundingClientRect — into unzoomed CSS px so slice
+     * positions don't double-count zoom and overlap (Phase 4). scrollTop /
+     * clientHeight / offsetTop are already unzoomed under CSS `zoom`, so they
+     * feed the slice raw — see
      * SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01.
      * Defaults to 1 (no zoom) when not supplied.
      */
@@ -244,10 +246,10 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // The slice records scrollTop / viewport / scrollMargin / zoom and the
     // render path (windowing + prefix-sum row positions) reads them back. All
     // blockId-gated and reducer-deduped (an unchanged value returns the same
-    // state ref). Slice positions are unzoomed CSS px, so scroll + viewport
-    // are normalized by the live zoom — the same ÷zoom basis as the measure RO.
-    // (scrollTop ÷zoom under CSS `zoom` is pending CDP confirmation at zoom
-    // 0.5 / 2 per the Phase-3 plan.)
+    // state ref). Slice positions are unzoomed CSS px; scrollTop / clientHeight /
+    // offsetTop are ALSO unzoomed under the ancestor CSS `zoom` (Phase 4 —
+    // CDP-confirmed at zoom 0.5/2: ratio 1.0; only getBoundingClientRect is
+    // zoomed), so they feed the slice raw — the lone ÷zoom is at the measure RO.
     let lastScrollMarginPx = -1;
     const dispatchScrollMargin = (): void => {
         if (!props.blockId) return;
@@ -372,13 +374,13 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             }
             // Phase 3: the scroll container resizing changes the viewport the
             // slice windows against — feed it (covers hidden→visible 0→N and
-            // pane resize). blockId-gated, reducer-deduped.
+            // pane resize). blockId-gated, reducer-deduped. scrollTop / h are
+            // unzoomed CSS px (Phase 4 — only the measure RO ÷zooms).
             if (props.blockId && h > 0) {
-                const zoom = props.zoomFactor?.() ?? 1;
                 dispatchLayoutIfRegistered(props.blockId, {
                     type: "Scrolled",
-                    scrollTop: scrollRef.scrollTop / (zoom || 1),
-                    viewportPx: h / (zoom || 1),
+                    scrollTop: scrollRef.scrollTop,
+                    viewportPx: h,
                 });
             }
             wasHidden = h === 0;
@@ -407,15 +409,15 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         const p = partition();
         if (idx < p.splitIndex) {
             // Virtualized region — center the row from the slice's position
-            // (Step 5). row.start/height are unzoomed CSS px; convert the
-            // target back to the scroll element's zoomed scrollTop (×zoom).
+            // (Step 5). row.start/height and the scroll element's clientHeight /
+            // scrollTop are all unzoomed CSS px (Phase 4 — CSS `zoom` leaves them
+            // in layout px), so no zoom conversion is needed here.
             const v = props.layoutView?.();
             const row = v?.rows[idx];
             if (row) {
-                const zoom = props.zoomFactor?.() ?? 1;
-                const viewportPx = scrollRef.clientHeight / (zoom || 1);
+                const viewportPx = scrollRef.clientHeight;
                 const center = row.start - viewportPx / 2 + row.height / 2;
-                scrollRef.scrollTo({ top: Math.max(0, center * (zoom || 1)), behavior: "smooth" });
+                scrollRef.scrollTo({ top: Math.max(0, center), behavior: "smooth" });
             }
         } else {
             // Streaming buffer — node is mounted; query DOM and scroll directly.
@@ -430,7 +432,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
 
     // React to jump commands from the parent's useScrollToNode hook.
     // untrack the scroll so this effect depends ONLY on the command signal:
-    // scrollToNode reads layoutView / zoom / partition, all of which change on
+    // scrollToNode reads layoutView / partition, both of which change on
     // every scroll, and useScrollToNode holds the last command rather than
     // clearing it — tracking them would re-fire the jump on each scroll and pin
     // the user on the old target.
@@ -443,14 +445,15 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (!scrollRef) return;
         const { scrollTop, scrollHeight, clientHeight } = scrollRef;
 
-        // Phase 3: push scroll position + viewport into the slice as unzoomed
-        // CSS px. Reducer-deduped; blockId-gated.
+        // Phase 4: scrollTop / clientHeight are already unzoomed CSS px under the
+        // ancestor CSS `zoom` (CDP-confirmed: ratio 1.0 at zoom 0.5/2 — only
+        // getBoundingClientRect is zoomed), so push them raw. The lone ÷zoom is
+        // at the measure RO. Reducer-deduped; blockId-gated.
         if (props.blockId) {
-            const zoom = props.zoomFactor?.() ?? 1;
             dispatchLayoutIfRegistered(props.blockId, {
                 type: "Scrolled",
-                scrollTop: scrollTop / (zoom || 1),
-                viewportPx: clientHeight / (zoom || 1),
+                scrollTop,
+                viewportPx: clientHeight,
             });
             dispatchScrollMargin();
         }
