@@ -1456,8 +1456,8 @@ fn register_session_digest(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 // Build the summarization prompt
                 let prompt = format!(
-                    "Summarize this AI coding session in 3-4 sentences. Focus on: what was worked on, \
-                     tools used, any errors encountered, and the current state. Be concise and factual.\n\n\
+                    "Summarize this AI coding session in 10 words or fewer. Be direct and specific. \
+                     Example: \"Fixed auth bug, added dark mode, tests passing.\"\n\n\
                      Session content (last 200 events):\n\n{}",
                     extracted
                 );
