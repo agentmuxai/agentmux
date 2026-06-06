@@ -28,7 +28,7 @@
  * the state into the DOM but never reads it back.
  */
 
-import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
 import { Key } from "@solid-primitives/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
@@ -112,36 +112,16 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // Guard against concurrent older-history fetches triggered by scroll.
     let loadingOlderInFlight = false;
 
-    // Sticky frontier id — once the document crosses STREAMING_BUFFER_SIZE,
-    // this advances on each StreamFlush to keep `streamingNodes` at exactly
-    // STREAMING_BUFFER_SIZE (≤ 50) items. See the cap-advance block below.
+    // Sticky frontier id — set once when the document first crosses
+    // STREAMING_BUFFER_SIZE; never advanced on subsequent appends. New
+    // nodes flow into streamingNodes, growing the buffer naturally.
     //
-    // Why the cap matters: without it, `streamingNodes` grows unboundedly
-    // across turns (50 → 51 → 52...). SolidJS's position-keyed `<Index>`
-    // tracks a fixed-length DOM range; once its array grows past the initial
-    // 50, `reconcileArrays` corrupts its internal sentinel tracking and
-    // throws "replaceChild: node is not a child" on the NEXT reconcile
-    // (render_trail 2026-06-05: streamCount 50→53-57 across turns).
+    // Plain `let` rather than a Solid signal: mutating this variable must
+    // NOT trigger another memo run while we're inside one.
     //
-    // Why the advancing migration is safe (unlike the count-based split
-    // warned against in streaming-buffer.ts): the partition() memo computes
-    // ONE consistent result per reactive tick. Both <Key> (virtualizedNodes)
-    // and <Index> (streamingNodes) read the same memo value in the same
-    // reactive pass — no node ever appears in both subtrees simultaneously.
-    // When the frontier advances by 1, <Index> sees STREAMING_BUFFER_SIZE
-    // items (same length as before — only signals update, no DOM changes),
-    // and <Key> gains one row in the virtualizer. No replaceChild path
-    // is exercised. The earlier crash (send-message 2026-05-27,
-    // docs/analysis/AGENT_PANE_REPLACECHILD_CRASH_ON_SEND_2026_05_27.md)
-    // was from the count-based split, which moved nodes without a consistent
-    // memo — a different code path.
-    //
-    // Cleared whenever the anchor node is truncated away (e.g.,
-    // history reset / pane re-mount); the next partition recompute
-    // re-anchors against the new tail.
-    //
-    // Plain `let` rather than a Solid signal: mutating the variable
-    // must NOT trigger another memo run while we're inside one.
+    // Cleared when the anchor node is truncated (e.g., history reset /
+    // pane re-mount); the next partition recompute re-anchors to the new
+    // tail.
     let stickyFrontierId: string | null = null;
 
     // Gate for the new-message enter animation. Starts false.
@@ -179,28 +159,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         // Stale frontier (anchor node was truncated). Re-anchor and
         // recompute once.
         if (result.splitIndex === -1) {
-            stickyFrontierId = initialStickyFrontierId(nodes, STREAMING_BUFFER_SIZE);
-            result = partitionForVirtualization(
-                nodes,
-                STREAMING_BUFFER_SIZE,
-                stickyFrontierId,
-            );
-        }
-
-        // Cap the streaming buffer at STREAMING_BUFFER_SIZE. The
-        // sticky frontier is set once (when the document first exceeds
-        // 50 nodes) but never advanced on subsequent appends, so
-        // streamingNodes grows unboundedly across turns. SolidJS's
-        // position-keyed <Index> tracks a fixed-length DOM range; when
-        // its array grows beyond the initial size, reconcileArrays
-        // corrupts its internal DOM tracking on the NEXT reconcile and
-        // throws "replaceChild: node is not a child". Re-anchoring
-        // whenever the buffer exceeds the cap advances the frontier
-        // to keep the streaming region at ≤ 50 nodes. Safe: the memo
-        // runs synchronously before either <Key> or <Index> reconciles,
-        // so both see the new consistent partition in a single reactive
-        // pass — no node crosses subtrees mid-render.
-        if (result.streamingNodes.length > STREAMING_BUFFER_SIZE) {
             stickyFrontierId = initialStickyFrontierId(nodes, STREAMING_BUFFER_SIZE);
             result = partitionForVirtualization(
                 nodes,
@@ -717,19 +675,27 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             </div>
 
             {/* Streaming buffer — always-mounted trailing nodes.
-                Uses <Index> not <For> because Solid's <For> reconciles
-                by item REFERENCE: each streaming token replaces the
-                active node's object (immutable update preserves id but
-                gives a new ref), and <For> would treat that as a new
-                item and unmount/remount the row on every token —
-                exactly the regression we wanted the streaming buffer
-                to prevent. <Index> keys by position and passes the
-                item as a Solid signal accessor, so the same
-                DocumentRow stays mounted while its `props.node()`
-                reactively re-reads the current value. (reagent P1 on
-                #784.) */}
+                Uses <Key by={n => n.id}> rather than <For> or <Index>:
+                  - <For> reconciles by item REFERENCE: each streaming
+                    token replaces the active node's object (immutable
+                    update preserves id but gives a new ref), so <For>
+                    would unmount/remount the row on every token.
+                    (reagent P1 on #784.)
+                  - <Index> is position-keyed and passes a signal, which
+                    avoids the remount, but its reconcileArrays
+                    implementation corrupts internal DOM tracking when
+                    the array grows past its initial size — causing the
+                    "replaceChild: node is not a child" crash when
+                    streamingNodes grows from 50 to 53–57 across turns.
+                    (render_trail 2026-06-05; fixed in #1300.)
+                  - <Key by={n => n.id}> keys each slot by stable node
+                    id. Token updates (new object, same id) fire the
+                    slot's accessor signal, no remount. Array growth
+                    simply adds new keyed slots at the end — no DOM
+                    sentinel corruption, no position shifting, no
+                    cross-slot state leakage. */}
             <div class="agent-document-streaming-buffer" data-animate={animateEnabled() || undefined}>
-                <Index each={partition().streamingNodes as DocumentNode[]}>
+                <Key each={partition().streamingNodes as DocumentNode[]} by={(n) => n.id}>
                     {(nodeAccessor) => (
                         <DocumentRow
                             node={nodeAccessor}
@@ -742,7 +708,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                             onTogglePin={props.onTogglePin}
                         />
                     )}
-                </Index>
+                </Key>
             </div>
         </div>
     );
