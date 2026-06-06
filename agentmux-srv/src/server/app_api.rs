@@ -18,7 +18,7 @@ use crate::backend::providers;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::*;
 use crate::backend::session_archive;
-use crate::backend::storage::store::Store;
+use crate::backend::storage::store::{Store, AgentDefinition, AgentInstance, derive_slug};
 
 use super::AppState;
 use crate::server::cli_handlers::resolve_cli_on_path;
@@ -35,6 +35,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_agent_tracked_blocks(engine, state);
     register_agent_kill_process(engine, state);
     register_agent_kill_tree(engine, state);
+    register_agent_define(engine, state);
     register_pane_open(engine, state);
     register_blockfile_line_count(engine, state);
     register_blockfile_read_range(engine, state);
@@ -1815,5 +1816,172 @@ fn write_agent_config_files(
     );
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// agent.define
+// ---------------------------------------------------------------------------
+
+fn register_agent_define(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+
+    engine.register_handler(
+        COMMAND_AGENT_DEFINE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                let cmd: CommandAgentDefineData = serde_json::from_value(data)
+                    .map_err(|e| format!("agent.define: {e}"))?;
+
+                if cmd.name.trim().is_empty() {
+                    return Err("agent.define: name is required".to_string());
+                }
+
+                let if_exists = cmd.if_exists.as_deref().unwrap_or("skip");
+                let create_stub = cmd.create_instance_stub.unwrap_or(true);
+
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64;
+
+                // Resolve the slug the new name would get, then look for a
+                // matching user-owned definition.
+                let slug_candidate = derive_slug(&cmd.name);
+                let all_defs = wstore.agent_def_list()
+                    .map_err(|e| format!("agent.define: list defs: {e}"))?;
+                let existing = all_defs.iter().find(|d| d.slug == slug_candidate && d.is_seeded == 0);
+
+                if let Some(def) = existing {
+                    match if_exists {
+                        "skip" => {
+                            tracing::info!(slug = %slug_candidate, "agent.define: skipped (exists)");
+                            return Ok(Some(serde_json::to_value(&AgentDefineResult {
+                                definition_id: def.id.clone(),
+                                slug: def.slug.clone(),
+                                action: "skipped".to_string(),
+                                instance_stub_id: None,
+                            }).unwrap()));
+                        }
+                        "error" => {
+                            return Err(format!(
+                                "agent.define: definition with slug '{}' already exists (if_exists=error)",
+                                slug_candidate
+                            ));
+                        }
+                        "update" => {
+                            let mut updated = def.clone();
+                            if !cmd.provider.is_empty() { updated.provider = cmd.provider; }
+                            if !cmd.icon.is_empty()     { updated.icon = cmd.icon; }
+                            if !cmd.description.is_empty() { updated.description = cmd.description; }
+                            if !cmd.working_directory.is_empty() { updated.working_directory = cmd.working_directory; }
+                            if !cmd.shell.is_empty()    { updated.shell = cmd.shell; }
+                            if !cmd.environment.is_empty() { updated.environment = cmd.environment; }
+                            // name update intentionally omitted — the slug
+                            // is immutable, so renaming would create a slug
+                            // mismatch. Use updateagent for renames.
+                            wstore.agent_def_update(&mut updated)
+                                .map_err(|e| format!("agent.define: update: {e}"))?;
+                            broker.publish(crate::backend::wps::WaveEvent {
+                                event: "agents:changed".to_string(),
+                                scopes: vec![],
+                                sender: String::new(),
+                                persist: 0,
+                                data: None,
+                            });
+                            tracing::info!(id = %updated.id, slug = %updated.slug, "agent.define: updated");
+                            return Ok(Some(serde_json::to_value(&AgentDefineResult {
+                                definition_id: updated.id.clone(),
+                                slug: updated.slug.clone(),
+                                action: "updated".to_string(),
+                                instance_stub_id: None,
+                            }).unwrap()));
+                        }
+                        other => {
+                            return Err(format!("agent.define: unknown if_exists value '{other}'"));
+                        }
+                    }
+                }
+
+                // No existing definition — create.
+                let mut def = AgentDefinition {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    slug: String::new(), // agent_def_insert derives + collision-resolves
+                    name: cmd.name.clone(),
+                    icon: cmd.icon,
+                    provider: cmd.provider,
+                    description: cmd.description,
+                    working_directory: cmd.working_directory,
+                    shell: cmd.shell,
+                    environment: cmd.environment,
+                    provider_flags: String::new(),
+                    auto_start: 0,
+                    restart_on_crash: 0,
+                    idle_timeout_minutes: 0,
+                    created_at: now,
+                    agent_type: "agent".to_string(),
+                    agent_bus_id: String::new(),
+                    is_seeded: 0,
+                    accounts: String::new(),
+                    parent_id: String::new(),
+                    branch_label: String::new(),
+                    updated_at: now,
+                    user_hidden: 0,
+                };
+                wstore.agent_def_insert(&mut def)
+                    .map_err(|e| format!("agent.define: insert def: {e}"))?;
+
+                let stub_id = if create_stub {
+                    let id = format!("stub-{}", uuid::Uuid::new_v4().to_string().replace('-', "").chars().take(12).collect::<String>());
+                    let inst = AgentInstance {
+                        id: id.clone(),
+                        definition_id: def.id.clone(),
+                        parent_instance_id: String::new(),
+                        block_id: String::new(),
+                        session_id: String::new(),
+                        status: "stopped".to_string(),
+                        github_context: String::new(),
+                        started_at: now,
+                        ended_at: 0,
+                        created_at: now,
+                        identity_id: String::new(),
+                        memory_id: String::new(),
+                        instance_name: cmd.name.clone(),
+                        working_directory: String::new(),
+                        display_hidden: false,
+                    };
+                    wstore.instance_create(&inst)
+                        .map_err(|e| format!("agent.define: create stub instance: {e}"))?;
+                    Some(id)
+                } else {
+                    None
+                };
+
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "agents:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+
+                tracing::info!(
+                    id = %def.id,
+                    slug = %def.slug,
+                    stub = stub_id.is_some(),
+                    "agent.define: created"
+                );
+
+                Ok(Some(serde_json::to_value(&AgentDefineResult {
+                    definition_id: def.id.clone(),
+                    slug: def.slug.clone(),
+                    action: "created".to_string(),
+                    instance_stub_id: stub_id,
+                }).unwrap()))
+            })
+        }),
+    );
 }
 
