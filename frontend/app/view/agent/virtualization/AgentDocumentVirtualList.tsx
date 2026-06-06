@@ -112,21 +112,29 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // Guard against concurrent older-history fetches triggered by scroll.
     let loadingOlderInFlight = false;
 
-    // Sticky frontier id — once the document crosses
-    // STREAMING_BUFFER_SIZE, this freezes to the id of the first node
-    // in the streaming buffer. After that, every appended node lands
-    // in `streamingNodes` and the virtualized head stays fixed; no
-    // node ever migrates from one subtree to the other on a simple
-    // append. That migration was the root cause of the SolidJS
-    // `replaceChild` crash on send-message
-    // (docs/analysis/AGENT_PANE_REPLACECHILD_CRASH_ON_SEND_2026_05_27.md).
+    // Sticky frontier id — once the document crosses STREAMING_BUFFER_SIZE,
+    // this advances on each StreamFlush to keep `streamingNodes` at exactly
+    // STREAMING_BUFFER_SIZE (≤ 50) items. See the cap-advance block below.
     //
-    // The replaceChild crash (render_trail 2026-06-05: streamCount 50→53-57
-    // across turns) has two mitigations: (1) batch() in useAgentStream.ts
-    // prevents interleaved StreamFlush / StreamFlushObserved renders, and (2)
-    // the cap-advance below (streamingNodes.length > STREAMING_BUFFER_SIZE)
-    // keeps <Index>'s array at ≤ 50 items so reconcileArrays never sees a
-    // larger array than its initial size — the structural root cause.
+    // Why the cap matters: without it, `streamingNodes` grows unboundedly
+    // across turns (50 → 51 → 52...). SolidJS's position-keyed `<Index>`
+    // tracks a fixed-length DOM range; once its array grows past the initial
+    // 50, `reconcileArrays` corrupts its internal sentinel tracking and
+    // throws "replaceChild: node is not a child" on the NEXT reconcile
+    // (render_trail 2026-06-05: streamCount 50→53-57 across turns).
+    //
+    // Why the advancing migration is safe (unlike the count-based split
+    // warned against in streaming-buffer.ts): the partition() memo computes
+    // ONE consistent result per reactive tick. Both <Key> (virtualizedNodes)
+    // and <Index> (streamingNodes) read the same memo value in the same
+    // reactive pass — no node ever appears in both subtrees simultaneously.
+    // When the frontier advances by 1, <Index> sees STREAMING_BUFFER_SIZE
+    // items (same length as before — only signals update, no DOM changes),
+    // and <Key> gains one row in the virtualizer. No replaceChild path
+    // is exercised. The earlier crash (send-message 2026-05-27,
+    // docs/analysis/AGENT_PANE_REPLACECHILD_CRASH_ON_SEND_2026_05_27.md)
+    // was from the count-based split, which moved nodes without a consistent
+    // memo — a different code path.
     //
     // Cleared whenever the anchor node is truncated away (e.g.,
     // history reset / pane re-mount); the next partition recompute
