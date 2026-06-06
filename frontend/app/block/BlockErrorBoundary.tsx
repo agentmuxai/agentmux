@@ -161,7 +161,8 @@ function BlockErrorFallback(props: {
     // (synchronous, no permission issues in CEF) with IPC writeText fallback.
     const handleMouseUp = (e: MouseEvent): void => {
         const sel = window.getSelection();
-        const text = sel?.toString().trim();
+        const raw = sel?.toString() ?? "";
+        const text = raw.trim();
         if (!text) return;
         const pos = { x: e.clientX, y: e.clientY };
         const show = (): void => {
@@ -175,7 +176,8 @@ function BlockErrorFallback(props: {
             if (ok) { show(); return; }
         } catch (_) { /* fall through */ }
         // Fallback: route through CEF IPC (navigator.clipboard is blocked in CEF).
-        void ipcWriteText(text).then(show).catch(() => {});
+        // Use raw (untrimmed) to match what execCommand would have copied.
+        void ipcWriteText(raw).then(show).catch(() => {});
     };
 
     return (
@@ -229,11 +231,11 @@ function BlockErrorFallback(props: {
                     </button>
                 </Show>
             </div>
-            <Show when={copiedPos()}>
+            <Show when={copiedPos()} keyed>
                 {(pos) => (
                     <div
                         class="block-error-fallback-copied"
-                        style={{ left: `${pos().x + 12}px`, top: `${pos().y - 28}px` }}
+                        style={{ left: `${pos.x + 12}px`, top: `${pos.y - 28}px` }}
                     >
                         Copied
                     </div>
