@@ -88,7 +88,7 @@ onCleanup(() => {
 });
 ```
 
-**Why it can crash:** When SolidJS's error boundary catches a `reconcileArrays` throw, it disposes the errored scope. Disposal runs `onCleanup` callbacks synchronously. `StreamUnsubscribe` fires first (pane write), then `SessionEnd` fires (document write). The `SessionEnd` reducer calls `scrubOrphanedInProgress` which returns a new `nodes` array → `documentAtom` changes → `partition` recomputes → the `<Index>` (whose scope may still be partially live during cleanup ordering) is re-triggered → a second `reconcileArrays` call on a partially-torn-down DOM → `replaceChild` fails.
+**Why it can crash:** When SolidJS's error boundary catches a `reconcileArrays` throw, it disposes the errored scope. Disposal runs `onCleanup` callbacks synchronously. `StreamUnsubscribe` fires first (pane write), then `SessionEnd` fires (document write). The `SessionEnd` reducer calls `scrubOrphanedInProgress` which returns a new `nodes` array → `documentAtom` changes → `partition` recomputes → the `<Key>` streaming-buffer scope (whose scope may still be partially live during cleanup ordering) is re-triggered → a second `reconcileArrays` call on a partially-torn-down DOM → `replaceChild` fails.
 
 Additionally, `StreamUnsubscribe` and `SessionEnd` are two sequential, unbatched writes. Even in the non-crash path (normal turn end with component unmounting), if there is any concurrent RAF flush pending (one that snuck through before `cancelAnimationFrame` cleared it), the double write produces two independent frames.
 
@@ -103,10 +103,10 @@ onCleanup(() => {
     const at = Date.now();
     model.dispatchPane({ type: "StreamUnsubscribe", at });
     // Defer SessionEnd out of the synchronous disposal chain. During error-boundary
-    // cleanup the <Index> scope is still partially live; a synchronous documentAtom
+    // cleanup the <Key> streaming-buffer scope is still partially live; a synchronous documentAtom
     // write here can re-trigger reconcileArrays on a half-torn-down DOM → replaceChild
     // NotFoundError (observed 2026-06-06 crash 2). By the time the microtask fires,
-    // all scope disposal is complete and the <Index> effect is already removed from
+    // all scope disposal is complete and the <Key> effect is already removed from
     // the computation graph — the write still runs the reducer (orphan scrub) but
     // no reactive effect reconciles the dead DOM. (model.dispatchDoc uses the soft
     // dispatchIfRegistered variant, so if the slot is gone by microtask time it's a
