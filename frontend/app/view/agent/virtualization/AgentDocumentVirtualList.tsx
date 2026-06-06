@@ -28,7 +28,7 @@
  * the state into the DOM but never reads it back.
  */
 
-import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
 import { Key } from "@solid-primitives/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
@@ -112,27 +112,16 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // Guard against concurrent older-history fetches triggered by scroll.
     let loadingOlderInFlight = false;
 
-    // Sticky frontier id — once the document crosses
-    // STREAMING_BUFFER_SIZE, this freezes to the id of the first node
-    // in the streaming buffer. After that, every appended node lands
-    // in `streamingNodes` and the virtualized head stays fixed; no
-    // node ever migrates from one subtree to the other on a simple
-    // append. That migration was the root cause of the SolidJS
-    // `replaceChild` crash on send-message
-    // (docs/analysis/AGENT_PANE_REPLACECHILD_CRASH_ON_SEND_2026_05_27.md).
+    // Sticky frontier id — set once when the document first crosses
+    // STREAMING_BUFFER_SIZE; never advanced on subsequent appends. New
+    // nodes flow into streamingNodes, growing the buffer naturally.
     //
-    // The replaceChild crash (root-caused from render_trail 2026-06-05:
-    // streamCount 50→53-57 across turns → Solid <Index> crash) is fixed
-    // at the dispatch level in useAgentStream.ts: wrapping StreamFlush +
-    // StreamFlushObserved in batch() so all reactive effects settle in one
-    // pass — no interleaved renders that could move a DOM node mid-reconcile.
+    // Plain `let` rather than a Solid signal: mutating this variable must
+    // NOT trigger another memo run while we're inside one.
     //
-    // Cleared whenever the anchor node is truncated away (e.g.,
-    // history reset / pane re-mount); the next partition recompute
-    // re-anchors against the new tail.
-    //
-    // Plain `let` rather than a Solid signal: mutating the variable
-    // must NOT trigger another memo run while we're inside one.
+    // Cleared when the anchor node is truncated (e.g., history reset /
+    // pane re-mount); the next partition recompute re-anchors to the new
+    // tail.
     let stickyFrontierId: string | null = null;
 
     // Gate for the new-message enter animation. Starts false.
@@ -149,7 +138,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
 
     // Memoized — partition is read inside the slice-feeding effect,
     // nodeById, scrollToNode / older-history, and the streaming buffer
-    // <Index>. Without createMemo, every read re-slices the document
+    // <Key>. Without createMemo, every read re-slices the document
     // (O(n)) on every token of streaming, defeating the streaming
     // buffer's purpose. (reagent P1 on #784.)
     const partition = createMemo(() => {
@@ -168,9 +157,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         );
 
         // Stale frontier (anchor node was truncated). Re-anchor and
-        // recompute once. The re-anchor is the ONLY place a node
-        // crosses subtrees, and it happens only on
-        // truncate/clear/reset — never during normal streaming.
+        // recompute once.
         if (result.splitIndex === -1) {
             stickyFrontierId = initialStickyFrontierId(nodes, STREAMING_BUFFER_SIZE);
             result = partitionForVirtualization(
@@ -688,19 +675,27 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             </div>
 
             {/* Streaming buffer — always-mounted trailing nodes.
-                Uses <Index> not <For> because Solid's <For> reconciles
-                by item REFERENCE: each streaming token replaces the
-                active node's object (immutable update preserves id but
-                gives a new ref), and <For> would treat that as a new
-                item and unmount/remount the row on every token —
-                exactly the regression we wanted the streaming buffer
-                to prevent. <Index> keys by position and passes the
-                item as a Solid signal accessor, so the same
-                DocumentRow stays mounted while its `props.node()`
-                reactively re-reads the current value. (reagent P1 on
-                #784.) */}
+                Uses <Key by={n => n.id}> rather than <For> or <Index>:
+                  - <For> reconciles by item REFERENCE: each streaming
+                    token replaces the active node's object (immutable
+                    update preserves id but gives a new ref), so <For>
+                    would unmount/remount the row on every token.
+                    (reagent P1 on #784.)
+                  - <Index> is position-keyed and passes a signal, which
+                    avoids the remount, but its reconcileArrays
+                    implementation corrupts internal DOM tracking when
+                    the array grows past its initial size — causing the
+                    "replaceChild: node is not a child" crash when
+                    streamingNodes grows from 50 to 53–57 across turns.
+                    (render_trail 2026-06-05; fixed in #1300.)
+                  - <Key by={n => n.id}> keys each slot by stable node
+                    id. Token updates (new object, same id) fire the
+                    slot's accessor signal, no remount. Array growth
+                    simply adds new keyed slots at the end — no DOM
+                    sentinel corruption, no position shifting, no
+                    cross-slot state leakage. */}
             <div class="agent-document-streaming-buffer" data-animate={animateEnabled() || undefined}>
-                <Index each={partition().streamingNodes as DocumentNode[]}>
+                <Key each={partition().streamingNodes as DocumentNode[]} by={(n) => n.id}>
                     {(nodeAccessor) => (
                         <DocumentRow
                             node={nodeAccessor}
@@ -713,7 +708,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                             onTogglePin={props.onTogglePin}
                         />
                     )}
-                </Index>
+                </Key>
             </div>
         </div>
     );
