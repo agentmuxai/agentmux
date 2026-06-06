@@ -706,10 +706,15 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                     (render_trail 2026-06-05; fixed in #1300.)
                   - <Key by={n => n.id}> keys each slot by stable node
                     id. Token updates (new object, same id) fire the
-                    slot's accessor signal, no remount. Array growth
-                    simply adds new keyed slots at the end — no DOM
-                    sentinel corruption, no position shifting, no
-                    cross-slot state leakage. */}
+                    slot's accessor signal — no remount, no position
+                    shifting, no cross-slot state leakage on cap-advance
+                    migrations. NOTE: <Key> still returns a plain array;
+                    insertExpression passes it to reconcileArrays, which
+                    crashes identically to <Index> if the array grows past
+                    the initial render size. The cap-advance in the
+                    partition memo (above) keeps streamingNodes.length ≤
+                    STREAMING_BUFFER_SIZE so reconcileArrays always sees
+                    a fixed-size array. (#1301) */}
             <div class="agent-document-streaming-buffer" data-animate={animateEnabled() || undefined}>
                 <Key each={partition().streamingNodes as DocumentNode[]} by={(n) => n.id}>
                     {(nodeAccessor) => (
