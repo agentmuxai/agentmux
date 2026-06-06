@@ -238,16 +238,14 @@ cat "$AGENTMUX_LOG_DIR/agentmux-launcher.log"   # launcher log
 The launcher runs the full reducer + saga coordinator (same as Windows, since v0.42.x A1). Diagnostic output:
 
 ```bash
-./AgentMux_*.AppImage --diag sagas      # dump the saga journal (SQLite)
-./AgentMux_*.AppImage --diag state      # dump the current reducer state
+./AgentMux_*.AppImage --diag sagas   # dump the saga journal (cross-platform)
+# --diag wrr and --diag srv are Windows-only (Phase 7 will add Unix socket parity)
 ```
 
 ## Remote debugging
 
-```bash
-AGENTMUX_CEF_ARGS="--remote-debugging-port=9222" ./AgentMux_*.AppImage
-# open chrome://inspect in a Chromium browser
-```
+The CEF host starts a remote debugger automatically on port 9222 (release) or 9223 (`task dev`).
+Open `chrome://inspect` in a Chromium browser and add `localhost:9222` (or `9223`) as a target.
 
 ## Single-instance enforcement
 
