@@ -113,8 +113,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     let loadingOlderInFlight = false;
 
     // Sticky frontier id — set once when the document first crosses
-    // STREAMING_BUFFER_SIZE; never advanced on subsequent appends. New
-    // nodes flow into streamingNodes, growing the buffer naturally.
+    // STREAMING_BUFFER_SIZE; advanced whenever the buffer exceeds the
+    // cap (see below) to keep streamingNodes.length ≤ STREAMING_BUFFER_SIZE.
     //
     // Plain `let` rather than a Solid signal: mutating this variable must
     // NOT trigger another memo run while we're inside one.
@@ -165,6 +165,34 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 STREAMING_BUFFER_SIZE,
                 stickyFrontierId,
             );
+        }
+
+        // Cap: across multi-turn sessions the streaming buffer grows
+        // unbounded because the sticky frontier never advances. Solid's
+        // insertExpression passes <Key>'s result array to reconcileArrays
+        // (solid-js/web), which corrupts its sentinel tracking when the
+        // array grows past the initial render size → "replaceChild: node
+        // is not a child" crash (render_trail 2026-06-06; same root cause
+        // as the <Index> crash — the array growth, not the keying strategy,
+        // is what breaks reconcileArrays). Fix: advance the frontier to
+        // pin streamingNodes at exactly STREAMING_BUFFER_SIZE items.
+        //
+        // WHY THIS DOESN'T REINTRODUCE THE COUNT-BASED CRASH: the cap
+        // runs inside createMemo, before any render effect reads the
+        // result. The memo returns the final 50-item array in a single
+        // synchronous step; the intermediate 51-item state is never
+        // observable by <Key> or the layout effect. <Key> always sees a
+        // fixed-size 50-item array (50 → 50, not 50 → 51), so
+        // reconcileArrays never encounters a growing array.
+        // The streaming-buffer.ts "no count-based mode" warning targets
+        // the old pattern where the memo was read TWICE with a moving
+        // split point — not a single sticky re-anchor inside one memo
+        // call. Migration is safe with <Key by={n => n.id}>: the
+        // departing node's slot is disposed by id; no position-keyed
+        // state leaks to the replacement. (#1302)
+        if (result.streamingNodes.length > STREAMING_BUFFER_SIZE) {
+            stickyFrontierId = initialStickyFrontierId(nodes, STREAMING_BUFFER_SIZE);
+            result = partitionForVirtualization(nodes, STREAMING_BUFFER_SIZE, stickyFrontierId);
         }
 
         // Crash-trace: every partition recompute is a candidate trigger
@@ -682,18 +710,24 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                     would unmount/remount the row on every token.
                     (reagent P1 on #784.)
                   - <Index> is position-keyed and passes a signal, which
-                    avoids the remount, but its reconcileArrays
-                    implementation corrupts internal DOM tracking when
-                    the array grows past its initial size — causing the
-                    "replaceChild: node is not a child" crash when
-                    streamingNodes grows from 50 to 53–57 across turns.
-                    (render_trail 2026-06-05; fixed in #1300.)
+                    avoids the remount, but has two problems: (a) the
+                    same reconcileArrays array-growth crash as <For> and
+                    <Key> — keying strategy doesn't matter, growth does;
+                    and (b) cap-advance migration leaks position-keyed
+                    slot state (prevStatus, expanded flag) to the node
+                    now at that position. Both are solved: <Key> by id
+                    (no slot leak), cap-advance (no growth). (#1302.)
                   - <Key by={n => n.id}> keys each slot by stable node
                     id. Token updates (new object, same id) fire the
-                    slot's accessor signal, no remount. Array growth
-                    simply adds new keyed slots at the end — no DOM
-                    sentinel corruption, no position shifting, no
-                    cross-slot state leakage. */}
+                    slot's accessor signal — no remount, no position
+                    shifting, no cross-slot state leakage on cap-advance
+                    migrations. NOTE: <Key> still returns a plain array;
+                    insertExpression passes it to reconcileArrays, which
+                    crashes identically to <Index> if the array grows past
+                    the initial render size. The cap-advance in the
+                    partition memo (above) keeps streamingNodes.length ≤
+                    STREAMING_BUFFER_SIZE so reconcileArrays always sees
+                    a fixed-size array. (#1302) */}
             <div class="agent-document-streaming-buffer" data-animate={animateEnabled() || undefined}>
                 <Key each={partition().streamingNodes as DocumentNode[]} by={(n) => n.id}>
                     {(nodeAccessor) => (
