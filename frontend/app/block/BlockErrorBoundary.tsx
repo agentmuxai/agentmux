@@ -25,6 +25,7 @@
 import { invokeCommand } from "@/app/platform/ipc";
 import { resolveStack, resolveStackSync, type ResolveStatus } from "@/log/source-map-resolver";
 import { getTrail } from "@/log/render-trail";
+import { writeText as ipcWriteText } from "@/util/clipboard";
 import { ErrorBoundary as SolidErrorBoundary, createSignal, Show } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -148,6 +149,7 @@ function BlockErrorFallback(props: {
 }): JSX.Element {
     const [stackOpen, setStackOpen] = createSignal(false);
     const [copiedPos, setCopiedPos] = createSignal<{ x: number; y: number } | null>(null);
+    let fadeTimer: ReturnType<typeof setTimeout> | null = null;
     const errName = () => props.error?.name ?? "Error";
     const errMessage = () => props.error?.message ?? String(props.error);
     const errStack = () => props.error?.stack ?? "";
@@ -156,23 +158,24 @@ function BlockErrorFallback(props: {
     // Copy-on-highlight: when the user releases the mouse with a non-empty
     // selection inside the error pane, copy to clipboard and show a brief
     // "Copied" tooltip near the cursor. Uses execCommand as primary path
-    // (synchronous, no permission issues in CEF) with clipboard API fallback.
+    // (synchronous, no permission issues in CEF) with IPC writeText fallback.
     const handleMouseUp = (e: MouseEvent): void => {
         const sel = window.getSelection();
         const text = sel?.toString().trim();
         if (!text) return;
         const pos = { x: e.clientX, y: e.clientY };
         const show = (): void => {
+            if (fadeTimer) clearTimeout(fadeTimer);
             setCopiedPos(pos);
-            setTimeout(() => setCopiedPos(null), 1500);
+            fadeTimer = setTimeout(() => setCopiedPos(null), 1500);
         };
         // execCommand is synchronous and works reliably in CEF within a user gesture.
         try {
             const ok = document.execCommand("copy");
             if (ok) { show(); return; }
         } catch (_) { /* fall through */ }
-        // Fallback to async clipboard API.
-        void navigator.clipboard.writeText(text).then(show).catch(() => {});
+        // Fallback: route through CEF IPC (navigator.clipboard is blocked in CEF).
+        void ipcWriteText(text).then(show).catch(() => {});
     };
 
     return (
