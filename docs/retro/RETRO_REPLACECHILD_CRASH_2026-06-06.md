@@ -2,8 +2,8 @@
 
 **Date:** 2026-06-06  
 **Severity:** Hard blocker — agent pane blanks mid-conversation, repeatable  
-**Status:** Root cause confirmed; fix required (see §6)  
-**Related:** `docs/analysis/AGENT_PANE_REPLACECHILD_CRASH_ON_SEND_2026_05_27.md`, PR #1293
+**Status:** Fixed — all fixes shipped in PR #1293, PR #1299, PR #1303.  
+**Related:** `docs/analysis/AGENT_PANE_REPLACECHILD_CRASH_ON_SEND_2026_05_27.md`, PR #1293, PR #1299, PR #1303
 
 ---
 

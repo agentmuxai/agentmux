@@ -1,8 +1,8 @@
 # Spec: `replaceChild` crash in the agent-pane virtualizer — full analysis and fix plan
 
 **Date:** 2026-06-06  
-**Status:** Two crashes observed today. Fix 1 (PR #1299) shipped. Fix 2 and Fix 3 still needed.  
-**Related:** `docs/retro/RETRO_REPLACECHILD_CRASH_2026-06-06.md`, PR #1293, PR #1299  
+**Status:** All five fixes shipped — PR #1293, PR #1299, PR #1303.  
+**Related:** `docs/retro/RETRO_REPLACECHILD_CRASH_2026-06-06.md`, PR #1293, PR #1299, PR #1303  
 **Block under test:** `a8cd53a4-a61c-4483-8606-0eba9ccb3565`
 
 ---

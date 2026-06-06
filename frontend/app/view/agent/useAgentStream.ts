@@ -440,8 +440,8 @@ export function useAgentStream({
         // metadata (active flag), agent-document owns the session phase
         // gate that drives truncate suppression.
         const subscribedAt = Date.now();
-        dispatchPane(blockId, { type: "StreamSubscribe", at: subscribedAt });
-        dispatchDoc(blockId, { type: "SessionStart", at: subscribedAt });
+        model.dispatchPane({ type: "StreamSubscribe", at: subscribedAt });
+        model.dispatchDoc({ type: "SessionStart", at: subscribedAt });
 
         // Stuck-stream watchdog (issue #728 gap 3). The reducer evaluates
         // each tick against `lastEventMs` and emits a `stream-stuck`
