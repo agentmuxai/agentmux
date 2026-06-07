@@ -2286,7 +2286,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                     Err(e) => return WebReturnType::error(e),
                 };
             match super::app_api::agent_define_core(state.wstore.clone(), state.broker.clone(), data).await {
-                Ok(result) => WebReturnType::success(serde_json::to_value(&result).unwrap()),
+                Ok(result) => WebReturnType::success(serde_json::to_value(&result).unwrap_or_default()),
                 Err(e) => WebReturnType::error(e),
             }
         }

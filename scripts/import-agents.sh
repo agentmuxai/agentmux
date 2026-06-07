@@ -19,9 +19,12 @@ AGENTMUX_DIR="${AGENTMUX_DIR:-$HOME/.agentmux}"
 # where sha1 is of the branch name string itself (not the commit).
 if [ -z "${CHANNEL:-}" ]; then
     _branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+    # Apply the same slug sanitization as scripts/package.sh BRANCH_SLUG:
+    # replace non-alphanumeric/dot/dash chars with '-', cap at 20 chars.
+    _branch_slug=$(printf '%s' "$_branch" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-20)
     _branch_hash=$(printf '%s' "$_branch" | sha1sum | cut -c1-6 2>/dev/null \
                    || printf '%s' "$_branch" | shasum | cut -c1-6)
-    CHANNEL="dev-portable-${_branch}-${_branch_hash}"
+    CHANNEL="dev-portable-${_branch_slug}-${_branch_hash}"
 fi
 CHANNEL_DIR="$AGENTMUX_DIR/channels/$CHANNEL"
 
@@ -218,6 +221,15 @@ import_into() {
                    ('$stub_id', '$def_id', '', '', '', 'stopped',
                     '', '', '', '$safe_name',
                     '', 0, $ts, 0, $ts);"
+
+            # Mirror instance_name into db_agents so Phase-3b readers
+            # (which read db_agents directly) see the agent name immediately,
+            # matching what agents_dual_write_instance_create does on the
+            # Rust path when a stub is created for a user-clone definition.
+            sqlite3 "$tgt_win" \
+                "UPDATE db_agents SET instance_name='$safe_name', updated_at=$ts
+                 WHERE id='$def_id'
+                   AND (instance_name IS NULL OR instance_name='');" 2>/dev/null || true
 
             echo "  OK    $agent_name"
             ((imported++)) || true

@@ -563,7 +563,7 @@ impl Store {
             let mut n: u32 = 2;
             loop {
                 let count: i64 = conn.query_row(
-                    "SELECT COUNT(*) FROM db_agents WHERE slug = ?1",
+                    "SELECT COUNT(*) FROM db_agent_definitions WHERE slug = ?1",
                     params![candidate],
                     |row| row.get(0),
                 )?;
