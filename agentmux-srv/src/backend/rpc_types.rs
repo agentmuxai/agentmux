@@ -825,6 +825,10 @@ pub struct CommandAgentDefineData {
     pub shell: String,
     #[serde(default)]
     pub environment: String,
+    /// System/instruction text written to the agent's CLAUDE.md on spawn.
+    pub system_prompt: Option<String>,
+    /// Extra env vars injected at agent spawn, stored as KEY=VALUE lines.
+    pub env: Option<std::collections::HashMap<String, String>>,
     pub if_exists: Option<String>,
     pub create_instance_stub: Option<bool>,
 }
