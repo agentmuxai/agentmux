@@ -1882,6 +1882,19 @@ fn register_agent_define(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     return Err("agent.define: name is required".to_string());
                 }
 
+                // Validate / default the provider so we never persist an
+                // unknown value that would cause agent.open to fail later.
+                let provider = if cmd.provider.is_empty() {
+                    "claude".to_string()
+                } else if providers::get_provider(&cmd.provider).is_none() {
+                    return Err(format!(
+                        "agent.define: unknown provider '{}'; valid: claude, codex, gemini, qwen, kimi, openclaw, pi, copilot",
+                        cmd.provider
+                    ));
+                } else {
+                    cmd.provider.clone()
+                };
+
                 let if_exists = cmd.if_exists.as_deref().unwrap_or("skip");
                 let create_stub = cmd.create_instance_stub.unwrap_or(true);
 
@@ -1935,7 +1948,9 @@ fn register_agent_define(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         }
                         "update" => {
                             let mut updated = def.clone();
-                            if !cmd.provider.is_empty() { updated.provider = cmd.provider; }
+                            // provider was already validated/defaulted above; only
+                            // overwrite if the caller explicitly supplied one.
+                            if !cmd.provider.is_empty() { updated.provider = provider.clone(); }
                             if !cmd.icon.is_empty()     { updated.icon = cmd.icon; }
                             if !cmd.description.is_empty() { updated.description = cmd.description; }
                             if !cmd.working_directory.is_empty() { updated.working_directory = cmd.working_directory; }
@@ -1980,7 +1995,7 @@ fn register_agent_define(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     slug: String::new(), // agent_def_insert derives + collision-resolves
                     name: cmd.name.clone(),
                     icon: cmd.icon,
-                    provider: cmd.provider,
+                    provider,  // validated / defaulted above
                     description: cmd.description,
                     working_directory: cmd.working_directory,
                     shell: cmd.shell,
