@@ -245,13 +245,17 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // 6. Build metadata
                 let controller_type = provider.controller_type_str();
                 let is_persistent = controller_type == "persistent";
-                let cli_args: Vec<String> = if is_persistent {
+                let mut cli_args: Vec<String> = if is_persistent {
                     provider.persistent_launch_args
                         .unwrap_or(provider.launch_args)
                         .iter().map(|s| s.to_string()).collect()
                 } else {
                     provider.launch_args.iter().map(|s| s.to_string()).collect()
                 };
+                // Append definition-level flags (e.g. --model <value>) stored in provider_flags.
+                if !agent.provider_flags.is_empty() {
+                    cli_args.extend(agent.provider_flags.split_whitespace().map(str::to_string));
+                }
 
                 let agent_slug = agent.name.to_lowercase()
                     .chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
@@ -283,6 +287,19 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 env_vars.insert(provider.auth_config_dir_env_var.to_string(), json!(auth_dir));
                 for (k, v) in provider.auth_extra_env {
                     env_vars.insert(k.to_string(), json!(v));
+                }
+                // Merge env vars from the definition's persisted env content blob (KEY=VALUE lines).
+                // Provider/auth entries inserted above take precedence; definition-level vars
+                // are merged after so they can extend (but not override) the auth env.
+                if let Ok(Some(env_blob)) = wstore.agent_content_get(&agent.id, "env") {
+                    for line in env_blob.content.lines() {
+                        if let Some((k, v)) = line.split_once('=') {
+                            let k = k.trim();
+                            if !k.is_empty() && !env_vars.contains_key(k) {
+                                env_vars.insert(k.to_string(), json!(v));
+                            }
+                        }
+                    }
                 }
                 // Agent identity
                 env_vars.insert("GH_CONFIG_DIR".to_string(), json!(format!("{}/gh-{}", config_home, agent_slug)));
