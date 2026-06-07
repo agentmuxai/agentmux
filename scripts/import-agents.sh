@@ -106,13 +106,15 @@ import_into() {
             where="is_seeded=0"
         fi
 
+        # Use char(1) (ASCII unit-separator) instead of '|' so agent names that
+        # contain a pipe character don't corrupt the field split.
         agents=$(db_query "$src_db" \
-            "SELECT id, name FROM db_agent_definitions WHERE $where;" 2>/dev/null)
+            "SELECT id||char(1)||name FROM db_agent_definitions WHERE $where;" 2>/dev/null)
         [ -z "$agents" ] && continue
 
         local src_win; src_win=$(win_path "$src_db")
 
-        while IFS='|' read -r def_id agent_name; do
+        while IFS=$'\x01' read -r def_id agent_name; do
             # Escape single-quotes for safe SQL interpolation (e.g. "Bob's Agent" → "Bob''s Agent")
             local safe_name="${agent_name//\'/\'\'}"
 

@@ -18,7 +18,7 @@ use crate::backend::providers;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::*;
 use crate::backend::session_archive;
-use crate::backend::storage::store::{Store, AgentDefinition, AgentInstance, derive_slug};
+use crate::backend::storage::store::{Store, AgentDefinition, AgentInstance};
 
 use super::AppState;
 use crate::server::cli_handlers::resolve_cli_on_path;
@@ -1827,12 +1827,15 @@ fn write_agent_config_files(
 /// The stub id is deterministically derived from the definition id so that
 /// calling this function multiple times for the same definition is a no-op
 /// rather than accumulating duplicate stopped rows in My Agents.
+/// Returns `(stub_id, newly_inserted)`. `newly_inserted = false` when the
+/// UNIQUE constraint fires (stub already existed); callers use this to avoid
+/// broadcasting `agents:changed` on no-op calls.
 fn make_stub_idempotent(
     wstore: &crate::backend::storage::store::Store,
     def_id: &str,
     name: &str,
     now: i64,
-) -> Result<String, String> {
+) -> Result<(String, bool), String> {
     let stub_id = format!("si-{}", def_id.replace('-', ""));
     let inst = AgentInstance {
         id: stub_id.clone(),
@@ -1852,10 +1855,9 @@ fn make_stub_idempotent(
         display_hidden: false,
     };
     match wstore.instance_create(&inst) {
-        Ok(_) => Ok(stub_id),
+        Ok(_) => Ok((stub_id, true)),
         Err(e) if e.to_string().contains("UNIQUE constraint") => {
-            // Stub already exists — deterministic id makes this idempotent
-            Ok(stub_id)
+            Ok((stub_id, false)) // stub already existed — idempotent
         }
         Err(e) => Err(format!("agent.define: create stub instance: {e}")),
     }
@@ -1897,57 +1899,62 @@ pub(crate) async fn agent_define_core(
         .unwrap_or_default()
         .as_millis() as i64;
 
-    // Look up an existing user-owned definition by name (case-insensitive).
-    // We cannot use derive_slug() for the lookup because agent_def_insert
-    // collision-resolves slugs against ALL existing rows (including seeded
-    // templates), so a prior call with name "Codex CLI" may have been stored
-    // as slug "codex-cli-2" when "codex-cli" was already taken by a template.
-    // Matching on the display name avoids that drift and keeps the call
-    // idempotent regardless of what slug was assigned at insert time.
-    //
-    // agent_def_list() reads from db_agents, which includes both real
-    // definition rows AND template-instance projections (rows whose id matches
-    // an AgentInstance id, not an AgentDefinition id). We iterate ALL same-name
-    // candidates and call agent_def_get() — which queries db_agent_definitions
-    // directly — skipping projections (None) until we find a real definition.
-    //
-    // We also check by derived slug as a fallback so that two names that
-    // normalise to the same slug ("Senior Dev" and "Senior-Dev" both → "senior_dev")
-    // find the same existing definition instead of creating a duplicate.
-    let name_lower = cmd.name.trim().to_lowercase();
-    let derived_slug = derive_slug(cmd.name.trim());
-    let all_defs = wstore.agent_def_list()
-        .map_err(|e| format!("agent.define: list defs: {e}"))?;
-    let existing: Option<AgentDefinition> = {
-        let mut found = None;
-        // Primary: exact name match (case-insensitive).
-        // Secondary: slug match (catches formatting variants of the same name).
-        for c in all_defs.iter().filter(|d| {
-            d.is_seeded == 0 &&
-            (d.name.trim().to_lowercase() == name_lower || d.slug == derived_slug)
-        }) {
-            match wstore.agent_def_get(&c.id)
-                .map_err(|e| format!("agent.define: lookup: {e}"))? {
-                Some(def) => { found = Some(def); break; }
-                None => continue, // projection row — skip and keep searching
-            }
-        }
-        found
+    // Build the new definition struct up-front so agent_def_find_or_insert
+    // can use it as both the lookup key and the insert payload.
+    // agent_def_find_or_insert holds a single mutex guard for the check +
+    // conditional insert — closing the TOCTOU window between list and insert.
+    let mut def = AgentDefinition {
+        id: uuid::Uuid::new_v4().to_string(),
+        slug: String::new(), // resolved by agent_def_find_or_insert
+        name: cmd.name.clone(),
+        icon: cmd.icon.clone(),
+        provider: provider.clone(),
+        description: cmd.description.clone(),
+        working_directory: cmd.working_directory.clone(),
+        shell: cmd.shell.clone(),
+        environment: cmd.environment.clone(),
+        provider_flags: String::new(),
+        auto_start: 0,
+        restart_on_crash: 0,
+        idle_timeout_minutes: 0,
+        created_at: now,
+        agent_type: "host".to_string(), // matches every other user-owned definition
+        agent_bus_id: String::new(),
+        is_seeded: 0,
+        accounts: String::new(),
+        parent_id: String::new(),
+        branch_label: String::new(),
+        updated_at: now,
+        user_hidden: 0,
     };
 
-    if let Some(def) = existing {
+    // Atomic check-then-insert.
+    // Returns Some(existing) if a row matched by name/slug already exists;
+    // None if the row was freshly inserted (def.slug now holds resolved slug).
+    let existing_opt = wstore.agent_def_find_or_insert(&mut def)
+        .map_err(|e| format!("agent.define: find_or_insert: {e}"))?;
+
+    if let Some(existing) = existing_opt {
+        // A definition with this name/slug already exists — apply if_exists policy.
         match if_exists {
             "skip" => {
-                // Still honor create_instance_stub on skip: the definition may
-                // have been created without a stub (e.g. create_instance_stub=false
-                // or imported via another path). A subsequent idempotent call with
-                // create_instance_stub=true should make it visible in My Agents.
-                let stub_id = if create_stub {
-                    Some(make_stub_idempotent(&wstore, &def.id, &def.name, now)?)
+                // Honor create_instance_stub even on skip: a definition that was
+                // created with create_instance_stub=false (or imported via another
+                // path) might not have a stub yet; a subsequent idempotent call
+                // with create_instance_stub=true should make it visible in My Agents.
+                // Only fire agents:changed when the stub was actually newly inserted.
+                let (stub_id, stub_new) = if create_stub {
+                    match make_stub_idempotent(&wstore, &existing.id, &existing.name, now) {
+                        Ok((id, new)) => (Some(id), new),
+                        Err(e) => {
+                            tracing::warn!(id = %existing.id, err = %e, "agent.define: skip stub failed (non-fatal)");
+                            (None, false)
+                        }
+                    }
                 } else {
-                    None
+                    (None, false)
                 };
-                if stub_id.is_some() {
+                if stub_new {
                     broker.publish(crate::backend::wps::WaveEvent {
                         event: "agents:changed".to_string(),
                         scopes: vec![],
@@ -1956,10 +1963,10 @@ pub(crate) async fn agent_define_core(
                         data: None,
                     });
                 }
-                tracing::info!(id = %def.id, slug = %def.slug, stub = stub_id.is_some(), "agent.define: skipped (exists)");
+                tracing::info!(id = %existing.id, slug = %existing.slug, stub = stub_id.is_some(), "agent.define: skipped (exists)");
                 return Ok(AgentDefineResult {
-                    definition_id: def.id.clone(),
-                    slug: def.slug.clone(),
+                    definition_id: existing.id.clone(),
+                    slug: existing.slug.clone(),
                     action: "skipped".to_string(),
                     instance_stub_id: stub_id,
                 });
@@ -1971,24 +1978,27 @@ pub(crate) async fn agent_define_core(
                 ));
             }
             "update" => {
-                let mut updated = def.clone();
+                let mut updated = existing.clone();
                 // provider was already validated/defaulted above; only
                 // overwrite if the caller explicitly supplied one.
                 if !cmd.provider.is_empty() { updated.provider = provider.clone(); }
-                if !cmd.icon.is_empty()     { updated.icon = cmd.icon; }
-                if !cmd.description.is_empty() { updated.description = cmd.description; }
-                if !cmd.working_directory.is_empty() { updated.working_directory = cmd.working_directory; }
-                if !cmd.shell.is_empty()    { updated.shell = cmd.shell; }
-                if !cmd.environment.is_empty() { updated.environment = cmd.environment; }
-                // name update intentionally omitted — the slug
-                // is immutable, so renaming would create a slug
-                // mismatch. Use updateagent for renames.
+                if !cmd.icon.is_empty()     { updated.icon = cmd.icon.clone(); }
+                if !cmd.description.is_empty() { updated.description = cmd.description.clone(); }
+                if !cmd.working_directory.is_empty() { updated.working_directory = cmd.working_directory.clone(); }
+                if !cmd.shell.is_empty()    { updated.shell = cmd.shell.clone(); }
+                if !cmd.environment.is_empty() { updated.environment = cmd.environment.clone(); }
+                // name update intentionally omitted — the slug is immutable;
+                // renaming would create a slug mismatch. Use updateagent for renames.
                 wstore.agent_def_update(&mut updated)
                     .map_err(|e| format!("agent.define: update: {e}"))?;
                 let stub_id = if create_stub {
-                    Some(make_stub_idempotent(
-                        &wstore, &updated.id, &updated.name, now,
-                    )?)
+                    match make_stub_idempotent(&wstore, &updated.id, &updated.name, now) {
+                        Ok((id, _new)) => Some(id),
+                        Err(e) => {
+                            tracing::warn!(id = %updated.id, err = %e, "agent.define: update stub failed (non-fatal)");
+                            None
+                        }
+                    }
                 } else {
                     None
                 };
@@ -2013,42 +2023,12 @@ pub(crate) async fn agent_define_core(
         }
     }
 
-    // No existing definition — create.
-    let mut def = AgentDefinition {
-        id: uuid::Uuid::new_v4().to_string(),
-        slug: String::new(), // agent_def_insert derives + collision-resolves
-        name: cmd.name.clone(),
-        icon: cmd.icon,
-        provider,  // validated / defaulted above
-        description: cmd.description,
-        working_directory: cmd.working_directory,
-        shell: cmd.shell,
-        environment: cmd.environment,
-        provider_flags: String::new(),
-        auto_start: 0,
-        restart_on_crash: 0,
-        idle_timeout_minutes: 0,
-        created_at: now,
-        agent_type: "agent".to_string(),
-        agent_bus_id: String::new(),
-        is_seeded: 0,
-        accounts: String::new(),
-        parent_id: String::new(),
-        branch_label: String::new(),
-        updated_at: now,
-        user_hidden: 0,
-    };
-    wstore.agent_def_insert(&mut def)
-        .map_err(|e| format!("agent.define: insert def: {e}"))?;
-
-    let stub_id = if create_stub {
-        Some(make_stub_idempotent(
-            &wstore, &def.id, &def.name, now,
-        )?)
-    } else {
-        None
-    };
-
+    // Fresh insert — def.slug is now set by agent_def_find_or_insert.
+    // Broadcast agents:changed before the stub creation: the definition is
+    // already committed, so broadcasting immediately is correct. If the stub
+    // create fails (a real DB error, not the expected UNIQUE no-op), we log
+    // a warning and return success with instance_stub_id = None rather than
+    // returning an error for an already-committed definition.
     broker.publish(crate::backend::wps::WaveEvent {
         event: "agents:changed".to_string(),
         scopes: vec![],
@@ -2056,6 +2036,17 @@ pub(crate) async fn agent_define_core(
         persist: 0,
         data: None,
     });
+    let stub_id = if create_stub {
+        match make_stub_idempotent(&wstore, &def.id, &def.name, now) {
+            Ok((id, _new)) => Some(id),
+            Err(e) => {
+                tracing::warn!(id = %def.id, err = %e, "agent.define: stub failed (definition committed, non-fatal)");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     tracing::info!(
         id = %def.id,
