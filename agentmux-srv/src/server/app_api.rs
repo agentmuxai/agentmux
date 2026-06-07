@@ -2065,18 +2065,10 @@ pub(crate) async fn agent_define_core(
     }
 
     // Fresh insert — def.slug is now set by agent_def_find_or_insert.
-    // Broadcast agents:changed before the stub creation: the definition is
-    // already committed, so broadcasting immediately is correct. If the stub
-    // create fails (a real DB error, not the expected UNIQUE no-op), we log
-    // a warning and return success with instance_stub_id = None rather than
-    // returning an error for an already-committed definition.
-    broker.publish(crate::backend::wps::WaveEvent {
-        event: "agents:changed".to_string(),
-        scopes: vec![],
-        sender: String::new(),
-        persist: 0,
-        data: None,
-    });
+    // Create the stub first so that listeners handling agents:changed can
+    // immediately find the new agent via ListRecentSessionsCommand. The
+    // definition is already committed; a stub failure is non-fatal (log +
+    // continue) and we still broadcast so callers see the new definition.
     let stub_id = if create_stub {
         match make_stub_idempotent(&wstore, &def.id, &def.name, now) {
             Ok((id, _new)) => Some(id),
@@ -2088,6 +2080,13 @@ pub(crate) async fn agent_define_core(
     } else {
         None
     };
+    broker.publish(crate::backend::wps::WaveEvent {
+        event: "agents:changed".to_string(),
+        scopes: vec![],
+        sender: String::new(),
+        persist: 0,
+        data: None,
+    });
 
     tracing::info!(
         id = %def.id,
