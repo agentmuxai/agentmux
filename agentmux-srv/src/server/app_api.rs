@@ -1907,31 +1907,51 @@ pub(crate) async fn agent_define_core(
     //
     // agent_def_list() reads from db_agents, which includes both real
     // definition rows AND template-instance projections (rows whose id matches
-    // an AgentInstance id, not an AgentDefinition id). We verify each
-    // candidate via agent_def_get() — which queries db_agent_definitions
-    // directly — so instance projections are correctly ignored.
+    // an AgentInstance id, not an AgentDefinition id). We iterate ALL same-name
+    // candidates and call agent_def_get() — which queries db_agent_definitions
+    // directly — skipping projections (None) until we find a real definition.
     let name_lower = cmd.name.trim().to_lowercase();
     let all_defs = wstore.agent_def_list()
         .map_err(|e| format!("agent.define: list defs: {e}"))?;
     let existing: Option<AgentDefinition> = {
-        let candidate = all_defs.iter()
-            .find(|d| d.is_seeded == 0 && d.name.trim().to_lowercase() == name_lower);
-        match candidate {
-            Some(c) => wstore.agent_def_get(&c.id)
-                .map_err(|e| format!("agent.define: lookup: {e}"))?,
-            None => None,
+        let mut found = None;
+        for c in all_defs.iter().filter(|d| d.is_seeded == 0 && d.name.trim().to_lowercase() == name_lower) {
+            match wstore.agent_def_get(&c.id)
+                .map_err(|e| format!("agent.define: lookup: {e}"))? {
+                Some(def) => { found = Some(def); break; }
+                None => continue, // projection row — skip and keep searching
+            }
         }
+        found
     };
 
     if let Some(def) = existing {
         match if_exists {
             "skip" => {
-                tracing::info!(id = %def.id, slug = %def.slug, "agent.define: skipped (exists)");
+                // Still honor create_instance_stub on skip: the definition may
+                // have been created without a stub (e.g. create_instance_stub=false
+                // or imported via another path). A subsequent idempotent call with
+                // create_instance_stub=true should make it visible in My Agents.
+                let stub_id = if create_stub {
+                    Some(make_stub_idempotent(&wstore, &def.id, &def.name, now)?)
+                } else {
+                    None
+                };
+                if stub_id.is_some() {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "agents:changed".to_string(),
+                        scopes: vec![],
+                        sender: String::new(),
+                        persist: 0,
+                        data: None,
+                    });
+                }
+                tracing::info!(id = %def.id, slug = %def.slug, stub = stub_id.is_some(), "agent.define: skipped (exists)");
                 return Ok(AgentDefineResult {
                     definition_id: def.id.clone(),
                     slug: def.slug.clone(),
                     action: "skipped".to_string(),
-                    instance_stub_id: None,
+                    instance_stub_id: stub_id,
                 });
             }
             "error" => {

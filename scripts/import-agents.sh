@@ -125,15 +125,19 @@ import_into() {
                 continue
             fi
 
-            # Copy definition into the legacy table AND the consolidated
-            # db_agents table (present in schema v4+). Readers such as
-            # agent_def_list() and instance_list() use db_agents; skipping
-            # the dual-write leaves the agent invisible to the running app
-            # even though it's in db_agent_definitions.
+            # Copy definition row (always required).
             sqlite3 "$src_win" \
                 "ATTACH '$tgt_win' AS dst;
                  INSERT OR IGNORE INTO dst.db_agent_definitions
-                   SELECT * FROM db_agent_definitions WHERE id='$def_id';
+                   SELECT * FROM db_agent_definitions WHERE id='$def_id';"
+
+            # Also populate the consolidated db_agents table (schema v4+).
+            # agent_def_list() and instance_list() read db_agents; skipping this
+            # write leaves the agent invisible to the running app even though the
+            # definition row is present. Silent no-op on pre-v4 targets where the
+            # table does not exist yet.
+            sqlite3 "$src_win" \
+                "ATTACH '$tgt_win' AS dst;
                  INSERT OR IGNORE INTO dst.db_agents
                    (id, name, icon, description,
                     is_template, parent_template_id,
@@ -150,11 +154,7 @@ import_into() {
                    auto_start, restart_on_crash, idle_timeout_minutes,
                    slug, branch_label,
                    created_at, updated_at, is_seeded, user_hidden
-                 FROM db_agent_definitions WHERE id='$def_id';" 2>/dev/null || \
-            sqlite3 "$src_win" \
-                "ATTACH '$tgt_win' AS dst;
-                 INSERT OR IGNORE INTO dst.db_agent_definitions
-                 SELECT * FROM db_agent_definitions WHERE id='$def_id';"
+                 FROM db_agent_definitions WHERE id='$def_id';" 2>/dev/null || true
 
             # Create a stub instance so the agent appears in My Agents
             # (ListRecentSessionsCommand queries instances, not definitions).
