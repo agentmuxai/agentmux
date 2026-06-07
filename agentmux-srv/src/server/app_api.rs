@@ -2018,8 +2018,8 @@ pub(crate) async fn agent_define_core(
             "update" => {
                 let mut updated = existing.clone();
                 // provider was already validated/defaulted above; only
-                // overwrite if the caller explicitly supplied one.
-                if !cmd.provider.is_empty() { updated.provider = provider.clone(); }
+                // overwrite if the caller explicitly supplied a provider or model.
+                if !cmd.provider.is_empty() || !cmd.model.is_empty() { updated.provider = provider.clone(); }
                 if !cmd.icon.is_empty()     { updated.icon = cmd.icon.clone(); }
                 if !cmd.description.is_empty() { updated.description = cmd.description.clone(); }
                 if !cmd.working_directory.is_empty() { updated.working_directory = cmd.working_directory.clone(); }
