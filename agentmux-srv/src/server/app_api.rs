@@ -1819,6 +1819,49 @@ fn write_agent_config_files(
 }
 
 // ---------------------------------------------------------------------------
+// agent.define helpers
+// ---------------------------------------------------------------------------
+
+/// Create a stub AgentInstance for a definition, idempotently.
+///
+/// The stub id is deterministically derived from the definition id so that
+/// calling this function multiple times for the same definition is a no-op
+/// rather than accumulating duplicate stopped rows in My Agents.
+fn make_stub_idempotent(
+    wstore: &crate::backend::storage::store::Store,
+    def_id: &str,
+    name: &str,
+    now: i64,
+) -> Result<String, String> {
+    let stub_id = format!("si-{}", def_id.replace('-', ""));
+    let inst = AgentInstance {
+        id: stub_id.clone(),
+        definition_id: def_id.to_string(),
+        parent_instance_id: String::new(),
+        block_id: String::new(),
+        session_id: String::new(),
+        status: "stopped".to_string(),
+        github_context: String::new(),
+        started_at: now,
+        ended_at: 0,
+        created_at: now,
+        identity_id: String::new(),
+        memory_id: String::new(),
+        instance_name: name.to_string(),
+        working_directory: String::new(),
+        display_hidden: false,
+    };
+    match wstore.instance_create(&inst) {
+        Ok(_) => Ok(stub_id),
+        Err(e) if e.to_string().contains("UNIQUE constraint") => {
+            // Stub already exists — deterministic id makes this idempotent
+            Ok(stub_id)
+        }
+        Err(e) => Err(format!("agent.define: create stub instance: {e}")),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // agent.define
 // ---------------------------------------------------------------------------
 
@@ -1854,12 +1897,24 @@ fn register_agent_define(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // as slug "codex-cli-2" when "codex-cli" was already taken by a template.
                 // Matching on the display name avoids that drift and keeps the call
                 // idempotent regardless of what slug was assigned at insert time.
+                //
+                // agent_def_list() reads from db_agents, which includes both real
+                // definition rows AND template-instance projections (rows whose id matches
+                // an AgentInstance id, not an AgentDefinition id). We verify each
+                // candidate via agent_def_get() — which queries db_agent_definitions
+                // directly — so instance projections are correctly ignored.
                 let name_lower = cmd.name.trim().to_lowercase();
                 let all_defs = wstore.agent_def_list()
                     .map_err(|e| format!("agent.define: list defs: {e}"))?;
-                let existing = all_defs.iter().find(|d| {
-                    d.is_seeded == 0 && d.name.trim().to_lowercase() == name_lower
-                });
+                let existing: Option<AgentDefinition> = {
+                    let candidate = all_defs.iter()
+                        .find(|d| d.is_seeded == 0 && d.name.trim().to_lowercase() == name_lower);
+                    match candidate {
+                        Some(c) => wstore.agent_def_get(&c.id)
+                            .map_err(|e| format!("agent.define: lookup: {e}"))?,
+                        None => None,
+                    }
+                };
 
                 if let Some(def) = existing {
                     match if_exists {
@@ -1892,27 +1947,9 @@ fn register_agent_define(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             wstore.agent_def_update(&mut updated)
                                 .map_err(|e| format!("agent.define: update: {e}"))?;
                             let stub_id = if create_stub {
-                                let id = format!("stub-{}", uuid::Uuid::new_v4().to_string().replace('-', "").chars().take(12).collect::<String>());
-                                let inst = AgentInstance {
-                                    id: id.clone(),
-                                    definition_id: updated.id.clone(),
-                                    parent_instance_id: String::new(),
-                                    block_id: String::new(),
-                                    session_id: String::new(),
-                                    status: "stopped".to_string(),
-                                    github_context: String::new(),
-                                    started_at: now,
-                                    ended_at: 0,
-                                    created_at: now,
-                                    identity_id: String::new(),
-                                    memory_id: String::new(),
-                                    instance_name: updated.name.clone(),
-                                    working_directory: String::new(),
-                                    display_hidden: false,
-                                };
-                                wstore.instance_create(&inst)
-                                    .map_err(|e| format!("agent.define: create stub instance: {e}"))?;
-                                Some(id)
+                                Some(make_stub_idempotent(
+                                    &wstore, &updated.id, &updated.name, now,
+                                )?)
                             } else {
                                 None
                             };
@@ -1966,27 +2003,9 @@ fn register_agent_define(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("agent.define: insert def: {e}"))?;
 
                 let stub_id = if create_stub {
-                    let id = format!("stub-{}", uuid::Uuid::new_v4().to_string().replace('-', "").chars().take(12).collect::<String>());
-                    let inst = AgentInstance {
-                        id: id.clone(),
-                        definition_id: def.id.clone(),
-                        parent_instance_id: String::new(),
-                        block_id: String::new(),
-                        session_id: String::new(),
-                        status: "stopped".to_string(),
-                        github_context: String::new(),
-                        started_at: now,
-                        ended_at: 0,
-                        created_at: now,
-                        identity_id: String::new(),
-                        memory_id: String::new(),
-                        instance_name: cmd.name.clone(),
-                        working_directory: String::new(),
-                        display_hidden: false,
-                    };
-                    wstore.instance_create(&inst)
-                        .map_err(|e| format!("agent.define: create stub instance: {e}"))?;
-                    Some(id)
+                    Some(make_stub_idempotent(
+                        &wstore, &def.id, &def.name, now,
+                    )?)
                 } else {
                     None
                 };
