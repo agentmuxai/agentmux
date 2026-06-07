@@ -116,6 +116,23 @@ import_into() {
 
         local src_win; src_win=$(win_path "$src_db")
 
+        # Detect which newer columns exist in the source schema so the SELECT
+        # does not fail on older AgentMux databases that lack them.
+        local _src_cols; _src_cols=$(sqlite3 "$src_win" \
+            "SELECT group_concat(name) FROM pragma_table_info('db_agent_definitions');" \
+            2>/dev/null || echo "")
+        local _col_updated_at _col_user_hidden
+        if echo "$_src_cols" | grep -qw "updated_at"; then
+            _col_updated_at="updated_at"
+        else
+            _col_updated_at="created_at"
+        fi
+        if echo "$_src_cols" | grep -qw "user_hidden"; then
+            _col_user_hidden="user_hidden"
+        else
+            _col_user_hidden="0"
+        fi
+
         while IFS=$'\x01' read -r def_id agent_name; do
             # Escape single-quotes for safe SQL interpolation (e.g. "Bob's Agent" → "Bob''s Agent")
             local safe_name="${agent_name//\'/\'\'}"
@@ -132,6 +149,8 @@ import_into() {
             # Copy definition row (always required).
             # Explicit column list avoids INSERT/SELECT * schema-mismatch failures
             # when importing across versions with different db_agent_definitions schemas.
+            # Uses detected column names so source DBs lacking updated_at/user_hidden
+            # fall back to created_at/0 rather than aborting the import.
             sqlite3 "$src_win" \
                 "ATTACH '$tgt_win' AS dst;
                  INSERT OR IGNORE INTO dst.db_agent_definitions
@@ -143,8 +162,22 @@ import_into() {
                     id, slug, name, icon, provider, description,
                     working_directory, shell, provider_flags, auto_start, restart_on_crash,
                     idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
-                    is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden
+                    is_seeded, accounts, parent_id, branch_label,
+                    ${_col_updated_at}, ${_col_user_hidden}
                  FROM db_agent_definitions WHERE id='$def_id';"
+
+            # Verify the definition was actually inserted.
+            # db_agent_definitions has a UNIQUE index on slug — an INSERT OR IGNORE
+            # silently skips when the target already has a different agent with the
+            # same slug. Creating a stub for a missing definition would leave a
+            # broken My Agents entry, so abort this agent if the row didn't land.
+            local def_landed; def_landed=$(db_query "$target_db" \
+                "SELECT count(*) FROM db_agent_definitions WHERE id='$def_id';")
+            if [ "${def_landed:-0}" -eq 0 ]; then
+                echo "  SKIP  $agent_name (slug conflict in target — definition not imported)"
+                ((skipped++)) || true
+                continue
+            fi
 
             # Also populate the consolidated db_agents table (schema v4+).
             # agent_def_list() and instance_list() read db_agents; skipping this
@@ -168,7 +201,7 @@ import_into() {
                    agent_type, agent_bus_id, accounts,
                    auto_start, restart_on_crash, idle_timeout_minutes,
                    slug, branch_label,
-                   created_at, updated_at, is_seeded, user_hidden
+                   created_at, ${_col_updated_at}, is_seeded, ${_col_user_hidden}
                  FROM db_agent_definitions WHERE id='$def_id';" 2>/dev/null || true
 
             # Create a stub instance so the agent appears in My Agents
