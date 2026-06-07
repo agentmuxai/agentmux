@@ -1953,7 +1953,13 @@ pub(crate) async fn agent_define_core(
         working_directory: cmd.working_directory.clone(),
         shell: cmd.shell.clone(),
         environment: cmd.environment.clone(),
-        provider_flags: String::new(),
+        // Persist the requested model as a CLI flag so the agent launches
+        // with the specified model rather than the provider default.
+        provider_flags: if cmd.model.is_empty() {
+            String::new()
+        } else {
+            format!("--model {}", cmd.model)
+        },
         auto_start: 0,
         restart_on_crash: 0,
         idle_timeout_minutes: 0,
@@ -2022,6 +2028,9 @@ pub(crate) async fn agent_define_core(
                 // provider was already validated/defaulted above; only
                 // overwrite if the caller explicitly supplied a provider or model.
                 if !cmd.provider.is_empty() || !cmd.model.is_empty() { updated.provider = provider.clone(); }
+                // Persist the model as a CLI flag so the agent launches with
+                // the requested model rather than the provider default.
+                if !cmd.model.is_empty() { updated.provider_flags = format!("--model {}", cmd.model); }
                 if !cmd.icon.is_empty()     { updated.icon = cmd.icon.clone(); }
                 if !cmd.description.is_empty() { updated.description = cmd.description.clone(); }
                 if !cmd.working_directory.is_empty() { updated.working_directory = cmd.working_directory.clone(); }
