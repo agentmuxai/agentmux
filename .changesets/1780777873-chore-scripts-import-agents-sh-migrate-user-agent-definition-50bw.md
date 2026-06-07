@@ -1,5 +1,5 @@
 ---
-type: patch
+type: minor
 ---
 
-chore(scripts): import-agents.sh — migrate user agent definitions across version data dirs
+feat(app-api): agent.define — create/upsert agent definition via HTTP RPC without restart
