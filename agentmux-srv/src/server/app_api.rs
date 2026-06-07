@@ -1827,6 +1827,26 @@ fn write_agent_config_files(
 /// The stub id is deterministically derived from the definition id so that
 /// calling this function multiple times for the same definition is a no-op
 /// rather than accumulating duplicate stopped rows in My Agents.
+/// Infer a provider slug from a model name prefix.
+/// Callers should still validate the result via `providers::get_provider`.
+fn infer_provider_from_model(model: &str) -> String {
+    let m = model.to_lowercase();
+    if m.starts_with("claude") {
+        "claude".to_string()
+    } else if m.starts_with("gpt") || m.starts_with("o1") || m.starts_with("o3") || m.starts_with("o4") {
+        "openai".to_string()
+    } else if m.starts_with("gemini") {
+        "gemini".to_string()
+    } else if m.starts_with("codex") {
+        "codex".to_string()
+    } else if m.starts_with("qwen") {
+        "qwen".to_string()
+    } else {
+        // Unknown prefix — return as-is; get_provider will reject it.
+        model.to_string()
+    }
+}
+
 /// Returns `(stub_id, newly_inserted)`. `newly_inserted = false` when the
 /// UNIQUE constraint fires (stub already existed); callers use this to avoid
 /// broadcasting `agents:changed` on no-op calls.
@@ -1878,20 +1898,38 @@ pub(crate) async fn agent_define_core(
         return Err("agent.define: name is required".to_string());
     }
 
-    // Validate / default the provider so we never persist an
-    // unknown value that would cause agent.open to fail later.
-    let provider = if cmd.provider.is_empty() {
-        "claude".to_string()
-    } else if providers::get_provider(&cmd.provider).is_none() {
+    // Validate if_exists early so a typo is caught even for new definitions,
+    // not only when a matching definition already exists.
+    let if_exists = cmd.if_exists.as_deref().unwrap_or("skip");
+    if !matches!(if_exists, "skip" | "update" | "error") {
         return Err(format!(
-            "agent.define: unknown provider '{}'; valid: claude, codex, gemini, qwen, kimi, openclaw, pi, copilot",
-            cmd.provider
+            "agent.define: unknown if_exists value '{if_exists}'; valid: skip, update, error"
         ));
-    } else {
+    }
+
+    // Resolve provider: explicit `provider` wins; fall back to inference from
+    // `model` prefix; default to "claude" when neither is supplied.
+    let provider = if !cmd.provider.is_empty() {
+        if providers::get_provider(&cmd.provider).is_none() {
+            return Err(format!(
+                "agent.define: unknown provider '{}'; valid: claude, codex, gemini, qwen, kimi, openclaw, pi, copilot",
+                cmd.provider
+            ));
+        }
         cmd.provider.clone()
+    } else if !cmd.model.is_empty() {
+        let inferred = infer_provider_from_model(&cmd.model);
+        if providers::get_provider(&inferred).is_none() {
+            return Err(format!(
+                "agent.define: cannot infer provider from model '{}'; set provider explicitly",
+                cmd.model
+            ));
+        }
+        inferred
+    } else {
+        "claude".to_string()
     };
 
-    let if_exists = cmd.if_exists.as_deref().unwrap_or("skip");
     let create_stub = cmd.create_instance_stub.unwrap_or(true);
 
     let now = std::time::SystemTime::now()

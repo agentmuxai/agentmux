@@ -811,6 +811,10 @@ pub struct CommandAgentDefineData {
     pub name: String,
     #[serde(default)]
     pub provider: String,
+    /// Alternative to `provider` — inferred from model prefix.
+    /// If both are set, `provider` wins.
+    #[serde(default)]
+    pub model: String,
     #[serde(default)]
     pub icon: String,
     #[serde(default)]
