@@ -21,7 +21,7 @@ The endpoint completes the "agent-driven self-configuration" loop:
 ```
 Agent reads  AGENTMUX_LOCAL_URL + AGENTMUX_AUTH_KEY
          ↓
-POST /agentmux/service  { "command": "agent.define", ... }
+POST /agentmux/service  {"service":"agent","method":"define","args":[{...}]}
          ↓
 Sidecar inserts/updates db_agent_definitions
          ↓
@@ -45,14 +45,17 @@ This is the **robust, restart-free alternative** to `scripts/import-agents.sh`.
 The token is stripped from the sidecar's own environment at startup and injected only into
 agent subprocesses — it never leaks to child processes that agents spawn.
 
-RPC envelope (same as all Tier 1 commands):
+**HTTP envelope** (`WebCallType` — matches all other `/agentmux/service` calls):
 ```json
-{
-  "command": "agent.define",
-  "reqid": "<uuid-v4>",
-  "data": { ... }
-}
+{ "service": "agent", "method": "define", "args": [{ ... }] }
 ```
+
+**WebSocket envelope** (`WshRpc` — for the WebSocket `/ws` path):
+```json
+{ "command": "agent.define", "reqid": "<uuid-v4>", "data": { ... } }
+```
+
+Both routes call the same `agent_define_core` handler and return equivalent results.
 
 ---
 
