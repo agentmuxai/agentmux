@@ -402,6 +402,9 @@ pub const COMMAND_AGENT_KILL_PROCESS: &str = "agent.kill-process";
 /// macOS: `killpg`. Returns `AgentKillResult { ok: true }` even when
 /// there are no members (idempotent).
 pub const COMMAND_AGENT_KILL_TREE: &str = "agent.kill-tree";
+/// Create or upsert an agent definition. Broadcasts `agents:changed` on
+/// success so all open frontends refresh My Agents without a restart.
+pub const COMMAND_AGENT_DEFINE: &str = "agent.define";
 
 // App API Tier 2 — pane lifecycle commands
 pub const COMMAND_PANE_OPEN: &str = "pane.open";
@@ -795,6 +798,50 @@ pub struct AgentOpenResult {
     pub controller_type: String,
     pub status: String,
     pub created: bool,
+}
+
+/// Request for agent.define — create or upsert an agent definition.
+/// `if_exists` controls behaviour when a slug-matching definition exists:
+///   `"skip"` (default) — return existing id unchanged
+///   `"update"` — overwrite all provided non-empty fields
+///   `"error"` — fail with an error message
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandAgentDefineData {
+    pub name: String,
+    #[serde(default)]
+    pub provider: String,
+    /// Alternative to `provider` — inferred from model prefix.
+    /// If both are set, `provider` wins.
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub icon: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub working_directory: String,
+    #[serde(default)]
+    pub shell: String,
+    #[serde(default)]
+    pub environment: String,
+    /// System/instruction text written to the agent's CLAUDE.md on spawn.
+    pub system_prompt: Option<String>,
+    /// Extra env vars injected at agent spawn, stored as KEY=VALUE lines.
+    pub env: Option<std::collections::HashMap<String, String>>,
+    pub if_exists: Option<String>,
+    pub create_instance_stub: Option<bool>,
+}
+
+/// Response from agent.define.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct AgentDefineResult {
+    pub definition_id: String,
+    pub slug: String,
+    pub action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance_stub_id: Option<String>,
 }
 
 /// Request for pane.open — create a new pane showing the given view.

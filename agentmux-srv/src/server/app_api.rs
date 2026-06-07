@@ -18,7 +18,7 @@ use crate::backend::providers;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::*;
 use crate::backend::session_archive;
-use crate::backend::storage::store::Store;
+use crate::backend::storage::store::{Store, AgentContent, AgentDefinition, AgentInstance};
 
 use super::AppState;
 use crate::server::cli_handlers::resolve_cli_on_path;
@@ -35,6 +35,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_agent_tracked_blocks(engine, state);
     register_agent_kill_process(engine, state);
     register_agent_kill_tree(engine, state);
+    register_agent_define(engine, state);
     register_pane_open(engine, state);
     register_blockfile_line_count(engine, state);
     register_blockfile_read_range(engine, state);
@@ -244,13 +245,17 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // 6. Build metadata
                 let controller_type = provider.controller_type_str();
                 let is_persistent = controller_type == "persistent";
-                let cli_args: Vec<String> = if is_persistent {
+                let mut cli_args: Vec<String> = if is_persistent {
                     provider.persistent_launch_args
                         .unwrap_or(provider.launch_args)
                         .iter().map(|s| s.to_string()).collect()
                 } else {
                     provider.launch_args.iter().map(|s| s.to_string()).collect()
                 };
+                // Append definition-level flags (e.g. --model <value>) stored in provider_flags.
+                if !agent.provider_flags.is_empty() {
+                    cli_args.extend(agent.provider_flags.split_whitespace().map(str::to_string));
+                }
 
                 let agent_slug = agent.name.to_lowercase()
                     .chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
@@ -282,6 +287,19 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 env_vars.insert(provider.auth_config_dir_env_var.to_string(), json!(auth_dir));
                 for (k, v) in provider.auth_extra_env {
                     env_vars.insert(k.to_string(), json!(v));
+                }
+                // Merge env vars from the definition's persisted env content blob (KEY=VALUE lines).
+                // Provider/auth entries inserted above take precedence; definition-level vars
+                // are merged after so they can extend (but not override) the auth env.
+                if let Ok(Some(env_blob)) = wstore.agent_content_get(&agent.id, "env") {
+                    for line in env_blob.content.lines() {
+                        if let Some((k, v)) = line.split_once('=') {
+                            let k = k.trim();
+                            if !k.is_empty() && !env_vars.contains_key(k) {
+                                env_vars.insert(k.to_string(), json!(v));
+                            }
+                        }
+                    }
                 }
                 // Agent identity
                 env_vars.insert("GH_CONFIG_DIR".to_string(), json!(format!("{}/gh-{}", config_home, agent_slug)));
@@ -1815,5 +1833,368 @@ fn write_agent_config_files(
     );
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// agent.define helpers
+// ---------------------------------------------------------------------------
+
+/// Create a stub AgentInstance for a definition, idempotently.
+///
+/// The stub id is deterministically derived from the definition id so that
+/// calling this function multiple times for the same definition is a no-op
+/// rather than accumulating duplicate stopped rows in My Agents.
+/// Infer a provider slug from a model name prefix.
+/// Only maps prefixes that correspond to a registered provider slug.
+/// Callers must still validate the result via `providers::get_provider`.
+fn infer_provider_from_model(model: &str) -> String {
+    let m = model.to_lowercase();
+    if m.starts_with("claude") {
+        "claude".to_string()
+    } else if m.starts_with("gemini") {
+        "gemini".to_string()
+    } else if m.starts_with("codex") {
+        "codex".to_string()
+    } else if m.starts_with("qwen") {
+        "qwen".to_string()
+    } else if m.starts_with("kimi") {
+        "kimi".to_string()
+    } else {
+        // Unknown prefix — return as-is; get_provider will reject it with
+        // a "cannot infer provider" error so callers know to set provider explicitly.
+        model.to_string()
+    }
+}
+
+/// Returns `(stub_id, newly_inserted)`. `newly_inserted = false` when the
+/// UNIQUE constraint fires (stub already existed); callers use this to avoid
+/// broadcasting `agents:changed` on no-op calls.
+fn make_stub_idempotent(
+    wstore: &crate::backend::storage::store::Store,
+    def_id: &str,
+    name: &str,
+    now: i64,
+) -> Result<(String, bool), String> {
+    let stub_id = format!("si-{}", def_id.replace('-', ""));
+    let inst = AgentInstance {
+        id: stub_id.clone(),
+        definition_id: def_id.to_string(),
+        parent_instance_id: String::new(),
+        block_id: String::new(),
+        session_id: String::new(),
+        status: "stopped".to_string(),
+        github_context: String::new(),
+        started_at: now,
+        ended_at: 0,
+        created_at: now,
+        identity_id: String::new(),
+        memory_id: String::new(),
+        instance_name: name.to_string(),
+        working_directory: String::new(),
+        display_hidden: false,
+    };
+    match wstore.instance_create(&inst) {
+        Ok(_) => Ok((stub_id, true)),
+        Err(e) if e.to_string().contains("UNIQUE constraint") => {
+            Ok((stub_id, false)) // stub already existed — idempotent
+        }
+        Err(e) => Err(format!("agent.define: create stub instance: {e}")),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// agent.define
+// ---------------------------------------------------------------------------
+
+/// Core logic for the `agent.define` command, shared by the WebSocket RPC
+/// handler and the HTTP service dispatch (`("agent", "define")` in service.rs).
+/// Persist `system_prompt` and `env` content blobs for a freshly created or
+/// updated agent definition.  Errors are logged but not propagated — the
+/// definition row is already committed and the caller has already published
+/// `agents:changed`, so a content-write failure must not abort the response.
+fn persist_define_content(
+    wstore: &Store,
+    agent_id: &str,
+    cmd: &CommandAgentDefineData,
+    now: i64,
+) {
+    if let Some(prompt) = &cmd.system_prompt {
+        if !prompt.is_empty() {
+            if let Err(e) = wstore.agent_content_set(&AgentContent {
+                agent_id: agent_id.to_string(),
+                content_type: "agentmd".to_string(),
+                content: prompt.clone(),
+                updated_at: now,
+            }) {
+                tracing::warn!(agent_id, err = %e, "agent.define: failed to persist system_prompt (non-fatal)");
+            }
+        }
+    }
+    if let Some(env_map) = &cmd.env {
+        if !env_map.is_empty() {
+            let content = env_map.iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if let Err(e) = wstore.agent_content_set(&AgentContent {
+                agent_id: agent_id.to_string(),
+                content_type: "env".to_string(),
+                content,
+                updated_at: now,
+            }) {
+                tracing::warn!(agent_id, err = %e, "agent.define: failed to persist env (non-fatal)");
+            }
+        }
+    }
+}
+
+pub(crate) async fn agent_define_core(
+    wstore: Arc<Store>,
+    broker: Arc<crate::backend::wps::Broker>,
+    cmd: CommandAgentDefineData,
+) -> Result<AgentDefineResult, String> {
+    if cmd.name.trim().is_empty() {
+        return Err("agent.define: name is required".to_string());
+    }
+
+    // Validate if_exists early so a typo is caught even for new definitions,
+    // not only when a matching definition already exists.
+    let if_exists = cmd.if_exists.as_deref().unwrap_or("skip");
+    if !matches!(if_exists, "skip" | "update" | "error") {
+        return Err(format!(
+            "agent.define: unknown if_exists value '{if_exists}'; valid: skip, update, error"
+        ));
+    }
+
+    // Resolve provider: explicit `provider` wins; fall back to inference from
+    // `model` prefix; default to "claude" when neither is supplied.
+    let provider = if !cmd.provider.is_empty() {
+        if providers::get_provider(&cmd.provider).is_none() {
+            return Err(format!(
+                "agent.define: unknown provider '{}'; valid: claude, codex, gemini, qwen, kimi, openclaw, pi, copilot",
+                cmd.provider
+            ));
+        }
+        cmd.provider.clone()
+    } else if !cmd.model.is_empty() {
+        let inferred = infer_provider_from_model(&cmd.model);
+        if providers::get_provider(&inferred).is_none() {
+            return Err(format!(
+                "agent.define: cannot infer provider from model '{}'; set provider explicitly",
+                cmd.model
+            ));
+        }
+        inferred
+    } else {
+        "claude".to_string()
+    };
+
+    let create_stub = cmd.create_instance_stub.unwrap_or(true);
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+
+    // Build the new definition struct up-front so agent_def_find_or_insert
+    // can use it as both the lookup key and the insert payload.
+    // agent_def_find_or_insert holds a single mutex guard for the check +
+    // conditional insert — closing the TOCTOU window between list and insert.
+    let mut def = AgentDefinition {
+        id: uuid::Uuid::new_v4().to_string(),
+        slug: String::new(), // resolved by agent_def_find_or_insert
+        name: cmd.name.clone(),
+        icon: cmd.icon.clone(),
+        provider: provider.clone(),
+        description: cmd.description.clone(),
+        working_directory: cmd.working_directory.clone(),
+        shell: cmd.shell.clone(),
+        environment: cmd.environment.clone(),
+        // Persist the requested model as a CLI flag so the agent launches
+        // with the specified model rather than the provider default.
+        provider_flags: if cmd.model.is_empty() {
+            String::new()
+        } else {
+            format!("--model {}", cmd.model)
+        },
+        auto_start: 0,
+        restart_on_crash: 0,
+        idle_timeout_minutes: 0,
+        created_at: now,
+        agent_type: "host".to_string(), // matches every other user-owned definition
+        agent_bus_id: String::new(),
+        is_seeded: 0,
+        accounts: String::new(),
+        parent_id: String::new(),
+        branch_label: String::new(),
+        updated_at: now,
+        user_hidden: 0,
+    };
+
+    // Atomic check-then-insert.
+    // Returns Some(existing) if a row matched by name/slug already exists;
+    // None if the row was freshly inserted (def.slug now holds resolved slug).
+    let existing_opt = wstore.agent_def_find_or_insert(&mut def)
+        .map_err(|e| format!("agent.define: find_or_insert: {e}"))?;
+
+    if let Some(existing) = existing_opt {
+        // A definition with this name/slug already exists — apply if_exists policy.
+        match if_exists {
+            "skip" => {
+                // Honor create_instance_stub even on skip: a definition that was
+                // created with create_instance_stub=false (or imported via another
+                // path) might not have a stub yet; a subsequent idempotent call
+                // with create_instance_stub=true should make it visible in My Agents.
+                // Only fire agents:changed when the stub was actually newly inserted.
+                let (stub_id, stub_new) = if create_stub {
+                    match make_stub_idempotent(&wstore, &existing.id, &existing.name, now) {
+                        Ok((id, new)) => (Some(id), new),
+                        Err(e) => {
+                            tracing::warn!(id = %existing.id, err = %e, "agent.define: skip stub failed (non-fatal)");
+                            (None, false)
+                        }
+                    }
+                } else {
+                    (None, false)
+                };
+                if stub_new {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "agents:changed".to_string(),
+                        scopes: vec![],
+                        sender: String::new(),
+                        persist: 0,
+                        data: None,
+                    });
+                }
+                tracing::info!(id = %existing.id, slug = %existing.slug, stub = stub_id.is_some(), "agent.define: skipped (exists)");
+                return Ok(AgentDefineResult {
+                    definition_id: existing.id.clone(),
+                    slug: existing.slug.clone(),
+                    action: "skipped".to_string(),
+                    instance_stub_id: stub_id,
+                });
+            }
+            "error" => {
+                return Err(format!(
+                    "agent.define: definition '{}' already exists (if_exists=error)",
+                    cmd.name.trim()
+                ));
+            }
+            "update" => {
+                let mut updated = existing.clone();
+                // provider was already validated/defaulted above; only
+                // overwrite if the caller explicitly supplied a provider or model.
+                if !cmd.provider.is_empty() || !cmd.model.is_empty() { updated.provider = provider.clone(); }
+                // Persist the model as a CLI flag so the agent launches with
+                // the requested model rather than the provider default.
+                // If the provider changes but no model is supplied, clear stale
+                // flags from the old provider so the new provider's default is used.
+                if !cmd.model.is_empty() {
+                    updated.provider_flags = format!("--model {}", cmd.model);
+                } else if !cmd.provider.is_empty() {
+                    updated.provider_flags = String::new();
+                }
+                if !cmd.icon.is_empty()     { updated.icon = cmd.icon.clone(); }
+                if !cmd.description.is_empty() { updated.description = cmd.description.clone(); }
+                if !cmd.working_directory.is_empty() { updated.working_directory = cmd.working_directory.clone(); }
+                if !cmd.shell.is_empty()    { updated.shell = cmd.shell.clone(); }
+                if !cmd.environment.is_empty() { updated.environment = cmd.environment.clone(); }
+                // name update intentionally omitted — the slug is immutable;
+                // renaming would create a slug mismatch. Use updateagent for renames.
+                let did_update = wstore.agent_def_update(&mut updated)
+                    .map_err(|e| format!("agent.define: update: {e}"))?;
+                if !did_update {
+                    return Err("agent.define: update: row was deleted between find and update".to_string());
+                }
+                persist_define_content(&wstore, &updated.id, &cmd, now);
+                let stub_id = if create_stub {
+                    match make_stub_idempotent(&wstore, &updated.id, &updated.name, now) {
+                        Ok((id, _new)) => Some(id),
+                        Err(e) => {
+                            tracing::warn!(id = %updated.id, err = %e, "agent.define: update stub failed (non-fatal)");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "agents:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+                tracing::info!(id = %updated.id, slug = %updated.slug, stub = stub_id.is_some(), "agent.define: updated");
+                return Ok(AgentDefineResult {
+                    definition_id: updated.id.clone(),
+                    slug: updated.slug.clone(),
+                    action: "updated".to_string(),
+                    instance_stub_id: stub_id,
+                });
+            }
+            other => {
+                return Err(format!("agent.define: unknown if_exists value '{other}'"));
+            }
+        }
+    }
+
+    // Fresh insert — def.slug is now set by agent_def_find_or_insert.
+    // Create the stub first so that listeners handling agents:changed can
+    // immediately find the new agent via ListRecentSessionsCommand. The
+    // definition is already committed; a stub failure is non-fatal (log +
+    // continue) and we still broadcast so callers see the new definition.
+    let stub_id = if create_stub {
+        match make_stub_idempotent(&wstore, &def.id, &def.name, now) {
+            Ok((id, _new)) => Some(id),
+            Err(e) => {
+                tracing::warn!(id = %def.id, err = %e, "agent.define: stub failed (definition committed, non-fatal)");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    broker.publish(crate::backend::wps::WaveEvent {
+        event: "agents:changed".to_string(),
+        scopes: vec![],
+        sender: String::new(),
+        persist: 0,
+        data: None,
+    });
+    persist_define_content(&wstore, &def.id, &cmd, now);
+
+    tracing::info!(
+        id = %def.id,
+        slug = %def.slug,
+        stub = stub_id.is_some(),
+        "agent.define: created"
+    );
+
+    Ok(AgentDefineResult {
+        definition_id: def.id.clone(),
+        slug: def.slug.clone(),
+        action: "created".to_string(),
+        instance_stub_id: stub_id,
+    })
+}
+
+fn register_agent_define(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+
+    engine.register_handler(
+        COMMAND_AGENT_DEFINE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                let cmd: CommandAgentDefineData = serde_json::from_value(data)
+                    .map_err(|e| format!("agent.define: {e}"))?;
+                agent_define_core(wstore, broker, cmd).await
+                    .map(|r| Some(serde_json::to_value(&r).unwrap()))
+            })
+        }),
+    );
 }
 

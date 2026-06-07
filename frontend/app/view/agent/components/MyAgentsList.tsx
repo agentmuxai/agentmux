@@ -44,6 +44,7 @@ import {
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { waveEventSubscribe } from "@/app/store/wps";
 import { ProviderLogo } from "@/element/ProviderLogo";
 
 /** ms epoch → human-readable relative timestamp. Centralized here +
@@ -108,6 +109,14 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     };
     document.addEventListener("visibilitychange", onVisible);
     onCleanup(() => document.removeEventListener("visibilitychange", onVisible));
+
+    // Refetch when a new agent definition is created (e.g. via agent.define)
+    // so the stub instance appears immediately without needing a restart.
+    const unsubAgents = waveEventSubscribe({
+        eventType: "agents:changed",
+        handler: () => void refetch(),
+    });
+    onCleanup(unsubAgents);
 
     // The Date.now() snapshot updates every minute so "5m ago" rolls
     // forward without the user having to re-render. createSignal ticks
