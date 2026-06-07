@@ -13,7 +13,16 @@
 set -euo pipefail
 
 AGENTMUX_DIR="${AGENTMUX_DIR:-$HOME/.agentmux}"
-CHANNEL="${CHANNEL:-dev-portable-main-b28b7a}"
+
+# Auto-detect channel from the current git branch when CHANNEL is not set.
+# The portable build channel name is: dev-portable-<branch>-<sha1(branch)[:6]>
+# where sha1 is of the branch name string itself (not the commit).
+if [ -z "${CHANNEL:-}" ]; then
+    _branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+    _branch_hash=$(printf '%s' "$_branch" | sha1sum | cut -c1-6 2>/dev/null \
+                   || printf '%s' "$_branch" | shasum | cut -c1-6)
+    CHANNEL="dev-portable-${_branch}-${_branch_hash}"
+fi
 CHANNEL_DIR="$AGENTMUX_DIR/channels/$CHANNEL"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -115,7 +124,32 @@ import_into() {
                 continue
             fi
 
-            # Copy definition
+            # Copy definition into the legacy table AND the consolidated
+            # db_agents table (present in schema v4+). Readers such as
+            # agent_def_list() and instance_list() use db_agents; skipping
+            # the dual-write leaves the agent invisible to the running app
+            # even though it's in db_agent_definitions.
+            sqlite3 "$src_win" \
+                "ATTACH '$tgt_win' AS dst;
+                 INSERT OR IGNORE INTO dst.db_agent_definitions
+                   SELECT * FROM db_agent_definitions WHERE id='$def_id';
+                 INSERT OR IGNORE INTO dst.db_agents
+                   (id, name, icon, description,
+                    is_template, parent_template_id,
+                    provider, provider_flags, shell, environment,
+                    agent_type, agent_bus_id, accounts,
+                    auto_start, restart_on_crash, idle_timeout_minutes,
+                    slug, branch_label,
+                    created_at, updated_at, is_seeded, user_hidden)
+                 SELECT
+                   id, name, icon, description,
+                   0,  parent_id,
+                   provider, provider_flags, shell, environment,
+                   agent_type, agent_bus_id, accounts,
+                   auto_start, restart_on_crash, idle_timeout_minutes,
+                   slug, branch_label,
+                   created_at, updated_at, is_seeded, user_hidden
+                 FROM db_agent_definitions WHERE id='$def_id';" 2>/dev/null || \
             sqlite3 "$src_win" \
                 "ATTACH '$tgt_win' AS dst;
                  INSERT OR IGNORE INTO dst.db_agent_definitions
