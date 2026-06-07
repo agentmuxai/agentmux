@@ -1828,21 +1828,23 @@ fn write_agent_config_files(
 /// calling this function multiple times for the same definition is a no-op
 /// rather than accumulating duplicate stopped rows in My Agents.
 /// Infer a provider slug from a model name prefix.
-/// Callers should still validate the result via `providers::get_provider`.
+/// Only maps prefixes that correspond to a registered provider slug.
+/// Callers must still validate the result via `providers::get_provider`.
 fn infer_provider_from_model(model: &str) -> String {
     let m = model.to_lowercase();
     if m.starts_with("claude") {
         "claude".to_string()
-    } else if m.starts_with("gpt") || m.starts_with("o1") || m.starts_with("o3") || m.starts_with("o4") {
-        "openai".to_string()
     } else if m.starts_with("gemini") {
         "gemini".to_string()
     } else if m.starts_with("codex") {
         "codex".to_string()
     } else if m.starts_with("qwen") {
         "qwen".to_string()
+    } else if m.starts_with("kimi") {
+        "kimi".to_string()
     } else {
-        // Unknown prefix — return as-is; get_provider will reject it.
+        // Unknown prefix — return as-is; get_provider will reject it with
+        // a "cannot infer provider" error so callers know to set provider explicitly.
         model.to_string()
     }
 }
