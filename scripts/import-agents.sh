@@ -50,8 +50,10 @@ catalog() {
     printf "%-20s %-12s %-10s %s\n" "NAME" "PROVIDER" "VERSION" "SOURCE"
     echo "──────────────────────────────────────────────────────────"
     while IFS= read -r db; do
+        # Use char(1) (ASCII unit-separator) as column delimiter so agent
+        # names containing '|' don't corrupt the field split.
         result=$(db_query "$db" \
-            "SELECT name, provider FROM db_agent_definitions WHERE is_seeded=0 ORDER BY name;")
+            "SELECT name||char(1)||provider FROM db_agent_definitions WHERE is_seeded=0 ORDER BY name;")
         [ -z "$result" ] && continue
         label=$(echo "$db" | sed \
             -e "s|$AGENTMUX_DIR/||" \
@@ -60,7 +62,7 @@ catalog() {
             -e 's|versions/||')
         version=$(echo "$label" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
         version="${version:-dev}"
-        while IFS='|' read -r name provider; do
+        while IFS=$'\x01' read -r name provider; do
             printf "%-20s %-12s %-10s %s\n" "$name" "$provider" "$version" "$label"
         done <<< "$result"
     done < <(all_dbs)
