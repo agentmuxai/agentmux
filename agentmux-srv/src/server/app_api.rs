@@ -18,7 +18,7 @@ use crate::backend::providers;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::*;
 use crate::backend::session_archive;
-use crate::backend::storage::store::{Store, AgentDefinition, AgentInstance};
+use crate::backend::storage::store::{Store, AgentDefinition, AgentInstance, derive_slug};
 
 use super::AppState;
 use crate::server::cli_handlers::resolve_cli_on_path;
@@ -1910,12 +1910,22 @@ pub(crate) async fn agent_define_core(
     // an AgentInstance id, not an AgentDefinition id). We iterate ALL same-name
     // candidates and call agent_def_get() — which queries db_agent_definitions
     // directly — skipping projections (None) until we find a real definition.
+    //
+    // We also check by derived slug as a fallback so that two names that
+    // normalise to the same slug ("Senior Dev" and "Senior-Dev" both → "senior_dev")
+    // find the same existing definition instead of creating a duplicate.
     let name_lower = cmd.name.trim().to_lowercase();
+    let derived_slug = derive_slug(cmd.name.trim());
     let all_defs = wstore.agent_def_list()
         .map_err(|e| format!("agent.define: list defs: {e}"))?;
     let existing: Option<AgentDefinition> = {
         let mut found = None;
-        for c in all_defs.iter().filter(|d| d.is_seeded == 0 && d.name.trim().to_lowercase() == name_lower) {
+        // Primary: exact name match (case-insensitive).
+        // Secondary: slug match (catches formatting variants of the same name).
+        for c in all_defs.iter().filter(|d| {
+            d.is_seeded == 0 &&
+            (d.name.trim().to_lowercase() == name_lower || d.slug == derived_slug)
+        }) {
             match wstore.agent_def_get(&c.id)
                 .map_err(|e| format!("agent.define: lookup: {e}"))? {
                 Some(def) => { found = Some(def); break; }
