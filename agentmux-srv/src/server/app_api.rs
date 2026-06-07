@@ -18,7 +18,7 @@ use crate::backend::providers;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::*;
 use crate::backend::session_archive;
-use crate::backend::storage::store::{Store, AgentDefinition, AgentInstance};
+use crate::backend::storage::store::{Store, AgentContent, AgentDefinition, AgentInstance};
 
 use super::AppState;
 use crate::server::cli_handlers::resolve_cli_on_path;
@@ -1891,6 +1891,46 @@ fn make_stub_idempotent(
 
 /// Core logic for the `agent.define` command, shared by the WebSocket RPC
 /// handler and the HTTP service dispatch (`("agent", "define")` in service.rs).
+/// Persist `system_prompt` and `env` content blobs for a freshly created or
+/// updated agent definition.  Errors are logged but not propagated — the
+/// definition row is already committed and the caller has already published
+/// `agents:changed`, so a content-write failure must not abort the response.
+fn persist_define_content(
+    wstore: &Store,
+    agent_id: &str,
+    cmd: &CommandAgentDefineData,
+    now: i64,
+) {
+    if let Some(prompt) = &cmd.system_prompt {
+        if !prompt.is_empty() {
+            if let Err(e) = wstore.agent_content_set(&AgentContent {
+                agent_id: agent_id.to_string(),
+                content_type: "agentmd".to_string(),
+                content: prompt.clone(),
+                updated_at: now,
+            }) {
+                tracing::warn!(agent_id, err = %e, "agent.define: failed to persist system_prompt (non-fatal)");
+            }
+        }
+    }
+    if let Some(env_map) = &cmd.env {
+        if !env_map.is_empty() {
+            let content = env_map.iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if let Err(e) = wstore.agent_content_set(&AgentContent {
+                agent_id: agent_id.to_string(),
+                content_type: "env".to_string(),
+                content,
+                updated_at: now,
+            }) {
+                tracing::warn!(agent_id, err = %e, "agent.define: failed to persist env (non-fatal)");
+            }
+        }
+    }
+}
+
 pub(crate) async fn agent_define_core(
     wstore: Arc<Store>,
     broker: Arc<crate::backend::wps::Broker>,
@@ -2043,6 +2083,7 @@ pub(crate) async fn agent_define_core(
                 if !did_update {
                     return Err("agent.define: update: row was deleted between find and update".to_string());
                 }
+                persist_define_content(&wstore, &updated.id, &cmd, now);
                 let stub_id = if create_stub {
                     match make_stub_idempotent(&wstore, &updated.id, &updated.name, now) {
                         Ok((id, _new)) => Some(id),
@@ -2098,6 +2139,7 @@ pub(crate) async fn agent_define_core(
         persist: 0,
         data: None,
     });
+    persist_define_content(&wstore, &def.id, &cmd, now);
 
     tracing::info!(
         id = %def.id,
