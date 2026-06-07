@@ -70,6 +70,9 @@ import_into() {
     if [ ! -f "$target_db" ]; then
         echo "ERROR: Target DB not found: $target_db" >&2
         echo "       Build and launch version $target_version at least once first." >&2
+        echo "" >&2
+        echo "       If you're using a different channel, pass --channel <name>." >&2
+        echo "       Available channels: $(ls "$AGENTMUX_DIR/channels/" 2>/dev/null | tr '\n' '  ')" >&2
         exit 1
     fi
 
@@ -84,7 +87,9 @@ import_into() {
         [ "$src_db" = "$target_db" ] && continue
 
         if [ -n "$name_filter" ]; then
+            # Escape apostrophes in each name before building the SQL IN list.
             names_in=$(echo "$name_filter" | tr ',' '\n' | \
+                sed "s/'/''/g" | \
                 awk '{printf "%s'\''%s'\''", (NR>1?",":""), $0}')
             where="is_seeded=0 AND name IN ($names_in)"
         else
@@ -117,8 +122,10 @@ import_into() {
                  SELECT * FROM db_agent_definitions WHERE id='$def_id';"
 
             # Create a stub instance so the agent appears in My Agents
-            # (ListRecentSessionsCommand queries instances, not definitions)
-            local stub_id="stub-$(echo "$def_id" | tr -dc 'a-z0-9' | head -c8)-01"
+            # (ListRecentSessionsCommand queries instances, not definitions).
+            # Derive stub_id from the full def_id (UUID, globally unique) so
+            # repeated imports are idempotent and INSERT OR IGNORE is safe.
+            local stub_id="si-$(echo "$def_id" | tr -d '-')"
             sqlite3 "$tgt_win" \
                 "INSERT OR IGNORE INTO db_agent_instances
                    (id, definition_id, parent_instance_id, block_id, session_id,
