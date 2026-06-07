@@ -1989,8 +1989,11 @@ pub(crate) async fn agent_define_core(
                 if !cmd.environment.is_empty() { updated.environment = cmd.environment.clone(); }
                 // name update intentionally omitted — the slug is immutable;
                 // renaming would create a slug mismatch. Use updateagent for renames.
-                wstore.agent_def_update(&mut updated)
+                let did_update = wstore.agent_def_update(&mut updated)
                     .map_err(|e| format!("agent.define: update: {e}"))?;
+                if !did_update {
+                    return Err("agent.define: update: row was deleted between find and update".to_string());
+                }
                 let stub_id = if create_stub {
                     match make_stub_idempotent(&wstore, &updated.id, &updated.name, now) {
                         Ok((id, _new)) => Some(id),
