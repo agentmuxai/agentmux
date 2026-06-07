@@ -98,6 +98,9 @@ import_into() {
         local src_win; src_win=$(win_path "$src_db")
 
         while IFS='|' read -r def_id agent_name; do
+            # Escape single-quotes for safe SQL interpolation (e.g. "Bob's Agent" → "Bob''s Agent")
+            local safe_name="${agent_name//\'/\'\'}"
+
             # Skip if definition already present
             exists=$(db_query "$target_db" \
                 "SELECT count(*) FROM db_agent_definitions WHERE id='$def_id';")
@@ -123,7 +126,7 @@ import_into() {
                     working_directory, display_hidden, started_at, ended_at, created_at)
                  VALUES
                    ('$stub_id', '$def_id', '', '', '', 'stopped',
-                    '', '', '', '$agent_name',
+                    '', '', '', '$safe_name',
                     '', 0, $ts, 0, $ts);"
 
             echo "  OK    $agent_name"

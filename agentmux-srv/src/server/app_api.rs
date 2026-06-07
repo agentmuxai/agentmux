@@ -1847,17 +1847,24 @@ fn register_agent_define(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .unwrap_or_default()
                     .as_millis() as i64;
 
-                // Resolve the slug the new name would get, then look for a
-                // matching user-owned definition.
-                let slug_candidate = derive_slug(&cmd.name);
+                // Look up an existing user-owned definition by name (case-insensitive).
+                // We cannot use derive_slug() for the lookup because agent_def_insert
+                // collision-resolves slugs against ALL existing rows (including seeded
+                // templates), so a prior call with name "Codex CLI" may have been stored
+                // as slug "codex-cli-2" when "codex-cli" was already taken by a template.
+                // Matching on the display name avoids that drift and keeps the call
+                // idempotent regardless of what slug was assigned at insert time.
+                let name_lower = cmd.name.trim().to_lowercase();
                 let all_defs = wstore.agent_def_list()
                     .map_err(|e| format!("agent.define: list defs: {e}"))?;
-                let existing = all_defs.iter().find(|d| d.slug == slug_candidate && d.is_seeded == 0);
+                let existing = all_defs.iter().find(|d| {
+                    d.is_seeded == 0 && d.name.trim().to_lowercase() == name_lower
+                });
 
                 if let Some(def) = existing {
                     match if_exists {
                         "skip" => {
-                            tracing::info!(slug = %slug_candidate, "agent.define: skipped (exists)");
+                            tracing::info!(id = %def.id, slug = %def.slug, "agent.define: skipped (exists)");
                             return Ok(Some(serde_json::to_value(&AgentDefineResult {
                                 definition_id: def.id.clone(),
                                 slug: def.slug.clone(),
@@ -1867,8 +1874,8 @@ fn register_agent_define(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         }
                         "error" => {
                             return Err(format!(
-                                "agent.define: definition with slug '{}' already exists (if_exists=error)",
-                                slug_candidate
+                                "agent.define: definition '{}' already exists (if_exists=error)",
+                                cmd.name.trim()
                             ));
                         }
                         "update" => {
