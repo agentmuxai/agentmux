@@ -18,7 +18,7 @@ use crate::backend::providers;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::*;
 use crate::backend::session_archive;
-use crate::backend::storage::store::{Store, AgentDefinition, AgentInstance, derive_slug};
+use crate::backend::storage::store::{Store, AgentDefinition, AgentInstance};
 
 use super::AppState;
 use crate::server::cli_handlers::resolve_cli_on_path;
@@ -1891,6 +1891,31 @@ fn register_agent_define(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             // mismatch. Use updateagent for renames.
                             wstore.agent_def_update(&mut updated)
                                 .map_err(|e| format!("agent.define: update: {e}"))?;
+                            let stub_id = if create_stub {
+                                let id = format!("stub-{}", uuid::Uuid::new_v4().to_string().replace('-', "").chars().take(12).collect::<String>());
+                                let inst = AgentInstance {
+                                    id: id.clone(),
+                                    definition_id: updated.id.clone(),
+                                    parent_instance_id: String::new(),
+                                    block_id: String::new(),
+                                    session_id: String::new(),
+                                    status: "stopped".to_string(),
+                                    github_context: String::new(),
+                                    started_at: now,
+                                    ended_at: 0,
+                                    created_at: now,
+                                    identity_id: String::new(),
+                                    memory_id: String::new(),
+                                    instance_name: updated.name.clone(),
+                                    working_directory: String::new(),
+                                    display_hidden: false,
+                                };
+                                wstore.instance_create(&inst)
+                                    .map_err(|e| format!("agent.define: create stub instance: {e}"))?;
+                                Some(id)
+                            } else {
+                                None
+                            };
                             broker.publish(crate::backend::wps::WaveEvent {
                                 event: "agents:changed".to_string(),
                                 scopes: vec![],
@@ -1898,12 +1923,12 @@ fn register_agent_define(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 persist: 0,
                                 data: None,
                             });
-                            tracing::info!(id = %updated.id, slug = %updated.slug, "agent.define: updated");
+                            tracing::info!(id = %updated.id, slug = %updated.slug, stub = stub_id.is_some(), "agent.define: updated");
                             return Ok(Some(serde_json::to_value(&AgentDefineResult {
                                 definition_id: updated.id.clone(),
                                 slug: updated.slug.clone(),
                                 action: "updated".to_string(),
-                                instance_stub_id: None,
+                                instance_stub_id: stub_id,
                             }).unwrap()));
                         }
                         other => {
