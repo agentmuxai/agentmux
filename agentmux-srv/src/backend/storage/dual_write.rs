@@ -64,7 +64,7 @@ impl Store {
                 provider, provider_flags, shell, environment,
                 agent_type, agent_bus_id, accounts,
                 auto_start, restart_on_crash, idle_timeout_minutes,
-                slug, branch_label,
+                slug, branch_label, working_directory,
                 created_at, updated_at, is_seeded, user_hidden
              ) VALUES (
                 ?1, ?2, ?3, ?4,
@@ -72,8 +72,8 @@ impl Store {
                 ?7, ?8, ?9, ?10,
                 ?11, ?12, ?13,
                 ?14, ?15, ?16,
-                ?17, ?18,
-                ?19, ?20, ?21, ?22
+                ?17, ?18, ?19,
+                ?20, ?21, ?22, ?23
              )
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
@@ -93,6 +93,7 @@ impl Store {
                 idle_timeout_minutes = excluded.idle_timeout_minutes,
                 slug = excluded.slug,
                 branch_label = excluded.branch_label,
+                working_directory = excluded.working_directory,
                 updated_at = excluded.updated_at,
                 is_seeded = excluded.is_seeded",
             params![
@@ -114,6 +115,7 @@ impl Store {
                 def.idle_timeout_minutes,
                 def.slug,
                 def.branch_label,
+                def.working_directory,
                 def.created_at,
                 def.updated_at,
                 def.is_seeded,
