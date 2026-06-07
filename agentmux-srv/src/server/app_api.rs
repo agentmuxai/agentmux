@@ -2087,7 +2087,13 @@ pub(crate) async fn agent_define_core(
                 if !cmd.provider.is_empty() || !cmd.model.is_empty() { updated.provider = provider.clone(); }
                 // Persist the model as a CLI flag so the agent launches with
                 // the requested model rather than the provider default.
-                if !cmd.model.is_empty() { updated.provider_flags = format!("--model {}", cmd.model); }
+                // If the provider changes but no model is supplied, clear stale
+                // flags from the old provider so the new provider's default is used.
+                if !cmd.model.is_empty() {
+                    updated.provider_flags = format!("--model {}", cmd.model);
+                } else if !cmd.provider.is_empty() {
+                    updated.provider_flags = String::new();
+                }
                 if !cmd.icon.is_empty()     { updated.icon = cmd.icon.clone(); }
                 if !cmd.description.is_empty() { updated.description = cmd.description.clone(); }
                 if !cmd.working_directory.is_empty() { updated.working_directory = cmd.working_directory.clone(); }
