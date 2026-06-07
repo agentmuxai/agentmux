@@ -32,8 +32,9 @@ db_query() { sqlite3 "$1" "$2" 2>/dev/null; }
 # sqlite3 ATTACH fails on long POSIX paths on Windows; convert to Win32
 win_path() { cygpath -w "$1" 2>/dev/null || echo "$1"; }
 
-# ms-epoch timestamp
-now_ms() { date +%s%3N; }
+# ms-epoch timestamp — uses epoch seconds × 1000; %N is a GNU extension and
+# is not available on macOS/BSD, so we avoid it for portability.
+now_ms() { printf '%s000\n' "$(date +%s)"; }
 
 # Find every objects.db under the agentmux dir
 all_dbs() {
@@ -136,7 +137,7 @@ import_into() {
                  INSERT OR IGNORE INTO dst.db_agents
                    (id, name, icon, description,
                     is_template, parent_template_id,
-                    provider, provider_flags, shell, environment,
+                    provider, provider_flags, shell, environment, working_directory,
                     agent_type, agent_bus_id, accounts,
                     auto_start, restart_on_crash, idle_timeout_minutes,
                     slug, branch_label,
@@ -144,7 +145,7 @@ import_into() {
                  SELECT
                    id, name, icon, description,
                    0,  parent_id,
-                   provider, provider_flags, shell, environment,
+                   provider, provider_flags, shell, environment, working_directory,
                    agent_type, agent_bus_id, accounts,
                    auto_start, restart_on_crash, idle_timeout_minutes,
                    slug, branch_label,
