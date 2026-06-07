@@ -126,10 +126,21 @@ import_into() {
             fi
 
             # Copy definition row (always required).
+            # Explicit column list avoids INSERT/SELECT * schema-mismatch failures
+            # when importing across versions with different db_agent_definitions schemas.
             sqlite3 "$src_win" \
                 "ATTACH '$tgt_win' AS dst;
                  INSERT OR IGNORE INTO dst.db_agent_definitions
-                   SELECT * FROM db_agent_definitions WHERE id='$def_id';"
+                   (id, slug, name, icon, provider, description,
+                    working_directory, shell, provider_flags, auto_start, restart_on_crash,
+                    idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
+                    is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden)
+                 SELECT
+                    id, slug, name, icon, provider, description,
+                    working_directory, shell, provider_flags, auto_start, restart_on_crash,
+                    idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
+                    is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden
+                 FROM db_agent_definitions WHERE id='$def_id';"
 
             # Also populate the consolidated db_agents table (schema v4+).
             # agent_def_list() and instance_list() read db_agents; skipping this
