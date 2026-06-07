@@ -507,6 +507,103 @@ impl Store {
         Ok(())
     }
 
+    /// Atomic check-then-insert for `agent.define`.
+    ///
+    /// Looks up an existing user-owned definition by name (case-insensitive)
+    /// or derived slug under the SAME mutex guard that protects the INSERT —
+    /// preventing TOCTOU when two concurrent `agent.define` calls arrive for
+    /// the same name.
+    ///
+    /// Returns:
+    /// - `Ok(Some(def))` — an existing row matched; `agent` was NOT inserted.
+    /// - `Ok(None)` — no match; `agent` was inserted and `agent.slug` now
+    ///   holds the collision-resolved slug.
+    pub fn agent_def_find_or_insert(
+        &self,
+        agent: &mut AgentDefinition,
+    ) -> Result<Option<AgentDefinition>, StoreError> {
+        let name_lower = agent.name.trim().to_lowercase();
+        let derived_slug = derive_slug(agent.name.trim());
+
+        let stamped_updated_at = {
+            let conn = self.conn.lock().unwrap();
+
+            // Check under the same lock to close the TOCTOU window.
+            let mut stmt = conn.prepare(
+                "SELECT id, slug, name, icon, provider, description,
+                        working_directory, shell, provider_flags, auto_start,
+                        restart_on_crash, idle_timeout_minutes, created_at,
+                        agent_type, environment, agent_bus_id, is_seeded,
+                        accounts, parent_id, branch_label, updated_at,
+                        user_hidden
+                 FROM db_agent_definitions
+                 WHERE (lower(trim(name)) = ?1 OR slug = ?2)
+                   AND is_seeded = 0
+                 LIMIT 1",
+            )?;
+            let mut rows = stmt.query_map(
+                params![name_lower, derived_slug],
+                map_agent_definition_row,
+            )?;
+            if let Some(row) = rows.next() {
+                return Ok(Some(row?));
+            }
+            // Drop borrows on `conn` before proceeding to the insert.
+            drop(rows);
+            drop(stmt);
+
+            // Not found — insert under the same lock.
+            let base = if agent.slug.is_empty() {
+                derive_slug(&agent.name)
+            } else {
+                agent.slug.clone()
+            };
+            let mut candidate = base.clone();
+            let mut n: u32 = 2;
+            loop {
+                let count: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM db_agents WHERE slug = ?1",
+                    params![candidate],
+                    |row| row.get(0),
+                )?;
+                if count == 0 {
+                    break;
+                }
+                candidate = format!("{}-{}", base, n);
+                n += 1;
+            }
+            agent.slug = candidate;
+            conn.execute(
+                "INSERT INTO db_agent_definitions
+                   (id, slug, name, icon, provider, description,
+                    working_directory, shell, provider_flags, auto_start, restart_on_crash,
+                    idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
+                    is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden)
+                 VALUES
+                   (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+                    ?17, ?18, ?19, ?20, ?21, ?22)",
+                params![
+                    agent.id, agent.slug, agent.name, agent.icon, agent.provider,
+                    agent.description, agent.working_directory, agent.shell,
+                    agent.provider_flags, agent.auto_start, agent.restart_on_crash,
+                    agent.idle_timeout_minutes, agent.created_at, agent.agent_type,
+                    agent.environment, agent.agent_bus_id, agent.is_seeded,
+                    agent.accounts, agent.parent_id, agent.branch_label,
+                    agent.created_at, // updated_at = created_at for new rows
+                    agent.user_hidden,
+                ],
+            )?;
+            agent.created_at
+            // conn guard drops here; dual-write acquires the lock again below
+        };
+
+        let mut snapshot = agent.clone();
+        snapshot.updated_at = stamped_updated_at;
+        self.agents_dual_write_definition_upsert(&snapshot)?;
+
+        Ok(None)
+    }
+
     /// Set the `user_hidden` flag on a single agent definition. Phase 2
     /// of the two-tier picker (Q2 Decision Y). Returns:
     ///   `Ok(true)`  — row updated.
