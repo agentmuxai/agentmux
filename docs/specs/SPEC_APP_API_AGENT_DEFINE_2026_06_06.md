@@ -45,17 +45,13 @@ This is the **robust, restart-free alternative** to `scripts/import-agents.sh`.
 The token is stripped from the sidecar's own environment at startup and injected only into
 agent subprocesses — it never leaks to child processes that agents spawn.
 
-**HTTP envelope** (`WebCallType` — matches all other `/agentmux/service` calls):
+**HTTP request body** — use `WebCallType` (matches every other `/agentmux/service` call):
 ```json
-{ "service": "agent", "method": "define", "args": [{ ... }] }
+{ "service": "agent", "method": "define", "args": [{ "name": "...", "provider": "claude" }] }
 ```
 
-**WebSocket envelope** (`WshRpc` — for the WebSocket `/ws` path):
-```json
-{ "command": "agent.define", "reqid": "<uuid-v4>", "data": { ... } }
-```
-
-Both routes call the same `agent_define_core` handler and return equivalent results.
+Both the HTTP path and the WebSocket (`wscommand: "rpc"`) path call the same
+`agent_define_core` handler. For in-pane curl scripts, always use the HTTP shape above.
 
 ---
 
@@ -215,11 +211,10 @@ Expected response:
 }
 ```
 
-> **Note on envelope format:** The HTTP `/agentmux/service` endpoint uses the
-> `WebCallType` envelope (`service` + `method` + `args[]`), which matches all other
-> AgentMux HTTP service calls. The WebSocket path uses the `WshRpc` envelope
-> (`command` + `reqid` + `data`). Both routes call the same `agent_define_core`
-> handler and return equivalent results.
+> **Note on envelope format:** The HTTP `/agentmux/service` endpoint uses
+> `{"service":"agent","method":"define","args":[{...}]}` — the same `WebCallType`
+> shape as every other service call. Both the HTTP path and the WebSocket RPC path
+> call the same `agent_define_core` handler and produce equivalent results.
 
 The agent appears in My Agents on all open frontends within ~100ms (broadcast roundtrip),
 without any restart.
