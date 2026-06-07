@@ -539,6 +539,7 @@ impl Store {
                  FROM db_agent_definitions
                  WHERE (lower(trim(name)) = ?1 OR slug = ?2)
                    AND is_seeded = 0
+                 ORDER BY CASE WHEN lower(trim(name)) = ?1 THEN 0 ELSE 1 END
                  LIMIT 1",
             )?;
             let mut rows = stmt.query_map(
