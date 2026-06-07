@@ -561,10 +561,10 @@ impl Store {
             };
             let mut candidate = base.clone();
             let mut n: u32 = 2;
-            // Use db_agents (not db_agent_definitions) to match agent_def_insert
-            // at line 440: db_agents surfaces template-instance projection rows
-            // that have no db_agent_definitions entry, making this a strict
-            // superset check that prevents slug collisions in the consolidated table.
+            // Query db_agents (the superset view) for slug uniqueness — matches
+            // agent_def_insert at line 440. Template-instance projections add rows to
+            // db_agents without a corresponding db_agent_definitions entry; checking
+            // only db_agent_definitions would miss those slugs and allow collisions.
             loop {
                 let count: i64 = conn.query_row(
                     "SELECT COUNT(*) FROM db_agents WHERE slug = ?1",
