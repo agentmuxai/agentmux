@@ -181,6 +181,67 @@
         "network:lan_discovery": {
           "type": "boolean",
           "description": "Enable mDNS-based discovery of other AgentMux instances on the same host and LAN. Defaults to false to avoid the Windows Firewall prompt; toggle from the HostPopover panel. See specs/lan-discovery-toggle.md."
+        },
+        "notify:*": {
+          "type": "boolean"
+        },
+        "notify:sounds:enabled": {
+          "type": "boolean",
+          "description": "Master enable for notification sounds. Default true. See docs/specs/SPEC_SOUND_NOTIFICATIONS_2026_06_05.md."
+        },
+        "notify:sounds:volume": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.6,
+          "description": "Notification sound volume, 0.0 (silent) to 1.0 (full). Default 0.6."
+        },
+        "notify:sounds:suppresswhenfocused": {
+          "type": "boolean",
+          "default": true,
+          "description": "Suppress a pane's sound when that pane is focused AND the OS window is in foreground (the user can already see the visual signal)."
+        },
+        "notify:sound:agent.turn.complete": {
+          "type": "boolean",
+          "description": "Play a sound when an agent turn completes normally. Default true."
+        },
+        "notify:sound:agent.turn.error": {
+          "type": "boolean",
+          "description": "Play a sound when an agent turn ends with an error (errored, submit-timed-out, stream-stalled). Default true."
+        },
+        "notify:sound:agent.turn.interrupted": {
+          "type": "boolean",
+          "description": "Play a sound when an agent turn is stopped or interrupted. Default true."
+        },
+        "notify:sound:agent.message.accepted": {
+          "type": "boolean",
+          "description": "Play a sound when the backend accepts a queued pending message. Default true."
+        },
+        "notify:sound:agent.message.rejected": {
+          "type": "boolean",
+          "description": "Play a sound when the backend rejects a queued pending message. Default true."
+        },
+        "notify:sound:agent.stream.stalled": {
+          "type": "boolean",
+          "description": "Play a sound when the agent stream stalls (diagnostic — fires before the bounded watchdog forces an exit). Default true."
+        },
+        "notify:tooltones:enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Play a subliminal synth tone for every agent tool call. Default true. See docs/specs/SPEC_AGENT_TOOL_CALL_TONES_2026_06_05.md."
+        },
+        "notify:tooltones:volume": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.15,
+          "description": "Independent gain for tool-call tones, 0.0 (silent) to 1.0. Layered below the shared master gain — turning the master off silences both. Default 0.15."
+        },
+        "notify:tooltones:scope": {
+          "type": "string",
+          "enum": ["all", "focused"],
+          "default": "all",
+          "description": "Which panes play tool-call tones. 'all' (default) plays for every pane in every window; 'focused' plays only for the focused pane in the focused OS window."
         }
       },
       "additionalProperties": false,

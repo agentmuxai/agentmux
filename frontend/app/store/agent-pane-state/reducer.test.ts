@@ -101,6 +101,11 @@ describe("agent-pane-state reducer", () => {
             expect(r.state.sessionStats).toEqual({ input_tokens: 50, output_tokens: 200 });
             expect(r.events[0]).toMatchObject({
                 type: "turn-ended",
+                // outcome is "stopped" because RequestStop put the phase
+                // into Interrupting before TurnEnd ran. Sound subsystem
+                // (SPEC_SOUND_NOTIFICATIONS_2026_06_05.md §3.2) reads
+                // outcome directly from the event without snapshotting.
+                outcome: "stopped",
                 statsMerged: true,
                 // stoppingCleared still carries the audit signal — true
                 // iff the turn ended while in Interrupting (PR G:
