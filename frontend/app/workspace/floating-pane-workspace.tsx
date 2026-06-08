@@ -39,7 +39,7 @@
  */
 
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
-import { isWindows } from "@/util/platformutil";
+import { isMacOS, isWindows } from "@/util/platformutil";
 import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { CenteredDiv } from "@/app/element/quickelems";
@@ -154,6 +154,18 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         // tryRedockAtCursor in onMouseUp so a plain header click (no pixel
         // motion) doesn't false-redock when the floater overlaps another window.
         let hasMoved = false;
+        // macOS JS-driven drag state: macOS libcef lacks the patched
+        // BeginWindowDrag, so we fall back to get/set_window_position polling
+        // (same approach as pre-PR #1276). These are only read on macOS.
+        let macClickScreenX = 0;
+        let macClickScreenY = 0;
+        let macInitWinX = 0;
+        let macInitWinY = 0;
+        let macLatestScreenX = 0;
+        let macLatestScreenY = 0;
+        let macSetPosInFlight = false;
+        let macPendingPos: { x: number; y: number } | null = null;
+        let macMouseDownId = 0;
         // redockInProgress is a signal at component scope (above this onMount)
         // so createEffect re-runs when it changes.
         // Sentinel for the listenEvent .then() race: if the component unmounts
@@ -294,6 +306,24 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             });
         }
 
+        const macSendPos = (x: number, y: number): void => {
+            if (macSetPosInFlight) {
+                macPendingPos = { x, y };
+                return;
+            }
+            macSetPosInFlight = true;
+            invokeCommand("set_window_position", { x, y, label })
+                .catch(() => {})
+                .finally(() => {
+                    macSetPosInFlight = false;
+                    if (macPendingPos) {
+                        const { x: nx, y: ny } = macPendingPos;
+                        macPendingPos = null;
+                        macSendPos(nx, ny);
+                    }
+                });
+        };
+
         const onMouseDown = (e: MouseEvent) => {
             if (e.button !== 0) return;
             const target = e.target as HTMLElement | null;
@@ -306,8 +336,38 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             // §"Tear-off conflict").
             e.preventDefault();
 
+            if (isMacOS()) {
+                // macOS fallback: BeginWindowDrag requires a patched libcef that
+                // isn't available in dev builds. Use JS-driven get/set_window_position
+                // polling instead (restores the pre-PR #1276 macOS behaviour).
+                macMouseDownId += 1;
+                const myId = macMouseDownId;
+                macClickScreenX = e.screenX;
+                macClickScreenY = e.screenY;
+                macLatestScreenX = e.screenX;
+                macLatestScreenY = e.screenY;
+                hasMoved = false;
+                pendingRedockCoords = null;
+                invokeCommand<{ x: number; y: number }>("get_window_position", { label })
+                    .then((pos) => {
+                        if (myId !== macMouseDownId) return;
+                        macInitWinX = pos.x;
+                        macInitWinY = pos.y;
+                        dragging = true;
+                        if (macLatestScreenX !== macClickScreenX || macLatestScreenY !== macClickScreenY) {
+                            const scale = posScale();
+                            macSendPos(
+                                macInitWinX + Math.round((macLatestScreenX - macClickScreenX) * scale),
+                                macInitWinY + Math.round((macLatestScreenY - macClickScreenY) * scale),
+                            );
+                        }
+                    })
+                    .catch(() => {});
+                return;
+            }
+
             // Hand the drag to the host. On Windows: Win32BeginMoveTask manual
-            // loop (zero per-move IPC, no DPR math). On macOS/Linux:
+            // loop (zero per-move IPC, no DPR math). On Linux:
             // CefWindow::BeginWindowDrag via the patched libcef.
             // Host owns motion + capture from here; renderer sees mouseup via
             // the dispatched WM_LBUTTONUP balance (PR #1181 §5.1).
@@ -318,6 +378,9 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         };
 
         const onMouseUp = (e: MouseEvent) => {
+            // Invalidate any in-flight macOS get_window_position IPC so a race
+            // where mouseup fires before the promise resolves doesn't arm dragging.
+            if (isMacOS()) macMouseDownId += 1;
             if (!dragging) return;
             dragging = false;
             invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
@@ -327,10 +390,9 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 // tryRedockAtCursor — no ordering race with this event.
                 pendingRedockCoords = { x: e.screenX, y: e.screenY };
             } else if (hasMoved) {
-                // Non-Windows: BeginWindowDrag may deliver mousemove+mouseup.
-                // Only attempt redock if onMouseMove confirmed actual motion —
-                // prevents a plain header click (no mousemove → hasMoved=false)
-                // from false-redocking when the floater overlaps another window.
+                // Non-Windows: on macOS the JS-driven path fires mousemove+mouseup
+                // normally. On Linux, BeginWindowDrag may deliver them. Only
+                // attempt redock if onMouseMove confirmed actual motion.
                 void tryRedockAtCursor(e.screenX, e.screenY);
             }
         };
@@ -412,8 +474,23 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             const HOVER_THROTTLE_MS = 50;
             let lastHoverAt = 0;
             const onMouseMove = (e: MouseEvent) => {
+                if (isMacOS()) {
+                    // Track latest coords even before dragging is armed — needed for
+                    // catch-up in onMouseDown's get_window_position .then() callback.
+                    macLatestScreenX = e.screenX;
+                    macLatestScreenY = e.screenY;
+                }
                 if (!dragging) return;
                 hasMoved = true;
+                if (isMacOS()) {
+                    // JS-driven position update — compute delta from mousedown origin
+                    // and call set_window_position with a one-in-flight + coalesce guard.
+                    const scale = posScale();
+                    macSendPos(
+                        macInitWinX + Math.round((e.screenX - macClickScreenX) * scale),
+                        macInitWinY + Math.round((e.screenY - macClickScreenY) * scale),
+                    );
+                }
                 const now = performance.now();
                 if (now - lastHoverAt < HOVER_THROTTLE_MS) return;
                 lastHoverAt = now;
