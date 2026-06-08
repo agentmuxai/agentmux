@@ -165,6 +165,10 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         let macSetPosInFlight = false;
         let macPendingPos: { x: number; y: number } | null = null;
         let macMouseDownId = 0;
+        // Per-drag session counter: incremented on every drag start and on cancel.
+        // Guards the update_floating_redock_hover IPC .then() against stale responses
+        // from a prior drag session arriving during a new drag (or after a cancel).
+        let dragSessionId = 0;
         // Dwell + velocity gate: prevents accidental redock when the cursor
         // transits over another window at speed. Arms hover only after the cursor
         // stays near the same target window for REDOCK_DWELL_MS ms at
@@ -375,6 +379,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 // isn't available in dev builds. Use JS-driven get/set_window_position
                 // polling instead (restores the pre-PR #1276 macOS behaviour).
                 macMouseDownId += 1;
+                dragSessionId += 1;
                 const myId = macMouseDownId;
                 macClickScreenX = e.screenX;
                 macClickScreenY = e.screenY;
@@ -442,6 +447,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             dwellWinLastSampleAt = 0;
             dwellWinLastSampleX = 0;
             dwellWinLastSampleY = 0;
+            dragSessionId += 1;
         };
 
         const onMouseUp = (e: MouseEvent) => {
@@ -504,6 +510,8 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             "window_drag_cancelled",
             (ev) => {
                 if (!ev.label || ev.label === label) {
+                    if (isMacOS()) macMouseDownId += 1;
+                    dragSessionId += 1;
                     dragging = false;
                     hasMoved = false;
                     pendingRedockCoords = null;
@@ -514,6 +522,9 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     dwellCurrentConfirmedAt = null;
                     dwellCurrentHoverTarget = null;
                     dwellHoverTargetFirstSeenAt = null;
+                    dwellLastMoveSampleAt = 0;
+                    dwellLastMoveSampleX = 0;
+                    dwellLastMoveSampleY = 0;
                     dwellWinLastSampleAt = 0;
                     dwellWinLastSampleX = 0;
                     dwellWinLastSampleY = 0;
@@ -703,11 +714,13 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 const scale = posScale();
                 const sourceLabel = windowLabel();
                 if (!sourceLabel) return;
+                const capturedSessionId = dragSessionId;
                 invokeCommand<{ target_label?: string | null }>("update_floating_redock_hover", {
                     source_label: sourceLabel,
                     x: Math.round(e.screenX * scale),
                     y: Math.round(e.screenY * scale),
                 }).then((res) => {
+                    if (capturedSessionId !== dragSessionId) return;
                     const newTarget = res?.target_label ?? null;
                     if (newTarget !== dwellLastArmedTarget) {
                         // Target changed — disarm and restart both dwell clocks.
