@@ -548,7 +548,9 @@ const ActionWidgets = (): JSX.Element => {
                 </Show>
             </div>
 
-            {/* Mirror 2: icon-only — measures tier 2→3 threshold (no More button). */}
+            {/* Mirror 2: icon-only — measures tier 2→3 threshold.
+                Includes the More button when unpinned widgets exist because
+                the tier-2 bar still shows it, so its width counts. */}
             <div ref={iconMirrorRef} class="action-widgets action-widgets--measure" aria-hidden="true">
                 <For each={pinnedWidgets()}>
                     {({ widget }) => (
@@ -557,6 +559,12 @@ const ActionWidgets = (): JSX.Element => {
                         </div>
                     )}
                 </For>
+                <Show when={moreWidgets().length > 0}>
+                    <div class="action-widget-more-btn">
+                        <i class="fa-solid fa-ellipsis" />
+                        <i class="fa-solid fa-chevron-down action-widget-more-chevron" />
+                    </div>
+                </Show>
             </div>
 
             <Portal>
