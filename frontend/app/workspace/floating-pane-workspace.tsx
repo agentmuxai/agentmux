@@ -184,6 +184,9 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         let dwellSlowSince: number | null = null;
         // Per-target dwell (non-Windows): reset arming when IPC returns a new target.
         let dwellLastArmedTarget: string | null = null;
+        // Non-Windows: wall-clock time when IPC first confirmed the current target.
+        // Used as fallback when cursor holds still after first confirmation (no 2nd IPC).
+        let dwellCurrentConfirmedAt: number | null = null;
         // Per-target dwell (Windows): driven by floating-redock:hover-state events.
         let dwellCurrentHoverTarget: string | null = null;
         let dwellHoverTargetFirstSeenAt: number | null = null;
@@ -386,6 +389,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 dwellLastMoveSampleY = 0;
                 dwellSlowSince = null;
                 dwellLastArmedTarget = null;
+                dwellCurrentConfirmedAt = null;
                 dwellCurrentHoverTarget = null;
                 dwellHoverTargetFirstSeenAt = null;
                 dwellWinLastSampleAt = 0;
@@ -432,6 +436,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             dwellLastMoveSampleY = 0;
             dwellSlowSince = null;
             dwellLastArmedTarget = null;
+            dwellCurrentConfirmedAt = null;
             dwellCurrentHoverTarget = null;
             dwellHoverTargetFirstSeenAt = null;
             dwellWinLastSampleAt = 0;
@@ -470,7 +475,8 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 // tryRedockAtCursorInner handles the no-target case gracefully.
                 const nowMs = performance.now();
                 const armed = hoverArmed ||
-                    (dwellSlowSince !== null && nowMs - dwellSlowSince >= REDOCK_DWELL_MS);
+                    (dwellCurrentConfirmedAt !== null &&
+                     nowMs - dwellCurrentConfirmedAt >= REDOCK_DWELL_MS);
                 hoverArmed = false;
                 if (armed) void tryRedockAtCursor(e.screenX, e.screenY);
             }
@@ -505,6 +511,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     pendingRedockArmed = false;
                     dwellSlowSince = null;
                     dwellLastArmedTarget = null;
+                    dwellCurrentConfirmedAt = null;
                     dwellCurrentHoverTarget = null;
                     dwellHoverTargetFirstSeenAt = null;
                     dwellWinLastSampleAt = 0;
@@ -543,7 +550,8 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     (dwellCurrentHoverTarget !== null &&
                      dwellHoverTargetFirstSeenAt !== null &&
                      nowMs - dwellHoverTargetFirstSeenAt >= REDOCK_DWELL_MS) ||
-                    (dwellSlowSince !== null && nowMs - dwellSlowSince >= REDOCK_DWELL_MS);
+                    (dwellCurrentConfirmedAt !== null &&
+                     nowMs - dwellCurrentConfirmedAt >= REDOCK_DWELL_MS);
                 hoverArmed = false;
                 pendingRedockArmed = false;
                 // Always clear hover — safety net for non-Windows where onMouseUp
@@ -605,12 +613,8 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                                 // matching the non-Windows path (line 671).
                                 dwellCurrentHoverTarget = null;
                                 dwellHoverTargetFirstSeenAt = null;
-                                if (hoverArmed) {
-                                    hoverArmed = false;
-                                    invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
-                                } else {
-                                    hoverArmed = false;
-                                }
+                                hoverArmed = false;
+                                invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
                                 dwellWinLastSampleAt = now;
                                 dwellWinLastSampleX = cssCurX;
                                 dwellWinLastSampleY = cssCurY;
@@ -626,7 +630,9 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     if (newTarget !== dwellCurrentHoverTarget) {
                         dwellCurrentHoverTarget = newTarget;
                         dwellHoverTargetFirstSeenAt = newTarget !== null ? now : null;
+                        const wasArmed = hoverArmed;
                         hoverArmed = false;
+                        if (wasArmed) invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
                     } else if (
                         newTarget !== null &&
                         dwellHoverTargetFirstSeenAt !== null &&
@@ -703,11 +709,15 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 }).then((res) => {
                     const newTarget = res?.target_label ?? null;
                     if (newTarget !== dwellLastArmedTarget) {
-                        // Target changed — disarm and restart the dwell clock.
-                        // Preserving dwellSlowSince would let a slow transit across an
-                        // intermediate window pre-satisfy the 180ms dwell for the
-                        // destination, bypassing the gate (codex P2).
+                        // Target changed — disarm and restart both dwell clocks.
+                        // dwellSlowSince reset prevents a slow transit across an
+                        // intermediate window from pre-satisfying the dwell for the
+                        // destination (codex P2). dwellCurrentConfirmedAt records when
+                        // this target was first confirmed so the mouseup fallback can
+                        // check "180ms since first confirmation" rather than "180ms
+                        // since any slow motion" (prevents desktop-transit false arm).
                         dwellLastArmedTarget = newTarget;
+                        dwellCurrentConfirmedAt = newTarget !== null ? performance.now() : null;
                         dwellSlowSince = null;
                         if (hoverArmed) {
                             hoverArmed = false;
