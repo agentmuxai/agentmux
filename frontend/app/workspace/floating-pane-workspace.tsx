@@ -17,16 +17,15 @@
  *  - no extra title bar — the floater renders the block's standard
  *    `BlockFrame_Header` (33 CSS px, `--header-height` in
  *    `theme.scss:97`) as its sole chrome.
- *  - window drag is **host-driven**, installed by the `onMount` below:
- *    a targeted document mousedown listener scoped to
- *    `[data-role="block-header"]` fires `start_window_drag` IPC on all
- *    platforms. On Windows the host runs `Win32BeginMoveTask` (manual
- *    SetCapture + GetMessage + SetWindowPos loop, zero per-move IPC).
- *    On macOS/Linux the host calls `CefWindow::BeginWindowDrag`. The
- *    renderer's `mousemove` listener is retained on non-Windows to emit
- *    `update_floating_redock_hover` (drop-target highlight) while the
- *    host owns capture; on Windows this is emitted from within
- *    `Win32BeginMoveTask` (§3.2 of
+ *  - window drag is **host-driven on Windows/Linux**, installed by the `onMount` below.
+ *    On Windows the host runs `Win32BeginMoveTask` (manual SetCapture +
+ *    GetMessage + SetWindowPos loop, zero per-move IPC). On Linux the host
+ *    calls `CefWindow::BeginWindowDrag` via the patched libcef. On macOS the
+ *    libcef is unpatched so drag falls back to JS-driven `get/set_window_position`
+ *    polling (same approach as pre-PR #1276). The renderer's `mousemove`
+ *    listener is retained on non-Windows to emit `update_floating_redock_hover`
+ *    (drop-target highlight) and, on macOS, to drive position updates; on
+ *    Windows this is emitted from within `Win32BeginMoveTask` (§3.2 of
  *    `docs/specs/SPEC_PANE_RESIZE_AND_FLOATER_DRAG_NATIVE_LOOP_2026_06_05.md`).
  *    `preventDefault` on mousedown blocks the HTML5 dragstart
  *    pragmatic-dnd would otherwise have used, suppressing a "double
@@ -123,13 +122,13 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         }
     });
 
-    // Pane-header drag — host-driven window move (PR #1276 / spec
-    // SPEC_PANE_RESIZE_AND_FLOATER_DRAG_NATIVE_LOOP_2026_06_05). A
-    // targeted mousedown listener fires `start_window_drag` IPC on all
-    // platforms; the host owns motion from there. On macOS/Linux a
-    // `mousemove` listener emits `update_floating_redock_hover` so the
-    // drop-target highlight stays live (on Windows that emission lives
-    // inside Win32BeginMoveTask while the renderer's mousemove is dark).
+    // Pane-header drag — host-driven on Windows/Linux; JS-driven on macOS.
+    // Windows: Win32BeginMoveTask (PR #1276). Linux: CefWindow::BeginWindowDrag
+    // via patched libcef. macOS: get/set_window_position polling (patched libcef
+    // not available in dev builds — restored from pre-PR #1276). On macOS/Linux
+    // a `mousemove` listener emits `update_floating_redock_hover` for the
+    // drop-target highlight, and on macOS also drives set_window_position; on
+    // Windows that emission lives inside Win32BeginMoveTask.
     //
     // `preventDefault()` on the qualifying mousedown is load-bearing:
     // it suppresses the HTML5 dragstart pragmatic-dnd would otherwise
@@ -306,7 +305,11 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             });
         }
 
-        const macSendPos = (x: number, y: number): void => {
+        // dragId guards the drain: if a new mousedown starts (incrementing
+        // macMouseDownId) while a set_window_position is in-flight, the old
+        // drain's .finally discards macPendingPos instead of applying a delta
+        // from the previous drag's origin to the new drag's macInitWinX/Y.
+        const macSendPos = (dragId: number, x: number, y: number): void => {
             if (macSetPosInFlight) {
                 macPendingPos = { x, y };
                 return;
@@ -316,10 +319,12 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 .catch(() => {})
                 .finally(() => {
                     macSetPosInFlight = false;
-                    if (macPendingPos) {
+                    if (macPendingPos && dragId === macMouseDownId) {
                         const { x: nx, y: ny } = macPendingPos;
                         macPendingPos = null;
-                        macSendPos(nx, ny);
+                        macSendPos(dragId, nx, ny);
+                    } else {
+                        macPendingPos = null;
                     }
                 });
         };
@@ -353,14 +358,21 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                         if (myId !== macMouseDownId) return;
                         macInitWinX = pos.x;
                         macInitWinY = pos.y;
-                        dragging = true;
-                        if (macLatestScreenX !== macClickScreenX || macLatestScreenY !== macClickScreenY) {
+                        const movedDuringIPC =
+                            macLatestScreenX !== macClickScreenX ||
+                            macLatestScreenY !== macClickScreenY;
+                        if (movedDuringIPC) {
+                            // Motion happened before dragging was armed; set
+                            // hasMoved so onMouseUp's gate allows tryRedockAtCursor.
+                            hasMoved = true;
                             const scale = posScale();
                             macSendPos(
+                                myId,
                                 macInitWinX + Math.round((macLatestScreenX - macClickScreenX) * scale),
                                 macInitWinY + Math.round((macLatestScreenY - macClickScreenY) * scale),
                             );
                         }
+                        dragging = true;
                     })
                     .catch(() => {});
                 return;
@@ -487,6 +499,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     // and call set_window_position with a one-in-flight + coalesce guard.
                     const scale = posScale();
                     macSendPos(
+                        macMouseDownId,
                         macInitWinX + Math.round((e.screenX - macClickScreenX) * scale),
                         macInitWinY + Math.round((e.screenY - macClickScreenY) * scale),
                     );
