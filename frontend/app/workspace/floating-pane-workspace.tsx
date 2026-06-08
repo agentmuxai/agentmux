@@ -17,16 +17,20 @@
  *  - no extra title bar — the floater renders the block's standard
  *    `BlockFrame_Header` (33 CSS px, `--header-height` in
  *    `theme.scss:97`) as its sole chrome.
- *  - window drag is **host-driven**, installed by the `onMount` below:
+ *  - window drag is platform-specific, installed by the `onMount` below:
  *    a targeted document mousedown listener scoped to
- *    `[data-role="block-header"]` fires `start_window_drag` IPC on all
- *    platforms. On Windows the host runs `Win32BeginMoveTask` (manual
+ *    `[data-role="block-header"]` initiates drag on all platforms.
+ *    Windows: `start_window_drag` IPC → `Win32BeginMoveTask` (manual
  *    SetCapture + GetMessage + SetWindowPos loop, zero per-move IPC).
- *    On macOS/Linux the host calls `CefWindow::BeginWindowDrag`. The
- *    renderer's `mousemove` listener is retained on non-Windows to emit
- *    `update_floating_redock_hover` (drop-target highlight) while the
- *    host owns capture; on Windows this is emitted from within
- *    `Win32BeginMoveTask` (§3.2 of
+ *    macOS: `start_window_drag` IPC → `CefWindow::BeginWindowDrag`
+ *    (performWindowDragWithEvent: is a blocking modal run loop that still
+ *    delivers DOM events to the renderer — hover ghosts and mouseup redock
+ *    work fine).
+ *    Linux: JS-driven positioning via `set_window_position` per-move.
+ *    BeginWindowDrag → _NET_WM_MOVERESIZE kills DOM events (compositor
+ *    owns all input), breaking hover ghosts and redock. JS-driven keeps
+ *    DOM events live. `update_floating_redock_hover` is emitted by the
+ *    `mousemove` listener on non-Windows (§3.2 of
  *    `docs/specs/SPEC_PANE_RESIZE_AND_FLOATER_DRAG_NATIVE_LOOP_2026_06_05.md`).
  *    `preventDefault` on mousedown blocks the HTML5 dragstart
  *    pragmatic-dnd would otherwise have used, suppressing a "double
@@ -39,7 +43,7 @@
  */
 
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
-import { isWindows } from "@/util/platformutil";
+import { isLinux, isWindows } from "@/util/platformutil";
 import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { CenteredDiv } from "@/app/element/quickelems";
@@ -154,6 +158,16 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         // tryRedockAtCursor in onMouseUp so a plain header click (no pixel
         // motion) doesn't false-redock when the floater overlaps another window.
         let hasMoved = false;
+        // Linux JS-driven drag state. BeginWindowDrag → _NET_WM_MOVERESIZE
+        // gives the compositor exclusive input ownership — DOM mousemove/mouseup
+        // never fire, so hover ghosts and redock don't work. Fix: JS-driven
+        // positioning (same as edge-resize) keeps DOM events live. We save the
+        // window origin and cursor anchor at dragstart; each mousemove calls
+        // set_window_position with the updated origin.
+        let linuxDragStartWindowX: number | null = null;
+        let linuxDragStartWindowY: number | null = null;
+        let linuxDragStartCursorX = 0;
+        let linuxDragStartCursorY = 0;
         // redockInProgress is a signal at component scope (above this onMount)
         // so createEffect re-runs when it changes.
         // Sentinel for the listenEvent .then() race: if the component unmounts
@@ -306,20 +320,45 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             // §"Tear-off conflict").
             e.preventDefault();
 
-            // Hand the drag to the host. On Windows: Win32BeginMoveTask manual
-            // loop (zero per-move IPC, no DPR math). On macOS/Linux:
-            // CefWindow::BeginWindowDrag via the patched libcef.
-            // Host owns motion + capture from here; renderer sees mouseup via
-            // the dispatched WM_LBUTTONUP balance (PR #1181 §5.1).
-            invokeCommand("start_window_drag", { label }).catch(() => {});
             dragging = true;
             hasMoved = false;
             pendingRedockCoords = null;
+
+            if (isLinux()) {
+                // Linux: JS-driven drag. BeginWindowDrag → _NET_WM_MOVERESIZE
+                // hands exclusive input to the X11 compositor — DOM mousemove/
+                // mouseup never fire, so hover ghosts (update_floating_redock_hover)
+                // and the hasMoved gate for tryRedockAtCursor are both broken.
+                // Use set_window_position per-move instead (same as edge-resize),
+                // which keeps DOM events live throughout the drag.
+                const startCursorX = e.screenX;
+                const startCursorY = e.screenY;
+                // Fetch window origin async; moves only start after the first
+                // mousemove so the async gap doesn't miss any motion.
+                invokeCommand<{ x: number; y: number; width: number; height: number }>(
+                    "get_window_rect",
+                    { label },
+                )
+                    .then((r) => {
+                        linuxDragStartWindowX = r.x;
+                        linuxDragStartWindowY = r.y;
+                        linuxDragStartCursorX = startCursorX;
+                        linuxDragStartCursorY = startCursorY;
+                    })
+                    .catch(() => {});
+            } else {
+                // Windows: Win32BeginMoveTask manual loop (zero per-move IPC).
+                // macOS: CefWindow::BeginWindowDrag (performWindowDragWithEvent:
+                // is a blocking modal loop that still delivers DOM events to the
+                // renderer — mousemove hover and mouseup redock both work).
+                invokeCommand("start_window_drag", { label }).catch(() => {});
+            }
         };
 
         const onMouseUp = (e: MouseEvent) => {
             if (!dragging) return;
             dragging = false;
+            linuxDragStartWindowX = null;
             invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
             if (isWindows()) {
                 // On Windows: save coords; window_drag_ended carries
@@ -360,6 +399,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     dragging = false;
                     hasMoved = false;
                     pendingRedockCoords = null;
+                    linuxDragStartWindowX = null;
                 }
             },
         );
@@ -403,10 +443,13 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             },
         );
 
-        // On macOS/Linux, BeginWindowDrag may still deliver mousemove to the
-        // renderer (F3 verification pending). Keep the hover emit here for
-        // those platforms — on Windows Win32BeginMoveTask handles it while
-        // the renderer's mousemove is dark (§3.2 / §3.3 of spec).
+        // Non-Windows mousemove: hover ghost updates + (Linux) JS-driven move.
+        // macOS: BeginWindowDrag (performWindowDragWithEvent:) is a blocking
+        //   modal run loop — DOM mousemove continues firing → hover works.
+        // Linux: BeginWindowDrag → _NET_WM_MOVERESIZE kills DOM events (F3
+        //   confirmed: no mousemove during native drag). JS-driven path above
+        //   skips BeginWindowDrag entirely, so this handler drives both the
+        //   window position and the hover state.
         let unlistenMouseMove: (() => void) | null = null;
         if (!isWindows()) {
             const HOVER_THROTTLE_MS = 50;
@@ -414,6 +457,17 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             const onMouseMove = (e: MouseEvent) => {
                 if (!dragging) return;
                 hasMoved = true;
+                // Linux: move the window to follow the cursor. The start rect is
+                // fetched async in onMouseDown; skip moves until it arrives.
+                if (isLinux() && linuxDragStartWindowX !== null) {
+                    const dx = e.screenX - linuxDragStartCursorX;
+                    const dy = e.screenY - linuxDragStartCursorY;
+                    invokeCommand("set_window_position", {
+                        label,
+                        x: Math.round(linuxDragStartWindowX + dx),
+                        y: Math.round(linuxDragStartWindowY + dy),
+                    }).catch(() => {});
+                }
                 const now = performance.now();
                 if (now - lastHoverAt < HOVER_THROTTLE_MS) return;
                 lastHoverAt = now;
