@@ -451,14 +451,26 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 // may arrive before or after DOM mouseup (separate CEF IPC channels).
                 // If ended arrives first: hoverArmed is still true and wins.
                 // If mouseup arrives first: pendingRedockArmed carries it for ended.
-                pendingRedockArmed = hoverArmed;
+                // Point-in-time fallback: if user held still over a target until the
+                // dwell threshold elapsed but no further hover-state event fired to set
+                // hoverArmed, check the wall-clock directly at mouseup time.
+                const nowMs = performance.now();
+                pendingRedockArmed = hoverArmed ||
+                    (dwellCurrentHoverTarget !== null &&
+                     dwellHoverTargetFirstSeenAt !== null &&
+                     nowMs - dwellHoverTargetFirstSeenAt >= REDOCK_DWELL_MS);
                 hoverArmed = false;
                 pendingRedockCoords = { x: e.screenX, y: e.screenY };
             } else if (hasMoved) {
                 // Non-Windows: on macOS the JS-driven path fires mousemove+mouseup
                 // normally. On Linux, BeginWindowDrag may deliver them. Only
                 // attempt redock if the dwell gate armed and motion confirmed.
-                const armed = hoverArmed;
+                // Point-in-time fallback: if cursor went slow REDOCK_DWELL_MS ago and
+                // then held still (no more mousemove events), fire redock at release;
+                // tryRedockAtCursorInner handles the no-target case gracefully.
+                const nowMs = performance.now();
+                const armed = hoverArmed ||
+                    (dwellSlowSince !== null && nowMs - dwellSlowSince >= REDOCK_DWELL_MS);
                 hoverArmed = false;
                 if (armed) void tryRedockAtCursor(e.screenX, e.screenY);
             }
@@ -522,7 +534,16 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 // this event can arrive before or after DOM mouseup (separate CEF IPC
                 // channels). Before mouseup: hoverArmed is still true. After mouseup:
                 // onMouseUp already moved it to pendingRedockArmed.
-                const armedAtEnd = pendingRedockArmed || hoverArmed;
+                // Point-in-time fallback: if the user held still over a target until
+                // the dwell elapsed but no event fired to set hoverArmed (or mouseup
+                // raced ahead and set pendingRedockArmed via the fallback there), the
+                // wall-clock check here covers the window_drag_ended ordering leg.
+                const nowMs = performance.now();
+                const armedAtEnd = pendingRedockArmed || hoverArmed ||
+                    (dwellCurrentHoverTarget !== null &&
+                     dwellHoverTargetFirstSeenAt !== null &&
+                     nowMs - dwellHoverTargetFirstSeenAt >= REDOCK_DWELL_MS) ||
+                    (dwellSlowSince !== null && nowMs - dwellSlowSince >= REDOCK_DWELL_MS);
                 hoverArmed = false;
                 pendingRedockArmed = false;
                 // Always clear hover — safety net for non-Windows where onMouseUp
@@ -674,11 +695,12 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 }).then((res) => {
                     const newTarget = res?.target_label ?? null;
                     if (newTarget !== dwellLastArmedTarget) {
-                        // Target changed — disarm. Don't reset dwellSlowSince: the
-                        // cursor has already qualified for ≥180ms, so the new target
-                        // will arm on the very next throttled IPC that returns the
-                        // same label rather than requiring a fresh 180ms wait.
+                        // Target changed — disarm and restart the dwell clock.
+                        // Preserving dwellSlowSince would let a slow transit across an
+                        // intermediate window pre-satisfy the 180ms dwell for the
+                        // destination, bypassing the gate (codex P2).
                         dwellLastArmedTarget = newTarget;
+                        dwellSlowSince = null;
                         if (hoverArmed) {
                             hoverArmed = false;
                             invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
