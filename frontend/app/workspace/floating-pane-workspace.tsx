@@ -165,6 +165,28 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         let macSetPosInFlight = false;
         let macPendingPos: { x: number; y: number } | null = null;
         let macMouseDownId = 0;
+        // Dwell + velocity gate: prevents accidental redock when the cursor
+        // transits over another window at speed. Arms hover only after the cursor
+        // stays near the same target window for REDOCK_DWELL_MS ms at
+        // ≤ REDOCK_VELOCITY_PX_PER_S CSS-px/s. All vars hoisted to drag scope so
+        // a second drag never inherits state from the first.
+        const REDOCK_DWELL_MS = 180;
+        const REDOCK_VELOCITY_PX_PER_S = 400;
+        let hoverArmed = false;
+        // Preserves arm state across the Windows mouseup/window_drag_ended race:
+        // onMouseUp sets pendingRedockArmed=hoverArmed before clearing hoverArmed,
+        // so window_drag_ended can safely use either flag.
+        let pendingRedockArmed = false;
+        // Velocity sampling state (non-Windows mousemove path).
+        let dwellLastMoveSampleAt = 0;
+        let dwellLastMoveSampleX = 0;
+        let dwellLastMoveSampleY = 0;
+        let dwellSlowSince: number | null = null;
+        // Per-target dwell (non-Windows): reset arming when IPC returns a new target.
+        let dwellLastArmedTarget: string | null = null;
+        // Per-target dwell (Windows): driven by floating-redock:hover-state events.
+        let dwellCurrentHoverTarget: string | null = null;
+        let dwellHoverTargetFirstSeenAt: number | null = null;
         // redockInProgress is a signal at component scope (above this onMount)
         // so createEffect re-runs when it changes.
         // Sentinel for the listenEvent .then() race: if the component unmounts
@@ -353,6 +375,15 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 macLatestScreenY = e.screenY;
                 hasMoved = false;
                 pendingRedockCoords = null;
+                hoverArmed = false;
+                pendingRedockArmed = false;
+                dwellLastMoveSampleAt = 0;
+                dwellLastMoveSampleX = 0;
+                dwellLastMoveSampleY = 0;
+                dwellSlowSince = null;
+                dwellLastArmedTarget = null;
+                dwellCurrentHoverTarget = null;
+                dwellHoverTargetFirstSeenAt = null;
                 invokeCommand<{ x: number; y: number }>("get_window_position", { label })
                     .then((pos) => {
                         if (myId !== macMouseDownId) return;
@@ -387,6 +418,15 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             dragging = true;
             hasMoved = false;
             pendingRedockCoords = null;
+            hoverArmed = false;
+            pendingRedockArmed = false;
+            dwellLastMoveSampleAt = 0;
+            dwellLastMoveSampleX = 0;
+            dwellLastMoveSampleY = 0;
+            dwellSlowSince = null;
+            dwellLastArmedTarget = null;
+            dwellCurrentHoverTarget = null;
+            dwellHoverTargetFirstSeenAt = null;
         };
 
         const onMouseUp = (e: MouseEvent) => {
@@ -397,15 +437,20 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             dragging = false;
             invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
             if (isWindows()) {
-                // On Windows: save coords; window_drag_ended carries
-                // cursor_x/cursor_y from the host (physical px) and drives
-                // tryRedockAtCursor — no ordering race with this event.
+                // On Windows: preserve arm state before clearing — window_drag_ended
+                // may arrive before or after DOM mouseup (separate CEF IPC channels).
+                // If ended arrives first: hoverArmed is still true and wins.
+                // If mouseup arrives first: pendingRedockArmed carries it for ended.
+                pendingRedockArmed = hoverArmed;
+                hoverArmed = false;
                 pendingRedockCoords = { x: e.screenX, y: e.screenY };
             } else if (hasMoved) {
                 // Non-Windows: on macOS the JS-driven path fires mousemove+mouseup
                 // normally. On Linux, BeginWindowDrag may deliver them. Only
-                // attempt redock if onMouseMove confirmed actual motion.
-                void tryRedockAtCursor(e.screenX, e.screenY);
+                // attempt redock if the dwell gate armed and motion confirmed.
+                const armed = hoverArmed;
+                hoverArmed = false;
+                if (armed) void tryRedockAtCursor(e.screenX, e.screenY);
             }
         };
 
@@ -434,6 +479,12 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     dragging = false;
                     hasMoved = false;
                     pendingRedockCoords = null;
+                    hoverArmed = false;
+                    pendingRedockArmed = false;
+                    dwellSlowSince = null;
+                    dwellLastArmedTarget = null;
+                    dwellCurrentHoverTarget = null;
+                    dwellHoverTargetFirstSeenAt = null;
                 }
             },
         );
@@ -454,10 +505,17 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             (ev) => {
                 if (!ev.label || ev.label !== label) return;
                 dragging = false;
+                // Capture arm state before clearing — handles the Windows race where
+                // this event can arrive before or after DOM mouseup (separate CEF IPC
+                // channels). Before mouseup: hoverArmed is still true. After mouseup:
+                // onMouseUp already moved it to pendingRedockArmed.
+                const armedAtEnd = pendingRedockArmed || hoverArmed;
+                hoverArmed = false;
+                pendingRedockArmed = false;
                 // Always clear hover — safety net for non-Windows where onMouseUp
                 // may not have fired (BeginWindowDrag absorbs the release).
                 invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
-                if (ev.moved && !cleaned) {
+                if (ev.moved && !cleaned && armedAtEnd) {
                     // Prefer host-provided cursor coords (physical px → CSS px via
                     // posScale). On Windows these are always present. On non-Windows
                     // fall back to pendingRedockCoords saved by onMouseUp if the OS
@@ -476,6 +534,32 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 }
             },
         );
+
+        // On Windows, Win32BeginMoveTask emits `floating-redock:hover-state` as
+        // the dragged window transits. The dwell gate arms once the same target
+        // window has been reported for REDOCK_DWELL_MS ms continuously.
+        let stopHoverStateListener: (() => void) = () => {};
+        if (isWindows()) {
+            stopHoverStateListener = safeListenEvent<{ target_label?: string | null }>(
+                "floating-redock:hover-state",
+                (ev) => {
+                    if (!dragging) return;
+                    const newTarget = ev.target_label ?? null;
+                    const now = performance.now();
+                    if (newTarget !== dwellCurrentHoverTarget) {
+                        dwellCurrentHoverTarget = newTarget;
+                        dwellHoverTargetFirstSeenAt = newTarget !== null ? now : null;
+                        hoverArmed = false;
+                    } else if (
+                        newTarget !== null &&
+                        dwellHoverTargetFirstSeenAt !== null &&
+                        now - dwellHoverTargetFirstSeenAt >= REDOCK_DWELL_MS
+                    ) {
+                        hoverArmed = true;
+                    }
+                },
+            );
+        }
 
         // On macOS/Linux, BeginWindowDrag may still deliver mousemove to the
         // renderer (F3 verification pending). Keep the hover emit here for
@@ -505,15 +589,55 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     );
                 }
                 const now = performance.now();
+                // Velocity gate: measure cursor speed since the last sample.
+                const dt = now - dwellLastMoveSampleAt;
+                const dx = e.screenX - dwellLastMoveSampleX;
+                const dy = e.screenY - dwellLastMoveSampleY;
+                if (dwellLastMoveSampleAt > 0 && dt > 0) {
+                    const velocity = Math.sqrt(dx * dx + dy * dy) / (dt / 1000);
+                    if (velocity > REDOCK_VELOCITY_PX_PER_S) {
+                        dwellSlowSince = null;
+                        dwellLastArmedTarget = null;
+                        if (hoverArmed) {
+                            hoverArmed = false;
+                            invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
+                        }
+                        dwellLastMoveSampleAt = now;
+                        dwellLastMoveSampleX = e.screenX;
+                        dwellLastMoveSampleY = e.screenY;
+                        return;
+                    }
+                }
+                dwellLastMoveSampleAt = now;
+                dwellLastMoveSampleX = e.screenX;
+                dwellLastMoveSampleY = e.screenY;
+                if (dwellSlowSince === null) dwellSlowSince = now;
+                if (now - dwellSlowSince < REDOCK_DWELL_MS) return;
+                // Cursor has been slow for REDOCK_DWELL_MS — throttle IPC calls.
                 if (now - lastHoverAt < HOVER_THROTTLE_MS) return;
                 lastHoverAt = now;
                 const scale = posScale();
                 const sourceLabel = windowLabel();
                 if (!sourceLabel) return;
-                invokeCommand("update_floating_redock_hover", {
+                invokeCommand<{ target_label?: string | null }>("update_floating_redock_hover", {
                     source_label: sourceLabel,
                     x: Math.round(e.screenX * scale),
                     y: Math.round(e.screenY * scale),
+                }).then((res) => {
+                    const newTarget = res?.target_label ?? null;
+                    if (newTarget !== dwellLastArmedTarget) {
+                        // Target changed — disarm. Don't reset dwellSlowSince: the
+                        // cursor has already qualified for ≥180ms, so the new target
+                        // will arm on the very next throttled IPC that returns the
+                        // same label rather than requiring a fresh 180ms wait.
+                        dwellLastArmedTarget = newTarget;
+                        if (hoverArmed) {
+                            hoverArmed = false;
+                            invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
+                        }
+                    } else if (newTarget !== null) {
+                        hoverArmed = true;
+                    }
                 }).catch(() => {});
             };
             document.addEventListener("mousemove", onMouseMove);
@@ -644,6 +768,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             document.removeEventListener("mouseup", onMouseUp, true);
             stopCancelListener();
             stopEndedListener();
+            stopHoverStateListener();
             unlistenMouseMove?.();
         });
     });
