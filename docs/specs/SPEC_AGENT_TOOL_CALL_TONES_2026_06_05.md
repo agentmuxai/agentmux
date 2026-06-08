@@ -86,7 +86,7 @@ The canonical set (from `stream-parser.ts:478`): `Read, Edit, Write, Bash, Grep,
 | **Read** | B4 → A4 (gentle falling 2nd) | Soft, descending — "looking." Neutral, doesn't claim attention. |
 | **Grep** | E5 → E5 (two same-pitch quick ticks) | "Search" — a question-mark feel, twin ticks for "scanning." |
 | **Glob** | D5 → E5 (paired tick, rising) | "Listing" — Grep's sibling but rising (results coming in). |
-| **Edit** | A4 → B4 → A4 (three-tone "fix") | Up-down-up — the auditory shape of a small correction. Only 3-tone tool in v1; reserved for the edit gesture because it's distinctive in conversation. |
+| **Edit** | A4 → B4 → A4 (three-tone "fix") | Up-down-up — the auditory shape of a small correction. Three-tone, paired with Agent to mark high-importance gestures. |
 | **Write** | G4 → D5 (rising 5th) | Bigger interval = "creation." Confident, not loud. |
 | **Bash** | G3 → D4 (rising 5th, octave down, triangle wave) | Same musical shape as Write but darker — mechanical. Triangle gives the "machine" timbre. |
 | **Task** | D5 → G5 (rising 4th, high) | "Delegation upward" — clear and brief. |

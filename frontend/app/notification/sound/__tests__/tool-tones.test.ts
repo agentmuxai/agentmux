@@ -44,7 +44,7 @@ describe("tool-tones params", () => {
             expect(Math.abs(b.tones[1] - w.tones[1] / 2)).toBeLessThan(1);
         });
 
-        it("Edit is the only three-tone canonical syllable", () => {
+        it("Edit and Agent are the three-tone canonical syllables", () => {
             const threeToneCanonicals = Object.entries(curated)
                 .filter(([_, p]) => p.tones.length === 3)
                 .map(([k]) => k);

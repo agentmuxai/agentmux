@@ -148,8 +148,10 @@ function mapAgentPaneEvent(blockId: string, event: AgentPaneEvent): void {
             }
             return;
         case "submit-timed-out":
-        case "interrupt-timed-out":
             notify("agent.turn.error", { sourceBlockId: blockId });
+            return;
+        case "interrupt-timed-out":
+            notify("agent.turn.interrupted", { sourceBlockId: blockId });
             return;
         case "stream-stalled":
             notify("agent.stream.stalled", { sourceBlockId: blockId });
