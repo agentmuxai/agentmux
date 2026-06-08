@@ -599,10 +599,18 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                             const dy = cssCurY - dwellWinLastSampleY;
                             const velocity = dt > 0 ? Math.sqrt(dx * dx + dy * dy) / (dt / 1000) : 0;
                             if (velocity > REDOCK_VELOCITY_PX_PER_S) {
-                                // Moving fast — reset dwell clock, disarm, skip target check.
+                                // Moving fast — reset dwell clock and disarm.
+                                // If the overlay was showing (hoverArmed), clear it so the
+                                // dock indicator disappears immediately on fast movement,
+                                // matching the non-Windows path (line 671).
                                 dwellCurrentHoverTarget = null;
                                 dwellHoverTargetFirstSeenAt = null;
-                                hoverArmed = false;
+                                if (hoverArmed) {
+                                    hoverArmed = false;
+                                    invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
+                                } else {
+                                    hoverArmed = false;
+                                }
                                 dwellWinLastSampleAt = now;
                                 dwellWinLastSampleX = cssCurX;
                                 dwellWinLastSampleY = cssCurY;
