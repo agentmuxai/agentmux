@@ -681,6 +681,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     if (velocity > REDOCK_VELOCITY_PX_PER_S) {
                         dwellSlowSince = null;
                         dwellLastArmedTarget = null;
+                        dwellCurrentConfirmedAt = null;
                         if (hoverArmed) {
                             hoverArmed = false;
                             invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
