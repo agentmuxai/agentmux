@@ -187,6 +187,10 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         // Per-target dwell (Windows): driven by floating-redock:hover-state events.
         let dwellCurrentHoverTarget: string | null = null;
         let dwellHoverTargetFirstSeenAt: number | null = null;
+        // Velocity sampling for Windows (hover-state events carry cursor_x/y).
+        let dwellWinLastSampleAt = 0;
+        let dwellWinLastSampleX = 0;
+        let dwellWinLastSampleY = 0;
         // redockInProgress is a signal at component scope (above this onMount)
         // so createEffect re-runs when it changes.
         // Sentinel for the listenEvent .then() race: if the component unmounts
@@ -384,6 +388,9 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 dwellLastArmedTarget = null;
                 dwellCurrentHoverTarget = null;
                 dwellHoverTargetFirstSeenAt = null;
+                dwellWinLastSampleAt = 0;
+                dwellWinLastSampleX = 0;
+                dwellWinLastSampleY = 0;
                 invokeCommand<{ x: number; y: number }>("get_window_position", { label })
                     .then((pos) => {
                         if (myId !== macMouseDownId) return;
@@ -427,6 +434,9 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             dwellLastArmedTarget = null;
             dwellCurrentHoverTarget = null;
             dwellHoverTargetFirstSeenAt = null;
+            dwellWinLastSampleAt = 0;
+            dwellWinLastSampleX = 0;
+            dwellWinLastSampleY = 0;
         };
 
         const onMouseUp = (e: MouseEvent) => {
@@ -485,6 +495,9 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     dwellLastArmedTarget = null;
                     dwellCurrentHoverTarget = null;
                     dwellHoverTargetFirstSeenAt = null;
+                    dwellWinLastSampleAt = 0;
+                    dwellWinLastSampleX = 0;
+                    dwellWinLastSampleY = 0;
                 }
             },
         );
@@ -535,17 +548,52 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             },
         );
 
-        // On Windows, Win32BeginMoveTask emits `floating-redock:hover-state` as
-        // the dragged window transits. The dwell gate arms once the same target
-        // window has been reported for REDOCK_DWELL_MS ms continuously.
+        // On Windows, Win32BeginMoveTask emits `floating-redock:hover-state` at
+        // 50 ms with cursor_x/cursor_y (physical px). Both gates apply:
+        // 1. Velocity: compute CSS-px/s from successive event positions; if
+        //    > REDOCK_VELOCITY_PX_PER_S reset dwell clock and disarm.
+        // 2. Dwell: arm only after the same target has been seen continuously for
+        //    REDOCK_DWELL_MS ms (checked after the velocity gate passes).
         let stopHoverStateListener: (() => void) = () => {};
         if (isWindows()) {
-            stopHoverStateListener = safeListenEvent<{ target_label?: string | null }>(
+            stopHoverStateListener = safeListenEvent<{
+                target_label?: string | null;
+                cursor_x?: number;
+                cursor_y?: number;
+            }>(
                 "floating-redock:hover-state",
                 (ev) => {
                     if (!dragging) return;
                     const newTarget = ev.target_label ?? null;
                     const now = performance.now();
+                    // Velocity gate: cursor_x/cursor_y are physical px — divide by
+                    // posScale() to get CSS px (1 DIP on non-HiDPI, 0.5 CSS on 2×).
+                    if (typeof ev.cursor_x === "number" && typeof ev.cursor_y === "number") {
+                        const scale = posScale();
+                        const cssCurX = ev.cursor_x / scale;
+                        const cssCurY = ev.cursor_y / scale;
+                        if (dwellWinLastSampleAt > 0) {
+                            const dt = now - dwellWinLastSampleAt;
+                            const dx = cssCurX - dwellWinLastSampleX;
+                            const dy = cssCurY - dwellWinLastSampleY;
+                            const velocity = dt > 0 ? Math.sqrt(dx * dx + dy * dy) / (dt / 1000) : 0;
+                            if (velocity > REDOCK_VELOCITY_PX_PER_S) {
+                                // Moving fast — reset dwell clock, disarm, skip target check.
+                                dwellCurrentHoverTarget = null;
+                                dwellHoverTargetFirstSeenAt = null;
+                                hoverArmed = false;
+                                dwellWinLastSampleAt = now;
+                                dwellWinLastSampleX = cssCurX;
+                                dwellWinLastSampleY = cssCurY;
+                                return;
+                            }
+                        }
+                        dwellWinLastSampleAt = now;
+                        dwellWinLastSampleX = cssCurX;
+                        dwellWinLastSampleY = cssCurY;
+                    }
+                    // Dwell gate: arm only after seeing the same non-null target for
+                    // REDOCK_DWELL_MS ms. Target change resets the clock.
                     if (newTarget !== dwellCurrentHoverTarget) {
                         dwellCurrentHoverTarget = newTarget;
                         dwellHoverTargetFirstSeenAt = newTarget !== null ? now : null;
