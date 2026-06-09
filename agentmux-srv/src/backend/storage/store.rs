@@ -69,6 +69,14 @@ impl Store {
         super::agents_consolidate::run_consolidate_migration(&mut conn, data_dir)
     }
 
+    /// Backfill any `db_agent_definitions` rows that are missing from
+    /// `db_agents`.  Not marker-gated — runs cheaply on every startup.
+    /// See `agents_consolidate::repair_def_gaps` for details.
+    pub fn repair_agent_def_gaps(&self) -> Result<usize, StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        super::agents_consolidate::repair_def_gaps(&mut *conn)
+    }
+
     fn configure_and_migrate(conn: Connection) -> Result<Self, StoreError> {
         conn.execute_batch(
             // `foreign_keys=ON` is per-connection and defaults to OFF in

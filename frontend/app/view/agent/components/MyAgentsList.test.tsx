@@ -62,6 +62,8 @@ const makeRow = (overrides: Partial<RecentSessionRow> = {}): RecentSessionRow =>
     node_count: 12,
     last_active_at: Date.now() - 60_000,
     has_snapshot: true,
+    agent_created_at: Date.now() - 7_776_000_000,
+    started_at: Date.now() - 3_600_000,
     ...overrides,
 });
 

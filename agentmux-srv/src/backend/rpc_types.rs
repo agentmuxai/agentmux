@@ -1968,6 +1968,12 @@ pub struct RecentSessionRow {
     /// block. False when the snapshot doesn't exist yet (no preview)
     /// or the block_id_hint was empty.
     pub has_snapshot: bool,
+    /// When the agent definition was first created (ms since epoch).
+    /// Shown as "Created" in the My Agents card.
+    pub agent_created_at: i64,
+    /// When this instance was last launched (ms since epoch).
+    /// Shown as "Last Launch" in the My Agents card.
+    pub started_at: i64,
 }
 
 /// Mutable subset of AgentInstance for PATCH-style updates. Every field is

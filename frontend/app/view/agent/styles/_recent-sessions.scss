@@ -161,4 +161,32 @@
     .agent-recent-sessions-nodes {
         // Numeric "12 messages" stays inline with timestamp.
     }
+
+    .agent-recent-sessions-timestamps {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-1) var(--space-3);
+        margin-top: 2px;
+    }
+
+    .agent-recent-sessions-ts {
+        display: flex;
+        gap: 3px;
+        align-items: baseline;
+        font-size: 10px;
+        color: color-mix(in srgb, var(--secondary-text-color) 60%, transparent);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .agent-recent-sessions-ts-label {
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        font-size: 9px;
+        font-weight: 600;
+        opacity: 0.75;
+    }
+
+    .agent-recent-sessions-ts-value {
+        font-size: 10px;
+    }
 }
