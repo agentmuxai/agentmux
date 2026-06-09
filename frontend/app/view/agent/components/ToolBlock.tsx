@@ -130,7 +130,12 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // expand. The user-visible "three popups on hover" (browser title
     // tooltip + larger log panel + fast expand/collapse animation)
     // collapsed into a single in-flow panel.
-    const expanded = () => props.pinned || autoExpanded();
+    //
+    // Exception: if the user's mouse is inside an already-expanded block,
+    // we hold it open until they leave so the post-completion timer can't
+    // collapse it mid-read.
+    const [userHolding, setUserHolding] = createSignal(false);
+    const expanded = () => props.pinned || autoExpanded() || userHolding();
 
     // Two render modes — `flow` when the panel is visible (auto-expand
     // or pinned), `hidden` otherwise. The hover-only `overlay` mode is
@@ -151,6 +156,8 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 canceled: props.node.status === "canceled",
             })}
             data-tool={props.node.tool.toLowerCase()}
+            onMouseEnter={() => { if (props.pinned || autoExpanded()) setUserHolding(true); }}
+            onMouseLeave={() => setUserHolding(false)}
         >
             <div class="agent-tool-summary" onClick={props.onTogglePin}>
                 <span class="agent-tool-status-icon">{statusIcon()}</span>

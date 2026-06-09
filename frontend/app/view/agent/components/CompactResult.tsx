@@ -98,7 +98,7 @@ function shortPath(p: string): string {
 }
 
 export const CompactResult = ({ tool, params, result }: CompactResultProps): JSX.Element => {
-    const [expanded, setExpanded] = createSignal(false);
+    const [expanded, setExpanded] = createSignal(tool === "Glob");
 
     const summary = summarize(tool, params, result);
     const fullJson = result != null ? JSON.stringify(result, null, 2) : "";
