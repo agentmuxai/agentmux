@@ -18,7 +18,6 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, createBlock, getApi } from "@/store/global";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
-import { invokeCommand } from "@/app/platform/ipc";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import {
     assertMenuInPaintableArea,
@@ -208,7 +207,9 @@ const MoreDropdown = ({
                     });
                 }},
                 { type: "separator" },
-                { label: "Pin to bar", click: () => pinWidget(shortName, settings(), wmap()) },
+                getPinnedKeys(settings(), wmap()).includes(shortName)
+                    ? { label: "Unpin from bar", click: () => unpinWidget(shortName, settings(), wmap()) }
+                    : { label: "Pin to bar", click: () => pinWidget(shortName, settings(), wmap()) },
             ],
             e
         );
@@ -254,26 +255,48 @@ const ActionWidgets = (): JSX.Element => {
     const pinnedWidgets = () => getPinnedWidgets(settings(), wmap());
     const moreWidgets = () => getMoreWidgets(settings(), wmap());
 
-    // ── Responsive labels ─────────────────────────────────────────────────────
-    // Labels collapse to icons when the title bar is too narrow to fit the
-    // labeled bar while leaving the tab bar a usable strip. `tooNarrow` is
-    // derived from a hidden always-labeled mirror (rendered below), so the
-    // decision never depends on the visible bar's own collapsed state — there
-    // is no measure→collapse→re-expand oscillation.
-    const [tooNarrow, setTooNarrow] = createSignal(false);
-    const effectiveIconOnly = (): boolean => iconOnly() || tooNarrow();
-    let mirrorRef: HTMLDivElement | undefined;
+    // ── Responsive labels — 3-tier collapse ──────────────────────────────────
+    //
+    // SPEC: SPEC_TOPBAR_PROGRESSIVE_COLLAPSE_2026_06_05.md
+    //
+    // Tier 1 (wide):    labels + "more" text visible
+    // Tier 2 (medium):  icon-only — labels hidden, all icons stay on bar
+    // Tier 3 (narrow):  overflow — icons + "…more" button for hidden widgets
+    //
+    // Each uses its own hidden measurement mirror so the decision is never
+    // based on the already-collapsed visible bar (no oscillation).
+    const [tooNarrow,  setTooNarrow]  = createSignal(false); // tier 1→2: drop labels
+    const [clipCount,  setClipCount]  = createSignal(0);     // pinned icons pushed to overflow in tier 3
 
-    // Header width always reserved for the tab bar before widget labels are
-    // dropped. The collapse point still auto-tracks the widget count via the
-    // mirror's measured width; this only floors the tab bar's share.
+    // Tier 1 only: show widget labels and the More button's "more" text.
+    const showWidgetLabels = () => !tooNarrow() && !iconOnly();
+
+    // Tier 3: split pinned widgets into those that fit on the bar vs. those that overflow.
+    const visiblePinnedWidgets = () => {
+        const all = pinnedWidgets();
+        const clip = clipCount();
+        return clip > 0 ? all.slice(0, Math.max(0, all.length - clip)) : all;
+    };
+    const clippedPinnedWidgets = () => {
+        const all = pinnedWidgets();
+        const clip = clipCount();
+        return clip > 0 ? all.slice(Math.max(0, all.length - clip)) : [];
+    };
+
+    let mirrorRef:         HTMLDivElement | undefined;
+    let iconMirrorRef:     HTMLDivElement | undefined;
+    let iconMirrorMoreRef: HTMLDivElement | undefined;
+
+    // Minimum tab strip reserved before widget labels are dropped (tier 1→2).
     const MIN_TAB_WIDTH = 120;
-    // Per-tab COLLAPSE-TRIGGER width: widget labels drop once each open tab
-    // would fall below this. Deliberately NOT the CSS shrink floor
-    // (`--ws-tab-min`, 56px) — labels collapse first (at this comfortable
-    // width), THEN tabs shrink toward the smaller floor. Reserve =
-    // `tabCount * this`.
+    // Per-tab comfortable width — labels collapse when each tab would fall
+    // below this. Deliberately above --ws-tab-min (56 px) so labels drop
+    // first, then tabs continue shrinking.
     const TAB_COLLAPSE_RESERVE_PX = 100;
+    // Tighter reserves used for the tier 2→3 threshold (icon-only bar is
+    // narrower, so tabs can afford to be a bit squeezed before overflow).
+    const MIN_TAB_WIDTH_ICON_ONLY      = 80;
+    const TAB_COLLAPSE_RESERVE_ICON_PX = 70;
 
     // More dropdown state
     const [moreOpen, setMoreOpen] = createSignal(false);
@@ -307,30 +330,52 @@ const ActionWidgets = (): JSX.Element => {
     let dropIndexRef: number | null = null;
     let dragStartRef: { x: number; y: number; key: string } | null = null;
 
-    // Re-evaluate `tooNarrow` whenever the window header resizes or the mirror's
-    // labeled width changes (e.g. a widget is pinned/unpinned).
     onMount(() => {
         const header = containerRef?.closest(".window-header") as HTMLElement | null;
-        if (!header || !mirrorRef) return;
+        if (!header || !mirrorRef || !iconMirrorRef) return;
         const buttons = containerRef?.parentElement?.querySelector(
             ".window-action-buttons"
         ) as HTMLElement | null;
         const tabScroll = header.querySelector(".tab-bar-scroll") as HTMLElement | null;
         const measure = () => {
-            const labeledW = mirrorRef?.offsetWidth ?? 0;
-            const headerW = header.clientWidth;
+            const labeledW  = mirrorRef?.offsetWidth ?? 0;
+            const iconOnlyW = iconMirrorRef?.offsetWidth ?? 0;
+            const headerW   = header.clientWidth;
             if (labeledW === 0 || headerW === 0) return;
             const buttonsW = buttons?.offsetWidth ?? 0;
             const tabCount = tabScroll?.querySelectorAll(".tab").length ?? 0;
             const tabsNeeded = Math.max(MIN_TAB_WIDTH, tabCount * TAB_COLLAPSE_RESERVE_PX);
             setTooNarrow(labeledW + buttonsW + tabsNeeded > headerW);
+            const tabsNeededIconOnly = Math.max(MIN_TAB_WIDTH_ICON_ONLY, tabCount * TAB_COLLAPSE_RESERVE_ICON_PX);
+            const isTooIconOnly = iconOnlyW + buttonsW + tabsNeededIconOnly > headerW;
+            if (isTooIconOnly) {
+                const pinnedCount = pinnedWidgets().length;
+                if (pinnedCount > 0) {
+                    // Always-mounted More button probe gives reliable moreBtnW even
+                    // before the live More button mounts on first tier-3 entry.
+                    const mirrorMoreW = iconMirrorMoreRef?.offsetWidth ?? 0;
+                    const moreBtnW = moreButtonRef?.offsetWidth || mirrorMoreW;
+                    // Mirror 2 includes the More button only when unpinned widgets exist;
+                    // strip it from iconOnlyW in that case to get pure per-icon width.
+                    const iconsOnlyW = moreWidgets().length > 0
+                        ? Math.max(0, iconOnlyW - mirrorMoreW)
+                        : iconOnlyW;
+                    const perIconW = iconsOnlyW / pinnedCount;
+                    const availableForIcons = Math.max(0, headerW - buttonsW - tabsNeededIconOnly - moreBtnW);
+                    const fitsCount = Math.max(0, Math.floor(availableForIcons / Math.max(1, perIconW)));
+                    setClipCount(Math.max(0, pinnedCount - fitsCount));
+                } else {
+                    setClipCount(0);
+                }
+            } else {
+                setClipCount(0);
+            }
         };
         const ro = new ResizeObserver(measure);
         ro.observe(header);
         ro.observe(mirrorRef);
-        // Adding/removing a tab doesn't resize the header, so the ResizeObserver
-        // won't fire — watch the tab strip's child list to re-measure on a
-        // tab-count change.
+        ro.observe(iconMirrorRef);
+        if (iconMirrorMoreRef) ro.observe(iconMirrorMoreRef);
         const mo = tabScroll ? new MutationObserver(measure) : null;
         if (mo && tabScroll) mo.observe(tabScroll, { childList: true });
         measure();
@@ -477,7 +522,7 @@ const ActionWidgets = (): JSX.Element => {
                 data-drag-region="false"
                 onContextMenu={handleBarContextMenu}
             >
-                <For each={pinnedWidgets()}>
+                <For each={visiblePinnedWidgets()}>
                     {({ key, widget }, idx) => (
                         <>
                             <Show when={draggingKey() != null && dropIndex() === idx() && draggingKey() !== key}>
@@ -493,18 +538,18 @@ const ActionWidgets = (): JSX.Element => {
                             >
                                 <ActionWidget
                                     widget={widget}
-                                    iconOnly={effectiveIconOnly()}
+                                    iconOnly={!showWidgetLabels()}
                                     onContextMenu={(e) => handlePinnedContextMenu(e, key)}
                                 />
                             </div>
                         </>
                     )}
                 </For>
-                <Show when={draggingKey() != null && dropIndex() === pinnedWidgets().length}>
+                <Show when={draggingKey() != null && dropIndex() === visiblePinnedWidgets().length}>
                     <div class="action-widget-drop-indicator" />
                 </Show>
 
-                <Show when={moreWidgets().length > 0}>
+                <Show when={moreWidgets().length > 0 || clipCount() > 0}>
                     <div
                         ref={moreButtonRef}
                         class="action-widget-more-btn"
@@ -512,7 +557,7 @@ const ActionWidgets = (): JSX.Element => {
                         onClick={openMore}
                     >
                         <i class="fa-solid fa-ellipsis" />
-                        <Show when={!effectiveIconOnly()}>
+                        <Show when={showWidgetLabels()}>
                             <span class="action-widget-more-label">more</span>
                         </Show>
                         <i
@@ -522,9 +567,7 @@ const ActionWidgets = (): JSX.Element => {
                 </Show>
             </div>
 
-            {/* Hidden always-labeled mirror. Measured to decide whether the
-                labeled bar fits; absolutely positioned so it never affects the
-                visible bar's layout, and inert (invisible, no pointer events). */}
+            {/* Mirror 1: always-labeled — measures tier 1→2 threshold. */}
             <div ref={mirrorRef} class="action-widgets action-widgets--measure" aria-hidden="true">
                 <For each={pinnedWidgets()}>
                     {({ widget }) => (
@@ -542,10 +585,38 @@ const ActionWidgets = (): JSX.Element => {
                 </Show>
             </div>
 
+            {/* Mirror 2: icon-only — measures tier 2→3 threshold.
+                Includes the More button when unpinned widgets exist because
+                the tier-2 bar still shows it, so its width counts. */}
+            <div ref={iconMirrorRef} class="action-widgets action-widgets--measure" aria-hidden="true">
+                <For each={pinnedWidgets()}>
+                    {({ widget }) => (
+                        <div class="action-widget-slot">
+                            <ActionWidget widget={widget} iconOnly={true} />
+                        </div>
+                    )}
+                </For>
+                <Show when={moreWidgets().length > 0}>
+                    <div class="action-widget-more-btn">
+                        <i class="fa-solid fa-ellipsis" />
+                        <i class="fa-solid fa-chevron-down action-widget-more-chevron" />
+                    </div>
+                </Show>
+            </div>
+
+            {/* More button width probe — always mounted so moreBtnW is available
+                before the live More button mounts on first tier-3 entry. */}
+            <div class="action-widgets action-widgets--measure" aria-hidden="true">
+                <div ref={(el) => (iconMirrorMoreRef = el)} class="action-widget-more-btn">
+                    <i class="fa-solid fa-ellipsis" />
+                    <i class="fa-solid fa-chevron-down action-widget-more-chevron" />
+                </div>
+            </div>
+
             <Portal>
                 <Show when={moreOpen()}>
                     <MoreDropdown
-                        widgets={moreWidgets}
+                        widgets={() => [...clippedPinnedWidgets(), ...moreWidgets()]}
                         onClose={closeMore}
                         anchor={() => moreButtonRef ?? null}
                         settings={settings}
