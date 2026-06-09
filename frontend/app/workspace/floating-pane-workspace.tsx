@@ -191,6 +191,10 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         // Non-Windows: wall-clock time when IPC first confirmed the current target.
         // Used as fallback when cursor holds still after first confirmation (no 2nd IPC).
         let dwellCurrentConfirmedAt: number | null = null;
+        // Non-Windows: true once update_floating_redock_hover returned a non-null target
+        // (indicator is showing on the backend). Separate from hoverArmed so the velocity
+        // gate can clear the indicator even before the full dwell interval has elapsed.
+        let indicatorShowing = false;
         // Per-target dwell (Windows): driven by floating-redock:hover-state events.
         let dwellCurrentHoverTarget: string | null = null;
         let dwellHoverTargetFirstSeenAt: number | null = null;
@@ -395,6 +399,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 dwellSlowSince = null;
                 dwellLastArmedTarget = null;
                 dwellCurrentConfirmedAt = null;
+                indicatorShowing = false;
                 dwellCurrentHoverTarget = null;
                 dwellHoverTargetFirstSeenAt = null;
                 dwellWinLastSampleAt = 0;
@@ -442,6 +447,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             dwellSlowSince = null;
             dwellLastArmedTarget = null;
             dwellCurrentConfirmedAt = null;
+            indicatorShowing = false;
             dwellCurrentHoverTarget = null;
             dwellHoverTargetFirstSeenAt = null;
             dwellWinLastSampleAt = 0;
@@ -491,6 +497,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     (dwellCurrentConfirmedAt !== null &&
                      nowMs - dwellCurrentConfirmedAt >= REDOCK_DWELL_MS);
                 hoverArmed = false;
+                indicatorShowing = false;
                 if (armed) void tryRedockAtCursor(e.screenX, e.screenY);
             }
         };
@@ -527,6 +534,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     dwellSlowSince = null;
                     dwellLastArmedTarget = null;
                     dwellCurrentConfirmedAt = null;
+                    indicatorShowing = false;
                     dwellCurrentHoverTarget = null;
                     dwellHoverTargetFirstSeenAt = null;
                     dwellLastMoveSampleAt = 0;
@@ -576,6 +584,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     (dwellCurrentConfirmedAt !== null &&
                      nowMs - dwellCurrentConfirmedAt >= REDOCK_DWELL_MS);
                 hoverArmed = false;
+                indicatorShowing = false;
                 pendingRedockArmed = false;
                 // Always clear hover — safety net for non-Windows where onMouseUp
                 // may not have fired (BeginWindowDrag absorbs the release).
@@ -710,8 +719,9 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                         dwellSlowSince = null;
                         dwellLastArmedTarget = null;
                         dwellCurrentConfirmedAt = null;
-                        if (hoverArmed) {
+                        if (hoverArmed || indicatorShowing) {
                             hoverArmed = false;
+                            indicatorShowing = false;
                             invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
                         }
                         dwellLastMoveSampleAt = now;
@@ -749,18 +759,17 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                         dwellLastArmedTarget = newTarget;
                         dwellCurrentConfirmedAt = newTarget !== null ? performance.now() : null;
                         dwellSlowSince = null;
-                        if (hoverArmed) {
+                        if (hoverArmed || indicatorShowing) {
                             hoverArmed = false;
+                            indicatorShowing = false;
                             invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
                         }
-                        // IPC returned a confirmed non-null target — the backend has
-                        // already broadcast the dock indicator. Arm immediately so
-                        // the velocity gate (line 692) can clear it on fast escape
-                        // and mouseup can dock on release.
-                        if (newTarget !== null) {
-                            hoverArmed = true;
-                        }
+                        // Backend has now broadcast the indicator for the new target.
+                        // Mark it showing so the velocity gate can clear it on fast
+                        // escape. hoverArmed stays false — full dwell still required.
+                        indicatorShowing = newTarget !== null;
                     } else if (newTarget !== null) {
+                        indicatorShowing = true;
                         hoverArmed = true;
                     }
                 }).catch(() => {});
