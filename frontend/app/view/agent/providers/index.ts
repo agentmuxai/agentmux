@@ -140,6 +140,37 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // with `Error: Git is required but was not found.`.
         systemPrereqs: [GIT_PREREQ],
     },
+    // Mux Code — AgentMux's first-party agentic coding CLI (@a5af/mux-code).
+    // Supports local GGUF inference via llama-server and cloud APIs
+    // (Anthropic, OpenAI, OpenAI-compat). Emits claude-compatible
+    // stream-json NDJSON (same `session_id` envelope) so ClaudeTranslator
+    // handles it without modification. `--resume <id>` resumes a prior session.
+    "mux-code": {
+        id: "mux-code",
+        displayName: "Mux Code",
+        cliCommand: "mux-code",
+        defaultArgs: [],
+        styledArgs: ["-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"],
+        outputFormat: "raw",
+        styledOutputFormat: "claude-stream-json",
+        authType: "api-key",
+        authCheckCommand: ["--version"],
+        authLoginCommand: ["config"],
+        requiresLoginTty: false,
+        npmPackage: "@a5af/mux-code",
+        pinnedVersion: "latest",
+        docsUrl: "https://github.com/a5af/mux-code",
+        windowsInstallCommand: "npm install -g @a5af/mux-code",
+        unixInstallCommand: "npm install -g @a5af/mux-code",
+        icon: "layers",
+        authConfigDirEnvVar: "MUX_CODE_CONFIG_DIR",
+        authDirName: "mux-code",
+        launchArgs: ["-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"],
+        resumeFlag: "--resume",
+        sessionIdField: "session_id",
+        controllerType: "subprocess",
+        persistentLaunchArgs: ["--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"],
+    },
     codex: {
         id: "codex",
         displayName: "Codex CLI",
@@ -391,6 +422,8 @@ const PROVIDER_ALIASES: Record<string, string> = {
     "copilot-cli": "copilot",
     "github-copilot": "copilot",
     "copilot_cli": "copilot",
+    "mux_code": "mux-code",
+    "muxcode": "mux-code",
 };
 
 export function resolveProviderAlias(id: string): string {

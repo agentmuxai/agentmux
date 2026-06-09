@@ -290,6 +290,45 @@ static PI: ProviderConfig = ProviderConfig {
     docs_url: "https://github.com/badlogic/pi-mono",
 };
 
+// Mux Code — AgentMux's first-party agentic coding CLI.
+// Local GGUF inference via llama-server or cloud APIs (Anthropic,
+// OpenAI, OpenAI-compat). Emits claude-compatible stream-json NDJSON
+// (same `session_id` field, same event envelope), so ClaudeTranslator
+// handles it without modification.  `--resume <id>` resumes a prior
+// session.  npm: `@a5af/mux-code`.
+static MUX_CODE: ProviderConfig = ProviderConfig {
+    id: "mux-code",
+    display_name: "Mux Code",
+    cli_command: "mux-code",
+    controller_type: ControllerType::Subprocess,
+    launch_args: &[
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--dangerously-skip-permissions",
+    ],
+    persistent_launch_args: Some(&[
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--dangerously-skip-permissions",
+    ]),
+    resume_flag: Some("--resume"),
+    session_id_field: "session_id",
+    styled_output_format: "claude-stream-json",
+    auth_config_dir_env_var: "MUX_CODE_CONFIG_DIR",
+    auth_dir_name: "mux-code",
+    auth_extra_env: &[],
+    unset_env: &[],
+    npm_package: "@a5af/mux-code",
+    pinned_version: "latest",
+    icon: "layers",
+    docs_url: "https://github.com/a5af/mux-code",
+};
+
 // GitHub Copilot CLI — Microsoft's coding agent. Runs in ACP mode via
 // `--acp` so the existing ACP controller drives it. Non-interactive
 // `-p`/`--prompt` doesn't accept stdin prompts (github/copilot-cli#96,
@@ -326,6 +365,7 @@ static REGISTRY: LazyLock<HashMap<&'static str, &'static ProviderConfig>> = Lazy
     m.insert(OPENCLAW.id, &OPENCLAW);
     m.insert(PI.id, &PI);
     m.insert(COPILOT.id, &COPILOT);
+    m.insert(MUX_CODE.id, &MUX_CODE);
     m
 });
 
@@ -345,6 +385,8 @@ static ALIASES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(||
     m.insert("copilot-cli", "copilot");
     m.insert("github-copilot", "copilot");
     m.insert("copilot_cli", "copilot");
+    m.insert("mux_code", "mux-code");
+    m.insert("muxcode", "mux-code");
     m
 });
 
@@ -383,7 +425,7 @@ pub fn get_provider(id: &str) -> Option<&'static ProviderConfig> {
 pub fn get_provider_list() -> impl Iterator<Item = &'static ProviderConfig> {
     // Stable canonical order matches the TypeScript PROVIDERS object order.
     static ORDER: &[&str] =
-        &["claude", "codex", "gemini", "qwen", "kimi", "openclaw", "pi", "copilot"];
+        &["claude", "mux-code", "codex", "gemini", "qwen", "kimi", "openclaw", "pi", "copilot"];
     ORDER.iter().filter_map(|id| REGISTRY.get(*id).copied())
 }
 
@@ -401,6 +443,20 @@ mod tests {
         assert!(get_provider("kimi").is_some());
         assert!(get_provider("openclaw").is_some());
         assert!(get_provider("qwen").is_some());
+        assert!(get_provider("mux-code").is_some());
+    }
+
+    #[test]
+    fn mux_code_is_subprocess_with_claude_stream_json() {
+        let p = get_provider("mux-code").unwrap();
+        assert_eq!(p.controller_type, ControllerType::Subprocess);
+        assert_eq!(p.controller_type_str(), "subprocess");
+        assert_eq!(p.styled_output_format, "claude-stream-json");
+        assert_eq!(p.cli_command, "mux-code");
+        assert_eq!(p.session_id_field, "session_id");
+        assert_eq!(p.resume_flag, Some("--resume"));
+        assert_eq!(p.npm_package, "@a5af/mux-code");
+        assert!(p.persistent_launch_args.is_some());
     }
 
     #[test]
@@ -421,11 +477,11 @@ mod tests {
     }
 
     #[test]
-    fn provider_list_has_eight_entries() {
+    fn provider_list_has_nine_entries() {
         // Update this when a provider is added or removed; a stale
         // count is the cheapest detection mechanism for accidental
         // additions.
-        assert_eq!(get_provider_list().count(), 8);
+        assert_eq!(get_provider_list().count(), 9);
     }
 
     #[test]
