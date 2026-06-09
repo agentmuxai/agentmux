@@ -489,15 +489,34 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 // Non-Windows: on macOS the JS-driven path fires mousemove+mouseup
                 // normally. On Linux, BeginWindowDrag may deliver them. Only
                 // attempt redock if the dwell gate armed and motion confirmed.
-                // Point-in-time fallback: if cursor went slow REDOCK_DWELL_MS ago and
-                // then held still (no more mousemove events), fire redock at release;
-                // tryRedockAtCursorInner handles the no-target case gracefully.
+                // Arm conditions (any one suffices):
+                // 1. hoverArmed: second IPC confirmed same target (full dwell cycle).
+                // 2. indicatorShowing: first IPC confirmed target after dwell;
+                //    cursor held still so no second IPC fired.
+                // 3. dwellSlowSince elapsed: cursor slowed and stopped before the
+                //    IPC could fire (stopped during the slow-motion window before
+                //    REDOCK_DWELL_MS); tryRedockAtCursorInner handles no-target.
+                // 4. dwellCurrentConfirmedAt elapsed: belt-and-suspenders for any
+                //    path where the target was confirmed but hoverArmed wasn't set.
                 const nowMs = performance.now();
                 const armed = hoverArmed ||
+                    indicatorShowing ||
+                    (dwellSlowSince !== null &&
+                     nowMs - dwellSlowSince >= REDOCK_DWELL_MS) ||
                     (dwellCurrentConfirmedAt !== null &&
                      nowMs - dwellCurrentConfirmedAt >= REDOCK_DWELL_MS);
+                // Invalidate in-flight IPC .then() so it cannot re-arm hoverArmed
+                // after this mouseup has already consumed and cleared the state
+                // (reagent P1 — stale IPC re-arm → spurious window_drag_ended dock).
+                dragSessionId += 1;
                 hoverArmed = false;
                 indicatorShowing = false;
+                // Clear non-Windows dwell state so window_drag_ended (Linux race)
+                // cannot see stale dwellCurrentConfirmedAt and fire a second
+                // tryRedockAtCursor on the already-redocked block (reagent P1).
+                dwellCurrentConfirmedAt = null;
+                dwellCurrentHoverTarget = null;
+                dwellHoverTargetFirstSeenAt = null;
                 if (armed) void tryRedockAtCursor(e.screenX, e.screenY);
             }
         };
@@ -573,6 +592,8 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 // wall-clock check here covers the window_drag_ended ordering leg.
                 const nowMs = performance.now();
                 const armedAtEnd = pendingRedockArmed || hoverArmed ||
+                    // Non-Windows: indicatorShowing means IPC confirmed target after dwell.
+                    indicatorShowing ||
                     (dwellCurrentHoverTarget !== null &&
                      dwellHoverTargetFirstSeenAt !== null &&
                      nowMs - dwellHoverTargetFirstSeenAt >= REDOCK_DWELL_MS) ||
