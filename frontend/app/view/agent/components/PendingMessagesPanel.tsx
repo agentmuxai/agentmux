@@ -20,6 +20,12 @@ import type { PendingMessage } from "../state";
 
 interface PendingMessagesPanelProps {
     pendingMessages: Accessor<PendingMessage[]>;
+    /** True while the turn is in the `Submitting` transient — the backend
+     *  has not yet acknowledged the send so `pendingMessages` still holds
+     *  the optimistic message. Hide the panel during this window to avoid
+     *  a one-frame flash on every normal idle send. When absent the outer
+     *  Show is gated on `pendingMessages` length alone. */
+    isSubmitting?: Accessor<boolean>;
     /** True when the user should be offered a "Send now" shortcut —
      *  typically: a turn is running AND the queue is non-empty. */
     showSendNow?: Accessor<boolean>;
@@ -29,7 +35,7 @@ interface PendingMessagesPanelProps {
 }
 
 export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Element => (
-    <Show when={props.pendingMessages().length > 0}>
+    <Show when={props.pendingMessages().length > 0 && !props.isSubmitting?.()}>
         <div class="agent-pending-zone">
             <div class="agent-pending-header">
                 <span class="agent-spinner-dot" />
