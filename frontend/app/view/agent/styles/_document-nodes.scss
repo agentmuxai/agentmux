@@ -46,6 +46,7 @@
         &.thinking-block {
             opacity: 0.6;
             font-style: italic;
+            color: var(--secondary-text-color);
             border-left: 2px solid var(--secondary-text-color);
             padding-left: var(--space-2);
             background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
@@ -382,6 +383,18 @@
         }
     }
 
+    // Per-tool-type color on the collapsed summary name.
+    // Requires data-tool attribute on .agent-tool-block (ToolBlock.tsx).
+    .agent-tool-block[data-tool="bash"]   .agent-tool-name { color: var(--term-bright-green); }
+    .agent-tool-block[data-tool="read"]   .agent-tool-name { color: var(--accent-color); }
+    .agent-tool-block[data-tool="write"]  .agent-tool-name { color: var(--warning-color); }
+    .agent-tool-block[data-tool="edit"]   .agent-tool-name { color: var(--warning-color); }
+    .agent-tool-block[data-tool="grep"]   .agent-tool-name { color: var(--term-bright-cyan); }
+    .agent-tool-block[data-tool="glob"]   .agent-tool-name { color: var(--term-bright-cyan); }
+    .agent-tool-block[data-tool="agent"]  .agent-tool-name { color: var(--term-bright-magenta); }
+    .agent-tool-block[data-tool="task"]   .agent-tool-name { color: var(--secondary-text-color); }
+    .agent-tool-block[data-tool="other"]  .agent-tool-name { color: var(--secondary-text-color); }
+
     // === Diff Viewer ===
     // === Shared Shiki highlighted-code base ===
     // Shiki emits <pre><code> with <span class="line"> per line.
@@ -530,6 +543,7 @@
                 border: none;
                 overflow: visible;
                 white-space: pre-wrap;
+                color: var(--accent-color);
                 // Force breaks inside long tokens (long paths, base64, etc.)
                 // so commands never overflow the portal width.
                 word-break: break-all;
@@ -977,6 +991,7 @@
             margin: var(--space-1) 0;
             border-bottom: 2px solid var(--border-color);
             padding-bottom: var(--space-0-5);
+            color: var(--accent-color);
         }
 
         &.level-2 h2 {
