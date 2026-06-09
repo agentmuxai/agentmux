@@ -30,7 +30,6 @@
 
 import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
-import { Key } from "@solid-primitives/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import { agentPerfStore, startAgentLayoutShiftObserver } from "./perf-probe";
@@ -648,7 +647,16 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     return (
         <div class="agent-document" ref={scrollRef} onScroll={handleScroll}>
             {props.headerSlot}
-            {/* Virtualized head — only present when document > buffer size */}
+            {/* Virtualized head — only present when document > buffer size.
+                Uses <Index> (position-keyed) rather than <Key by={r=>r.nodeId}>
+                for the same reason the streaming buffer does: the window is a
+                sliding positional range, not an identity-stable list. <Key>
+                disposes departing slots synchronously inside keyArray while
+                reconcileArrays still holds stale element refs — same rapid
+                cap-advance crash pattern as the streaming buffer (§7.4,
+                SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md).
+                With <Index>, window shifts are pure signal updates; no DOM
+                rearrangements occur at steady-state window size. (#1319) */}
             <div
                 ref={(el) => { virtualContainerRef = el; }}
                 class="agent-document-virtualizer"
@@ -658,14 +666,20 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                     width: "100%",
                 }}
             >
-                <Key each={windowedRows()} by={(r) => r.nodeId}>
+                <Index each={windowedRows()}>
                     {(row) => {
                         let rowEl: HTMLElement | undefined;
                         // The live node at this row's id; skip a frame if it's
-                        // momentarily absent from the partition (recoverable,
-                        // like the old getVirtualItems undefined guard).
+                        // momentarily absent from the partition (recoverable).
                         const node = (): DocumentNode | undefined => nodeById().get(row().nodeId);
                         onCleanup(() => { if (rowEl) unobserveRow(rowEl); });
+                        // Keep elNodeId current when the window shifts and this
+                        // slot's nodeId changes. With <Key>, each slot was tied to
+                        // one nodeId for life; with <Index>, the same DOM element
+                        // can represent different nodes as the window scrolls —
+                        // without this update measureRO would dispatch RowMeasured
+                        // for the wrong nodeId.
+                        createEffect(() => { if (rowEl) elNodeId.set(rowEl, row().nodeId); });
                         return (
                             <Show when={node()}>
                                 {(n) => (
@@ -678,9 +692,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                         highlightNodeId={props.highlightNodeId}
                                         onToggleCollapse={props.onToggleCollapse}
                                         onTogglePin={props.onTogglePin}
-                                        // Step 4: ref carries the measure RO
-                                        // (keyed by nodeId), not measureElement —
-                                        // no data-index, no measure race.
                                         ref={(el) => { rowEl = el; observeRow(el, row().nodeId); }}
                                         style={{
                                             position: "absolute",
@@ -694,7 +705,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                             </Show>
                         );
                     }}
-                </Key>
+                </Index>
             </div>
 
             {/* Streaming buffer — always-mounted trailing nodes.
