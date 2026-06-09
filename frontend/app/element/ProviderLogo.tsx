@@ -18,6 +18,7 @@ import moonshotSvg from "@lobehub/icons-static-svg/icons/moonshot.svg?raw";
 import githubSvg from "@lobehub/icons-static-svg/icons/github.svg?raw";
 import awsSvg from "@lobehub/icons-static-svg/icons/aws-color.svg?raw";
 import plandexUrl from "@/app/element/icons/plandex.png?url";
+import brainSvg from "@/app/asset/logo-brain.svg?raw";
 import type { JSX } from "solid-js";
 
 export interface ProviderLogoProps {
@@ -44,18 +45,7 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
         if (p === "aws") return { html: awsSvg };
         if (p === "pi" || p === "plandex") return { png: plandexUrl };
 
-        if (p === "mux-code" || p === "mux_code" || p === "muxcode") {
-            return {
-                jsx: (
-                    <svg width={size()} height={size()} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        {/* layers icon — three stacked rectangles */}
-                        <rect x="3" y="14" width="18" height="3" rx="1.5" fill="currentColor" opacity="0.45" />
-                        <rect x="3" y="10" width="18" height="3" rx="1.5" fill="currentColor" opacity="0.70" />
-                        <rect x="3" y="6"  width="18" height="3" rx="1.5" fill="currentColor" />
-                    </svg>
-                ),
-            };
-        }
+        if (p === "muxcode" || p === "mux-code" || p === "mux_code") return { html: brainSvg };
 
         // Handcrafted multi-color Google G (more recognizable than
         // simple-icons' monochrome G).

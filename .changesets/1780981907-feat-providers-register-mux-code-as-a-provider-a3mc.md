@@ -2,4 +2,4 @@
 type: minor
 ---
 
-feat(providers): register mux-code as a first-party provider
+feat(providers): register muxcode as a first-party provider
