@@ -491,16 +491,16 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 // attempt redock if the dwell gate armed and motion confirmed.
                 // Arm conditions (any one suffices):
                 // 1. hoverArmed: second IPC confirmed same target (full dwell cycle).
-                // 2. indicatorShowing: first IPC confirmed target after dwell;
-                //    cursor held still so no second IPC fired.
-                // 3. dwellSlowSince elapsed: cursor slowed and stopped before the
-                //    IPC could fire (stopped during the slow-motion window before
-                //    REDOCK_DWELL_MS); tryRedockAtCursorInner handles no-target.
-                // 4. dwellCurrentConfirmedAt elapsed: belt-and-suspenders for any
-                //    path where the target was confirmed but hoverArmed wasn't set.
+                // 2. dwellSlowSince elapsed: cursor slowed and stopped before
+                //    the IPC could fire (stopped during the slow-motion window);
+                //    tryRedockAtCursorInner handles the no-target case gracefully.
+                // 3. dwellCurrentConfirmedAt elapsed: first IPC confirmed the target;
+                //    user has now held still over it for a full REDOCK_DWELL_MS.
+                //    (indicatorShowing intentionally excluded — arming on first IPC
+                //    confirmation lets slow desktop transits dock without per-target
+                //    dwell; dwellCurrentConfirmedAt is the spec-correct check.)
                 const nowMs = performance.now();
                 const armed = hoverArmed ||
-                    indicatorShowing ||
                     (dwellSlowSince !== null &&
                      nowMs - dwellSlowSince >= REDOCK_DWELL_MS) ||
                     (dwellCurrentConfirmedAt !== null &&
@@ -592,8 +592,6 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 // wall-clock check here covers the window_drag_ended ordering leg.
                 const nowMs = performance.now();
                 const armedAtEnd = pendingRedockArmed || hoverArmed ||
-                    // Non-Windows: indicatorShowing means IPC confirmed target after dwell.
-                    indicatorShowing ||
                     (dwellCurrentHoverTarget !== null &&
                      dwellHoverTargetFirstSeenAt !== null &&
                      nowMs - dwellHoverTargetFirstSeenAt >= REDOCK_DWELL_MS) ||
