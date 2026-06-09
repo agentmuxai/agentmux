@@ -77,7 +77,7 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF ho
 Platform-specific:
 - **Windows:** Visual Studio Build Tools (CMake + Ninja ship with VS, but Ninja must be on PATH — see CLAUDE.md)
 - **macOS:** Xcode Command Line Tools, `brew install cmake ninja`
-- **Linux:** Build essentials, `apt install cmake ninja-build`
+- **Linux:** Build essentials, `apt install cmake ninja-build build-essential` — see [Linux guide](docs/linux.md)
 
 ### Development
 

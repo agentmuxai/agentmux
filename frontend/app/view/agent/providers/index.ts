@@ -185,7 +185,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // local GGUF model installed), exits 1 when nothing is configured.
         // Avoids the false-positive that `--version` would cause.
         authCheckCommand: ["auth", "status"],
-        authLoginCommand: ["model", "list"],
+        // `auth login` pulls a default local model when no backend is configured.
+        authLoginCommand: ["auth", "login"],
         npmPackage: "@a5af/muxcode",
         pinnedVersion: "latest",
         docsUrl: "https://github.com/agentmuxai/muxcode",
