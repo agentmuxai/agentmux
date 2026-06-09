@@ -301,21 +301,12 @@ static MUX_CODE: ProviderConfig = ProviderConfig {
     display_name: "Mux Code",
     cli_command: "muxcode",
     controller_type: ControllerType::Subprocess,
-    launch_args: &[
-        "-p",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--dangerously-skip-permissions",
-    ],
-    persistent_launch_args: Some(&[
-        "--input-format",
-        "stream-json",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--dangerously-skip-permissions",
-    ]),
+    // muxcode emits NDJSON unconditionally; no --output-format flag exists.
+    // The `run` subcommand is explicit even though it is Commander's default,
+    // so the invocation is unambiguous: `muxcode run -p "<prompt>"`.
+    launch_args: &["run", "-p"],
+    // muxcode takes a single prompt and exits; persistent mode not supported.
+    persistent_launch_args: None,
     resume_flag: Some("--resume"),
     session_id_field: "session_id",
     styled_output_format: "claude-stream-json",
@@ -456,7 +447,8 @@ mod tests {
         assert_eq!(p.session_id_field, "session_id");
         assert_eq!(p.resume_flag, Some("--resume"));
         assert_eq!(p.npm_package, "@a5af/muxcode");
-        assert!(p.persistent_launch_args.is_some());
+        assert_eq!(p.launch_args, &["run", "-p"]);
+        assert!(p.persistent_launch_args.is_none());
     }
 
     #[test]

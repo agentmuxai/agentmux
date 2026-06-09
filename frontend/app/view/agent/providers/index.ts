@@ -176,12 +176,16 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         displayName: "Mux Code",
         cliCommand: "muxcode",
         defaultArgs: [],
-        styledArgs: ["run", "--output-format", "stream-json"],
+        // muxcode emits NDJSON unconditionally — no --output-format flag.
+        styledArgs: ["run", "-p"],
         outputFormat: "raw",
         styledOutputFormat: "claude-stream-json",
         authType: "api-key",
-        authCheckCommand: ["--version"],
-        authLoginCommand: [],
+        // `auth status` exits 0 when any backend is ready (API key env var or
+        // local GGUF model installed), exits 1 when nothing is configured.
+        // Avoids the false-positive that `--version` would cause.
+        authCheckCommand: ["auth", "status"],
+        authLoginCommand: ["model", "list"],
         npmPackage: "@a5af/muxcode",
         pinnedVersion: "latest",
         docsUrl: "https://github.com/agentmuxai/muxcode",
@@ -190,7 +194,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         icon: "brain",
         authConfigDirEnvVar: "MUXCODE_CONFIG_DIR",
         authDirName: "muxcode",
-        launchArgs: ["run", "--output-format", "stream-json", "-p"],
+        launchArgs: ["run", "-p"],
         resumeFlag: "--resume",
         sessionIdField: "session_id",
         controllerType: "subprocess",
