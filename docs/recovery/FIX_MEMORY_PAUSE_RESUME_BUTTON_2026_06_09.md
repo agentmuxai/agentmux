@@ -66,8 +66,17 @@ asserts the inert `onclick="location.href` antipattern is gone, the URL appears 
 string literal (`location.href = "http://…&…"`), and the handler is wired via
 `addEventListener`.
 
-> Audit note: confirm the normal crash-recovery and "give-up" pages don't construct buttons the
-> same way (they appear to use different markup, but worth a glance during review).
+### Same bug, second instance (also fixed in this PR)
+
+ReAgent review flagged the identical pattern on the **broken-install error page**:
+`assets_missing_data_url()` in `agentmux-cef/src/commands/window/creation.rs` put
+`js_string_literal(&detail)` into a double-quoted `onclick="navigator.clipboard && …writeText(…)"`,
+making the **"Copy path"** button permanently inert. Fixed the same way — extracted a testable
+`assets_missing_html()`, moved the handlers into a `<script>` block via `addEventListener`, and
+added `copy_path_button_has_working_handler`.
+
+Both data:-page buttons in the CEF host are now wired in script context; no remaining
+`onclick="…{js_string_literal}…"` attribute call sites.
 
 ## 4. Follow-up (P1 — memory-gated auto-resume, separate PR)
 
