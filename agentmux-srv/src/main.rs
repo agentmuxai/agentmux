@@ -569,6 +569,19 @@ async fn main() {
         }
     }
 
+    // Gap-repair: backfill definitions written after the Phase 3a marker
+    // but before Phase 3b dual-write (they exist in db_agent_definitions
+    // but not in db_agents, making them invisible to Phase 3b readers).
+    match wstore.repair_agent_def_gaps() {
+        Ok(0) => {}
+        Ok(n) => {
+            tracing::info!(count = n, "agents_consolidate: gap-repair backfilled missing definitions");
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "agents_consolidate: gap-repair failed (non-fatal)");
+        }
+    }
+
     // Event infrastructure
     let event_bus = Arc::new(EventBus::new());
     let broker = Arc::new(Broker::new());

@@ -192,16 +192,37 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                 {row.preview}
                                             </span>
                                         </Show>
-                                        <span class="agent-recent-sessions-line3">
-                                            <Show when={row.node_count > 0}>
+                                        <Show when={row.node_count > 0}>
+                                            <span class="agent-recent-sessions-line3">
                                                 <span class="agent-recent-sessions-nodes">
                                                     {row.node_count} message
                                                     {row.node_count === 1 ? "" : "s"}
                                                 </span>
+                                            </span>
+                                        </Show>
+                                        <span class="agent-recent-sessions-timestamps">
+                                            <Show when={row.agent_created_at > 0}>
+                                                <span class="agent-recent-sessions-ts">
+                                                    <span class="agent-recent-sessions-ts-label">Created</span>
+                                                    <span class="agent-recent-sessions-ts-value">
+                                                        {formatRelative(now(), row.agent_created_at)}
+                                                    </span>
+                                                </span>
                                             </Show>
-                                            <Show when={row.last_active_at > 0}>
-                                                <span class="agent-recent-sessions-when">
-                                                    {formatRelative(now(), row.last_active_at)}
+                                            <Show when={row.started_at > 0}>
+                                                <span class="agent-recent-sessions-ts">
+                                                    <span class="agent-recent-sessions-ts-label">Last Launch</span>
+                                                    <span class="agent-recent-sessions-ts-value">
+                                                        {formatRelative(now(), row.started_at)}
+                                                    </span>
+                                                </span>
+                                            </Show>
+                                            <Show when={row.has_snapshot && row.started_at > 0 && row.last_active_at > row.started_at}>
+                                                <span class="agent-recent-sessions-ts">
+                                                    <span class="agent-recent-sessions-ts-label">Last Active</span>
+                                                    <span class="agent-recent-sessions-ts-value">
+                                                        {formatRelative(now(), row.last_active_at)}
+                                                    </span>
                                                 </span>
                                             </Show>
                                         </span>
