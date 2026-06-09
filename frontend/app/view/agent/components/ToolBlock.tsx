@@ -150,6 +150,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 failed: props.node.status === "failed",
                 canceled: props.node.status === "canceled",
             })}
+            data-tool={props.node.tool.toLowerCase()}
         >
             <div class="agent-tool-summary" onClick={props.onTogglePin}>
                 <span class="agent-tool-status-icon">{statusIcon()}</span>
