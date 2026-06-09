@@ -149,7 +149,7 @@ Within `channels/stable/`, every version reads and writes the same DB. The curre
 
 **This breaks the current "every portable is its own world" guarantee.** Two portables of different versions can't both be running at the same time (within a channel) — single-instance enforcement applies, just like Chrome. The user already accepts this for `task dev`.
 
-**For the active-dev workflow** (which is what triggered this research): create a `dev-portable` channel that mirrors stable but is meant for the user's own test builds. Portables built via `task package` for personal smoke-testing land there. The bot can opt into `dev-portable` channel by default and the user gets continuity across local build iterations.
+**For the active-dev workflow** (which is what triggered this research): create a `local-<branch>-<hash>` channel that mirrors stable but is meant for the user's own test builds. Portables built via `task package` for personal smoke-testing land there. The bot can opt into `local-<branch>-<hash>` channel by default and the user gets continuity across local build iterations.
 
 ### 5.2 Increment B: Migration framework + snapshots
 
@@ -192,10 +192,10 @@ This is JetBrains's pattern, applied at channel boundaries instead of version bo
 
 Smallest move that delivers immediate value:
 
-**Ship Increment A (channels) as a single PR with one new channel: `dev-portable`.** Local builds via `task package` land there by default (no production user is affected). Within `dev-portable`, all builds share one data dir. The "My Agents" list survives the next `bump patch && task package`. Total scope:
+**Ship Increment A (channels) as a single PR with one new channel: `local-<branch>-<hash>`.** Local builds via `task package` land there by default (no production user is affected). Within `local-<branch>-<hash>`, all builds share one data dir. The "My Agents" list survives the next `bump patch && task package`. Total scope:
 
-- `agentmux-common/src/data_paths.rs` — add channel parameter, derive instance_dir as `channels/<channel>/` for the `Portable` mode when built with a "dev-portable" flag (or env var).
-- `Taskfile.yml` — `task package` sets `AGENTMUX_CHANNEL=dev-portable` in the bundled binaries.
+- `agentmux-common/src/data_paths.rs` — add channel parameter, derive instance_dir as `channels/<channel>/` for the `Portable` mode when built with a "local-<branch>-<hash>" flag (or env var).
+- `Taskfile.yml` — `task package` sets `AGENTMUX_CHANNEL=local-<branch>-<hash>` in the bundled binaries.
 - No schema migration code yet — within a single channel without released versions, just trust the schema. Migration framework can wait for Increment B.
 
 Test:
@@ -210,7 +210,7 @@ Once that lands, Increment B unblocks a real channel rollout to Installed + (eve
 
 ## 8. Open questions for the user
 
-- **Is the production install model in scope, or only the dev/portable workflow?** Increment A only addresses local-build continuity if scoped to `dev-portable`. Channels for shipped builds is a bigger conversation (release process, update flow).
+- **Is the production install model in scope, or only the dev/portable workflow?** Increment A only addresses local-build continuity if scoped to `local-<branch>-<hash>`. Channels for shipped builds is a bigger conversation (release process, update flow).
 - **Should `task dev` participate?** Currently keyed on branch. Could optionally collapse all dev branches into a single channel, but the per-branch isolation is genuinely useful for parallel feature work.
 - **What's the right blast radius for an accidental "wrong channel" launch?** Worst case today: lost test agents. Worst case under §5.1: same. Worst case under §5.2 with a buggy migration: corrupted shared state — hence the snapshot, hence the safety lock.
 - **Does this become a `RFC #...` in the existing reducer/state-machine arc, or its own track?** Adjacent but not the same conversation. Suggest its own discussion.

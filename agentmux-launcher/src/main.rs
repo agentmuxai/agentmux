@@ -736,13 +736,15 @@ async fn run_unix(
     // in `ensure_ipc_socket_dir` and is invoked separately below so
     // that any future read-only inspector (e.g. a Linux `--diag`
     // port) can call `pipe_name` without mutating the filesystem.
-    let dir_hash = hash::data_dir_hash16(&paths.data_dir, version);
+    let pipe_version = option_env!("AGENTMUX_BUILD_LABEL")
+        .unwrap_or(env!("CARGO_PKG_VERSION"));
+    let dir_hash = hash::data_dir_hash16(&paths.data_dir, pipe_version);
     let socket_path = ipc::pipe_name(&dir_hash);
     log(&format!(
-        "launcher IPC socket = {} (data_dir={} version={})",
+        "launcher IPC socket = {} (data_dir={} pipe_version={})",
         socket_path,
         paths.data_dir.display(),
-        version
+        pipe_version
     ));
     // Ensure the socket dir exists with safe ownership/perms BEFORE
     // any bind attempts. This may call std::process::exit(2) on a
@@ -1149,10 +1151,16 @@ async fn run_windows(
     // "AgentMux is already running for this data directory" and
     // exit cleanly BEFORE spawning srv/host (otherwise the second
     // host would briefly contend on the CEF cache lockfile).
-    // Include the build version so two different release versions (e.g.
-    // 0.40.2 and 0.41.0) sharing the same channel data dir produce
-    // distinct pipe names — each version is its own single-instance domain.
-    let dir_hash = hash::data_dir_hash16(&paths.data_dir, env!("CARGO_PKG_VERSION"));
+    // For release builds, CARGO_PKG_VERSION (semver) is the isolation key —
+    // two different versions on the same channel get distinct pipes.
+    // For local builds, package.sh bakes AGENTMUX_BUILD_LABEL (which includes
+    // a per-build timestamp stamp), so each successive `task package` run gets
+    // its own single-instance domain and can start a fresh window even while a
+    // previous local build is running. Session data is still shared (data_dir
+    // is keyed on channel+semver, not the label), so agents/auth carry over.
+    let pipe_version = option_env!("AGENTMUX_BUILD_LABEL")
+        .unwrap_or(env!("CARGO_PKG_VERSION"));
+    let dir_hash = hash::data_dir_hash16(&paths.data_dir, pipe_version);
     let pipe_path = ipc::pipe_name(&dir_hash);
     // Isolation telemetry: record exactly which keyed resources this instance
     // claims, so a cross-instance collision is diagnosable from the log alone
@@ -1163,7 +1171,7 @@ async fn run_windows(
     log(&format!(
         "instance_claim pid={} version={} data_dir={} dir_hash={} pipe={}",
         std::process::id(),
-        env!("CARGO_PKG_VERSION"),
+        pipe_version,
         paths.data_dir.display(),
         dir_hash,
         pipe_path

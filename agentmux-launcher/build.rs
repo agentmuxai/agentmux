@@ -2,6 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 fn main() {
+    // AGENTMUX_BUILD_LABEL is injected by package.sh and includes a per-build
+    // timestamp stamp. Tracking it here forces a recompile of agentmux-launcher
+    // (only) when the label changes between local builds, so the baked
+    // option_env!("AGENTMUX_BUILD_LABEL") in main.rs reflects the new stamp.
+    // We do NOT track this in agentmux-common/build.rs because common is a
+    // foundational crate — recompiling it every build destroys incremental caching.
+    println!("cargo:rerun-if-env-changed=AGENTMUX_BUILD_LABEL");
+
     #[cfg(target_os = "windows")]
     {
         let version = std::env::var("CARGO_PKG_VERSION").unwrap();
