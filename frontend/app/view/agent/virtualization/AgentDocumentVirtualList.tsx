@@ -28,7 +28,7 @@
  * the state into the DOM but never reads it back.
  */
 
-import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, ErrorBoundary, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
 import { Key } from "@solid-primitives/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
@@ -781,26 +781,49 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 so it is fully disposed before the outer partition memo
                 can produce a stale read.
                 (SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §3.3) */}
-            <Show when={partition()}>
-                {(p) => (
-                    <div class="agent-document-streaming-buffer" data-animate={animateEnabled() || undefined}>
-                        <Key each={p().streamingNodes as DocumentNode[]} by={(n) => n.id}>
-                            {(nodeAccessor) => (
-                                <DocumentRow
-                                    node={nodeAccessor}
-                                    documentState={props.documentState}
-                                    bookmarkedNodeIds={props.bookmarkedNodeIds}
-                                    onBookmark={props.onBookmark}
-                                    onSubagentClick={props.onSubagentClick}
-                                    highlightNodeId={props.highlightNodeId}
-                                    onToggleCollapse={props.onToggleCollapse}
-                                    onTogglePin={props.onTogglePin}
-                                />
-                            )}
-                        </Key>
-                    </div>
-                )}
-            </Show>
+            {/* Local error boundary around the streaming buffer. The
+                replaceChild / reconcileArrays crash (RETRO_REPLACECHILD_CRASH
+                _2026-06-06.md) can still fire from a Solid re-entrancy edge
+                case where the layout-feeding effect runs before the <Key>
+                render effect, mutating expansion state for a departing node
+                while its DocumentRow's inner <Show> is still live. The outer
+                block-level boundary catches it but blanks the pane; this
+                boundary catches it first and resets just the streaming buffer,
+                which remounts cleanly on the next reactive tick. The root
+                cause investigation continues in parallel. */}
+            <ErrorBoundary fallback={(err, reset) => {
+                if (err instanceof Error && err.message.includes("replaceChild")) {
+                    // Schedule a silent reset so the streaming buffer remounts
+                    // with the current (now-stable) partition state. Don't show
+                    // any fallback UI — the flicker is imperceptible at 60fps.
+                    queueMicrotask(reset);
+                    return null;
+                }
+                // Re-throw anything that's NOT a replaceChild DOM race so
+                // the outer block-level boundary still catches genuine errors.
+                throw err;
+            }}>
+                <Show when={partition()}>
+                    {(p) => (
+                        <div class="agent-document-streaming-buffer" data-animate={animateEnabled() || undefined}>
+                            <Key each={p().streamingNodes as DocumentNode[]} by={(n) => n.id}>
+                                {(nodeAccessor) => (
+                                    <DocumentRow
+                                        node={nodeAccessor}
+                                        documentState={props.documentState}
+                                        bookmarkedNodeIds={props.bookmarkedNodeIds}
+                                        onBookmark={props.onBookmark}
+                                        onSubagentClick={props.onSubagentClick}
+                                        highlightNodeId={props.highlightNodeId}
+                                        onToggleCollapse={props.onToggleCollapse}
+                                        onTogglePin={props.onTogglePin}
+                                    />
+                                )}
+                            </Key>
+                        </div>
+                    )}
+                </Show>
+            </ErrorBoundary>
         </div>
     );
 }
