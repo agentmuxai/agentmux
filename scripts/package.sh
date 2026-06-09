@@ -27,10 +27,14 @@
 #                never collide with or reorder a release). Names the
 #                portable folder + ZIP so builds are unique on disk and
 #                you can tell them apart at a glance.
-#   - CHANNEL  : dev-portable-<branch>[-<stamp> if --fresh] — the data-dir
-#                key. Branch-scoped so rebuilds of the same branch reuse
-#                one data dir. Baked into the binary at compile time via
+#   - CHANNEL  : local-<branch>[-<stamp> if --fresh] — the data-dir key.
+#                Branch-scoped so rebuilds of the same branch reuse one
+#                data dir. Baked into the binary at compile time via
 #                AGENTMUX_BUILD_CHANNEL_DEFAULT (see agentmux-common/build.rs).
+#   - AGENTMUX_BUILD_LABEL: the full label (including stamp) baked into
+#                the launcher for use as the single-instance pipe key, so
+#                two successive local builds never share a pipe and each
+#                local build starts its own window.
 
 set -euo pipefail
 
@@ -79,18 +83,17 @@ LABEL="${VERSION}+g${SHA}${DIRTY}.${STAMP}.$$"
 # share a prefix from aliasing to the same data dir once the human-readable
 # slug is truncated. Budget for the 64-char channel cap enforced in
 # data_paths.rs::sanitize_channel_name:
-#   "dev-portable-" (13) + slug (≤20) + "-" + hash (6) + "-" + stamp (15)
+#   "local-" (6) + slug (≤27) + "-" + hash (6) + "-" + stamp (15)
 #   = ≤55  → comfortably under 64 even with the --fresh suffix.
-# Codex P2 on #1141.
 BRANCH_HASH=$(printf '%s' "$BRANCH" | sha1sum | cut -c1-6)
-BRANCH_SLUG=$(printf '%s' "$BRANCH" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-20)
-CHANNEL="dev-portable-${BRANCH_SLUG}-${BRANCH_HASH}"
+BRANCH_SLUG=$(printf '%s' "$BRANCH" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-27)
+CHANNEL="local-${BRANCH_SLUG}-${BRANCH_HASH}"
 if [ "$FRESH" -eq 1 ]; then
     CHANNEL="${CHANNEL}-${STAMP}"
 fi
 
 # Release portables must bake the "stable" channel so users open their
-# real data dir, not a branch-scoped dev-portable dir. Set RELEASE_CHANNEL
+# real data dir, not a branch-scoped local dir. Set RELEASE_CHANNEL
 # (task package:release does this automatically) to override.
 if [ -n "${RELEASE_CHANNEL:-}" ]; then
     if [ "$FRESH" -eq 1 ]; then
@@ -121,15 +124,15 @@ echo "────────────────────────�
 #     declares rerun-if-env-changed for it so a changed channel actually
 #     recompiles instead of serving a stale cache.
 #   - package-portable.sh: AGENTMUX_BUILD_LABEL names the artifacts.
-# Locally-built portables default to the dev-portable channel family per
-# SPEC_DATA_CHANNELS_2026_05_24.md §2.2; release portables use RELEASE_CHANNEL
-# (set by task package:release) to bake "stable"; release CI never calls this script.
+# Locally-built portables default to the local channel family; release
+# portables use RELEASE_CHANNEL (set by task package:release) to bake
+# "stable"; release CI never calls this script.
 export AGENTMUX_BUILD_CHANNEL_DEFAULT="$CHANNEL"
 export AGENTMUX_BUILD_LABEL="$LABEL"
 
 task build:frontend
 
-# Release portables strip source maps (~28 MB). Dev portables keep them so
+# Release portables strip source maps (~28 MB). Local builds keep them so
 # the runtime source-map resolver works during local testing.
 # Set STRIP_MAPS=1 explicitly (task package:release does this automatically).
 if [ "${STRIP_MAPS:-0}" = "1" ]; then
