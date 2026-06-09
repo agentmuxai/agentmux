@@ -5,8 +5,8 @@
 
 ## Rule
 
-- **`task package`** (dev portable) — maps **included**, channel = `dev-portable-<branch>`. Use for all local iteration and testing.
-- **`task package:release`** (release portable) — maps **stripped**, channel = `stable` (baked via `RELEASE_CHANNEL=stable`). Use when building the artifact that ships in a GitHub release. Without this, the portable boots users into the dev-portable channel instead of their real data.
+- **`task package`** (local portable) — maps **included**, channel = `local-<branch>`. Use for all local iteration and testing.
+- **`task package:release`** (release portable) — maps **stripped**, channel = `stable` (baked via `RELEASE_CHANNEL=stable`). Use when building the artifact that ships in a GitHub release. Without this, the portable boots users into the local channel instead of their real data.
 - **`task dev`** — maps always available (Vite dev server, no ZIP).
 
 ## Why
