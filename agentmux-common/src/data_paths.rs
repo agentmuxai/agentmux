@@ -48,7 +48,7 @@ use std::path::{Path, PathBuf};
 
 /// Build-time default channel for `Installed` / `Portable` modes.
 /// Set by the packaging script (`task package` exports
-/// `AGENTMUX_BUILD_CHANNEL_DEFAULT=dev-portable`; release CI exports
+/// `AGENTMUX_BUILD_CHANNEL_DEFAULT=local-<branch>`; release CI exports
 /// `stable`). Falls back to `"stable"` when the binary is built
 /// without the env (e.g. plain `cargo build` / `cargo run` for tests).
 const BUILD_CHANNEL_DEFAULT: &str =
@@ -92,7 +92,7 @@ pub struct DataPaths {
     pub instance_dir: PathBuf,
 
     /// Channel identifier this resolution used (e.g. `"stable"`,
-    /// `"dev-portable"`, `"dev-main"`, or a user-specified custom
+    /// `"local-main"`, `"dev-main"`, or a user-specified custom
     /// channel from `AGENTMUX_CHANNEL`). Surfaced for diagnostics,
     /// logging, and the launcher splash; downstream binaries usually
     /// don't need it (paths are passed via env vars).
@@ -1163,14 +1163,14 @@ mod tests {
 
     #[test]
     fn sanitize_channel_name_accepts_normal_names() {
-        // The happy path — make sure stable / beta / dev-portable
+        // The happy path — make sure stable / beta / local-main
         // and friends all sanitize cleanly. Catches regressions in
         // case the reserved list grows by mistake.
         assert_eq!(sanitize_channel_name("stable"), Some("stable".into()));
         assert_eq!(sanitize_channel_name("beta"), Some("beta".into()));
         assert_eq!(
-            sanitize_channel_name("dev-portable"),
-            Some("dev-portable".into())
+            sanitize_channel_name("local-main"),
+            Some("local-main".into())
         );
         assert_eq!(
             sanitize_channel_name("dev-main"),
