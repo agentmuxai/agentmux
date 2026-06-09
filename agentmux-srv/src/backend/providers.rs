@@ -290,6 +290,36 @@ static PI: ProviderConfig = ProviderConfig {
     docs_url: "https://github.com/badlogic/pi-mono",
 };
 
+// Mux Code — AgentMux's first-party agentic coding CLI.
+// Local GGUF inference via llama-server or cloud APIs (Anthropic,
+// OpenAI, OpenAI-compat). Emits claude-compatible stream-json NDJSON
+// (same `session_id` field, same event envelope), so ClaudeTranslator
+// handles it without modification.  `--resume <id>` resumes a prior
+// session.  npm: `@a5af/muxcode`.
+static MUX_CODE: ProviderConfig = ProviderConfig {
+    id: "muxcode",
+    display_name: "Mux Code",
+    cli_command: "muxcode",
+    controller_type: ControllerType::Subprocess,
+    // muxcode emits NDJSON unconditionally; no --output-format flag exists.
+    // The `run` subcommand is explicit even though it is Commander's default,
+    // so the invocation is unambiguous: `muxcode run -p "<prompt>"`.
+    launch_args: &["run", "-p"],
+    // muxcode takes a single prompt and exits; persistent mode not supported.
+    persistent_launch_args: None,
+    resume_flag: Some("--resume"),
+    session_id_field: "session_id",
+    styled_output_format: "claude-stream-json",
+    auth_config_dir_env_var: "MUXCODE_CONFIG_DIR",
+    auth_dir_name: "muxcode",
+    auth_extra_env: &[],
+    unset_env: &[],
+    npm_package: "@a5af/muxcode",
+    pinned_version: "latest",
+    icon: "brain",
+    docs_url: "https://github.com/agentmuxai/muxcode",
+};
+
 // GitHub Copilot CLI — Microsoft's coding agent. Runs in ACP mode via
 // `--acp` so the existing ACP controller drives it. Non-interactive
 // `-p`/`--prompt` doesn't accept stdin prompts (github/copilot-cli#96,
@@ -326,6 +356,7 @@ static REGISTRY: LazyLock<HashMap<&'static str, &'static ProviderConfig>> = Lazy
     m.insert(OPENCLAW.id, &OPENCLAW);
     m.insert(PI.id, &PI);
     m.insert(COPILOT.id, &COPILOT);
+    m.insert(MUX_CODE.id, &MUX_CODE);
     m
 });
 
@@ -345,6 +376,8 @@ static ALIASES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(||
     m.insert("copilot-cli", "copilot");
     m.insert("github-copilot", "copilot");
     m.insert("copilot_cli", "copilot");
+    m.insert("mux-code", "muxcode");
+    m.insert("mux_code", "muxcode");
     m
 });
 
@@ -383,7 +416,7 @@ pub fn get_provider(id: &str) -> Option<&'static ProviderConfig> {
 pub fn get_provider_list() -> impl Iterator<Item = &'static ProviderConfig> {
     // Stable canonical order matches the TypeScript PROVIDERS object order.
     static ORDER: &[&str] =
-        &["claude", "codex", "gemini", "qwen", "kimi", "openclaw", "pi", "copilot"];
+        &["claude", "codex", "muxcode", "gemini", "qwen", "kimi", "openclaw", "pi", "copilot"];
     ORDER.iter().filter_map(|id| REGISTRY.get(*id).copied())
 }
 
@@ -401,6 +434,21 @@ mod tests {
         assert!(get_provider("kimi").is_some());
         assert!(get_provider("openclaw").is_some());
         assert!(get_provider("qwen").is_some());
+        assert!(get_provider("muxcode").is_some());
+    }
+
+    #[test]
+    fn mux_code_is_subprocess_with_claude_stream_json() {
+        let p = get_provider("muxcode").unwrap();
+        assert_eq!(p.controller_type, ControllerType::Subprocess);
+        assert_eq!(p.controller_type_str(), "subprocess");
+        assert_eq!(p.styled_output_format, "claude-stream-json");
+        assert_eq!(p.cli_command, "muxcode");
+        assert_eq!(p.session_id_field, "session_id");
+        assert_eq!(p.resume_flag, Some("--resume"));
+        assert_eq!(p.npm_package, "@a5af/muxcode");
+        assert_eq!(p.launch_args, &["run", "-p"]);
+        assert!(p.persistent_launch_args.is_none());
     }
 
     #[test]
@@ -421,11 +469,11 @@ mod tests {
     }
 
     #[test]
-    fn provider_list_has_eight_entries() {
+    fn provider_list_has_nine_entries() {
         // Update this when a provider is added or removed; a stale
         // count is the cheapest detection mechanism for accidental
         // additions.
-        assert_eq!(get_provider_list().count(), 8);
+        assert_eq!(get_provider_list().count(), 9);
     }
 
     #[test]
