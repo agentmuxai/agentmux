@@ -1171,7 +1171,7 @@ async fn run_windows(
     log(&format!(
         "instance_claim pid={} version={} data_dir={} dir_hash={} pipe={}",
         std::process::id(),
-        env!("CARGO_PKG_VERSION"),
+        pipe_version,
         paths.data_dir.display(),
         dir_hash,
         pipe_path

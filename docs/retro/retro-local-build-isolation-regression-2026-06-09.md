@@ -144,7 +144,7 @@ New test `successive_local_builds_produce_different_hashes` in `hash.rs` asserts
 
 ---
 
-## 6. What to do
+## 7. What to do
 
 1. **PR:** Inject `AGENTMUX_BUILD_LABEL` into the pipe hash for local builds (see §4). Small change; touches `package.sh`, `agentmux-common/build.rs`, and `agentmux-launcher/src/main.rs`. Add a test: `same_version_different_stamps_produce_different_hashes`.
 2. **Workaround (now):** Close all running AgentMux instances before launching a new local portable. The new build starts cleanly; your session data is in the same data dir, so agents, auth, and panes all come back.
@@ -152,7 +152,7 @@ New test `successive_local_builds_produce_different_hashes` in `hash.rs` asserts
 
 ---
 
-## 7. Lessons
+## 8. Lessons
 
 - **Spec §3.2 was under-specified.** "Data dir stable across rebuilds" was the right goal but didn't separately state the single-instance domain requirement. The two concerns were collapsed into one key.
 - **`CARGO_PKG_VERSION` is the wrong isolation primitive for local builds.** It's stable across all builds between releases — which is useful for data sharing but wrong for single-instance enforcement.
