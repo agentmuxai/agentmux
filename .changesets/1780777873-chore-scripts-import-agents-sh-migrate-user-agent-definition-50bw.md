@@ -1,5 +1,5 @@
 ---
-type: minor
+type: patch
 ---
 
-feat(app-api): agent.define — create/upsert agent definition via HTTP RPC without restart
+fix(scripts): import-agents.sh — scan version dirs for channel instead of deriving from git branch
