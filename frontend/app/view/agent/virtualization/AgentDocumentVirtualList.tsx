@@ -28,7 +28,7 @@
  * the state into the DOM but never reads it back.
  */
 
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
 import { Key } from "@solid-primitives/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
@@ -612,6 +612,39 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // dispatch RowMeasured keyed by the row's current in-flow state, ÷zoom to
     // stay in unzoomed CSS px (INV-2/3). Rows observe on mount, unobserve on
     // unmount (the Key child's onCleanup).
+    //
+    // Dispatching RowMeasured synchronously inside the RO callback triggers
+    // Solid's reactive scheduler (documentAtom → partition → <Key> effects)
+    // while the browser is already in a layout pass. This creates two problems:
+    //   1. A new runUpdates frame starts while the previous batch()'s render
+    //      effects may still be executing → concurrent reconcileArrays →
+    //      replaceChild NotFoundError (the same class as the crashes documented
+    //      in RETRO_REPLACECHILD_CRASH_2026-06-06.md).
+    //   2. The RowMeasured dispatch updates the virtualizer height, which
+    //      triggers DOM mutations, which fire more RO callbacks → tight loop →
+    //      "ResizeObserver loop completed with undelivered notifications".
+    //
+    // Fix: capture getBoundingClientRect() synchronously (layout-accurate at
+    // RO time), but defer the RowMeasured dispatch to the next RAF. The RAF
+    // fires outside Solid's current effects pass so no frame interleaving
+    // occurs. All pending measurements are batched into one reactive frame.
+    type PendingMeasurement = { nodeId: string; cssPx: number; state: ReturnType<typeof inFlowState> };
+    let pendingMeasures: PendingMeasurement[] = [];
+    let measureFlushId: number | null = null;
+    const flushMeasurements = (): void => {
+        measureFlushId = null;
+        const blockId = props.blockId;
+        if (!blockId || pendingMeasures.length === 0) { pendingMeasures = []; return; }
+        const toFlush = pendingMeasures;
+        pendingMeasures = [];
+        // Batch so all RowMeasured updates land in one reactive frame —
+        // prevents each measurement from triggering its own runUpdates pass.
+        batch(() => {
+            for (const { nodeId, cssPx, state } of toFlush) {
+                dispatchLayoutIfRegistered(blockId, { type: "RowMeasured", nodeId, state, cssPx });
+            }
+        });
+    };
     const elNodeId = new WeakMap<Element, string>();
     const measureRO = typeof ResizeObserver !== "undefined"
         ? new ResizeObserver((entries) => {
@@ -623,6 +656,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             for (const entry of entries) {
                 const nodeId = elNodeId.get(entry.target);
                 if (!nodeId) continue;
+                // Capture layout synchronously — getBoundingClientRect is
+                // accurate here; deferring this read would give stale values.
                 const cssPx = entry.target.getBoundingClientRect().height / (zoom || 1);
                 const node = nodes.get(nodeId);
                 if (node) {
@@ -632,16 +667,18 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                         cssPx,
                     );
                 }
-                dispatchLayoutIfRegistered(blockId, {
-                    type: "RowMeasured",
-                    nodeId,
-                    state: inFlowState(snap?.expansion.get(nodeId)),
-                    cssPx,
-                });
+                pendingMeasures.push({ nodeId, cssPx, state: inFlowState(snap?.expansion.get(nodeId)) });
+            }
+            if (measureFlushId === null) {
+                measureFlushId = requestAnimationFrame(flushMeasurements);
             }
         })
         : undefined;
-    onCleanup(() => measureRO?.disconnect());
+    onCleanup(() => {
+        measureRO?.disconnect();
+        if (measureFlushId !== null) { cancelAnimationFrame(measureFlushId); measureFlushId = null; }
+        pendingMeasures = [];
+    });
     const observeRow = (el: HTMLElement, nodeId: string): void => {
         elNodeId.set(el, nodeId);
         measureRO?.observe(el);
