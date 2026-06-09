@@ -10,7 +10,7 @@
 
 ## TL;DR
 
-Replace per-version data isolation (`~/.agentmux/versions/<version>/`) with **per-channel** isolation (`~/.agentmux/channels/<channel>/`). Within a channel, every version reads and writes the same data dir; agents, identity, memory, conversations all persist across patch/minor bumps. Across channels, full isolation — `stable` and `beta` and `dev-portable` are independent worlds.
+Replace per-version data isolation (`~/.agentmux/versions/<version>/`) with **per-channel** isolation (`~/.agentmux/channels/<channel>/`). Within a channel, every version reads and writes the same data dir; agents, identity, memory, conversations all persist across patch/minor bumps. Across channels, full isolation — `stable` and `beta` and `local-<branch>-<hash>` are independent worlds.
 
 Applies to **both Installed and Portable**. Each runtime mode resolves to a default channel:
 
@@ -18,7 +18,7 @@ Applies to **both Installed and Portable**. Each runtime mode resolves to a defa
 |---|---|---|
 | Installed (production install) | `stable` | release CI |
 | Portable (downloaded released ZIP) | `stable` | release CI |
-| Portable (local `task package` build) | `dev-portable` | the operator |
+| Portable (local `task package` build) | `local-<branch>-<hash>` | the operator |
 | Dev (`task dev`) | `dev-<branch>` | `task dev` |
 
 The user can override with `AGENTMUX_CHANNEL=<name>` for parallel-channel testing.
@@ -74,7 +74,7 @@ Resolution: `agentmux_common::DataPaths::resolve(version, mode)` in `agentmux-co
 │   │   ├── cef-cache/
 │   │   └── runtime/                  ← single-instance lockfile (one process per channel)
 │   ├── beta/                         ← reserved; not populated in Increment A
-│   └── dev-portable/                 ← local `task package` builds — for personal smoke-test
+│   └── local-<branch>-<hash>/                 ← local `task package` builds — for personal smoke-test
 ├── dev/<branch>/                     ← unchanged from Phase 1 (kept as a fourth "channel namespace")
 └── snapshots/                        ← auto-backups before migration (Increment B)
     └── stable-pre-v0.42.0-2026-06-15T13-22-08Z.bak/
@@ -92,7 +92,7 @@ Resolution: `agentmux_common::DataPaths::resolve(version, mode)` in `agentmux-co
 |---|---|---|
 | `Installed` | `stable` | Production install — same channel across all installed versions |
 | `Portable` AND built by release CI | `stable` | Released portable ZIP downloaded by a user |
-| `Portable` AND built by `task package` locally | `dev-portable` | Differentiated via embedded build marker (see §2.5) |
+| `Portable` AND built by `task package` locally | `local-<branch>-<hash>` | Differentiated via embedded build marker (see §2.5) |
 | `Dev { branch }` | `dev-<branch>` (renamed for symmetry; resolves to `~/.agentmux/dev/<branch>/`, unchanged path on disk) | Per-branch — existing behavior |
 
 The operator can override with `AGENTMUX_CHANNEL=<name>` to point an `Installed` / `Portable` binary at any channel (e.g., for testing a hot-fix build against the live stable data). **Dev mode does NOT honor the override** — the launcher and host both use `resolve_path_only` for dev builds, so a `task dev` session launched from inside a parent agentmux pane can't inherit the parent's channel and break per-branch isolation (codex P2 on PR #1027 caught this — without the symmetric ignore, launcher and host would disagree on the single-instance lock path). If you want a non-default channel, use a portable build.
@@ -111,16 +111,16 @@ Reserved channel names (cannot be used in `AGENTMUX_CHANNEL`):
 
 ### 2.4 Single-instance enforcement is per-channel
 
-The named-pipe lockfile lives at `~/.agentmux/channels/<channel>/runtime/lockfile`. Two binaries of *the same channel* are mutually exclusive (single-instance per channel — the existing launcher invariant, now scoped correctly). Different channels can run concurrently: `stable` and `dev-portable` and `dev-<branch>` simultaneously, each with its own srv on its own dynamic port, each in its own data dir. This is the existing "multiple instances run in parallel" guarantee from `CLAUDE.md`, preserved and clarified — the unit of mutual exclusion is the channel, not the binary.
+The named-pipe lockfile lives at `~/.agentmux/channels/<channel>/runtime/lockfile`. Two binaries of *the same channel* are mutually exclusive (single-instance per channel — the existing launcher invariant, now scoped correctly). Different channels can run concurrently: `stable` and `local-<branch>-<hash>` and `dev-<branch>` simultaneously, each with its own srv on its own dynamic port, each in its own data dir. This is the existing "multiple instances run in parallel" guarantee from `CLAUDE.md`, preserved and clarified — the unit of mutual exclusion is the channel, not the binary.
 
 ### 2.5 Build-time channel marker for portable
 
-`agentmux_common::is_dev_build_exe` already distinguishes the exe's provenance. Extend to also detect "built by local `task package`" vs. "built by release CI". Cleanest: compile-time env var `AGENTMUX_BUILD_CHANNEL_DEFAULT`, set to `dev-portable` by `task package`'s build invocation and to `stable` by the release CI script.
+`agentmux_common::is_dev_build_exe` already distinguishes the exe's provenance. Extend to also detect "built by local `task package`" vs. "built by release CI". Cleanest: compile-time env var `AGENTMUX_BUILD_CHANNEL_DEFAULT`, set to `local-<branch>-<hash>` by `task package`'s build invocation and to `stable` by the release CI script.
 
 ```toml
 # Taskfile.yml — package task
 env:
-  AGENTMUX_BUILD_CHANNEL_DEFAULT: dev-portable
+  AGENTMUX_BUILD_CHANNEL_DEFAULT: local-<branch>-<hash>
 ```
 
 ```rust
@@ -323,18 +323,18 @@ Increment A only ships §2. Increment B adds §3. Import wizard is its own PR. E
    - `agentmux-common/src/runtime_mode.rs` — no change.
    - Comprehensive unit tests for sanitization, mode→channel mapping, env-var override, path layout.
    - Plumb `AGENTMUX_CHANNEL` through env-var export.
-   - Taskfile.yml: `task package` sets `AGENTMUX_BUILD_CHANNEL_DEFAULT=dev-portable`.
+   - Taskfile.yml: `task package` sets `AGENTMUX_BUILD_CHANNEL_DEFAULT=local-<branch>-<hash>`.
    - Single-instance lockfile path updated to channel-keyed (`runtime/lockfile`).
    - **No** migration of existing `versions/<v>/` dirs (per §2.7).
    - Ride along: this spec (`SPEC_DATA_CHANNELS_2026_05_24.md`) + per `feedback_no_doc_only_prs` directive.
 
 **Test plan:**
 - Unit tests in `data_paths.rs`: every channel-resolution edge case (env override, dev branch, build marker default, invalid names rejected).
-- Integration: build `dev-portable` portable v0.38.6, create agent "continuity-test", build v0.38.7, launch, confirm agent present.
+- Integration: build `local-<branch>-<hash>` portable v0.38.6, create agent "continuity-test", build v0.38.7, launch, confirm agent present.
 - Integration: build with `AGENTMUX_CHANNEL=experiment` set in env at runtime → confirm data lands at `~/.agentmux/channels/experiment/`.
 - Regression: existing `task dev` workflow uses `dev-<branch>` channels under `~/.agentmux/dev/<branch>/` — same on-disk path as today, no behavior change.
 
-**Acceptance gate:** "My Agents" list persists across a patch bump + rebuild + relaunch on the `dev-portable` channel.
+**Acceptance gate:** "My Agents" list persists across a patch bump + rebuild + relaunch on the `local-<branch>-<hash>` channel.
 
 ### 5.2 Increment B — Migration framework + safety lock
 
@@ -361,7 +361,7 @@ Each PR is small and focused. The migration framework (§3.2 file structure) is 
 2. `feat(frontend): import wizard UI in launcher splash`
 
 **Test plan:**
-- Integration: import from legacy `versions/<v>/` into a fresh `dev-portable` channel; verify agent count + identity + memory carry over.
+- Integration: import from legacy `versions/<v>/` into a fresh `local-<branch>-<hash>` channel; verify agent count + identity + memory carry over.
 - Integration: declining the prompt doesn't re-prompt on next launch.
 
 ---
@@ -370,7 +370,7 @@ Each PR is small and focused. The migration framework (§3.2 file structure) is 
 
 | Increment | Lands on which channels first | Rollout to release builds |
 |---|---|---|
-| A | `dev-portable` activates immediately on next `task package` build | `stable` channel ships in the next `chore: release` after merge |
+| A | `local-<branch>-<hash>` activates immediately on next `task package` build | `stable` channel ships in the next `chore: release` after merge |
 | B | All channels — required before any real schema change across versions | Same release as A or shortly after |
 | C | All channels — first-launch behavior only | Same as B |
 
@@ -386,7 +386,7 @@ If we're not comfortable with the fresh-start UX even for the first stable relea
 
 (Mirrored from Discussion #1026 — answers update both places.)
 
-1. **Sequencing for production:** Increment A first (fresh start, lossy) or B+C first (seamless migration when A lands)? Recommend A-first for `dev-portable`, B+C+A together for the first `stable` release that ships channels.
+1. **Sequencing for production:** Increment A first (fresh start, lossy) or B+C first (seamless migration when A lands)? Recommend A-first for `local-<branch>-<hash>`, B+C+A together for the first `stable` release that ships channels.
 
 2. **Should `task dev` consolidate into channels too?** Currently kept at `~/.agentmux/dev/<branch>/` for clarity. Branches → channels would unify the namespace but lose the visual distinction. Recommend keep dev separate; it's a different concept (per-branch isolation for feature work).
 

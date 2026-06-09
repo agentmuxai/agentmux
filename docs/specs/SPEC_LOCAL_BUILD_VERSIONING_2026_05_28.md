@@ -64,7 +64,7 @@ Because every build gets a unique folder, `package-portable.sh`'s running-instan
 
 Because the data dir keys on branch (not the per-build label), rebuilding the same patch 10 times reuses one data dir — your smoke session persists across iterations instead of resetting every build. This is the behavior the user actually wants for "iterate on patches."
 
-> Sub-note: branch-keyed local-portable data dirs live under the `dev-portable` channel (`SPEC_DATA_CHANNELS_2026_05_24.md` §2.2) — e.g. `~/.agentmux/dev-portable/<branch>/`. Confirm the channel/path scheme in `data_paths.rs` during implementation; the principle is "key on something stable across rebuilds," and branch is the natural choice already used by dev.
+> Sub-note: branch-keyed local-portable data dirs live under the `local-<branch>-<hash>` channel (`SPEC_DATA_CHANNELS_2026_05_24.md` §2.2) — e.g. `~/.agentmux/local-<branch>-<hash>/<branch>/`. Confirm the channel/path scheme in `data_paths.rs` during implementation; the principle is "key on something stable across rebuilds," and branch is the natural choice already used by dev.
 
 ### 3.3 Release path is unchanged
 
@@ -84,7 +84,7 @@ Plus two bonuses: builds become **traceable** (sha in the label → check out ex
 
 1. **build-stamp source:** timestamp (zero state) vs `.build-seq` counter (shorter, strictly ordered). *Recommendation:* timestamp — no gitignored state file to manage, and ordering is preserved by wall-clock.
 2. **Release tags exist?** `git describe --tags` needs them. Verify CI tags `vX.Y.Z` on release; `--always` is the safe fallback (degrades to bare sha) if a tag is ever missing. If release isn't tagging, add it — it's independently good practice and cheap.
-3. **Data-dir key exact path:** confirm `data_paths.rs` derives the `dev-portable` path from branch and that the build can pass the branch through (env var or `git rev-parse --abbrev-ref HEAD` at package time). Mirror the `dev` keying logic so there's one mechanism, not two.
+3. **Data-dir key exact path:** confirm `data_paths.rs` derives the `local-<branch>-<hash>` path from branch and that the build can pass the branch through (env var or `git rev-parse --abbrev-ref HEAD` at package time). Mirror the `dev` keying logic so there's one mechanism, not two.
 4. **`package:local`:** currently a deprecated alias of `package`. Either delete it or repoint it as the documented name for the ephemeral build (it *was* ephemeral once — this restores that meaning, correctly this time).
 
 ## 6. Implementation sketch
@@ -99,7 +99,7 @@ package:
            that embeds the git sha + dirty flag for traceability.'
     platforms: [windows]
     env:
-        AGENTMUX_BUILD_CHANNEL_DEFAULT: dev-portable
+        AGENTMUX_BUILD_CHANNEL_DEFAULT: local-<branch>-<hash>
     cmds:
         # NO bump, NO commit. Derive an ephemeral label and export it for the
         # build + package steps to stamp. git describe gives traceability;
@@ -114,7 +114,7 @@ package:
 
 `package-portable.sh`: name the extract folder + ZIP from `AGENTMUX_BUILD_LABEL`; drop the running-instance lock check (or keep it as a cheap belt-and-suspenders — it will simply never trigger).
 
-`data_paths.rs`: for the `dev-portable` channel, key the data dir on branch, not version.
+`data_paths.rs`: for the `local-<branch>-<hash>` channel, key the data dir on branch, not version.
 
 `bump-wrapper.sh`: no longer invoked by `package`; remains the release-flow tool. No change needed beyond removing the package call.
 
