@@ -87,19 +87,23 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // completion. Both bugs are fixed here: track only
     // `props.node.status`, and gate on a transition by comparing
     // against `prevStatus` captured outside the reactive scope.
+    //
+    // prevNodeId guards against <Index> slot-position state leakage:
+    // when a streaming-buffer cap-advance replaces the node at this
+    // slot position with a different node, the old prevStatus must not
+    // be treated as a transition baseline for the incoming node.
     let prevStatus: string = props.node.status;
-    // ACTIVE states are the ones that keep the panel auto-expanded
-    // continuously. Terminal states (success, failed) trigger the
-    // 5s post-completion hold once, then collapse. Failed used to
-    // be in the active set (kept open forever) — removed per user
-    // feedback that failed panels cluttered the pane; the ✗ icon
-    // and red border-left already signal failure at a glance, and
-    // hover-to-peek covers the rare case where the user wants to
-    // re-read the output later.
+    let prevNodeId: string = props.node.id;
     const isActive = (s: string): boolean =>
         s === "running" || s === "pending_approval";
     createEffect(() => {
         const s = props.node.status;
+        const id = props.node.id;
+        if (id !== prevNodeId) {
+            prevNodeId = id;
+            prevStatus = s;
+            return;
+        }
         if (isActive(prevStatus) && !isActive(s)) {
             setPostCompletionHold(true);
             const t = setTimeout(() => setPostCompletionHold(false), POST_COMPLETION_HOLD_MS);

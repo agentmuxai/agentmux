@@ -28,7 +28,7 @@
  * the state into the DOM but never reads it back.
  */
 
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
 import { Key } from "@solid-primitives/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
@@ -168,28 +168,23 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         }
 
         // Cap: across multi-turn sessions the streaming buffer grows
-        // unbounded because the sticky frontier never advances. Solid's
-        // insertExpression passes <Key>'s result array to reconcileArrays
-        // (solid-js/web), which corrupts its sentinel tracking when the
-        // array grows past the initial render size → "replaceChild: node
-        // is not a child" crash (render_trail 2026-06-06; same root cause
-        // as the <Index> crash — the array growth, not the keying strategy,
-        // is what breaks reconcileArrays). Fix: advance the frontier to
-        // pin streamingNodes at exactly STREAMING_BUFFER_SIZE items.
+        // unbounded because the sticky frontier never advances. Fix:
+        // advance the frontier to pin streamingNodes at exactly
+        // STREAMING_BUFFER_SIZE items. The cap runs inside createMemo
+        // before any render effect reads the result — the intermediate
+        // 51-item state is never observable by <Index>; reconcileArrays
+        // always sees a fixed-size 50-item array (50 → 50, not 50 → 51)
+        // and never encounters a growing array. (#1302)
         //
-        // WHY THIS DOESN'T REINTRODUCE THE COUNT-BASED CRASH: the cap
-        // runs inside createMemo, before any render effect reads the
-        // result. The memo returns the final 50-item array in a single
-        // synchronous step; the intermediate 51-item state is never
-        // observable by <Key> or the layout effect. <Key> always sees a
-        // fixed-size 50-item array (50 → 50, not 50 → 51), so
-        // reconcileArrays never encounters a growing array.
-        // The streaming-buffer.ts "no count-based mode" warning targets
-        // the old pattern where the memo was read TWICE with a moving
-        // split point — not a single sticky re-anchor inside one memo
-        // call. Migration is safe with <Key by={n => n.id}>: the
-        // departing node's slot is disposed by id; no position-keyed
-        // state leaks to the replacement. (#1302)
+        // WHY <Index> NOT <Key>: rapid consecutive cap-advances cause
+        // <Key>'s keyArray to dispose slots synchronously (removing their
+        // inner DOM content) while reconcileArrays still holds stale
+        // element refs → "replaceChild: node not a child" crash (§7.4,
+        // SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md).
+        // <Index> avoids reconcileArrays DOM rearrangements entirely at
+        // steady-state 50 items: position-slot signals update in place,
+        // no DOM moves. ToolBlock guards against same-slot state leakage
+        // by resetting prevStatus when the node id changes. (#1317)
         if (result.streamingNodes.length > STREAMING_BUFFER_SIZE) {
             stickyFrontierId = initialStickyFrontierId(nodes, STREAMING_BUFFER_SIZE);
             result = partitionForVirtualization(nodes, STREAMING_BUFFER_SIZE, stickyFrontierId);
@@ -703,50 +698,44 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             </div>
 
             {/* Streaming buffer — always-mounted trailing nodes.
-                Uses <Key by={n => n.id}> rather than <For> or <Index>:
+                Uses <Index> rather than <For> or <Key by={n=>n.id}>:
                   - <For> reconciles by item REFERENCE: each streaming
                     token replaces the active node's object (immutable
                     update preserves id but gives a new ref), so <For>
                     would unmount/remount the row on every token.
                     (reagent P1 on #784.)
-                  - <Index> is position-keyed and passes a signal, which
-                    avoids the remount, but has two problems: (a) the
-                    same reconcileArrays array-growth crash as <For> and
-                    <Key> — keying strategy doesn't matter, growth does;
-                    and (b) cap-advance migration leaks position-keyed
-                    slot state (prevStatus, expanded flag) to the node
-                    now at that position. Both are solved: <Key> by id
-                    (no slot leak), cap-advance (no growth). (#1302.)
-                  - <Key by={n => n.id}> keys each slot by stable node
-                    id. Token updates (new object, same id) fire the
-                    slot's accessor signal — no remount, no position
-                    shifting, no cross-slot state leakage on cap-advance
-                    migrations. NOTE: <Key> still returns a plain array;
-                    insertExpression passes it to reconcileArrays, which
-                    crashes identically to <Index> if the array grows past
-                    the initial render size. The cap-advance in the
-                    partition memo (above) keeps streamingNodes.length ≤
-                    STREAMING_BUFFER_SIZE so reconcileArrays always sees
-                    a fixed-size array. (#1302)
+                  - <Key by={n=>n.id}> avoids the remount and no
+                    position-keyed state leaks across cap-advances.
+                    But rapid consecutive cap-advances crash (#1317):
+                    keyArray disposes slots synchronously (clearing DOM
+                    content) while reconcileArrays still holds stale
+                    element refs → "replaceChild: node not a child".
+                    (§7.4, SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS…)
+                  - <Index> avoids reconcileArrays DOM rearrangements
+                    entirely at steady-state 50 items: position-slot
+                    signals update in place, no DOM moves. The only
+                    trade-off vs <Key>: slot-position state (prevStatus
+                    in ToolBlock) could leak when a cap-advance lands a
+                    different node at the same position. ToolBlock guards
+                    this by resetting prevStatus when the node id changes.
+                    (#1317)
 
-                <Show when={partition()}> is a belt-and-suspenders guard
-                against the secondary crash class: if the memo is read
-                after its reactive scope is disposed (e.g. mid-error-
-                boundary teardown), the <Show> catches the falsy result
-                before it reaches <Key>, preventing the
+                <Show when={partition()}> guards against the secondary
+                crash: if the memo is read after its reactive scope is
+                disposed (mid-error-boundary teardown) the <Show> catches
+                the falsy result before it reaches <Index>, preventing
                 "Cannot read properties of undefined (reading
-                'streamingNodes')" TypeError. The narrowed accessor
-                form `p()` also isolates <Key> in its own child scope
-                so it is fully disposed before the outer partition memo
-                can produce a stale read.
+                'streamingNodes')". The narrowed `p()` isolates <Index>
+                in its own child scope so it is disposed before the outer
+                memo can produce a stale read.
                 (SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §3.3) */}
             <Show when={partition()}>
                 {(p) => (
                     <div class="agent-document-streaming-buffer" data-animate={animateEnabled() || undefined}>
-                        <Key each={p().streamingNodes as DocumentNode[]} by={(n) => n.id}>
-                            {(nodeAccessor) => (
+                        <Index each={p().streamingNodes as DocumentNode[]}>
+                            {(nodeSignal) => (
                                 <DocumentRow
-                                    node={nodeAccessor}
+                                    node={nodeSignal}
                                     documentState={props.documentState}
                                     bookmarkedNodeIds={props.bookmarkedNodeIds}
                                     onBookmark={props.onBookmark}
@@ -756,7 +745,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                     onTogglePin={props.onTogglePin}
                                 />
                             )}
-                        </Key>
+                        </Index>
                     </div>
                 )}
             </Show>
