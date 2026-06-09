@@ -264,13 +264,10 @@ const ActionWidgets = (): JSX.Element => {
     //
     // Each uses its own hidden measurement mirror so the decision is never
     // based on the already-collapsed visible bar (no oscillation).
-    const [tooNarrow,   setTooNarrow]   = createSignal(false); // tier 1→2: drop labels
-    const [tooIconOnly, setTooIconOnly] = createSignal(false); // tier 2→3: overflow icons
-    const [clipCount,   setClipCount]   = createSignal(0);     // pinned icons pushed to overflow in tier 3
+    const [tooNarrow,  setTooNarrow]  = createSignal(false); // tier 1→2: drop labels
+    const [clipCount,  setClipCount]  = createSignal(0);     // pinned icons pushed to overflow in tier 3
 
     // Tier 1 only: show widget labels and the More button's "more" text.
-    // tooIconOnly is subsumed by tooNarrow (icon mirror is always narrower than the
-    // labeled mirror) so it is not needed here — it drives tier 2→3 overflow instead.
     const showWidgetLabels = () => !tooNarrow() && !iconOnly();
 
     // Tier 3: split pinned widgets into those that fit on the bar vs. those that overflow.
@@ -285,8 +282,9 @@ const ActionWidgets = (): JSX.Element => {
         return clip > 0 ? all.slice(Math.max(0, all.length - clip)) : [];
     };
 
-    let mirrorRef:     HTMLDivElement | undefined;
-    let iconMirrorRef: HTMLDivElement | undefined;
+    let mirrorRef:         HTMLDivElement | undefined;
+    let iconMirrorRef:     HTMLDivElement | undefined;
+    let iconMirrorMoreRef: HTMLDivElement | undefined;
 
     // Minimum tab strip reserved before widget labels are dropped (tier 1→2).
     const MIN_TAB_WIDTH = 120;
@@ -349,17 +347,17 @@ const ActionWidgets = (): JSX.Element => {
             setTooNarrow(labeledW + buttonsW + tabsNeeded > headerW);
             const tabsNeededIconOnly = Math.max(MIN_TAB_WIDTH_ICON_ONLY, tabCount * TAB_COLLAPSE_RESERVE_ICON_PX);
             const isTooIconOnly = iconOnlyW + buttonsW + tabsNeededIconOnly > headerW;
-            setTooIconOnly(isTooIconOnly);
             if (isTooIconOnly) {
                 const pinnedCount = pinnedWidgets().length;
                 if (pinnedCount > 0) {
-                    // moreBtnW: use the live button width if visible, else 0 (converges on
-                    // next frame once the More button mounts after clipCount becomes > 0).
-                    const moreBtnW = moreButtonRef?.offsetWidth ?? 0;
-                    // iconOnlyW from Mirror 2 includes the More button when unpinned
-                    // widgets exist; strip it so we get pure per-icon width.
+                    // Always-mounted More button probe gives reliable moreBtnW even
+                    // before the live More button mounts on first tier-3 entry.
+                    const mirrorMoreW = iconMirrorMoreRef?.offsetWidth ?? 0;
+                    const moreBtnW = moreButtonRef?.offsetWidth || mirrorMoreW;
+                    // Mirror 2 includes the More button only when unpinned widgets exist;
+                    // strip it from iconOnlyW in that case to get pure per-icon width.
                     const iconsOnlyW = moreWidgets().length > 0
-                        ? Math.max(0, iconOnlyW - moreBtnW)
+                        ? Math.max(0, iconOnlyW - mirrorMoreW)
                         : iconOnlyW;
                     const perIconW = iconsOnlyW / pinnedCount;
                     const availableForIcons = Math.max(0, headerW - buttonsW - tabsNeededIconOnly - moreBtnW);
@@ -602,6 +600,15 @@ const ActionWidgets = (): JSX.Element => {
                         <i class="fa-solid fa-chevron-down action-widget-more-chevron" />
                     </div>
                 </Show>
+            </div>
+
+            {/* More button width probe — always mounted so moreBtnW is available
+                before the live More button mounts on first tier-3 entry. */}
+            <div class="action-widgets action-widgets--measure" aria-hidden="true">
+                <div ref={(el) => (iconMirrorMoreRef = el)} class="action-widget-more-btn">
+                    <i class="fa-solid fa-ellipsis" />
+                    <i class="fa-solid fa-chevron-down action-widget-more-chevron" />
+                </div>
             </div>
 
             <Portal>
