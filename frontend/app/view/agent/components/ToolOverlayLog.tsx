@@ -15,7 +15,7 @@
  * ANSI parsing lands in Phase γ (perf + worker offload) per the spec.
  */
 
-import { For, Match, Show, Switch, createEffect, type JSX } from "solid-js";
+import { For, Match, Show, Switch, createEffect, onCleanup, onMount, type JSX } from "solid-js";
 // `Show` retained for fallback ToolOverlayResult sub-tree.
 import type { ToolNode } from "../types";
 import { BashOutputViewer } from "./BashOutputViewer";
@@ -90,6 +90,25 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         stickToBottom = dist < 40;
     };
 
+    // Track whether the overlay panel is collapsed (content-visibility: hidden).
+    // Accessing layout-forcing properties (scrollHeight, scrollTop) on an element
+    // inside a content-visibility:hidden subtree forces a synchronous subtree
+    // render and emits "Rendering was performed in a subtree hidden by
+    // content-visibility" warnings in the console. MutationObserver is
+    // layout-free and correctly tracks the .agent-tool-panel--hidden class flip
+    // that applies content-visibility:hidden to the panel containing this log.
+    let panelHidden = false;
+    onMount(() => {
+        const panel = scrollRef?.closest(".agent-tool-panel");
+        if (!panel) return;
+        panelHidden = panel.classList.contains("agent-tool-panel--hidden");
+        const mo = new MutationObserver(() => {
+            panelHidden = panel.classList.contains("agent-tool-panel--hidden");
+        });
+        mo.observe(panel, { attributes: true, attributeFilter: ["class"] });
+        onCleanup(() => mo.disconnect());
+    });
+
     createEffect(() => {
         // Re-read chunks to register the dep, then schedule a scroll-down.
         chunks();
@@ -99,9 +118,10 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
             // flip during the same RAF window can detach the element
             // out from under us. Mutating scrollTop on a detached node
             // raised the `replaceChild` reconciliation race that
-            // crashed v0.33.799.
+            // crashed v0.33.799. Guard panelHidden to avoid forcing
+            // layout on a content-visibility:hidden subtree.
             requestAnimationFrame(() => {
-                if (scrollRef && scrollRef.isConnected) {
+                if (scrollRef && scrollRef.isConnected && !panelHidden) {
                     scrollRef.scrollTop = scrollRef.scrollHeight;
                 }
             });

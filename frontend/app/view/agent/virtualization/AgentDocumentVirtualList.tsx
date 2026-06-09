@@ -368,7 +368,11 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (props.viewState.stickToBottom() && scrollRef) {
             // queueMicrotask so the new content has rendered before we scroll.
             queueMicrotask(() => {
-                if (!scrollRef) return;
+                // Re-check stickToBottom: the user may have scrolled up between
+                // the effect firing and this microtask running (handleScroll
+                // calls disengageStickToBottom synchronously, but the microtask
+                // was already queued before that handler ran).
+                if (!scrollRef || !props.viewState.stickToBottom()) return;
                 scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
             });
         }
