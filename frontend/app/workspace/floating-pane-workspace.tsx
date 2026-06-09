@@ -469,7 +469,14 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 pendingRedockArmed = hoverArmed ||
                     (dwellCurrentHoverTarget !== null &&
                      dwellHoverTargetFirstSeenAt !== null &&
-                     nowMs - dwellHoverTargetFirstSeenAt >= REDOCK_DWELL_MS);
+                     nowMs - dwellHoverTargetFirstSeenAt >= REDOCK_DWELL_MS) ||
+                    // Hold-still after fast entry: velocity gate preserved the target
+                    // but cleared the timer; cursor then stopped so no slow event
+                    // restarted it. Check time-since-last-event as dwell proxy.
+                    (dwellCurrentHoverTarget !== null &&
+                     dwellHoverTargetFirstSeenAt === null &&
+                     dwellWinLastSampleAt > 0 &&
+                     nowMs - dwellWinLastSampleAt >= REDOCK_DWELL_MS);
                 hoverArmed = false;
                 pendingRedockCoords = { x: e.screenX, y: e.screenY };
             } else if (hasMoved) {
@@ -561,6 +568,11 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     (dwellCurrentHoverTarget !== null &&
                      dwellHoverTargetFirstSeenAt !== null &&
                      nowMs - dwellHoverTargetFirstSeenAt >= REDOCK_DWELL_MS) ||
+                    // Hold-still after fast entry (Windows): same fallback as onMouseUp.
+                    (dwellCurrentHoverTarget !== null &&
+                     dwellHoverTargetFirstSeenAt === null &&
+                     dwellWinLastSampleAt > 0 &&
+                     nowMs - dwellWinLastSampleAt >= REDOCK_DWELL_MS) ||
                     (dwellCurrentConfirmedAt !== null &&
                      nowMs - dwellCurrentConfirmedAt >= REDOCK_DWELL_MS);
                 hoverArmed = false;
@@ -619,10 +631,11 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                             const velocity = dt > 0 ? Math.sqrt(dx * dx + dy * dy) / (dt / 1000) : 0;
                             if (velocity > REDOCK_VELOCITY_PX_PER_S) {
                                 // Moving fast — reset dwell clock and disarm.
-                                // If the overlay was showing (hoverArmed), clear it so the
-                                // dock indicator disappears immediately on fast movement,
-                                // matching the non-Windows path (line 671).
-                                dwellCurrentHoverTarget = null;
+                                // Preserve dwellCurrentHoverTarget (don't null it) so that
+                                // if the cursor slows or stops over the same target the
+                                // dwell timer can restart (codex P2 fix). Only the timer
+                                // is cleared; the target identity is kept.
+                                dwellCurrentHoverTarget = newTarget;
                                 dwellHoverTargetFirstSeenAt = null;
                                 hoverArmed = false;
                                 invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
@@ -644,6 +657,10 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                         const wasArmed = hoverArmed;
                         hoverArmed = false;
                         if (wasArmed) invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
+                    } else if (newTarget !== null && dwellHoverTargetFirstSeenAt === null) {
+                        // Velocity gate preserved the target but cleared the timer.
+                        // Cursor has now slowed on the same target — restart dwell clock.
+                        dwellHoverTargetFirstSeenAt = now;
                     } else if (
                         newTarget !== null &&
                         dwellHoverTargetFirstSeenAt !== null &&
@@ -723,19 +740,25 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     if (capturedSessionId !== dragSessionId) return;
                     const newTarget = res?.target_label ?? null;
                     if (newTarget !== dwellLastArmedTarget) {
-                        // Target changed — disarm and restart both dwell clocks.
-                        // dwellSlowSince reset prevents a slow transit across an
-                        // intermediate window from pre-satisfying the dwell for the
-                        // destination (codex P2). dwellCurrentConfirmedAt records when
-                        // this target was first confirmed so the mouseup fallback can
-                        // check "180ms since first confirmation" rather than "180ms
-                        // since any slow motion" (prevents desktop-transit false arm).
+                        // Target changed — disarm old target and restart both dwell
+                        // clocks. dwellSlowSince reset prevents a slow transit across
+                        // an intermediate window from pre-satisfying the dwell for the
+                        // destination. dwellCurrentConfirmedAt records when this target
+                        // was first confirmed so the mouseup fallback uses "180ms since
+                        // first confirmation" (prevents desktop-transit false arm).
                         dwellLastArmedTarget = newTarget;
                         dwellCurrentConfirmedAt = newTarget !== null ? performance.now() : null;
                         dwellSlowSince = null;
                         if (hoverArmed) {
                             hoverArmed = false;
                             invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
+                        }
+                        // IPC returned a confirmed non-null target — the backend has
+                        // already broadcast the dock indicator. Arm immediately so
+                        // the velocity gate (line 692) can clear it on fast escape
+                        // and mouseup can dock on release.
+                        if (newTarget !== null) {
+                            hoverArmed = true;
                         }
                     } else if (newTarget !== null) {
                         hoverArmed = true;
