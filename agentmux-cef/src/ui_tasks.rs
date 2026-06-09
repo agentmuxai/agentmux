@@ -793,7 +793,21 @@ wrap_task! {
             tracing::info!(label = %self.label, "[create-window] task entered UI thread");
 
             let settings = BrowserSettings {
-                background_color: 0xFF000000, // ARGB: opaque black (matches pre-transparency-experiment baseline)
+                // ARGB alpha=0 → transparent, mirroring the MAIN window
+                // (app.rs:679) and the global CefSettings.background_color
+                // (main.rs). CreateWindowTask builds every secondary window
+                // on Linux/macOS — additional windows AND floating-pane
+                // tear-offs (open_floating_pane_window routes here on
+                // non-Windows; the dedicated post_create_floating_window is
+                // Windows-only). Previously hard-coded 0xFF000000 (opaque
+                // black), which (a) overrode the transparent global default
+                // and (b) gated OFF the BrowserViewImpl transparency cascade
+                // (it only fires when default_background_color_ is
+                // transparent — see cef/libcef/browser/views/browser_view_impl.cc
+                // WebContentsCreated). Result: floaters/secondary windows were
+                // fully opaque even when window:transparent=true. 0x00000000
+                // lets them inherit the same transparency path as main.
+                background_color: 0x00000000,
                 ..Default::default()
             };
             let cef_url = CefString::from(self.url.as_str());
