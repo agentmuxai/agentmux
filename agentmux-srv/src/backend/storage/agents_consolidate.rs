@@ -433,6 +433,138 @@ pub fn run_consolidate_migration(
     Ok(stats)
 }
 
+/// Delta repair: backfill any `db_agent_definitions` rows that are
+/// missing from `db_agents`.
+///
+/// This closes a gap the one-shot consolidation migration cannot cover:
+/// agents defined after the marker file was written (and before Phase 3b
+/// dual-write landed) live only in `db_agent_definitions`.  Phase 3b
+/// readers look exclusively at `db_agents`, so those agents are invisible
+/// — no icon, no reattach, "clicking does nothing".
+///
+/// Unlike `run_consolidate_migration`, this is **not** marker-gated.  It
+/// runs on every startup (cheap — one indexed LEFT JOIN + a handful of
+/// inserts at most) and is idempotent via `INSERT OR IGNORE`.
+///
+/// Returns the number of definitions inserted.
+pub fn repair_def_gaps(conn: &Connection) -> Result<usize, StoreError> {
+    // Find every db_agent_definitions row that has no matching id in
+    // db_agents.  These were written between Phase 3a marker creation and
+    // Phase 3b dual-write landing.
+    let mut stmt = conn.prepare(
+        "SELECT d.id, d.name, d.icon, d.provider, d.description,
+                d.working_directory, d.shell, d.provider_flags, d.auto_start,
+                d.restart_on_crash, d.idle_timeout_minutes, d.created_at,
+                d.agent_type, d.environment, d.agent_bus_id, d.is_seeded,
+                d.accounts, d.parent_id, d.branch_label, d.updated_at,
+                d.slug, d.user_hidden
+         FROM db_agent_definitions d
+         LEFT JOIN db_agents a ON a.id = d.id
+         WHERE a.id IS NULL",
+    )?;
+
+    #[allow(clippy::type_complexity)]
+    let missing: Vec<(
+        String, String, String, String, String, String, String, String,
+        i64, i64, i64, i64, String, String, String, i64, String, String,
+        String, i64, String, i64,
+    )> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,   // id
+                row.get::<_, String>(1)?,   // name
+                row.get::<_, String>(2)?,   // icon
+                row.get::<_, String>(3)?,   // provider
+                row.get::<_, String>(4)?,   // description
+                row.get::<_, String>(5)?,   // working_directory
+                row.get::<_, String>(6)?,   // shell
+                row.get::<_, String>(7)?,   // provider_flags
+                row.get::<_, i64>(8)?,      // auto_start
+                row.get::<_, i64>(9)?,      // restart_on_crash
+                row.get::<_, i64>(10)?,     // idle_timeout_minutes
+                row.get::<_, i64>(11)?,     // created_at
+                row.get::<_, String>(12)?,  // agent_type
+                row.get::<_, String>(13)?,  // environment
+                row.get::<_, String>(14)?,  // agent_bus_id
+                row.get::<_, i64>(15)?,     // is_seeded
+                row.get::<_, String>(16)?,  // accounts
+                row.get::<_, String>(17)?,  // parent_id
+                row.get::<_, String>(18)?,  // branch_label
+                row.get::<_, i64>(19)?,     // updated_at
+                row.get::<_, String>(20)?,  // slug
+                row.get::<_, i64>(21)?,     // user_hidden
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+
+    let mut inserted = 0usize;
+    for (
+        id, name, icon, provider, description, working_directory, shell,
+        provider_flags, auto_start, restart_on_crash, idle_timeout_minutes,
+        created_at, agent_type, environment, agent_bus_id, is_seeded,
+        accounts, parent_id, branch_label, updated_at, slug, user_hidden,
+    ) in &missing
+    {
+        let is_template = if *is_seeded == 1 { 1_i64 } else { 0_i64 };
+        let parent_template_id = if *is_seeded == 1 {
+            String::new()
+        } else {
+            parent_id.clone()
+        };
+        let affected = conn.execute(
+            "INSERT OR IGNORE INTO db_agents (
+                id, name, icon, description,
+                is_template, parent_template_id,
+                provider, provider_flags, shell, environment,
+                agent_type, agent_bus_id, accounts,
+                auto_start, restart_on_crash, idle_timeout_minutes,
+                slug, branch_label,
+                identity_id, memory_id, working_directory, github_context,
+                instance_name,
+                created_at, updated_at, is_seeded, user_hidden
+             ) VALUES (
+                ?1, ?2, ?3, ?4,
+                ?5, ?6,
+                ?7, ?8, ?9, ?10,
+                ?11, ?12, ?13,
+                ?14, ?15, ?16,
+                ?17, ?18,
+                '', '', ?19, '',
+                '',
+                ?20, ?21, ?22, ?23
+             )",
+            params![
+                id, name, icon, description,
+                is_template, parent_template_id,
+                provider, provider_flags, shell, environment,
+                agent_type, agent_bus_id, accounts,
+                auto_start, restart_on_crash, idle_timeout_minutes,
+                slug, branch_label,
+                working_directory,
+                created_at, updated_at, is_seeded, user_hidden,
+            ],
+        )?;
+        if affected > 0 {
+            warn!(
+                def_id = %id,
+                name = %name,
+                "agents_consolidate: gap-repair inserted missing definition into db_agents"
+            );
+            inserted += 1;
+        }
+    }
+
+    if inserted > 0 {
+        info!(
+            count = inserted,
+            "agents_consolidate: gap-repair complete — definitions backfilled"
+        );
+    }
+
+    Ok(inserted)
+}
+
 /// Snapshot of one `db_agent_definitions` row, narrow projection
 /// matching what the backfill needs.
 struct DefRow {

@@ -1855,6 +1855,8 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         node_count,
                         last_active_at,
                         has_snapshot,
+                        agent_created_at: def.map(|d| d.created_at).unwrap_or(0),
+                        started_at: inst.started_at,
                     });
                 }
 

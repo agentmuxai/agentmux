@@ -205,6 +205,32 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                 </span>
                                             </Show>
                                         </span>
+                                        <span class="agent-recent-sessions-timestamps">
+                                            <Show when={row.agent_created_at > 0}>
+                                                <span class="agent-recent-sessions-ts">
+                                                    <span class="agent-recent-sessions-ts-label">Created</span>
+                                                    <span class="agent-recent-sessions-ts-value">
+                                                        {formatRelative(now(), row.agent_created_at)}
+                                                    </span>
+                                                </span>
+                                            </Show>
+                                            <Show when={row.started_at > 0}>
+                                                <span class="agent-recent-sessions-ts">
+                                                    <span class="agent-recent-sessions-ts-label">Last Launch</span>
+                                                    <span class="agent-recent-sessions-ts-value">
+                                                        {formatRelative(now(), row.started_at)}
+                                                    </span>
+                                                </span>
+                                            </Show>
+                                            <Show when={row.has_snapshot && row.last_active_at > row.started_at}>
+                                                <span class="agent-recent-sessions-ts">
+                                                    <span class="agent-recent-sessions-ts-label">Last Active</span>
+                                                    <span class="agent-recent-sessions-ts-value">
+                                                        {formatRelative(now(), row.last_active_at)}
+                                                    </span>
+                                                </span>
+                                            </Show>
+                                        </span>
                                     </span>
                                 </button>
                             </li>

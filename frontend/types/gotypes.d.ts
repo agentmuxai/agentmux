@@ -530,6 +530,10 @@ declare global {
         node_count: number;
         last_active_at: number;
         has_snapshot: boolean;
+        /** When the agent definition was first created (ms epoch). */
+        agent_created_at: number;
+        /** When this instance was most recently launched (ms epoch). */
+        started_at: number;
     };
 
     // AgentContent
