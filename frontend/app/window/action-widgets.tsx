@@ -18,7 +18,6 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, createBlock, getApi } from "@/store/global";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
-import { invokeCommand } from "@/app/platform/ipc";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import {
     assertMenuInPaintableArea,
@@ -208,7 +207,9 @@ const MoreDropdown = ({
                     });
                 }},
                 { type: "separator" },
-                { label: "Pin to bar", click: () => pinWidget(shortName, settings(), wmap()) },
+                getPinnedKeys(settings(), wmap()).includes(shortName)
+                    ? { label: "Unpin from bar", click: () => unpinWidget(shortName, settings(), wmap()) }
+                    : { label: "Pin to bar", click: () => pinWidget(shortName, settings(), wmap()) },
             ],
             e
         );
@@ -374,6 +375,7 @@ const ActionWidgets = (): JSX.Element => {
         ro.observe(header);
         ro.observe(mirrorRef);
         ro.observe(iconMirrorRef);
+        if (iconMirrorMoreRef) ro.observe(iconMirrorMoreRef);
         const mo = tabScroll ? new MutationObserver(measure) : null;
         if (mo && tabScroll) mo.observe(tabScroll, { childList: true });
         measure();
