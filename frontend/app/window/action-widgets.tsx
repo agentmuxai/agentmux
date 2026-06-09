@@ -264,11 +264,26 @@ const ActionWidgets = (): JSX.Element => {
     //
     // Each uses its own hidden measurement mirror so the decision is never
     // based on the already-collapsed visible bar (no oscillation).
-    const [tooNarrow,   setTooNarrow]   = createSignal(false); // tier 1→2
-    const [tooIconOnly, setTooIconOnly] = createSignal(false); // tier 2→3
+    const [tooNarrow,   setTooNarrow]   = createSignal(false); // tier 1→2: drop labels
+    const [tooIconOnly, setTooIconOnly] = createSignal(false); // tier 2→3: overflow icons
+    const [clipCount,   setClipCount]   = createSignal(0);     // pinned icons pushed to overflow in tier 3
 
     // Tier 1 only: show widget labels and the More button's "more" text.
-    const showWidgetLabels = () => !tooNarrow() && !tooIconOnly() && !iconOnly();
+    // tooIconOnly is subsumed by tooNarrow (icon mirror is always narrower than the
+    // labeled mirror) so it is not needed here — it drives tier 2→3 overflow instead.
+    const showWidgetLabels = () => !tooNarrow() && !iconOnly();
+
+    // Tier 3: split pinned widgets into those that fit on the bar vs. those that overflow.
+    const visiblePinnedWidgets = () => {
+        const all = pinnedWidgets();
+        const clip = clipCount();
+        return clip > 0 ? all.slice(0, Math.max(0, all.length - clip)) : all;
+    };
+    const clippedPinnedWidgets = () => {
+        const all = pinnedWidgets();
+        const clip = clipCount();
+        return clip > 0 ? all.slice(Math.max(0, all.length - clip)) : [];
+    };
 
     let mirrorRef:     HTMLDivElement | undefined;
     let iconMirrorRef: HTMLDivElement | undefined;
@@ -333,7 +348,29 @@ const ActionWidgets = (): JSX.Element => {
             const tabsNeeded = Math.max(MIN_TAB_WIDTH, tabCount * TAB_COLLAPSE_RESERVE_PX);
             setTooNarrow(labeledW + buttonsW + tabsNeeded > headerW);
             const tabsNeededIconOnly = Math.max(MIN_TAB_WIDTH_ICON_ONLY, tabCount * TAB_COLLAPSE_RESERVE_ICON_PX);
-            setTooIconOnly(iconOnlyW + buttonsW + tabsNeededIconOnly > headerW);
+            const isTooIconOnly = iconOnlyW + buttonsW + tabsNeededIconOnly > headerW;
+            setTooIconOnly(isTooIconOnly);
+            if (isTooIconOnly) {
+                const pinnedCount = pinnedWidgets().length;
+                if (pinnedCount > 0) {
+                    // moreBtnW: use the live button width if visible, else 0 (converges on
+                    // next frame once the More button mounts after clipCount becomes > 0).
+                    const moreBtnW = moreButtonRef?.offsetWidth ?? 0;
+                    // iconOnlyW from Mirror 2 includes the More button when unpinned
+                    // widgets exist; strip it so we get pure per-icon width.
+                    const iconsOnlyW = moreWidgets().length > 0
+                        ? Math.max(0, iconOnlyW - moreBtnW)
+                        : iconOnlyW;
+                    const perIconW = iconsOnlyW / pinnedCount;
+                    const availableForIcons = Math.max(0, headerW - buttonsW - tabsNeededIconOnly - moreBtnW);
+                    const fitsCount = Math.max(0, Math.floor(availableForIcons / Math.max(1, perIconW)));
+                    setClipCount(Math.max(0, pinnedCount - fitsCount));
+                } else {
+                    setClipCount(0);
+                }
+            } else {
+                setClipCount(0);
+            }
         };
         const ro = new ResizeObserver(measure);
         ro.observe(header);
@@ -485,7 +522,7 @@ const ActionWidgets = (): JSX.Element => {
                 data-drag-region="false"
                 onContextMenu={handleBarContextMenu}
             >
-                <For each={pinnedWidgets()}>
+                <For each={visiblePinnedWidgets()}>
                     {({ key, widget }, idx) => (
                         <>
                             <Show when={draggingKey() != null && dropIndex() === idx() && draggingKey() !== key}>
@@ -508,11 +545,11 @@ const ActionWidgets = (): JSX.Element => {
                         </>
                     )}
                 </For>
-                <Show when={draggingKey() != null && dropIndex() === pinnedWidgets().length}>
+                <Show when={draggingKey() != null && dropIndex() === visiblePinnedWidgets().length}>
                     <div class="action-widget-drop-indicator" />
                 </Show>
 
-                <Show when={moreWidgets().length > 0}>
+                <Show when={moreWidgets().length > 0 || clipCount() > 0}>
                     <div
                         ref={moreButtonRef}
                         class="action-widget-more-btn"
@@ -570,7 +607,7 @@ const ActionWidgets = (): JSX.Element => {
             <Portal>
                 <Show when={moreOpen()}>
                     <MoreDropdown
-                        widgets={moreWidgets}
+                        widgets={() => [...clippedPinnedWidgets(), ...moreWidgets()]}
                         onClose={closeMore}
                         anchor={() => moreButtonRef ?? null}
                         settings={settings}
