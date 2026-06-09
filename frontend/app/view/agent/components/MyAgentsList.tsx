@@ -217,7 +217,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                     </span>
                                                 </span>
                                             </Show>
-                                            <Show when={row.has_snapshot && row.last_active_at > row.started_at}>
+                                            <Show when={row.has_snapshot && row.started_at > 0 && row.last_active_at > row.started_at}>
                                                 <span class="agent-recent-sessions-ts">
                                                     <span class="agent-recent-sessions-ts-label">Last Active</span>
                                                     <span class="agent-recent-sessions-ts-value">
