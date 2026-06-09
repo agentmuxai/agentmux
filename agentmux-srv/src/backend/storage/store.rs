@@ -73,8 +73,8 @@ impl Store {
     /// `db_agents`.  Not marker-gated — runs cheaply on every startup.
     /// See `agents_consolidate::repair_def_gaps` for details.
     pub fn repair_agent_def_gaps(&self) -> Result<usize, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        super::agents_consolidate::repair_def_gaps(&conn)
+        let mut conn = self.conn.lock().unwrap();
+        super::agents_consolidate::repair_def_gaps(&mut *conn)
     }
 
     fn configure_and_migrate(conn: Connection) -> Result<Self, StoreError> {

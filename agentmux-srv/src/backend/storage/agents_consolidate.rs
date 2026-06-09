@@ -447,7 +447,7 @@ pub fn run_consolidate_migration(
 /// inserts at most) and is idempotent via `INSERT OR IGNORE`.
 ///
 /// Returns the number of definitions inserted.
-pub fn repair_def_gaps(conn: &Connection) -> Result<usize, StoreError> {
+pub fn repair_def_gaps(conn: &mut Connection) -> Result<usize, StoreError> {
     // Find every db_agent_definitions row that has no matching id in
     // db_agents.  These were written between Phase 3a marker creation and
     // Phase 3b dual-write landing.
@@ -498,6 +498,11 @@ pub fn repair_def_gaps(conn: &Connection) -> Result<usize, StoreError> {
         .collect::<Result<Vec<_>, _>>()?;
     drop(stmt);
 
+    if missing.is_empty() {
+        return Ok(0);
+    }
+
+    let tx = conn.transaction()?;
     let mut inserted = 0usize;
     for (
         id, name, icon, provider, description, working_directory, shell,
@@ -512,7 +517,7 @@ pub fn repair_def_gaps(conn: &Connection) -> Result<usize, StoreError> {
         } else {
             parent_id.clone()
         };
-        let affected = conn.execute(
+        let affected = tx.execute(
             "INSERT OR IGNORE INTO db_agents (
                 id, name, icon, description,
                 is_template, parent_template_id,
@@ -554,6 +559,7 @@ pub fn repair_def_gaps(conn: &Connection) -> Result<usize, StoreError> {
             inserted += 1;
         }
     }
+    tx.commit()?;
 
     if inserted > 0 {
         info!(
