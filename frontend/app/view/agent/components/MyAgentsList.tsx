@@ -192,19 +192,14 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                 {row.preview}
                                             </span>
                                         </Show>
-                                        <span class="agent-recent-sessions-line3">
-                                            <Show when={row.node_count > 0}>
+                                        <Show when={row.node_count > 0}>
+                                            <span class="agent-recent-sessions-line3">
                                                 <span class="agent-recent-sessions-nodes">
                                                     {row.node_count} message
                                                     {row.node_count === 1 ? "" : "s"}
                                                 </span>
-                                            </Show>
-                                            <Show when={row.last_active_at > 0}>
-                                                <span class="agent-recent-sessions-when">
-                                                    {formatRelative(now(), row.last_active_at)}
-                                                </span>
-                                            </Show>
-                                        </span>
+                                            </span>
+                                        </Show>
                                         <span class="agent-recent-sessions-timestamps">
                                             <Show when={row.agent_created_at > 0}>
                                                 <span class="agent-recent-sessions-ts">
