@@ -883,9 +883,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 so it sits adjacent to the messages it accelerates. */}
             <PendingMessagesPanel
                 pendingMessages={pendingMessagesAtom[0]}
-                interruptibleTurn={() =>
-                    isInterruptibleTurn(agentAtoms().turnPhaseAtom[0]())
-                }
+                // Hide the panel while the turn is in the Submitting transient
+                // (backend has not yet ack'd the send; pendingMessages holds
+                // the optimistic message). Every other phase — including
+                // Done.errored (stream stall) — should show the panel.
+                isSubmitting={() => agentAtoms().turnPhaseAtom[0]().kind === "Submitting"}
                 showSendNow={() =>
                     // "Send now" appears only when there is an in-flight
                     // turn that SIGINT can actually interrupt — i.e.
