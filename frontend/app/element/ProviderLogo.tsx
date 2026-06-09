@@ -18,6 +18,7 @@ import moonshotSvg from "@lobehub/icons-static-svg/icons/moonshot.svg?raw";
 import githubSvg from "@lobehub/icons-static-svg/icons/github.svg?raw";
 import awsSvg from "@lobehub/icons-static-svg/icons/aws-color.svg?raw";
 import plandexUrl from "@/app/element/icons/plandex.png?url";
+import brainSvg from "@/app/asset/logo-brain.svg?raw";
 import type { JSX } from "solid-js";
 
 export interface ProviderLogoProps {
@@ -43,6 +44,8 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
         if (p === "openclaw") return { html: openclawColorSvg };
         if (p === "aws") return { html: awsSvg };
         if (p === "pi" || p === "plandex") return { png: plandexUrl };
+
+        if (p === "muxcode" || p === "mux-code" || p === "mux_code") return { html: brainSvg };
 
         // Handcrafted multi-color Google G (more recognizable than
         // simple-icons' monochrome G).

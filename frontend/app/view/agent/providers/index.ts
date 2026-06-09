@@ -167,6 +167,39 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "thread_id",
         controllerType: "subprocess",
     },
+    // muxcode — AgentMux's first-party agentic coding CLI.
+    // Supports local GGUF inference via llama-server, Anthropic, OpenAI, and
+    // OpenAI-compatible backends. Emits claude-stream-json NDJSON output.
+    // npm: @a5af/muxcode
+    muxcode: {
+        id: "muxcode",
+        displayName: "Mux Code",
+        cliCommand: "muxcode",
+        defaultArgs: [],
+        // muxcode emits NDJSON unconditionally — no --output-format flag.
+        styledArgs: ["run", "-p"],
+        outputFormat: "raw",
+        styledOutputFormat: "claude-stream-json",
+        authType: "api-key",
+        // `auth status` exits 0 when any backend is ready (API key env var or
+        // local GGUF model installed), exits 1 when nothing is configured.
+        // Avoids the false-positive that `--version` would cause.
+        authCheckCommand: ["auth", "status"],
+        // `auth login` pulls a default local model when no backend is configured.
+        authLoginCommand: ["auth", "login"],
+        npmPackage: "@a5af/muxcode",
+        pinnedVersion: "latest",
+        docsUrl: "https://github.com/agentmuxai/muxcode",
+        windowsInstallCommand: "npm install -g @a5af/muxcode",
+        unixInstallCommand: "npm install -g @a5af/muxcode",
+        icon: "brain",
+        authConfigDirEnvVar: "MUXCODE_CONFIG_DIR",
+        authDirName: "muxcode",
+        launchArgs: ["run", "-p"],
+        resumeFlag: "--resume",
+        sessionIdField: "session_id",
+        controllerType: "subprocess",
+    },
     gemini: {
         id: "gemini",
         displayName: "Gemini CLI",
@@ -391,6 +424,8 @@ const PROVIDER_ALIASES: Record<string, string> = {
     "copilot-cli": "copilot",
     "github-copilot": "copilot",
     "copilot_cli": "copilot",
+    "mux-code": "muxcode",
+    "mux_code": "muxcode",
 };
 
 export function resolveProviderAlias(id: string): string {
