@@ -736,7 +736,8 @@ async fn run_unix(
     // in `ensure_ipc_socket_dir` and is invoked separately below so
     // that any future read-only inspector (e.g. a Linux `--diag`
     // port) can call `pipe_name` without mutating the filesystem.
-    let pipe_version = option_env!("AGENTMUX_BUILD_LABEL").unwrap_or(version);
+    let pipe_version = option_env!("AGENTMUX_BUILD_LABEL")
+        .unwrap_or(env!("CARGO_PKG_VERSION"));
     let dir_hash = hash::data_dir_hash16(&paths.data_dir, pipe_version);
     let socket_path = ipc::pipe_name(&dir_hash);
     log(&format!(

@@ -133,7 +133,7 @@ New test `successive_local_builds_produce_different_hashes` in `hash.rs` asserts
 
 ---
 
-## 5. Timeline
+## 6. Timeline
 
 | Date | Event |
 |---|---|

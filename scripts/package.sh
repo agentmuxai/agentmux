@@ -84,7 +84,7 @@ LABEL="${VERSION}+g${SHA}${DIRTY}.${STAMP}.$$"
 # slug is truncated. Budget for the 64-char channel cap enforced in
 # data_paths.rs::sanitize_channel_name:
 #   "local-" (6) + slug (≤27) + "-" + hash (6) + "-" + stamp (15)
-#   = ≤55  → comfortably under 64 even with the --fresh suffix.
+#   = ≤56  → comfortably under 64 even with the --fresh suffix.
 BRANCH_HASH=$(printf '%s' "$BRANCH" | sha1sum | cut -c1-6)
 BRANCH_SLUG=$(printf '%s' "$BRANCH" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-27)
 CHANNEL="local-${BRANCH_SLUG}-${BRANCH_HASH}"
