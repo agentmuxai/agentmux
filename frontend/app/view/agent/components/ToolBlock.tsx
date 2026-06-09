@@ -102,6 +102,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         if (id !== prevNodeId) {
             prevNodeId = id;
             prevStatus = s;
+            setPostCompletionHold(false);
             return;
         }
         if (isActive(prevStatus) && !isActive(s)) {
