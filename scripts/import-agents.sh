@@ -13,20 +13,10 @@
 set -euo pipefail
 
 AGENTMUX_DIR="${AGENTMUX_DIR:-$HOME/.agentmux}"
-
-# Auto-detect channel from the current git branch when CHANNEL is not set.
-# The portable build channel name is: dev-portable-<branch>-<sha1(branch)[:6]>
-# where sha1 is of the branch name string itself (not the commit).
-if [ -z "${CHANNEL:-}" ]; then
-    _branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
-    # Apply the same slug sanitization as scripts/package.sh BRANCH_SLUG:
-    # replace non-alphanumeric/dot/dash chars with '-', cap at 20 chars.
-    _branch_slug=$(printf '%s' "$_branch" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-20)
-    _branch_hash=$(printf '%s' "$_branch" | sha1sum | cut -c1-6 2>/dev/null \
-                   || printf '%s' "$_branch" | shasum | cut -c1-6)
-    CHANNEL="dev-portable-${_branch_slug}-${_branch_hash}"
-fi
-CHANNEL_DIR="$AGENTMUX_DIR/channels/$CHANNEL"
+CHANNEL="${CHANNEL:-}"
+# Pre-compute CHANNEL_DIR when CHANNEL is supplied via env var or --channel.
+# import_into() sets both when it auto-detects the channel.
+CHANNEL_DIR="${CHANNEL:+$AGENTMUX_DIR/channels/$CHANNEL}"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -42,6 +32,17 @@ now_ms() { printf '%s000\n' "$(date +%s)"; }
 # Find every objects.db under the agentmux dir
 all_dbs() {
     find "$AGENTMUX_DIR" -name "objects.db" 2>/dev/null | sort
+}
+
+# Scan $AGENTMUX_DIR/channels for the channel that contains a given version's
+# data dir. More robust than deriving the channel name from the current git
+# branch (which breaks after a channel rename or when the user has switched
+# branches since the build was created).
+detect_channel_for_version() {
+    local version="$1"
+    find "$AGENTMUX_DIR/channels" -maxdepth 4 \
+        -path "*/versions/$version/data/db/objects.db" 2>/dev/null | \
+        head -1 | sed -e "s|$AGENTMUX_DIR/channels/||" -e 's|/versions/.*||'
 }
 
 # ── catalog ──────────────────────────────────────────────────────────────────
@@ -80,6 +81,19 @@ catalog() {
 import_into() {
     local target_version="$1"
     local name_filter="$2"   # comma-separated names, or "" for all
+
+    # Auto-detect channel by scanning existing version dirs if not specified.
+    if [ -z "$CHANNEL" ]; then
+        CHANNEL=$(detect_channel_for_version "$target_version")
+        if [ -z "$CHANNEL" ]; then
+            echo "ERROR: No channel found containing version $target_version." >&2
+            echo "       Launch version $target_version at least once, or pass --channel." >&2
+            echo "       Available channels: $(ls "$AGENTMUX_DIR/channels/" 2>/dev/null | tr '\n' '  ')" >&2
+            exit 1
+        fi
+        CHANNEL_DIR="$AGENTMUX_DIR/channels/$CHANNEL"
+    fi
+
     local target_db="$CHANNEL_DIR/versions/$target_version/data/db/objects.db"
 
     if [ ! -f "$target_db" ]; then
