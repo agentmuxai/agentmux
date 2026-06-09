@@ -128,7 +128,12 @@ echo "────────────────────────�
 # portables use RELEASE_CHANNEL (set by task package:release) to bake
 # "stable"; release CI never calls this script.
 export AGENTMUX_BUILD_CHANNEL_DEFAULT="$CHANNEL"
-export AGENTMUX_BUILD_LABEL="$LABEL"
+# Only export AGENTMUX_BUILD_LABEL for local builds. Release builds (RELEASE_CHANNEL
+# set) must use CARGO_PKG_VERSION as their pipe key so same-version stable instances
+# continue to share the single-instance guard and data dir as designed.
+if [ -z "${RELEASE_CHANNEL:-}" ]; then
+    export AGENTMUX_BUILD_LABEL="$LABEL"
+fi
 
 task build:frontend
 
