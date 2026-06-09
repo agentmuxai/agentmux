@@ -340,7 +340,7 @@ const ActionWidgets = (): JSX.Element => {
             const labeledW  = mirrorRef?.offsetWidth ?? 0;
             const iconOnlyW = iconMirrorRef?.offsetWidth ?? 0;
             const headerW   = header.clientWidth;
-            if (headerW === 0) return;
+            if (labeledW === 0 || headerW === 0) return;
             const buttonsW = buttons?.offsetWidth ?? 0;
             const tabCount = tabScroll?.querySelectorAll(".tab").length ?? 0;
             const tabsNeeded = Math.max(MIN_TAB_WIDTH, tabCount * TAB_COLLAPSE_RESERVE_PX);
