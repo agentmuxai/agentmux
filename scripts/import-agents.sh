@@ -40,7 +40,9 @@ all_dbs() {
 # branches since the build was created).
 detect_channel_for_version() {
     local version="$1"
-    find "$AGENTMUX_DIR/channels" -maxdepth 4 \
+    # Path depth from $AGENTMUX_DIR/channels:
+    #   <channel>/versions/<version>/data/db/objects.db  → 6 levels
+    find "$AGENTMUX_DIR/channels" -maxdepth 6 \
         -path "*/versions/$version/data/db/objects.db" 2>/dev/null | \
         head -1 | sed -e "s|$AGENTMUX_DIR/channels/||" -e 's|/versions/.*||'
 }
@@ -195,6 +197,20 @@ import_into() {
                 ((skipped++)) || true
                 continue
             fi
+
+            # Copy system prompt and MCP skills — the agent's behaviour config.
+            # Both tables use agent_id FK, so they must follow the def INSERT.
+            # Silent no-op when source lacks these tables (pre-v2 DBs).
+            sqlite3 "$src_win" \
+                "ATTACH '$tgt_win' AS dst;
+                 INSERT OR IGNORE INTO dst.db_agent_content (agent_id, content_type, content, updated_at)
+                 SELECT agent_id, content_type, content, updated_at
+                 FROM db_agent_content WHERE agent_id='$def_id';" 2>/dev/null || true
+            sqlite3 "$src_win" \
+                "ATTACH '$tgt_win' AS dst;
+                 INSERT OR IGNORE INTO dst.db_agent_skills (id, agent_id, name, trigger, skill_type, description, content, created_at)
+                 SELECT id, agent_id, name, trigger, skill_type, description, content, created_at
+                 FROM db_agent_skills WHERE agent_id='$def_id';" 2>/dev/null || true
 
             # Also populate the consolidated db_agents table (schema v4+).
             # agent_def_list() and instance_list() read db_agents; skipping this
