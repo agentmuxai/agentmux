@@ -99,7 +99,7 @@ All paths in `agentmux-launcher/` unless noted. Verified 2026-06-03 at HEAD
   cef-cache,runtime}` — `data_paths.rs:200-210`.
 - Channel baked at build time via `option_env!("AGENTMUX_BUILD_CHANNEL_DEFAULT")`,
   default `"stable"` — `data_paths.rs:54-58`, `agentmux-common/build.rs:23`. Portable
-  builds bake `dev-portable-<branch>-<hash>` — `scripts/package.sh:85-87`.
+  builds bake `local-<branch>-<hash>` — `scripts/package.sh:85-87`.
 - Portable detection is the explicit marker `agentmux-portable.marker` next to the
   exe — `agentmux-common/src/runtime_mode.rs:328-341`; absence falls back to
   `Installed`.
@@ -107,8 +107,8 @@ All paths in `agentmux-launcher/` unless noted. Verified 2026-06-03 at HEAD
 ### 3.5 The specific 06-03 case
 | | v0.42.0 portable | v0.41.0 running |
 |---|---|---|
-| channel | `dev-portable-main-<hash>` | `stable` |
-| data dir | `…/channels/dev-portable-main-*/versions/0.42.0/data` | `…/channels/stable/versions/0.41.0/data` |
+| channel | `local-main-<hash>` | `stable` |
+| data dir | `…/channels/local-main-*/versions/0.42.0/data` | `…/channels/stable/versions/0.41.0/data` |
 | pipe hash | `hash(portable-data, "0.42.0")` | `hash(stable-data, "0.41.0")` |
 
 Different channel **and** different version **and** different pipe ⇒ **no shared
