@@ -105,13 +105,13 @@ mod tests {
 
     #[test]
     fn portable_and_installed_never_collide() {
-        // The real 2026-06-03 scenario: a dev-portable v0.42.0 build launched
+        // The real 2026-06-03 scenario: a local v0.42.0 build launched
         // alongside an installed v0.41.0. Different channel dir AND different
         // version → distinct single-instance pipe → safe to run in parallel,
         // per CLAUDE.md "Multiple Instances Run in Parallel" and
         // SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md.
         let portable = std::path::PathBuf::from(
-            "C:\\Users\\test\\.agentmux\\channels\\dev-portable-main-b28b7a\\versions\\0.42.0\\data",
+            "C:\\Users\\test\\.agentmux\\channels\\local-main-b28b7a\\versions\\0.42.0\\data",
         );
         let installed = std::path::PathBuf::from(
             "C:\\Users\\test\\.agentmux\\channels\\stable\\versions\\0.41.0\\data",
@@ -119,6 +119,25 @@ mod tests {
         assert_ne!(
             data_dir_hash16(&portable, "0.42.0"),
             data_dir_hash16(&installed, "0.41.0")
+        );
+    }
+
+    #[test]
+    fn successive_local_builds_produce_different_hashes() {
+        // Two successive `task package` runs on the same branch at the same
+        // semver get different AGENTMUX_BUILD_LABELs (different stamps).
+        // The pipe key uses the label, so each build is its own single-instance
+        // domain — the second launch starts a fresh window rather than joining
+        // the first build's running instance. Regression guard for the
+        // 2026-06-09 isolation bug (retro: retro-local-build-isolation-regression).
+        let data_dir = std::path::PathBuf::from(
+            "C:\\Users\\test\\.agentmux\\channels\\local-main-b28b7a\\versions\\0.43.1\\data",
+        );
+        let label_a = "0.43.1+gabc1234.20260609T1100.12345";
+        let label_b = "0.43.1+gabc1234.20260609T1145.67890";
+        assert_ne!(
+            data_dir_hash16(&data_dir, label_a),
+            data_dir_hash16(&data_dir, label_b)
         );
     }
 }
