@@ -47,9 +47,16 @@
         white-space: pre-wrap;
         word-break: break-word;
 
+        &--stdout {
+            color: var(--term-foreground, #d3d7cf);
+        }
         &--stderr {
             color: var(--error-color, #ff6b6b);
             opacity: 0.85;
+        }
+        &--diff {
+            color: var(--accent-color);
+            opacity: 0.9;
         }
         &--system {
             font-style: italic;
