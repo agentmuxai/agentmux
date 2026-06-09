@@ -2,4 +2,4 @@
 type: patch
 ---
 
-fix(linux): floater & secondary windows honor window:transparent (were opaque-black by construction)
+fix(linux/macos): floater & secondary windows honor window:transparent (were opaque-black by construction)
