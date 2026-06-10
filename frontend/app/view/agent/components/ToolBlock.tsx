@@ -147,7 +147,14 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         const r = props.node.result as any;
         switch (props.node.tool) {
             case "Bash": {
-                const code = (r as BashResult).exitCode;
+                const br = r as BashResult;
+                let code = br.exitCode;
+                // Claude provider encodes exit code in stdout as "<exited N>" (claude-translator.ts:263)
+                // rather than populating exitCode on the result object.
+                if (typeof code !== "number" && typeof br.stdout === "string") {
+                    const m = br.stdout.match(/<exited\s+(\d+)>/);
+                    if (m) code = parseInt(m[1], 10);
+                }
                 if (typeof code === "number") {
                     return code === 0
                         ? { label: "exit 0", variant: "exit-ok" }

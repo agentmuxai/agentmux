@@ -134,7 +134,7 @@ export const CompactResult = ({ tool, params, result }: CompactResultProps): JSX
                                     </For>
                                 </div>
                                 <Show when={hidden > 0}>
-                                    <OutputHiddenMarker hidden={hidden} noun="file" from="head" />
+                                    <OutputHiddenMarker hidden={hidden} noun="line" from="head" />
                                 </Show>
                             </>
                         );
