@@ -1,14 +1,25 @@
 #!/usr/bin/env bash
-# import-agents.sh — copy user-created agent definitions into a target version DB
-# and create stub session instances so they appear in My Agents without a restart.
+# import-agents.sh — copy user-created agent definitions into a target version DB,
+# create session instances so they appear in My Agents without a restart, AND wire
+# each instance to its existing on-disk Claude session so its real (long)
+# conversation resumes on the next message.
+#
+# The conversation transcript itself is NOT stored in objects.db — it lives in the
+# provider CLI's account-wide session file (~/.claude/projects/<cwd>/<sid>.jsonl),
+# which the target instance can already read. So "copy all data" means wiring the
+# instance row to that session (session_id + working_directory), not copying bytes.
+# Sending the imported agent one message re-spawns it with `--resume <sid>` and the
+# full history replays into the pane.
 #
 # Usage:
 #   scripts/import-agents.sh                        # catalog all agents across all DBs
 #   scripts/import-agents.sh --to 0.43.2            # import all user agents into version
 #   scripts/import-agents.sh --to 0.43.2 --name Maks,Maksi
+#   scripts/import-agents.sh --to 0.43.1 --channel local-foo-abc123
 #
 # After running, reopen the agent pane in the target build (no full restart needed).
-# The agents appear in My Agents with status "stopped", ready to launch.
+# Agents appear in My Agents as "stopped"; send one a message to resume its
+# conversation. Agents with no on-disk session import as before (empty stub).
 
 set -euo pipefail
 
@@ -32,6 +43,49 @@ now_ms() { printf '%s000\n' "$(date +%s)"; }
 # Find every objects.db under the agentmux dir
 all_dbs() {
     find "$AGENTMUX_DIR" -name "objects.db" 2>/dev/null | sort
+}
+
+# ── session linkage ──────────────────────────────────────────────────────────
+# AgentMux stores nothing of the conversation transcript in objects.db; the
+# document the agent pane renders comes from the provider CLI's own session
+# file, replayed when the agent is re-spawned with `--resume <session_id>`.
+# For Claude Code that lives at:
+#   ~/.claude/projects/<slugified-cwd>/<session_id>.jsonl   (account-wide)
+# where <slugified-cwd> is the agent's working directory with each of : \ . /
+# replaced by '-'. Agent working dirs follow the convention
+# ~/.agentmux/agents/<slug>-<id>. So to make an imported agent show its real
+# (long) conversation, we don't copy transcript bytes — we wire the instance
+# row to the existing on-disk session, and a single message resumes it.
+CLAUDE_PROJECTS="${CLAUDE_PROJECTS:-$HOME/.claude/projects}"
+AGENTS_DIR="$AGENTMUX_DIR/agents"
+
+# Slugify a working dir the way Claude Code names its project subdir.
+slugify_cwd() { printf '%s' "$1" | sed 's#[:\\./]#-#g'; }
+
+# Resolve the LARGEST Claude session for an agent slug (longest transcript →
+# best streaming/perf repro). Echoes "<session_id>\t<working_directory_win>"
+# (tab-separated) or nothing if no session is found.
+best_session_for_slug() {
+    local slug="$1"
+    [ -n "$slug" ] || return 0
+    local best_size=0 best_sid="" best_wd=""
+    local d name wd_win cslug jf sz
+    for d in "$AGENTS_DIR/$slug"-*; do
+        [ -d "$d" ] || continue
+        wd_win=$(win_path "$d")               # C:\Users\...\.agentmux\agents\<name>
+        cslug=$(slugify_cwd "$wd_win")
+        [ -d "$CLAUDE_PROJECTS/$cslug" ] || continue
+        while IFS= read -r jf; do
+            [ -n "$jf" ] || continue
+            sz=$(stat -c%s "$jf" 2>/dev/null || echo 0)
+            if [ "$sz" -gt "$best_size" ]; then
+                best_size=$sz
+                best_sid=$(basename "$jf" .jsonl)
+                best_wd=$wd_win
+            fi
+        done < <(find "$CLAUDE_PROJECTS/$cslug" -maxdepth 1 -name '*.jsonl' 2>/dev/null)
+    done
+    [ -n "$best_sid" ] && printf '%s\t%s' "$best_sid" "$best_wd"
 }
 
 # Scan $AGENTMUX_DIR/channels for the channel that contains a given version's
@@ -130,7 +184,7 @@ import_into() {
         # Use char(1) (ASCII unit-separator) instead of '|' so agent names that
         # contain a pipe character don't corrupt the field split.
         agents=$(db_query "$src_db" \
-            "SELECT id||char(1)||name FROM db_agent_definitions WHERE $where;" 2>/dev/null)
+            "SELECT id||char(1)||name||char(1)||COALESCE(slug,'') FROM db_agent_definitions WHERE $where;" 2>/dev/null)
         [ -z "$agents" ] && continue
 
         local src_win; src_win=$(win_path "$src_db")
@@ -152,17 +206,19 @@ import_into() {
             _col_user_hidden="0"
         fi
 
-        while IFS=$'\x01' read -r def_id agent_name; do
+        while IFS=$'\x01' read -r def_id agent_name agent_slug; do
             # Escape single-quotes for safe SQL interpolation (e.g. "Bob's Agent" → "Bob''s Agent")
             local safe_name="${agent_name//\'/\'\'}"
 
-            # Skip if definition already present
-            exists=$(db_query "$target_db" \
-                "SELECT count(*) FROM db_agent_definitions WHERE id='$def_id';")
-            if [ "$exists" -gt 0 ]; then
-                echo "  SKIP  $agent_name (already in target)"
-                ((skipped++)) || true
-                continue
+            # Note whether the definition is already present. We do NOT skip the
+            # agent in that case: an earlier run may have created the definition
+            # plus an empty-session stub, and we still want to backfill the real
+            # session linkage below. Every COPY below is INSERT OR IGNORE, so
+            # re-running them on an existing agent is a harmless no-op.
+            local def_exists=0
+            if [ "$(db_query "$target_db" \
+                "SELECT count(*) FROM db_agent_definitions WHERE id='$def_id';")" -gt 0 ]; then
+                def_exists=1
             fi
 
             # Copy definition row (always required).
@@ -241,6 +297,22 @@ import_into() {
             # (ListRecentSessionsCommand queries instances, not definitions).
             # Derive stub_id from the full def_id (UUID, globally unique) so
             # repeated imports are idempotent and INSERT OR IGNORE is safe.
+            # Wire the instance to the agent's existing on-disk Claude session
+            # so a single message resumes the real (long) conversation. Falls
+            # back to an empty stub when no transcript is found (same behaviour
+            # as before this change), so the import never fails on a session-less
+            # agent. The slug column is preferred; lower-cased name is the fallback.
+            local lookup_slug="${agent_slug:-$(printf '%s' "$agent_name" | tr 'A-Z' 'a-z')}"
+            local resolved sess_id="" work_dir=""
+            resolved=$(best_session_for_slug "$lookup_slug")
+            if [ -n "$resolved" ]; then
+                sess_id=$(printf '%s' "$resolved" | cut -f1)
+                work_dir=$(printf '%s' "$resolved" | cut -f2)
+            fi
+            # SQL-escape single quotes (paths/UUIDs rarely contain them, but safe).
+            local sess_sql="${sess_id//\'/\'\'}"
+            local wd_sql="${work_dir//\'/\'\'}"
+
             local stub_id="si-$(echo "$def_id" | tr -d '-')"
             sqlite3 "$tgt_win" \
                 "INSERT OR IGNORE INTO db_agent_instances
@@ -248,9 +320,24 @@ import_into() {
                     status, github_context, identity_id, memory_id, instance_name,
                     working_directory, display_hidden, started_at, ended_at, created_at)
                  VALUES
-                   ('$stub_id', '$def_id', '', '', '', 'stopped',
+                   ('$stub_id', '$def_id', '', '', '$sess_sql', 'stopped',
                     '', '', '', '$safe_name',
-                    '', 0, $ts, 0, $ts);"
+                    '$wd_sql', 0, $ts, 0, $ts);"
+
+            # Keep an already-imported stub in sync: earlier runs created the
+            # instance with an empty session_id/working_directory, so backfill
+            # them now (INSERT OR IGNORE above no-ops on the existing row).
+            if [ -n "$sess_sql" ]; then
+                sqlite3 "$tgt_win" \
+                    "UPDATE db_agent_instances
+                        SET session_id='$sess_sql', working_directory='$wd_sql'
+                      WHERE id='$stub_id'
+                        AND (session_id IS NULL OR session_id='');"
+            fi
+
+            if [ -n "$sess_id" ]; then
+                echo "        ↳ session $(echo "$sess_id" | cut -c1-8)…  cwd $work_dir"
+            fi
 
             # Mirror instance_name into db_agents so Phase-3b readers
             # (which read db_agents directly) see the agent name immediately,
@@ -261,7 +348,20 @@ import_into() {
                  WHERE id='$def_id'
                    AND (instance_name IS NULL OR instance_name='');" 2>/dev/null || true
 
-            echo "  OK    $agent_name"
+            # Mirror the resolved working dir into db_agents so a FRESH launch
+            # (without resume) also starts in the agent's real directory.
+            if [ -n "$wd_sql" ]; then
+                sqlite3 "$tgt_win" \
+                    "UPDATE db_agents SET working_directory='$wd_sql', updated_at=$ts
+                      WHERE id='$def_id'
+                        AND (working_directory IS NULL OR working_directory='');" 2>/dev/null || true
+            fi
+
+            if [ "$def_exists" -eq 1 ]; then
+                echo "  OK    $agent_name (definition already present)"
+            else
+                echo "  OK    $agent_name"
+            fi
             ((imported++)) || true
         done <<< "$agents"
     done < <(all_dbs)
