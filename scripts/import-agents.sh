@@ -49,45 +49,74 @@ all_dbs() {
 # AgentMux stores nothing of the conversation transcript in objects.db; the
 # document the agent pane renders comes from the provider CLI's own session
 # file, replayed when the agent is re-spawned with `--resume <session_id>`.
-# For Claude Code that lives at:
-#   ~/.claude/projects/<slugified-cwd>/<session_id>.jsonl   (account-wide)
+# For Claude Code that lives at <home>/projects/<slugified-cwd>/<session_id>.jsonl
 # where <slugified-cwd> is the agent's working directory with each of : \ . /
-# replaced by '-'. Agent working dirs follow the convention
-# ~/.agentmux/agents/<slug>-<id>. So to make an imported agent show its real
-# (long) conversation, we don't copy transcript bytes — we wire the instance
-# row to the existing on-disk session, and a single message resumes it.
+# replaced by '-', and <home> is whatever CLAUDE_CONFIG_DIR points at.
+#
+# IMPORTANT: AgentMux spawns claude with CLAUDE_CONFIG_DIR pointed at its OWN
+# isolated home (~/.agentmux/shared/providers/claude), so `claude --resume` reads
+# the session from THERE — not from the user's global ~/.claude. Older sessions
+# (pre-isolation) live only in the global dir. So we (a) search BOTH roots for
+# the best session, and (b) REHYDRATE the chosen session into the isolated home
+# at the slug resume expects, so a single message actually replays it.
+# (P0 of docs/specs/SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md.)
 CLAUDE_PROJECTS="${CLAUDE_PROJECTS:-$HOME/.claude/projects}"
+# Where AgentMux's resume actually reads from (CLAUDE_CONFIG_DIR/projects).
+SHARED_CLAUDE_PROJECTS="${SHARED_CLAUDE_PROJECTS:-$AGENTMUX_DIR/shared/providers/claude/projects}"
 AGENTS_DIR="$AGENTMUX_DIR/agents"
 
 # Slugify a working dir the way Claude Code names its project subdir.
 slugify_cwd() { printf '%s' "$1" | sed 's#[:\\./]#-#g'; }
 
 # Resolve the LARGEST Claude session for an agent slug (longest transcript →
-# best streaming/perf repro). Echoes "<session_id>\t<working_directory_win>"
+# best streaming/perf repro), searching BOTH the isolated AgentMux home and the
+# user's global ~/.claude. Echoes "<session_id>\t<working_dir_win>\t<src_jsonl>"
 # (tab-separated) or nothing if no session is found.
 best_session_for_slug() {
     local slug="$1"
     [ -n "$slug" ] || return 0
-    local best_size=0 best_sid="" best_wd=""
-    local d name wd_win cslug jf sz
+    local best_size=0 best_sid="" best_wd="" best_src=""
+    local d wd_win cslug jf sz root
     for d in "$AGENTS_DIR/$slug"-*; do
         [ -d "$d" ] || continue
         wd_win=$(win_path "$d")               # C:\Users\...\.agentmux\agents\<name>
         cslug=$(slugify_cwd "$wd_win")
-        [ -d "$CLAUDE_PROJECTS/$cslug" ] || continue
-        while IFS= read -r jf; do
-            [ -n "$jf" ] || continue
-            # `wc -c` is POSIX; `stat -c%s` is GNU-only and fails silently on
-            # BSD/macOS — that would make every size 0 and no-op the wiring.
-            sz=$(wc -c < "$jf" 2>/dev/null | tr -d '[:space:]'); sz=${sz:-0}
-            if [ "$sz" -gt "$best_size" ]; then
-                best_size=$sz
-                best_sid=$(basename "$jf" .jsonl)
-                best_wd=$wd_win
-            fi
-        done < <(find "$CLAUDE_PROJECTS/$cslug" -maxdepth 1 -name '*.jsonl' 2>/dev/null)
+        for root in "$SHARED_CLAUDE_PROJECTS" "$CLAUDE_PROJECTS"; do
+            [ -d "$root/$cslug" ] || continue
+            while IFS= read -r jf; do
+                [ -n "$jf" ] || continue
+                # `wc -c` is POSIX; `stat -c%s` is GNU-only and fails silently on
+                # BSD/macOS — that would make every size 0 and no-op the wiring.
+                sz=$(wc -c < "$jf" 2>/dev/null | tr -d '[:space:]'); sz=${sz:-0}
+                if [ "$sz" -gt "$best_size" ]; then
+                    best_size=$sz
+                    best_sid=$(basename "$jf" .jsonl)
+                    best_wd=$wd_win
+                    best_src=$jf
+                fi
+            done < <(find "$root/$cslug" -maxdepth 1 -name '*.jsonl' 2>/dev/null)
+        done
     done
-    [ -n "$best_sid" ] && printf '%s\t%s' "$best_sid" "$best_wd"
+    [ -n "$best_sid" ] && printf '%s\t%s\t%s' "$best_sid" "$best_wd" "$best_src"
+}
+
+# P0 rehydrate: copy a session transcript into AgentMux's isolated Claude home at
+# the slug `claude --resume` expects, so the conversation actually replays even
+# when the session only existed in the user's global ~/.claude (pre-isolation).
+# No-op when a copy is already present. Echoes a one-line note on success.
+rehydrate_claude_session() {
+    local sess_id="$1" work_dir="$2" src_jsonl="$3"
+    [ -n "$sess_id" ] && [ -f "$src_jsonl" ] || return 0
+    local cslug dst_dir dst
+    cslug=$(slugify_cwd "$work_dir")
+    dst_dir="$SHARED_CLAUDE_PROJECTS/$cslug"
+    dst="$dst_dir/$sess_id.jsonl"
+    # Already in the isolated home (src == dst, or a copy exists) → nothing to do.
+    [ -f "$dst" ] && return 0
+    mkdir -p "$dst_dir" 2>/dev/null || return 0
+    if cp "$src_jsonl" "$dst" 2>/dev/null; then
+        echo "        ↳ rehydrated session into shared/providers/claude (resume will find it)"
+    fi
 }
 
 # Scan $AGENTMUX_DIR/channels for the channel that contains a given version's
@@ -320,11 +349,16 @@ import_into() {
             if [ -z "$lookup_slug" ]; then
                 lookup_slug=$(printf '%s' "$agent_name" | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9_-]/-/g')
             fi
-            local resolved sess_id="" work_dir=""
+            local resolved sess_id="" work_dir="" src_jsonl=""
             resolved=$(best_session_for_slug "$lookup_slug")
             if [ -n "$resolved" ]; then
-                sess_id=$(printf '%s' "$resolved" | cut -f1)
-                work_dir=$(printf '%s' "$resolved" | cut -f2-)
+                # Tab-delimited fields; filesystem paths never contain a literal
+                # tab, so the split is unambiguous.
+                IFS=$'\t' read -r sess_id work_dir src_jsonl <<< "$resolved"
+                # P0: ensure the chosen session lives in AgentMux's isolated Claude
+                # home, which is where `claude --resume` reads — otherwise the pane
+                # stays empty even though session_id is wired.
+                rehydrate_claude_session "$sess_id" "$work_dir" "$src_jsonl"
             fi
             # SQL-escape single quotes (paths/UUIDs rarely contain them, but safe).
             local sess_sql="${sess_id//\'/\'\'}"
