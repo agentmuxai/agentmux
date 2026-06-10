@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Claude Code history adapter.
-//! Scans ~/.claude/projects/ and ~/.config/claude-*/projects/ for session JSONL files.
+//! Scans for session JSONL files across both the user's global Claude homes and
+//! the AgentMux-isolated homes that current agents actually write to:
+//!   - ~/.claude/projects/ and ~/.config/claude-*/projects/ (global / legacy)
+//!   - <AGENTMUX_SHARED_DIR>/providers/claude/projects/ (default isolated home)
+//!   - <AGENTMUX_SHARED_DIR>/identities/<bundle_id>/claude/projects/ (per-identity)
 
 use std::fs;
 use std::io::{BufRead, BufReader};
