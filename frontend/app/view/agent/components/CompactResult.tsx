@@ -122,13 +122,24 @@ export const CompactResult = ({ tool, params, result }: CompactResultProps): JSX
             </div>
             <Show when={expanded()}>
                 {tool === "Glob" && Array.isArray(result?.files)
-                    ? (
-                        <div class="agent-tool-glob-files">
-                            <For each={result.files}>
-                                {(f: string) => <div class="agent-tool-glob-file">{f}</div>}
-                            </For>
-                        </div>
-                    ) : (
+                    ? (() => {
+                        const files: string[] = result.files;
+                        const visible = files.slice(0, MAX_TOOL_OUTPUT_LINES);
+                        const hidden = files.length - visible.length;
+                        return (
+                            <>
+                                <div class="agent-tool-glob-files">
+                                    <For each={visible}>
+                                        {(f: string) => <div class="agent-tool-glob-file">{f}</div>}
+                                    </For>
+                                </div>
+                                <Show when={hidden > 0}>
+                                    <OutputHiddenMarker hidden={hidden} noun="file" from="head" />
+                                </Show>
+                            </>
+                        );
+                    })()
+                    : (
                         <>
                             <pre class="agent-tool-compact-json">{jsonCap.text}</pre>
                             <Show when={jsonCap.hiddenLines > 0}>

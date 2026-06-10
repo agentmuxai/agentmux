@@ -51,30 +51,12 @@
         }
     }
 
-    // Tier 4 — Wide pane (≥900px): two-column param/result layout inside
-    // the expanded panel. The summary row gets more horizontal breathing room.
+    // Tier 4 — Wide pane (≥900px): slightly taller panel cap at wide widths.
+    // Two-column param/result grid is Phase 3 (deferred — needs pane-width
+    // context to drive inert/aria-hidden; see SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO).
     @container agent-pane (min-width: 900px) {
         .agent-tool-panel {
-            // Slightly more generous max-height at wide tier so the panel
-            // doesn't feel cramped when it shows both param + result columns.
             max-height: 60vh;
-        }
-
-        .agent-tool-overlay-log {
-            // Two-column grid: left = streaming log / params, right = result.
-            // Only applied when both slots are present; CSS can't know this,
-            // so the JSX adds .has-result to the overlay when result is set.
-            &.has-result {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: var(--space-2);
-                align-items: start;
-            }
-        }
-
-        .agent-tool-overlay-result {
-            border-left: 1px solid var(--border-color);
-            padding-left: var(--space-2);
         }
     }
 
