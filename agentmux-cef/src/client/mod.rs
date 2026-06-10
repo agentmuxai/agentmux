@@ -2161,11 +2161,19 @@ window resumes.</p>
 other apps — then click Resume. Resuming before memory recovers will just
 pause again.</p>
 <div class="actions">
-<button class="primary" onclick="location.href = {app_url_js}">Resume</button>
-<button onclick="window.close()">Quit this window</button>
+<button id="amx-resume" class="primary">Resume</button>
+<button id="amx-quit">Quit this window</button>
 </div>
 <div class="footer">error_code={error_code} · commit_free={commit_free_mb}MB</div>
 </div>
+<script>
+(function(){{
+  var r = document.getElementById('amx-resume');
+  if (r) r.addEventListener('click', function () {{ location.href = {app_url_js}; }});
+  var q = document.getElementById('amx-quit');
+  if (q) q.addEventListener('click', function () {{ window.close(); }});
+}})();
+</script>
 </body></html>"#,
         reason_safe = html_escape(reason),
         commit_free_mb = commit_free_mb,
@@ -2179,11 +2187,39 @@ pause again.</p>
 #[cfg(test)]
 mod gated_recovery_tests {
     use super::{
-        record_memory_pause, url_on_origin, MEMORY_PAUSE_BUDGET, MEMORY_PAUSE_WINDOW,
-        RESUME_FLOOR_MB,
+        memory_paused_page, record_memory_pause, url_on_origin, MEMORY_PAUSE_BUDGET,
+        MEMORY_PAUSE_WINDOW, RESUME_FLOOR_MB,
     };
     use std::collections::VecDeque;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn memory_paused_page_resume_button_has_working_handler() {
+        // Regression for the inert-Resume bug: js_string_literal() returns a
+        // DOUBLE-quoted JS string and is a <script>-context literal; embedding it
+        // in a double-quoted onclick="..." attribute terminated the attribute
+        // early, so Resume did nothing and the window wedged. The handler must be
+        // wired in a <script> block instead.
+        let url = "http://127.0.0.1:63627/?ipc_port=63627&ipc_token=abc";
+        let html = memory_paused_page("out of memory", -1, 100, url);
+
+        // The broken antipattern must be gone.
+        assert!(
+            !html.contains("onclick=\"location.href"),
+            "Resume must not use an inline onclick with a double-quoted URL"
+        );
+        // The handler is attached by id via addEventListener.
+        assert!(html.contains("addEventListener"), "handler should use addEventListener");
+        assert!(html.contains("id=\"amx-resume\""), "Resume button needs its id");
+        // The app URL must appear as a valid JS string literal in script context
+        // (js_string_literal escapes & -> \\u0026 and wraps in double quotes).
+        assert!(
+            html.contains(
+                "location.href = \"http://127.0.0.1:63627/?ipc_port=63627\\u0026ipc_token=abc\""
+            ),
+            "Resume must navigate to the app URL as a valid JS string literal"
+        );
+    }
 
     #[test]
     fn url_on_origin_matches_only_real_same_origin_urls() {
