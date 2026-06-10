@@ -160,6 +160,16 @@ fn resolve_host_runtime_dir() -> Result<PathBuf, FrontendUrlError> {
 /// path" (the missing asset path is shown so the user knows what to
 /// reinstall).
 pub(crate) fn assets_missing_data_url(err: &FrontendUrlError) -> String {
+    let html = assets_missing_html(err);
+    let b64 = cef::base64_encode(Some(html.as_bytes()));
+    let b64_str = cef::CefString::from(&b64).to_string();
+    format!("data:text/html;base64,{}", b64_str)
+}
+
+/// HTML for the broken-install error page. Split out from
+/// `assets_missing_data_url` so the button wiring is unit-testable without
+/// CEF / base64 round-tripping.
+fn assets_missing_html(err: &FrontendUrlError) -> String {
     let (reason, detail) = match err {
         FrontendUrlError::ExeUnresolvable(e) => (
             "Could not determine the install directory".to_string(),
@@ -170,7 +180,7 @@ pub(crate) fn assets_missing_data_url(err: &FrontendUrlError) -> String {
             format!("Expected at: {}", checked_path.display()),
         ),
     };
-    let html = format!(
+    format!(
         r#"<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>AgentMux — Install broken</title>
 <style>
@@ -203,16 +213,24 @@ button:hover {{ background: #45475a; border-color: #585b70; }}
 <p>Reinstall AgentMux from a fresh portable ZIP to recover. Your saved
 sessions and agent state are in <code>~/.agentmux/</code> and are unaffected.</p>
 <div class="actions">
-<button onclick="navigator.clipboard &amp;&amp; navigator.clipboard.writeText({detail_js})">Copy path</button>
-<button onclick="window.close()">Quit</button>
-</div></div></body></html>"#,
+<button id="amx-copy">Copy path</button>
+<button id="amx-quit">Quit</button>
+</div></div>
+<script>
+(function(){{
+  var c = document.getElementById('amx-copy');
+  if (c) c.addEventListener('click', function () {{
+    if (navigator.clipboard) navigator.clipboard.writeText({detail_js});
+  }});
+  var q = document.getElementById('amx-quit');
+  if (q) q.addEventListener('click', function () {{ window.close(); }});
+}})();
+</script>
+</body></html>"#,
         reason_safe = html_escape(&reason),
         detail_safe = html_escape(&detail),
         detail_js = js_string_literal(&detail),
-    );
-    let b64 = cef::base64_encode(Some(html.as_bytes()));
-    let b64_str = cef::CefString::from(&b64).to_string();
-    format!("data:text/html;base64,{}", b64_str)
+    )
 }
 
 /// Open a new full AgentMux instance (status-bar version click, Ctrl+Shift+N,
@@ -375,4 +393,35 @@ fn get_secondary_window_size(px: i32, py: i32) -> (i32, i32) {
         }
     }
     (1200, 800)
+}
+
+#[cfg(test)]
+mod assets_missing_tests {
+    use super::{assets_missing_html, FrontendUrlError};
+    use std::path::PathBuf;
+
+    #[test]
+    fn copy_path_button_has_working_handler() {
+        // Regression: js_string_literal() returns a DOUBLE-quoted JS string;
+        // dropping it into a double-quoted onclick="..." attribute terminated
+        // the attribute early, leaving the "Copy path" button inert. The
+        // handler must be wired in a <script> block instead.
+        let err = FrontendUrlError::AssetsMissing {
+            checked_path: PathBuf::from("MISSING_ASSETS"),
+        };
+        let html = assets_missing_html(&err);
+
+        assert!(
+            !html.contains("onclick=\"navigator.clipboard"),
+            "Copy path must not use an inline onclick with a double-quoted literal"
+        );
+        assert!(html.contains("addEventListener"), "handler should use addEventListener");
+        assert!(html.contains("id=\"amx-copy\""), "Copy button needs its id");
+        // The detail string is emitted as a valid JS string literal in script
+        // context (js_string_literal wraps in double quotes).
+        assert!(
+            html.contains("writeText(\"Expected at: MISSING_ASSETS\")"),
+            "Copy path must writeText the detail as a valid JS string literal"
+        );
+    }
 }
