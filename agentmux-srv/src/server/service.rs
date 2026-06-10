@@ -2264,6 +2264,22 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             let result = state.history_service.refresh();
             WebReturnType::success(result)
         }
+        ("history", "Delete") => {
+            let session_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let result = state.history_service.delete(&session_id);
+            WebReturnType::success(result)
+        }
+        ("history", "Clear") => {
+            let provider: Option<String> = service::get_optional_arg(args, 0).unwrap_or(None);
+            let project: Option<String> = service::get_optional_arg(args, 1).unwrap_or(None);
+            let result = state
+                .history_service
+                .clear(provider.as_deref(), project.as_deref());
+            WebReturnType::success(result)
+        }
 
         ("subagent", "WatchAgent") => {
             let agent_id: String = match service::get_arg(args, 0) {
