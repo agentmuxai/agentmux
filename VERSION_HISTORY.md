@@ -1,5 +1,11 @@
 # AgentMux Version History
 
+## 0.44.1 — 2026-06-10
+
+- fix(cef): low-memory pause page Resume button was inert (double-quoted JS string inside a double-quoted onclick attribute) — wire it via a <script> + addEventListener so OOM-paused windows can actually resume
+- fix(agent-pane): replace remaining <Index> with <Key> in virt list and <For> with <Index> in DiffViewer to close replaceChild crash class (#1326)
+
+
 ## 0.44.0 — 2026-06-10
 
 - perf(pane-focus): skip updateTree for FocusNode + drop diag console.logs
@@ -1067,6 +1073,7 @@ Auto-appended by `scripts/package-cef-portable.sh`. Newest first.
 
 | Version | Date | ZIP (compressed) | Folder (uncompressed) | Note |
 |---------|------|------------------|-----------------------|------|
+| 0.44.0 | 2026-06-10 | 163.9 MiB | 349.8 MiB | |
 | 0.38.13 | 2026-05-26 | 164.8 MiB | 346.2 MiB | |
 | 0.38.11 | 2026-05-26 | 164.8 MiB | 346.1 MiB | |
 | 0.38.10 | 2026-05-26 | 164.8 MiB | 346.1 MiB | |
