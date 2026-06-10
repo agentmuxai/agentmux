@@ -3,10 +3,11 @@
 
 // Responsive container queries — compact layout on narrow panes. Wrapped in .agent-view so the cascade chain matches
 // the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
+// SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09 adds Tier 3/4/5 breakpoints.
 .agent-view {
     // === Responsive Container Queries ===
 
-    // Narrow pane: compact agent cards
+    // Tier 1 — Narrow pane (<380px): compact agent cards, no extras
     @container agent-pane (max-width: 249px) {
         .agent-picker {
             padding: 10px;
@@ -28,6 +29,61 @@
 
         .agent-document {
             padding: var(--space-2);
+        }
+    }
+
+    // Tier 3 — Medium pane (≥600px): show result pill inline in collapsed row.
+    // The pill is always rendered in the DOM (stable subtree for virtualization)
+    // but hidden via display:none below this breakpoint.
+    @container agent-pane (min-width: 600px) {
+        .agent-tool-result-pill {
+            display: inline;
+        }
+
+        // At medium width, live-tail and result pill would duplicate info
+        // (both condense the tool output to one line). Hide live-tail when
+        // the pill is present — the pill is more structured and takes up
+        // less space. The live-tail still shows at <600px where the pill
+        // is hidden.
+        .agent-tool-block.success .agent-tool-live-tail,
+        .agent-tool-block.failed  .agent-tool-live-tail {
+            display: none;
+        }
+    }
+
+    // Tier 4 — Wide pane (≥900px): two-column param/result layout inside
+    // the expanded panel. The summary row gets more horizontal breathing room.
+    @container agent-pane (min-width: 900px) {
+        .agent-tool-panel {
+            // Slightly more generous max-height at wide tier so the panel
+            // doesn't feel cramped when it shows both param + result columns.
+            max-height: 60vh;
+        }
+
+        .agent-tool-overlay-log {
+            // Two-column grid: left = streaming log / params, right = result.
+            // Only applied when both slots are present; CSS can't know this,
+            // so the JSX adds .has-result to the overlay when result is set.
+            &.has-result {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: var(--space-2);
+                align-items: start;
+            }
+        }
+
+        .agent-tool-overlay-result {
+            border-left: 1px solid var(--border-color);
+            padding-left: var(--space-2);
+        }
+    }
+
+    // Tier 5 — Ultra-wide pane (≥1200px): Glob file list goes multi-column.
+    @container agent-pane (min-width: 1200px) {
+        .agent-tool-glob-files {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1px var(--space-2);
         }
     }
 }
