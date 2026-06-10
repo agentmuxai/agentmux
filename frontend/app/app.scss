@@ -66,6 +66,7 @@ a.plain-link {
 }
 
 *::-webkit-scrollbar-thumb {
+    cursor: pointer;
     background-color: var(--scrollbar-thumb-color);
     border-radius: 0;
     margin: 0 1px 0 1px;
@@ -97,6 +98,10 @@ a.plain-link {
     --os-handle-bg: var(--scrollbar-thumb-color);
     --os-handle-bg-hover: var(--scrollbar-thumb-hover-color);
     --os-handle-bg-active: var(--scrollbar-thumb-active-color);
+}
+
+.os-scrollbar-handle {
+    cursor: pointer;
 }
 
 .scrollbar-hide-until-hover {
