@@ -21,13 +21,13 @@ impl ClaudeHistoryAdapter {
         let mut base_dirs = Vec::new();
 
         if let Some(home) = dirs::home_dir() {
-            // User's personal Claude sessions
+            // User's personal (non-isolated) Claude sessions
             let personal = home.join(".claude").join("projects");
             if personal.is_dir() {
                 base_dirs.push(personal);
             }
 
-            // AgentMux agent sessions: ~/.config/claude-*/projects/
+            // Legacy multi-account convention: ~/.config/claude-*/projects/
             let config_dir = home.join(".config");
             if config_dir.is_dir() {
                 if let Ok(entries) = fs::read_dir(&config_dir) {
@@ -40,6 +40,32 @@ impl ClaudeHistoryAdapter {
                                 base_dirs.push(projects);
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        // AgentMux-ISOLATED Claude homes — where agents spawned by current builds
+        // actually write (AgentMux sets CLAUDE_CONFIG_DIR here at spawn time).
+        // Without these, the history browse misses every AgentMux agent
+        // conversation. See docs/specs/SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md.
+        //   <shared>/providers/claude/projects/              (default, account-wide)
+        //   <shared>/identities/<bundle_id>/claude/projects/ (per-identity bundles)
+        // `AGENTMUX_SHARED_DIR` is exported by the launcher; fall back to
+        // ~/.agentmux/shared so discovery still works in plain/test contexts.
+        let shared_dir = std::env::var_os("AGENTMUX_SHARED_DIR")
+            .map(PathBuf::from)
+            .or_else(|| dirs::home_dir().map(|h| h.join(".agentmux").join("shared")));
+        if let Some(shared) = shared_dir {
+            let default_projects = shared.join("providers").join("claude").join("projects");
+            if default_projects.is_dir() {
+                base_dirs.push(default_projects);
+            }
+            if let Ok(entries) = fs::read_dir(shared.join("identities")) {
+                for entry in entries.flatten() {
+                    let projects = entry.path().join("claude").join("projects");
+                    if projects.is_dir() {
+                        base_dirs.push(projects);
                     }
                 }
             }
