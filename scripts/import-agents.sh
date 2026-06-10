@@ -183,20 +183,18 @@ import_into() {
             where="is_seeded=0"
         fi
 
-        # Use char(1) (ASCII unit-separator) instead of '|' so agent names that
-        # contain a pipe character don't corrupt the field split.
-        agents=$(db_query "$src_db" \
-            "SELECT id||char(1)||name||char(1)||COALESCE(slug,'') FROM db_agent_definitions WHERE $where;" 2>/dev/null)
-        [ -z "$agents" ] && continue
-
         local src_win; src_win=$(win_path "$src_db")
 
-        # Detect which newer columns exist in the source schema so the SELECT
-        # does not fail on older AgentMux databases that lack them.
+        # Detect which newer columns exist in the source schema so the SELECTs
+        # below never reference a missing column. This MUST run BEFORE the agents
+        # query: referencing an absent column (e.g. `slug` on a very old DB) makes
+        # sqlite3 error, and under `set -euo pipefail` the failing
+        # command-substitution assignment aborts the entire import silently
+        # (db_query swallows stderr with its own 2>/dev/null).
         local _src_cols; _src_cols=$(sqlite3 "$src_win" \
             "SELECT group_concat(name) FROM pragma_table_info('db_agent_definitions');" \
             2>/dev/null || echo "")
-        local _col_updated_at _col_user_hidden
+        local _col_updated_at _col_user_hidden _col_slug
         if echo "$_src_cols" | grep -qw "updated_at"; then
             _col_updated_at="updated_at"
         else
@@ -207,6 +205,17 @@ import_into() {
         else
             _col_user_hidden="0"
         fi
+        if echo "$_src_cols" | grep -qw "slug"; then
+            _col_slug="slug"
+        else
+            _col_slug="''"
+        fi
+
+        # Use char(1) (ASCII unit-separator) instead of '|' so agent names that
+        # contain a pipe character don't corrupt the field split.
+        agents=$(db_query "$src_db" \
+            "SELECT id||char(1)||name||char(1)||COALESCE(${_col_slug},'') FROM db_agent_definitions WHERE $where;" 2>/dev/null)
+        [ -z "$agents" ] && continue
 
         while IFS=$'\x01' read -r def_id agent_name agent_slug; do
             # Escape single-quotes for safe SQL interpolation (e.g. "Bob's Agent" → "Bob''s Agent")
@@ -236,7 +245,7 @@ import_into() {
                     idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
                     is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden)
                  SELECT
-                    id, slug, name, icon, provider, description,
+                    id, ${_col_slug}, name, icon, provider, description,
                     working_directory, shell, provider_flags, auto_start, restart_on_crash,
                     idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
                     is_seeded, accounts, parent_id, branch_label,
@@ -291,7 +300,7 @@ import_into() {
                    provider, provider_flags, shell, environment, working_directory,
                    agent_type, agent_bus_id, accounts,
                    auto_start, restart_on_crash, idle_timeout_minutes,
-                   slug, branch_label,
+                   ${_col_slug}, branch_label,
                    created_at, ${_col_updated_at}, is_seeded, ${_col_user_hidden}
                  FROM db_agent_definitions WHERE id='$def_id';" 2>/dev/null || true
 
@@ -315,7 +324,7 @@ import_into() {
             resolved=$(best_session_for_slug "$lookup_slug")
             if [ -n "$resolved" ]; then
                 sess_id=$(printf '%s' "$resolved" | cut -f1)
-                work_dir=$(printf '%s' "$resolved" | cut -f2)
+                work_dir=$(printf '%s' "$resolved" | cut -f2-)
             fi
             # SQL-escape single quotes (paths/UUIDs rarely contain them, but safe).
             local sess_sql="${sess_id//\'/\'\'}"
