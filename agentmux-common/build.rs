@@ -21,4 +21,20 @@
 
 fn main() {
     println!("cargo:rerun-if-env-changed=AGENTMUX_BUILD_CHANNEL_DEFAULT");
+
+    // `rerun-if-env-changed` only re-runs THIS build script when the env
+    // changes — it does NOT, on its own, force rustc to recompile the crate
+    // whose `option_env!` reads the value (the build-script output is
+    // unchanged, so Cargo can reuse the cached object). Re-emitting the value
+    // as `rustc-env` puts it into the crate's rustc fingerprint, so a channel
+    // change (branch switch, `--fresh`) reliably forces the rebake instead of
+    // silently baking a stale channel from the incremental cache.
+    //
+    // When the env is unset (plain `cargo build`/`cargo run` for tests) we emit
+    // nothing, so `option_env!` falls back to its `"stable"` default exactly as
+    // before. The per-build LABEL is deliberately NOT tracked this way (it
+    // changes every build and would defeat incremental caching).
+    if let Ok(channel) = std::env::var("AGENTMUX_BUILD_CHANNEL_DEFAULT") {
+        println!("cargo:rustc-env=AGENTMUX_BUILD_CHANNEL_DEFAULT={channel}");
+    }
 }
