@@ -150,9 +150,13 @@ Impls: `claude` (`projects/<slug>/<sid>.jsonl`), `codex` (`sessions/<y>/<m>/<d>/
 | Phase | Scope | Outcome |
 |-------|-------|---------|
 | **P0** ✅ | Fix `import-agents.sh`: search `shared/providers/claude` + global, and **rehydrate** the chosen session into `$CLAUDE_CONFIG_DIR/projects/<slug>/` where resume reads (`rehydrate_claude_session`) | **DONE** — imported agents' sessions replay on resume (verified: Mopeo `4f03e3ed`, 1.1 MB, copied into the isolated home) |
-| **P1** | History store + Claude/Codex/Gemini adapters + turn-end capture + reconcile scan | Real usage durably captured & unified inside `~/.agentmux/` |
-| **P2** | `index.db` + History pane (browse/search/label/pin/restore/clear) | Organize + clear + read-only restore |
+| **P1a** ✅ | Make the **existing** `ClaudeHistoryAdapter` scan the AgentMux-isolated homes (`shared/providers/claude/projects` + `shared/identities/*/claude/projects`) | **DONE** — the existing browse (`HistoryService` → `useHistoryPagination`) now surfaces AgentMux agent conversations, not just global `~/.claude` |
+| **P1b** | Durable mirror/capture: `HistoryStore` under `shared/history/` + turn-end copy + reconcile scan; clear/delete | Histories survive provider GC; unified & agent-anchored |
+| **P1c** | Codex + Gemini `HistoryAdapter`s (scan isolated `CODEX_HOME`/`GEMINI_CLI_HOME`) | Multi-provider browse + capture |
+| **P2** | History pane UX: search/label/pin/restore/clear (RPC + `index.rs` already exist) | Organize + clear + read-only restore |
 | **P3** | ACP providers (copilot/pi/openclaw), size budget + GC, cross-machine export | Full coverage + housekeeping |
+
+> **Implementation reality (discovered 2026-06-10):** a discovery/browse layer **already exists** — `history/{adapter.rs (HistoryAdapter trait), claude_adapter.rs, index.rs (SessionIndex), mod.rs (HistoryService)}`, wired to RPC (`service.rs`) and a frontend consumer (`useHistoryPagination.ts`, `parseHistoryLines.ts`). It scanned only global `~/.claude` + `~/.config/claude-*`. P1a closes that gap; P1b/P1c/P2 build on this rather than from scratch. The trait is read-oriented (`discover_files`/`extract_meta`/`parse_file`); P1b adds the write/mirror/delete side.
 
 ---
 
