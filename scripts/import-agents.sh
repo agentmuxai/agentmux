@@ -77,7 +77,9 @@ best_session_for_slug() {
         [ -d "$CLAUDE_PROJECTS/$cslug" ] || continue
         while IFS= read -r jf; do
             [ -n "$jf" ] || continue
-            sz=$(stat -c%s "$jf" 2>/dev/null || echo 0)
+            # `wc -c` is POSIX; `stat -c%s` is GNU-only and fails silently on
+            # BSD/macOS — that would make every size 0 and no-op the wiring.
+            sz=$(wc -c < "$jf" 2>/dev/null | tr -d '[:space:]'); sz=${sz:-0}
             if [ "$sz" -gt "$best_size" ]; then
                 best_size=$sz
                 best_sid=$(basename "$jf" .jsonl)
@@ -301,8 +303,14 @@ import_into() {
             # so a single message resumes the real (long) conversation. Falls
             # back to an empty stub when no transcript is found (same behaviour
             # as before this change), so the import never fails on a session-less
-            # agent. The slug column is preferred; lower-cased name is the fallback.
-            local lookup_slug="${agent_slug:-$(printf '%s' "$agent_name" | tr 'A-Z' 'a-z')}"
+            # agent. The slug column is preferred; when it's empty we reproduce
+            # the Rust derive_slug() encoding — lower-case AND replace every
+            # char outside [a-z0-9_-] with '-' — so names with spaces/dots
+            # (e.g. "My Agent" → "my-agent-<id>") still match the on-disk dir.
+            local lookup_slug="$agent_slug"
+            if [ -z "$lookup_slug" ]; then
+                lookup_slug=$(printf '%s' "$agent_name" | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9_-]/-/g')
+            fi
             local resolved sess_id="" work_dir=""
             resolved=$(best_session_for_slug "$lookup_slug")
             if [ -n "$resolved" ]; then
