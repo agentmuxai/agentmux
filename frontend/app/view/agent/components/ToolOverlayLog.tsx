@@ -15,7 +15,7 @@
  * ANSI parsing lands in Phase γ (perf + worker offload) per the spec.
  */
 
-import { For, Match, Show, Switch, createEffect, type JSX } from "solid-js";
+import { Index, Match, Show, Switch, createEffect, type JSX } from "solid-js";
 // `Show` retained for fallback ToolOverlayResult sub-tree.
 import type { ToolNode } from "../types";
 import { BashOutputViewer } from "./BashOutputViewer";
@@ -154,13 +154,13 @@ function ChunkList(props: ChunkListProps): JSX.Element {
             <Show when={capped().hiddenLines > 0}>
                 <OutputHiddenMarker hidden={capped().hiddenLines} noun="line" from="tail" />
             </Show>
-            <For each={capped().chunks}>
+            <Index each={capped().chunks}>
                 {(chunk) => (
-                    <pre class={`agent-tool-log-line ${KIND_CLASS[chunk.kind] ?? ""}`}>
-                        {capChars(chunk.content)}
+                    <pre class={`agent-tool-log-line ${KIND_CLASS[chunk().kind] ?? ""}`}>
+                        {capChars(chunk().content)}
                     </pre>
                 )}
-            </For>
+            </Index>
         </>
     );
 }
