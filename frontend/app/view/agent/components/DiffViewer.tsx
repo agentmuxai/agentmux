@@ -20,8 +20,7 @@
  * output.
  */
 
-import { createEffect, createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
-import { For } from "solid-js";
+import { createEffect, createMemo, createSignal, Index, onCleanup, Show, type JSX } from "solid-js";
 import type { EditParams, EditResult } from "../types";
 import { detectLanguage } from "./detectLanguage";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
@@ -188,20 +187,30 @@ export const DiffViewer = (props: DiffViewerProps): JSX.Element => {
         );
     }
 
+    // Memoized so parseDiffLines doesn't re-run on every reactive sweep
+    // and so <Index> sees a stable array reference between renders.
+    const lines = createMemo(() => {
+        const d = diff();
+        return d ? parseDiffLines(d) : [];
+    });
+
     // --- Plain fallback (shown until Shiki resolves, or permanently if Shiki fails) ---
-    const PlainDiff = () => {
-        const lines = parseDiffLines(diff()!);
-        return (
-            <pre class="agent-diff">
-                <div class="agent-diff-header">{filePath()}</div>
-                <For each={lines}>
-                    {(line) => (
-                        <div class={`agent-diff-${line.type}`}>{line.raw}</div>
-                    )}
-                </For>
-            </pre>
-        );
-    };
+    // Uses <Index> (position-keyed) rather than <For> (reference-keyed).
+    // Diffs are immutable once rendered, but a <Show> branch flip when
+    // Shiki resolves can race with a reactive update that drives a
+    // second reconcileArrays pass on the same DOM nodes → replaceChild
+    // NotFoundError. <Index> avoids that: each position slot updates
+    // in place; no DOM moves occur when the array is stable. (#1326)
+    const PlainDiff = () => (
+        <pre class="agent-diff">
+            <div class="agent-diff-header">{filePath()}</div>
+            <Index each={lines()}>
+                {(line) => (
+                    <div class={`agent-diff-${line().type}`}>{line().raw}</div>
+                )}
+            </Index>
+        </pre>
+    );
 
     return (
         <>

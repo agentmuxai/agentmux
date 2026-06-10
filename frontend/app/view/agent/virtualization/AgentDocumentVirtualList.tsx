@@ -28,8 +28,9 @@
  * the state into the DOM but never reads it back.
  */
 
-import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
+import { Key } from "@solid-primitives/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import { agentPerfStore, startAgentLayoutShiftObserver } from "./perf-probe";
@@ -648,15 +649,14 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         <div class="agent-document" ref={scrollRef} onScroll={handleScroll}>
             {props.headerSlot}
             {/* Virtualized head — only present when document > buffer size.
-                Uses <Index> (position-keyed) rather than <Key by={r=>r.nodeId}>
-                for the same reason the streaming buffer does: the window is a
-                sliding positional range, not an identity-stable list. <Key>
-                disposes departing slots synchronously inside keyArray while
-                reconcileArrays still holds stale element refs — same rapid
-                cap-advance crash pattern as the streaming buffer (§7.4,
-                SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md).
-                With <Index>, window shifts are pure signal updates; no DOM
-                rearrangements occur at steady-state window size. (#1319) */}
+                Uses <Key by={r => r.nodeId}> (identity-keyed) so each DOM
+                slot is permanently tied to one nodeId. The old <Index>
+                (position-keyed) approach required an extra createEffect to
+                keep elNodeId current whenever the window shifted a different
+                node into the same position slot; without it measureRO would
+                dispatch RowMeasured for the wrong nodeId. <Key> eliminates
+                that complexity: each slot's lifecycle matches its node's
+                lifecycle exactly. (#1319, #1326) */}
             <div
                 ref={(el) => { virtualContainerRef = el; }}
                 class="agent-document-virtualizer"
@@ -666,20 +666,13 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                     width: "100%",
                 }}
             >
-                <Index each={windowedRows()}>
+                <Key each={windowedRows()} by={(r) => r.nodeId}>
                     {(row) => {
                         let rowEl: HTMLElement | undefined;
                         // The live node at this row's id; skip a frame if it's
                         // momentarily absent from the partition (recoverable).
                         const node = (): DocumentNode | undefined => nodeById().get(row().nodeId);
                         onCleanup(() => { if (rowEl) unobserveRow(rowEl); });
-                        // Keep elNodeId current when the window shifts and this
-                        // slot's nodeId changes. With <Key>, each slot was tied to
-                        // one nodeId for life; with <Index>, the same DOM element
-                        // can represent different nodes as the window scrolls —
-                        // without this update measureRO would dispatch RowMeasured
-                        // for the wrong nodeId.
-                        createEffect(() => { if (rowEl) elNodeId.set(rowEl, row().nodeId); });
                         return (
                             <Show when={node()}>
                                 {(n) => (
@@ -705,48 +698,48 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                             </Show>
                         );
                     }}
-                </Index>
+                </Key>
             </div>
 
             {/* Streaming buffer — always-mounted trailing nodes.
-                Uses <Index> rather than <For> or <Key by={n=>n.id}>:
+                Uses <Key by={n => n.id}> rather than <For> or <Index>:
                   - <For> reconciles by item REFERENCE: each streaming
                     token replaces the active node's object (immutable
                     update preserves id but gives a new ref), so <For>
                     would unmount/remount the row on every token.
                     (reagent P1 on #784.)
-                  - <Key by={n=>n.id}> avoids the remount and no
-                    position-keyed state leaks across cap-advances.
-                    But rapid consecutive cap-advances crash (#1317):
-                    keyArray disposes slots synchronously (clearing DOM
-                    content) while reconcileArrays still holds stale
-                    element refs → "replaceChild: node not a child".
-                    (§7.4, SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS…)
-                  - <Index> avoids reconcileArrays DOM rearrangements
-                    entirely at steady-state 50 items: position-slot
-                    signals update in place, no DOM moves. The only
-                    trade-off vs <Key>: slot-position state (prevStatus
-                    in ToolBlock) could leak when a cap-advance lands a
-                    different node at the same position. ToolBlock guards
-                    this by resetting prevStatus when the node id changes.
-                    (#1317)
+                  - <Index> is position-keyed: slot state (prevStatus,
+                    expanded flag in ToolBlock) leaks to whatever node
+                    lands at the same position after a cap-advance
+                    migration. Also still crashes if the array grows
+                    (reconcileArrays sentinel corruption) — the keying
+                    strategy doesn't matter; growth does. (#1326)
+                  - <Key by={n => n.id}> keys each slot by stable node
+                    id. Token updates (new object ref, same id) fire the
+                    slot's accessor without remount. Cap-advance migrations
+                    dispose the departing slot by id cleanly — no position
+                    state leaks. The array never grows because the
+                    partition memo caps streamingNodes at
+                    STREAMING_BUFFER_SIZE before any render effect sees
+                    it, so reconcileArrays always sees a fixed-size array.
+                    (#1302, #1317, #1326)
 
                 <Show when={partition()}> guards against the secondary
                 crash: if the memo is read after its reactive scope is
                 disposed (mid-error-boundary teardown) the <Show> catches
-                the falsy result before it reaches <Index>, preventing
+                the falsy result before it reaches <Key>, preventing
                 "Cannot read properties of undefined (reading
-                'streamingNodes')". The narrowed `p()` isolates <Index>
+                'streamingNodes')". The narrowed `p()` isolates <Key>
                 in its own child scope so it is disposed before the outer
                 memo can produce a stale read.
                 (SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §3.3) */}
             <Show when={partition()}>
                 {(p) => (
                     <div class="agent-document-streaming-buffer" data-animate={animateEnabled() || undefined}>
-                        <Index each={p().streamingNodes as DocumentNode[]}>
-                            {(nodeSignal) => (
+                        <Key each={p().streamingNodes as DocumentNode[]} by={(n) => n.id}>
+                            {(nodeAccessor) => (
                                 <DocumentRow
-                                    node={nodeSignal}
+                                    node={nodeAccessor}
                                     documentState={props.documentState}
                                     bookmarkedNodeIds={props.bookmarkedNodeIds}
                                     onBookmark={props.onBookmark}
@@ -756,7 +749,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                     onTogglePin={props.onTogglePin}
                                 />
                             )}
-                        </Index>
+                        </Key>
                     </div>
                 )}
             </Show>
