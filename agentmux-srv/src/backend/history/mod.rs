@@ -77,4 +77,25 @@ impl HistoryService {
             "new": new_count,
         })
     }
+
+    /// Delete a single session's on-disk transcript and drop it from the index.
+    pub fn delete(&self, session_id: &str) -> serde_json::Value {
+        if self.index.is_empty() {
+            self.index.refresh();
+        }
+        match self.index.delete(session_id) {
+            Ok(true) => serde_json::json!({ "deleted": true }),
+            Ok(false) => serde_json::json!({ "deleted": false, "error": "session not found" }),
+            Err(e) => serde_json::json!({ "deleted": false, "error": format!("{}", e) }),
+        }
+    }
+
+    /// Bulk-clear sessions matching the optional provider/project filter.
+    pub fn clear(&self, provider: Option<&str>, project: Option<&str>) -> serde_json::Value {
+        if self.index.is_empty() {
+            self.index.refresh();
+        }
+        let deleted = self.index.clear(provider, project);
+        serde_json::json!({ "deleted": deleted })
+    }
 }
