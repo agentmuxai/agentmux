@@ -1,6 +1,11 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+// Install the replaceChild crash diagnostic FIRST, before any rendering module
+// loads, so it's active when the agent pane mounts. See the module header,
+// SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §7.4, and #1326.
+import "./diag/replace-child-diagnostic";
+
 import { Workspace } from "@/app/workspace/workspace";
 import { FloatingPaneWorkspace } from "@/app/workspace/floating-pane-workspace";
 import { ContextMenuModel } from "@/store/contextmenu";
