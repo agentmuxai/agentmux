@@ -1,5 +1,96 @@
 # AgentMux Version History
 
+## 0.44.0 — 2026-06-10
+
+- perf(pane-focus): skip updateTree for FocusNode + drop diag console.logs
+- Two small, all-cross-platform wins on the click → focused-border-paint
+- chain (issue #1136, full analysis in
+- `docs/analyses/ANALYSIS_PANE_FOCUS_PAINT_LATENCY_2026-05-28.md`):
+- - **Skip `updateTree()` for `FocusNode` actions**
+-   (`frontend/layout/lib/layoutModel.ts`). The reducer previously ran
+-   a full rebalance + per-leaf transform recompute after every action.
+-   `FocusNode` only mutates `treeState.focusedNodeId` — topology, sizes,
+-   and per-leaf transforms are unchanged. The reactive `isFocused` memos
+-   still get notified via the `localTreeStateAtom._set` immediately after.
+-   Savings scale with #panes-per-tab; the dominant synchronous cost on
+-   the click path is gone.
+- - **Drop the two diagnostic `console.log`s in `handleChildFocus`**
+-   (`frontend/app/block/block.tsx`). `getElemAsStr(event.target)` walked
+-   the DOM on every focusin event; the unused `getElemAsStr` import is
+-   removed too.
+- No platform `cfg` / `*.linux.tsx` gates; benefits every platform
+- uniformly.
+- fix(term): predictive-echo — short stall cooldown so a slow rAF doesn't lock predictions out for 1.2 s
+- The user-visible symptom on Linux: type a sustained burst, see ~10
+- chars, then ~1 s of nothing, then a huge burst of all the accumulated
+- chars. Holds even with `--ozone-platform=x11` (PR #1241) because rAF
+- *occasionally* still stalls past 600 ms on broken Mutter/Chromium GPU
+- handoff.
+- The state machine in `predictive-echo.ts` had two rollback paths
+- sharing one cooldown:
+- - **`reconcile()` rollback** (line ~182): PTY echoed bytes that didn't
+-   match the prediction — a real divergence. Penalising with the full
+-   `cooldownMs` (1200 ms default) makes sense; it rides out a mode
+-   change without thrash.
+- - **`sweep()` rollback** (line ~197): no echo arrived within
+-   `predictTimeoutMs` (600 ms default) — *not* divergence, just a slow
+-   echo. Penalising this with the same 1200 ms was wrong.
+- The Linux symptom is exactly the second case looping:
+- 1. User holds key, ~12 chars get predicted+painted in the first 600 ms
+-    (~20 Hz key-repeat × 50 ms/key = 600 ms).
+- 2. The next rAF stalls past 600 ms (we measure occasional rAF gaps to
+-    ~1 s on Linux even after #1241).
+- 3. `sweep()` fires → `rollback()` erases the painted chars +
+-    `enterCooldown()` sets a **1200 ms** dead zone.
+- 4. For the next 1.2 s, every keystroke goes through `observe()`
+-    instead of `paint()` — nothing visible — while chars accumulate.
+- 5. Cooldown ends → re-arms → backlog pours out at once.
+- This PR splits the cooldown into two:
+- - `cooldownMs` (divergence) — unchanged default 1200 ms.
+- - `stallCooldownMs` (sweep timeout) — new default **100 ms**.
+- Sweep now calls `enterStallCooldown(now)`. The next rAF cycle resumes
+- painting almost immediately. The 100 ms default is hardcoded; a
+- per-platform `stallCooldownMs` constructor option exists for tests.
+- Tests: convergence + the 17 existing predict-echo tests still pass;
+- added one new test specifically covering the stall path (sweep
+- rollback should re-paint within ~150 ms, not be stuck for ~1.2 s).
+- Spec: docs/specs/SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31.md
+- (§7.3 — cooldown split into divergence vs stall).
+- fix(agent-pane): fix virtualized layout under zoom != 1 (Phase 4 - single zoom-normalize at the measure boundary)
+- feat(notify): sound notifications subsystem with turn-complete sound
+- feat(notify): per-tool-call subliminal tone voice
+- fix session-digest shorten summary to 10 words
+- fix(virt): accumulate tool chunks in RAF buffer to prevent replaceChild crash
+- feat(topbar): 3-tier progressive collapse — drop labels before overflow
+- fix(virt): advance streaming-buffer frontier to cap <Index> at 50 — prevent replaceChild crash across turns
+- fix(virt): defer SessionEnd, batch HistoryLoaded, Show-guard streaming buffer
+- fix(scripts): import-agents.sh — scan version dirs for channel instead of deriving from git branch
+- docs(linux): catch up BUILD.md, README, cef-build guide, and new linux.md operator guide
+- feat(app-api): agent.define HTTP+WebSocket endpoint to create/upsert agent definitions with system_prompt, env, and model support
+- docs: prominent early-alpha warning at top of README and in MSIX manifest
+- Adds a callout to the top of README.md and updates the AppxManifest
+- Description so the Microsoft Store listing carries the same disclaimer.
+- Canonical wording lives in
+- docs/specs/SPEC_EARLY_ALPHA_WARNING_2026_06_05.md.
+- fix(floating-pane): restore JS-driven drag on macOS (BeginWindowDrag not available in dev)
+- fix(floating-pane): dwell + velocity gate prevents accidental redock on fast transit
+- feat(providers): register muxcode as a first-party provider
+- fix(topbar): implement tier-3 overflow — clipped pinned icons now route to …more dropdown
+- fix(my-agents): repair missing definitions in db_agents; add Created/Last Launch/Last Active timestamps to My Agents cards
+- fix(topbar): reliable moreBtnW via always-mounted probe; remove dead tooIconOnly signal
+- fix(topbar): restore labeledW===0 guard to prevent transient false-positive on first measure
+- fix(topbar): pin/unpin context menu for clipped widgets; observe more probe; remove dead import
+- fix(linux/macos): floater & secondary windows honor window:transparent (were opaque-black by construction)
+- fix(launcher): rename dev-portable channel to local; use build label in pipe hash so successive task package runs start independent windows
+- feat(agent-pane): colorize tool names, bash commands, streaming chunks, section headings, thinking blocks
+- fix(agent-pane): Send Now panel always visible during stream stall + replaceChild crash on consecutive cap-advances
+- fix(agent-pane): virtual head Key→Index — eliminates replaceChild crash on rapid window shifts
+- fix(agent-pane): hold expanded tool on hover; expand Glob results by default
+- feat(scripts): import-agents wires real Claude sessions so imported agents resume their conversation
+- fix(agent-pane): replace For with Index in ChunkList to close the last replaceChild crash site
+- fix(build): bake data channel via rustc-env so a channel change forces a rebake instead of serving a stale incremental cache
+
+
 ## 0.43.1 — 2026-06-06
 
 - feat(window-drag): smooth floater header drag via host-side Win32 native move loop (#1280)
