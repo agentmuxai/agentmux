@@ -4,9 +4,24 @@
 //! In-memory session index built from adapter discovery.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use super::adapter::*;
+
+/// AgentMux-ISOLATED provider-home roots under which delete/clear is permitted:
+/// `<shared>/providers/` and `<shared>/identities/`. Anything outside these
+/// (the user's personal `~/.claude` / `~/.config/claude-*`) is OFF-LIMITS so a
+/// "clear all" can never nuke transcripts AgentMux didn't create.
+fn default_isolated_roots() -> Vec<PathBuf> {
+    let shared = std::env::var_os("AGENTMUX_SHARED_DIR")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".agentmux").join("shared")));
+    match shared {
+        Some(s) => vec![s.join("providers"), s.join("identities")],
+        None => Vec::new(),
+    }
+}
 
 /// In-memory index of discovered sessions.
 pub struct SessionIndex {
@@ -14,14 +29,31 @@ pub struct SessionIndex {
     sessions: Mutex<HashMap<String, SessionMeta>>,
     /// Adapters for all registered providers
     adapters: Vec<Box<dyn HistoryAdapter>>,
+    /// Roots under which destructive ops (delete/clear) are allowed.
+    isolated_roots: Vec<PathBuf>,
 }
 
 impl SessionIndex {
     pub fn new(adapters: Vec<Box<dyn HistoryAdapter>>) -> Self {
+        Self::with_isolated_roots(adapters, default_isolated_roots())
+    }
+
+    /// Construct with explicit isolated roots (used by new() and tests).
+    pub fn with_isolated_roots(
+        adapters: Vec<Box<dyn HistoryAdapter>>,
+        isolated_roots: Vec<PathBuf>,
+    ) -> Self {
         SessionIndex {
             sessions: Mutex::new(HashMap::new()),
             adapters,
+            isolated_roots,
         }
+    }
+
+    /// True if `path` lives under an AgentMux-isolated provider home and is
+    /// therefore safe to delete. Personal global homes are never isolated.
+    fn is_isolated(&self, path: &Path) -> bool {
+        self.isolated_roots.iter().any(|r| path.starts_with(r))
     }
 
     /// Full scan: discover all files and extract metadata.
@@ -203,8 +235,23 @@ impl SessionIndex {
             Some(m) => m,
             None => return Ok(false),
         };
-        let path = std::path::Path::new(&meta.file_path);
-        std::fs::remove_file(path)?;
+        let path = Path::new(&meta.file_path);
+        // Safety: only delete inside AgentMux-isolated homes — never the user's
+        // personal Claude/Codex/... transcripts that the browse also surfaces.
+        if !self.is_isolated(path) {
+            return Err(HistoryError::Other(format!(
+                "refusing to delete '{}' — it lives in your personal {} home, not AgentMux's",
+                meta.file_path, meta.provider
+            )));
+        }
+        // Treat an already-removed file (GC'd out-of-band) as success so the
+        // stale index entry still gets dropped (otherwise clear-all can't
+        // converge and the index stays non-empty).
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
         // Claude stores subagent transcripts in a sibling `<session_id>/` dir;
         // remove it too so the clear actually frees the space. Best-effort.
         if let Some(parent) = path.parent() {
@@ -228,6 +275,8 @@ impl SessionIndex {
                 .values()
                 .filter(|s| provider.map_or(true, |p| s.provider == p))
                 .filter(|s| project.map_or(true, |proj| s.working_directory.contains(proj)))
+                // Never bulk-delete the user's personal global transcripts.
+                .filter(|s| self.is_isolated(Path::new(&s.file_path)))
                 .map(|s| s.session_id.clone())
                 .collect()
         };
@@ -307,11 +356,14 @@ mod tests {
         let sidecar = dir.join("sess-abc");
         fs::create_dir_all(sidecar.join("subagents")).unwrap();
 
-        let idx = SessionIndex::new(vec![Box::new(MockAdapter {
-            files: vec![DiscoveredFile { file_path: fp.clone(), mtime_ms: 0 }],
-            provider: "mock".into(),
-            working_directory: "/proj".into(),
-        })]);
+        let idx = SessionIndex::with_isolated_roots(
+            vec![Box::new(MockAdapter {
+                files: vec![DiscoveredFile { file_path: fp.clone(), mtime_ms: 0 }],
+                provider: "mock".into(),
+                working_directory: "/proj".into(),
+            })],
+            vec![dir.clone()],
+        );
         idx.refresh();
         assert!(idx.get_meta("sess-abc").is_some());
 
@@ -331,14 +383,17 @@ mod tests {
         let a = write_session(&dir, "a");
         let b = write_session(&dir, "b");
 
-        let idx = SessionIndex::new(vec![Box::new(MockAdapter {
-            files: vec![
-                DiscoveredFile { file_path: a.clone(), mtime_ms: 0 },
-                DiscoveredFile { file_path: b.clone(), mtime_ms: 0 },
-            ],
-            provider: "mock".into(),
-            working_directory: "/proj".into(),
-        })]);
+        let idx = SessionIndex::with_isolated_roots(
+            vec![Box::new(MockAdapter {
+                files: vec![
+                    DiscoveredFile { file_path: a.clone(), mtime_ms: 0 },
+                    DiscoveredFile { file_path: b.clone(), mtime_ms: 0 },
+                ],
+                provider: "mock".into(),
+                working_directory: "/proj".into(),
+            })],
+            vec![dir.clone()],
+        );
         idx.refresh();
 
         // Non-matching provider clears nothing; matching clears both.
@@ -347,6 +402,33 @@ mod tests {
         assert_eq!(idx.clear(Some("mock"), None), 2);
         assert!(!std::path::Path::new(&a).exists() && !std::path::Path::new(&b).exists());
         assert!(idx.is_empty());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn refuses_to_delete_outside_isolated_roots() {
+        // A session that lives OUTSIDE the isolated roots (i.e. the user's
+        // personal global home) must never be deletable.
+        let dir = std::env::temp_dir().join(format!("amux-hist-guard-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let fp = write_session(&dir, "personal-sess");
+
+        let idx = SessionIndex::with_isolated_roots(
+            vec![Box::new(MockAdapter {
+                files: vec![DiscoveredFile { file_path: fp.clone(), mtime_ms: 0 }],
+                provider: "claude".into(),
+                working_directory: "/home/me/.claude".into(),
+            })],
+            // isolated roots deliberately do NOT include `dir`.
+            vec![std::env::temp_dir().join("amux-some-other-isolated-root")],
+        );
+        idx.refresh();
+
+        assert!(idx.delete("personal-sess").is_err(), "single delete must refuse");
+        assert!(std::path::Path::new(&fp).exists(), "file must be intact");
+        assert_eq!(idx.clear(None, None), 0, "clear-all must skip it");
+        assert!(std::path::Path::new(&fp).exists(), "still intact after clear");
 
         let _ = fs::remove_dir_all(&dir);
     }
