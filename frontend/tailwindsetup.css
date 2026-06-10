@@ -81,6 +81,7 @@ svg [aria-label="tip"] g path {
 
 /* Monaco editor scrollbar styling */
 .monaco-editor .slider {
+    cursor: pointer;
     background: rgba(255, 255, 255, 0.4);
     border-radius: 0;
     transition: background 0.2s ease;
