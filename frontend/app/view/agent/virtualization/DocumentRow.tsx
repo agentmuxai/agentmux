@@ -15,7 +15,6 @@
  */
 
 import { onMount, Show, type Accessor, type JSX } from "solid-js";
-import { ContextMenuModel } from "@/app/store/contextmenu";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
 import { MarkdownBlock } from "../components/MarkdownBlock";
 import { NodeHoverStrip } from "../components/NodeHoverStrip";
@@ -34,8 +33,6 @@ export interface DocumentRowProps {
      */
     node: Accessor<DocumentNode>;
     documentState: Accessor<DocumentState>;
-    bookmarkedNodeIds?: Accessor<Set<string>>;
-    onBookmark?: (node: DocumentNode) => void;
     onSubagentClick?: (node: SubagentLinkNode) => void;
     highlightNodeId?: Accessor<string | null>;
     onToggleCollapse: (id: string) => void;
@@ -70,11 +67,6 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
     // No-op in production builds.
     const close = markRowMount(props.node().type);
     onMount(() => close());
-
-    const isBookmarked = (): boolean => {
-        const n = props.node();
-        return props.bookmarkedNodeIds?.().has(n.id) ?? false;
-    };
 
     const isSearchMatch = (): boolean => {
         return props.highlightNodeId?.() === props.node().id;
@@ -114,9 +106,6 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
             case "e":
                 if (canExpand()) { onExpand(); e.preventDefault(); }
                 break;
-            case "b":
-                if (props.onBookmark != null) { props.onBookmark(n); e.preventDefault(); }
-                break;
             case "escape":
                 (e.currentTarget as HTMLElement).blur();
                 e.preventDefault();
@@ -124,44 +113,21 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
         }
     };
 
-    const handleContextMenu = (e: MouseEvent): void => {
-        if (!props.onBookmark) return;
-        // Don't shadow text-selection menus — let the parent pane handle those.
-        const sel = window.getSelection()?.toString();
-        if (sel) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const n = props.node();
-        ContextMenuModel.showContextMenu(
-            [
-                {
-                    label: isBookmarked() ? "Remove bookmark" : "Bookmark this message",
-                    click: () => props.onBookmark?.(n),
-                },
-            ],
-            e,
-        );
-    };
-
     return (
         <div
             ref={props.ref}
             class="hover-strip-host agent-document-row"
             classList={{
-                "agent-node-bookmarked": isBookmarked(),
                 "agent-node-search-match": isSearchMatch(),
             }}
             data-node-id={props.node().id}
             tabindex="0"
             onKeyDown={handleRowKey}
-            onContextMenu={handleContextMenu}
             style={props.style}
         >
             <DocumentNodeBody
                 node={props.node}
                 documentState={props.documentState}
-                isBookmarked={isBookmarked()}
-                onBookmark={props.onBookmark != null ? () => props.onBookmark!(props.node()) : undefined}
                 onOpenInPane={onOpenInPane}
                 onToggleCollapse={props.onToggleCollapse}
                 onTogglePin={props.onTogglePin}
@@ -170,8 +136,6 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
             <NodeHoverStrip
                 timestamp={(props.node() as { timestamp?: number }).timestamp}
                 nodeId={props.node().id}
-                isBookmarked={isBookmarked()}
-                onBookmark={props.onBookmark != null ? () => props.onBookmark!(props.node()) : undefined}
                 canExpand={canExpand()}
                 isExpanded={isExpanded()}
                 onExpand={onExpand}
@@ -183,12 +147,6 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
 interface DocumentNodeBodyProps {
     node: Accessor<DocumentNode>;
     documentState: Accessor<DocumentState>;
-    /** Bookmark state + handler — surfaced inside the tool overlay's
-     *  bottom action bar (SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md §3.5).
-     *  The row-level NodeHoverStrip also surfaces bookmark — same handler
-     *  threaded through both. */
-    isBookmarked?: boolean;
-    onBookmark?: () => void;
     /** Open-in-pane handler for tool nodes (overlay action bar). */
     onOpenInPane?: () => void;
     onToggleCollapse: (id: string) => void;
@@ -235,8 +193,6 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     node={props.node() as Extract<DocumentNode, { type: "tool" }>}
                     pinned={props.documentState().pinnedNodes.has(props.node().id)}
                     onTogglePin={() => props.onTogglePin(props.node().id)}
-                    isBookmarked={props.isBookmarked}
-                    onBookmark={props.onBookmark}
                     onOpenInPane={props.onOpenInPane}
                 />
             </Show>

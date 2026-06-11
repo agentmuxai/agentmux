@@ -5,16 +5,14 @@
  * ToolOverlayActions — bottom action bar of the tool overlay
  * (SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md §3.4 + §4).
  *
- * Hosts the branching actions that used to live in `NodeHoverStrip`:
- * bookmark, open-in-pane, open-in-window, new-agent-here. Branching
- * actions belong at the bottom of the log so the user sees output
- * first, options second — matches every native log viewer (terminal,
- * VSCode output panel, browser DevTools console).
+ * Hosts the branching actions: open-in-pane, open-in-window,
+ * new-agent-here. Actions belong at the bottom of the log so the user
+ * sees output first, options second — matches every native log viewer
+ * (terminal, VSCode output panel, browser DevTools console).
  *
- * Phase 3 wires bookmark + open-in-pane to real handlers; open-in-window
- * and new-agent-here remain stubs with explanatory tooltips until the
- * host APIs land (open-in-window) and a backend RPC exists
- * (new-agent-here).
+ * open-in-window and new-agent-here remain stubs with explanatory
+ * tooltips until the host APIs land (open-in-window) and a backend RPC
+ * exists (new-agent-here).
  */
 
 import { Show, type JSX } from "solid-js";
@@ -22,8 +20,6 @@ import type { ToolNode } from "../types";
 
 interface ToolOverlayActionsProps {
     node: ToolNode;
-    isBookmarked?: boolean;
-    onBookmark?: () => void;
     onOpenInPane?: () => void;
     onOpenInWindow?: () => void;
     onNewAgentHere?: () => void;
@@ -61,14 +57,6 @@ const ActionButton = (props: ActionButtonProps): JSX.Element => (
 
 export const ToolOverlayActions = (props: ToolOverlayActionsProps): JSX.Element => (
     <div class="agent-tool-overlay-actions" data-node-id={props.node.id}>
-        <Show when={props.onBookmark}>
-            <ActionButton
-                icon="🔖"
-                label={props.isBookmarked ? "Bookmarked" : "Bookmark"}
-                active={props.isBookmarked === true}
-                onClick={props.onBookmark}
-            />
-        </Show>
         <Show when={props.onOpenInPane}>
             <ActionButton
                 icon="⧉"

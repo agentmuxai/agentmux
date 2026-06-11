@@ -179,6 +179,10 @@ function updateTreeHelper(
                 flexDirection: node.flexDirection,
                 centerPx:
                     (nodeIsRow ? resizeHandleDimensions.left : resizeHandleDimensions.top) + halfResizeHandleSizePx,
+                perpMinPx: nodeIsRow ? resizeHandleDimensions.top : resizeHandleDimensions.left,
+                perpMaxPx: nodeIsRow
+                    ? resizeHandleDimensions.top + resizeHandleDimensions.height
+                    : resizeHandleDimensions.left + resizeHandleDimensions.width,
             });
         }
         lastChildRect = rect;

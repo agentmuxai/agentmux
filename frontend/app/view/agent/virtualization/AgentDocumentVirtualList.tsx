@@ -61,8 +61,6 @@ import {
 export interface AgentDocumentVirtualListProps {
     viewState: AgentViewState;
     documentState: Accessor<DocumentState>;
-    bookmarkedNodeIds?: Accessor<Set<string>>;
-    onBookmark?: (node: DocumentNode) => void;
     onSubagentClick?: (node: SubagentLinkNode) => void;
     onLoadOlder?: () => Promise<void>;
     loadingOlder?: Accessor<boolean>;
@@ -679,8 +677,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                     <DocumentRow
                                         node={n}
                                         documentState={props.documentState}
-                                        bookmarkedNodeIds={props.bookmarkedNodeIds}
-                                        onBookmark={props.onBookmark}
                                         onSubagentClick={props.onSubagentClick}
                                         highlightNodeId={props.highlightNodeId}
                                         onToggleCollapse={props.onToggleCollapse}
@@ -741,8 +737,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                 <DocumentRow
                                     node={nodeAccessor}
                                     documentState={props.documentState}
-                                    bookmarkedNodeIds={props.bookmarkedNodeIds}
-                                    onBookmark={props.onBookmark}
                                     onSubagentClick={props.onSubagentClick}
                                     highlightNodeId={props.highlightNodeId}
                                     onToggleCollapse={props.onToggleCollapse}

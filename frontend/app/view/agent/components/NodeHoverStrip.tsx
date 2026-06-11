@@ -13,7 +13,7 @@
 import { Show, type JSX } from "solid-js";
 
 /**
- * Row-level strip — bookmark + expand only after Phase 3 of
+ * Row-level strip — expand only after Phase 3 of
  * SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md §3.5. Branching actions
  * (open-in-pane, open-in-window, new-agent-here) moved into the tool
  * overlay's bottom action bar so each row's chrome stays lean and the
@@ -23,8 +23,6 @@ import { Show, type JSX } from "solid-js";
 interface NodeHoverStripProps {
     timestamp?: number; // Unix ms
     nodeId: string;
-    isBookmarked?: boolean;
-    onBookmark?: () => void;
     canExpand?: boolean;
     isExpanded?: boolean;
     onExpand?: () => void;
@@ -61,11 +59,7 @@ const StripButton = (props: StripButtonProps): JSX.Element => {
 };
 
 export const NodeHoverStrip = (props: NodeHoverStripProps): JSX.Element => (
-    <Show when={
-        props.timestamp != null ||
-        props.canExpand ||
-        props.onBookmark != null
-    }>
+    <Show when={props.timestamp != null || props.canExpand}>
         <div
             class="node-strip"
             data-node-strip-for={props.nodeId}
@@ -84,14 +78,6 @@ export const NodeHoverStrip = (props: NodeHoverStripProps): JSX.Element => (
                     label={props.isExpanded ? "Collapse" : "Expand"}
                     active={props.isExpanded === true}
                     onClick={props.onExpand}
-                />
-            </Show>
-            <Show when={props.onBookmark}>
-                <StripButton
-                    icon="🔖"
-                    label={props.isBookmarked ? "Remove bookmark" : "Bookmark"}
-                    active={props.isBookmarked === true}
-                    onClick={props.onBookmark}
                 />
             </Show>
         </div>

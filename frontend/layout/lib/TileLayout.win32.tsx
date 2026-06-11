@@ -17,6 +17,7 @@ import { LayoutModel } from "./layoutModel";
 import { useNodeModel, useTileLayout } from "./layoutModelHooks";
 import "./tilelayout.scss";
 import {
+    FlexDirection,
     LayoutNode,
     LayoutTreeActionType,
     LayoutTreeComputeMoveNodeAction,
@@ -460,7 +461,30 @@ const DisplayNode = (props: DisplayNodeProps) => {
             registeredHandle = handle;
             cleanupFn = draggable({
                 element: handle,
-                canDrag: () => !isEphemeral() && !isMagnified(),
+                canDrag: ({ input }) => {
+                    if (isEphemeral() || isMagnified()) return false;
+                    // Reject drags that originate inside a resize-handle zone.
+                    // The resize handle overlaps slightly with the adjacent
+                    // header; this guard ensures a near-border mousedown never
+                    // turns into a tear-off even if the pointer just missed the
+                    // handle element.
+                    const containerEl = props.layoutModel.displayContainerRef?.current;
+                    if (containerEl) {
+                        const containerRect = containerEl.getBoundingClientRect();
+                        const localX = input.clientX - containerRect.left;
+                        const localY = input.clientY - containerRect.top;
+                        const halfSize = props.layoutModel.resizeHandleSizePx() / 2;
+                        for (const rh of props.layoutModel.resizeHandles()) {
+                            if (rh.flexDirection === FlexDirection.Row &&
+                                Math.abs(localX - rh.centerPx) <= halfSize &&
+                                localY >= rh.perpMinPx && localY <= rh.perpMaxPx) return false;
+                            if (rh.flexDirection === FlexDirection.Column &&
+                                Math.abs(localY - rh.centerPx) <= halfSize &&
+                                localX >= rh.perpMinPx && localX <= rh.perpMaxPx) return false;
+                        }
+                    }
+                    return true;
+                },
                 getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
                 onGenerateDragPreview: ({ nativeSetDragImage }) => {
                     const img = previewImage();
@@ -816,6 +840,9 @@ const ResizeHandle = (props: ResizeHandleComponentProps) => {
     });
 
     function onPointerDown(event: PointerEvent) {
+        // Prevent mousedown (and thus dragstart) from reaching elements below
+        // the resize handle — stops a border press from triggering a tear-off.
+        event.preventDefault();
         resizeHandleRef?.setPointerCapture(event.pointerId);
     }
 
