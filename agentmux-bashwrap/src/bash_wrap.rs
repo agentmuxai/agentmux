@@ -704,10 +704,11 @@ fn strip_dsr(chunk: &mut Vec<u8>) {
 ///    Git Bash on every command).
 ///
 /// 3. **Lone control chars** — `\r` (carriage return without
-///    newline), `\x07` (bell), `\x08` (backspace). We strip `\r`
-///    when it immediately precedes `\n` (CRLF → LF for the chunk
-///    list); other `\r` we keep as-is for now since simple progress
-///    bars use it.
+///    newline), `\x07` (bell), `\x08` (backspace). CRLF → LF for
+///    the chunk list. Lone `\r` collapses the current visual line
+///    (truncate `out` back to after the last `\n`), simulating
+///    carriage-return overwrite so spinner animations don't leak as
+///    one line per frame when rendered in a `<pre>`.
 ///
 /// Things we DON'T handle yet (Phase γ territory):
 /// - Alt-screen apps (`\x1b[?1049h`) — left in the stream.
@@ -778,9 +779,22 @@ fn strip_ansi(chunk: &mut Vec<u8>) {
             i += 1;
             continue;
         }
-        if b == b'\r' && i + 1 < chunk.len() && chunk[i + 1] == b'\n' {
-            // CRLF → LF (matches what bash sends after every line on
-            // a PTY; the chunk list expects LF only).
+        if b == b'\r' {
+            if i + 1 < chunk.len() && chunk[i + 1] == b'\n' {
+                // CRLF → LF: drop the \r, keep the \n on the next pass.
+                i += 1;
+                continue;
+            }
+            // Lone \r: simulate carriage-return by discarding the current
+            // line's content in `out` (truncate back to after the last \n).
+            // This collapses spinner/progress animations — each frame
+            // overwrites the previous one — instead of leaking them as
+            // separate lines when the frontend renders the chunk in a <pre>.
+            if let Some(last_nl) = out.iter().rposition(|&b| b == b'\n') {
+                out.truncate(last_nl + 1);
+            } else {
+                out.clear();
+            }
             i += 1;
             continue;
         }
