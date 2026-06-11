@@ -378,59 +378,55 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                     </button>
                                                 </div>
                                             </Show>
-                                            <Show when={forkState().kind === "naming"}>
-                                                {(() => {
-                                                    const ns = forkState() as Extract<ForkState, { kind: "naming" }>;
-                                                    return (
-                                                        <div class="agent-fork-naming">
-                                                            <label class="agent-fork-label">Name for new session:</label>
-                                                            <div class="agent-fork-input-row">
-                                                                <input
-                                                                    type="text"
-                                                                    class="agent-fork-input"
-                                                                    value={ns.label}
-                                                                    disabled={ns.loading}
-                                                                    placeholder="Session name"
-                                                                    data-testid="agent-fork-name-input"
-                                                                    onInput={(e) =>
-                                                                        setForkState(row.definition_id, {
-                                                                            kind: "naming",
-                                                                            label: e.currentTarget.value,
-                                                                            loading: false,
-                                                                            error: null,
-                                                                        })
-                                                                    }
-                                                                    onKeyDown={(e) => {
-                                                                        if (e.key === "Enter") void handleForkStart(row);
-                                                                        if (e.key === "Escape") handleForkCancel(row.definition_id);
-                                                                    }}
-                                                                    // autofocus when the naming box appears
-                                                                    ref={(el) => { if (el && !ns.loading) setTimeout(() => el.focus(), 0); }}
-                                                                />
-                                                                <button
-                                                                    type="button"
-                                                                    class="agent-fork-btn agent-fork-btn--primary"
-                                                                    disabled={ns.loading || !ns.label.trim()}
-                                                                    onClick={() => handleForkStart(row)}
-                                                                    data-testid="agent-fork-start"
-                                                                >
-                                                                    {ns.loading ? "…" : "Start"}
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    class="agent-fork-btn agent-fork-btn--ghost"
-                                                                    onClick={() => handleForkCancel(row.definition_id)}
-                                                                    aria-label="Cancel"
-                                                                >
-                                                                    ✕
-                                                                </button>
-                                                            </div>
-                                                            <Show when={ns.error}>
-                                                                <span class="agent-fork-error">{ns.error}</span>
-                                                            </Show>
+                                            <Show when={forkState().kind === "naming" ? (forkState() as Extract<ForkState, { kind: "naming" }>) : null}>
+                                                {(ns) => (
+                                                    <div class="agent-fork-naming">
+                                                        <label class="agent-fork-label">Name for new session:</label>
+                                                        <div class="agent-fork-input-row">
+                                                            <input
+                                                                type="text"
+                                                                class="agent-fork-input"
+                                                                value={ns().label}
+                                                                disabled={ns().loading}
+                                                                placeholder="Session name"
+                                                                data-testid="agent-fork-name-input"
+                                                                onInput={(e) =>
+                                                                    setForkState(row.definition_id, {
+                                                                        kind: "naming",
+                                                                        label: e.currentTarget.value,
+                                                                        loading: false,
+                                                                        error: null,
+                                                                    })
+                                                                }
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === "Enter") void handleForkStart(row);
+                                                                    if (e.key === "Escape") handleForkCancel(row.definition_id);
+                                                                }}
+                                                                ref={(el) => { setTimeout(() => el.focus(), 0); }}
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                class="agent-fork-btn agent-fork-btn--primary"
+                                                                disabled={ns().loading || !ns().label.trim()}
+                                                                onClick={() => handleForkStart(row)}
+                                                                data-testid="agent-fork-start"
+                                                            >
+                                                                {ns().loading ? "…" : "Start"}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                class="agent-fork-btn agent-fork-btn--ghost"
+                                                                onClick={() => handleForkCancel(row.definition_id)}
+                                                                aria-label="Cancel"
+                                                            >
+                                                                ✕
+                                                            </button>
                                                         </div>
-                                                    );
-                                                })()}
+                                                        <Show when={ns().error}>
+                                                            <span class="agent-fork-error">{ns().error}</span>
+                                                        </Show>
+                                                    </div>
+                                                )}
                                             </Show>
                                         </div>
                                     </Show>
