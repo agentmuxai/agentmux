@@ -628,13 +628,13 @@ export class TermWrap {
             // invisible at every zoom. Reclaiming the lane unconditionally is not an option:
             // a visible Chromium scrollbar always costs 14px, which would clip the last
             // column when the scrollbar appears.
-            const cs = getComputedStyle(this.connectElem);
+            const cs = getComputedStyle(this.connectElem); // perf:allow-layout-read — customFit runs on resize/init/refit, never the keystroke path
             const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
             const viewport = this.terminal.element?.querySelector(".xterm-viewport") as HTMLElement | null;
-            const scrollbarVisible = !!viewport && viewport.scrollHeight > viewport.clientHeight;
+            const scrollbarVisible = !!viewport && viewport.scrollHeight > viewport.clientHeight; // perf:allow-layout-read — resize/fit path, not per-keystroke
             this.lastScrollbarVisible = scrollbarVisible;
             const reservation = scrollbarVisible ? TermWrap.SCROLLBAR_WIDTH : 0;
-            const availPx = this.connectElem.clientWidth - padX - reservation;
+            const availPx = this.connectElem.clientWidth - padX - reservation; // perf:allow-layout-read — resize/fit path, not per-keystroke
             dims.cols = Math.max(2, Math.floor(availPx / cellWidth));
         }
         if (this.terminal.rows !== dims.rows || this.terminal.cols !== dims.cols) {
@@ -652,7 +652,7 @@ export class TermWrap {
         if (!viewport || typeof ResizeObserver === "undefined") return;
         const ro = new ResizeObserver(() => {
             if (this.disposed || !this.terminal) return;
-            const visible = viewport.scrollHeight > viewport.clientHeight;
+            const visible = viewport.scrollHeight > viewport.clientHeight; // perf:allow-layout-read — ResizeObserver callback, not the keystroke path
             if (visible !== this.lastScrollbarVisible) {
                 this.lastScrollbarVisible = visible;
                 this.handleResize_debounced();
