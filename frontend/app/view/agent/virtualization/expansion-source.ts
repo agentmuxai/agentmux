@@ -84,9 +84,9 @@ export function currentExpansion(
             return OPEN_DEFAULT;
 
         case "shell":
-            // Mirrors tool: pin wins; a running shell is auto-expanded.
+            // Pin-to-expand only: unlike tools, a running shell stays collapsed
+            // by default (spec §11). Only a pin opens it.
             if (state.pinnedNodes.has(node.id)) return { open: true, via: "pin" };
-            if (node.status === "running") return { open: true, via: "auto" };
             return CLOSED;
     }
 }
