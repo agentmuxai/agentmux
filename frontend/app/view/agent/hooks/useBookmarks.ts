@@ -73,6 +73,7 @@ function nodePreview(node: DocumentNode): string {
         case "agent_message": raw = node.summary || node.message; break;
         case "section":       raw = node.title; break;
         case "subagent_link": raw = node.slug || node.subagentId; break;
+        case "shell":         raw = node.title || node.cmd; break;
     }
     return raw.replace(/\s+/g, " ").trim().slice(0, 80);
 }

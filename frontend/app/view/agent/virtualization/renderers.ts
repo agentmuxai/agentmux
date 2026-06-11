@@ -19,6 +19,7 @@ import type {
     DocumentState,
     MarkdownNode,
     SectionNode,
+    ShellNode,
     SubagentLinkNode,
     ToolNode,
     UserMessageNode,
@@ -162,6 +163,13 @@ export function estimateSubagentLink(_node: SubagentLinkNode): number {
     return SUBAGENT_LINK_PX;
 }
 
+const SHELL_COLLAPSED_PX = 32;
+const SHELL_EXPANDED_PX = 200;
+
+export function estimateShell(node: ShellNode, state: DocumentState): number {
+    return state.pinnedNodes.has(node.id) ? SHELL_EXPANDED_PX : SHELL_COLLAPSED_PX;
+}
+
 /** Per-kind streaming capability — straightforward map. */
 export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
     markdown: true,
@@ -170,6 +178,7 @@ export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
     tool: false,
     user_message: false,
     subagent_link: false,
+    shell: false,
 };
 
 // ── Registry factory ────────────────────────────────────────────────────────
@@ -181,6 +190,7 @@ export interface RendererComponents {
     AgentMessage: Component<{ node: AgentMessageNode; state: DocumentState }>;
     UserMessage: Component<{ node: UserMessageNode; state: DocumentState }>;
     SubagentLink: Component<{ node: SubagentLinkNode; state: DocumentState }>;
+    Shell: Component<{ node: ShellNode; state: DocumentState }>;
 }
 
 /**
@@ -220,6 +230,11 @@ export function buildRendererRegistry(components: RendererComponents): NodeRende
             estimatedSize: estimateSubagentLink,
             isStreamingCapable: STREAMING_CAPABLE.subagent_link,
         },
+        shell: {
+            component: components.Shell,
+            estimatedSize: estimateShell,
+            isStreamingCapable: STREAMING_CAPABLE.shell,
+        },
     };
 }
 
@@ -236,6 +251,7 @@ export function estimateNode(node: DocumentNode, state: DocumentState): number {
         case "agent_message": return estimateAgentMessage(node, state);
         case "user_message": return estimateUserMessage(node, state);
         case "subagent_link": return estimateSubagentLink(node);
+        case "shell": return estimateShell(node, state);
     }
 }
 
@@ -272,6 +288,7 @@ export function estimateNodeForState(
                     ? COLLAPSED_MESSAGE_PX
                     : estimateTextHeight(node.content);
             case "subagent_link": return SUBAGENT_LINK_PX;
+            case "shell":         return SHELL_COLLAPSED_PX;
         }
     }
     // expanded
@@ -282,5 +299,6 @@ export function estimateNodeForState(
         case "section":       return SECTION_PX;
         case "markdown":      return estimateTextHeight(node.content);
         case "subagent_link": return SUBAGENT_LINK_PX;
+        case "shell":         return SHELL_EXPANDED_PX;
     }
 }
