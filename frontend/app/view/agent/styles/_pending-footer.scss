@@ -132,20 +132,11 @@
 
                 &:focus {
                     outline: none;
-                    border-color: var(--accent-color);
+                    border-color: color-mix(in srgb, var(--accent-color) 40%, transparent);
                 }
             }
 
 
-            .agent-input-hint {
-                font-size: 9px;
-                color: var(--secondary-text-color);
-                opacity: 0.5;
-                padding: 0 var(--space-0-5);
-                line-height: 1.2;
-                display: flex;
-                align-items: center;
-            }
         }
     }
 }
