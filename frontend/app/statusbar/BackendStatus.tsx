@@ -1,9 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, backendDeathInfoAtom, getApi, setBackendStatusAtom } from "@/store/global";
+import { atoms, backendDeathInfoAtom, getApi, setBackendStatusAtom, termRendererAtom } from "@/store/global";
 import { setRestartInProgress } from "@/store/backendStatus";
 import { waveEventSubscribe } from "@/app/store/wps";
+import { getGpuInfo } from "@/util/gpuutil";
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 function pad2(n: number): string {
@@ -18,6 +19,17 @@ function formatUptime(secs: number): string {
     if (d > 0) return `${d}:${pad2(h)}:${pad2(m)}:${pad2(s)}`;
     if (h > 0) return `${h}:${pad2(m)}:${pad2(s)}`;
     return `${m}:${pad2(s)}`;
+}
+
+function gpuColor(c: ReturnType<typeof getGpuInfo>["classification"]): string {
+    switch (c) {
+        case "hardware":
+            return "var(--accent-color)";
+        case "software":
+            return "var(--warning-color)";
+        default:
+            return "var(--error-color)";
+    }
 }
 
 const BackendStatus = (): JSX.Element => {
@@ -47,6 +59,7 @@ const BackendStatus = (): JSX.Element => {
         version: string;
     } | null>(null);
     let popoverRef!: HTMLDivElement;
+    const gpu = getGpuInfo(); // WebGL/GPU capability — static for the renderer process
 
     // Fetch started_at when backend becomes running
     createEffect(() => {
@@ -177,6 +190,47 @@ const BackendStatus = (): JSX.Element => {
                             <div class="status-bar-popover-row">
                                 <span class="status-bar-popover-label">Version</span>
                                 <span>{backendInfo().version}</span>
+                            </div>
+                        </Show>
+                        {/* GPU / WebGL rendering — enabled/disabled + driver info.
+                            Surfaces the silent DOM-renderer fallback when the GPU
+                            process is unavailable. */}
+                        <div class="status-bar-popover-divider" />
+                        <div class="status-bar-popover-section-title">GPU</div>
+                        <div class="status-bar-popover-row">
+                            <span class="status-bar-popover-label">Status</span>
+                            <span style={{ color: gpuColor(gpu.classification) }}>
+                                {gpu.classification === "unavailable"
+                                    ? "Disabled"
+                                    : gpu.classification === "software"
+                                        ? "Enabled (software)"
+                                        : "Enabled (hardware)"}
+                            </span>
+                        </div>
+                        <Show when={gpu.webgl}>
+                            <div class="status-bar-popover-row">
+                                <span class="status-bar-popover-label">WebGL</span>
+                                <span>{gpu.webgl2 ? "2.0" : "1.0"}</span>
+                            </div>
+                        </Show>
+                        <Show when={gpu.renderer}>
+                            <div class="status-bar-popover-row">
+                                <span class="status-bar-popover-label">Driver</span>
+                                <span class="status-bar-popover-mono">{gpu.renderer}</span>
+                            </div>
+                        </Show>
+                        <Show when={gpu.vendor}>
+                            <div class="status-bar-popover-row">
+                                <span class="status-bar-popover-label">Vendor</span>
+                                <span class="status-bar-popover-mono">{gpu.vendor}</span>
+                            </div>
+                        </Show>
+                        <Show when={termRendererAtom() != null}>
+                            <div class="status-bar-popover-row">
+                                <span class="status-bar-popover-label">Terminal</span>
+                                <span style={{ color: termRendererAtom() === "webgl" ? "var(--accent-color)" : "var(--warning-color)" }}>
+                                    {termRendererAtom() === "webgl" ? "WebGL (GPU)" : "DOM (software)"}
+                                </span>
                             </div>
                         </Show>
                         <Show when={backendStatus() === "crashed" && backendDeathInfoAtom() != null}>
