@@ -1,0 +1,50 @@
+# AgentMux Container Agent Image
+# Independent of claw — AgentMux builds and distributes this image.
+# Published to: ghcr.io/agentmuxai/agent-claude
+#
+# Design decisions:
+#   - node:22-slim (Debian Bookworm): glibc required — Alpine/musl crashes Claude Code
+#   - tini as PID 1: docker exec -i does not propagate signals; tini handles reaping
+#   - DISABLE_AUTOUPDATER=1: version pinned at image build time, not runtime
+#   - ~/.claude is a named Docker volume (not host bind mount) — credential isolation
+#   - /workspace is bind-mounted by the AgentMux runtime at container start
+
+FROM node:22-slim
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tini \
+    git \
+    curl \
+    jq \
+    bash \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user with UID 1000 for host filesystem UID parity on Linux
+RUN useradd -m -u 1000 -s /bin/bash agent
+
+# Claude Code — version pinned at build time for reproducible images.
+# Managed by rebuilding with a new CLAUDE_VERSION arg, not npm update.
+ARG CLAUDE_VERSION=latest
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_VERSION}
+
+# Prevent in-container auto-updates — version is managed at the image level.
+ENV DISABLE_AUTOUPDATER=1
+ENV NO_UPDATE_NOTIFIER=1
+
+ENV HOME=/home/agent
+ENV CLAUDE_CONFIG_DIR=/home/agent/.claude
+ENV TERM=xterm-256color
+ENV LANG=C.UTF-8
+
+# /workspace is the default mount point for the agent's working directory.
+# AgentMux bind-mounts the host workspace path here at container start.
+WORKDIR /workspace
+USER agent
+
+# tini as PID 1 ensures:
+#   - Correct signal forwarding: SIGTERM from `docker stop` reaches claude
+#   - Zombie process reaping
+# Always exec-form to avoid shell as PID 1 (shell swallows signals).
+ENTRYPOINT ["/usr/bin/tini", "--", "claude"]
