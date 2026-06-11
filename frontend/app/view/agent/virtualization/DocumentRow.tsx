@@ -58,6 +58,7 @@ export interface DocumentRowProps {
 // to begin with). Codex P2 on PR #1020.
 const TOGGLEABLE_KINDS: ReadonlySet<DocumentNode["type"]> = new Set([
     "tool",
+    "shell",
     "agent_message",
     "section",
 ]);
@@ -84,13 +85,13 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
     const isExpanded = (): boolean => {
         const n = props.node();
         const state = props.documentState();
-        if (n.type === "tool") return state.pinnedNodes.has(n.id);
+        if (n.type === "tool" || n.type === "shell") return state.pinnedNodes.has(n.id);
         return !state.collapsedNodes.has(n.id);
     };
 
     const onExpand = (): void => {
         const n = props.node();
-        if (n.type === "tool") props.onTogglePin(n.id);
+        if (n.type === "tool" || n.type === "shell") props.onTogglePin(n.id);
         else props.onToggleCollapse(n.id);
     };
 
