@@ -29,6 +29,11 @@
  * `--continue` (and equivalents) resumes the session and the new pane's
  * `output.state.json` snapshot path picks up the conversation history
  * on render.
+ *
+ * Fork prompt (feat/agent-session-fork): when a row's definition is
+ * already open in another pane, clicking it shows an inline prompt
+ * instead of immediately reattaching. The user can either fork into a
+ * new named session or switch focus to the existing pane.
  */
 
 import {
@@ -70,11 +75,33 @@ export interface MyAgentsListProps {
     identityId?: Accessor<string | null | undefined>;
     /** Visible cap. Backend caps at 100; default is 20. */
     limit?: number;
-    /** Called when the user clicks an entry. The parent (AgentPicker)
-     *  hands this to `AgentViewModel.launchAgentDefinition` with the
-     *  continuation overrides — see "Reattach mechanism" above. */
+    /** Called when the user clicks an entry that is NOT currently open
+     *  in another pane. The parent (AgentPicker) hands this to
+     *  `AgentViewModel.launchAgentDefinition` with the continuation
+     *  overrides — see "Reattach mechanism" above. */
     onReattach: (row: RecentSessionRow) => void;
+    /**
+     * Map of definition_id → blockId for definitions currently open in
+     * another pane. When a row's definition_id is in this map, clicking
+     * the row shows the fork prompt instead of calling onReattach.
+     */
+    openDefinitions?: Accessor<Map<string, string>>;
+    /**
+     * Called after the user confirms a fork: fork has been created and
+     * the new definition should be launched. Receives the new AgentDefinition.
+     */
+    onFork?: (row: RecentSessionRow, branchLabel: string) => Promise<void>;
+    /**
+     * Called when the user clicks "Switch to existing" in the fork
+     * prompt. Receives the blockId of the already-open pane.
+     */
+    onSwitchToExisting?: (blockId: string) => void;
 }
+
+type ForkState =
+    | { kind: "idle" }
+    | { kind: "prompt" }           // showing "Open new session / Switch" buttons
+    | { kind: "naming"; label: string; loading: boolean; error: string | null }; // name input expanded
 
 export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     const filterId = createMemo(() => {
@@ -125,6 +152,82 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     const tick = setInterval(() => setNow(Date.now()), 60_000);
     onCleanup(() => clearInterval(tick));
 
+    // Fork prompt state per row (keyed by definition_id)
+    const [forkStates, setForkStates] = createSignal<Map<string, ForkState>>(new Map());
+
+    const getForkState = (definitionId: string): ForkState =>
+        forkStates().get(definitionId) ?? { kind: "idle" };
+
+    const setForkState = (definitionId: string, state: ForkState): void => {
+        setForkStates((prev) => {
+            const next = new Map(prev);
+            next.set(definitionId, state);
+            return next;
+        });
+    };
+
+    const handleRowClick = async (row: RecentSessionRow) => {
+        const openMap = props.openDefinitions?.() ?? new Map<string, string>();
+        const existingBlockId = openMap.get(row.definition_id);
+        if (existingBlockId) {
+            // Already open — show fork prompt
+            setForkState(row.definition_id, { kind: "prompt" });
+            return;
+        }
+        props.onReattach(row);
+    };
+
+    const handleOpenNewSession = async (row: RecentSessionRow) => {
+        setForkState(row.definition_id, { kind: "naming", label: "", loading: true, error: null });
+        try {
+            const result = await RpcApi.ForkAgentDefinitionSuggestCommand(TabRpcClient, {
+                source_id: row.definition_id,
+            });
+            setForkState(row.definition_id, {
+                kind: "naming",
+                label: result.suggested_label,
+                loading: false,
+                error: null,
+            });
+        } catch {
+            setForkState(row.definition_id, {
+                kind: "naming",
+                label: `${row.definition_name} #2`,
+                loading: false,
+                error: null,
+            });
+        }
+    };
+
+    const handleSwitchToExisting = (row: RecentSessionRow) => {
+        const openMap = props.openDefinitions?.() ?? new Map<string, string>();
+        const blockId = openMap.get(row.definition_id);
+        if (blockId) props.onSwitchToExisting?.(blockId);
+        setForkState(row.definition_id, { kind: "idle" });
+    };
+
+    const handleForkStart = async (row: RecentSessionRow) => {
+        const fs = getForkState(row.definition_id);
+        if (fs.kind !== "naming" || !fs.label.trim()) return;
+        const label = fs.label.trim();
+        setForkState(row.definition_id, { kind: "naming", label, loading: true, error: null });
+        try {
+            await props.onFork?.(row, label);
+            setForkState(row.definition_id, { kind: "idle" });
+        } catch (err) {
+            setForkState(row.definition_id, {
+                kind: "naming",
+                label,
+                loading: false,
+                error: err instanceof Error ? err.message : String(err),
+            });
+        }
+    };
+
+    const handleForkCancel = (definitionId: string) => {
+        setForkState(definitionId, { kind: "idle" });
+    };
+
     // Surfacing rules:
     // - rows undefined → still loading (skeleton hint)
     // - rows []        → empty state (filter-aware copy)
@@ -155,81 +258,185 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
             >
                 <ul class="agent-recent-sessions-list">
                     <For each={rows() ?? []}>
-                        {(row) => (
-                            <li class="agent-recent-sessions-row">
-                                <button
-                                    type="button"
-                                    class="agent-recent-sessions-entry"
-                                    onClick={() => props.onReattach(row)}
-                                    aria-label={`Continue ${row.instance_name}`}
-                                    data-testid="agent-my-agents-entry"
-                                >
-                                    <ProviderLogo
-                                        provider={row.provider}
-                                        size={24}
-                                        class="agent-recent-sessions-icon"
-                                    />
-                                    <span class="agent-recent-sessions-body">
-                                        <span class="agent-recent-sessions-line1">
-                                            <span class="agent-recent-sessions-name">
-                                                {row.instance_name || row.definition_name}
+                        {(row) => {
+                            const isActive = () =>
+                                (props.openDefinitions?.() ?? new Map()).has(row.definition_id);
+                            const forkState = () => getForkState(row.definition_id);
+
+                            return (
+                                <li class="agent-recent-sessions-row">
+                                    <button
+                                        type="button"
+                                        class={`agent-recent-sessions-entry${isActive() ? " agent-recent-sessions-entry--active" : ""}`}
+                                        onClick={() => handleRowClick(row)}
+                                        aria-label={`Continue ${row.instance_name}`}
+                                        data-testid="agent-my-agents-entry"
+                                    >
+                                        <ProviderLogo
+                                            provider={row.provider}
+                                            size={24}
+                                            class="agent-recent-sessions-icon"
+                                        />
+                                        <span class="agent-recent-sessions-body">
+                                            <span class="agent-recent-sessions-line1">
+                                                <span class="agent-recent-sessions-name">
+                                                    {row.instance_name || row.definition_name}
+                                                </span>
+                                                <Show when={isActive()}>
+                                                    <span
+                                                        class="agent-active-badge"
+                                                        title="Open in another pane"
+                                                        aria-label="Active"
+                                                    />
+                                                </Show>
+                                                <span class="agent-recent-sessions-meta">
+                                                    {row.identity_name || "(ambient creds)"}
+                                                </span>
                                             </span>
-                                            <span class="agent-recent-sessions-meta">
-                                                {row.identity_name || "(ambient creds)"}
+                                            <Show
+                                                when={row.preview}
+                                                fallback={
+                                                    <span class="agent-recent-sessions-preview agent-recent-sessions-preview--empty">
+                                                        {row.has_snapshot
+                                                            ? "(no user message yet)"
+                                                            : "(no conversation snapshot)"}
+                                                    </span>
+                                                }
+                                            >
+                                                <span class="agent-recent-sessions-preview">
+                                                    {row.preview}
+                                                </span>
+                                            </Show>
+                                            <Show when={row.node_count > 0}>
+                                                <span class="agent-recent-sessions-line3">
+                                                    <span class="agent-recent-sessions-nodes">
+                                                        {row.node_count} message
+                                                        {row.node_count === 1 ? "" : "s"}
+                                                    </span>
+                                                </span>
+                                            </Show>
+                                            <span class="agent-recent-sessions-timestamps">
+                                                <Show when={row.agent_created_at > 0}>
+                                                    <span class="agent-recent-sessions-ts">
+                                                        <span class="agent-recent-sessions-ts-label">Created</span>
+                                                        <span class="agent-recent-sessions-ts-value">
+                                                            {formatRelative(now(), row.agent_created_at)}
+                                                        </span>
+                                                    </span>
+                                                </Show>
+                                                <Show when={row.started_at > 0}>
+                                                    <span class="agent-recent-sessions-ts">
+                                                        <span class="agent-recent-sessions-ts-label">Last Launch</span>
+                                                        <span class="agent-recent-sessions-ts-value">
+                                                            {formatRelative(now(), row.started_at)}
+                                                        </span>
+                                                    </span>
+                                                </Show>
+                                                <Show when={row.has_snapshot && row.started_at > 0 && row.last_active_at > row.started_at}>
+                                                    <span class="agent-recent-sessions-ts">
+                                                        <span class="agent-recent-sessions-ts-label">Last Active</span>
+                                                        <span class="agent-recent-sessions-ts-value">
+                                                            {formatRelative(now(), row.last_active_at)}
+                                                        </span>
+                                                    </span>
+                                                </Show>
                                             </span>
                                         </span>
-                                        <Show
-                                            when={row.preview}
-                                            fallback={
-                                                <span class="agent-recent-sessions-preview agent-recent-sessions-preview--empty">
-                                                    {row.has_snapshot
-                                                        ? "(no user message yet)"
-                                                        : "(no conversation snapshot)"}
-                                                </span>
-                                            }
-                                        >
-                                            <span class="agent-recent-sessions-preview">
-                                                {row.preview}
+                                    </button>
+
+                                    {/* Fork prompt — inline below the row */}
+                                    <Show when={forkState().kind !== "idle"}>
+                                        <div class="agent-fork-prompt" data-testid="agent-fork-prompt">
+                                            <span class="agent-fork-prompt-msg">
+                                                <strong>{row.instance_name || row.definition_name}</strong> is already open in another pane.
                                             </span>
-                                        </Show>
-                                        <Show when={row.node_count > 0}>
-                                            <span class="agent-recent-sessions-line3">
-                                                <span class="agent-recent-sessions-nodes">
-                                                    {row.node_count} message
-                                                    {row.node_count === 1 ? "" : "s"}
-                                                </span>
-                                            </span>
-                                        </Show>
-                                        <span class="agent-recent-sessions-timestamps">
-                                            <Show when={row.agent_created_at > 0}>
-                                                <span class="agent-recent-sessions-ts">
-                                                    <span class="agent-recent-sessions-ts-label">Created</span>
-                                                    <span class="agent-recent-sessions-ts-value">
-                                                        {formatRelative(now(), row.agent_created_at)}
-                                                    </span>
-                                                </span>
+                                            <Show when={forkState().kind === "prompt"}>
+                                                <div class="agent-fork-prompt-actions">
+                                                    <button
+                                                        type="button"
+                                                        class="agent-fork-btn agent-fork-btn--primary"
+                                                        onClick={() => handleOpenNewSession(row)}
+                                                        data-testid="agent-fork-open-new"
+                                                    >
+                                                        Open new session
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        class="agent-fork-btn agent-fork-btn--secondary"
+                                                        onClick={() => handleSwitchToExisting(row)}
+                                                        data-testid="agent-fork-switch"
+                                                    >
+                                                        Switch to existing
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        class="agent-fork-btn agent-fork-btn--ghost"
+                                                        onClick={() => handleForkCancel(row.definition_id)}
+                                                        aria-label="Cancel"
+                                                    >
+                                                        ✕
+                                                    </button>
+                                                </div>
                                             </Show>
-                                            <Show when={row.started_at > 0}>
-                                                <span class="agent-recent-sessions-ts">
-                                                    <span class="agent-recent-sessions-ts-label">Last Launch</span>
-                                                    <span class="agent-recent-sessions-ts-value">
-                                                        {formatRelative(now(), row.started_at)}
-                                                    </span>
-                                                </span>
+                                            <Show when={forkState().kind === "naming"}>
+                                                {(() => {
+                                                    const ns = forkState() as Extract<ForkState, { kind: "naming" }>;
+                                                    return (
+                                                        <div class="agent-fork-naming">
+                                                            <label class="agent-fork-label">Name for new session:</label>
+                                                            <div class="agent-fork-input-row">
+                                                                <input
+                                                                    type="text"
+                                                                    class="agent-fork-input"
+                                                                    value={ns.label}
+                                                                    disabled={ns.loading}
+                                                                    placeholder="Session name"
+                                                                    data-testid="agent-fork-name-input"
+                                                                    onInput={(e) =>
+                                                                        setForkState(row.definition_id, {
+                                                                            kind: "naming",
+                                                                            label: e.currentTarget.value,
+                                                                            loading: false,
+                                                                            error: null,
+                                                                        })
+                                                                    }
+                                                                    onKeyDown={(e) => {
+                                                                        if (e.key === "Enter") void handleForkStart(row);
+                                                                        if (e.key === "Escape") handleForkCancel(row.definition_id);
+                                                                    }}
+                                                                    // autofocus when the naming box appears
+                                                                    ref={(el) => { if (el && !ns.loading) setTimeout(() => el.focus(), 0); }}
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    class="agent-fork-btn agent-fork-btn--primary"
+                                                                    disabled={ns.loading || !ns.label.trim()}
+                                                                    onClick={() => handleForkStart(row)}
+                                                                    data-testid="agent-fork-start"
+                                                                >
+                                                                    {ns.loading ? "…" : "Start"}
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    class="agent-fork-btn agent-fork-btn--ghost"
+                                                                    onClick={() => handleForkCancel(row.definition_id)}
+                                                                    aria-label="Cancel"
+                                                                >
+                                                                    ✕
+                                                                </button>
+                                                            </div>
+                                                            <Show when={ns.error}>
+                                                                <span class="agent-fork-error">{ns.error}</span>
+                                                            </Show>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </Show>
-                                            <Show when={row.has_snapshot && row.started_at > 0 && row.last_active_at > row.started_at}>
-                                                <span class="agent-recent-sessions-ts">
-                                                    <span class="agent-recent-sessions-ts-label">Last Active</span>
-                                                    <span class="agent-recent-sessions-ts-value">
-                                                        {formatRelative(now(), row.last_active_at)}
-                                                    </span>
-                                                </span>
-                                            </Show>
-                                        </span>
-                                    </span>
-                                </button>
-                            </li>
-                        )}
+                                        </div>
+                                    </Show>
+                                </li>
+                            );
+                        }}
                     </For>
                 </ul>
             </Show>
