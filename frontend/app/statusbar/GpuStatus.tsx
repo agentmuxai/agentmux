@@ -28,22 +28,24 @@ const GpuStatus = (): JSX.Element => {
         const termPart = term ? ` · terminal: ${term.toUpperCase()}` : "";
         switch (info.classification) {
             case "hardware":
-                return `GPU: hardware accelerated${rend}${termPart}`;
+                return `Graphics: hardware accelerated${rend}${termPart}`;
             case "software":
-                return `GPU: software rendering (SwiftShader)${rend}${termPart}`;
+                return `Graphics: software rendering${rend}${termPart}`;
             default:
-                return `GPU: unavailable — WebGL disabled, terminals use the DOM renderer${termPart}`;
+                return `Graphics: GPU disabled — WebGL unavailable, terminals use the DOM renderer${termPart}`;
         }
     };
 
+    // Labeled "GFX" (graphics-acceleration state) to distinguish from SystemStats'
+    // "GPU {n}%" (utilization) sitting in the same bar.
     return (
         <span
             class="stat-mono stat-gpu-mode"
             style={{ color: color() }}
             data-tip={tip()}
-            aria-label="GPU rendering status"
+            aria-label="Graphics acceleration status"
         >
-            GPU {gpuClassBadge(info.classification)}
+            GFX {gpuClassBadge(info.classification)}
         </span>
     );
 };

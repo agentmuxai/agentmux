@@ -61,6 +61,11 @@ function probe(): GpuInfo {
                 vendor = gl.getParameter(gl.VENDOR) as string;
                 renderer = gl.getParameter(gl.RENDERER) as string;
             }
+            // Release the probe context immediately. Chromium caps live WebGL
+            // contexts per page (~16) and evicts the oldest; holding this one for
+            // the renderer's lifetime would steal a slot from xterm's WebGL
+            // terminals. We only needed it to read the capability params.
+            gl.getExtension("WEBGL_lose_context")?.loseContext();
         }
     } catch {
         // leave defaults → classified "unavailable"
