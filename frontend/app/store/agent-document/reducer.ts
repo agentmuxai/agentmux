@@ -490,7 +490,7 @@ export function update(
             nextSet.add(command.node.id);
             return {
                 state: { ...state, nodes: [...state.nodes, command.node], nodeIdSet: nextSet },
-                events: [{ type: "stream-flushed", appended: 1, updated: 0, updateDropped: 0 }],
+                events: [{ type: "stream-flushed", appendedNew: 1, collidedAndUpdated: 0, updateApplied: 0, updateDropped: 0 }],
             };
         }
 
