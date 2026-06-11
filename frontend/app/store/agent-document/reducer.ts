@@ -517,7 +517,7 @@ export function update(
             nextNodes[idx] = {
                 ...shell,
                 status: command.status,
-                exitCode: command.exitCode,
+                exitCode: command.exitCode ?? shell.exitCode,
                 exitedAt: command.exitedAt,
                 log: { ...shell.log, open: false },
             };
