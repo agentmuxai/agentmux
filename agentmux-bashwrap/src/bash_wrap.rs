@@ -615,32 +615,51 @@ async fn run_via_pipes(
 
 /// PTY reader loop: drains bytes from the master, strips DSR / ANSI
 /// control sequences, and forwards line-split chunks to the publisher.
+///
+/// Uses a thread-bridge + `recv_timeout` to add a quiet-window flush
+/// identical to `stream_reader`'s `tokio::time::timeout` approach, but
+/// for the blocking sync I/O that the PTY master reader requires.
+/// This lets newline-free partial output (`printf 'Building...'`) surface
+/// live while still accumulating across reads for CR collapse.
 fn pty_reader_loop(
-    mut reader: Box<dyn std::io::Read + Send>,
+    reader: Box<dyn std::io::Read + Send>,
     tx: mpsc::Sender<LineEvent>,
 ) {
-    use std::io::Read;
+    use std::sync::mpsc as std_mpsc;
     // PTY collapses stdout + stderr onto one stream — the slave's
     // terminal device is a single FD shared by both. Chunks are
     // labelled "stdout" because there is no way to recover the
     // original FD distinction from the master read. The pipe path
     // (`run_via_pipes`) preserves the split.
     let kind: &'static str = "stdout";
-    let mut pending: Vec<u8> = Vec::with_capacity(8192);
-    let mut buf = [0u8; 8192];
-    loop {
-        match reader.read(&mut buf) {
-            Ok(0) => {
-                if !pending.is_empty() {
-                    let _ = tx.blocking_send(LineEvent {
-                        kind,
-                        bytes: std::mem::take(&mut pending),
-                    });
+
+    // Offload the blocking read to a dedicated thread so the main
+    // loop can use recv_timeout for the quiet-window flush.
+    let (data_tx, data_rx) = std_mpsc::channel::<Option<Vec<u8>>>();
+    std::thread::spawn(move || {
+        use std::io::Read;
+        let mut reader = reader;
+        let mut buf = [0u8; 8192];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => {
+                    let _ = data_tx.send(None); // EOF sentinel
+                    return;
                 }
-                return;
+                Ok(n) => {
+                    if data_tx.send(Some(buf[..n].to_vec())).is_err() {
+                        return; // consumer gone
+                    }
+                }
+                Err(_) => return,
             }
-            Ok(n) => {
-                let mut chunk = buf[..n].to_vec();
+        }
+    });
+
+    let mut pending: Vec<u8> = Vec::with_capacity(8192);
+    loop {
+        match data_rx.recv_timeout(FLUSH_QUIET_WINDOW) {
+            Ok(Some(mut chunk)) => {
                 strip_dsr(&mut chunk);
                 // Phase β: strip remaining ANSI control sequences so
                 // the plain-text chunk list doesn't render them as
@@ -655,10 +674,9 @@ fn pty_reader_loop(
                 }
                 pending.extend_from_slice(&chunk);
                 // Collapse lone \r in the accumulated buffer. Must run
-                // after extend (not inside strip_ansi) because spinner
-                // frames often arrive as separate PTY reads: "frame1\r"
-                // is flushed before the next read's "frame2\r" arrives,
-                // so a per-chunk strip can't see across the read boundary.
+                // after extend so spinner frames that arrive as separate
+                // reads ("frame1\r" then "\rframe2") are collapsed across
+                // the read boundary.
                 collapse_cr(&mut pending);
                 while let Some(nl_pos) = pending.iter().position(|&b| b == b'\n') {
                     let line: Vec<u8> = pending.drain(..=nl_pos).collect();
@@ -666,19 +684,55 @@ fn pty_reader_loop(
                         return;
                     }
                 }
-                // Do NOT eagerly flush the partial line here. Spinner
-                // animations use leading-\r (`"\rframe"`) — each frame
-                // arrives as one PTY read with no trailing newline. If we
-                // flushed after every read, the previous frame would be
-                // published before the next read's leading \r could
-                // collapse it. Keeping content in `pending` across reads
-                // lets collapse_cr do its job on the accumulator. Content
-                // without a newline will be flushed at EOF (the Ok(0)
-                // branch above), which is correct for non-interactive
-                // bash tool calls.
+                // Size threshold: flush large newline-free residue to keep
+                // memory bounded. Suppress when trailing \r may be the
+                // first byte of a CRLF pair.
+                if pending.len() >= FLUSH_BYTES && pending.last() != Some(&b'\r') {
+                    if tx.blocking_send(LineEvent {
+                        kind,
+                        bytes: std::mem::take(&mut pending),
+                    }).is_err() {
+                        return;
+                    }
+                }
             }
-            Err(e) => {
-                tracing::warn!(target: "bashwrap", error = %e, "PTY read error");
+            Ok(None) => {
+                // EOF: drain remainder and exit.
+                if !pending.is_empty() {
+                    let _ = tx.blocking_send(LineEvent {
+                        kind,
+                        bytes: std::mem::take(&mut pending),
+                    });
+                }
+                return;
+            }
+            Err(std_mpsc::RecvTimeoutError::Timeout) => {
+                // Quiet-window: flush pending so newline-free output
+                // (`printf 'Building...'`) surfaces live. Strip a trailing
+                // \r (paused mid-spinner-frame) so the chunk shows clean
+                // text — same as stream_reader's elapsed branch.
+                if !pending.is_empty() {
+                    if pending.last() == Some(&b'\r') {
+                        pending.pop();
+                    }
+                    if !pending.is_empty() {
+                        if tx.blocking_send(LineEvent {
+                            kind,
+                            bytes: std::mem::take(&mut pending),
+                        }).is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+            Err(std_mpsc::RecvTimeoutError::Disconnected) => {
+                // Reader thread died without sending EOF — treat as EOF.
+                if !pending.is_empty() {
+                    let _ = tx.blocking_send(LineEvent {
+                        kind,
+                        bytes: std::mem::take(&mut pending),
+                    });
+                }
                 return;
             }
         }
