@@ -37,6 +37,7 @@
  */
 
 import {
+    createEffect,
     createMemo,
     createResource,
     createSignal,
@@ -402,7 +403,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                                     if (e.key === "Enter") void handleForkStart(row);
                                                                     if (e.key === "Escape") handleForkCancel(row.definition_id);
                                                                 }}
-                                                                ref={(el) => { setTimeout(() => el.focus(), 0); }}
+                                                                ref={(el) => { createEffect(() => { if (!ns().loading) el.focus(); }); }}
                                                             />
                                                             <button
                                                                 type="button"
