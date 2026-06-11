@@ -44,11 +44,6 @@ interface ToolBlockProps {
     pinned: boolean;
     /** Toggle the pinned state (called on click of the collapsed row). */
     onTogglePin: () => void;
-    /** Bookmark state + handler — surfaced in the overlay action bar
-     *  (SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md §3.4). Optional for
-     *  callers that don't surface bookmarking. */
-    isBookmarked?: boolean;
-    onBookmark?: () => void;
     /** Opens the tool's overlay content in a dedicated pane. */
     onOpenInPane?: () => void;
 }
@@ -304,8 +299,6 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
             >
                 <ToolBlockOverlay
                     node={props.node}
-                    isBookmarked={props.isBookmarked}
-                    onBookmark={props.onBookmark}
                     onOpenInPane={props.onOpenInPane}
                 />
             </div>
