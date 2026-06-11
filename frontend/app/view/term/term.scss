@@ -161,7 +161,7 @@
             // xterm defaults this to `overflow-y: scroll`, which permanently reserves the
             // 14px scrollbar gutter even with no scrollback — the dead lane to the right of
             // the text. `auto` shows the scrollbar only when content overflows; TermWrap.
-            // customFit reserves a matching 14 columns' worth of width only while it is shown.
+            // customFit reserves a matching 14 px (≈1 column) of width only while it is shown.
             overflow-y: auto;
 
             &::-webkit-scrollbar {
