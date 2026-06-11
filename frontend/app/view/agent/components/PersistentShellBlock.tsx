@@ -13,7 +13,7 @@
 
 import clsx from "clsx";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
-import { capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import type { ShellNode, ToolLogChunk } from "../types";
 
