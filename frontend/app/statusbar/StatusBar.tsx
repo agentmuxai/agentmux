@@ -5,6 +5,7 @@ import { getApi, windowCountAtom, backendStatusAtom, isDev } from "@/store/globa
 import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { BackendStatus } from "./BackendStatus";
 import { ConfigStatus } from "./ConfigStatus";
+import { GpuStatus } from "./GpuStatus";
 import { HostPopover } from "./HostPopover";
 import { InstancePanel } from "./InstancePanel";
 import { SystemStats } from "./SystemStats";
@@ -56,6 +57,8 @@ const StatusBar = (): JSX.Element => {
                 <BackendStatus />
                 <span class="stat-separator">|</span>
                 <SystemStats />
+                <span class="stat-separator">|</span>
+                <GpuStatus />
             </div>
             <div class="status-bar-center" />
             <div class="status-bar-right">
