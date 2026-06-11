@@ -82,5 +82,11 @@ export function currentExpansion(
 
         case "subagent_link":
             return OPEN_DEFAULT;
+
+        case "shell":
+            // Mirrors tool: pin wins; a running shell is auto-expanded.
+            if (state.pinnedNodes.has(node.id)) return { open: true, via: "pin" };
+            if (node.status === "running") return { open: true, via: "auto" };
+            return CLOSED;
     }
 }
