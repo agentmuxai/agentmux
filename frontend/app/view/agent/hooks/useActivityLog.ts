@@ -8,7 +8,7 @@
  *   - Launch flow (cli, docker, auth, install)
  *   - Subprocess lifecycle (`[subprocess] spawned`, `turn complete`, exit codes)
  *   - Slash command outcomes
- *   - History pagination, subagent events, bookmark save failures
+ *   - History pagination, subagent events
  *   - Errors routed via `log("error", …, "error")`
  *
  * Rendered in `<ActivityLogPanel>` as a collapsible pane docked above
