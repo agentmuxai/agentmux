@@ -13,7 +13,7 @@
 
 import clsx from "clsx";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
-import { capChunksByLines, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { capChars, createChunkCapper, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import type { ShellNode, ToolLogChunk } from "../types";
 
@@ -74,10 +74,11 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
 
     const expanded = () => props.pinned;
 
-    // Cap by rendered lines (not chunk count) — a single chunk can contain
-    // thousands of newlines and bypass a naive array-slice cap.
+    // createChunkCapper tracks total lines incrementally and returns hiddenLines.
+    // Using capChunksByLines directly only returns keptLines (no hidden count).
+    const chunkCap = createChunkCapper(MAX_TOOL_OUTPUT_LINES);
     const capped = createMemo(() =>
-        capChunksByLines(props.node.log.chunks as ToolLogChunk[], MAX_TOOL_OUTPUT_LINES, "tail")
+        chunkCap(props.node.log.chunks as ToolLogChunk[])
     );
     const visibleChunks = () => capped().chunks;
     const hiddenCount = () => capped().hiddenLines;
@@ -126,7 +127,7 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
                         <For each={visibleChunks()}>
                             {(chunk) => (
                                 <pre class={`agent-tool-log-line ${KIND_CLASS[chunk.kind] ?? ""}`}>
-                                    {chunk.content}
+                                    {capChars(chunk.content)}
                                 </pre>
                             )}
                         </For>
