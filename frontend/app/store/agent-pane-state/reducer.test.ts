@@ -147,7 +147,7 @@ describe("agent-pane-state reducer", () => {
         it("TurnReset clears turn-scoped state but keeps subscription + pending", () => {
             const s0 = ready(100);
             const s1 = update(s0, {
-                type: "PendingMessageQueued",
+                type: "PendingMessageQueued", enqueuedWhileBusy: false,
                 id: "p1",
                 text: "hello",
                 at: 105,
@@ -237,7 +237,7 @@ describe("agent-pane-state reducer", () => {
     describe("Pending message FIFO", () => {
         it("Queue then accept removes the entry", () => {
             const s0 = update(mk(), {
-                type: "PendingMessageQueued",
+                type: "PendingMessageQueued", enqueuedWhileBusy: false,
                 id: "m1",
                 text: "hi",
                 at: 100,
@@ -257,7 +257,7 @@ describe("agent-pane-state reducer", () => {
 
         it("Reject removes the entry", () => {
             const s0 = update(mk(), {
-                type: "PendingMessageQueued",
+                type: "PendingMessageQueued", enqueuedWhileBusy: false,
                 id: "m1",
                 text: "hi",
                 at: 100,
@@ -268,19 +268,19 @@ describe("agent-pane-state reducer", () => {
 
         it("Preserves FIFO order across multiple queues", () => {
             const s0 = update(mk(), {
-                type: "PendingMessageQueued",
+                type: "PendingMessageQueued", enqueuedWhileBusy: false,
                 id: "a",
                 text: "1",
                 at: 100,
             }).state;
             const s1 = update(s0, {
-                type: "PendingMessageQueued",
+                type: "PendingMessageQueued", enqueuedWhileBusy: false,
                 id: "b",
                 text: "2",
                 at: 110,
             }).state;
             const s2 = update(s1, {
-                type: "PendingMessageQueued",
+                type: "PendingMessageQueued", enqueuedWhileBusy: false,
                 id: "c",
                 text: "3",
                 at: 120,
@@ -483,7 +483,7 @@ describe("agent-pane-state reducer", () => {
     describe("Pending message expiry (gap 2)", () => {
         it("PendingMessageExpired removes the entry by id", () => {
             const s0 = update(mk(), {
-                type: "PendingMessageQueued",
+                type: "PendingMessageQueued", enqueuedWhileBusy: false,
                 id: "x",
                 text: "hi",
                 at: 1_000,
@@ -512,7 +512,7 @@ describe("agent-pane-state reducer", () => {
 
         it("PendingMessageExpired after Accepted is harmless (already removed)", () => {
             const s0 = update(mk(), {
-                type: "PendingMessageQueued",
+                type: "PendingMessageQueued", enqueuedWhileBusy: false,
                 id: "y",
                 text: "hi",
                 at: 100,
@@ -837,7 +837,7 @@ describe("agent-pane-state reducer", () => {
             // lifecycle. PR A keeps it that way.
             const s0 = ready(100);
             const s1 = update(s0, {
-                type: "PendingMessageQueued",
+                type: "PendingMessageQueued", enqueuedWhileBusy: false,
                 id: "m1",
                 text: "hi",
                 at: 105,
@@ -846,7 +846,7 @@ describe("agent-pane-state reducer", () => {
             const s2 = update(s1, { type: "PendingMessageAccepted", id: "m1" }).state;
             expect(s2.turnPhase.kind).toBe("Idle");
             const s3 = update(s2, {
-                type: "PendingMessageQueued",
+                type: "PendingMessageQueued", enqueuedWhileBusy: false,
                 id: "m2",
                 text: "hi2",
                 at: 200,
@@ -854,7 +854,7 @@ describe("agent-pane-state reducer", () => {
             const s4 = update(s3, { type: "PendingMessageRejected", id: "m2" }).state;
             expect(s4.turnPhase.kind).toBe("Idle");
             const s5 = update(s4, {
-                type: "PendingMessageQueued",
+                type: "PendingMessageQueued", enqueuedWhileBusy: false,
                 id: "m3",
                 text: "hi3",
                 at: 300,

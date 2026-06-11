@@ -13,6 +13,7 @@ import {
 import {
     dispatch as dispatchPane,
     dispatchIfRegistered as dispatchPaneIfRegistered,
+    snapshot as paneSnapshot,
 } from "@/app/store/agent-pane-state-store";
 import {
     registerPane as registerAgentPane,
@@ -602,8 +603,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // Mark turn as active when the user sends a message — TurnStart
     // also clears stale sessionStats from the prior turn.
     const handleSendMessage = (message: string): Promise<void> => {
+        // Capture working state BEFORE TurnStart so PendingMessageQueued can
+        // mark whether this message is queued behind a running turn (true) or
+        // is the message that initiated the turn (false). The panel only shows
+        // messages with enqueuedWhileBusy:true, preventing the idle-send race
+        // where the message flashed in the amber zone between Streaming
+        // promotion and agent-message-accepted. See ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
+        const wasAlreadyWorking = workingFromPhase(paneSnapshot(model.blockId)?.turnPhase ?? { kind: "Idle" });
         dispatchPane(model.blockId, { type: "TurnStart", at: Date.now() }, "user");
-        return commands.sendMessage(message);
+        return commands.sendMessage(message, wasAlreadyWorking);
     };
 
     // ── Startup sequence ────────────────────────────────────────────────────────
@@ -883,11 +891,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 so it sits adjacent to the messages it accelerates. */}
             <PendingMessagesPanel
                 pendingMessages={pendingMessagesAtom[0]}
-                // Hide the panel while the turn is in the Submitting transient
-                // (backend has not yet ack'd the send; pendingMessages holds
-                // the optimistic message). Every other phase — including
-                // Done.errored (stream stall) — should show the panel.
-                isSubmitting={() => agentAtoms().turnPhaseAtom[0]().kind === "Submitting"}
                 showSendNow={() =>
                     // "Send now" appears only when there is an in-flight
                     // turn that SIGINT can actually interrupt — i.e.
@@ -898,7 +901,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     // caused a brief flash on every send.
                     // Spec: docs/analysis/ANALYSIS_SEND_NOW_FLASH_2026_05_28.md.
                     isInterruptibleTurn(agentAtoms().turnPhaseAtom[0]()) &&
-                    pendingMessagesAtom[0]().length > 0
+                    pendingMessagesAtom[0]().some((m) => m.enqueuedWhileBusy)
                 }
                 onSendImmediately={() => {
                     commands.stopAgent();

@@ -434,7 +434,21 @@ export type AgentPaneCommand =
     | { type: "StreamStalled"; at: number }
 
     // ── Pending message queue (composer side) ─────────────────────
-    | { type: "PendingMessageQueued"; id: string; text: string; at: number }
+    | {
+          type: "PendingMessageQueued";
+          id: string;
+          text: string;
+          at: number;
+          /**
+           * True when the user sent this message while a turn was already
+           * in-flight (isWorking was true before TurnStart). False for
+           * idle sends. Stored on the PendingMessage entry and used by
+           * PendingMessagesPanel to gate visibility — idle-send messages
+           * must never flash in the amber queued zone.
+           * See docs/analysis/ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
+           */
+          enqueuedWhileBusy: boolean;
+      }
     /** Backend acknowledged the message — remove from pending. */
     | { type: "PendingMessageAccepted"; id: string }
     /** RPC failed — remove the entry so user doesn't see a ghost row. */

@@ -88,8 +88,10 @@ export interface UseAgentCommandsOptions {
 }
 
 export interface UseAgentCommands {
-    /** Send a user message. Slash commands are intercepted via the registry. */
-    sendMessage: (message: string) => Promise<void>;
+    /** Send a user message. Slash commands are intercepted via the registry.
+     *  `wasAlreadyWorking` should be true when a turn was in-flight before
+     *  the caller dispatched TurnStart — drives PendingMessage.enqueuedWhileBusy. */
+    sendMessage: (message: string, wasAlreadyWorking?: boolean) => Promise<void>;
     /** Return to the agent picker by clearing the agent-identity meta keys. */
     back: () => Promise<void>;
     /**
@@ -226,7 +228,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         return registry().list(buildCommandContext());
     };
 
-    const sendMessage = async (message: string): Promise<void> => {
+    const sendMessage = async (message: string, wasAlreadyWorking = false): Promise<void> => {
         // Crash trace: this is the entry point for "user pressed send."
         // The boundary dumps this trail when a renderer fault catches —
         // see frontend/log/render-trail.ts + BlockErrorBoundary.
@@ -279,6 +281,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 id: messageId,
                 text: message,
                 at: Date.now(),
+                enqueuedWhileBusy: wasAlreadyWorking,
             },
             "user",
         );
