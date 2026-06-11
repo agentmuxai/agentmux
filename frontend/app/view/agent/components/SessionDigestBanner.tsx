@@ -76,7 +76,9 @@ export const SessionDigestBanner = (props: SessionDigestBannerProps): JSX.Elemen
                             when={props.summary()}
                             fallback={<span class="agent-session-digest-empty">No summary available.</span>}
                         >
-                            {(s) => <Markdown text={s()} />}
+                            {/* scrollable={false}: avoid OverlayScrollbars on reactive
+                                agent markdown (replaceChild crash, #1326). */}
+                            {(s) => <Markdown text={s()} scrollable={false} />}
                         </Show>
                     </div>
                 </Show>
