@@ -52,7 +52,7 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | SubagentLinkNode;
+export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | SubagentLinkNode | ShellNode;
 
 /**
  * Raw markdown text block
@@ -303,6 +303,29 @@ export interface SubagentLinkNode {
     status: "active" | "completed";
     model: string | null;
     timestamp?: number; // Unix ms
+}
+
+/**
+ * Persistent shell — a long-running process launched by the agent via the
+ * Shell tool (agentmux-mcp). Lives in the document as a single compact row
+ * that expands inline to show the live-log.
+ *
+ * Unlike ToolNode, a ShellNode is not tied to a tool-call lifecycle —
+ * the shell runs independently after the Shell tool returns.
+ *
+ * Spec: docs/specs/SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md
+ */
+export interface ShellNode {
+    type: "shell";
+    id: string;
+    cmd: string;
+    title: string;
+    cwd?: string;
+    status: "running" | "exited-ok" | "exited-err" | "stopped";
+    exitCode?: number;
+    spawnedAt: number;   // Unix ms
+    exitedAt?: number;   // Unix ms
+    log: ToolStreamingLog;
 }
 
 /**

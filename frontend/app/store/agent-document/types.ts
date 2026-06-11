@@ -10,7 +10,7 @@
  * and produces typed Events for audit. Pure function, no I/O.
  */
 
-import type { DocumentNode, ToolLogChunk } from "../../view/agent/types";
+import type { DocumentNode, ShellNode, ToolLogChunk } from "../../view/agent/types";
 
 export type SessionPhase = "loading-history" | "active" | "ended";
 
@@ -98,6 +98,12 @@ export type AgentDocumentCommand =
      * SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md §3.3.
      */
     | { type: "ToolChunkAppend"; toolId: string; chunk: ToolLogChunk }
+    /** Create a new ShellNode in the document (fired on shell_node_create WPS event). */
+    | { type: "ShellNodeCreate"; node: ShellNode }
+    /** Append a streaming chunk to a ShellNode's live-log. */
+    | { type: "ShellChunkAppend"; shellId: string; chunk: ToolLogChunk }
+    /** Update a ShellNode's terminal status (exit, stop). */
+    | { type: "ShellStatusUpdate"; shellId: string; status: ShellNode["status"]; exitCode?: number; exitedAt: number }
     /**
      * Backend `fileop=truncate` arrived on the file subject. The reducer
      * decides whether to honor (initialization, legitimate clear) or

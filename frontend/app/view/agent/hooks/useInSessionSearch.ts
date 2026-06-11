@@ -67,6 +67,7 @@ function nodeSearchText(node: DocumentNode): string {
         case "tool":          return node.tool + " " + JSON.stringify(node.params ?? {});
         case "section":       return node.title;
         case "subagent_link": return node.slug + " " + node.subagentId;
+        case "shell":         return node.cmd + " " + node.title;
         default:              return "";
     }
 }
