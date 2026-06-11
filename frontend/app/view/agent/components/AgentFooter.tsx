@@ -505,9 +505,6 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                     }}
                     rows={1}
                 />
-                <div class="agent-input-hint">
-                    <span>Enter to send • Shift+Enter for newline • Esc to clear / stop</span>
-                </div>
             </div>
         </div>
     );
