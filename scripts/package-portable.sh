@@ -134,6 +134,10 @@ cp dist/cef/v8_context_snapshot.bin "$PORTABLE/runtime/" 2>/dev/null || true
 
 # GPU support
 cp dist/cef/libEGL.dll dist/cef/libGLESv2.dll dist/cef/d3dcompiler_47.dll "$PORTABLE/runtime/" 2>/dev/null || true
+# Software-GL fallback (SwiftShader) — must reach runtime/ too, not just dist/cef.
+# Without these the GPU degrades to the disabled DOM renderer when hardware GL
+# can't boot. Paired with --enable-unsafe-swiftshader (app.rs) + the bundle step.
+cp dist/cef/vk_swiftshader.dll dist/cef/vulkan-1.dll dist/cef/vk_swiftshader_icd.json "$PORTABLE/runtime/" 2>/dev/null || true
 
 # Resource paks
 cp dist/cef/chrome_100_percent.pak dist/cef/chrome_200_percent.pak dist/cef/resources.pak "$PORTABLE/runtime/" 2>/dev/null || true
