@@ -536,18 +536,29 @@ tasks:
                 cp -f "$cefDir/libEGL.dll" dist/cef/ 2>/dev/null || true
                 cp -f "$cefDir/libGLESv2.dll" dist/cef/ 2>/dev/null || true
                 cp -f "$cefDir/d3dcompiler_47.dll" dist/cef/ 2>/dev/null || true
+                # Software-GL fallback (SwiftShader). When the HARDWARE GPU process can't
+                # initialize a GL device — virtual display adapters (Parsec, RDP/headless
+                # sessions), or broken drivers — Chromium 110+ will only fall back to
+                # SwiftShader for WebGL if these are present AND --enable-unsafe-swiftshader
+                # is set (see agentmux-cef/src/app.rs). Without them, GL is disabled entirely
+                # (gl=disabled), WebGL becomes unavailable, and xterm drops to its slower DOM
+                # renderer (no scrollbar). macOS/Linux bundles already ship SwiftShader; this
+                # restores parity on Windows. ~18 MB.
+                # See docs/analysis/ANALYSIS_WEBGL_GPU_DISABLED_ROOTCAUSE_2026_06_10.md.
+                cp -f "$cefDir/vk_swiftshader.dll" dist/cef/ 2>/dev/null || true
+                cp -f "$cefDir/vulkan-1.dll" dist/cef/ 2>/dev/null || true
+                cp -f "$cefDir/vk_swiftshader_icd.json" dist/cef/ 2>/dev/null || true
                 # Data files (required)
                 cp -f "$cefDir/icudtl.dat" dist/cef/ 2>/dev/null || true
                 cp -f "$cefDir/v8_context_snapshot.bin" dist/cef/ 2>/dev/null || true
                 cp -f "$cefDir"/*.pak dist/cef/ 2>/dev/null || true
                 # Locales — en-US only (saves ~18 MB)
                 [ -f "$cefDir/locales/en-US.pak" ] && cp -f "$cefDir/locales/en-US.pak" dist/cef/locales/
-                # SKIPPED (not needed, saves ~18 MB):
-                #   vk_swiftshader.dll, vulkan-1.dll, vk_swiftshader_icd.json (SwiftShader — deprecated upstream)
+                # SKIPPED (not needed):
                 #   dxil.dll, dxcompiler.dll (WebGPU — not used)
                 #   snapshot_blob.bin (removed in CEF 133+)
                 #   49 non-English locale .pak files
-                echo "✓ Bundled runtime to dist/cef/ (optimized: GPU kept, SwiftShader/WebGPU/extra locales stripped)"
+                echo "✓ Bundled runtime to dist/cef/ (GPU + SwiftShader fallback kept, WebGPU/extra locales stripped)"
 
     bundle:darwin:
         internal: true
