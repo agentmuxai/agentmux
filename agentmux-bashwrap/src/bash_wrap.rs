@@ -351,6 +351,7 @@ where
             }
             Ok(Ok(n)) => {
                 pending.extend_from_slice(&buf[..n]);
+                collapse_cr(&mut pending);
                 // Drain every complete line.
                 while let Some(nl_pos) = pending.iter().position(|&b| b == b'\n') {
                     let line: Vec<u8> = pending.drain(..=nl_pos).collect();
@@ -358,9 +359,11 @@ where
                         return;
                     }
                 }
-                // Newline-free residue past the size threshold: flush
-                // as one chunk to keep memory bounded + streaming live.
-                if pending.len() >= FLUSH_BYTES {
+                // Newline-free residue past the size threshold: flush to
+                // keep memory bounded. Suppress when trailing \r may be
+                // the first byte of a CRLF pair — let the next read
+                // resolve it.
+                if pending.len() >= FLUSH_BYTES && pending.last() != Some(&b'\r') {
                     if tx
                         .send(LineEvent { kind, bytes: std::mem::take(&mut pending) })
                         .await
@@ -376,14 +379,21 @@ where
             }
             Err(_elapsed) => {
                 // Quiet window: flush any pending bytes so slow-trickle
-                // output doesn't sit indefinitely.
+                // output doesn't sit indefinitely. Strip a trailing \r
+                // (paused mid-spinner-frame) so the rendered chunk shows
+                // clean text without the overwrite marker.
                 if !pending.is_empty() {
-                    if tx
-                        .send(LineEvent { kind, bytes: std::mem::take(&mut pending) })
-                        .await
-                        .is_err()
-                    {
-                        return;
+                    if pending.last() == Some(&b'\r') {
+                        pending.pop();
+                    }
+                    if !pending.is_empty() {
+                        if tx
+                            .send(LineEvent { kind, bytes: std::mem::take(&mut pending) })
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
                     }
                 }
             }
@@ -644,26 +654,28 @@ fn pty_reader_loop(
                     continue;
                 }
                 pending.extend_from_slice(&chunk);
+                // Collapse lone \r in the accumulated buffer. Must run
+                // after extend (not inside strip_ansi) because spinner
+                // frames often arrive as separate PTY reads: "frame1\r"
+                // is flushed before the next read's "frame2\r" arrives,
+                // so a per-chunk strip can't see across the read boundary.
+                collapse_cr(&mut pending);
                 while let Some(nl_pos) = pending.iter().position(|&b| b == b'\n') {
                     let line: Vec<u8> = pending.drain(..=nl_pos).collect();
                     if tx.blocking_send(LineEvent { kind, bytes: line }).is_err() {
                         return;
                     }
                 }
-                // Flush any remaining partial line at the end of each
-                // read so progress prompts like `printf 'starting...'`
-                // surface live without waiting for a newline.
-                if !pending.is_empty() {
-                    if tx
-                        .blocking_send(LineEvent {
-                            kind,
-                            bytes: std::mem::take(&mut pending),
-                        })
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
+                // Do NOT eagerly flush the partial line here. Spinner
+                // animations use leading-\r (`"\rframe"`) — each frame
+                // arrives as one PTY read with no trailing newline. If we
+                // flushed after every read, the previous frame would be
+                // published before the next read's leading \r could
+                // collapse it. Keeping content in `pending` across reads
+                // lets collapse_cr do its job on the accumulator. Content
+                // without a newline will be flushed at EOF (the Ok(0)
+                // branch above), which is correct for non-interactive
+                // bash tool calls.
             }
             Err(e) => {
                 tracing::warn!(target: "bashwrap", error = %e, "PTY read error");
@@ -704,10 +716,9 @@ fn strip_dsr(chunk: &mut Vec<u8>) {
 ///    Git Bash on every command).
 ///
 /// 3. **Lone control chars** — `\r` (carriage return without
-///    newline), `\x07` (bell), `\x08` (backspace). We strip `\r`
-///    when it immediately precedes `\n` (CRLF → LF for the chunk
-///    list); other `\r` we keep as-is for now since simple progress
-///    bars use it.
+///    newline), `\x07` (bell), `\x08` (backspace). CRLF → LF for
+///    the chunk list. Lone `\r` passes through so `collapse_cr` can
+///    operate on the `pending` buffer across PTY reads (see below).
 ///
 /// Things we DON'T handle yet (Phase γ territory):
 /// - Alt-screen apps (`\x1b[?1049h`) — left in the stream.
@@ -779,8 +790,7 @@ fn strip_ansi(chunk: &mut Vec<u8>) {
             continue;
         }
         if b == b'\r' && i + 1 < chunk.len() && chunk[i + 1] == b'\n' {
-            // CRLF → LF (matches what bash sends after every line on
-            // a PTY; the chunk list expects LF only).
+            // CRLF → LF: drop the \r, keep the \n on the next pass.
             i += 1;
             continue;
         }
@@ -788,6 +798,60 @@ fn strip_ansi(chunk: &mut Vec<u8>) {
         i += 1;
     }
     *chunk = out;
+}
+
+/// Collapse lone carriage-returns in the `pending` byte buffer, simulating
+/// terminal overwrite: each `\r` NOT followed by `\n` discards the current
+/// visual line back to column 0.
+///
+/// **Why here and not in `strip_ansi`:** real spinner animations emit each
+/// frame as a separate `write()` syscall, so the preceding frame content and
+/// the overwriting `\r` arrive in different PTY reads. Running collapse on
+/// the `pending` accumulator (which spans reads for the current visual line)
+/// catches those cross-read overwrites.
+///
+/// **Trailing `\r` is left in place.** A `\r` at the very end of `pending`
+/// might be the first byte of a CRLF pair split across reads. Collapsing it
+/// immediately would discard the line's content before the `\n` arrives,
+/// causing silent data loss. The caller suppresses the eager partial-line
+/// flush when `pending` ends with `\r` so the next read can disambiguate.
+fn collapse_cr(pending: &mut Vec<u8>) {
+    if !pending.contains(&b'\r') {
+        return; // fast-path: no CR at all
+    }
+    let mut out: Vec<u8> = Vec::with_capacity(pending.len());
+    let mut line_start = 0usize;
+    let mut i = 0;
+    while i < pending.len() {
+        let b = pending[i];
+        if b == b'\n' {
+            out.push(b);
+            line_start = out.len();
+            i += 1;
+        } else if b == b'\r' {
+            if i + 1 < pending.len() {
+                if pending[i + 1] == b'\n' {
+                    // CRLF → LF (strip_ansi already handles this for
+                    // within-chunk pairs, but CRLF can straddle reads).
+                    out.push(b'\n');
+                    line_start = out.len();
+                    i += 2;
+                } else {
+                    // Lone \r mid-buffer: discard current line and keep going.
+                    out.truncate(line_start);
+                    i += 1;
+                }
+            } else {
+                // Trailing \r — can't disambiguate yet; leave for next read.
+                out.push(b);
+                i += 1;
+            }
+        } else {
+            out.push(b);
+            i += 1;
+        }
+    }
+    *pending = out;
 }
 
 /// Shared publisher loop — drains the LineEvent channel, aggregates
@@ -969,6 +1033,82 @@ mod tests {
         // "é" = [0xC3, 0xA9]; index 1 is a continuation byte.
         let buf = b"\xc3\xa9x";
         assert_eq!(snap_to_char_boundary_floor(buf, 1), 0);
+    }
+
+    // ── collapse_cr tests ────────────────────────────────────────────────────
+
+    fn cr(input: &[u8]) -> Vec<u8> {
+        let mut v = input.to_vec();
+        collapse_cr(&mut v);
+        v
+    }
+
+    #[test]
+    fn collapse_cr_no_cr_is_noop() {
+        assert_eq!(cr(b"hello\nworld\n"), b"hello\nworld\n");
+    }
+
+    #[test]
+    fn collapse_cr_trailing_cr_preserved() {
+        // Trailing \r must not be collapsed — may be first byte of CRLF split
+        // across reads. The caller suppresses the partial flush in this case.
+        assert_eq!(cr(b"frame1\r"), b"frame1\r");
+    }
+
+    #[test]
+    fn collapse_cr_crlf_within_buffer_becomes_lf() {
+        assert_eq!(cr(b"line\r\n"), b"line\n");
+    }
+
+    #[test]
+    fn collapse_cr_crlf_straddle_resolved_on_second_call() {
+        // Simulate two reads: first leaves trailing \r, second sees \n next.
+        // collapse_cr is called after each extend.
+        let mut pending = b"line1\r".to_vec();
+        collapse_cr(&mut pending);
+        assert_eq!(pending, b"line1\r"); // trailing \r preserved
+        pending.extend_from_slice(b"\nmore");
+        collapse_cr(&mut pending);
+        assert_eq!(pending, b"line1\nmore"); // CRLF resolved, "more" accumulated
+    }
+
+    #[test]
+    fn collapse_cr_trailing_spinner_frames_collapse() {
+        // Trailing-\r convention: "frame\r" per write, accumulated before \n.
+        let mut pending = b"frame1\r".to_vec();
+        collapse_cr(&mut pending);
+        // trailing \r kept, frame1 still present
+        assert_eq!(pending, b"frame1\r");
+        pending.extend_from_slice(b"frame2\r");
+        collapse_cr(&mut pending);
+        // \r mid-buffer (pos 6, followed by 'f'): frame1 collapsed, trailing \r kept
+        assert_eq!(pending, b"frame2\r");
+        pending.extend_from_slice(b"done\n");
+        collapse_cr(&mut pending);
+        // \r mid-buffer (followed by 'd'): frame2 collapsed, done\n remains
+        assert_eq!(pending, b"done\n");
+    }
+
+    #[test]
+    fn collapse_cr_leading_spinner_frames_collapse() {
+        // Leading-\r convention: "\rframe" per write (npm/ora/gh style).
+        let mut pending = b"frame1".to_vec();
+        collapse_cr(&mut pending);
+        assert_eq!(pending, b"frame1"); // no \r, unchanged
+        pending.extend_from_slice(b"\rframe2");
+        collapse_cr(&mut pending);
+        // \r at pos 6, followed by 'f': frame1 collapsed
+        assert_eq!(pending, b"frame2");
+        pending.extend_from_slice(b"\rdone\n");
+        collapse_cr(&mut pending);
+        // \r at pos 6, followed by 'd': frame2 collapsed, done\n remains
+        assert_eq!(pending, b"done\n");
+    }
+
+    #[test]
+    fn collapse_cr_preserves_prior_lines() {
+        // \r only rewinds to the start of the current visual line, not past \n.
+        assert_eq!(cr(b"line1\npartial\rreplace\n"), b"line1\nreplace\n");
     }
 
     #[test]
