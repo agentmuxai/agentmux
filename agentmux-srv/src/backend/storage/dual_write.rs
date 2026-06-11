@@ -65,7 +65,8 @@ impl Store {
                 agent_type, agent_bus_id, accounts,
                 auto_start, restart_on_crash, idle_timeout_minutes,
                 slug, branch_label, working_directory,
-                created_at, updated_at, is_seeded, user_hidden
+                created_at, updated_at, is_seeded, user_hidden,
+                container_image, container_volumes, container_name
              ) VALUES (
                 ?1, ?2, ?3, ?4,
                 ?5, ?6,
@@ -73,7 +74,8 @@ impl Store {
                 ?11, ?12, ?13,
                 ?14, ?15, ?16,
                 ?17, ?18, ?19,
-                ?20, ?21, ?22, ?23
+                ?20, ?21, ?22, ?23,
+                ?24, ?25, ?26
              )
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
@@ -95,7 +97,10 @@ impl Store {
                 branch_label = excluded.branch_label,
                 working_directory = excluded.working_directory,
                 updated_at = excluded.updated_at,
-                is_seeded = excluded.is_seeded",
+                is_seeded = excluded.is_seeded,
+                container_image = excluded.container_image,
+                container_volumes = excluded.container_volumes,
+                container_name = excluded.container_name",
             params![
                 def.id,
                 def.name,
@@ -120,6 +125,9 @@ impl Store {
                 def.updated_at,
                 def.is_seeded,
                 def.user_hidden,
+                def.container_image,
+                def.container_volumes,
+                def.container_name,
             ],
         )?;
         Ok(())
@@ -341,7 +349,8 @@ impl Store {
                     identity_id, memory_id, working_directory, github_context,
                     instance_name,
                     created_at, updated_at, is_seeded, user_hidden,
-                    last_block_id
+                    last_block_id,
+                    container_image, container_volumes, container_name
                  ) VALUES (
                     ?1, ?2, ?3, ?4,
                     0, ?5,
@@ -352,7 +361,8 @@ impl Store {
                     ?18, ?19, ?20, ?21,
                     ?22,
                     ?23, ?24, 0, ?25,
-                    ?26
+                    ?26,
+                    ?27, ?28, ?29
                  )
                  ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
@@ -391,6 +401,9 @@ impl Store {
                     inst.created_at, // updated_at = created_at on insert
                     if inst.display_hidden { 1_i64 } else { 0_i64 },
                     inst.block_id,
+                    def.container_image,
+                    def.container_volumes,
+                    def.container_name,
                 ],
             )
         };
@@ -625,7 +638,7 @@ impl Store {
                     restart_on_crash, idle_timeout_minutes, created_at,
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_id, branch_label, updated_at,
-                    user_hidden
+                    user_hidden, container_image, container_volumes, container_name
              FROM db_agent_definitions WHERE id = ?1",
         )?;
         let result = stmt.query_row(params![id], |row| {
@@ -652,6 +665,9 @@ impl Store {
                 branch_label: row.get(19)?,
                 updated_at: row.get(20)?,
                 user_hidden: row.get(21)?,
+                container_image: row.get(22)?,
+                container_volumes: row.get(23)?,
+                container_name: row.get(24)?,
             })
         });
         match result {
