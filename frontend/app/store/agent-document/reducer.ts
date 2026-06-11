@@ -13,7 +13,7 @@
  * on every mount. Issue #728 gap 4.
  */
 
-import type { DocumentNode, ToolLogChunk, ToolNode, ToolStreamingLog } from "../../view/agent/types";
+import type { DocumentNode, ShellNode, ToolLogChunk, ToolNode, ToolStreamingLog } from "../../view/agent/types";
 import {
     AgentDocumentCommand,
     AgentDocumentState,
@@ -106,6 +106,12 @@ function scrubOrphanedInProgress(
             // spinner" goal. Codex + reagent P2 on PR #1104.
             const closedLog = n.log != null ? { ...n.log, open: false } : n.log;
             next[i] = { ...n, status: "canceled", log: closedLog };
+            toolsCanceled++;
+            continue;
+        }
+        if (n.type === "shell" && n.status === "running") {
+            if (!next) next = nodes.slice();
+            next[i] = { ...n, status: "stopped", log: { ...n.log, open: false } };
             toolsCanceled++;
             continue;
         }
@@ -474,6 +480,48 @@ export function update(
                     { type: "truncate-applied", reason: command.reason, clearedCount: cleared },
                 ],
             };
+        }
+
+        case "ShellNodeCreate": {
+            if (state.nodeIdSet.has(command.node.id)) {
+                return { state, events: [] };
+            }
+            const nextSet = new Set(state.nodeIdSet);
+            nextSet.add(command.node.id);
+            return {
+                state: { ...state, nodes: [...state.nodes, command.node], nodeIdSet: nextSet },
+                events: [{ type: "stream-flushed", appended: 1, updated: 0, updateDropped: 0 }],
+            };
+        }
+
+        case "ShellChunkAppend": {
+            const idx = state.nodes.findIndex((n) => n.type === "shell" && n.id === command.shellId);
+            if (idx === -1) return { state, events: [] };
+            const shell = state.nodes[idx] as ShellNode;
+            const existingChunks = shell.log.chunks;
+            if (isDuplicate(existingChunks, command.chunk)) return { state, events: [] };
+            const nextLog: ToolStreamingLog = {
+                chunks: [...existingChunks, command.chunk],
+                open: shell.log.open,
+            };
+            const nextNodes = state.nodes.slice();
+            nextNodes[idx] = { ...shell, log: nextLog };
+            return { state: { ...state, nodes: nextNodes }, events: [] };
+        }
+
+        case "ShellStatusUpdate": {
+            const idx = state.nodes.findIndex((n) => n.type === "shell" && n.id === command.shellId);
+            if (idx === -1) return { state, events: [] };
+            const shell = state.nodes[idx] as ShellNode;
+            const nextNodes = state.nodes.slice();
+            nextNodes[idx] = {
+                ...shell,
+                status: command.status,
+                exitCode: command.exitCode,
+                exitedAt: command.exitedAt,
+                log: { ...shell.log, open: false },
+            };
+            return { state: { ...state, nodes: nextNodes }, events: [] };
         }
 
         case "UserClear": {

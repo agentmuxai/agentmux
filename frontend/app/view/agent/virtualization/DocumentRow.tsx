@@ -20,9 +20,10 @@ import { AgentMessageBlock } from "../components/AgentMessageBlock";
 import { MarkdownBlock } from "../components/MarkdownBlock";
 import { NodeHoverStrip } from "../components/NodeHoverStrip";
 import { SubagentLinkBlock } from "../components/SubagentLinkBlock";
+import { PersistentShellBlock } from "../components/PersistentShellBlock";
 import { ToolBlock } from "../components/ToolBlock";
 import { UserMessageBlock } from "../components/UserMessageBlock";
-import type { DocumentNode, DocumentState, SubagentLinkNode, UserMessageNode } from "../types";
+import type { DocumentNode, DocumentState, ShellNode, SubagentLinkNode, UserMessageNode } from "../types";
 import { markRowMount } from "./perf-probe";
 
 export interface DocumentRowProps {
@@ -256,6 +257,13 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 <SubagentLinkBlock
                     node={props.node() as Extract<DocumentNode, { type: "subagent_link" }>}
                     onClick={props.onSubagentClick ?? (() => { })}
+                />
+            </Show>
+            <Show when={props.node() && props.node().type === "shell"}>
+                <PersistentShellBlock
+                    node={props.node() as ShellNode}
+                    pinned={props.documentState().pinnedNodes.has(props.node().id)}
+                    onTogglePin={() => props.onTogglePin(props.node().id)}
                 />
             </Show>
             <Show when={props.node() && props.node().type === "section"}>
