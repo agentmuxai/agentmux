@@ -240,10 +240,12 @@
         }
 
         // Status icon color variants for the collapsed row
-        &.success  .agent-tool-status-icon { color: var(--success-color); }
-        &.failed   .agent-tool-status-icon { color: var(--error-color); }
-        &.running  .agent-tool-status-icon { color: var(--warning-color); }
-        &.canceled .agent-tool-status-icon { color: var(--secondary-text-color); }
+        &.success          .agent-tool-status-icon { color: var(--success-color); }
+        &.failed           .agent-tool-status-icon { color: var(--error-color); }
+        &.running          .agent-tool-status-icon { color: var(--warning-color); }
+        &.canceled         .agent-tool-status-icon { color: var(--secondary-text-color); }
+        &.pending_approval .agent-tool-status-icon { color: var(--warning-color); }
+        &.denied           .agent-tool-status-icon { color: var(--secondary-text-color); }
 
         .agent-tool-content {
             padding: 0 var(--space-1) var(--space-1) var(--space-4);
@@ -394,6 +396,63 @@
     .agent-tool-block[data-tool="agent"]  .agent-tool-name { color: var(--term-bright-magenta); }
     .agent-tool-block[data-tool="task"]   .agent-tool-name { color: var(--secondary-text-color); }
     .agent-tool-block[data-tool="other"]  .agent-tool-name { color: var(--secondary-text-color); }
+
+    // Per-tool left-border identity colors — terminal (non-running, non-failed, non-pinned) state.
+    // Running → warning, failed → error, pinned → accent (all set above).
+    // Identity color gives instant visual fingerprint on quiet completed rows.
+    .agent-tool-block[data-tool="bash"]:not(.running):not(.failed):not(.pinned)      { border-left-color: var(--term-bright-green); }
+    .agent-tool-block[data-tool="read"]:not(.running):not(.failed):not(.pinned)      { border-left-color: var(--accent-color); }
+    .agent-tool-block[data-tool="write"]:not(.running):not(.failed):not(.pinned)     { border-left-color: var(--warning-color); }
+    .agent-tool-block[data-tool="edit"]:not(.running):not(.failed):not(.pinned)      { border-left-color: var(--warning-color); }
+    .agent-tool-block[data-tool="grep"]:not(.running):not(.failed):not(.pinned),
+    .agent-tool-block[data-tool="glob"]:not(.running):not(.failed):not(.pinned)      { border-left-color: var(--term-bright-cyan); }
+    .agent-tool-block[data-tool="agent"]:not(.running):not(.failed):not(.pinned)     { border-left-color: var(--term-bright-magenta); }
+    .agent-tool-block[data-tool="webfetch"]:not(.running):not(.failed):not(.pinned),
+    .agent-tool-block[data-tool="websearch"]:not(.running):not(.failed):not(.pinned) { border-left-color: var(--term-bright-blue); }
+
+    // Result pill — inline summary in the collapsed row at medium+ widths.
+    // Hidden by default; shown by the 600px container query in _responsive.scss.
+    .agent-tool-result-pill {
+        display: none; // shown via container query at ≥600px
+        font-size: 10px;
+        font-family: var(--fixed-font, monospace);
+        padding: 1px 5px;
+        border-radius: var(--radius-full);
+        font-variant-numeric: tabular-nums;
+        flex-shrink: 0;
+        white-space: nowrap;
+        line-height: 1.4;
+
+        &.pill-exit-ok  { color: var(--success-color); background: color-mix(in srgb, var(--success-color) 14%, transparent); }
+        &.pill-exit-err { color: var(--error-color);   background: color-mix(in srgb, var(--error-color)   14%, transparent); }
+        &.pill-files    { color: var(--term-bright-cyan);    background: color-mix(in srgb, var(--term-bright-cyan)    12%, transparent); }
+        &.pill-matches  { color: var(--term-bright-cyan);    background: color-mix(in srgb, var(--term-bright-cyan)    12%, transparent); }
+        &.pill-written  { color: var(--success-color);       background: color-mix(in srgb, var(--success-color)       14%, transparent); }
+        &.pill-edited   { color: var(--warning-color);       background: color-mix(in srgb, var(--warning-color)       14%, transparent); }
+        &.pill-agent    { color: var(--term-bright-magenta); background: color-mix(in srgb, var(--term-bright-magenta) 12%, transparent); }
+    }
+
+    // Glob file list — shown when CompactResult is expanded for a Glob result.
+    .agent-tool-glob-files {
+        margin-top: var(--space-1);
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        font-size: 11px;
+        font-family: var(--fixed-font, monospace);
+
+        .agent-tool-glob-file {
+            color: var(--term-bright-cyan);
+            padding: 1px var(--space-1);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+
+            &:hover {
+                background: color-mix(in srgb, var(--term-bright-cyan) 8%, transparent);
+            }
+        }
+    }
 
     // === Diff Viewer ===
     // === Shared Shiki highlighted-code base ===

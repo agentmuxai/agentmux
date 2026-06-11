@@ -10,7 +10,7 @@
  * the conversation DOM once expanded.
  */
 
-import { createSignal, Show, type JSX } from "solid-js";
+import { For, createSignal, Show, type JSX } from "solid-js";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 
@@ -121,10 +121,33 @@ export const CompactResult = ({ tool, params, result }: CompactResultProps): JSX
                 <span class="agent-tool-compact-text">{summary}</span>
             </div>
             <Show when={expanded()}>
-                <pre class="agent-tool-compact-json">{jsonCap.text}</pre>
-                <Show when={jsonCap.hiddenLines > 0}>
-                    <OutputHiddenMarker hidden={jsonCap.hiddenLines} noun="line" from="head" />
-                </Show>
+                {tool === "Glob" && Array.isArray(result?.files)
+                    ? (() => {
+                        const files: string[] = result.files;
+                        const visible = files.slice(0, MAX_TOOL_OUTPUT_LINES);
+                        const hidden = files.length - visible.length;
+                        return (
+                            <>
+                                <div class="agent-tool-glob-files">
+                                    <For each={visible}>
+                                        {(f: string) => <div class="agent-tool-glob-file">{f}</div>}
+                                    </For>
+                                </div>
+                                <Show when={hidden > 0}>
+                                    <OutputHiddenMarker hidden={hidden} noun="line" from="head" />
+                                </Show>
+                            </>
+                        );
+                    })()
+                    : (
+                        <>
+                            <pre class="agent-tool-compact-json">{jsonCap.text}</pre>
+                            <Show when={jsonCap.hiddenLines > 0}>
+                                <OutputHiddenMarker hidden={jsonCap.hiddenLines} noun="line" from="head" />
+                            </Show>
+                        </>
+                    )
+                }
             </Show>
         </div>
     );
