@@ -39,8 +39,11 @@ function formatElapsed(ms: number): string {
 export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Element => {
     const [now, setNow] = createSignal(Date.now());
 
+    // Gate the interval on the status memo, not props.node, so chunk appends
+    // don't tear down and recreate the timer on every streamed line.
+    const isRunning = createMemo(() => props.node.status === "running");
     createEffect(() => {
-        if (props.node.status !== "running") return;
+        if (!isRunning()) return;
         const id = setInterval(() => setNow(Date.now()), 1000);
         onCleanup(() => clearInterval(id));
     });
