@@ -25,6 +25,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot};
 
+use super::failure::classify;
 use super::translator::claude::ClaudeTranslator;
 use super::translator::Translator as _;
 use super::types::{AgentEvent, AgentRef, AgentRunResult, AgentTask};
@@ -143,15 +144,19 @@ pub(crate) async fn run_agent_with_bin(
 
     let instance_id = format!("drone-agent-{}", uuid::Uuid::new_v4());
     let (result_tx, result_rx) = oneshot::channel();
+    // Hand the captured stderr back to `drain_and_collect` so a failed
+    // run reports the real cause (rate-limit / auth / OOM) instead of a
+    // bare exit code. See
+    // `docs/specs/SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11.md`.
+    let (stderr_tx, stderr_rx) = oneshot::channel::<Vec<u8>>();
 
     // Drain stderr to EOF in the background so the child's pipe
     // never fills (a half-drained pipe causes the child to block
     // on stderr writes, which can stall the whole run). Capped at
     // STDERR_CAP bytes — beyond that, additional bytes are read
     // and dropped on the floor so the child can keep writing.
-    // Phase 2 surfaces stderr as a `dronerun:<id>` diagnostic
-    // event; for now it's captured locally and discarded.
-    // Reagent P2 on PR #834.
+    // On EOF the captured prefix is handed to the collector via
+    // `stderr_tx`, which classifies + surfaces it when the run fails.
     tokio::spawn(async move {
         const STDERR_CAP: usize = 64 * 1024;
         let mut buf = Vec::with_capacity(4096);
@@ -176,12 +181,14 @@ pub(crate) async fn run_agent_with_bin(
                 }
             }
         }
-        // buf currently dropped; Phase 2 will plumb it to the broker.
-        let _ = buf;
+        // Hand the captured prefix to the collector. If the receiver is
+        // already gone (run succeeded — nobody needs stderr), the send
+        // just drops; harmless.
+        let _ = stderr_tx.send(buf);
     });
 
     tokio::spawn(async move {
-        let result = drain_and_collect(stdout, &tx, &mut child).await;
+        let result = drain_and_collect(stdout, &tx, &mut child, stderr_rx).await;
         let _ = result_tx.send(result);
     });
 
@@ -203,6 +210,7 @@ async fn drain_and_collect(
     stdout: tokio::process::ChildStdout,
     tx: &mpsc::UnboundedSender<AgentEvent>,
     child: &mut tokio::process::Child,
+    stderr_rx: oneshot::Receiver<Vec<u8>>,
 ) -> Result<AgentRunResult, String> {
     let result = drain_async_reader(BufReader::new(stdout), tx).await;
 
@@ -211,20 +219,60 @@ async fn drain_and_collect(
 
     match result {
         Ok(mut accumulated) if exit.success() => {
-            // If the stream never emitted Done (e.g. claude died
-            // mid-run), surface a synthetic error rather than
-            // returning empty defaults silently.
+            // Exited 0 but the stream never emitted Done (claude
+            // reported an error on stdout, or died mid-write).
+            // Classify it rather than returning empty defaults silently.
             if accumulated.response.is_empty() && accumulated.transcript.is_empty() {
-                return Err("claude exited 0 but stream produced no Done event".to_string());
+                return Err(explain_failure(exit.code(), exit_signal(&exit), stderr_rx).await);
             }
             accumulated.transcript.shrink_to_fit();
             Ok(accumulated)
         }
-        Ok(_) => Err(format!(
-            "claude exited with status {exit} but stream emitted no error"
-        )),
-        Err(e) => Err(e),
+        // Non-zero exit: classify from the exit status + captured stderr
+        // so the caller sees a real cause, not "exited with status N".
+        Ok(_) => Err(explain_failure(exit.code(), exit_signal(&exit), stderr_rx).await),
+        // Stream read error: still enrich with the exit/stderr cause.
+        Err(e) => {
+            let cause = explain_failure(exit.code(), exit_signal(&exit), stderr_rx).await;
+            Err(format!("{cause}\n(stream read: {e})"))
+        }
     }
+}
+
+/// Await the captured stderr, classify the exit, log a warning, and
+/// render the human-readable explanation that becomes the run's
+/// terminal error string. See
+/// `docs/specs/SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11.md`.
+async fn explain_failure(
+    exit_code: Option<i32>,
+    signal: Option<i32>,
+    stderr_rx: oneshot::Receiver<Vec<u8>>,
+) -> String {
+    let bytes = stderr_rx.await.unwrap_or_default();
+    let stderr = String::from_utf8_lossy(&bytes);
+    let failure = classify(exit_code, signal, &stderr, None);
+    tracing::warn!(
+        code = ?failure.code,
+        exit_code = ?exit_code,
+        signal = ?signal,
+        retryable = failure.retryable,
+        "agent run failed: {}",
+        failure.title,
+    );
+    failure.explain()
+}
+
+/// Extract the terminating signal (Unix only). On non-Unix there is no
+/// signal concept, so this is always `None`.
+#[cfg(unix)]
+fn exit_signal(status: &std::process::ExitStatus) -> Option<i32> {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal()
+}
+
+#[cfg(not(unix))]
+fn exit_signal(_status: &std::process::ExitStatus) -> Option<i32> {
+    None
 }
 
 /// Drain an arbitrary async reader of newline-delimited stream-json
@@ -485,6 +533,69 @@ mod tests {
             Err(other) => panic!("expected Spawn error, got: {other}"),
             Ok(_) => panic!("expected Spawn error, got Ok(handle)"),
         }
+    }
+
+    /// End-to-end (Unix): a stub binary that writes a rate-limit line to
+    /// stderr and exits 1 must produce a *classified* failure naming the
+    /// cause and including the stderr tail — not a bare "exit 1".
+    /// Exercises G1 (stderr retained) + G2 (classify) of
+    /// SPEC_AGENT_FAILURE_DIAGNOSTICS.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn classified_failure_surfaces_cause_and_stderr() {
+        use std::io::Write as _;
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let path = std::env::temp_dir()
+            .join(format!("amux-stub-claude-{}.sh", uuid::Uuid::new_v4()));
+        {
+            let mut f = std::fs::File::create(&path).unwrap();
+            writeln!(f, "#!/bin/sh").unwrap();
+            writeln!(
+                f,
+                "echo 'API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited' >&2"
+            )
+            .unwrap();
+            writeln!(f, "exit 1").unwrap();
+            let mut perms = std::fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&path, perms).unwrap();
+        }
+
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let handle = run_agent_with_bin(
+            path.to_str().unwrap(),
+            AgentRef::default(),
+            AgentTask {
+                prompt: "hi".to_string(),
+                context: serde_json::Map::new(),
+                max_turns: None,
+            },
+            tx,
+        )
+        .await
+        .expect("spawn ok");
+
+        let err = handle
+            .final_result
+            .await
+            .expect("oneshot ok")
+            .expect_err("run should fail");
+
+        assert!(
+            err.contains("Rate-limited"),
+            "explanation should name the class; got: {err}"
+        );
+        assert!(
+            err.to_lowercase().contains("rate limited"),
+            "stderr tail should be included; got: {err}"
+        );
+        assert!(
+            err.contains("retryable"),
+            "rate-limit is retryable; got: {err}"
+        );
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
