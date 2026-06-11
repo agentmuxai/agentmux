@@ -13,7 +13,7 @@
 
 import clsx from "clsx";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
-import { MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { capChunksByLines, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import type { ShellNode, ToolLogChunk } from "../types";
 
@@ -74,15 +74,13 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
 
     const expanded = () => props.pinned;
 
-    // Cap chunks for rendering — same limit as tool log
-    const visibleChunks = createMemo((): ToolLogChunk[] => {
-        const chunks = props.node.log.chunks;
-        if (chunks.length <= MAX_TOOL_OUTPUT_LINES) return chunks as ToolLogChunk[];
-        return chunks.slice(chunks.length - MAX_TOOL_OUTPUT_LINES) as ToolLogChunk[];
-    });
-    const hiddenCount = createMemo(() =>
-        Math.max(0, props.node.log.chunks.length - MAX_TOOL_OUTPUT_LINES)
+    // Cap by rendered lines (not chunk count) — a single chunk can contain
+    // thousands of newlines and bypass a naive array-slice cap.
+    const capped = createMemo(() =>
+        capChunksByLines(props.node.log.chunks as ToolLogChunk[], MAX_TOOL_OUTPUT_LINES, "tail")
     );
+    const visibleChunks = () => capped().chunks;
+    const hiddenCount = () => capped().hiddenLines;
 
     return (
         <div

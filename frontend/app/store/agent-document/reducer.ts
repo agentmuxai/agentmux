@@ -111,7 +111,7 @@ function scrubOrphanedInProgress(
         }
         if (n.type === "shell" && n.status === "running") {
             if (!next) next = nodes.slice();
-            next[i] = { ...n, status: "stopped", log: { ...n.log, open: false } };
+            next[i] = { ...n, status: "stopped", exitedAt: at, log: { ...n.log, open: false } };
             toolsCanceled++;
             continue;
         }
