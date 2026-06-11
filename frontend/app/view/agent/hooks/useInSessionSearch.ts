@@ -24,7 +24,7 @@
  *   - prev             — cycle to previous match
  *   - close            — clear matches and hide the bar
  *
- * Like useBookmarks, this hook doesn't own scroll. Callers pass a
+ * This hook doesn't own scroll. Callers pass a
  * `jumpTo(nodeId)` callback that gets invoked on every navigation.
  */
 
