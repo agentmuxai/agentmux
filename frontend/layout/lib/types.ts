@@ -224,6 +224,12 @@ export interface ResizeHandleProps {
     parentNodeId: string;
     parentIndex: number;
     centerPx: number;
+    /** Start of the handle's span on the perpendicular axis (container-local px).
+     *  Row handle → top edge; Column handle → left edge. */
+    perpMinPx: number;
+    /** End of the handle's span on the perpendicular axis (container-local px).
+     *  Row handle → bottom edge; Column handle → right edge. */
+    perpMaxPx: number;
     transform: CSSProperties;
     flexDirection: FlexDirection;
 }
