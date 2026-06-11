@@ -248,4 +248,18 @@ export function __resetAllSlots(): void {
     slots.clear();
 }
 
+/**
+ * Returns a map of definition_id → blockId for all currently-open agent panes.
+ * Used by AgentPicker to detect when a definition is already open so it can
+ * show the fork prompt instead of silently reattaching.
+ */
+export function getOpenDefinitionMap(): Map<string, string> {
+    const result = new Map<string, string>();
+    for (const [blockId, slot] of slots) {
+        const defId = slot.state.streaming.agentId;
+        if (defId) result.set(defId, blockId);
+    }
+    return result;
+}
+
 export type { AgentPaneCommand, AgentPaneEvent, AgentPaneState };

@@ -342,6 +342,9 @@ pub const COMMAND_LIST_RECENT_SESSIONS: &str = "listrecentsessions";
 
 // Agent definition branching
 pub const COMMAND_FORK_AGENT_DEFINITION: &str = "forkagentdefinition";
+/// Returns the suggested branch label for a fork without mutating anything.
+/// Called when the user clicks "Open new session" to pre-fill the name input.
+pub const COMMAND_FORK_AGENT_DEFINITION_SUGGEST: &str = "forkagentdefinitionsuggest";
 
 /// Two-tier picker (Phase 1 — SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
 /// Clone a seeded template into a new user-owned agent definition with
@@ -2003,8 +2006,20 @@ pub struct CommandDeleteAgentInstanceData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandForkAgentDefinitionData {
     pub source_id: String,
+    /// When non-empty this becomes the fork's display name directly.
+    /// When empty, the handler auto-generates "Name #N".
     #[serde(default)]
     pub branch_label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandForkAgentDefinitionSuggestData {
+    pub source_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForkAgentDefinitionSuggestResult {
+    pub suggested_label: String,
 }
 
 // ====================================================================

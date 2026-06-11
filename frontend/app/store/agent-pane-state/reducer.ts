@@ -729,7 +729,12 @@ export function update(
                     ...state,
                     pending: [
                         ...state.pending,
-                        { id: command.id, text: command.text, createdAt: command.at },
+                        {
+                            id: command.id,
+                            text: command.text,
+                            createdAt: command.at,
+                            enqueuedWhileBusy: command.enqueuedWhileBusy,
+                        },
                     ],
                 },
                 events: [{ type: "pending-queued", id: command.id }],

@@ -128,6 +128,26 @@ const paneModels = new Map<
     AgentPaneModel & { _markDisposed(): void }
 >();
 
+/** Listeners notified whenever any pane is registered or unregistered. */
+const lifecycleListeners = new Set<() => void>();
+
+/**
+ * Subscribe to pane lifecycle changes (register / unregister).
+ * Returns an unsubscribe function. Use in components that need to
+ * keep derived data (e.g. open-definition maps) in sync with the
+ * live slot set rather than relying solely on `agents:changed`.
+ */
+export function subscribeToPaneLifecycle(listener: () => void): () => void {
+    lifecycleListeners.add(listener);
+    return () => lifecycleListeners.delete(listener);
+}
+
+function notifyLifecycleListeners(): void {
+    for (const l of lifecycleListeners) {
+        try { l(); } catch { /* never let a subscriber break teardown */ }
+    }
+}
+
 /**
  * Atomically register a pane in BOTH stores. Either both succeed or
  * neither does — if the second store throws during registration, the
@@ -183,6 +203,7 @@ export function registerPane(
 
     const model = _createAgentPaneModel(blockId);
     paneModels.set(blockId, model);
+    notifyLifecycleListeners();
     return model;
 }
 
@@ -236,6 +257,7 @@ export function unregisterPane(blockId: string): void {
     } catch {
         // Best-effort — see above.
     }
+    notifyLifecycleListeners();
 }
 
 /**
