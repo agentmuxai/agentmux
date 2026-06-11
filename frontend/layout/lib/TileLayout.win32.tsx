@@ -475,8 +475,12 @@ const DisplayNode = (props: DisplayNodeProps) => {
                         const localY = input.clientY - containerRect.top;
                         const halfSize = props.layoutModel.resizeHandleSizePx() / 2;
                         for (const rh of props.layoutModel.resizeHandles()) {
-                            if (rh.flexDirection === FlexDirection.Row && Math.abs(localX - rh.centerPx) <= halfSize) return false;
-                            if (rh.flexDirection === FlexDirection.Column && Math.abs(localY - rh.centerPx) <= halfSize) return false;
+                            if (rh.flexDirection === FlexDirection.Row &&
+                                Math.abs(localX - rh.centerPx) <= halfSize &&
+                                localY >= rh.perpMinPx && localY <= rh.perpMaxPx) return false;
+                            if (rh.flexDirection === FlexDirection.Column &&
+                                Math.abs(localY - rh.centerPx) <= halfSize &&
+                                localX >= rh.perpMinPx && localX <= rh.perpMaxPx) return false;
                         }
                     }
                     return true;
