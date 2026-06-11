@@ -108,6 +108,17 @@ export interface PendingMessage {
     id: string;
     text: string;
     createdAt: number;
+    /**
+     * True when this message was queued while a turn was already in-flight
+     * (Submitting | Streaming | Interrupting). False for messages that
+     * initiated the current turn (idle sends).
+     *
+     * The PendingMessagesPanel gates its visibility on this flag so that
+     * idle-send messages never flash in the amber queued zone — only messages
+     * genuinely sitting behind a running turn should appear there.
+     * See docs/analysis/ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
+     */
+    enqueuedWhileBusy: boolean;
 }
 
 /**

@@ -370,17 +370,27 @@ export function useAgentStream({
                         type: "PendingMessageAccepted",
                         id: messageId,
                     });
-                    // A new turn is now running (either the first one,
-                    // which already entered Submitting via the TurnStart
-                    // in handleSendMessage, or one drained from the
-                    // queue — in that case the previous session_end
-                    // dropped the phase to Done and nothing else flips
-                    // it back, leaving the status line stuck on "Worked"
-                    // with no running animation even though the CLI is
-                    // processing the next message).
-                    trail("agent:dispatch:TurnStart", { messageId });
-                    model.dispatchPane({ type: "TurnStart", at: Date.now() });
-                    trail("agent:dispatch:TurnStart:done", { messageId });
+                    // Queue-drain case: the prior turn ended (phase Done/Idle/
+                    // Disconnected) and the backend is now picking up the next
+                    // queued message. Re-enter Submitting so the working
+                    // animation re-activates.
+                    //
+                    // For idle sends (phase Submitting/Streaming/Interrupting),
+                    // TurnStart was already dispatched in handleSendMessage —
+                    // a second fire here regresses Streaming → Submitting and
+                    // re-arms the 30 s submit timeout unnecessarily.
+                    // See docs/analysis/ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
+                    const currentPhase = paneSnapshot(blockId)?.turnPhase;
+                    const needsTurnStart =
+                        currentPhase?.kind === "Done" ||
+                        currentPhase?.kind === "Idle" ||
+                        currentPhase?.kind === "Disconnected" ||
+                        currentPhase == null;
+                    if (needsTurnStart) {
+                        trail("agent:dispatch:TurnStart", { messageId });
+                        model.dispatchPane({ type: "TurnStart", at: Date.now() });
+                        trail("agent:dispatch:TurnStart:done", { messageId });
+                    }
                     // Append as a normal user_message so it joins the
                     // conversation stream. Keeps the same id so the new
                     // node ties back to the pending entry 1:1.
