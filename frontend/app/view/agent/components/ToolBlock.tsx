@@ -33,6 +33,7 @@
 
 import clsx from "clsx";
 import { Show, createEffect, createSignal, onCleanup, type JSX } from "solid-js";
+import type { BashResult, EditResult, GlobResult, GrepResult, WriteResult } from "../types";
 import { createBlock } from "@/store/global";
 import type { ToolNode } from "../types";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
@@ -142,6 +143,63 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     const [userHolding, setUserHolding] = createSignal(false);
     const expanded = () => props.pinned || autoExpanded() || userHolding();
 
+    // Result pill — compact inline summary shown at medium+ pane widths
+    // (visible only via CSS container query; always rendered so the
+    // DOM is stable when the pane is resized through the breakpoint).
+    const resultPill = (): { label: string; variant: string } | null => {
+        const s = props.node.status;
+        if (s === "running" || s === "pending_approval" || !props.node.result) return null;
+        const r = props.node.result as any;
+        switch (props.node.tool) {
+            case "Bash": {
+                const br = r as BashResult;
+                let code = br.exitCode;
+                // Claude provider encodes exit code in stdout as "<exited N>" (claude-translator.ts:263)
+                // rather than populating exitCode on the result object.
+                if (typeof code !== "number" && typeof br.stdout === "string") {
+                    const m = br.stdout.match(/<exited\s+(\d+)>/);
+                    if (m) code = parseInt(m[1], 10);
+                }
+                if (typeof code === "number") {
+                    return code === 0
+                        ? { label: "exit 0", variant: "exit-ok" }
+                        : { label: `exit ${code}`, variant: "exit-err" };
+                }
+                return null;
+            }
+            case "Glob": {
+                const n = (r as GlobResult).files?.length;
+                if (typeof n === "number") {
+                    return { label: `${n} file${n === 1 ? "" : "s"}`, variant: "files" };
+                }
+                return null;
+            }
+            case "Grep": {
+                const n = (r as GrepResult).matches?.length;
+                if (typeof n === "number") {
+                    return { label: `${n} match${n === 1 ? "" : "es"}`, variant: "matches" };
+                }
+                return null;
+            }
+            case "Write": {
+                const b = (r as WriteResult).bytesWritten;
+                return typeof b === "number"
+                    ? { label: `${b}b`, variant: "written" }
+                    : { label: "written", variant: "written" };
+            }
+            case "Edit": {
+                const n = (r as EditResult).linesChanged;
+                return typeof n === "number"
+                    ? { label: `${n} line${n === 1 ? "" : "s"}`, variant: "edited" }
+                    : { label: "edited", variant: "edited" };
+            }
+            case "Agent":
+                return s === "success" ? { label: "done", variant: "agent" } : null;
+            default:
+                return null;
+        }
+    };
+
     // Two render modes — `flow` when the panel is visible (auto-expand
     // or pinned), `hidden` otherwise. The hover-only `overlay` mode is
     // gone with the hover trigger.
@@ -159,6 +217,8 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 success: props.node.status === "success",
                 failed: props.node.status === "failed",
                 canceled: props.node.status === "canceled",
+                pending_approval: props.node.status === "pending_approval",
+                denied: props.node.status === "denied",
             })}
             data-tool={props.node.tool.toLowerCase()}
             onMouseEnter={() => { if (props.pinned || autoExpanded()) setUserHolding(true); }}
@@ -169,6 +229,11 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 <span class="agent-tool-name">{props.node.summary}</span>
                 <Show when={props.node.duration}>
                     <span class="agent-tool-duration">({props.node.duration.toFixed(1)}s)</span>
+                </Show>
+                <Show when={resultPill() != null}>
+                    <span class={`agent-tool-result-pill pill-${resultPill()?.variant}`}>
+                        {resultPill()?.label}
+                    </span>
                 </Show>
                 {/* Live-tail: while the tool is streaming, show the most
                     recent stdout/stderr line right in the collapsed row
