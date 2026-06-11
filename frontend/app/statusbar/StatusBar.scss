@@ -302,6 +302,14 @@
         opacity: 0.4;
     }
 
+    .status-bar-popover-section-title {
+        text-transform: uppercase;
+        font-size: 0.85em;
+        letter-spacing: 0.05em;
+        opacity: 0.5;
+        padding: var(--space-0-5) 0;
+    }
+
     /* Toggle switch used in the LAN discovery row.
        Spec: specs/lan-discovery-toggle.md */
     .status-bar-toggle {

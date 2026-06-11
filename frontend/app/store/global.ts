@@ -106,6 +106,12 @@ export const [controlShiftDelayAtom, setControlShiftDelayAtom] = createSignal(fa
 export const [updaterStatusAtom, setUpdaterStatusAtom] = createSignal<UpdaterStatus>("up-to-date");
 export const [updaterVersionAtom, setUpdaterVersionAtom] = createSignal<string | null>(null);
 
+// Which renderer the most recently-mounted terminal actually loaded: "webgl"
+// (GPU-accelerated, xterm WebglAddon) or "dom" (software fallback when WebGL is
+// unavailable). Set by TermWrap.loadRendererAddon; read by the status-bar GPU
+// indicator. null until the first terminal mounts.
+export const [termRendererAtom, setTermRendererAtom] = createSignal<"webgl" | "dom" | null>(null);
+
 export const reducedMotionSetting = createMemo(() => settingsAtom()?.["window:reducedmotion"]);
 export const [reducedMotionSystemPreference, setReducedMotionSystemPreference] = createSignal(false);
 

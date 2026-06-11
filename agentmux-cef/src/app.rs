@@ -623,6 +623,20 @@ wrap_app! {
                 // the app in a zombie white-screen state on GPU context loss with
                 // no recovery path. Removed in v0.33.66.
 
+                // Permit SwiftShader as a software-GL fallback. Chromium 110+
+                // removed the automatic SwiftShader fallback for WebGL and gated
+                // it behind this switch. Without it, when the hardware GPU process
+                // can't initialize a GL device — virtual display adapters (Parsec,
+                // RDP/headless), broken drivers — Chromium disables GL entirely
+                // (gl=disabled), WebGL becomes unavailable, and xterm drops to its
+                // slower DOM renderer (no scrollbar). With this switch + the bundled
+                // vk_swiftshader.dll / vulkan-1.dll (Taskfile bundle:windows), GL
+                // degrades to software instead, keeping WebGL and the xterm WebGL
+                // renderer working. Hardware GL is still preferred when available,
+                // so this is a fallback only — no perf cost on healthy machines.
+                // See docs/analysis/ANALYSIS_WEBGL_GPU_DISABLED_ROOTCAUSE_2026_06_10.md.
+                cmd.append_switch(Some(&CefString::from("enable-unsafe-swiftshader")));
+
                 // NOTE: `--renderer-process-limit=1` was previously set here to
                 // protect against DevTools popups spawning extra renderers under
                 // an Alloy-mode assumption. The current Linux CEF build is NOT

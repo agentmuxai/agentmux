@@ -5,7 +5,7 @@ import { getFileSubject } from "@/app/store/wps";
 import { sendWSCommand } from "@/app/store/ws";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { WOS, atoms, fetchWaveFile, getSettingsKeyAtom, openLink } from "@/app/store/global";
+import { WOS, atoms, fetchWaveFile, getSettingsKeyAtom, openLink, setTermRendererAtom } from "@/app/store/global";
 import * as services from "@/app/store/services";
 import { PLATFORM, PlatformLinux, PlatformMacOS, PlatformWindows } from "@/util/platformutil";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
@@ -632,6 +632,7 @@ export class TermWrap {
                 console.log("linux: using DOM renderer (WebKitGTK WebGL workaround)");
                 loggedWebGL = true;
             }
+            setTermRendererAtom("dom"); // surfaces in the status-bar GPU indicator
             return; // DOM renderer is the default when no renderer addon is loaded
         }
         if (WebGLSupported && useWebGl) {
@@ -641,21 +642,27 @@ export class TermWrap {
                     webglAddon.onContextLoss(() => {
                         webglAddon.dispose();
                         console.warn("WebGL context lost, falling back to DOM renderer");
+                        setTermRendererAtom("dom"); // GPU context lost → DOM fallback
                         // DOM renderer is active by default when no addon is loaded
                     })
                 );
                 this.terminal.loadAddon(webglAddon);
+                setTermRendererAtom("webgl");
                 if (!loggedWebGL) {
                     console.log("loaded webgl renderer!");
                     loggedWebGL = true;
                 }
             } catch (e) {
                 console.warn("WebGL renderer unavailable, using DOM renderer:", e);
+                setTermRendererAtom("dom");
                 if (!loggedWebGL) {
                     console.log("loaded DOM renderer (webgl fallback)!");
                     loggedWebGL = true;
                 }
             }
+        } else {
+            // WebGL unsupported (GPU disabled) or disabled by setting — DOM renderer.
+            setTermRendererAtom("dom");
         }
     }
 
