@@ -1,0 +1,113 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Persistent shell node — compact colored row + inline log panel.
+// Spec: docs/specs/SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md
+
+.agent-shell-block {
+    position: relative;
+    border-left: 4px solid var(--border-color);
+    transition: border-left-color 0.2s ease;
+
+    // Status colors
+    &.running    { border-left-color: var(--term-bright-green); }
+    &.exited-ok  { border-left-color: var(--accent-color); opacity: 0.8; }
+    &.exited-err { border-left-color: var(--error-color, #ff6b6b); }
+    &.stopped    { border-left-color: var(--secondary-text-color); opacity: 0.6; }
+
+    // Running pulse — draws attention to an active long-running process
+    &.running {
+        animation: shell-running-pulse 2s ease-in-out infinite;
+    }
+}
+
+@keyframes shell-running-pulse {
+    0%, 100% { border-left-color: var(--term-bright-green); }
+    50%       { border-left-color: color-mix(in srgb, var(--term-bright-green) 35%, transparent); }
+}
+
+.agent-shell-summary {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    cursor: pointer;
+    user-select: none;
+    min-height: 24px;
+
+    &:hover {
+        background: var(--hover-bg-color, rgba(255, 255, 255, 0.04));
+    }
+}
+
+.agent-shell-sigil {
+    flex: 0 0 auto;
+    font-size: 12px;
+    width: 14px;
+    text-align: center;
+
+    .running &    { color: var(--term-bright-green); }
+    .exited-ok &  { color: var(--accent-color); }
+    .exited-err & { color: var(--error-color, #ff6b6b); }
+    .stopped &    { color: var(--secondary-text-color); }
+}
+
+.agent-shell-title {
+    flex: 0 0 auto;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 40%;
+}
+
+.agent-shell-elapsed {
+    flex: 0 0 auto;
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+}
+
+.agent-shell-live-tail {
+    flex: 1 1 0;
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.75;
+    min-width: 0;
+}
+
+.agent-shell-header-cmd {
+    font-family: var(--fixed-font, monospace);
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+// Pulsing cursor shown while the shell is still streaming
+.agent-shell-streaming-indicator {
+    display: inline-block;
+    width: 6px;
+    height: 12px;
+    background: var(--term-bright-green);
+    margin-left: 2px;
+    vertical-align: text-bottom;
+    animation: shell-cursor-blink 1s step-end infinite;
+}
+
+@keyframes shell-cursor-blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0; }
+}
+
+// Responsive: hide live-tail on narrow panes
+@container agent-pane (max-width: 399px) {
+    .agent-shell-live-tail {
+        display: none;
+    }
+}
