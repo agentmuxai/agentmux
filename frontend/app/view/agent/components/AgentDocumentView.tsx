@@ -21,7 +21,7 @@
 
 import { createSignal, onMount, Show, type Accessor, type JSX } from "solid-js";
 import type { SignalPair } from "../state";
-import type { DocumentState, SubagentLinkNode } from "../types";
+import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { LayoutView } from "@/app/store/agent-pane-layout-store";
 import { AgentDocumentVirtualList } from "../virtualization/AgentDocumentVirtualList";

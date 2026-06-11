@@ -8,7 +8,7 @@
  * Step 9 of specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
  *
  * Replaces the mutable `let scrollToNodeFn: ((id: string) => void) | null`
- * pattern in agent-view.tsx. Callers (bookmarks, search) invoke `jumpTo`;
+ * pattern in agent-view.tsx. Callers (search) invoke `jumpTo`;
  * AgentDocumentView reads `command()` in an effect and runs the actual
  * DOM scroll inside its own scroll container.
  *
