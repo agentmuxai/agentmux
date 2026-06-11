@@ -1098,6 +1098,15 @@ class RpcApiType {
         return client.rpcCall("forkagentdefinition", data, opts);
     }
 
+    // command "forkagentdefinitionsuggest" [call] — read-only, no mutation
+    ForkAgentDefinitionSuggestCommand(
+        client: RpcClient,
+        data: { source_id: string },
+        opts?: RpcOpts,
+    ): Promise<{ suggested_label: string }> {
+        return client.rpcCall("forkagentdefinitionsuggest", data, opts);
+    }
+
     // command "subprocessspawn" [call]
     SubprocessSpawnCommand(client: RpcClient, data: CommandSubprocessSpawnData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("subprocessspawn", data, opts);

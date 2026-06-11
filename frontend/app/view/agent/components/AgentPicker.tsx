@@ -37,6 +37,9 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { useModalLayer, type LaunchFormStateWire } from "@/element/modal-layer";
 import { getPlatform } from "@/util/platformutil";
+import { refocusNode } from "@/app/store/global";
+import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
+import { subscribeToPaneLifecycle } from "@/app/store/agent-pane-registration";
 import type { AgentViewModel } from "../agent-model";
 import { getProvider } from "../providers";
 import { AgentCard } from "./AgentCard";
@@ -93,6 +96,20 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     const [nodejsError, setNodejsError] = createSignal<string | null>(null);
     const agents = useAgentDefinitions();
     const modalLayer = useModalLayer();
+
+    // Reactive map of definition_id → blockId for panes currently open.
+    // Refreshes on pane register/unregister (via subscribeToPaneLifecycle)
+    // AND on agents:changed so newly-forked definitions also appear.
+    const [openDefinitions, setOpenDefinitions] = createSignal<Map<string, string>>(new Map());
+    const refreshOpenDefinitions = () => setOpenDefinitions(getOpenDefinitionMap());
+    onMount(refreshOpenDefinitions);
+    const unsubOpenDefs = waveEventSubscribe({
+        eventType: "agents:changed",
+        handler: refreshOpenDefinitions,
+    });
+    const unsubPaneLifecycle = subscribeToPaneLifecycle(refreshOpenDefinitions);
+    onCleanup(unsubOpenDefs);
+    onCleanup(unsubPaneLifecycle);
 
     // Per-agent install state, keyed by agent.id.
     //   undefined = not yet checked / non-npm provider (no install needed)
@@ -281,6 +298,34 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         } finally {
             setLaunching(null);
         }
+    };
+
+    const handleFork = async (row: RecentSessionRow, branchLabel: string): Promise<void> => {
+        const def = agents().find((a) => a.id === row.definition_id);
+        if (!def) return;
+        setLaunching(row.definition_id);
+        try {
+            const forkedDef = await RpcApi.ForkAgentDefinitionCommand(TabRpcClient, {
+                source_id: row.definition_id,
+                branch_label: branchLabel,
+            });
+            // refreshOpenDefinitions after fork so the new def won't
+            // also show as "active" before it's actually launched.
+            refreshOpenDefinitions();
+            await props.model.launchAgentDefinition(forkedDef, {
+                instanceName: branchLabel,
+                agentType: (forkedDef.agent_type as "host" | "container") || "host",
+                environment: forkedDef.agent_type === "container" ? "docker" : "local",
+                identityId: row.identity_id,
+                memoryId: row.memory_id,
+            });
+        } finally {
+            setLaunching(null);
+        }
+    };
+
+    const handleSwitchToExisting = (blockId: string): void => {
+        refocusNode(blockId);
     };
 
     // Extracted from the install branch of handleSelect so the
@@ -717,7 +762,12 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             current Option E session state.
                             Bottom: seeded templates, click = open the
                             create-from-template modal. */}
-                        <MyAgentsList onReattach={handleReattach} />
+                        <MyAgentsList
+                            onReattach={handleReattach}
+                            openDefinitions={openDefinitions}
+                            onFork={handleFork}
+                            onSwitchToExisting={handleSwitchToExisting}
+                        />
                         <div class="agent-picker-templates-header" data-testid="agent-templates-header">
                             <span>+ New from template</span>
                         </div>

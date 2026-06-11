@@ -57,6 +57,8 @@ use crate::backend::rpc_types::{
     CommandAgentSessionArchiveData, AgentSessionArchiveResult,
     CommandAgentSessionListArchivesData, AgentArchiveRow,
     COMMAND_FORK_AGENT_DEFINITION,
+    COMMAND_FORK_AGENT_DEFINITION_SUGGEST,
+    CommandForkAgentDefinitionSuggestData, ForkAgentDefinitionSuggestResult,
     CommandListIdentityAccountsData, CommandGetIdentityAccountData,
     CommandDeleteIdentityAccountData,
     CommandLinkAgentIdentityData, CommandUnlinkAgentIdentityData,
@@ -1892,11 +1894,13 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("forkagentdefinition: {e}"))?;
 
                 // Find the source definition by id.
-                let source = wstore
+                let all_defs = wstore
                     .agent_def_list()
-                    .map_err(|e| format!("forkagentdefinition: {e}"))?
-                    .into_iter()
+                    .map_err(|e| format!("forkagentdefinition: {e}"))?;
+                let source = all_defs
+                    .iter()
                     .find(|a| a.id == cmd.source_id)
+                    .cloned()
                     .ok_or_else(|| format!("forkagentdefinition: source not found: {}", cmd.source_id))?;
 
                 // Build a new definition that shares the source's content but
@@ -1906,20 +1910,29 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .duration_since(UNIX_EPOCH)
                     .map(|d| d.as_millis() as i64)
                     .unwrap_or(0);
-                let branch_slug_part = if cmd.branch_label.is_empty() {
-                    "fork".to_string()
+
+                // branch_label is the fork's full display name when provided.
+                // When empty, auto-generate "Name #N" based on existing fork count.
+                let fork_name = if cmd.branch_label.is_empty() {
+                    let existing_fork_count = all_defs
+                        .iter()
+                        .filter(|a| a.parent_id == cmd.source_id && a.is_seeded == 0)
+                        .count();
+                    format!("{} #{}", source.name, existing_fork_count + 2)
                 } else {
-                    crate::backend::storage::store::derive_slug(&cmd.branch_label)
+                    cmd.branch_label.clone()
                 };
+                let branch_label = if cmd.branch_label.is_empty() {
+                    fork_name.clone()
+                } else {
+                    cmd.branch_label.clone()
+                };
+                let branch_slug_part = crate::backend::storage::store::derive_slug(&branch_label);
                 let mut fork = AgentDefinition {
                     id: uuid::Uuid::new_v4().to_string(),
                     // Empty slug → agent_def_insert derives + resolves collisions.
                     slug: format!("{}-{}", source.slug, branch_slug_part),
-                    name: if cmd.branch_label.is_empty() {
-                        format!("{} (fork)", source.name)
-                    } else {
-                        format!("{} [{}]", source.name, cmd.branch_label)
-                    },
+                    name: fork_name,
                     icon: source.icon.clone(),
                     provider: source.provider.clone(),
                     description: source.description.clone(),
@@ -1936,7 +1949,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     is_seeded: 0,
                     accounts: String::new(),
                     parent_id: source.id.clone(),
-                    branch_label: cmd.branch_label.clone(),
+                    branch_label: branch_label.clone(),
                     updated_at: now,
                     user_hidden: 0,
                 };
@@ -1989,6 +2002,37 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 });
 
                 Ok(Some(serde_json::to_value(&fork).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // ---- Definition fork suggest (read-only — no mutation) ----
+
+    let wstore_sug = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_FORK_AGENT_DEFINITION_SUGGEST,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_sug.clone();
+            Box::pin(async move {
+                let cmd: CommandForkAgentDefinitionSuggestData = serde_json::from_value(data)
+                    .map_err(|e| format!("forkagentdefinitionsuggest: {e}"))?;
+
+                let all = wstore
+                    .agent_def_list()
+                    .map_err(|e| format!("forkagentdefinitionsuggest: {e}"))?;
+                let source = all
+                    .iter()
+                    .find(|a| a.id == cmd.source_id)
+                    .ok_or_else(|| format!("forkagentdefinitionsuggest: source not found: {}", cmd.source_id))?;
+
+                let existing_fork_count = all
+                    .iter()
+                    .filter(|a| a.parent_id == cmd.source_id && a.is_seeded == 0)
+                    .count();
+                let suggested_label = format!("{} #{}", source.name, existing_fork_count + 2);
+
+                let result = ForkAgentDefinitionSuggestResult { suggested_label };
+                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
             })
         }),
     );
