@@ -169,6 +169,9 @@ pub fn seed_agents(wstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
             // user explicitly hides; new template ids in re-seed are
             // force-reset to 0 below (see `reseed_if_needed`).
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         wstore.agent_def_insert(&mut agent)?;
 
@@ -348,6 +351,9 @@ fn reseed_if_needed(
             // hidden — the `else` branch below honours that by lining
             // up against existing ids only.
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
 
         if let Some(existing_agent) = existing_map.get(agent_def.id.as_str()) {
@@ -449,6 +455,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 1_700_000_000_000,
             user_hidden: hidden,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         wstore.agent_def_insert(&mut def).unwrap();
     }

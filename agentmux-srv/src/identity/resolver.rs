@@ -758,6 +758,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 0,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -832,6 +835,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 0,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -919,6 +925,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 0,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -961,6 +970,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 0,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1047,6 +1059,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 0,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1128,6 +1143,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 0,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1293,6 +1311,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 0,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1379,6 +1400,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 0,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 

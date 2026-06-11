@@ -835,6 +835,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 0,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut a1).unwrap();
         // "Agent X" → "agent-x"
@@ -898,6 +901,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 0,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut a1).unwrap();
         assert_eq!(a1.slug, "explicit");
@@ -956,6 +962,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 0,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         }
     }
 
@@ -2740,6 +2749,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 1000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
         // db_agents row exists, projected as template.
@@ -2776,6 +2788,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 1000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
         // User-cloned def has is_seeded=0 + parent_id pointing at template.
@@ -2818,6 +2833,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 1000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
         def.name = "New Name".to_string();
@@ -2854,6 +2872,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 1000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
         assert_eq!(count_agents(&store, "id = 'tpl-del'"), 1);
@@ -2888,6 +2909,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 1000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
 
@@ -2970,6 +2994,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 1000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
 
@@ -3061,6 +3088,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 1000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
         let inst = AgentInstance {
@@ -3114,6 +3144,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 1000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
         let inst = AgentInstance {
@@ -3165,6 +3198,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 1000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut tpl_a).unwrap();
         let mut tpl_b = tpl_a.clone();
@@ -3228,6 +3264,9 @@ mod tests {
                 branch_label: String::new(),
                 updated_at: 1000,
                 user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
             };
             store.agent_def_insert(&mut d).unwrap();
         }
@@ -3266,6 +3305,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 1000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
         // User-clone DEF of that template (Phase 1 created this).
@@ -3336,6 +3378,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 1000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
         let mut clone = AgentDefinition {
