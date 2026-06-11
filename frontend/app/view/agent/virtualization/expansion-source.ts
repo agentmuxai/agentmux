@@ -82,5 +82,11 @@ export function currentExpansion(
 
         case "subagent_link":
             return OPEN_DEFAULT;
+
+        case "shell":
+            // Pin-to-expand only: unlike tools, a running shell stays collapsed
+            // by default (spec §11). Only a pin opens it.
+            if (state.pinnedNodes.has(node.id)) return { open: true, via: "pin" };
+            return CLOSED;
     }
 }

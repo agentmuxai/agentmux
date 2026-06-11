@@ -20,9 +20,10 @@ import { AgentMessageBlock } from "../components/AgentMessageBlock";
 import { MarkdownBlock } from "../components/MarkdownBlock";
 import { NodeHoverStrip } from "../components/NodeHoverStrip";
 import { SubagentLinkBlock } from "../components/SubagentLinkBlock";
+import { PersistentShellBlock } from "../components/PersistentShellBlock";
 import { ToolBlock } from "../components/ToolBlock";
 import { UserMessageBlock } from "../components/UserMessageBlock";
-import type { DocumentNode, DocumentState, SubagentLinkNode, UserMessageNode } from "../types";
+import type { DocumentNode, DocumentState, ShellNode, SubagentLinkNode, UserMessageNode } from "../types";
 import { markRowMount } from "./perf-probe";
 
 export interface DocumentRowProps {
@@ -57,6 +58,7 @@ export interface DocumentRowProps {
 // to begin with). Codex P2 on PR #1020.
 const TOGGLEABLE_KINDS: ReadonlySet<DocumentNode["type"]> = new Set([
     "tool",
+    "shell",
     "agent_message",
     "section",
 ]);
@@ -83,13 +85,13 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
     const isExpanded = (): boolean => {
         const n = props.node();
         const state = props.documentState();
-        if (n.type === "tool") return state.pinnedNodes.has(n.id);
+        if (n.type === "tool" || n.type === "shell") return state.pinnedNodes.has(n.id);
         return !state.collapsedNodes.has(n.id);
     };
 
     const onExpand = (): void => {
         const n = props.node();
-        if (n.type === "tool") props.onTogglePin(n.id);
+        if (n.type === "tool" || n.type === "shell") props.onTogglePin(n.id);
         else props.onToggleCollapse(n.id);
     };
 
@@ -256,6 +258,13 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 <SubagentLinkBlock
                     node={props.node() as Extract<DocumentNode, { type: "subagent_link" }>}
                     onClick={props.onSubagentClick ?? (() => { })}
+                />
+            </Show>
+            <Show when={props.node() && props.node().type === "shell"}>
+                <PersistentShellBlock
+                    node={props.node() as ShellNode}
+                    pinned={props.documentState().pinnedNodes.has(props.node().id)}
+                    onTogglePin={() => props.onTogglePin(props.node().id)}
                 />
             </Show>
             <Show when={props.node() && props.node().type === "section"}>
