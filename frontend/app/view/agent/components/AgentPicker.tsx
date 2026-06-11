@@ -39,6 +39,7 @@ import { useModalLayer, type LaunchFormStateWire } from "@/element/modal-layer";
 import { getPlatform } from "@/util/platformutil";
 import { refocusNode } from "@/app/store/global";
 import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
+import { subscribeToPaneLifecycle } from "@/app/store/agent-pane-registration";
 import type { AgentViewModel } from "../agent-model";
 import { getProvider } from "../providers";
 import { AgentCard } from "./AgentCard";
@@ -97,8 +98,8 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     const modalLayer = useModalLayer();
 
     // Reactive map of definition_id → blockId for panes currently open.
-    // Re-reads the slots map on every agents:changed event and on mount
-    // so the active badges + fork prompts reflect live state.
+    // Refreshes on pane register/unregister (via subscribeToPaneLifecycle)
+    // AND on agents:changed so newly-forked definitions also appear.
     const [openDefinitions, setOpenDefinitions] = createSignal<Map<string, string>>(new Map());
     const refreshOpenDefinitions = () => setOpenDefinitions(getOpenDefinitionMap());
     onMount(refreshOpenDefinitions);
@@ -106,7 +107,9 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         eventType: "agents:changed",
         handler: refreshOpenDefinitions,
     });
+    const unsubPaneLifecycle = subscribeToPaneLifecycle(refreshOpenDefinitions);
     onCleanup(unsubOpenDefs);
+    onCleanup(unsubPaneLifecycle);
 
     // Per-agent install state, keyed by agent.id.
     //   undefined = not yet checked / non-npm provider (no install needed)
