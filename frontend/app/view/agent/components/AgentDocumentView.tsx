@@ -21,7 +21,7 @@
 
 import { createSignal, onMount, Show, type Accessor, type JSX } from "solid-js";
 import type { SignalPair } from "../state";
-import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
+import type { DocumentState, SubagentLinkNode } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { LayoutView } from "@/app/store/agent-pane-layout-store";
 import { AgentDocumentVirtualList } from "../virtualization/AgentDocumentVirtualList";
@@ -38,10 +38,6 @@ interface AgentDocumentViewProps {
     onLoadOlder?: () => Promise<void>;
     /** Whether an older-history load is currently in progress. */
     loadingOlder?: Accessor<boolean>;
-    /** Set of bookmarked node IDs — drives the bookmarked visual indicator. */
-    bookmarkedNodeIds?: Accessor<Set<string>>;
-    /** Called when the user bookmarks or un-bookmarks a node via context menu. */
-    onBookmark?: (node: DocumentNode) => void;
     /**
      * Signal-based jump command. The parent owns a `useScrollToNode`
      * hook and passes its `command` accessor here; the VirtualList
@@ -140,8 +136,6 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
         <AgentDocumentVirtualList
             viewState={viewState}
             documentState={documentState}
-            bookmarkedNodeIds={props.bookmarkedNodeIds}
-            onBookmark={props.onBookmark}
             onSubagentClick={props.onSubagentClick}
             onLoadOlder={props.onLoadOlder}
             loadingOlder={props.loadingOlder}

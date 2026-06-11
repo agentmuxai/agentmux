@@ -22,8 +22,6 @@ import type { ToolNode } from "../types";
 
 interface ToolOverlayActionsProps {
     node: ToolNode;
-    isBookmarked?: boolean;
-    onBookmark?: () => void;
     onOpenInPane?: () => void;
     onOpenInWindow?: () => void;
     onNewAgentHere?: () => void;
@@ -61,14 +59,6 @@ const ActionButton = (props: ActionButtonProps): JSX.Element => (
 
 export const ToolOverlayActions = (props: ToolOverlayActionsProps): JSX.Element => (
     <div class="agent-tool-overlay-actions" data-node-id={props.node.id}>
-        <Show when={props.onBookmark}>
-            <ActionButton
-                icon="🔖"
-                label={props.isBookmarked ? "Bookmarked" : "Bookmark"}
-                active={props.isBookmarked === true}
-                onClick={props.onBookmark}
-            />
-        </Show>
         <Show when={props.onOpenInPane}>
             <ActionButton
                 icon="⧉"
