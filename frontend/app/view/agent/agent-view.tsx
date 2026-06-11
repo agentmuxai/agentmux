@@ -40,7 +40,6 @@ import { useSessionDigest } from "./hooks/useSessionDigest";
 import { useHistoryPagination, SNAPSHOT_SCHEMA_VERSION } from "./hooks/useHistoryPagination";
 import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
 import { useInSessionSearch } from "./hooks/useInSessionSearch";
-import { useBookmarks } from "./hooks/useBookmarks";
 import { useScrollToNode } from "./hooks/useScrollToNode";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useProcessCount } from "./hooks/useProcessCount";
@@ -63,7 +62,6 @@ import { AgentSearchBar } from "./components/AgentSearchBar";
 import { AgentFocusedPanel } from "./components/AgentFocusedPanel";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
-import { BookmarksPanel } from "./components/BookmarksPanel";
 import { SessionDigestBanner } from "./components/SessionDigestBanner";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -650,20 +648,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         }
     };
 
-    // ── Jump-to-node + Bookmarks ────────────────────────────────────────────────
+    // ── Jump-to-node ───────────────────────────────────────────────────────────
 
     // Signal-based jump command. AgentDocumentView reacts via a
     // createEffect and scrolls inside its own container — no mutable
     // refs crossing component boundaries. See hooks/useScrollToNode.ts.
     const scroll = useScrollToNode();
-
-    // Bookmarks: list, derived id set, panel visibility, CRUD callbacks.
-    const bookmarks = useBookmarks({
-        blockId: model.blockId,
-        block,
-        log,
-        jumpTo: scroll.jumpTo,
-    });
 
     // In-session search: matches, navigation, highlight. Searches over
     // the currently-loaded document slice only.
@@ -672,10 +662,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         jumpTo: scroll.jumpTo,
     });
 
-    // Pane-scoped Ctrl+B / Ctrl+F listener. See hooks/useAgentKeyboard.ts.
+    // Pane-scoped Ctrl+F listener. See hooks/useAgentKeyboard.ts.
     useAgentKeyboard({
         blockId: model.blockId,
-        onToggleBookmarks: () => bookmarks.setVisible((v) => !v),
         onToggleSearch: () => {
             // Second Ctrl+F press closes and clears state.
             if (search.visible()) {
@@ -781,15 +770,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 driven by AgentViewModel.viewName / viewIcon / endIconButtons.
                 See SPEC_AGENT_PANE_FOLLOWUPS item #8. */}
 
-            <Show when={bookmarks.visible()}>
-                <BookmarksPanel
-                    bookmarks={bookmarks.bookmarks}
-                    onJump={bookmarks.jump}
-                    onDelete={bookmarks.remove}
-                    onRename={bookmarks.rename}
-                />
-            </Show>
-
             <AgentSearchBar
                 visible={search.visible}
                 onSearch={search.performSearch}
@@ -838,8 +818,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 onSubagentClick={handleSubagentClick}
                 onLoadOlder={history.loadOlder}
                 loadingOlder={history.loadingOlder}
-                bookmarkedNodeIds={bookmarks.bookmarkedNodeIds}
-                onBookmark={bookmarks.add}
                 scrollCommand={scroll.command}
                 scrollToBottomRef={(fn) => { scrollToBottomFn = fn; }}
                 highlightNodeId={search.highlightId}

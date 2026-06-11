@@ -30,8 +30,6 @@ import { ToolOverlayLog } from "./ToolOverlayLog";
 
 export interface ToolBlockOverlayProps {
     node: ToolNode;
-    isBookmarked?: boolean;
-    onBookmark?: () => void;
     onOpenInPane?: () => void;
     onOpenInWindow?: () => void;
     onNewAgentHere?: () => void;
@@ -64,8 +62,6 @@ export const ToolBlockOverlay = (props: ToolBlockOverlayProps): JSX.Element => (
         <ToolOverlayLog node={props.node} />
         <ToolOverlayActions
             node={props.node}
-            isBookmarked={props.isBookmarked}
-            onBookmark={props.onBookmark}
             onOpenInPane={props.onOpenInPane}
             onOpenInWindow={props.onOpenInWindow}
             onNewAgentHere={props.onNewAgentHere}
