@@ -469,11 +469,7 @@ async fn run_via_pty(
     // dirs to PATH manually (see below) so external commands like
     // `date`, `grep`, `awk` resolve without needing rc-script setup.
     cmd.arg("-c");
-    // Redirect stdin to /dev/null inside bash so stdin-reading
-    // children see EOF — ConPTY does not deliver EOF on master
-    // writer drop. The redirect runs after readline's startup DSR
-    // exchange, so the pre-written CSI response is still consumed.
-    cmd.arg(format!("exec </dev/null; {}", command));
+    cmd.arg(command);
 
     // PATH fix-up: bashwrap is a Windows exe, so when MSYS2/Git Bash
     // spawned us it converted PATH to Windows form, which has
@@ -562,10 +558,11 @@ async fn run_via_pty(
     let exit_code = tokio::task::spawn_blocking(move || -> Result<i32> {
         let mut child = child;
         let status = child.wait().context("PTY child wait")?;
-        // pair and writer both drop here, after child has exited.
+        let code = status.exit_code() as i32;
+        tracing::info!(target: "bashwrap", exit_code = code, "PTY child exited");
         drop(writer);
         drop(pair);
-        Ok(status.exit_code() as i32)
+        Ok(code)
     })
     .await
     .context("PTY wait task join")??;
@@ -638,6 +635,7 @@ fn pty_reader_loop(
                 return;
             }
             Ok(n) => {
+                let raw_n = n;
                 let mut chunk = buf[..n].to_vec();
                 strip_dsr(&mut chunk);
                 // Phase β: strip remaining ANSI control sequences so
@@ -648,6 +646,7 @@ fn pty_reader_loop(
                 // PTY; without this strip every chunk list starts
                 // with garbage.
                 strip_ansi(&mut chunk);
+                tracing::debug!(target: "bashwrap", raw_bytes = raw_n, post_strip = chunk.len(), "PTY read");
                 if chunk.is_empty() {
                     continue;
                 }
