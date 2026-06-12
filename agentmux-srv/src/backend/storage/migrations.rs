@@ -33,7 +33,11 @@ use super::error::StoreError;
 ///   v5 — db_agents.last_block_id (Phase 3c; latest launch's block, so the
 ///        consolidated read can find the session snapshot without joining
 ///        db_agent_instances)
-pub const OBJECT_SCHEMA_VERSION: i64 = 5;
+///   v6 — container_image / container_volumes / container_name on both
+///        db_agent_definitions and db_agents (Phase 0 of
+///        SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md; host agents default
+///        to '' / '[]' / '')
+pub const OBJECT_SCHEMA_VERSION: i64 = 6;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -141,7 +145,10 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             branch_label         TEXT NOT NULL DEFAULT '',
             created_at           INTEGER NOT NULL DEFAULT 0,
             updated_at           INTEGER NOT NULL DEFAULT 0,
-            user_hidden          INTEGER NOT NULL DEFAULT 0
+            user_hidden          INTEGER NOT NULL DEFAULT 0,
+            container_image      TEXT NOT NULL DEFAULT '',
+            container_volumes    TEXT NOT NULL DEFAULT '[]',
+            container_name       TEXT NOT NULL DEFAULT ''
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_definitions_slug
             ON db_agent_definitions(slug);
@@ -330,7 +337,13 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             created_at           INTEGER NOT NULL DEFAULT 0,
             updated_at           INTEGER NOT NULL DEFAULT 0,
             is_seeded            INTEGER NOT NULL DEFAULT 0,
-            user_hidden          INTEGER NOT NULL DEFAULT 0
+            user_hidden          INTEGER NOT NULL DEFAULT 0,
+
+            -- Container support (Schema v6 / Phase 0).
+            -- Empty for host agents; populated by ContainerManager.
+            container_image      TEXT NOT NULL DEFAULT '',
+            container_volumes    TEXT NOT NULL DEFAULT '[]',
+            container_name       TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_agents_is_template
             ON db_agents(is_template);
@@ -384,10 +397,20 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
     //     Defaults to '' for existing rows; the dual-write populates it on
     //     the next launch/continuation. Read side (3b.1b) treats '' as
     //     "no snapshot" (same as the current empty-block_id fallback).
+    // v6: Container support (Phase 0 of SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md).
+    //     container_image / container_volumes / container_name on both tables.
+    //     Host-agent rows default to '', '[]', '' respectively — ContainerManager
+    //     populates them on first container spawn.
     for stmt in &[
         "ALTER TABLE db_agent_definitions ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE db_agent_definitions ADD COLUMN user_hidden INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE db_agents ADD COLUMN last_block_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agent_definitions ADD COLUMN container_image TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agent_definitions ADD COLUMN container_volumes TEXT NOT NULL DEFAULT '[]'",
+        "ALTER TABLE db_agent_definitions ADD COLUMN container_name TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agents ADD COLUMN container_image TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agents ADD COLUMN container_volumes TEXT NOT NULL DEFAULT '[]'",
+        "ALTER TABLE db_agents ADD COLUMN container_name TEXT NOT NULL DEFAULT ''",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();

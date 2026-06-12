@@ -98,6 +98,22 @@ pub struct AgentDefinition {
     /// removal path is `deleteagent`, not hide.
     #[serde(default)]
     pub user_hidden: i64,
+    /// Docker image to use when `agent_type == "container"`.
+    /// e.g. `"ghcr.io/agentmuxai/agent-claude:latest"`.
+    /// Empty string for host agents. Schema v6.
+    #[serde(default)]
+    pub container_image: String,
+    /// JSON array of volume mount specs for container agents.
+    /// Each element is a string in Docker bind-mount format:
+    /// `"source:target"` or `"source:target:options"`.
+    /// Empty JSON array (`"[]"`) for host agents. Schema v6.
+    #[serde(default = "default_container_volumes")]
+    pub container_volumes: String,
+    /// Stable Docker container name managed by the server.
+    /// Set to `"agentmux-<slug>"` on first container spawn;
+    /// empty for host agents. Schema v6.
+    #[serde(default)]
+    pub container_name: String,
 }
 
 /// Derive a filesystem-safe slug from a display name. Lowercase,
@@ -131,6 +147,10 @@ pub fn derive_slug(name: &str) -> String {
 
 fn default_agent_type() -> String {
     "standalone".to_string()
+}
+
+fn default_container_volumes() -> String {
+    "[]".to_string()
 }
 
 /// Instance lifecycle status. Serialised lowercase to match the DB text.
@@ -298,7 +318,7 @@ impl Store {
                     restart_on_crash, idle_timeout_minutes, created_at,
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_id, branch_label, updated_at,
-                    user_hidden
+                    user_hidden, container_image, container_volumes, container_name
              FROM db_agent_definitions
              WHERE is_seeded = 0 AND parent_id = ?1
              ORDER BY updated_at DESC, created_at DESC",
@@ -330,7 +350,7 @@ impl Store {
                     restart_on_crash, idle_timeout_minutes, created_at,
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_id, branch_label, updated_at,
-                    user_hidden
+                    user_hidden, container_image, container_volumes, container_name
              FROM db_agent_definitions
              WHERE id = ?1",
         )?;
@@ -349,7 +369,7 @@ impl Store {
                     restart_on_crash, idle_timeout_minutes, created_at,
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_template_id, branch_label, updated_at,
-                    user_hidden
+                    user_hidden, container_image, container_volumes, container_name
              FROM db_agents
              ORDER BY updated_at DESC, created_at ASC",
         )?;
@@ -452,9 +472,10 @@ impl Store {
             "INSERT INTO db_agent_definitions (id, slug, name, icon, provider, description,
              working_directory, shell, provider_flags, auto_start, restart_on_crash,
              idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
-             is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden)
+             is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
+             container_image, container_volumes, container_name)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19, ?20, ?21, ?22)",
+                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
             params![
                 agent.id,
                 agent.slug,
@@ -485,6 +506,9 @@ impl Store {
                 // caller-supplied value here is safe even when a stray
                 // 1 sneaks through.
                 agent.user_hidden,
+                agent.container_image,
+                agent.container_volumes,
+                agent.container_name,
             ],
         )?;
         // Persist the stamped updated_at before we leave the lock so the
@@ -535,7 +559,7 @@ impl Store {
                         restart_on_crash, idle_timeout_minutes, created_at,
                         agent_type, environment, agent_bus_id, is_seeded,
                         accounts, parent_id, branch_label, updated_at,
-                        user_hidden
+                        user_hidden, container_image, container_volumes, container_name
                  FROM db_agent_definitions
                  WHERE (lower(trim(name)) = ?1 OR slug = ?2)
                    AND is_seeded = 0
@@ -583,10 +607,11 @@ impl Store {
                    (id, slug, name, icon, provider, description,
                     working_directory, shell, provider_flags, auto_start, restart_on_crash,
                     idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
-                    is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden)
+                    is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
+                    container_image, container_volumes, container_name)
                  VALUES
                    (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                    ?17, ?18, ?19, ?20, ?21, ?22)",
+                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
                 params![
                     agent.id, agent.slug, agent.name, agent.icon, agent.provider,
                     agent.description, agent.working_directory, agent.shell,
@@ -596,6 +621,7 @@ impl Store {
                     agent.accounts, agent.parent_id, agent.branch_label,
                     agent.created_at, // updated_at = created_at for new rows
                     agent.user_hidden,
+                    agent.container_image, agent.container_volumes, agent.container_name,
                 ],
             )?;
             agent.created_at
@@ -687,7 +713,8 @@ impl Store {
                 "UPDATE db_agent_definitions SET name=?1, icon=?2, provider=?3, description=?4,
                  working_directory=?5, shell=?6, provider_flags=?7, auto_start=?8,
                  restart_on_crash=?9, idle_timeout_minutes=?10,
-                 agent_type=?11, environment=?12, agent_bus_id=?13, accounts=?14, updated_at=?15
+                 agent_type=?11, environment=?12, agent_bus_id=?13, accounts=?14, updated_at=?15,
+                 container_image=?17, container_volumes=?18, container_name=?19
                  WHERE id=?16",
                 params![
                     agent.name,
@@ -705,7 +732,10 @@ impl Store {
                     agent.agent_bus_id,
                     agent.accounts,
                     now,
-                    agent.id
+                    agent.id,
+                    agent.container_image,
+                    agent.container_volumes,
+                    agent.container_name,
                 ],
             )?
         };
@@ -1759,5 +1789,8 @@ fn map_agent_definition_row(row: &rusqlite::Row) -> rusqlite::Result<AgentDefini
         branch_label: row.get(19)?,
         updated_at: row.get(20)?,
         user_hidden: row.get(21)?,
+        container_image: row.get(22)?,
+        container_volumes: row.get(23)?,
+        container_name: row.get(24)?,
     })
 }

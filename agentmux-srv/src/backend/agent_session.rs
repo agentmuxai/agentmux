@@ -900,6 +900,9 @@ pub fn migrate_promote_template_sessions_v1(
                 branch_label: String::new(),
                 updated_at: now,
                 user_hidden: 0,
+                container_image: template.container_image.clone(),
+                container_volumes: template.container_volumes.clone(),
+                container_name: String::new(),
             };
             if let Err(e) = wstore.agent_def_insert(&mut new_def) {
                 tracing::warn!(
@@ -1568,6 +1571,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 1_700_000_000_000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         wstore.agent_def_insert(&mut def).unwrap();
         def
@@ -1797,6 +1803,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: now - 2_000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         wstore.agent_def_insert(&mut user_clone).unwrap();
         // The user's clone has its OWN active conversation.
@@ -1900,6 +1909,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: now - 1_000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         wstore.agent_def_insert(&mut prior_target).unwrap();
         // Seeded `:current` has the OLDER stale snapshot the prior
@@ -1995,6 +2007,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: now - 1_000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         wstore.agent_def_insert(&mut prior_target).unwrap();
 
@@ -2092,6 +2107,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: now - 1_000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         wstore.agent_def_insert(&mut prior_target).unwrap();
 
@@ -2208,6 +2226,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: now - 1_000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         wstore.agent_def_insert(&mut prior_target).unwrap();
         // Realistic partial-failure shape: run 1 copied :current
@@ -2341,6 +2362,9 @@ mod tests {
             branch_label: String::new(),
             updated_at: 1_700_000_000_000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         wstore.agent_def_insert(&mut user_def).unwrap();
         write_session_state(&filestore, &user_def.id, br#"{"nodes":[]}"#).unwrap();
