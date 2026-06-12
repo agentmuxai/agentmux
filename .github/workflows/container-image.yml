@@ -45,6 +45,9 @@ jobs:
             # refs/tags/vX.Y.Z here; the previous refs/heads/main check was
             # never true in this workflow and suppressed :latest entirely)
             type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            # workflow_dispatch does not push a semver tag so type=semver emits nothing;
+            # produce a dispatch-<sha> tag so manual runs actually push an image.
+            type=raw,value=dispatch-{{sha}},enable=${{ github.event_name == 'workflow_dispatch' }}
 
       - name: Resolve Claude Code version
         id: claude_ver
