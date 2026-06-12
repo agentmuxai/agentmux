@@ -220,6 +220,32 @@ tasks:
             # Single quotes pass `$v` through literally for pwsh to evaluate.
             - cmd: pwsh -Command '$v = (Get-Content -Raw package.json | ConvertFrom-Json).version; New-Item -ItemType Directory -Force -Path dist/bin | Out-Null; Copy-Item target/release/agentmux-srv.exe dist/bin/agentmux-srv-$v-windows.x64.exe -Force'
 
+    build:mcp:
+        desc: Build the agentmux-mcp MCP server binary.
+        cmds:
+            - task: build:mcp:{{OS}}
+
+    build:mcp:windows:
+        internal: true
+        platforms: [windows]
+        cmds:
+            - cargo build --release -p agentmux-mcp
+            - echo "✓ Built agentmux-mcp for Windows"
+
+    build:mcp:darwin:
+        internal: true
+        platforms: [darwin]
+        cmds:
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-mcp'
+            - echo "✓ Built agentmux-mcp for macOS"
+
+    build:mcp:linux:
+        internal: true
+        platforms: [linux]
+        cmds:
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-mcp'
+            - echo "✓ Built agentmux-mcp for Linux"
+
     # agentmux-wsh build tasks removed — wsh has been retired.
     # See specs/SPEC_RETIRE_WSH_2026_04_12.md.
 
@@ -451,7 +477,7 @@ tasks:
             # (see docs/retros/RETRO_CEF_BUILD_RACE_2026_04_24.md). If the first
             # build lost the race, cef_windows_x86_64/ is missing libcef_dll/ +
             # include/ + Resources/. Retry once after repair before failing hard.
-            - cmd: bash -c 'cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap || { bash scripts/repair-cef-extract.sh && cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap; }'
+            - cmd: bash -c 'cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp || { bash scripts/repair-cef-extract.sh && cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp; }'
             - cmd: pwsh -Command "New-Item -ItemType Directory -Force -Path dist/cef | Out-Null; Copy-Item target/release/agentmux-cef.exe dist/cef/agentmux-cef.exe -Force"
             - echo "✓ Built host + launcher for Windows"
 
