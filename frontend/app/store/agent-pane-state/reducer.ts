@@ -440,6 +440,7 @@ export function update(
                     sessionStats: null,
                     currentTool: null,
                     turnTokens: null,
+                    lastContextTokens: null,
                     // TurnReset is a wholesale clear → Idle. The
                     // working/stopping cascade lives entirely on
                     // turnPhase since PR G.

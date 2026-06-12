@@ -263,8 +263,10 @@
 
 @include mixins.respect-reduced-motion {
     // Critical context fill: keep the pulse but slow it down.
-    // Freezing it entirely would hide the "danger" signal under reduced motion.
-    .ctx-window-fill {
+    // Must match specificity of .ctx-window-track--critical .ctx-window-fill
+    // (0,2,0) — a bare .ctx-window-fill (0,1,0) is outranked by the animation
+    // shorthand and the duration override silently loses.
+    .ctx-window-track--critical .ctx-window-fill {
         animation-duration: 2.4s;
     }
 }
