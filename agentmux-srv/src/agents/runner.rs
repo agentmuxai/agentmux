@@ -150,40 +150,29 @@ pub(crate) async fn run_agent_with_bin(
     // `docs/specs/SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11.md`.
     let (stderr_tx, stderr_rx) = oneshot::channel::<Vec<u8>>();
 
-    // Drain stderr to EOF in the background so the child's pipe
-    // never fills (a half-drained pipe causes the child to block
-    // on stderr writes, which can stall the whole run). Capped at
-    // STDERR_CAP bytes — beyond that, additional bytes are read
-    // and dropped on the floor so the child can keep writing.
-    // On EOF the captured prefix is handed to the collector via
-    // `stderr_tx`, which classifies + surfaces it when the run fails.
+    // Drain stderr to EOF in the background so the child's pipe never
+    // fills (a half-drained pipe blocks the child on stderr writes and
+    // can stall the whole run). We keep a rolling *tail* — the last
+    // STDERR_TAIL_CAP bytes — because the CLI's terminal error line
+    // (rate-limit / auth / OOM) lands at the END of stderr; a capped
+    // prefix would drop exactly the line the classifier needs. On EOF
+    // the tail is handed to the collector via `stderr_tx`.
+    // (codex P2 on #1353: keep the tail, not a prefix.)
     tokio::spawn(async move {
-        const STDERR_CAP: usize = 64 * 1024;
-        let mut buf = Vec::with_capacity(4096);
+        const STDERR_TAIL_CAP: usize = 64 * 1024;
+        let mut buf: Vec<u8> = Vec::with_capacity(8192);
         let mut reader = BufReader::new(stderr);
-        let mut sink = [0u8; 4096];
-        // Read until EOF, capping the kept prefix at STDERR_CAP.
+        let mut sink = [0u8; 8192];
         loop {
-            if buf.len() < STDERR_CAP {
-                let space = STDERR_CAP - buf.len();
-                let take = space.min(sink.len());
-                match reader.read(&mut sink[..take]).await {
-                    Ok(0) => break,
-                    Ok(n) => buf.extend_from_slice(&sink[..n]),
-                    Err(_) => break,
-                }
-            } else {
-                // Beyond cap — keep draining but discard.
-                match reader.read(&mut sink).await {
-                    Ok(0) => break,
-                    Ok(_) => {}
-                    Err(_) => break,
-                }
+            match reader.read(&mut sink).await {
+                Ok(0) => break,
+                Ok(n) => append_capped_tail(&mut buf, &sink[..n], STDERR_TAIL_CAP),
+                Err(_) => break,
             }
         }
-        // Hand the captured prefix to the collector. If the receiver is
-        // already gone (run succeeded — nobody needs stderr), the send
-        // just drops; harmless.
+        // Trim to exactly the last CAP bytes. If the receiver is gone
+        // (run succeeded — nobody needs stderr), the send just drops.
+        trim_to_tail(&mut buf, STDERR_TAIL_CAP);
         let _ = stderr_tx.send(buf);
     });
 
@@ -273,6 +262,26 @@ fn exit_signal(status: &std::process::ExitStatus) -> Option<i32> {
 #[cfg(not(unix))]
 fn exit_signal(_status: &std::process::ExitStatus) -> Option<i32> {
     None
+}
+
+/// Append `chunk` to a rolling tail buffer, compacting to the last
+/// `cap` bytes whenever it grows past `2 * cap` (amortized O(1)). The
+/// exact final trim happens at EOF via [`trim_to_tail`]. Keeping the
+/// *tail* (not a prefix) matters because the CLI's terminal error line
+/// is at the end of stderr.
+fn append_capped_tail(buf: &mut Vec<u8>, chunk: &[u8], cap: usize) {
+    buf.extend_from_slice(chunk);
+    if buf.len() > cap.saturating_mul(2) {
+        trim_to_tail(buf, cap);
+    }
+}
+
+/// Drop all but the last `cap` bytes of `buf`.
+fn trim_to_tail(buf: &mut Vec<u8>, cap: usize) {
+    if buf.len() > cap {
+        let excess = buf.len() - cap;
+        buf.drain(0..excess);
+    }
 }
 
 /// Drain an arbitrary async reader of newline-delimited stream-json
@@ -596,6 +605,84 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// End-to-end (Unix): stderr larger than the tail cap with the real
+    /// error on the LAST line must still classify correctly — the
+    /// rolling tail keeps the end, not a prefix. Regression test for
+    /// codex P2 on #1353.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn classified_failure_reads_error_past_stderr_cap() {
+        use std::io::Write as _;
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let path = std::env::temp_dir()
+            .join(format!("amux-stub-claude-big-{}.sh", uuid::Uuid::new_v4()));
+        {
+            let mut f = std::fs::File::create(&path).unwrap();
+            writeln!(f, "#!/bin/sh").unwrap();
+            // ~70 KiB of filler (> 64 KiB tail cap), THEN the real error.
+            writeln!(f, "head -c 70000 /dev/zero | tr '\\0' x >&2").unwrap();
+            writeln!(
+                f,
+                "printf '\\nAPI Error: Server is temporarily limiting requests (not your usage limit) Rate limited\\n' >&2"
+            )
+            .unwrap();
+            writeln!(f, "exit 1").unwrap();
+            let mut perms = std::fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&path, perms).unwrap();
+        }
+
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let handle = run_agent_with_bin(
+            path.to_str().unwrap(),
+            AgentRef::default(),
+            AgentTask {
+                prompt: "hi".to_string(),
+                context: serde_json::Map::new(),
+                max_turns: None,
+            },
+            tx,
+        )
+        .await
+        .expect("spawn ok");
+
+        let err = handle
+            .final_result
+            .await
+            .expect("oneshot ok")
+            .expect_err("run should fail");
+
+        assert!(
+            err.contains("Rate-limited"),
+            "must classify from the tail past the cap; got: {}",
+            err.chars().take(160).collect::<String>()
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rolling_tail_keeps_last_bytes_past_cap() {
+        let cap = 8;
+        let mut buf = Vec::new();
+        for i in 0..100u8 {
+            append_capped_tail(&mut buf, &[i], cap);
+            assert!(buf.len() <= cap * 2, "rolling buffer must stay bounded");
+        }
+        trim_to_tail(&mut buf, cap);
+        assert_eq!(buf, vec![92, 93, 94, 95, 96, 97, 98, 99]);
+    }
+
+    #[test]
+    fn rolling_tail_single_large_chunk() {
+        let cap = 4;
+        let mut buf = Vec::new();
+        append_capped_tail(&mut buf, b"abcdefghij", cap);
+        trim_to_tail(&mut buf, cap);
+        assert_eq!(&buf, b"ghij");
     }
 
     #[test]
