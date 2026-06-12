@@ -251,8 +251,13 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // (`agentdefhide` / `agentdefunhide`). Phase 2 of
                     // SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md.
                     user_hidden: old.user_hidden,
-                    container_image: cmd.container_image,
-                    container_volumes: cmd.container_volumes,
+                    // Preserve existing container config when the caller omits the field
+                    // (cmd.container_image defaults to "" via #[serde(default)]). Callers
+                    // that only update name/icon/etc. (AgentDefForm) don't carry container
+                    // fields, so falling back to old values prevents silently wiping a
+                    // container agent's image and volumes — same guard as `accounts` above.
+                    container_image: if cmd.container_image.is_empty() { old.container_image.clone() } else { cmd.container_image },
+                    container_volumes: if cmd.container_volumes == "[]" { old.container_volumes.clone() } else { cmd.container_volumes },
                     // container_name is server-managed; preserve the existing value.
                     container_name: old.container_name.clone(),
                 };

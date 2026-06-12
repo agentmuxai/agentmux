@@ -33,6 +33,10 @@ use super::error::StoreError;
 ///   v5 — db_agents.last_block_id (Phase 3c; latest launch's block, so the
 ///        consolidated read can find the session snapshot without joining
 ///        db_agent_instances)
+///   v6 — container_image / container_volumes / container_name on both
+///        db_agent_definitions and db_agents (Phase 0 of
+///        SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md; host agents default
+///        to '' / '[]' / '')
 pub const OBJECT_SCHEMA_VERSION: i64 = 6;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
