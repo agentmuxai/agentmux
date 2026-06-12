@@ -137,7 +137,7 @@ fn publish_exit(broker: &Broker, block_id: &str, shell_id: &str, exit_code: i32,
         event: EVENT_SHELL_CHUNK.to_string(),
         scopes: vec![format!("block:{block_id}")],
         sender: String::new(),
-        persist: 1,
+        persist: 1024,
         data: Some(serde_json::json!({
             "shell_id": shell_id,
             "op": "exit",
