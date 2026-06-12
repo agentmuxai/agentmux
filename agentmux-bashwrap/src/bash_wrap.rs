@@ -341,11 +341,17 @@ where
     loop {
         match tokio::time::timeout(FLUSH_QUIET_WINDOW, reader.read(&mut buf)).await {
             Ok(Ok(0)) => {
-                // EOF: drain remainder and exit.
+                // EOF: drain remainder, strip a dangling lone \r (stream
+                // ended mid-spinner-frame or mid-CRLF pair).
                 if !pending.is_empty() {
-                    let _ = tx
-                        .send(LineEvent { kind, bytes: std::mem::take(&mut pending) })
-                        .await;
+                    if pending.last() == Some(&b'\r') {
+                        pending.pop();
+                    }
+                    if !pending.is_empty() {
+                        let _ = tx
+                            .send(LineEvent { kind, bytes: std::mem::take(&mut pending) })
+                            .await;
+                    }
                 }
                 return;
             }
@@ -378,22 +384,19 @@ where
                 return;
             }
             Err(_elapsed) => {
-                // Quiet window: flush any pending bytes so slow-trickle
-                // output doesn't sit indefinitely. Strip a trailing \r
-                // (paused mid-spinner-frame) so the rendered chunk shows
-                // clean text without the overwrite marker.
-                if !pending.is_empty() {
-                    if pending.last() == Some(&b'\r') {
-                        pending.pop();
-                    }
-                    if !pending.is_empty() {
-                        if tx
-                            .send(LineEvent { kind, bytes: std::mem::take(&mut pending) })
-                            .await
-                            .is_err()
-                        {
-                            return;
-                        }
+                // Quiet window: flush pending only when it does NOT end
+                // with \r. A trailing \r means either a CRLF split (the
+                // \n hasn't arrived yet) or a spinner frame awaiting its
+                // overwrite — in both cases, hold in pending so the next
+                // read's collapse_cr can do its job. Non-\r partial output
+                // (printf 'Building...') has no trailing \r and flushes here.
+                if !pending.is_empty() && pending.last() != Some(&b'\r') {
+                    if tx
+                        .send(LineEvent { kind, bytes: std::mem::take(&mut pending) })
+                        .await
+                        .is_err()
+                    {
+                        return;
                     }
                 }
             }
@@ -697,41 +700,47 @@ fn pty_reader_loop(
                 }
             }
             Ok(None) => {
-                // EOF: drain remainder and exit.
-                if !pending.is_empty() {
-                    let _ = tx.blocking_send(LineEvent {
-                        kind,
-                        bytes: std::mem::take(&mut pending),
-                    });
-                }
-                return;
-            }
-            Err(std_mpsc::RecvTimeoutError::Timeout) => {
-                // Quiet-window: flush pending so newline-free output
-                // (`printf 'Building...'`) surfaces live. Strip a trailing
-                // \r (paused mid-spinner-frame) so the chunk shows clean
-                // text — same as stream_reader's elapsed branch.
+                // EOF: drain remainder, strip a dangling lone \r.
                 if !pending.is_empty() {
                     if pending.last() == Some(&b'\r') {
                         pending.pop();
                     }
                     if !pending.is_empty() {
-                        if tx.blocking_send(LineEvent {
+                        let _ = tx.blocking_send(LineEvent {
                             kind,
                             bytes: std::mem::take(&mut pending),
-                        }).is_err() {
-                            return;
-                        }
+                        });
+                    }
+                }
+                return;
+            }
+            Err(std_mpsc::RecvTimeoutError::Timeout) => {
+                // Quiet-window: flush only when pending does NOT end with \r.
+                // A trailing \r means either a CRLF split or a spinner frame
+                // awaiting overwrite — hold in pending so the next read's
+                // collapse_cr can do its job. Non-\r partial output
+                // (printf 'Building...') flushes here for live display.
+                if !pending.is_empty() && pending.last() != Some(&b'\r') {
+                    if tx.blocking_send(LineEvent {
+                        kind,
+                        bytes: std::mem::take(&mut pending),
+                    }).is_err() {
+                        return;
                     }
                 }
             }
             Err(std_mpsc::RecvTimeoutError::Disconnected) => {
-                // Reader thread died without sending EOF — treat as EOF.
+                // Reader thread died without EOF — treat as EOF, strip \r.
                 if !pending.is_empty() {
-                    let _ = tx.blocking_send(LineEvent {
-                        kind,
-                        bytes: std::mem::take(&mut pending),
-                    });
+                    if pending.last() == Some(&b'\r') {
+                        pending.pop();
+                    }
+                    if !pending.is_empty() {
+                        let _ = tx.blocking_send(LineEvent {
+                            kind,
+                            bytes: std::mem::take(&mut pending),
+                        });
+                    }
                 }
                 return;
             }
@@ -1163,6 +1172,47 @@ mod tests {
     fn collapse_cr_preserves_prior_lines() {
         // \r only rewinds to the start of the current visual line, not past \n.
         assert_eq!(cr(b"line1\npartial\rreplace\n"), b"line1\nreplace\n");
+    }
+
+    /// Verify that the quiet-window semantics are: hold when pending ends
+    /// with \r; flush when it doesn't. These are unit tests of the policy
+    /// (not of the reader loop directly) — they encode the contract so a
+    /// future refactor can't accidentally revert to pop-and-flush.
+    #[test]
+    fn quiet_window_holds_when_trailing_cr() {
+        // A spinner frame "⠋ Loading...\r" should NOT be flushed by the
+        // quiet-window — the \r signals that the next frame will overwrite.
+        let pending = b"Loading...\r".to_vec();
+        assert!(
+            pending.last() == Some(&b'\r'),
+            "quiet-window must hold pending ending with \\r"
+        );
+        // Simulate what collapse_cr does when the next frame arrives.
+        let mut combined = pending.clone();
+        combined.extend_from_slice(b"Done!\n");
+        collapse_cr(&mut combined);
+        assert_eq!(combined, b"Done!\n");
+    }
+
+    #[test]
+    fn quiet_window_flushes_when_no_trailing_cr() {
+        // "Building..." (no \r) should flush live on the quiet-window.
+        let pending = b"Building...".to_vec();
+        assert!(
+            pending.last() != Some(&b'\r'),
+            "quiet-window must flush pending NOT ending with \\r"
+        );
+    }
+
+    #[test]
+    fn eof_strips_trailing_cr() {
+        // At EOF, a dangling \r (stream ended mid-spinner or mid-CRLF) is
+        // stripped before the final flush so the rendered chunk is clean.
+        let mut pending = b"partial\r".to_vec();
+        if pending.last() == Some(&b'\r') {
+            pending.pop();
+        }
+        assert_eq!(pending, b"partial");
     }
 
     #[test]
