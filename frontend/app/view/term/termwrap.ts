@@ -424,6 +424,10 @@ export class TermWrap {
         if (this.mainFileSubject) {
             this.mainFileSubject.release();
         }
+        if (this.scrollbarStyleEl) {
+            this.scrollbarStyleEl.remove();
+            this.scrollbarStyleEl = null;
+        }
         try {
             this.terminal.dispose();
         } catch (e) {
@@ -604,6 +608,10 @@ export class TermWrap {
     // ResizeObserver on the viewport (setupScrollbarRefit) uses this to re-fit only when
     // the scrollbar toggles, not on every size tick.
     private lastScrollbarVisible: boolean = false;
+    // Per-terminal <style> element injected into <head> to override the scrollbar width
+    // with a concrete pixel value. CSS var() is unreliable in ::-webkit-scrollbar
+    // pseudo-elements — style injection avoids that limitation.
+    private scrollbarStyleEl: HTMLStyleElement | null = null;
 
     private customFit() {
         const dims = this.fitAddon.proposeDimensions();
@@ -636,6 +644,26 @@ export class TermWrap {
             const reservation = scrollbarVisible ? TermWrap.SCROLLBAR_WIDTH : 0;
             const availPx = this.connectElem.clientWidth - padX - reservation; // perf:allow-layout-read — resize/fit path, not per-keystroke
             dims.cols = Math.max(2, Math.floor(availPx / cellWidth));
+            // Widen the scrollbar by the sub-cell remainder so text columns tile flush to
+            // its left edge with no visible gap: (cols * cellWidth) + (14 + remainder) = connW.
+            // Inject a concrete <style> rule per terminal — CSS var() in ::-webkit-scrollbar
+            // pseudo-elements is not reliably inherited in Chromium, so we bypass it entirely.
+            if (viewport && scrollbarVisible) {
+                const remainder = Math.max(0, availPx - dims.cols * cellWidth);
+                if (remainder > 0) {
+                    const sbWidth = TermWrap.SCROLLBAR_WIDTH + remainder;
+                    if (!this.scrollbarStyleEl) {
+                        this.scrollbarStyleEl = document.createElement("style");
+                        document.head.appendChild(this.scrollbarStyleEl);
+                        viewport.setAttribute("data-term-block", this.blockId);
+                    }
+                    this.scrollbarStyleEl.textContent = `[data-term-block="${this.blockId}"]::-webkit-scrollbar { width: ${sbWidth}px !important; }`;
+                } else if (this.scrollbarStyleEl) {
+                    this.scrollbarStyleEl.textContent = "";
+                }
+            } else if (this.scrollbarStyleEl) {
+                this.scrollbarStyleEl.textContent = "";
+            }
         }
         if (this.terminal.rows !== dims.rows || this.terminal.cols !== dims.cols) {
             core?._renderService?.clear?.();

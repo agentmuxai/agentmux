@@ -126,26 +126,6 @@
         }
     }
 
-    // The 18px width is the width of the scrollbar plus the margin
-    .term-scrollbar-show-observer {
-        z-index: calc(var(--zindex-xterm-viewport-overlay) - 1);
-        position: absolute;
-        top: 0;
-        right: 0;
-        height: 100%;
-        width: 18px;
-    }
-
-    .term-scrollbar-hide-observer {
-        z-index: calc(var(--zindex-xterm-viewport-overlay) + 1);
-        display: none;
-        position: absolute;
-        top: 0;
-        left: 0;
-        height: 100%;
-        width: calc(100% - 18px);
-    }
-
     .terminal {
         // WebView2 renders the native textarea caret even at opacity:0
         // when the terminal background is transparent.
@@ -165,20 +145,23 @@
             overflow-y: auto;
 
             &::-webkit-scrollbar {
+                // Base width — customFit injects a per-terminal <style> rule that overrides
+                // this with 14px + sub-cell remainder so text columns tile flush to the
+                // scrollbar's left edge. cursor:pointer makes the whole track area show a
+                // hand cursor instead of the inherited text I-beam.
                 width: 14px;
                 height: 14px;
+                cursor: pointer;
             }
 
-            // Transparent track: the scrollbar lane (reserved only while the scrollbar is
-            // visible — see TermWrap.customFit) shows the terminal background instead of a
-            // contrasting strip. The thumb paints on top on hover.
+            // Transparent track so the scrollbar lane shows the terminal background.
             &::-webkit-scrollbar-track {
                 background-color: transparent;
+                cursor: pointer;
             }
 
             &::-webkit-scrollbar-thumb {
                 cursor: pointer;
-                display: none;
                 background-color: var(--scrollbar-thumb-color);
                 border-radius: 0;
                 margin: 0 1px 0 1px;
@@ -190,12 +173,6 @@
                 &:active {
                     background-color: var(--scrollbar-thumb-active-color);
                 }
-            }
-        }
-
-        &:hover {
-            .xterm-viewport::-webkit-scrollbar-thumb {
-                display: block;
             }
         }
     }
