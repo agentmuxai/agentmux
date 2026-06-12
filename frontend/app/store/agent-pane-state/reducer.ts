@@ -483,7 +483,7 @@ export function update(
                 output: state.turnTokens?.output ?? 0,
             };
             const nextState = bumpEvent(
-                { ...state, turnTokens: next },
+                { ...state, turnTokens: next, lastContextTokens: command.input },
                 nowMs,
                 0,
             );

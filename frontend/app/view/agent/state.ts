@@ -58,7 +58,7 @@ export interface AgentAtoms {
     /**
      * Total input-token count from the last message_start event — equals
      * the full context fill (all conversation history) sent to the model
-     * on that turn. Resets to null on TurnEnd — live only during a turn.
+     * on that turn. Persists through TurnEnd; clears on TurnReset (session wipe).
      */
     contextTokensAtom: SignalPair<number | null>;
     /**

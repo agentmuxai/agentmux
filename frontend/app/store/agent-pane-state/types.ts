@@ -230,6 +230,16 @@ export interface AgentPaneState {
      * SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
      */
     composerUnreadCount: number;
+
+    /**
+     * Input-token count from the most recent message_start — the full
+     * context fill sent to the model on that turn. Unlike `turnTokens`,
+     * this field is NOT cleared at TurnEnd so the context-window bar
+     * stays visible between turns showing the last known fill level.
+     * Cleared only when the pane is created (initialState) or on an
+     * explicit TurnReset (session wipe).
+     */
+    lastContextTokens: number | null;
 }
 
 export const initialState = (agentId: string): AgentPaneState => ({
@@ -237,6 +247,7 @@ export const initialState = (agentId: string): AgentPaneState => ({
     sessionStats: null,
     currentTool: null,
     turnTokens: null,
+    lastContextTokens: null,
     pending: [],
     initPhase: { kind: "InitPending" },
     lastEventMs: null,
