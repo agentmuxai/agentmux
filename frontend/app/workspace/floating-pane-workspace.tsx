@@ -165,6 +165,14 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         let macSetPosInFlight = false;
         let macPendingPos: { x: number; y: number } | null = null;
         let macMouseDownId = 0;
+        // macStartupId is a separate counter used solely to guard the async
+        // get_window_position startup race (so that a mouseup arriving before
+        // the promise resolves doesn't arm dragging for a new drag). It is
+        // incremented on both mousedown and mouseup. macMouseDownId, by
+        // contrast, is only incremented on mousedown so that macSendPos's drain
+        // check (dragId === macMouseDownId) remains valid after mouseup and
+        // the pending position is never silently discarded mid-drag.
+        let macStartupId = 0;
         // redockInProgress is a signal at component scope (above this onMount)
         // so createEffect re-runs when it changes.
         // Sentinel for the listenEvent .then() race: if the component unmounts
@@ -346,7 +354,9 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 // isn't available in dev builds. Use JS-driven get/set_window_position
                 // polling instead (restores the pre-PR #1276 macOS behaviour).
                 macMouseDownId += 1;
-                const myId = macMouseDownId;
+                macStartupId += 1;
+                const myDragId = macMouseDownId;
+                const myStartupId = macStartupId;
                 macClickScreenX = e.screenX;
                 macClickScreenY = e.screenY;
                 macLatestScreenX = e.screenX;
@@ -355,7 +365,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 pendingRedockCoords = null;
                 invokeCommand<{ x: number; y: number }>("get_window_position", { label })
                     .then((pos) => {
-                        if (myId !== macMouseDownId) return;
+                        if (myStartupId !== macStartupId) return;
                         macInitWinX = pos.x;
                         macInitWinY = pos.y;
                         const movedDuringIPC =
@@ -367,7 +377,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                             hasMoved = true;
                             const scale = posScale();
                             macSendPos(
-                                myId,
+                                myDragId,
                                 macInitWinX + Math.round((macLatestScreenX - macClickScreenX) * scale),
                                 macInitWinY + Math.round((macLatestScreenY - macClickScreenY) * scale),
                             );
@@ -392,7 +402,13 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         const onMouseUp = (e: MouseEvent) => {
             // Invalidate any in-flight macOS get_window_position IPC so a race
             // where mouseup fires before the promise resolves doesn't arm dragging.
-            if (isMacOS()) macMouseDownId += 1;
+            // We increment macStartupId (not macMouseDownId) here so that the
+            // macSendPos drain's `dragId === macMouseDownId` check stays valid
+            // after mouseup — incrementing macMouseDownId here would cause
+            // macPendingPos to be silently discarded for any in-flight
+            // set_window_position IPC, leaving the floater at the penultimate
+            // drag position.
+            if (isMacOS()) macStartupId += 1;
             if (!dragging) return;
             dragging = false;
             invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
