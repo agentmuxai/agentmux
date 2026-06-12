@@ -411,26 +411,21 @@ where
                 // If `pending` starts with `\r`, it is a leading-\r spinner
                 // frame. Stash it in the CR override slot so the next read
                 // prepends it and collapse_cr can overwrite it with the new
-                // frame. Flush any prior held frame first.
+                // frame.
                 //
                 // If `pending` ends with `\r` (but not starts), hold it —
                 // a following `\n` will form a complete CRLF.
                 //
                 // Non-`\r` partial output (printf 'Building...') flushes here.
+                //
+                // Note: pending_cr_override is always None here. The override is
+                // set only by take(&mut pending), which empties pending. The only
+                // way to reach this branch with non-empty pending is after an
+                // Ok(Some) that already consumed and cleared the override.
                 if !pending.is_empty() {
                     if pending.first() == Some(&b'\r') {
-                        if let Some(prior) = pending_cr_override.take() {
-                            if tx.send(LineEvent { kind, bytes: prior }).await.is_err() {
-                                return;
-                            }
-                        }
                         pending_cr_override = Some(std::mem::take(&mut pending));
                     } else if pending.last() != Some(&b'\r') {
-                        if let Some(held) = pending_cr_override.take() {
-                            if tx.send(LineEvent { kind, bytes: held }).await.is_err() {
-                                return;
-                            }
-                        }
                         if tx
                             .send(LineEvent { kind, bytes: std::mem::take(&mut pending) })
                             .await
@@ -821,18 +816,25 @@ fn pty_reader_loop(
                 // Non-`\r` partial output (printf 'Building...') flushes here.
                 if !pending.is_empty() {
                     if pending.first() == Some(&b'\r') {
-                        if let Some(prior) = pending_cr_override.take() {
-                            if tx.blocking_send(LineEvent { kind, bytes: prior }).is_err() {
-                                return;
-                            }
-                        }
+                        // Leading-\r spinner frame: stash in the override slot so
+                        // the next Ok(Some) prepends it and collapse_cr can overwrite
+                        // it with the incoming frame.
+                        //
+                        // Note: pending_cr_override is always None here. The override
+                        // is set only by take(&mut pending), which empties pending.
+                        // The only way to reach this branch with non-empty pending is
+                        // after an Ok(Some) that already consumed and cleared the
+                        // override. No flush-prior is needed or reachable.
+                        //
+                        // Non-\r-prefixed first frames (e.g. a tool that starts with
+                        // "frame1" then switches to "\rframe2" overwrites) are already
+                        // flushed as regular LineEvents by the time the \r-prefixed
+                        // frames arrive; they cannot be retroactively collapsed.
                         pending_cr_override = Some(std::mem::take(&mut pending));
                     } else if pending.last() != Some(&b'\r') {
-                        if let Some(held) = pending_cr_override.take() {
-                            if tx.blocking_send(LineEvent { kind, bytes: held }).is_err() {
-                                return;
-                            }
-                        }
+                        // Non-spinner partial output (e.g. "Building..."): flush now.
+                        // pending_cr_override is always None here for the same reason
+                        // as above — no flush-prior needed.
                         if tx.blocking_send(LineEvent {
                             kind,
                             bytes: std::mem::take(&mut pending),
@@ -1074,8 +1076,10 @@ fn collapse_cr(pending: &mut Vec<u8>) {
 /// flushed at the next non-`\r` line or EOF. Consecutive spinner frames
 /// therefore appear as sequential published chunks in the live log.
 ///
-/// The model-visible buffer (`buffered`) receives every raw event byte
-/// unchanged so the full output is preserved for the model.
+/// The model-visible buffer (`buffered`) receives the post-collapse LineEvent
+/// bytes. Intermediate spinner frames collapsed by `pending_cr_override` never
+/// become LineEvents and are not present in `buffered`; the model sees only the
+/// surviving final frame for each overwrite sequence.
 fn spawn_publisher_loop(
     args: &Args,
     wps: Option<WpsClient>,
