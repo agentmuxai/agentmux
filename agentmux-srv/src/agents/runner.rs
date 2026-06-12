@@ -25,6 +25,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot};
 
+use super::failure::classify;
 use super::translator::claude::ClaudeTranslator;
 use super::translator::Translator as _;
 use super::types::{AgentEvent, AgentRef, AgentRunResult, AgentTask};
@@ -143,45 +144,40 @@ pub(crate) async fn run_agent_with_bin(
 
     let instance_id = format!("drone-agent-{}", uuid::Uuid::new_v4());
     let (result_tx, result_rx) = oneshot::channel();
+    // Hand the captured stderr back to `drain_and_collect` so a failed
+    // run reports the real cause (rate-limit / auth / OOM) instead of a
+    // bare exit code. See
+    // `docs/specs/SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11.md`.
+    let (stderr_tx, stderr_rx) = oneshot::channel::<Vec<u8>>();
 
-    // Drain stderr to EOF in the background so the child's pipe
-    // never fills (a half-drained pipe causes the child to block
-    // on stderr writes, which can stall the whole run). Capped at
-    // STDERR_CAP bytes — beyond that, additional bytes are read
-    // and dropped on the floor so the child can keep writing.
-    // Phase 2 surfaces stderr as a `dronerun:<id>` diagnostic
-    // event; for now it's captured locally and discarded.
-    // Reagent P2 on PR #834.
+    // Drain stderr to EOF in the background so the child's pipe never
+    // fills (a half-drained pipe blocks the child on stderr writes and
+    // can stall the whole run). We keep a rolling *tail* — the last
+    // STDERR_TAIL_CAP bytes — because the CLI's terminal error line
+    // (rate-limit / auth / OOM) lands at the END of stderr; a capped
+    // prefix would drop exactly the line the classifier needs. On EOF
+    // the tail is handed to the collector via `stderr_tx`.
+    // (codex P2 on #1353: keep the tail, not a prefix.)
     tokio::spawn(async move {
-        const STDERR_CAP: usize = 64 * 1024;
-        let mut buf = Vec::with_capacity(4096);
+        const STDERR_TAIL_CAP: usize = 64 * 1024;
+        let mut buf: Vec<u8> = Vec::with_capacity(8192);
         let mut reader = BufReader::new(stderr);
-        let mut sink = [0u8; 4096];
-        // Read until EOF, capping the kept prefix at STDERR_CAP.
+        let mut sink = [0u8; 8192];
         loop {
-            if buf.len() < STDERR_CAP {
-                let space = STDERR_CAP - buf.len();
-                let take = space.min(sink.len());
-                match reader.read(&mut sink[..take]).await {
-                    Ok(0) => break,
-                    Ok(n) => buf.extend_from_slice(&sink[..n]),
-                    Err(_) => break,
-                }
-            } else {
-                // Beyond cap — keep draining but discard.
-                match reader.read(&mut sink).await {
-                    Ok(0) => break,
-                    Ok(_) => {}
-                    Err(_) => break,
-                }
+            match reader.read(&mut sink).await {
+                Ok(0) => break,
+                Ok(n) => append_capped_tail(&mut buf, &sink[..n], STDERR_TAIL_CAP),
+                Err(_) => break,
             }
         }
-        // buf currently dropped; Phase 2 will plumb it to the broker.
-        let _ = buf;
+        // Trim to exactly the last CAP bytes. If the receiver is gone
+        // (run succeeded — nobody needs stderr), the send just drops.
+        trim_to_tail(&mut buf, STDERR_TAIL_CAP);
+        let _ = stderr_tx.send(buf);
     });
 
     tokio::spawn(async move {
-        let result = drain_and_collect(stdout, &tx, &mut child).await;
+        let result = drain_and_collect(stdout, &tx, &mut child, stderr_rx).await;
         let _ = result_tx.send(result);
     });
 
@@ -203,6 +199,7 @@ async fn drain_and_collect(
     stdout: tokio::process::ChildStdout,
     tx: &mpsc::UnboundedSender<AgentEvent>,
     child: &mut tokio::process::Child,
+    stderr_rx: oneshot::Receiver<Vec<u8>>,
 ) -> Result<AgentRunResult, String> {
     let result = drain_async_reader(BufReader::new(stdout), tx).await;
 
@@ -210,20 +207,90 @@ async fn drain_and_collect(
     let exit = child.wait().await.map_err(|e| format!("wait: {e}"))?;
 
     match result {
-        Ok(mut accumulated) if exit.success() => {
-            // If the stream never emitted Done (e.g. claude died
-            // mid-run), surface a synthetic error rather than
-            // returning empty defaults silently.
-            if accumulated.response.is_empty() && accumulated.transcript.is_empty() {
-                return Err("claude exited 0 but stream produced no Done event".to_string());
+        Ok(mut accumulated) => {
+            // A run is a failure if the process exited non-zero OR claude
+            // reported an error on stdout (a terminal error `result`
+            // frame) even while exiting 0 — otherwise downstream blocks
+            // could treat a failed run as successful. (codex P1 #1353.)
+            let reported_error = accumulated.error_frame.take();
+            if exit.success() && reported_error.is_none() {
+                // Genuine success — but a stream that produced nothing is
+                // itself a (classified) failure, not a silent empty result.
+                if accumulated.response.is_empty() && accumulated.transcript.is_empty() {
+                    return Err(
+                        explain_failure(exit.code(), exit_signal(&exit), None, stderr_rx).await,
+                    );
+                }
+                accumulated.transcript.shrink_to_fit();
+                return Ok(accumulated);
             }
-            accumulated.transcript.shrink_to_fit();
-            Ok(accumulated)
+            // Non-zero exit, or a stdout-reported error on exit 0: classify
+            // from the exit status + result frame + captured stderr so the
+            // caller sees a real cause, not "exited with status N".
+            Err(explain_failure(exit.code(), exit_signal(&exit), reported_error, stderr_rx).await)
         }
-        Ok(_) => Err(format!(
-            "claude exited with status {exit} but stream emitted no error"
-        )),
-        Err(e) => Err(e),
+        // Stream read error: still enrich with the exit/stderr cause.
+        Err(e) => {
+            let cause = explain_failure(exit.code(), exit_signal(&exit), None, stderr_rx).await;
+            Err(format!("{cause}\n(stream read: {e})"))
+        }
+    }
+}
+
+/// Await the captured stderr, classify the exit, log a warning, and
+/// render the human-readable explanation that becomes the run's
+/// terminal error string. See
+/// `docs/specs/SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11.md`.
+async fn explain_failure(
+    exit_code: Option<i32>,
+    signal: Option<i32>,
+    result_frame: Option<serde_json::Value>,
+    stderr_rx: oneshot::Receiver<Vec<u8>>,
+) -> String {
+    let bytes = stderr_rx.await.unwrap_or_default();
+    let stderr = String::from_utf8_lossy(&bytes);
+    let failure = classify(exit_code, signal, &stderr, result_frame.as_ref());
+    tracing::warn!(
+        code = ?failure.code,
+        exit_code = ?exit_code,
+        signal = ?signal,
+        retryable = failure.retryable,
+        "agent run failed: {}",
+        failure.title,
+    );
+    failure.explain()
+}
+
+/// Extract the terminating signal (Unix only). On non-Unix there is no
+/// signal concept, so this is always `None`.
+#[cfg(unix)]
+fn exit_signal(status: &std::process::ExitStatus) -> Option<i32> {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal()
+}
+
+#[cfg(not(unix))]
+fn exit_signal(_status: &std::process::ExitStatus) -> Option<i32> {
+    None
+}
+
+/// Append `chunk` to a rolling tail buffer, compacting to the last
+/// `cap` bytes whenever it grows past `2 * cap` (amortized O(1)). The
+/// exact final trim happens at EOF via [`trim_to_tail`]. Keeping the
+/// *tail* (not a prefix) matters because the CLI's terminal error line
+/// is at the end of stderr.
+fn append_capped_tail(buf: &mut Vec<u8>, chunk: &[u8], cap: usize) {
+    buf.extend_from_slice(chunk);
+    if buf.len() > cap.saturating_mul(2) {
+        trim_to_tail(buf, cap);
+    }
+}
+
+/// Drop all but the last `cap` bytes of `buf`.
+fn trim_to_tail(buf: &mut Vec<u8>, cap: usize) {
+    if buf.len() > cap {
+        let excess = buf.len() - cap;
+        buf.drain(0..excess);
     }
 }
 
@@ -256,6 +323,15 @@ pub(crate) async fn drain_async_reader<R: tokio::io::AsyncBufRead + Unpin>(
         let Ok(frame) = serde_json::from_str::<serde_json::Value>(trimmed) else {
             continue;
         };
+        // Capture a terminal *error* result frame so the collector can
+        // fail the run even when claude reports the error on stdout and
+        // exits 0 (the translator still emits a hollow `Done`).
+        // codex P1 on #1353.
+        if frame.get("type").and_then(|v| v.as_str()) == Some("result")
+            && super::failure::is_error_result_frame(&frame)
+        {
+            accumulated.error_frame = Some(frame.clone());
+        }
         for event in translator.translate(frame) {
             // Capture terminal values before forwarding so a closed
             // receiver doesn't lose the accumulated result.
@@ -485,6 +561,220 @@ mod tests {
             Err(other) => panic!("expected Spawn error, got: {other}"),
             Ok(_) => panic!("expected Spawn error, got Ok(handle)"),
         }
+    }
+
+    /// End-to-end (Unix): a stub binary that writes a rate-limit line to
+    /// stderr and exits 1 must produce a *classified* failure naming the
+    /// cause and including the stderr tail — not a bare "exit 1".
+    /// Exercises G1 (stderr retained) + G2 (classify) of
+    /// SPEC_AGENT_FAILURE_DIAGNOSTICS.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn classified_failure_surfaces_cause_and_stderr() {
+        use std::io::Write as _;
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let path = std::env::temp_dir()
+            .join(format!("amux-stub-claude-{}.sh", uuid::Uuid::new_v4()));
+        {
+            let mut f = std::fs::File::create(&path).unwrap();
+            writeln!(f, "#!/bin/sh").unwrap();
+            writeln!(
+                f,
+                "echo 'API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited' >&2"
+            )
+            .unwrap();
+            writeln!(f, "exit 1").unwrap();
+            let mut perms = std::fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&path, perms).unwrap();
+        }
+
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let handle = run_agent_with_bin(
+            path.to_str().unwrap(),
+            AgentRef::default(),
+            AgentTask {
+                prompt: "hi".to_string(),
+                context: serde_json::Map::new(),
+                max_turns: None,
+            },
+            tx,
+        )
+        .await
+        .expect("spawn ok");
+
+        let err = handle
+            .final_result
+            .await
+            .expect("oneshot ok")
+            .expect_err("run should fail");
+
+        assert!(
+            err.contains("Rate-limited"),
+            "explanation should name the class; got: {err}"
+        );
+        assert!(
+            err.to_lowercase().contains("rate limited"),
+            "stderr tail should be included; got: {err}"
+        );
+        assert!(
+            err.contains("retryable"),
+            "rate-limit is retryable; got: {err}"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// End-to-end (Unix): stderr larger than the tail cap with the real
+    /// error on the LAST line must still classify correctly — the
+    /// rolling tail keeps the end, not a prefix. Regression test for
+    /// codex P2 on #1353.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn classified_failure_reads_error_past_stderr_cap() {
+        use std::io::Write as _;
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let path = std::env::temp_dir()
+            .join(format!("amux-stub-claude-big-{}.sh", uuid::Uuid::new_v4()));
+        {
+            let mut f = std::fs::File::create(&path).unwrap();
+            writeln!(f, "#!/bin/sh").unwrap();
+            // ~70 KiB of filler (> 64 KiB tail cap), THEN the real error.
+            writeln!(f, "head -c 70000 /dev/zero | tr '\\0' x >&2").unwrap();
+            writeln!(
+                f,
+                "printf '\\nAPI Error: Server is temporarily limiting requests (not your usage limit) Rate limited\\n' >&2"
+            )
+            .unwrap();
+            writeln!(f, "exit 1").unwrap();
+            let mut perms = std::fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&path, perms).unwrap();
+        }
+
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let handle = run_agent_with_bin(
+            path.to_str().unwrap(),
+            AgentRef::default(),
+            AgentTask {
+                prompt: "hi".to_string(),
+                context: serde_json::Map::new(),
+                max_turns: None,
+            },
+            tx,
+        )
+        .await
+        .expect("spawn ok");
+
+        let err = handle
+            .final_result
+            .await
+            .expect("oneshot ok")
+            .expect_err("run should fail");
+
+        assert!(
+            err.contains("Rate-limited"),
+            "must classify from the tail past the cap; got: {}",
+            err.chars().take(160).collect::<String>()
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rolling_tail_keeps_last_bytes_past_cap() {
+        let cap = 8;
+        let mut buf = Vec::new();
+        for i in 0..100u8 {
+            append_capped_tail(&mut buf, &[i], cap);
+            assert!(buf.len() <= cap * 2, "rolling buffer must stay bounded");
+        }
+        trim_to_tail(&mut buf, cap);
+        assert_eq!(buf, vec![92, 93, 94, 95, 96, 97, 98, 99]);
+    }
+
+    #[test]
+    fn rolling_tail_single_large_chunk() {
+        let cap = 4;
+        let mut buf = Vec::new();
+        append_capped_tail(&mut buf, b"abcdefghij", cap);
+        trim_to_tail(&mut buf, cap);
+        assert_eq!(&buf, b"ghij");
+    }
+
+    #[tokio::test]
+    async fn drain_captures_error_result_frame() {
+        // An error result frame on stdout must be captured so the
+        // collector can fail the run even on exit 0. codex P1 #1353.
+        let bytes =
+            b"{\"type\":\"result\",\"is_error\":true,\"subtype\":\"error_during_execution\",\"error\":{\"message\":\"overloaded_error\"}}\n"
+                .to_vec();
+        let (mut w, r) = tokio::io::duplex(4096);
+        tokio::spawn(async move {
+            w.write_all(&bytes).await.unwrap();
+            w.shutdown().await.unwrap();
+        });
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let result = drain_async_reader(BufReader::new(r), &tx)
+            .await
+            .expect("drain ok");
+        assert!(
+            result.error_frame.is_some(),
+            "error result frame should be captured"
+        );
+    }
+
+    /// End-to-end (Unix): claude can report an error on stdout and still
+    /// exit 0; the runner must NOT treat that as success. codex P1 #1353.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stdout_error_result_with_exit_zero_is_a_failure() {
+        use std::io::Write as _;
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let path = std::env::temp_dir()
+            .join(format!("amux-stub-claude-okerr-{}.sh", uuid::Uuid::new_v4()));
+        {
+            let mut f = std::fs::File::create(&path).unwrap();
+            writeln!(f, "#!/bin/sh").unwrap();
+            // Emit an error result frame on stdout, then exit 0. The JSON
+            // lives in a `let` so its braces are data, not writeln! format
+            // placeholders (no escaping, no print_literal lint).
+            let frame = r#"{"type":"result","is_error":true,"subtype":"error_during_execution","error":{"message":"overloaded_error: upstream busy"}}"#;
+            writeln!(f, "echo '{frame}'").unwrap();
+            writeln!(f, "exit 0").unwrap();
+            let mut perms = std::fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&path, perms).unwrap();
+        }
+
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let handle = run_agent_with_bin(
+            path.to_str().unwrap(),
+            AgentRef::default(),
+            AgentTask {
+                prompt: "hi".to_string(),
+                context: serde_json::Map::new(),
+                max_turns: None,
+            },
+            tx,
+        )
+        .await
+        .expect("spawn ok");
+
+        let err = handle
+            .final_result
+            .await
+            .expect("oneshot ok")
+            .expect_err("stdout-reported error with exit 0 must fail");
+        assert!(
+            err.to_lowercase().contains("overloaded"),
+            "should classify the stdout error; got: {err}"
+        );
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
