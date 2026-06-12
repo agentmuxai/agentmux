@@ -40,8 +40,11 @@ use crate::backend::storage::store::Store;
 use crate::backend::obj::{self, MetaMapType};
 use crate::backend::wps;
 
-/// Channel buffer size for shell input (matches Go's 32).
-const SHELL_INPUT_CH_SIZE: usize = 32;
+/// Channel buffer size for shell input.
+/// 256 slots prevents burst-drop on large pastes arriving faster than the
+/// PTY write loop drains. Original Go value was 32 — too small for multi-chunk
+/// pastes.
+const SHELL_INPUT_CH_SIZE: usize = 256;
 
 /// Detect the best available interactive shell on Windows.
 ///

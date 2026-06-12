@@ -19,6 +19,8 @@ import {
     getConnStatusAtom,
     getOverrideConfigAtom,
     getSettingsKeyAtom,
+    pushNotification,
+    removeNotificationById,
     setIsTermMultiInput,
     useBlockAtom,
     WOS,
@@ -340,14 +342,57 @@ class TermViewModel implements ViewModel {
         }
     }
 
+    // Max bytes per blockinput WebSocket frame. Keeps individual frames small
+    // enough to avoid PTY write-buffer saturation on Windows ConPTY and large
+    // single-write failures. Pastes above this threshold are split and sent
+    // with a small inter-chunk delay to avoid flooding the backend channel.
+    static readonly PASTE_CHUNK_BYTES = 4096;
+    static readonly PASTE_CHUNK_DELAY_MS = 5;
+
     sendDataToController(data: string) {
-        const inputdata64 = stringToBase64(data);
         // Use the blockinput wscommand, not the controllerinput RPC: blockinput
         // is processed inline & synchronously in the WS receive loop, so
         // consecutive keystrokes reach the PTY in TCP order. The RPC path is
         // dispatched concurrently by the engine and can reorder fast typing.
-        const cmd: BlockInputWSCommand = { wscommand: "blockinput", blockid: this.blockId, inputdata64 };
-        sendWSCommand(cmd);
+        const encoded = new TextEncoder().encode(data);
+        if (encoded.length <= TermViewModel.PASTE_CHUNK_BYTES) {
+            const inputdata64 = stringToBase64(data);
+            const cmd: BlockInputWSCommand = { wscommand: "blockinput", blockid: this.blockId, inputdata64 };
+            sendWSCommand(cmd);
+        } else {
+            // Large input (paste): send in chunks with inter-chunk delay so the
+            // backend input channel and PTY write buffer are never overwhelmed.
+            void this.sendDataChunked(encoded);
+        }
+    }
+
+    private async sendDataChunked(encoded: Uint8Array) {
+        const chunkSize = TermViewModel.PASTE_CHUNK_BYTES;
+        const decoder = new TextDecoder();
+        const kb = Math.round(encoded.length / 1024);
+        const toastId = `paste-progress-${this.blockId}`;
+        if (kb >= 8) {
+            pushNotification({
+                id: toastId,
+                icon: "clipboard",
+                title: "Pasting…",
+                message: `Sending ${kb} KB in chunks`,
+                timestamp: new Date().toISOString(),
+                type: "info",
+            });
+        }
+        for (let offset = 0; offset < encoded.length; offset += chunkSize) {
+            const slice = encoded.slice(offset, offset + chunkSize);
+            const inputdata64 = stringToBase64(decoder.decode(slice));
+            const cmd: BlockInputWSCommand = { wscommand: "blockinput", blockid: this.blockId, inputdata64 };
+            sendWSCommand(cmd);
+            if (offset + chunkSize < encoded.length) {
+                await new Promise<void>((r) => setTimeout(r, TermViewModel.PASTE_CHUNK_DELAY_MS));
+            }
+        }
+        if (kb >= 8) {
+            removeNotificationById(toastId);
+        }
     }
 
     triggerRestartAtom() {
