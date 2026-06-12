@@ -35,18 +35,11 @@ pub struct ContainerManager {
 
 struct ContainerManagerInner {
     docker: Docker,
-    /// container_name → running-state cache.
-    state: Mutex<HashMap<String, ContainerState>>,
     /// Per-container serialization lock: prevents concurrent ensure_running calls
-    /// for the same container from both seeing None and both attempting create_container
-    /// (which would fail with a 409 name-conflict on the second caller).
+    /// for the same container from both seeing "not found" in Docker and both
+    /// attempting create_container (which would fail with a 409 name-conflict
+    /// on the second caller).
     ensure_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum ContainerState {
-    Running,
-    Stopped,
 }
 
 /// Exec session handle for a single turn.
@@ -81,7 +74,6 @@ impl ContainerManager {
         Ok(Self {
             inner: Arc::new(ContainerManagerInner {
                 docker,
-                state: Mutex::new(HashMap::new()),
                 ensure_locks: Mutex::new(HashMap::new()),
             }),
         })
@@ -99,9 +91,10 @@ impl ContainerManager {
     /// - If it exists but stopped: starts it.
     /// - If it doesn't exist: creates and starts it.
     ///
-    /// Concurrent calls for the **same** `container_name` are serialized via a
-    /// per-container mutex so only one caller races Docker. Concurrent calls for
-    /// **different** containers proceed in parallel.
+    /// Always queries Docker (no in-memory cache) so externally killed containers
+    /// are detected. Concurrent calls for the **same** `container_name` are
+    /// serialized via a per-container mutex. Concurrent calls for **different**
+    /// containers proceed in parallel.
     pub async fn ensure_running(
         &self,
         container_name: &str,
@@ -109,18 +102,10 @@ impl ContainerManager {
         volumes: &[String],
         env_vars: &[(String, String)],
     ) -> Result<(), ContainerError> {
-        // Fast path: cache hit (no Docker round-trip needed).
-        {
-            let state = self.inner.state.lock().await;
-            if state.get(container_name) == Some(&ContainerState::Running) {
-                return Ok(());
-            }
-        }
-
         // Acquire the per-container serialization lock before touching Docker.
-        // This closes the TOCTOU window: two concurrent callers for the same
-        // not-yet-created container both miss the cache, but the second one
-        // blocks here until the first finishes, then finds the cache warm.
+        // Concurrent callers for the same container_name queue here; once the
+        // first caller completes, the second finds the container already running
+        // via the Docker query below and returns immediately.
         let container_lock = {
             let mut locks = self.inner.ensure_locks.lock().await;
             locks.entry(container_name.to_string())
@@ -129,38 +114,26 @@ impl ContainerManager {
         };
         let _guard = container_lock.lock().await;
 
-        // Re-check cache after acquiring the per-container lock (another
-        // caller may have completed between the fast-path miss and here).
-        {
-            let state = self.inner.state.lock().await;
-            if state.get(container_name) == Some(&ContainerState::Running) {
-                return Ok(());
-            }
-        }
-
-        // Always query Docker rather than trusting the cache — the cache can go
-        // stale if the container is killed externally.
+        // Always query Docker — do not rely on an in-memory cache. The container
+        // can be stopped or removed externally (e.g. `docker rm -f`), and a
+        // stale cache entry would cause ensure_running to silently no-op while
+        // a subsequent exec call fails.
         let existing = self.find_container(container_name).await?;
 
         match existing {
             Some(status) if status == "running" => {
-                let mut state = self.inner.state.lock().await;
-                state.insert(container_name.to_string(), ContainerState::Running);
+                // Already running — nothing to do.
             }
             Some(_) => {
-                // Exists but stopped — start it
+                // Exists but stopped — start it.
                 self.inner.docker
                     .start_container(container_name, None::<StartContainerOptions<String>>)
                     .await?;
-                let mut state = self.inner.state.lock().await;
-                state.insert(container_name.to_string(), ContainerState::Running);
                 tracing::info!(container = container_name, "restarted stopped container");
             }
             None => {
-                // Create and start
+                // Create and start.
                 self.create_and_start(container_name, image, volumes, env_vars).await?;
-                let mut state = self.inner.state.lock().await;
-                state.insert(container_name.to_string(), ContainerState::Running);
                 tracing::info!(container = container_name, image = image, "created and started container");
             }
         }
@@ -211,8 +184,6 @@ impl ContainerManager {
         self.inner.docker
             .stop_container(container_name, Some(StopContainerOptions { t: timeout_secs }))
             .await?;
-        let mut state = self.inner.state.lock().await;
-        state.insert(container_name.to_string(), ContainerState::Stopped);
         tracing::info!(container = container_name, "stopped container");
         Ok(())
     }
@@ -226,8 +197,6 @@ impl ContainerManager {
                 ..Default::default()
             }))
             .await?;
-        let mut state = self.inner.state.lock().await;
-        state.remove(container_name);
         tracing::info!(container = container_name, "removed container");
         Ok(())
     }
@@ -269,24 +238,17 @@ impl ContainerManager {
             .map(|(k, v)| format!("{k}={v}"))
             .collect();
 
-        // Parse volume specs: "source:target" or "source:target:options"
-        // Named volumes (no path separator in source) are treated as Docker named volumes;
-        // paths starting with / are bind mounts.
         let mounts: Vec<Mount> = volumes.iter().filter_map(|spec| {
-            let parts: Vec<&str> = spec.splitn(3, ':').collect();
-            if parts.len() < 2 {
+            let (source, target, read_only) = parse_volume_spec(spec)?;
+            if target.is_empty() {
                 tracing::warn!(spec = %spec, "ignoring malformed volume spec (expected source:target)");
                 return None;
             }
-            let source = parts[0];
-            let target = parts[1];
-            let read_only = parts.get(2).map(|o| o.contains("ro")).unwrap_or(false);
-            let mount_type = if source.starts_with('/') || source.starts_with('~') ||
-                             source.len() > 1 && source.chars().nth(1) == Some(':') {
-                // Absolute path → bind mount
+            let mount_type = if source.starts_with('/') || source.starts_with('~')
+                || (source.len() >= 2 && source.as_bytes()[1] == b':')
+            {
                 MountTypeEnum::BIND
             } else {
-                // Name without path → named volume
                 MountTypeEnum::VOLUME
             };
             Some(Mount {
@@ -315,8 +277,9 @@ impl ContainerManager {
         let config: Config<String> = Config {
             image: Some(image.to_string()),
             env: if env.is_empty() { None } else { Some(env) },
-            // Keep container alive between turns — entrypoint keeps process running.
-            // The agent-claude image uses `tini` as PID 1 so SIGTERM routes correctly.
+            // Keep container alive between turns — idle PID 1 (`sleep infinity`
+            // via tini) stays running until `docker stop`. Agent turns run via
+            // `docker exec`, not as the PID-1 process.
             tty: Some(false),
             open_stdin: Some(true),
             host_config: Some(HostConfig {
@@ -357,6 +320,44 @@ pub fn container_name_for_slug(slug: &str) -> String {
     format!("agentmux-{slug}")
 }
 
+/// Parse a Docker volume spec into `(source, target, read_only)`.
+///
+/// Format: `source:target` or `source:target:options`.
+///
+/// Handles Windows drive-letter bind paths (e.g. `C:\Users\me\repo:/workspace:ro`)
+/// by treating the drive-letter colon (`X:`) as part of the source path, not as
+/// the source/target separator. A plain `splitn(3, ':')` would split `C:\path`
+/// into `C` and `\path`, losing the drive letter.
+///
+/// Returns `None` for malformed specs (no target separator found).
+fn parse_volume_spec(spec: &str) -> Option<(&str, &str, bool)> {
+    let bytes = spec.as_bytes();
+
+    // Detect Windows drive-letter prefix: single ASCII letter followed by ':\'  or ':/'
+    let (source, rest) = if bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/')
+    {
+        // Windows path: skip the drive colon and split on the next ':'.
+        let tail = &spec[2..]; // starts at '\' or '/'
+        let pos = tail.find(':')?;
+        (&spec[..2 + pos], &tail[pos + 1..])
+    } else {
+        let pos = spec.find(':')?;
+        (&spec[..pos], &spec[pos + 1..])
+    };
+
+    // Split target from optional options.
+    let (target, options) = if let Some(pos) = rest.find(':') {
+        (&rest[..pos], &rest[pos + 1..])
+    } else {
+        (rest, "")
+    };
+
+    Some((source, target, options.contains("ro")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -365,5 +366,43 @@ mod tests {
     fn test_container_name_for_slug() {
         assert_eq!(container_name_for_slug("my-agent"), "agentmux-my-agent");
         assert_eq!(container_name_for_slug("agent1"), "agentmux-agent1");
+    }
+
+    #[test]
+    fn test_parse_volume_spec_unix_named() {
+        let (src, tgt, ro) = parse_volume_spec("myvolume:/data").unwrap();
+        assert_eq!(src, "myvolume");
+        assert_eq!(tgt, "/data");
+        assert!(!ro);
+    }
+
+    #[test]
+    fn test_parse_volume_spec_unix_bind_readonly() {
+        let (src, tgt, ro) = parse_volume_spec("/host/path:/container/path:ro").unwrap();
+        assert_eq!(src, "/host/path");
+        assert_eq!(tgt, "/container/path");
+        assert!(ro);
+    }
+
+    #[test]
+    fn test_parse_volume_spec_windows_bind() {
+        // Drive-letter path must not be split at the drive colon.
+        let (src, tgt, ro) = parse_volume_spec("C:\\Users\\me\\repo:/workspace").unwrap();
+        assert_eq!(src, "C:\\Users\\me\\repo");
+        assert_eq!(tgt, "/workspace");
+        assert!(!ro);
+    }
+
+    #[test]
+    fn test_parse_volume_spec_windows_bind_readonly() {
+        let (src, tgt, ro) = parse_volume_spec("C:/Users/me/repo:/workspace:ro").unwrap();
+        assert_eq!(src, "C:/Users/me/repo");
+        assert_eq!(tgt, "/workspace");
+        assert!(ro);
+    }
+
+    #[test]
+    fn test_parse_volume_spec_malformed() {
+        assert!(parse_volume_spec("nocodon").is_none());
     }
 }
