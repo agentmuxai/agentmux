@@ -834,12 +834,16 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
     // expiry probe (PR D, spec §4.4) can publish
     // `identitybundlebindings:changed:<bundle_id>` on status change.
     let broker_ai = state.broker.clone();
+    // Container manager — None on hosts without Docker; container agents
+    // return an error to the caller rather than crashing the server.
+    let container_manager_ai = state.container_manager.clone();
     engine.register_handler(
         COMMAND_AGENT_INPUT,
         Box::new(move |data, _ctx| {
             let wstore = wstore_ai.clone();
             let auth_key = auth_key_ai.clone();
             let broker = broker_ai.clone();
+            let container_manager = container_manager_ai.clone();
             Box::pin(async move {
                 let cmd: CommandAgentInputData = serde_json::from_value(data)
                     .map_err(|e| format!("agentinput: {e}"))?;
@@ -977,10 +981,60 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     let persisted_session_id = crate::backend::obj::meta_get_string(
                         &block.meta, "agent:sessionid", "",
                     );
+
+                    // Container agent branch: replace the direct CLI spawn with
+                    // `docker exec -i <container> <cli_command> [args...]`.
+                    // For host agents this is a no-op (cli_command and cli_args
+                    // pass through unchanged).
+                    let agent_mode = crate::backend::obj::meta_get_string(
+                        &block.meta, "agentMode", "host",
+                    );
+                    let (final_command, final_args, final_working_dir) = if agent_mode == "container" {
+                        let cm = container_manager.as_deref()
+                            .ok_or_else(|| "Docker not available on this host; cannot start container agent".to_string())?;
+                        let container_image = crate::backend::obj::meta_get_string(
+                            &block.meta, "agent:container_image", "ghcr.io/agentmuxai/agent-claude:latest",
+                        );
+                        let agent_name = crate::backend::obj::meta_get_string(
+                            &block.meta, "agentName", "",
+                        );
+                        let container_name = crate::backend::container::container_name_for_slug(&agent_name);
+                        let volumes_json = crate::backend::obj::meta_get_string(
+                            &block.meta, "agent:container_volumes", "[]",
+                        );
+                        let volumes: Vec<String> = serde_json::from_str(&volumes_json).unwrap_or_default();
+
+                        // Ensure container is alive before spawning the exec subprocess.
+                        cm.ensure_running(&container_name, &container_image, &volumes, &[]).await
+                            .map_err(|e| format!("container ensure_running failed: {e}"))?;
+
+                        tracing::info!(
+                            block_id = %cmd.blockid,
+                            container = %container_name,
+                            image = %container_image,
+                            "container agent turn: docker exec -i",
+                        );
+
+                        // Build `docker exec -i [-w /path] <container> <cli_command> [args]`.
+                        // Use -i (not -t): tty allocates a PTY and corrupts NDJSON newlines.
+                        let mut docker_args = vec!["exec".to_string(), "-i".to_string()];
+                        if !working_dir.is_empty() {
+                            docker_args.push("-w".to_string());
+                            docker_args.push(working_dir.clone());
+                        }
+                        docker_args.push(container_name);
+                        docker_args.push(cli_command.clone());
+                        docker_args.extend(cli_args);
+                        // working_dir is encoded in -w flag above; do not also set on host process
+                        ("docker".to_string(), docker_args, String::new())
+                    } else {
+                        (cli_command, cli_args, working_dir)
+                    };
+
                     let config = blockcontroller::subprocess::SubprocessSpawnConfig {
-                        cli_command,
-                        cli_args,
-                        working_dir,
+                        cli_command: final_command,
+                        cli_args: final_args,
+                        working_dir: final_working_dir,
                         env_vars,
                         message: cmd.message,
                         resume_flag,

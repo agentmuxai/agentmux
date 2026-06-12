@@ -316,6 +316,12 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 meta.insert("agentName".to_string(), json!(&agent.name));
                 meta.insert("agentIcon".to_string(), json!(if agent.icon.is_empty() { "sparkles" } else { &agent.icon }));
                 meta.insert("agentMode".to_string(), json!(if agent.agent_type.is_empty() { "host" } else { &agent.agent_type }));
+                if !agent.container_image.is_empty() {
+                    meta.insert("agent:container_image".to_string(), json!(&agent.container_image));
+                }
+                if agent.container_volumes != "[]" && !agent.container_volumes.is_empty() {
+                    meta.insert("agent:container_volumes".to_string(), json!(&agent.container_volumes));
+                }
                 // Derive output format from provider ID (matches frontend providers/index.ts)
                 let output_format = match provider.id {
                     "claude" => "claude-stream-json",
@@ -457,12 +463,14 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
 fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
     let broker = state.broker.clone();
+    let container_manager = state.container_manager.clone();
 
     engine.register_handler(
         COMMAND_AGENT_SEND,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
             let broker = broker.clone();
+            let container_manager = container_manager.clone();
             Box::pin(async move {
                 let cmd: CommandAgentSendData = serde_json::from_value(data)
                     .map_err(|e| format!("agent.send: {e}"))?;
@@ -539,10 +547,38 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     let persisted_session_id = obj::meta_get_string(
                         &block.meta, "agent:sessionid", "",
                     );
+
+                    // Container agent branch — same logic as websocket.rs agentinput.
+                    let agent_mode = obj::meta_get_string(&block.meta, "agentMode", "host");
+                    let (final_command, final_args, final_working_dir) = if agent_mode == "container" {
+                        let cm = container_manager.as_deref()
+                            .ok_or_else(|| "Docker not available on this host; cannot start container agent".to_string())?;
+                        let container_image = obj::meta_get_string(
+                            &block.meta, "agent:container_image", "ghcr.io/agentmuxai/agent-claude:latest",
+                        );
+                        let agent_name = obj::meta_get_string(&block.meta, "agentName", "");
+                        let container_name = crate::backend::container::container_name_for_slug(&agent_name);
+                        let volumes_json = obj::meta_get_string(&block.meta, "agent:container_volumes", "[]");
+                        let volumes: Vec<String> = serde_json::from_str(&volumes_json).unwrap_or_default();
+                        cm.ensure_running(&container_name, &container_image, &volumes, &[]).await
+                            .map_err(|e| format!("container ensure_running failed: {e}"))?;
+                        let mut docker_args = vec!["exec".to_string(), "-i".to_string()];
+                        if !working_dir.is_empty() {
+                            docker_args.push("-w".to_string());
+                            docker_args.push(working_dir.clone());
+                        }
+                        docker_args.push(container_name);
+                        docker_args.push(cli_command.clone());
+                        docker_args.extend(cli_args);
+                        ("docker".to_string(), docker_args, String::new())
+                    } else {
+                        (cli_command, cli_args, working_dir)
+                    };
+
                     let config = blockcontroller::subprocess::SubprocessSpawnConfig {
-                        cli_command,
-                        cli_args,
-                        working_dir,
+                        cli_command: final_command,
+                        cli_args: final_args,
+                        working_dir: final_working_dir,
                         env_vars,
                         message: cmd.message,
                         resume_flag,

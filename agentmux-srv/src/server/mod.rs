@@ -119,6 +119,10 @@ pub struct AppState {
     /// an install mid-flight.
     /// See `SPEC_AGENT_INSTALL_STAGE_2026_05_17.md` §9.
     pub install_sessions: std::sync::Arc<crate::server::install_handlers::InstallSessionRegistry>,
+    /// Docker container manager for container-type agent panes (Phase 2).
+    /// `None` when Docker is not available on this host — container agents
+    /// will refuse to start rather than crashing the server.
+    pub container_manager: Option<std::sync::Arc<crate::backend::container::ContainerManager>>,
 }
 
 /// Build the Axum router with all routes, auth middleware, and CORS.

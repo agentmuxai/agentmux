@@ -847,6 +847,27 @@ async fn main() {
             crate::identity::auth_session::AuthSessionManager::new(),
         ),
         install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
+        container_manager: {
+            match crate::backend::container::ContainerManager::connect() {
+                Ok(mgr) => {
+                    // Ping is async — spawn a task; the manager is still exposed
+                    // so container agents can start even before the ping resolves.
+                    let mgr = std::sync::Arc::new(mgr);
+                    let mgr_check = mgr.clone();
+                    tokio::spawn(async move {
+                        match mgr_check.check_available().await {
+                            Ok(()) => tracing::info!("Docker daemon available — container agent panes enabled"),
+                            Err(e) => tracing::warn!(error = %e, "Docker daemon not reachable; container agent panes will fail to start"),
+                        }
+                    });
+                    Some(mgr)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Docker not available; container agent panes disabled");
+                    None
+                }
+            }
+        },
     };
 
     // Saga durability PR 2 — resume-on-startup. Walk any sagas the

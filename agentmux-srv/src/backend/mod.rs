@@ -46,5 +46,6 @@ pub mod wcore;
 pub mod wps;
 pub mod wshutil;
 pub mod tool_store;
+pub mod container;
 
 pub use oref::ORef;

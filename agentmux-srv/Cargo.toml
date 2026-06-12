@@ -45,6 +45,7 @@ hex = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 tar = "0.4"
 tempfile = "3"
+bollard = { version = "0.18", features = ["chrono"] }
 
 [target.'cfg(windows)'.dependencies]
 # Out-of-process crash dump capture via VEH + named-pipe IPC.
