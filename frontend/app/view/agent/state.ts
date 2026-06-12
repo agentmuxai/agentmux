@@ -56,6 +56,12 @@ export interface AgentAtoms {
     currentToolAtom: SignalPair<string | null>;
     turnTokensAtom: SignalPair<TurnTokens | null>;
     /**
+     * Total input-token count from the last message_start event — equals
+     * the full context fill (all conversation history) sent to the model
+     * on that turn. null until the first turn completes.
+     */
+    contextTokensAtom: SignalPair<number | null>;
+    /**
      * Messages sent by the user that the backend hasn't picked up yet.
      * Rendered in a pending zone between the conversation and the composer.
      * When the backend emits `agent-message-accepted` for a given id, the
@@ -148,6 +154,7 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         sessionStatsAtom: createSignal<SessionStats | null>(null),
         currentToolAtom: createSignal<string | null>(null),
         turnTokensAtom: createSignal<TurnTokens | null>(null),
+        contextTokensAtom: createSignal<number | null>(null),
         pendingMessagesAtom: createSignal<PendingMessage[]>([]),
         // gap1 (#993) reshaped InitPhase from string union to discriminated
         // union; turnPhase from PR B is now the sole working-state encoding
