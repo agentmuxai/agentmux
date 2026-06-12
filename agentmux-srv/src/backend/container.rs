@@ -17,8 +17,11 @@
 //! Docker best practices here were researched independently.
 
 use std::collections::HashMap;
+use std::pin::Pin;
 use std::sync::Arc;
+use tokio::io::AsyncWrite;
 use tokio::sync::Mutex;
+use futures_util::StreamExt as _;
 use bollard::Docker;
 use bollard::container::{
     Config, CreateContainerOptions, ListContainersOptions, StartContainerOptions,
@@ -62,12 +65,18 @@ struct ContainerManagerInner {
 
 /// Exec session handle for a single turn.
 ///
-/// `output` is a bollard `StartExecResults` stream. With `tty: false` +
-/// `attach_stderr: true`, Docker multiplexes stdout and stderr as separate
-/// `LogOutput::StdOut` / `LogOutput::StdErr` frames (not merged). Phase 2
-/// should fan both into the block's output channel.
+/// `input` is the stdin pipe into the container process (write JSON message here,
+/// then drop/flush to send EOF). `output` is a bollard `LogOutput` stream; with
+/// `tty: false` Docker multiplexes stdout as `LogOutput::StdOut` frames and
+/// stderr as `LogOutput::StdErr` frames.
+///
+/// Env vars are passed via `CreateExecOptions.env` (Docker socket) — they never
+/// appear in process argv, preventing CWE-214 credential exposure via ps/proc.
 pub struct ExecSession {
-    pub output: StartExecResults,
+    /// Stdin pipe to the container process. Write the JSON message then flush/drop.
+    pub input: Pin<Box<dyn AsyncWrite + Send>>,
+    /// Multiplexed stdout/stderr stream (LogOutput::StdOut / LogOutput::StdErr).
+    pub output: Pin<Box<dyn futures_util::Stream<Item = Result<bollard::container::LogOutput, bollard::errors::Error>> + Send>>,
 }
 
 /// Errors from container operations.
@@ -150,6 +159,11 @@ impl ContainerManager {
                 tracing::info!(container = container_name, "restarted stopped container");
             }
             None => {
+                // Pull the image via Docker socket before create so the Engine API
+                // has the image locally. Unlike `docker run`, the Engine's
+                // create_container does NOT auto-pull — it returns 404 if the image
+                // is absent. pull_image is a no-op when the image already exists.
+                self.pull_image(image).await?;
                 // Create and start.
                 self.create_and_start(container_name, image, volumes, env_vars).await?;
                 tracing::info!(container = container_name, image = image, "created and started container");
@@ -187,14 +201,26 @@ impl ContainerManager {
             })
             .await?;
 
-        let output = self.inner.docker
+        let results = self.inner.docker
             .start_exec(&exec.id, Some(StartExecOptions {
                 detach: false,
                 ..Default::default()
             }))
             .await?;
 
-        Ok(ExecSession { output })
+        match results {
+            StartExecResults::Attached { input, output } => {
+                Ok(ExecSession { input, output })
+            }
+            StartExecResults::Detached => {
+                Err(ContainerError::Docker(
+                    bollard::errors::Error::DockerResponseServerError {
+                        status_code: 0,
+                        message: "start_exec returned Detached unexpectedly (detach=false)".to_string(),
+                    }
+                ))
+            }
+        }
     }
 
     /// Gracefully stop a container. Uses SIGTERM → SIGKILL after `timeout_secs`.
@@ -243,6 +269,40 @@ impl ContainerManager {
             }
         }
         Ok(None)
+    }
+
+    /// Pull `image` via the Docker socket (create_image API).
+    ///
+    /// Streams the pull response to completion before returning. If the image is
+    /// already present locally, Docker returns an empty stream immediately — this
+    /// function treats that as success (no pull needed).
+    ///
+    /// Errors only on genuine pull failures (network, auth, no such image).
+    async fn pull_image(&self, image: &str) -> Result<(), ContainerError> {
+        tracing::info!(image = image, "pulling image (if not already cached)");
+        let mut stream = self.inner.docker.create_image(
+            Some(CreateImageOptions {
+                from_image: image,
+                ..Default::default()
+            }),
+            None,
+            None,
+        );
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(info) => {
+                    if let Some(status) = info.status {
+                        tracing::debug!(image = image, status = %status, "pull progress");
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(image = image, error = %e, "image pull error");
+                    return Err(ContainerError::Docker(e));
+                }
+            }
+        }
+        tracing::info!(image = image, "image pull complete (or already cached)");
+        Ok(())
     }
 
     async fn create_and_start(
@@ -308,20 +368,6 @@ impl ContainerManager {
             }),
             ..Default::default()
         };
-
-        // bollard's create_container does NOT auto-pull (unlike `docker run` CLI).
-        // Pull first so that hosts that have never run this image don't get a 404.
-        tracing::info!(image = image, "pulling container image (no-op if already present)");
-        let mut pull_stream = self.inner.docker.create_image(
-            Some(CreateImageOptions { from_image: image, ..Default::default() }),
-            None,
-            None,
-        );
-        while let Some(item) = pull_stream.next().await {
-            if let Err(e) = item {
-                return Err(ContainerError::NotAvailable(format!("image pull failed for {image}: {e}")));
-            }
-        }
 
         let container = self.inner.docker
             .create_container(

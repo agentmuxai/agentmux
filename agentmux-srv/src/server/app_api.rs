@@ -555,9 +555,10 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         &block.meta, "agent:sessionid", "",
                     );
 
-                    // Container agent branch — same logic as websocket.rs agentinput.
+                    // Container agent branch: use Docker socket API exec (P1a: no
+                    // secrets in argv). Host agent branch: regular CLI subprocess.
                     let agent_mode = obj::meta_get_string(&block.meta, "agentMode", "host");
-                    let (final_command, final_args, final_working_dir) = if agent_mode == "container" {
+                    if agent_mode == "container" {
                         let cm = container_manager.as_deref()
                             .ok_or_else(|| "Docker not available on this host; cannot start container agent".to_string())?;
                         let container_image = obj::meta_get_string(
@@ -568,44 +569,67 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         let container_name = crate::backend::container::container_name_for_slug(&agent_id);
                         let volumes_json = obj::meta_get_string(&block.meta, "agent:container_volumes", "[]");
                         let volumes: Vec<String> = serde_json::from_str(&volumes_json).unwrap_or_default();
+
+                        // Ensure container is alive (pull image if needed — P1b).
                         cm.ensure_running(&container_name, &container_image, &volumes, &[]).await
                             .map_err(|e| format!("container ensure_running failed: {e}"))?;
-                        // Forward turn env vars via -e; skip host-path vars (container has its own).
-                        // Do NOT pass -w: cmd:cwd is a host path, not a container path.
-                        let mut docker_args = vec!["exec".to_string(), "-i".to_string()];
-                        // Pass env var NAMES only (no =value) — docker exec inherits values
-                        // from the host docker process env (set via SubprocessSpawnConfig.env_vars).
-                        // This keeps secrets out of argv (CWE-214 / ps/cmdline exposure).
-                        for (k, _v) in &env_vars {
-                            if !crate::backend::container::CONTAINER_ENV_DENYLIST.contains(&k.as_str()) {
-                                docker_args.push("-e".to_string());
-                                docker_args.push(k.clone());
-                            }
-                        }
-                        docker_args.push(container_name);
-                        docker_args.push(cli_command.clone());
-                        docker_args.extend(cli_args);
-                        ("docker".to_string(), docker_args, String::new())
-                    } else {
-                        (cli_command, cli_args, working_dir)
-                    };
 
-                    let config = blockcontroller::subprocess::SubprocessSpawnConfig {
-                        cli_command: final_command,
-                        cli_args: final_args,
-                        working_dir: final_working_dir,
-                        env_vars,
-                        message: cmd.message,
-                        resume_flag,
-                        session_id_field,
-                        message_id: None,
-                        session_id: if persisted_session_id.is_empty() {
-                            None
-                        } else {
-                            Some(persisted_session_id)
-                        },
-                    };
-                    subprocess_ctrl.spawn_turn(config)?;
+
+                        tracing::info!(
+                            container = %container_name,
+                            image = %container_image,
+                            "container agent turn: bollard exec (env via Docker socket, not argv)",
+                        );
+
+                        // Filter env vars: skip host-path vars the container image provides.
+                        // Do NOT pass cwd: cmd:cwd is a host path, not a container path.
+                        // Env vars are passed via CreateExecOptions.env (Docker socket API),
+                        // NOT as -e KEY=VALUE argv args — this prevents CWE-214 exposure.
+                        let container_env: Vec<(String, String)> = env_vars.iter()
+                            .filter(|(k, _)| !crate::backend::container::CONTAINER_ENV_DENYLIST.contains(&k.as_str()))
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect();
+
+                        // Base cmd: [cli_command, ...cli_args] — spawn_container_turn
+                        // appends --resume <sid> internally before starting the exec.
+                        let mut base_cmd = vec![cli_command];
+                        base_cmd.extend(cli_args);
+
+                        let config = blockcontroller::subprocess::SubprocessSpawnConfig {
+                            cli_command: String::new(), // unused by spawn_container_turn
+                            cli_args: vec![],           // unused by spawn_container_turn
+                            working_dir: String::new(), // unused — container has own cwd
+                            env_vars,
+                            message: cmd.message,
+                            resume_flag,
+                            session_id_field,
+                            message_id: None,
+                            session_id: if persisted_session_id.is_empty() {
+                                None
+                            } else {
+                                Some(persisted_session_id)
+                            },
+                        };
+                        subprocess_ctrl.spawn_container_turn(cm, &container_name, base_cmd, container_env, config).await?;
+                    } else {
+                        // Host agent: regular CLI subprocess (env set on child process, not in argv).
+                        let config = blockcontroller::subprocess::SubprocessSpawnConfig {
+                            cli_command,
+                            cli_args,
+                            working_dir,
+                            env_vars,
+                            message: cmd.message,
+                            resume_flag,
+                            session_id_field,
+                            message_id: None,
+                            session_id: if persisted_session_id.is_empty() {
+                                None
+                            } else {
+                                Some(persisted_session_id)
+                            },
+                        };
+                        subprocess_ctrl.spawn_turn(config)?;
+                    }
                 } else {
                     return Err("NOT_RUNNING: controller type not supported".to_string());
                 }

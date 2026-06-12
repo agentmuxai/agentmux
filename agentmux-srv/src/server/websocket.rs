@@ -989,14 +989,12 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         &block.meta, "agent:sessionid", "",
                     );
 
-                    // Container agent branch: replace the direct CLI spawn with
-                    // `docker exec -i <container> <cli_command> [args...]`.
-                    // For host agents this is a no-op (cli_command and cli_args
-                    // pass through unchanged).
+                    // Container agent branch: use Docker socket API exec (P1a: no
+                    // secrets in argv). Host agent branch: regular CLI subprocess.
                     let agent_mode = crate::backend::obj::meta_get_string(
                         &block.meta, "agentMode", "host",
                     );
-                    let (final_command, final_args, final_working_dir) = if agent_mode == "container" {
+                    if agent_mode == "container" {
                         let cm = container_manager.as_deref()
                             .ok_or_else(|| "Docker not available on this host; cannot start container agent".to_string())?;
                         let container_image = crate::backend::obj::meta_get_string(
@@ -1012,7 +1010,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         );
                         let volumes: Vec<String> = serde_json::from_str(&volumes_json).unwrap_or_default();
 
-                        // Ensure container is alive before spawning the exec subprocess.
+                        // Ensure container is alive (pull image if needed — P1b).
                         cm.ensure_running(&container_name, &container_image, &volumes, &[]).await
                             .map_err(|e| format!("container ensure_running failed: {e}"))?;
 
@@ -1020,47 +1018,58 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                             block_id = %cmd.blockid,
                             container = %container_name,
                             image = %container_image,
-                            "container agent turn: docker exec -i",
+                            "container agent turn: bollard exec (env via Docker socket, not argv)",
                         );
 
-                        // Build `docker exec -i -e KEY=VAL ... <container> <cli_command> [args]`.
-                        // Use -i (not -t): tty allocates a PTY and corrupts NDJSON newlines.
-                        // Forward turn env vars except host-path vars (container has its own values).
-                        // Do NOT pass -w: cmd:cwd is a host path, not a container path.
-                        let mut docker_args = vec!["exec".to_string(), "-i".to_string()];
-                        // Pass env var NAMES only (no =value) — docker exec inherits values
-                        // from the host docker process env (set via SubprocessSpawnConfig.env_vars).
-                        // This keeps secrets out of argv (CWE-214 / ps/cmdline exposure).
-                        for (k, _v) in &env_vars {
-                            if !crate::backend::container::CONTAINER_ENV_DENYLIST.contains(&k.as_str()) {
-                                docker_args.push("-e".to_string());
-                                docker_args.push(k.clone());
-                            }
-                        }
-                        docker_args.push(container_name);
-                        docker_args.push(cli_command.clone());
-                        docker_args.extend(cli_args);
-                        ("docker".to_string(), docker_args, String::new())
-                    } else {
-                        (cli_command, cli_args, working_dir)
-                    };
+                        // Filter env vars: skip host-path vars the container image provides.
+                        // Do NOT pass cwd: cmd:cwd is a host path, not a container path.
+                        // Env vars are passed via CreateExecOptions.env (Docker socket API),
+                        // NOT as -e KEY=VALUE argv args — this prevents CWE-214 exposure.
+                        let container_env: Vec<(String, String)> = env_vars.iter()
+                            .filter(|(k, _)| !crate::backend::container::CONTAINER_ENV_DENYLIST.contains(&k.as_str()))
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect();
 
-                    let config = blockcontroller::subprocess::SubprocessSpawnConfig {
-                        cli_command: final_command,
-                        cli_args: final_args,
-                        working_dir: final_working_dir,
-                        env_vars,
-                        message: cmd.message,
-                        resume_flag,
-                        session_id_field,
-                        message_id: cmd.message_id,
-                        session_id: if persisted_session_id.is_empty() {
-                            None
-                        } else {
-                            Some(persisted_session_id)
-                        },
-                    };
-                    subprocess_ctrl.spawn_turn(config)?;
+                        // Base cmd: [cli_command, ...cli_args] — spawn_container_turn
+                        // appends --resume <sid> internally before starting the exec.
+                        let mut base_cmd = vec![cli_command];
+                        base_cmd.extend(cli_args);
+
+                        let config = blockcontroller::subprocess::SubprocessSpawnConfig {
+                            cli_command: String::new(), // unused by spawn_container_turn
+                            cli_args: vec![],           // unused by spawn_container_turn
+                            working_dir: String::new(), // unused — container has own cwd
+                            env_vars,
+                            message: cmd.message,
+                            resume_flag,
+                            session_id_field,
+                            message_id: cmd.message_id,
+                            session_id: if persisted_session_id.is_empty() {
+                                None
+                            } else {
+                                Some(persisted_session_id)
+                            },
+                        };
+                        subprocess_ctrl.spawn_container_turn(cm, &container_name, base_cmd, container_env, config).await?;
+                    } else {
+                        // Host agent: regular CLI subprocess (env set on child process, not in argv).
+                        let config = blockcontroller::subprocess::SubprocessSpawnConfig {
+                            cli_command,
+                            cli_args,
+                            working_dir,
+                            env_vars,
+                            message: cmd.message,
+                            resume_flag,
+                            session_id_field,
+                            message_id: cmd.message_id,
+                            session_id: if persisted_session_id.is_empty() {
+                                None
+                            } else {
+                                Some(persisted_session_id)
+                            },
+                        };
+                        subprocess_ctrl.spawn_turn(config)?;
+                    }
                 } else {
                     return Err("controller is not a SubprocessController or PersistentSubprocessController".to_string());
                 }
