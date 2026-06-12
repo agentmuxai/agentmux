@@ -995,13 +995,14 @@ fn strip_ansi(chunk: &mut Vec<u8>) {
 /// the `pending` accumulator (which spans reads for the current visual line)
 /// catches those cross-read overwrites.
 ///
-/// **Leading `\r` is preserved.** When a lone `\r` appears at the very start
-/// of a visual line (i.e., nothing to overwrite), it is emitted as-is rather
-/// than discarded. This lets the caller's `pending_cr_override` slot recognise
-/// and hold leading-`\r` spinner frames (`"\rframe"`, npm/ora/tqdm style) on
-/// both the PTY path (`pty_reader_loop`) and the pipe path (`stream_reader`).
-/// Without this, `collapse_cr` would silently drop the `\r` and the override
-/// slot would never engage.
+/// **Leading `\r` is preserved — including through mid-buffer overwrites.**
+/// When a lone `\r` appears at the very start of a visual line, it is emitted
+/// as-is rather than discarded. When a subsequent lone `\r` overwrites a line
+/// that *itself* started with `\r` (e.g. `"\rframe1\rframe2"`), the leading
+/// `\r` is preserved in the result (`"\rframe2"`, not `"frame2"`). This lets
+/// the caller's `pending_cr_override` slot chain-collapse throttled spinner
+/// frames on successive reads: the collapsed result still starts with `\r`, so
+/// the slot engages again on the next quiet-window expiry.
 ///
 /// **Trailing `\r` is left in place.** A `\r` at the very end of `pending`
 /// might be the first byte of a CRLF pair split across reads. Collapsing it
@@ -1037,8 +1038,14 @@ fn collapse_cr(pending: &mut Vec<u8>) {
                     out.push(b);
                     i += 1;
                 } else {
-                    // Lone \r mid-buffer: discard current line and keep going.
-                    out.truncate(line_start);
+                    // Lone \r mid-buffer: discard current line back to column 0.
+                    // If the line opened with a leading \r (spinner convention),
+                    // preserve that leading \r so the pending_cr_override slot in
+                    // the reader can still recognise the result as a spinner frame
+                    // after collapsing "\rframe1\rframe2" → "\rframe2".
+                    let keep =
+                        usize::from(out.len() > line_start && out[line_start] == b'\r');
+                    out.truncate(line_start + keep);
                     i += 1;
                 }
             } else {
@@ -1390,17 +1397,32 @@ mod tests {
     #[test]
     fn collapse_cr_leading_spinner_frames_collapse() {
         // Leading-\r convention: "\rframe" per write (npm/ora/gh style).
+        // Case 1: non-\r line overwritten by \r-prefixed content (normal path).
         let mut pending = b"frame1".to_vec();
         collapse_cr(&mut pending);
         assert_eq!(pending, b"frame1"); // no \r, unchanged
         pending.extend_from_slice(b"\rframe2");
         collapse_cr(&mut pending);
-        // \r at pos 6, followed by 'f': frame1 collapsed
+        // "frame1\rframe2": \r at pos 6 overwrites non-\r line → "frame2"
         assert_eq!(pending, b"frame2");
         pending.extend_from_slice(b"\rdone\n");
         collapse_cr(&mut pending);
-        // \r at pos 6, followed by 'd': frame2 collapsed, done\n remains
+        // "frame2\rdone\n": \r at pos 6 overwrites non-\r line, done\n remains
         assert_eq!(pending, b"done\n");
+    }
+
+    #[test]
+    fn collapse_cr_leading_cr_multi_frame_preserves_leading_cr() {
+        // Case 2: \r-prefixed line overwritten by another \r-prefixed line.
+        // "\rframe1\rframe2" must collapse to "\rframe2", NOT "frame2".
+        // Without the leading-\r preservation, the mid-buffer \r at pos 7
+        // would truncate to line_start=0, discarding the leading \r, and
+        // pending_cr_override can no longer detect the result as a spinner.
+        assert_eq!(cr(b"\rframe1\rframe2"), b"\rframe2");
+        // Three frames: only last survives, leading \r preserved.
+        assert_eq!(cr(b"\rframe1\rframe2\rframe3"), b"\rframe3");
+        // Normal (non-leading-\r) line overwritten: no leading \r in result.
+        assert_eq!(cr(b"frame1\rframe2"), b"frame2");
     }
 
     #[test]
