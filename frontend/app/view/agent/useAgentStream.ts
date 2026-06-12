@@ -15,7 +15,7 @@ import { batch, createEffect, onCleanup, onMount } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import type { PendingMessage, SignalPair } from "./state";
 import { ClaudeCodeStreamParser, STARTUP_HEADING_RE } from "./stream-parser";
-import type { DocumentNode, SessionStats, ToolLogChunk, UserMessageNode } from "./types";
+import type { DocumentNode, SessionStats, ShellNode, ToolLogChunk, UserMessageNode } from "./types";
 import { recordTurn } from "@/store/token-usage";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
 import {
@@ -129,6 +129,16 @@ export function useAgentStream({
     type PendingChunk = { toolId: string; chunk: ToolLogChunk };
     let pendingChunks: PendingChunk[] = [];
 
+    // Shell-node accumulators. Mirrors the tool_chunk pattern — batched inside
+    // the same RAF flush so ShellNodeCreate exists before ShellChunkAppend
+    // tries to append to it. (SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md §5.6)
+    type PendingShellCreate = { node: ShellNode };
+    type PendingShellChunk = { shellId: string; chunk: ToolLogChunk };
+    type PendingShellExit = { shellId: string; status: ShellNode["status"]; exitCode: number; exitedAt: number };
+    let pendingShellCreates: PendingShellCreate[] = [];
+    let pendingShellChunks: PendingShellChunk[] = [];
+    let pendingShellExits: PendingShellExit[] = [];
+
     // Single per-block WPS subscription for `tool_chunk` events.
     // `agentmux-bashwrap exec` publishes every stdout/stderr line to a
     // fixed event name with `scopes: ["block:<id>"]` and the tool_use_id
@@ -177,16 +187,79 @@ export function useAgentStream({
     // this the global handler would leak one per mount.
     onCleanup(() => { try { blockChunkUnsub(); } catch { /* ignore */ } });
 
+    // shell_node_create: backend published immediately when Shell tool is called.
+    // We build the full ShellNode and queue it for the next RAF flush.
+    const shellNodeCreateUnsub = waveEventSubscribe({
+        eventType: "shell_node_create",
+        scope: `block:${blockId}`,
+        handler: (event: any) => {
+            const d = event?.data;
+            if (!d || typeof d !== "object") return;
+            const shellId = typeof d.shell_id === "string" ? d.shell_id : "";
+            if (!shellId) return;
+            const node: ShellNode = {
+                type: "shell",
+                id: shellId,
+                cmd: d.cmd ?? "",
+                title: d.title ?? d.cmd ?? "",
+                cwd: typeof d.cwd === "string" ? d.cwd : undefined,
+                status: "running",
+                spawnedAt: d.timestamp ?? Date.now(),
+                log: { chunks: [], open: true },
+            };
+            pendingShellCreates.push({ node });
+            scheduleFlush();
+        },
+    });
+    onCleanup(() => { try { shellNodeCreateUnsub(); } catch { /* ignore */ } });
+
+    // shell_chunk: per-line output (op="chunk") or process exit (op="exit").
+    const shellChunkUnsub = waveEventSubscribe({
+        eventType: "shell_chunk",
+        scope: `block:${blockId}`,
+        handler: (event: any) => {
+            const d = event?.data;
+            if (!d || typeof d !== "object") return;
+            const shellId = typeof d.shell_id === "string" ? d.shell_id : "";
+            if (!shellId) return;
+            if (d.op === "exit") {
+                const exitCode = typeof d.exit_code === "number" ? d.exit_code : -1;
+                const status: ShellNode["status"] = exitCode === 0 ? "exited-ok" : "exited-err";
+                pendingShellExits.push({ shellId, status, exitCode, exitedAt: d.timestamp ?? Date.now() });
+                scheduleFlush();
+                return;
+            }
+            if (d.op !== "chunk") return;
+            pendingShellChunks.push({
+                shellId,
+                chunk: {
+                    kind: d.kind ?? "stdout",
+                    content: d.content ?? "",
+                    timestamp: d.timestamp ?? Date.now(),
+                },
+            });
+            scheduleFlush();
+        },
+    });
+    onCleanup(() => { try { shellChunkUnsub(); } catch { /* ignore */ } });
+
     function flushPendingNodes() {
         flushRafId = null;
-        if (pendingNew.length === 0 && pendingUpdates.length === 0 && pendingChunks.length === 0) return;
+        if (pendingNew.length === 0 && pendingUpdates.length === 0 && pendingChunks.length === 0
+            && pendingShellCreates.length === 0 && pendingShellChunks.length === 0 && pendingShellExits.length === 0) return;
 
         const batchNew = pendingNew;
         const batchUpdates = pendingUpdates;
         const batchChunks = pendingChunks;
+        const batchShellCreates = pendingShellCreates;
+        const batchShellChunks = pendingShellChunks;
+        const batchShellExits = pendingShellExits;
         pendingNew = [];
         pendingUpdates = [];
         pendingChunks = [];
+        pendingShellCreates = [];
+        pendingShellChunks = [];
+        pendingShellExits = [];
 
         // Wrap both store writes in a single Solid batch so all reactive
         // effects (partition memo → <Index> reconciler, DocumentRow
@@ -216,6 +289,17 @@ export function useAgentStream({
             // Tool-chunk appends after StreamFlush has committed the ToolNode.
             for (const { toolId, chunk } of batchChunks) {
                 model.dispatchDoc({ type: "ToolChunkAppend", toolId, chunk });
+            }
+            // Shell: create nodes first, then chunks, then exits —
+            // same ordering guarantee as the tool_chunk/StreamFlush pair.
+            for (const { node } of batchShellCreates) {
+                model.dispatchDoc({ type: "ShellNodeCreate", node });
+            }
+            for (const { shellId, chunk } of batchShellChunks) {
+                model.dispatchDoc({ type: "ShellChunkAppend", shellId, chunk });
+            }
+            for (const { shellId, status, exitCode, exitedAt } of batchShellExits) {
+                model.dispatchDoc({ type: "ShellStatusUpdate", shellId, status, exitCode, exitedAt });
             }
             // Lifecycle counter bump — agent-pane-state owns streaming
             // metadata (active flag + bufferSize + lastEventTime).
@@ -485,6 +569,9 @@ export function useAgentStream({
                 pendingNew = [];
                 pendingUpdates = [];
                 pendingChunks = [];
+                pendingShellCreates = [];
+                pendingShellChunks = [];
+                pendingShellExits = [];
                 lineBuffer = "";
                 translator.reset();
                 parser.reset();
