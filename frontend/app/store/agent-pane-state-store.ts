@@ -70,7 +70,8 @@ export interface AgentPaneProjections {
      * Current input-token count as of the last message_start — equals the
      * total context fill (all conversation history) sent to the model.
      * Driven by the same TokensIn command as turnTokens.input; fires once
-     * per turn at message_start. null until the first turn completes.
+     * per turn at message_start. Resets to null on TurnEnd, so it is live
+     * only while a turn is in flight.
      */
     contextTokens?: (next: number | null) => void;
 }
