@@ -556,16 +556,18 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         let container_image = obj::meta_get_string(
                             &block.meta, "agent:container_image", "ghcr.io/agentmuxai/agent-claude:latest",
                         );
-                        let agent_name = obj::meta_get_string(&block.meta, "agentName", "");
-                        let container_name = crate::backend::container::container_name_for_slug(&agent_name);
+                        // Use agentId (UUID) — always valid as a Docker name; display names can have spaces.
+                        let agent_id = obj::meta_get_string(&block.meta, "agentId", "");
+                        let container_name = crate::backend::container::container_name_for_slug(&agent_id);
                         let volumes_json = obj::meta_get_string(&block.meta, "agent:container_volumes", "[]");
                         let volumes: Vec<String> = serde_json::from_str(&volumes_json).unwrap_or_default();
                         cm.ensure_running(&container_name, &container_image, &volumes, &[]).await
                             .map_err(|e| format!("container ensure_running failed: {e}"))?;
+                        // Forward turn env vars via -e; do NOT pass -w (host cwd ≠ container path).
                         let mut docker_args = vec!["exec".to_string(), "-i".to_string()];
-                        if !working_dir.is_empty() {
-                            docker_args.push("-w".to_string());
-                            docker_args.push(working_dir.clone());
+                        for (k, v) in &env_vars {
+                            docker_args.push("-e".to_string());
+                            docker_args.push(format!("{k}={v}"));
                         }
                         docker_args.push(container_name);
                         docker_args.push(cli_command.clone());

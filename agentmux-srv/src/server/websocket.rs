@@ -995,10 +995,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         let container_image = crate::backend::obj::meta_get_string(
                             &block.meta, "agent:container_image", "ghcr.io/agentmuxai/agent-claude:latest",
                         );
-                        let agent_name = crate::backend::obj::meta_get_string(
-                            &block.meta, "agentName", "",
+                        // Use agentId (UUID) — always valid as a Docker name; display names can have spaces.
+                        let agent_id = crate::backend::obj::meta_get_string(
+                            &block.meta, "agentId", "",
                         );
-                        let container_name = crate::backend::container::container_name_for_slug(&agent_name);
+                        let container_name = crate::backend::container::container_name_for_slug(&agent_id);
                         let volumes_json = crate::backend::obj::meta_get_string(
                             &block.meta, "agent:container_volumes", "[]",
                         );
@@ -1015,17 +1016,18 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                             "container agent turn: docker exec -i",
                         );
 
-                        // Build `docker exec -i [-w /path] <container> <cli_command> [args]`.
+                        // Build `docker exec -i -e KEY=VAL ... <container> <cli_command> [args]`.
                         // Use -i (not -t): tty allocates a PTY and corrupts NDJSON newlines.
+                        // Forward all turn env vars so the in-container agent gets its credentials.
+                        // Do NOT pass -w: cmd:cwd is a host path, not a container path.
                         let mut docker_args = vec!["exec".to_string(), "-i".to_string()];
-                        if !working_dir.is_empty() {
-                            docker_args.push("-w".to_string());
-                            docker_args.push(working_dir.clone());
+                        for (k, v) in &env_vars {
+                            docker_args.push("-e".to_string());
+                            docker_args.push(format!("{k}={v}"));
                         }
                         docker_args.push(container_name);
                         docker_args.push(cli_command.clone());
                         docker_args.extend(cli_args);
-                        // working_dir is encoded in -w flag above; do not also set on host process
                         ("docker".to_string(), docker_args, String::new())
                     } else {
                         (cli_command, cli_args, working_dir)
