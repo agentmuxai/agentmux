@@ -1232,9 +1232,9 @@ pub fn handle_append_block_file(
     // Create the file lazily on first append; if the file already exists
     // we skip make_file and go straight to append_data.
     if let Some(fs) = filestore {
-        let needs_create = match fs.stat(block_id, filename) {
-            Ok(None) => true,
-            Ok(Some(_)) => false,
+        let (needs_create, prev_size) = match fs.stat(block_id, filename) {
+            Ok(None) => (true, 0u64),
+            Ok(Some(ref wf)) => (false, wf.size as u64),
             Err(e) => {
                 tracing::warn!(
                     block_id = %block_id,
@@ -1275,6 +1275,42 @@ pub fn handle_append_block_file(
                 error = %e,
                 "filestore append_data failed"
             );
+        } else if filename == "output" {
+            append_output_idx(fs, block_id, prev_size, data);
+        }
+    }
+}
+
+/// Append per-line byte-start offsets to `output.idx` alongside the main output file.
+///
+/// `output.idx` is a flat array of u64-LE values where entry N records the byte
+/// offset at which line N begins in `output`.  This lets `blockfile:read_range`
+/// seek to any line in O(1) instead of scanning the whole file.
+///
+/// Called after every successful `append_data` to "output".  If the idx write
+/// fails it is silently dropped — the fast-path reader falls through to the
+/// full-scan fallback, so correctness is preserved.
+fn append_output_idx(fs: &FileStore, block_id: &str, start_byte: u64, data: &[u8]) {
+    const IDX: &str = "output.idx";
+    if let Ok(None) = fs.stat(block_id, IDX) {
+        let _ = fs.make_file(
+            block_id,
+            IDX,
+            std::collections::HashMap::new(),
+            crate::backend::storage::filestore::FileOpts::default(),
+        );
+    }
+    let mut offsets_buf: Vec<u8> = Vec::new();
+    let mut line_start = start_byte;
+    for (i, &b) in data.iter().enumerate() {
+        if b == b'\n' {
+            offsets_buf.extend_from_slice(&line_start.to_le_bytes());
+            line_start = start_byte + i as u64 + 1;
+        }
+    }
+    if !offsets_buf.is_empty() {
+        if let Err(e) = fs.append_data(block_id, IDX, &offsets_buf) {
+            tracing::warn!(block_id = %block_id, error = %e, "output.idx append failed");
         }
     }
 }

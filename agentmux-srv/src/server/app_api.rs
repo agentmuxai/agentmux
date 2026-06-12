@@ -1045,6 +1045,56 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let offset = cmd.offset as usize;
                 let end = offset.saturating_add(limit);
 
+                // Fast path: output.idx enables O(1) seek — avoids loading the full
+                // file to slice by line number for large sessions.
+                if cmd.filename == "output" {
+                    let idx_result: Option<BlockfileReadRangeResult> = (|| {
+                        let idx_stat = filestore.stat(&cmd.block_id, "output.idx").ok()??;
+                        let total_lines = (idx_stat.size / 8) as u64;
+                        if total_lines == 0 || (offset as u64) >= total_lines {
+                            return None;
+                        }
+                        let (_, sb) = filestore
+                            .read_at(&cmd.block_id, "output.idx", offset as i64 * 8, 8)
+                            .ok()?;
+                        let byte_start = u64::from_le_bytes(sb.try_into().ok()?) as i64;
+                        let byte_end: i64 = if (offset + limit) as u64 >= total_lines {
+                            filestore.stat(&cmd.block_id, "output").ok()??.size
+                        } else {
+                            let (_, eb) = filestore
+                                .read_at(
+                                    &cmd.block_id,
+                                    "output.idx",
+                                    (offset + limit) as i64 * 8,
+                                    8,
+                                )
+                                .ok()?;
+                            u64::from_le_bytes(eb.try_into().ok()?) as i64
+                        };
+                        let read_len = (byte_end - byte_start).max(0);
+                        let (_, raw) = filestore
+                            .read_at(&cmd.block_id, "output", byte_start, read_len)
+                            .ok()?;
+                        let text = String::from_utf8_lossy(&raw);
+                        let lines: Vec<String> = text
+                            .lines()
+                            .filter(|l| !l.trim().is_empty())
+                            .map(|l| l.to_string())
+                            .collect();
+                        Some(BlockfileReadRangeResult { lines, total: total_lines })
+                    })();
+                    if let Some(result) = idx_result {
+                        tracing::debug!(
+                            block_id = %cmd.block_id,
+                            offset,
+                            limit,
+                            lines = result.lines.len(),
+                            "blockfile:read_range via output.idx fast path"
+                        );
+                        return Ok(Some(serde_json::to_value(&result).unwrap()));
+                    }
+                }
+
                 // Phase 1.3: Prefer FileStore (persistent, no size cap) over the
                 // WPS broker ring buffer (MAX_PERSIST = 4096 events).
                 //
