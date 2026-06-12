@@ -15,7 +15,7 @@
  * ANSI parsing lands in Phase γ (perf + worker offload) per the spec.
  */
 
-import { For, Match, Show, Switch, createEffect, onCleanup, onMount, type JSX } from "solid-js";
+import { For, Match, Show, Switch, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 // `Show` retained for fallback ToolOverlayResult sub-tree.
 import type { ToolNode } from "../types";
 import { BashOutputViewer } from "./BashOutputViewer";
@@ -97,21 +97,32 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     // content-visibility" warnings in the console. MutationObserver is
     // layout-free and correctly tracks the .agent-tool-panel--hidden class flip
     // that applies content-visibility:hidden to the panel containing this log.
-    let panelHidden = false;
+    //
+    // panelHidden is a SolidJS signal so that createEffect below tracks it as a
+    // reactive dependency. If it were a plain `let`, the effect would have no
+    // dependency on it: when streaming completes while the panel is collapsed,
+    // `chunks()` stops changing and the effect never re-fires on expand, leaving
+    // `scrollTop` frozen at the pre-collapse position. Using a signal ensures
+    // the effect re-runs when the panel is expanded.
+    const [panelHidden, setPanelHidden] = createSignal(false);
     onMount(() => {
         const panel = scrollRef?.closest(".agent-tool-panel");
         if (!panel) return;
-        panelHidden = panel.classList.contains("agent-tool-panel--hidden");
+        setPanelHidden(panel.classList.contains("agent-tool-panel--hidden"));
         const mo = new MutationObserver(() => {
-            panelHidden = panel.classList.contains("agent-tool-panel--hidden");
+            setPanelHidden(panel.classList.contains("agent-tool-panel--hidden"));
         });
         mo.observe(panel, { attributes: true, attributeFilter: ["class"] });
         onCleanup(() => mo.disconnect());
     });
 
     createEffect(() => {
-        // Re-read chunks to register the dep, then schedule a scroll-down.
+        // Re-read chunks and panelHidden to register both as reactive deps.
+        // panelHidden must be read here (not inside the RAF callback) so the
+        // effect re-fires when the panel expands even after streaming has ended
+        // and chunks() is no longer changing.
         chunks();
+        const hidden = panelHidden();
         if (stickToBottom && scrollRef) {
             // Wait one frame for the DOM to flush before measuring.
             // Re-check scrollRef + isConnected because a Show-branch
@@ -121,7 +132,7 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
             // crashed v0.33.799. Guard panelHidden to avoid forcing
             // layout on a content-visibility:hidden subtree.
             requestAnimationFrame(() => {
-                if (scrollRef && scrollRef.isConnected && !panelHidden) {
+                if (scrollRef && scrollRef.isConnected && !hidden) {
                     scrollRef.scrollTop = scrollRef.scrollHeight;
                 }
             });
