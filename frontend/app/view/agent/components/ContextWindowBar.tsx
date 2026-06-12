@@ -24,6 +24,16 @@ function band(fraction: number): Band {
 }
 
 export function ContextWindowBar(props: ContextWindowBarProps): JSX.Element {
+    // Reactive accessors so updates to props.tokens mid-turn (successive
+    // message_start events) re-render the bar. An IIFE inside <Show> only
+    // runs once when `when` first becomes truthy and freezes thereafter.
+    const fraction = () =>
+        props.tokens != null && props.contextWindow != null
+            ? props.tokens / props.contextWindow
+            : null;
+    const b = () => { const f = fraction(); return f != null ? band(f) : "low"; };
+    const pct = () => { const f = fraction(); return f != null ? Math.min(100, Math.round(f * 100)) : 0; };
+
     return (
         <Show when={props.tokens != null && props.tokens! > 0}>
             <div
@@ -39,22 +49,15 @@ export function ContextWindowBar(props: ContextWindowBarProps): JSX.Element {
                         </span>
                     }
                 >
-                    {(() => {
-                        const fraction = props.tokens! / props.contextWindow!;
-                        const b = band(fraction);
-                        const pct = Math.min(100, Math.round(fraction * 100));
-                        return (
-                            <div class={`ctx-window-track ctx-window-track--${b}`}>
-                                <div
-                                    class="ctx-window-fill"
-                                    style={{ width: `${pct}%` }}
-                                />
-                                <span class="ctx-window-label">
-                                    {fmtK(props.tokens!)} / {fmtK(props.contextWindow!)}
-                                </span>
-                            </div>
-                        );
-                    })()}
+                    <div class={`ctx-window-track ctx-window-track--${b()}`}>
+                        <div
+                            class="ctx-window-fill"
+                            style={{ width: `${pct()}%` }}
+                        />
+                        <span class="ctx-window-label">
+                            {fmtK(props.tokens!)} / {fmtK(props.contextWindow!)}
+                        </span>
+                    </div>
                 </Show>
             </div>
         </Show>
