@@ -11,7 +11,9 @@
 //!   if PTY allocation fails. The PTY path keeps glibc's stdout
 //!   line-buffered so partial chunks reach the overlay in real time;
 //!   bash's startup DSR (`\x1b[6n`) is satisfied by pre-loading the
-//!   master writer with `\x1b[1;1R` and dropping it immediately, and
+//!   master writer with `\x1b[1;1R`; the writer is held alive until
+//!   after child.wait() (dropping it earlier sends CTRL_C_EVENT on
+//!   Windows — ConPTY CONIN lifetime invariant, same as pair.master); and
 //!   the user's command is prefixed `exec </dev/null;` so stdin-
 //!   reading children see EOF rather than blocking on the PTY's
 //!   stdin (ConPTY doesn't EOF on master-writer drop). The pipe
@@ -530,16 +532,21 @@ async fn run_via_pty(
 
     let reader = pair.master.try_clone_reader().context("PTY try_clone_reader")?;
 
-    // Pre-load bash's stdin with a DSR response and drop the writer.
-    // Bash's readline blocks on `\x1b[6n` until it reads a matching
-    // CSI report; queuing the response upfront unblocks that read
-    // without keeping the master writer open across the child.
-    {
+    // Write the DSR response into the master writer, then hold the
+    // writer alive until after child.wait(). On Windows, closing the
+    // CONIN pipe write-end while the pseudoconsole is still attached
+    // sends CTRL_C_EVENT to the child (exit 130 / SIGINT). This is
+    // the same ConPTY-lifetime invariant as pair.master itself — both
+    // must outlive child.wait(). The `exec </dev/null;` prefix in the
+    // command redirects bash's stdin after startup, so no future writes
+    // to the writer are needed; we just keep the handle open.
+    let writer = {
         use std::io::Write as _;
-        let mut writer = pair.master.take_writer().context("PTY take_writer")?;
-        let _ = writer.write_all(b"\x1b[1;1R");
-        let _ = writer.flush();
-    }
+        let mut w = pair.master.take_writer().context("PTY take_writer")?;
+        let _ = w.write_all(b"\x1b[1;1R");
+        let _ = w.flush();
+        w
+    };
 
     let (tx, rx) = mpsc::channel::<LineEvent>(1024);
     let tx_reader = tx.clone();
@@ -550,12 +557,13 @@ async fn run_via_pty(
 
     let publisher_handle = spawn_publisher_loop(args, wps.cloned(), buffered.clone(), rx);
 
-    // Move the whole pair (master + dropped-slave-handle slot) into
-    // the wait task so its destructor runs after child reaps.
+    // Move pair AND writer into the wait task — both must outlive
+    // child.wait() to satisfy the ConPTY lifetime contract on Windows.
     let exit_code = tokio::task::spawn_blocking(move || -> Result<i32> {
         let mut child = child;
         let status = child.wait().context("PTY child wait")?;
-        // pair drops here, after wait returns — triggers reader EOF.
+        // pair and writer both drop here, after child has exited.
+        drop(writer);
         drop(pair);
         Ok(status.exit_code() as i32)
     })
