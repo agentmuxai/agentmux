@@ -427,11 +427,17 @@ async fn handle_shell_create(
 
     // Publish shell_node_create so the frontend inserts the row
     // before the first chunk arrives (avoids a flash of orphaned chunks).
+    // persist: 64 — retain up to 64 shell_node_create events per block scope
+    // so multiple shells in a pane all replay on WS reconnect / pane remount.
+    // (persist: 1 meant only the last shell's create event was kept; earlier
+    // shells lost their create event while their shell_chunk events at
+    // persist: 1024 still replayed, causing the reducer to silently drop
+    // orphaned chunks.)
     state.broker.publish(crate::backend::wps::WaveEvent {
         event: crate::backend::wps::EVENT_SHELL_NODE_CREATE.to_string(),
         scopes: vec![format!("block:{}", req.agent_block_id)],
         sender: String::new(),
-        persist: 1,
+        persist: 64,
         data: Some(json!({
             "shell_id": shell_id,
             "cmd": req.cmd,
