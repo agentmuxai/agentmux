@@ -30,6 +30,7 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 
 import type { PermissionMode, SessionStats, TurnTokens } from "../types";
+import { ContextWindowBar } from "./ContextWindowBar";
 
 const PERMISSION_LABELS: Record<PermissionMode, string> = {
     bypass: "Bypass",
@@ -106,6 +107,10 @@ interface AgentComposerStripProps {
     unreadCount: number;
     /** Dispatches `DetailsToggle` to the pane reducer. */
     onToggleExpanded: () => void;
+    /** Current context fill in tokens (from message_start). null = no turn yet. */
+    contextTokens?: number | null;
+    /** Provider's max context window size. undefined = unknown provider. */
+    contextWindow?: number;
 }
 
 export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element => {
@@ -257,6 +262,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         {PERMISSION_LABELS[props.permissionMode!]}
                     </span>
                 </Show>
+                <ContextWindowBar tokens={props.contextTokens} contextWindow={props.contextWindow} />
                 <button
                     type="button"
                     class="agent-composer-strip-chevron"
