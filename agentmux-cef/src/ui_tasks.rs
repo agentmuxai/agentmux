@@ -282,20 +282,20 @@ wrap_task! {
     impl Task {
         fn execute(&self) {
             if let Some(window) = get_window_on_ui(&self.state, &self.label) {
-                // Mirrors app.rs: on macOS the CEF window handle IS the NSView.
-                let nsview = window.window_handle() as *mut std::ffi::c_void;
-                if nsview.is_null() {
-                    tracing::warn!("[start_window_drag] macOS: null NSView label={}", self.label);
-                } else {
-                    unsafe { begin_macos_native_window_drag(nsview, &self.label) };
-                }
-                // Dragging-reset safety net, same as the Linux task. On
-                // non-Windows, tryRedockAtCursor is driven from the DOM
-                // mouseup, so `moved` is unused here.
+                // Host-side manual move loop (mirrors the Windows path). We do
+                // NOT use performWindowDragWithEvent: — start_window_drag arrives
+                // async over IPC, so [NSApp currentEvent] is not the original
+                // title-bar mouse-down and the AppKit drag may never start.
+                // Instead we pump NSLeftMouseDragged/Up ourselves and reposition
+                // via CEF set_bounds, so the window always tracks the cursor.
+                unsafe { run_macos_native_drag_loop(&window, &self.label) };
+                // Dragging-reset safety net, same as the Linux task — resets the
+                // renderer's dragging flag. (On non-Windows, tryRedockAtCursor is
+                // driven from the DOM mouseup.)
                 crate::events::emit_event_to_top_level_windows(
                     &self.state,
                     "window_drag_ended",
-                    &serde_json::json!({ "label": &self.label, "moved": false }),
+                    &serde_json::json!({ "label": &self.label, "moved": true }),
                 );
             } else {
                 tracing::warn!("[start_window_drag] no window for label={}", self.label);
@@ -304,62 +304,109 @@ wrap_task! {
     }
 }
 
-/// Begin a native macOS window drag in response to the renderer's
-/// `start_window_drag` IPC. Reaches the NSWindow via `[NSView window]` and
-/// calls AppKit's `performWindowDragWithEvent:` with the in-flight mouse
-/// event; the window server then moves the window until the button is
-/// released (GPU-composited, no per-frame IPC). Raw libobjc FFI, mirroring
-/// `ensure_macos_native_window_buttons` in app.rs.
+/// Host-side manual window-drag loop for macOS, run on the CEF UI thread in
+/// response to the renderer's `start_window_drag` IPC. Mirrors the Windows
+/// `Win32BeginMoveTask` approach instead of AppKit's
+/// `performWindowDragWithEvent:`: that API needs the *original* mouse-down
+/// event, but our IPC is async (renderer mousemove → IPC → post_task), so
+/// `[NSApp currentEvent]` is unreliable and the drag can silently fail to
+/// start. Here we pump `NSLeftMouseDragged`/`NSLeftMouseUp` ourselves and
+/// reposition with CEF `set_bounds`, so the window always tracks the cursor.
 ///
-/// `performWindowDragWithEvent:` needs the live mouse event. This IPC is
-/// async, but the button is still held and the browser is mid-drag, so
-/// `[NSApp currentEvent]` is the current left-mouse-dragged event. If it is
-/// somehow nil we skip rather than pass nil (the user can re-press) — never
-/// UB.
+/// Coordinates: CEF window bounds are DIP, top-left origin, y-down — the same
+/// space the other window commands use (DOM `screenX/Y`). `[NSEvent
+/// mouseLocation]` is screen points, bottom-left origin, y-up. Points == DIP on
+/// macOS and we track deltas (absolute origin / screen height cancel out), so
+/// only the vertical axis is flipped (`origin.y - dy`).
+///
+/// Raw libobjc FFI, mirroring `ensure_macos_native_window_buttons` in app.rs.
+/// Like the Windows loop this blocks the UI thread until mouse-up — the
+/// accepted trade-off for a window drag (content freezes briefly, as it does
+/// for any native title-bar drag).
 #[cfg(target_os = "macos")]
-unsafe fn begin_macos_native_window_drag(nsview: *mut std::ffi::c_void, label: &str) {
+unsafe fn run_macos_native_drag_loop(window: &Window, label: &str) {
     use std::ffi::{c_char, c_void};
     type Id = *mut c_void;
     type Sel = *const c_void;
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct NSPoint {
+        x: f64,
+        y: f64,
+    }
     extern "C" {
         fn sel_registerName(name: *const c_char) -> Sel;
         fn objc_getClass(name: *const c_char) -> Id;
         fn objc_msgSend();
     }
+    // objc_msgSend transmuted per call signature (the app.rs idiom). NSPoint is
+    // two doubles → returned in registers on both arm64 and x86_64, so plain
+    // objc_msgSend is correct (no objc_msgSend_stret); that is why we reposition
+    // via CEF set_bounds rather than reading an NSRect frame.
     let msg: extern "C" fn(Id, Sel) -> Id = std::mem::transmute(objc_msgSend as *const c_void);
+    let msg_str: extern "C" fn(Id, Sel, *const c_char) -> Id =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    let msg_point: extern "C" fn(Id, Sel) -> NSPoint =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    let msg_uint: extern "C" fn(Id, Sel) -> u64 = std::mem::transmute(objc_msgSend as *const c_void);
+    let msg_next: extern "C" fn(Id, Sel, u64, Id, Id, i8) -> Id =
+        std::mem::transmute(objc_msgSend as *const c_void);
 
-    // nswindow = [nsview window]
-    let nswindow = msg(nsview, sel_registerName(b"window\0".as_ptr() as _));
-    if nswindow.is_null() {
-        tracing::warn!("[start_window_drag] macOS: [nsview window] nil label={}", label);
-        return;
-    }
-
-    // event = [[NSApplication sharedApplication] currentEvent]
+    // NSApp = [NSApplication sharedApplication]
     let nsapp = msg(
         objc_getClass(b"NSApplication\0".as_ptr() as _),
         sel_registerName(b"sharedApplication\0".as_ptr() as _),
     );
-    let event = msg(nsapp, sel_registerName(b"currentEvent\0".as_ptr() as _));
-    if event.is_null() {
-        tracing::warn!(
-            "[start_window_drag] macOS: [NSApp currentEvent] nil — drag skipped label={}",
-            label
-        );
+    if nsapp.is_null() {
+        tracing::warn!("[start_window_drag] macOS: NSApp nil label={}", label);
         return;
     }
+    let nsevent_cls = objc_getClass(b"NSEvent\0".as_ptr() as _);
+    let sel_mouse_location = sel_registerName(b"mouseLocation\0".as_ptr() as _);
+    // untilDate: [NSDate distantFuture] — block until the next matching event.
+    let distant_future = msg(
+        objc_getClass(b"NSDate\0".as_ptr() as _),
+        sel_registerName(b"distantFuture\0".as_ptr() as _),
+    );
+    // inMode: an NSString equal to the event-tracking run-loop mode (run-loop
+    // modes compare by string value, so a fresh NSString is fine).
+    let mode = msg_str(
+        objc_getClass(b"NSString\0".as_ptr() as _),
+        sel_registerName(b"stringWithUTF8String:\0".as_ptr() as _),
+        b"NSEventTrackingRunLoopMode\0".as_ptr() as _,
+    );
+    let sel_next =
+        sel_registerName(b"nextEventMatchingMask:untilDate:inMode:dequeue:\0".as_ptr() as _);
+    let sel_type = sel_registerName(b"type\0".as_ptr() as _);
 
-    // [nswindow performWindowDragWithEvent: event]
-    let perform: extern "C" fn(Id, Sel, Id) = std::mem::transmute(objc_msgSend as *const c_void);
-    perform(
-        nswindow,
-        sel_registerName(b"performWindowDragWithEvent:\0".as_ptr() as _),
-        event,
-    );
-    tracing::info!(
-        "[start_window_drag] macOS: performWindowDragWithEvent dispatched label={}",
-        label
-    );
+    // NSEventMaskLeftMouseDragged (1<<6) | NSEventMaskLeftMouseUp (1<<2).
+    const MASK: u64 = (1 << 6) | (1 << 2);
+    const NS_LEFT_MOUSE_UP: u64 = 2; // NSEventTypeLeftMouseUp
+
+    let origin = window.bounds(); // DIP, top-left, y-down
+    let start = msg_point(nsevent_cls, sel_mouse_location); // screen points, y-up
+
+    loop {
+        // dequeue:YES (1) — consume the event, else the same pending event is
+        // returned forever. The renderer doesn't need these mid-drag.
+        let event = msg_next(nsapp, sel_next, MASK, distant_future, mode, 1);
+        if event.is_null() {
+            break;
+        }
+        if msg_uint(event, sel_type) == NS_LEFT_MOUSE_UP {
+            break;
+        }
+        let cur = msg_point(nsevent_cls, sel_mouse_location);
+        let dx = (cur.x - start.x).round() as i32;
+        let dy = (cur.y - start.y).round() as i32; // screen y-up
+        window.set_bounds(Some(&Rect {
+            x: origin.x + dx,
+            y: origin.y - dy, // flip screen y-up → CEF y-down
+            width: origin.width,
+            height: origin.height,
+        }));
+    }
+    tracing::info!("[start_window_drag] macOS: drag loop ended label={}", label);
 }
 
 #[cfg(target_os = "windows")]
