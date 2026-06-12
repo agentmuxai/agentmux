@@ -623,15 +623,15 @@ async fn run_via_pipes(
 /// identical to `stream_reader`'s `tokio::time::timeout` approach, but
 /// for the blocking sync I/O that the PTY master reader requires.
 ///
-/// **CR handling split:** this layer handles two Rust-layer cases only:
-/// (a) trailing-`\r` frames (`"frame\r"`, rare) — the hold-on-trailing-`\r`
-/// guard prevents flushing until the next read disambiguates overwrite vs
-/// CRLF; (b) CRLF straddling a read boundary — `\r` ends one read, `\n`
-/// begins the next, and the trailing-`\r` hold keeps the line intact.
-/// Leading-`\r` spinners (`"\rframe"`, the common npm/cargo/ora/tqdm style)
-/// cannot be collapsed here because the quiet-window timer fires between
-/// frames and drains each frame as its own chunk; they are collapsed at
-/// render time by `collapseCarriageReturns` in `ToolOverlayLog.tsx`.
+/// **CR handling:** `\r` bytes are passed through to the frontend intact
+/// (not stripped by `collapse_cr`). The only Rust-layer CR guard is the
+/// trailing-`\r` hold in the quiet-window Timeout branch: if `pending`
+/// ends in `\r`, the flush is deferred so a following `\n` can form a
+/// complete CRLF rather than a stray bare `\r` chunk. All overwrite
+/// collapsing — including leading-`\r` spinners (`"\rframe"`, npm/cargo/
+/// ora/tqdm style) and same-buffer mid-line overwrites — is handled at
+/// render time by `collapseCarriageReturns` in `ToolOverlayLog.tsx`,
+/// which receives the `\r` bytes and applies terminal-overwrite semantics.
 fn pty_reader_loop(
     reader: Box<dyn std::io::Read + Send>,
     tx: mpsc::Sender<LineEvent>,
@@ -690,11 +690,8 @@ fn pty_reader_loop(
                     continue;
                 }
                 pending.extend_from_slice(&chunk);
-                // Collapse lone \r in the accumulated buffer. Must run
-                // after extend so spinner frames that arrive as separate
-                // reads ("frame1\r" then "\rframe2") are collapsed across
-                // the read boundary.
-                collapse_cr(&mut pending);
+                // \r is passed through intact for the frontend's
+                // collapseCarriageReturns to handle.
                 while let Some(nl_pos) = pending.iter().position(|&b| b == b'\n') {
                     let line: Vec<u8> = pending.drain(..=nl_pos).collect();
                     if tx.blocking_send(LineEvent { kind, bytes: line }).is_err() {
@@ -730,9 +727,9 @@ fn pty_reader_loop(
             }
             Err(std_mpsc::RecvTimeoutError::Timeout) => {
                 // Quiet-window: flush only when pending does NOT end with \r.
-                // A trailing \r means either a CRLF split or a spinner frame
-                // awaiting overwrite — hold in pending so the next read's
-                // collapse_cr can do its job. Non-\r partial output
+                // A trailing \r means a CRLF straddling the quiet-window gap
+                // (\r arrived, \n hasn't yet); hold so they publish together
+                // as a complete CRLF chunk. Non-\r partial output
                 // (printf 'Building...') flushes here for live display.
                 if !pending.is_empty() && pending.last() != Some(&b'\r') {
                     if tx.blocking_send(LineEvent {
