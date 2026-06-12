@@ -37,6 +37,10 @@ struct ContainerManagerInner {
     docker: Docker,
     /// container_name → running-state cache.
     state: Mutex<HashMap<String, ContainerState>>,
+    /// Per-container serialization lock: prevents concurrent ensure_running calls
+    /// for the same container from both seeing None and both attempting create_container
+    /// (which would fail with a 409 name-conflict on the second caller).
+    ensure_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -45,9 +49,12 @@ enum ContainerState {
     Stopped,
 }
 
-/// Exec session handles for a single turn. Contains the two async byte-streams
-/// (stdout + stderr merged into stdout, stderr empty) that Phase 2 will pipe
-/// into the block's stdin/stdout channels.
+/// Exec session handle for a single turn.
+///
+/// `output` is a bollard `StartExecResults` stream. With `tty: false` +
+/// `attach_stderr: true`, Docker multiplexes stdout and stderr as separate
+/// `LogOutput::StdOut` / `LogOutput::StdErr` frames (not merged). Phase 2
+/// should fan both into the block's output channel.
 pub struct ExecSession {
     pub output: StartExecResults,
 }
@@ -75,6 +82,7 @@ impl ContainerManager {
             inner: Arc::new(ContainerManagerInner {
                 docker,
                 state: Mutex::new(HashMap::new()),
+                ensure_locks: Mutex::new(HashMap::new()),
             }),
         })
     }
@@ -91,7 +99,9 @@ impl ContainerManager {
     /// - If it exists but stopped: starts it.
     /// - If it doesn't exist: creates and starts it.
     ///
-    /// Returns the container name (same as `container_name` in `AgentDefinition`).
+    /// Concurrent calls for the **same** `container_name` are serialized via a
+    /// per-container mutex so only one caller races Docker. Concurrent calls for
+    /// **different** containers proceed in parallel.
     pub async fn ensure_running(
         &self,
         container_name: &str,
@@ -99,13 +109,37 @@ impl ContainerManager {
         volumes: &[String],
         env_vars: &[(String, String)],
     ) -> Result<(), ContainerError> {
-        let mut state = self.inner.state.lock().await;
-        if state.get(container_name) == Some(&ContainerState::Running) {
-            return Ok(());
+        // Fast path: cache hit (no Docker round-trip needed).
+        {
+            let state = self.inner.state.lock().await;
+            if state.get(container_name) == Some(&ContainerState::Running) {
+                return Ok(());
+            }
         }
-        drop(state); // release lock before async Docker calls
 
-        // Check if container exists in Docker
+        // Acquire the per-container serialization lock before touching Docker.
+        // This closes the TOCTOU window: two concurrent callers for the same
+        // not-yet-created container both miss the cache, but the second one
+        // blocks here until the first finishes, then finds the cache warm.
+        let container_lock = {
+            let mut locks = self.inner.ensure_locks.lock().await;
+            locks.entry(container_name.to_string())
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .clone()
+        };
+        let _guard = container_lock.lock().await;
+
+        // Re-check cache after acquiring the per-container lock (another
+        // caller may have completed between the fast-path miss and here).
+        {
+            let state = self.inner.state.lock().await;
+            if state.get(container_name) == Some(&ContainerState::Running) {
+                return Ok(());
+            }
+        }
+
+        // Always query Docker rather than trusting the cache — the cache can go
+        // stale if the container is killed externally.
         let existing = self.find_container(container_name).await?;
 
         match existing {
@@ -241,7 +275,7 @@ impl ContainerManager {
         let mounts: Vec<Mount> = volumes.iter().filter_map(|spec| {
             let parts: Vec<&str> = spec.splitn(3, ':').collect();
             if parts.len() < 2 {
-                tracing::warn!(spec = spec, "ignoring malformed volume spec (expected source:target)");
+                tracing::warn!(spec = %spec, "ignoring malformed volume spec (expected source:target)");
                 return None;
             }
             let source = parts[0];
