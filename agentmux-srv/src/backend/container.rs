@@ -30,7 +30,6 @@ use bollard::container::{
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::image::CreateImageOptions;
 use bollard::models::{HostConfig, Mount, MountTypeEnum};
-use futures_util::StreamExt as _;
 
 /// Env var names that reference host-filesystem paths and must NOT be forwarded
 /// into a container via `docker exec -e`. The container image supplies its own

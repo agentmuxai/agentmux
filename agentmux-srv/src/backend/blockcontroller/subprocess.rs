@@ -865,10 +865,13 @@ impl SubprocessController {
     /// `base_cmd` is `[cli_command] + cli_args` WITHOUT resume — this method appends
     /// `--resume <sid>` internally before starting the exec.
     /// `container_env` is the pre-filtered env list (denylist already applied).
-    pub async fn spawn_container_turn(
+    ///
+    /// Takes `cm` and `container_name` by value (not reference) so the returned
+    /// future is `'static` — required for `tokio::spawn` in the queue-drain path.
+    pub fn spawn_container_turn(
         &self,
-        cm: &crate::backend::container::ContainerManager,
-        container_name: &str,
+        cm: crate::backend::container::ContainerManager,
+        container_name: String,
         base_cmd: Vec<String>,
         container_env: Vec<(String, String)>,
         config: SubprocessSpawnConfig,
@@ -887,6 +890,12 @@ impl SubprocessController {
         self.emit_message_accepted(&config);
         self.hydrate_session_id_from_config(config.session_id.as_deref());
 
+        // Snapshot container params for the queue-drain path before base_cmd is consumed.
+        let cm_for_drain = cm.clone();
+        let container_name_for_drain = container_name.clone();
+        let base_cmd_for_drain = base_cmd.clone();
+        let container_env_for_drain = container_env.clone();
+
         // Build final command: append --resume <sid> if we have a prior session.
         let mut cmd = base_cmd;
         {
@@ -899,68 +908,87 @@ impl SubprocessController {
             }
         }
 
-        // Start the exec via Docker socket — env vars travel through
-        // CreateExecOptions.env (Docker API), never in process argv.
-        let exec_session = cm
-            .exec(container_name, &cmd, None, &container_env)
-            .await
-            .map_err(|e| {
-                // On exec error, release the run lock and reset status
-                let mut inner = self.inner.lock().unwrap();
-                Self::set_status(&mut inner, STATUS_DONE);
-                self.unlock_run();
-                format!("container exec failed: {e}")
-            })?;
-
-        // Update status to running
-        {
-            let mut inner = self.inner.lock().unwrap();
-            Self::set_status(&mut inner, STATUS_RUNNING);
-        }
-        self.publish_status();
-        self.health_monitor.set_active_turn(true);
-
-        let crate::backend::container::ExecSession { mut input, output } = exec_session;
-
-        // Write JSON message to container stdin, then flush (EOF signals end of input).
-        let message = config.message.clone();
-        let block_id_stdin = self.block_id.clone();
-        tokio::spawn(async move {
-            let payload = format!("{}\n", message);
-            if let Err(e) = input.write_all(payload.as_bytes()).await {
-                tracing::warn!(block_id = %block_id_stdin, "container exec stdin write error: {}", e);
-                return;
-            }
-            if let Err(e) = input.flush().await {
-                tracing::warn!(block_id = %block_id_stdin, "container exec stdin flush error: {}", e);
-            }
-            // Drop `input` here → EOF to the container process.
-        });
-
-        // Spawn stdout reader task
-        let block_id_read = self.block_id.clone();
-        let broker_read = self.broker.clone();
-        let inner_read = Arc::clone(&self.inner);
-        let wstore_read = self.wstore.clone();
-        let event_bus_read = self.event_bus.clone();
-        let filestore_read = self.filestore.clone();
-        let health_read = Arc::clone(&self.health_monitor);
-        let session_id_field = config.session_id_field.clone();
+        // Clone all self fields needed by the inner tokio::spawn so we don't
+        // borrow `self` across the async boundary (which would make the future
+        // non-'static and break tokio::spawn).
+        let inner_arc = Arc::clone(&self.inner);
         let run_lock = Arc::clone(&self.run_lock);
-        let broker_done = self.broker.clone();
-        let block_id_done = self.block_id.clone();
-        let inner_done = Arc::clone(&self.inner);
-        let health_done = Arc::clone(&self.health_monitor);
+        let broker = self.broker.clone();
+        let event_bus = self.event_bus.clone();
+        let wstore = self.wstore.clone();
+        let filestore = self.filestore.clone();
+        let health_monitor = Arc::clone(&self.health_monitor);
+        let block_id = self.block_id.clone();
         let self_ref_done = self.self_ref.lock().unwrap().clone().unwrap_or_default();
 
+        // Spawn all async work (exec + I/O) into a background task so this
+        // function returns synchronously. This is required so the queue-drain
+        // path inside the reader task can call `spawn_container_turn` without
+        // needing the returned future to be `'static`.
         tokio::spawn(async move {
             use bollard::container::LogOutput;
 
-            // Accumulate bytes into lines — Docker frames don't always align to newlines.
-            let mut line_buf = String::new();
-            let mut stats = super::session_stats::SessionStatsAccumulator::new(block_id_read.clone());
+            // Start the exec via Docker socket — env vars travel through
+            // CreateExecOptions.env (Docker API), never in process argv.
+            let exec_result = cm
+                .exec(&container_name, &cmd, None, &container_env)
+                .await;
+            let exec_session = match exec_result {
+                Ok(s) => s,
+                Err(e) => {
+                    let mut inner = inner_arc.lock().unwrap();
+                    Self::set_status(&mut inner, STATUS_DONE);
+                    run_lock.store(false, Ordering::SeqCst);
+                    tracing::warn!(block_id = %block_id, error = %e, "container exec failed");
+                    return;
+                }
+            };
 
-            tracing::info!(block_id = %block_id_read, "container exec output reader started");
+            // Update status to running
+            {
+                let mut inner = inner_arc.lock().unwrap();
+                Self::set_status(&mut inner, STATUS_RUNNING);
+            }
+            if let Some(ref b) = broker {
+                let status = {
+                    let inner = inner_arc.lock().unwrap();
+                    super::BlockControllerRuntimeStatus {
+                        blockid: block_id.clone(),
+                        version: inner.status_version,
+                        shellprocstatus: inner.proc_status.clone(),
+                        shellprocconnname: "local".to_string(),
+                        shellprocexitcode: inner.proc_exit_code,
+                        spawn_ts_ms: None,
+                        is_agent_pane: false,
+                    }
+                };
+                super::publish_controller_status(b, &status);
+            }
+            health_monitor.set_active_turn(true);
+
+            let crate::backend::container::ExecSession { mut input, output } = exec_session;
+
+            // Write JSON message to container stdin, then flush (EOF signals end of input).
+            let message = config.message.clone();
+            let block_id_stdin = block_id.clone();
+            tokio::spawn(async move {
+                let payload = format!("{}\n", message);
+                if let Err(e) = input.write_all(payload.as_bytes()).await {
+                    tracing::warn!(block_id = %block_id_stdin, "container exec stdin write error: {}", e);
+                    return;
+                }
+                if let Err(e) = input.flush().await {
+                    tracing::warn!(block_id = %block_id_stdin, "container exec stdin flush error: {}", e);
+                }
+                // Drop `input` here → EOF to the container process.
+            });
+
+            // Read stdout — accumulate bytes into lines.
+            let mut line_buf = String::new();
+            let mut stats = super::session_stats::SessionStatsAccumulator::new(block_id.clone());
+            let session_id_field = config.session_id_field.clone();
+
+            tracing::info!(block_id = %block_id, "container exec output reader started");
 
             let mut pinned = std::pin::pin!(output);
             loop {
@@ -968,13 +996,13 @@ impl SubprocessController {
                     None => {
                         // Stream ended — flush any remaining partial line.
                         if !line_buf.trim().is_empty() {
-                            Self::publish_line(&line_buf, &block_id_read, &session_id_field, &inner_read, &wstore_read, &event_bus_read, &broker_read, &filestore_read, &health_read, &mut stats);
+                            Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &health_monitor, &mut stats);
                         }
-                        tracing::info!(block_id = %block_id_read, "container exec output EOF");
+                        tracing::info!(block_id = %block_id, "container exec output EOF");
                         break;
                     }
                     Some(Err(e)) => {
-                        tracing::warn!(block_id = %block_id_read, error = %e, "container exec output read error");
+                        tracing::warn!(block_id = %block_id, error = %e, "container exec output read error");
                         break;
                     }
                     Some(Ok(log_output)) => {
@@ -985,7 +1013,7 @@ impl SubprocessController {
                                 let s = String::from_utf8_lossy(&message);
                                 for line in s.lines() {
                                     if !line.trim().is_empty() {
-                                        tracing::info!(block_id = %block_id_read, stderr = %line, "container exec stderr");
+                                        tracing::info!(block_id = %block_id, stderr = %line, "container exec stderr");
                                     }
                                 }
                                 continue;
@@ -996,7 +1024,7 @@ impl SubprocessController {
                         for ch in chunk.chars() {
                             if ch == '\n' {
                                 if !line_buf.trim().is_empty() {
-                                    Self::publish_line(&line_buf, &block_id_read, &session_id_field, &inner_read, &wstore_read, &event_bus_read, &broker_read, &filestore_read, &health_read, &mut stats);
+                                    Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &health_monitor, &mut stats);
                                 }
                                 line_buf.clear();
                             } else {
@@ -1007,11 +1035,11 @@ impl SubprocessController {
                 }
             }
 
-            tracing::info!(block_id = %block_id_read, "container exec output reader exiting");
+            tracing::info!(block_id = %block_id, "container exec output reader exiting");
 
             // Mark done
             {
-                let mut inner = inner_done.lock().unwrap();
+                let mut inner = inner_arc.lock().unwrap();
                 inner.proc_exit_code = 0;
                 SubprocessController::set_status(&mut inner, STATUS_DONE);
                 inner.current_pid = None;
@@ -1019,15 +1047,15 @@ impl SubprocessController {
             }
 
             {
-                let inner = inner_done.lock().unwrap();
-                health_done.set_exited(inner.proc_exit_code);
+                let inner = inner_arc.lock().unwrap();
+                health_monitor.set_exited(inner.proc_exit_code);
             }
 
-            if let Some(ref broker) = broker_done {
+            if let Some(ref b) = broker {
                 let status = {
-                    let inner = inner_done.lock().unwrap();
+                    let inner = inner_arc.lock().unwrap();
                     super::BlockControllerRuntimeStatus {
-                        blockid: block_id_done.clone(),
+                        blockid: block_id.clone(),
                         version: inner.status_version,
                         shellprocstatus: inner.proc_status.clone(),
                         shellprocconnname: "local".to_string(),
@@ -1036,22 +1064,30 @@ impl SubprocessController {
                         is_agent_pane: false,
                     }
                 };
-                super::publish_controller_status(broker, &status);
+                super::publish_controller_status(b, &status);
             }
 
             run_lock.store(false, std::sync::atomic::Ordering::SeqCst);
 
-            // Drain queued messages — re-queue via spawn_turn; the container manager
-            // will call ensure_running + exec again for each subsequent turn.
+            // Drain queued messages via spawn_container_turn so the container
+            // context (cm, container_name, base_cmd, container_env) is preserved.
+            // spawn_turn has no container awareness and would spawn an empty command
+            // on the host, silently losing the queued message.
             let next_config = {
-                let mut inner = inner_done.lock().unwrap();
+                let mut inner = inner_arc.lock().unwrap();
                 inner.pending_messages.pop_front()
             };
             if let Some(cfg) = next_config {
                 if let Some(ctrl) = self_ref_done.upgrade() {
-                    tracing::info!(block_id = %block_id_done, "draining queued container message via spawn_turn");
-                    if let Err(e) = ctrl.spawn_turn(cfg) {
-                        tracing::warn!(block_id = %block_id_done, error = %e, "failed to spawn queued container turn");
+                    tracing::info!(block_id = %block_id, "draining queued container message via spawn_container_turn");
+                    if let Err(e) = ctrl.spawn_container_turn(
+                        cm_for_drain,
+                        container_name_for_drain,
+                        base_cmd_for_drain,
+                        container_env_for_drain,
+                        cfg,
+                    ) {
+                        tracing::warn!(error = %e, "failed to spawn queued container turn");
                     }
                 }
             }

@@ -610,7 +610,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 Some(persisted_session_id)
                             },
                         };
-                        subprocess_ctrl.spawn_container_turn(cm, &container_name, base_cmd, container_env, config).await?;
+                        subprocess_ctrl.spawn_container_turn(cm.clone(), container_name, base_cmd, container_env, config)?;
                     } else {
                         // Host agent: regular CLI subprocess (env set on child process, not in argv).
                         let config = blockcontroller::subprocess::SubprocessSpawnConfig {
