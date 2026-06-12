@@ -623,15 +623,19 @@ async fn run_via_pipes(
 /// identical to `stream_reader`'s `tokio::time::timeout` approach, but
 /// for the blocking sync I/O that the PTY master reader requires.
 ///
-/// **CR handling:** `\r` bytes are passed through to the frontend intact
-/// (not stripped by `collapse_cr`). The only Rust-layer CR guard is the
-/// trailing-`\r` hold in the quiet-window Timeout branch: if `pending`
-/// ends in `\r`, the flush is deferred so a following `\n` can form a
-/// complete CRLF rather than a stray bare `\r` chunk. All overwrite
-/// collapsing — including leading-`\r` spinners (`"\rframe"`, npm/cargo/
-/// ora/tqdm style) and same-buffer mid-line overwrites — is handled at
-/// render time by `collapseCarriageReturns` in `ToolOverlayLog.tsx`,
-/// which receives the `\r` bytes and applies terminal-overwrite semantics.
+/// **CR handling:** `\r` bytes are passed through intact (not stripped
+/// here). Within-buffer overwrite — trailing-`\r` spinner conventions
+/// (`"frame\r"`) and mid-buffer lone `\r` sequences — are collapsed by
+/// `collapse_cr` operating on the `pending` accumulator across PTY reads.
+/// Leading-`\r` spinner frames (`"\rframe"`, npm/cargo/ora/tqdm style)
+/// are NOT collapsed by `collapse_cr` (the `\r` starts the chunk, so
+/// there is no prior content to discard). Instead, each such frame
+/// arrives at `spawn_publisher_loop` with its leading `\r` intact, where
+/// the `pending_cr_line` slot collapses consecutive frames to a single
+/// published chunk (last frame wins). The only Rust-layer CR guard here
+/// is the trailing-`\r` hold in the quiet-window Timeout branch: if
+/// `pending` ends in `\r`, the flush is deferred so a following `\n` can
+/// form a complete CRLF rather than a stray bare `\r` chunk.
 fn pty_reader_loop(
     reader: Box<dyn std::io::Read + Send>,
     tx: mpsc::Sender<LineEvent>,
@@ -690,8 +694,8 @@ fn pty_reader_loop(
                     continue;
                 }
                 pending.extend_from_slice(&chunk);
-                // \r is passed through intact for the frontend's
-                // collapseCarriageReturns to handle.
+                // \r is passed through intact so spawn_publisher_loop's
+                // pending_cr_line slot can collapse leading-\r spinner frames.
                 while let Some(nl_pos) = pending.iter().position(|&b| b == b'\n') {
                     let line: Vec<u8> = pending.drain(..=nl_pos).collect();
                     if tx.blocking_send(LineEvent { kind, bytes: line }).is_err() {
@@ -884,6 +888,14 @@ fn strip_ansi(chunk: &mut Vec<u8>) {
 /// the `pending` accumulator (which spans reads for the current visual line)
 /// catches those cross-read overwrites.
 ///
+/// **Leading `\r` is preserved.** When a lone `\r` appears at the very start
+/// of a visual line (i.e., nothing to overwrite), it is emitted as-is rather
+/// than discarded. This lets `spawn_publisher_loop`'s `pending_cr_line` slot
+/// recognise and collapse consecutive leading-`\r` spinner frames (`"\rframe"`
+/// npm/ora/tqdm style) on both the PTY path and the pipe (`stream_reader`)
+/// fallback path. Without this, `collapse_cr` would silently drop the `\r`
+/// and `pending_cr_line` would never engage on the pipe path.
+///
 /// **Trailing `\r` is left in place.** A `\r` at the very end of `pending`
 /// might be the first byte of a CRLF pair split across reads. Collapsing it
 /// immediately would discard the line's content before the `\n` arrives,
@@ -910,6 +922,13 @@ fn collapse_cr(pending: &mut Vec<u8>) {
                     out.push(b'\n');
                     line_start = out.len();
                     i += 2;
+                } else if out.len() == line_start {
+                    // Leading \r: nothing to overwrite on this line.
+                    // Preserve it so spawn_publisher_loop's pending_cr_line
+                    // slot can recognise and collapse consecutive spinner
+                    // frames that use the leading-\r convention ("\rframe").
+                    out.push(b);
+                    i += 1;
                 } else {
                     // Lone \r mid-buffer: discard current line and keep going.
                     out.truncate(line_start);
@@ -940,10 +959,12 @@ fn collapse_cr(pending: &mut Vec<u8>) {
 ///
 /// Fix: track `pending_cr_line`. When a line's content (after stripping
 /// its trailing `\n`) starts with `\r`, strip the leading `\r` and store
-/// the result in the pending slot — overwriting any previous frame. The
-/// slot is flushed to WPS when the next non-`\r` line arrives or at EOF.
-/// Multiple consecutive spinner frames therefore collapse to one published
-/// chunk (the last frame wins), regardless of inter-frame timing.
+/// the result in the pending slot. When the next `\r`-prefixed line
+/// arrives, the prior pending value is published first so no frame is
+/// silently dropped from the live log. The slot is flushed to WPS when
+/// the next non-`\r` line arrives or at EOF. Consecutive spinner frames
+/// therefore appear as sequential chunks in the live log rather than
+/// being merged into one, which keeps all intermediate frames visible.
 ///
 /// The model-visible buffer (`buffered`) receives every raw event byte
 /// unchanged so the full output is preserved for the model.
@@ -979,7 +1000,33 @@ fn spawn_publisher_loop(
                 let line_str = String::from_utf8_lossy(line_bytes);
 
                 if let Some(stripped) = line_str.strip_prefix('\r') {
-                    // Leading-\r spinner frame: overwrite pending slot.
+                    // Leading-\r spinner frame: publish any prior pending frame
+                    // before storing the new one, so consecutive \r-prefixed
+                    // lines are not silently dropped from the live WPS log.
+                    // (The model-visible buffered blob is unaffected — it
+                    // receives every raw event byte regardless of this slot.)
+                    if let Some((prior_text, prior_kind)) = pending_cr_line.take() {
+                        match publish_line(
+                            client,
+                            &tool_id,
+                            block_id.as_deref(),
+                            prior_kind,
+                            &prior_text,
+                        )
+                        .await
+                        {
+                            Ok(()) => chunks_published += 1,
+                            Err(e) => {
+                                chunks_failed += 1;
+                                tracing::warn!(
+                                    target: "bashwrap",
+                                    tool_id = %tool_id,
+                                    error = %e,
+                                    "WPS publish failed (prior pending_cr_line)"
+                                );
+                            }
+                        }
+                    }
                     pending_cr_line = Some((stripped.to_owned(), event.kind));
                 } else {
                     // Non-\r line: flush any pending spinner frame first.
