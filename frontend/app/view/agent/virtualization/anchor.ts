@@ -71,7 +71,17 @@ export function isNearBottom(
     clientHeight: number,
     threshold = STICK_TO_BOTTOM_THRESHOLD_PX,
 ): boolean {
-    return scrollHeight - scrollTop - clientHeight < threshold;
+    const maxScroll = scrollHeight - clientHeight;
+    if (maxScroll <= 0) return true;
+    // When the total scroll range is smaller than the threshold every
+    // position would qualify as "near bottom", making it impossible for
+    // the user to disengage stickToBottom. Cap the sticky zone at half
+    // the scroll range so there is always a reachable "scrolled away"
+    // position (fixes wheel / fast-scroll on short conversations).
+    const effectiveThreshold = maxScroll < threshold
+        ? Math.max(1, Math.floor(maxScroll / 2))
+        : threshold;
+    return maxScroll - scrollTop < effectiveThreshold;
 }
 
 /**
