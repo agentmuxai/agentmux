@@ -930,6 +930,23 @@ fn collapse_cr(pending: &mut Vec<u8>) {
 
 /// Shared publisher loop — drains the LineEvent channel, aggregates
 /// into the model-visible buffer, and publishes each line via WPS.
+///
+/// **Leading-`\r` spinner collapse:** spinner programs (npm, cargo,
+/// ora, tqdm) emit each frame as `"\rframe\r"` or just `"\rframe"` —
+/// a lone `\r` at the start means "overwrite the current line". Because
+/// the PTY reader flushes every read immediately, each frame arrives as
+/// a separate `LineEvent`. Without collapsing, the frontend would render
+/// every frame as a distinct `<pre>` element.
+///
+/// Fix: track `pending_cr_line`. When a line's content (after stripping
+/// its trailing `\n`) starts with `\r`, strip the leading `\r` and store
+/// the result in the pending slot — overwriting any previous frame. The
+/// slot is flushed to WPS when the next non-`\r` line arrives or at EOF.
+/// Multiple consecutive spinner frames therefore collapse to one published
+/// chunk (the last frame wins), regardless of inter-frame timing.
+///
+/// The model-visible buffer (`buffered`) receives every raw event byte
+/// unchanged so the full output is preserved for the model.
 fn spawn_publisher_loop(
     args: &Args,
     wps: Option<WpsClient>,
@@ -941,6 +958,11 @@ fn spawn_publisher_loop(
     tokio::spawn(async move {
         let mut chunks_published = 0u64;
         let mut chunks_failed = 0u64;
+
+        // Pending leading-\r spinner frame: holds (content_after_cr, kind).
+        // Flushed on the next non-\r line or at EOF.
+        let mut pending_cr_line: Option<(String, &'static str)> = None;
+
         while let Some(event) = rx.recv().await {
             {
                 let mut buf = buffered.lock().await;
@@ -955,23 +977,77 @@ fn spawn_publisher_loop(
                     line_bytes = &line_bytes[..line_bytes.len() - 1];
                 }
                 let line_str = String::from_utf8_lossy(line_bytes);
-                match publish_line(
-                    client,
-                    &tool_id,
-                    block_id.as_deref(),
-                    event.kind,
-                    &line_str,
-                )
-                .await
-                {
-                    Ok(()) => chunks_published += 1,
-                    Err(e) => {
-                        chunks_failed += 1;
-                        tracing::warn!(target: "bashwrap", tool_id = %tool_id, error = %e, "WPS publish failed");
+
+                if let Some(stripped) = line_str.strip_prefix('\r') {
+                    // Leading-\r spinner frame: overwrite pending slot.
+                    pending_cr_line = Some((stripped.to_owned(), event.kind));
+                } else {
+                    // Non-\r line: flush any pending spinner frame first.
+                    if let Some((cr_text, cr_kind)) = pending_cr_line.take() {
+                        match publish_line(
+                            client,
+                            &tool_id,
+                            block_id.as_deref(),
+                            cr_kind,
+                            &cr_text,
+                        )
+                        .await
+                        {
+                            Ok(()) => chunks_published += 1,
+                            Err(e) => {
+                                chunks_failed += 1;
+                                tracing::warn!(
+                                    target: "bashwrap",
+                                    tool_id = %tool_id,
+                                    error = %e,
+                                    "WPS publish failed"
+                                );
+                            }
+                        }
+                    }
+                    match publish_line(
+                        client,
+                        &tool_id,
+                        block_id.as_deref(),
+                        event.kind,
+                        &line_str,
+                    )
+                    .await
+                    {
+                        Ok(()) => chunks_published += 1,
+                        Err(e) => {
+                            chunks_failed += 1;
+                            tracing::warn!(
+                                target: "bashwrap",
+                                tool_id = %tool_id,
+                                error = %e,
+                                "WPS publish failed"
+                            );
+                        }
                     }
                 }
             }
         }
+
+        // EOF: flush any remaining pending spinner frame.
+        if let Some((cr_text, cr_kind)) = pending_cr_line.take() {
+            if let Some(client) = wps.as_ref() {
+                match publish_line(client, &tool_id, block_id.as_deref(), cr_kind, &cr_text).await
+                {
+                    Ok(()) => chunks_published += 1,
+                    Err(e) => {
+                        chunks_failed += 1;
+                        tracing::warn!(
+                            target: "bashwrap",
+                            tool_id = %tool_id,
+                            error = %e,
+                            "WPS publish failed (EOF flush)"
+                        );
+                    }
+                }
+            }
+        }
+
         tracing::info!(
             target: "bashwrap",
             tool_id = %tool_id,
