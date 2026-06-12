@@ -105,6 +105,7 @@ dependencies = [
  "crash-handler",
  "dirs",
  "flate2",
+ "futures-util",
  "hex",
  "json_comments",
  "libc",

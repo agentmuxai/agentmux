@@ -573,10 +573,13 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // Forward turn env vars via -e; skip host-path vars (container has its own).
                         // Do NOT pass -w: cmd:cwd is a host path, not a container path.
                         let mut docker_args = vec!["exec".to_string(), "-i".to_string()];
-                        for (k, v) in &env_vars {
+                        // Pass env var NAMES only (no =value) — docker exec inherits values
+                        // from the host docker process env (set via SubprocessSpawnConfig.env_vars).
+                        // This keeps secrets out of argv (CWE-214 / ps/cmdline exposure).
+                        for (k, _v) in &env_vars {
                             if !crate::backend::container::CONTAINER_ENV_DENYLIST.contains(&k.as_str()) {
                                 docker_args.push("-e".to_string());
-                                docker_args.push(format!("{k}={v}"));
+                                docker_args.push(k.clone());
                             }
                         }
                         docker_args.push(container_name);

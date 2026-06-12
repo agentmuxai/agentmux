@@ -25,7 +25,9 @@ use bollard::container::{
     StopContainerOptions,
 };
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
+use bollard::image::CreateImageOptions;
 use bollard::models::{HostConfig, Mount, MountTypeEnum};
+use futures_util::StreamExt as _;
 
 /// Env var names that reference host-filesystem paths and must NOT be forwarded
 /// into a container via `docker exec -e`. The container image supplies its own
@@ -306,6 +308,20 @@ impl ContainerManager {
             }),
             ..Default::default()
         };
+
+        // bollard's create_container does NOT auto-pull (unlike `docker run` CLI).
+        // Pull first so that hosts that have never run this image don't get a 404.
+        tracing::info!(image = image, "pulling container image (no-op if already present)");
+        let mut pull_stream = self.inner.docker.create_image(
+            Some(CreateImageOptions { from_image: image, ..Default::default() }),
+            None,
+            None,
+        );
+        while let Some(item) = pull_stream.next().await {
+            if let Err(e) = item {
+                return Err(ContainerError::NotAvailable(format!("image pull failed for {image}: {e}")));
+            }
+        }
 
         let container = self.inner.docker
             .create_container(
