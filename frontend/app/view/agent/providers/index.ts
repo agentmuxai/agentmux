@@ -79,6 +79,12 @@ export interface ProviderDefinition {
      *  the user launches the agent so we can show install links
      *  instead of letting the CLI fail with cryptic stderr. */
     systemPrereqs?: SystemPrereq[];
+    /**
+     * The model's maximum input token capacity (context window size).
+     * Used by the composer strip to render a context-fill progress bar.
+     * Omit for providers whose context window is unknown or variable.
+     */
+    contextWindow?: number;
 }
 
 /** Shared git prereq — claude-code calls `git` from session-start
@@ -139,6 +145,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // anthropics/claude-code#29898). Without git the CLI fails
         // with `Error: Git is required but was not found.`.
         systemPrereqs: [GIT_PREREQ],
+        contextWindow: 200_000,
     },
     codex: {
         id: "codex",
@@ -166,6 +173,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: null,
         sessionIdField: "thread_id",
         controllerType: "subprocess",
+        contextWindow: 200_000,
     },
     // muxcode — AgentMux's first-party agentic coding CLI.
     // Supports local GGUF inference via llama-server, Anthropic, OpenAI, and
@@ -199,6 +207,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: "--resume",
         sessionIdField: "session_id",
         controllerType: "subprocess",
+        contextWindow: 200_000,
     },
     gemini: {
         id: "gemini",
@@ -226,6 +235,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: "-r",
         sessionIdField: "session_id",
         controllerType: "subprocess",
+        contextWindow: 1_000_000,
     },
     // Qwen Code — Alibaba's open-source coding agent, a fork of Gemini CLI.
     // Same stream-json headless surface → reuses the gemini translator
@@ -320,6 +330,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // Same git dependency as Claude Code — OpenClaw uses git for
         // project-context features when invoking the Codex harness.
         systemPrereqs: [GIT_PREREQ],
+        contextWindow: 200_000,
     },
     // Kimi Code CLI — Moonshot AI's coding agent.
     // Python-based CLI (not npm). Supports stream-json output and OpenAI-style tool calls.
@@ -347,6 +358,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: null,
         sessionIdField: "session_id",
         controllerType: "subprocess",
+        contextWindow: 128_000,
     },
     // GitHub Copilot CLI — Microsoft's coding agent.
     // Runs in ACP mode (`--acp` flag) so the existing ACP controller
@@ -379,6 +391,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: null,
         sessionIdField: "sessionId",
         controllerType: "acp",
+        contextWindow: 128_000,
     },
     // Pi — the lightweight coding agent that powers OpenClaw.
     // Standalone CLI, no gateway required. Pure coding agent with read/write/bash/edit tools.
