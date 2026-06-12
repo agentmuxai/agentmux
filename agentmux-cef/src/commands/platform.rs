@@ -1053,8 +1053,13 @@ pub fn open_external(args: &serde_json::Value) -> Result<serde_json::Value, Stri
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing url".to_string())?;
 
-    // Only allow safe URL schemes
-    if !url.starts_with("http://") && !url.starts_with("https://") && !url.starts_with("devtools://") {
+    // Allow safe URL schemes. vscode:// is included so that file-path links
+    // with a :line suffix can open the file at the correct line in VS Code.
+    let allowed = url.starts_with("http://")
+        || url.starts_with("https://")
+        || url.starts_with("devtools://")
+        || url.starts_with("vscode://");
+    if !allowed {
         return Err(format!("Refusing to open URL with unsupported scheme: {}", url));
     }
 
@@ -1086,6 +1091,50 @@ pub fn open_external(args: &serde_json::Value) -> Result<serde_json::Value, Stri
             .arg(url)
             .spawn()
             .map_err(|e| format!("Failed to open URL: {}", e))?;
+    }
+
+    Ok(serde_json::Value::Null)
+}
+
+/// Open the system file manager with the given file selected.
+/// On Windows: `explorer /select,<path>`.
+/// On macOS:   `open -R <path>`.
+/// On Linux:   opens the parent directory via `xdg-open` (no cross-desktop
+///             "select file" standard exists).
+pub fn reveal_in_file_explorer(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let file_path = args
+        .get("filePath")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Missing filePath".to_string())?;
+
+    #[cfg(target_os = "windows")]
+    {
+        // Convert forward slashes (from JS normalisation) back to backslashes.
+        let native = file_path.replace('/', "\\");
+        // /select,<path> must be a single argument — the comma is the delimiter
+        // between the switch and the path, not a shell separator.
+        let _ = std::process::Command::new("explorer.exe")
+            .arg(format!("/select,{}", native))
+            .spawn()
+            .map_err(|e| format!("Failed to reveal in Explorer: {}", e))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .args(["-R", file_path])
+            .spawn()
+            .map_err(|e| format!("Failed to reveal in Finder: {}", e))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let parent = std::path::Path::new(file_path)
+            .parent()
+            .and_then(|p| p.to_str())
+            .unwrap_or(file_path);
+        let _ = std::process::Command::new("xdg-open")
+            .arg(parent)
+            .spawn()
+            .map_err(|e| format!("Failed to open parent directory: {}", e))?;
     }
 
     Ok(serde_json::Value::Null)
