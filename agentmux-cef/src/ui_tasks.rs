@@ -168,7 +168,10 @@ pub fn post_focus_window(state: &Arc<AppState>, label: &str) {
 // renderer events) and sends this IPC to initiate native drag.
 //
 // Requires CEF Patch: BeginWindowDrag added to CefWindow API (libcef/browser/views/window_impl.cc).
-#[cfg(not(target_os = "windows"))]
+// Linux: native drag via CefWindow::BeginWindowDrag (Ozone). macOS uses a
+// separate NSWindow-level path (MacWindowDragTask, below) because stock
+// libcef has no drag API and the fork's BeginWindowDrag is Ozone-only.
+#[cfg(target_os = "linux")]
 wrap_task! {
     pub struct StartWindowDragTask {
         state: Arc<AppState>,
@@ -250,10 +253,113 @@ wrap_task! {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn post_start_drag(state: &Arc<AppState>, label: &str) {
     let mut task = StartWindowDragTask::new(state.clone(), label.to_string());
     post_task(ThreadId::UI, Some(&mut task));
+}
+
+// macOS: drive the drag at the NSWindow level via AppKit's
+// `performWindowDragWithEvent:`. Stock libcef ships no programmatic drag API
+// and the fork's BeginWindowDrag is Ozone-only (no-op on macOS), so rather
+// than chain macOS releases to a patched-Chromium framework we reach the
+// NSWindow ourselves. The header is HTCLIENT (useWindowDrag.darwin.ts sends
+// this IPC only on a left-button drag), so right-click context menus keep
+// working on the same surface.
+#[cfg(target_os = "macos")]
+pub fn post_start_drag(state: &Arc<AppState>, label: &str) {
+    let mut task = MacWindowDragTask::new(state.clone(), label.to_string());
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
+#[cfg(target_os = "macos")]
+wrap_task! {
+    pub struct MacWindowDragTask {
+        state: Arc<AppState>,
+        label: String,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            if let Some(window) = get_window_on_ui(&self.state, &self.label) {
+                // Mirrors app.rs: on macOS the CEF window handle IS the NSView.
+                let nsview = window.window_handle() as *mut std::ffi::c_void;
+                if nsview.is_null() {
+                    tracing::warn!("[start_window_drag] macOS: null NSView label={}", self.label);
+                } else {
+                    unsafe { begin_macos_native_window_drag(nsview, &self.label) };
+                }
+                // Dragging-reset safety net, same as the Linux task. On
+                // non-Windows, tryRedockAtCursor is driven from the DOM
+                // mouseup, so `moved` is unused here.
+                crate::events::emit_event_to_top_level_windows(
+                    &self.state,
+                    "window_drag_ended",
+                    &serde_json::json!({ "label": &self.label, "moved": false }),
+                );
+            } else {
+                tracing::warn!("[start_window_drag] no window for label={}", self.label);
+            }
+        }
+    }
+}
+
+/// Begin a native macOS window drag in response to the renderer's
+/// `start_window_drag` IPC. Reaches the NSWindow via `[NSView window]` and
+/// calls AppKit's `performWindowDragWithEvent:` with the in-flight mouse
+/// event; the window server then moves the window until the button is
+/// released (GPU-composited, no per-frame IPC). Raw libobjc FFI, mirroring
+/// `ensure_macos_native_window_buttons` in app.rs.
+///
+/// `performWindowDragWithEvent:` needs the live mouse event. This IPC is
+/// async, but the button is still held and the browser is mid-drag, so
+/// `[NSApp currentEvent]` is the current left-mouse-dragged event. If it is
+/// somehow nil we skip rather than pass nil (the user can re-press) — never
+/// UB.
+#[cfg(target_os = "macos")]
+unsafe fn begin_macos_native_window_drag(nsview: *mut std::ffi::c_void, label: &str) {
+    use std::ffi::{c_char, c_void};
+    type Id = *mut c_void;
+    type Sel = *const c_void;
+    extern "C" {
+        fn sel_registerName(name: *const c_char) -> Sel;
+        fn objc_getClass(name: *const c_char) -> Id;
+        fn objc_msgSend();
+    }
+    let msg: extern "C" fn(Id, Sel) -> Id = std::mem::transmute(objc_msgSend as *const c_void);
+
+    // nswindow = [nsview window]
+    let nswindow = msg(nsview, sel_registerName(b"window\0".as_ptr() as _));
+    if nswindow.is_null() {
+        tracing::warn!("[start_window_drag] macOS: [nsview window] nil label={}", label);
+        return;
+    }
+
+    // event = [[NSApplication sharedApplication] currentEvent]
+    let nsapp = msg(
+        objc_getClass(b"NSApplication\0".as_ptr() as _),
+        sel_registerName(b"sharedApplication\0".as_ptr() as _),
+    );
+    let event = msg(nsapp, sel_registerName(b"currentEvent\0".as_ptr() as _));
+    if event.is_null() {
+        tracing::warn!(
+            "[start_window_drag] macOS: [NSApp currentEvent] nil — drag skipped label={}",
+            label
+        );
+        return;
+    }
+
+    // [nswindow performWindowDragWithEvent: event]
+    let perform: extern "C" fn(Id, Sel, Id) = std::mem::transmute(objc_msgSend as *const c_void);
+    perform(
+        nswindow,
+        sel_registerName(b"performWindowDragWithEvent:\0".as_ptr() as _),
+        event,
+    );
+    tracing::info!(
+        "[start_window_drag] macOS: performWindowDragWithEvent dispatched label={}",
+        label
+    );
 }
 
 #[cfg(target_os = "windows")]
