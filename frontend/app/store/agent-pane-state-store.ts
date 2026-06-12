@@ -70,8 +70,8 @@ export interface AgentPaneProjections {
      * Current input-token count as of the last message_start — equals the
      * total context fill (all conversation history) sent to the model.
      * Driven by the same TokensIn command as turnTokens.input; fires once
-     * per turn at message_start. Resets to null on TurnEnd, so it is live
-     * only while a turn is in flight.
+     * per turn at message_start. Persists through TurnEnd so the bar stays
+     * visible between turns. Clears only on TurnReset (session wipe).
      */
     contextTokens?: (next: number | null) => void;
 }
@@ -187,8 +187,8 @@ export function dispatch(
     proj("currentTool", prev.currentTool, slot.state.currentTool, slot.proj.currentTool);
     proj("turnTokens", prev.turnTokens, slot.state.turnTokens, slot.proj.turnTokens);
     proj("contextTokens",
-        prev.turnTokens?.input ?? null,
-        slot.state.turnTokens?.input ?? null,
+        prev.lastContextTokens ?? null,
+        slot.state.lastContextTokens ?? null,
         slot.proj.contextTokens);
     proj("pending", prev.pending, slot.state.pending, slot.proj.pending);
     proj("initPhase", prev.initPhase, slot.state.initPhase, slot.proj.initPhase);
