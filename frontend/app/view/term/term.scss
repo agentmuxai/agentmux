@@ -127,15 +127,6 @@
     }
 
     .terminal {
-        // .xterm-screen covers the full element area (including the scrollbar gutter) but
-        // only contains the canvas/rows for the text columns. pointer-events:none lets
-        // clicks in the scrollbar zone fall through to .xterm-viewport's native scrollbar,
-        // while children (canvas/rows) keep their default pointer-events:auto so text
-        // selection and input still work.
-        .xterm-screen {
-            pointer-events: none;
-        }
-
         // WebView2 renders the native textarea caret even at opacity:0
         // when the terminal background is transparent.
         .xterm-helper-textarea {
