@@ -622,8 +622,16 @@ async fn run_via_pipes(
 /// Uses a thread-bridge + `recv_timeout` to add a quiet-window flush
 /// identical to `stream_reader`'s `tokio::time::timeout` approach, but
 /// for the blocking sync I/O that the PTY master reader requires.
-/// This lets newline-free partial output (`printf 'Building...'`) surface
-/// live while still accumulating across reads for CR collapse.
+///
+/// **CR handling split:** this layer handles two Rust-layer cases only:
+/// (a) trailing-`\r` frames (`"frame\r"`, rare) — the hold-on-trailing-`\r`
+/// guard prevents flushing until the next read disambiguates overwrite vs
+/// CRLF; (b) CRLF straddling a read boundary — `\r` ends one read, `\n`
+/// begins the next, and the trailing-`\r` hold keeps the line intact.
+/// Leading-`\r` spinners (`"\rframe"`, the common npm/cargo/ora/tqdm style)
+/// cannot be collapsed here because the quiet-window timer fires between
+/// frames and drains each frame as its own chunk; they are collapsed at
+/// render time by `collapseCarriageReturns` in `ToolOverlayLog.tsx`.
 fn pty_reader_loop(
     reader: Box<dyn std::io::Read + Send>,
     tx: mpsc::Sender<LineEvent>,
@@ -654,7 +662,10 @@ fn pty_reader_loop(
                         return; // consumer gone
                     }
                 }
-                Err(_) => return,
+                Err(e) => {
+                    tracing::warn!(target: "bashwrap", error = %e, "PTY read error");
+                    return;
+                }
             }
         }
     });

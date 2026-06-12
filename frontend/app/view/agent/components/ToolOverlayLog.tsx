@@ -139,16 +139,66 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     );
 };
 
+type LogChunk = { kind: string; content: string; timestamp: number };
+
+// Apply terminal CR overwrite semantics across chunk boundaries so that
+// leading-\r spinner frames (npm/cargo/ora/tqdm style "\rframe") produced
+// by separate PTY reads collapse into a single visible line instead of
+// bleeding as one <pre> per frame. CRLF straddling a chunk boundary is
+// also handled via the pendingCR lookahead.
+function collapseCarriageReturns(chunks: ReadonlyArray<LogChunk>): ReadonlyArray<LogChunk> {
+    if (!chunks.some((c) => c.content.includes("\r"))) return chunks;
+
+    const result: LogChunk[] = [];
+    let currentLine = "";
+    let currentKind = "stdout";
+    let currentTimestamp = 0;
+    let pendingCR = false;
+
+    for (const chunk of chunks) {
+        currentKind = chunk.kind;
+        currentTimestamp = chunk.timestamp;
+        for (let i = 0; i < chunk.content.length; i++) {
+            const char = chunk.content[i];
+            if (pendingCR) {
+                pendingCR = false;
+                if (char === "\n") {
+                    // CRLF: commit current line, start fresh
+                    result.push({ kind: currentKind, content: currentLine, timestamp: currentTimestamp });
+                    currentLine = "";
+                    continue;
+                }
+                // Lone CR: overwrite (cursor to column 0)
+                currentLine = "";
+            }
+            if (char === "\r") {
+                pendingCR = true;
+            } else if (char === "\n") {
+                result.push({ kind: currentKind, content: currentLine, timestamp: currentTimestamp });
+                currentLine = "";
+            } else {
+                currentLine += char;
+            }
+        }
+        // pendingCR carries across chunk boundaries (CRLF straddle)
+    }
+
+    if (pendingCR) currentLine = ""; // lone \r at very end
+    if (currentLine.length > 0) {
+        result.push({ kind: currentKind, content: currentLine, timestamp: currentTimestamp });
+    }
+
+    return result;
+}
+
 interface ChunkListProps {
-    chunks: ReadonlyArray<{ kind: string; content: string; timestamp: number }>;
+    chunks: ReadonlyArray<LogChunk>;
 }
 function ChunkList(props: ChunkListProps): JSX.Element {
-    // Cap the inline render to ~MAX_TOOL_OUTPUT_LINES worth of trailing
-    // chunks. Inline (not memoized) per this file's reactivity discipline.
-    // The capper is stateful (per-stream running line total) so each streamed
-    // append only scans the new chunk, never the growing dropped prefix.
+    // Collapse CR overwrite frames first so the capper counts visually
+    // meaningful lines (one spinner animation = one line, not N frames).
     const cap = createChunkCapper();
-    const capped = () => cap(props.chunks);
+    const capped = () => cap(collapseCarriageReturns(props.chunks));
     return (
         <>
             <Show when={capped().hiddenLines > 0}>
