@@ -195,16 +195,19 @@ interface ChunkListProps {
     chunks: ReadonlyArray<LogChunk>;
 }
 function ChunkList(props: ChunkListProps): JSX.Element {
-    // Collapse CR overwrite frames first so the capper counts visually
-    // meaningful lines (one spinner animation = one line, not N frames).
+    // Cap the full incoming stream first so createChunkCapper can use its
+    // O(1) incremental anchor (chunks[0] identity comparison). Collapse runs
+    // only on the bounded capped window — avoids the O(n²) pathology of
+    // collapsing an ever-growing unbounded list on every streaming append.
     const cap = createChunkCapper();
-    const capped = () => cap(collapseCarriageReturns(props.chunks));
+    const capped = () => cap(props.chunks);
+    const visible = () => collapseCarriageReturns(capped().chunks);
     return (
         <>
             <Show when={capped().hiddenLines > 0}>
                 <OutputHiddenMarker hidden={capped().hiddenLines} noun="line" from="tail" />
             </Show>
-            <Index each={capped().chunks}>
+            <Index each={visible()}>
                 {(chunk) => (
                     <pre class={`agent-tool-log-line ${KIND_CLASS[chunk().kind] ?? ""}`}>
                         {capChars(chunk().content)}
