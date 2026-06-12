@@ -437,7 +437,10 @@ pub fn build_settings_with_hooks(
     // agent cannot run any bash commands. Merge with any user-supplied allow list
     // rather than overwriting it.
     {
-        let bashwrap_allow = Value::String("Bash(agentmux-bashwrap*)".to_string());
+        // Space before * enforces a command-name boundary: matches
+        // "agentmux-bashwrap <args>" only, not other executables that
+        // happen to share the prefix (e.g. agentmux-bashwrapXYZ).
+        let bashwrap_allow = Value::String("Bash(agentmux-bashwrap *)".to_string());
         let mut allow_arr = match settings_obj.get("permissions") {
             Some(Value::Object(perms)) => match perms.get("allow") {
                 Some(Value::Array(arr)) => arr.clone(),
