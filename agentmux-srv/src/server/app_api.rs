@@ -2029,6 +2029,9 @@ pub(crate) async fn agent_define_core(
         branch_label: String::new(),
         updated_at: now,
         user_hidden: 0,
+        container_image: cmd.container_image.clone(),
+        container_volumes: cmd.container_volumes.clone(),
+        container_name: String::new(), // assigned by ContainerManager on first spawn
     };
 
     // Atomic check-then-insert.

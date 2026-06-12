@@ -834,6 +834,12 @@ pub struct CommandAgentDefineData {
     pub env: Option<std::collections::HashMap<String, String>>,
     pub if_exists: Option<String>,
     pub create_instance_stub: Option<bool>,
+    /// Docker image for container-type agents. Empty string for host agents.
+    #[serde(default)]
+    pub container_image: String,
+    /// JSON array of volume mount specs. Empty array (`"[]"`) for host agents.
+    #[serde(default = "default_container_volumes")]
+    pub container_volumes: String,
 }
 
 /// Response from agent.define.
@@ -1477,6 +1483,10 @@ fn default_agent_type() -> String {
     "standalone".to_string()
 }
 
+fn default_container_volumes() -> String {
+    "[]".to_string()
+}
+
 fn default_agent_icon() -> String {
     "✦".to_string()
 }
@@ -1512,6 +1522,12 @@ pub struct CommandUpdateAgentDefinitionData {
     /// `AgentDefinition.accounts`). Written by the Agent pane's Identity tab.
     #[serde(default)]
     pub accounts: String,
+    /// Docker image for container-type agents. Empty string for host agents.
+    #[serde(default)]
+    pub container_image: String,
+    /// JSON array of volume mount specs. Empty array (`"[]"`) for host agents.
+    #[serde(default = "default_container_volumes")]
+    pub container_volumes: String,
 }
 
 /// Input for deleteagent

@@ -179,6 +179,9 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     branch_label: String::new(),
                     updated_at: now,
                     user_hidden: 0,
+                    container_image: String::new(),
+                    container_volumes: "[]".to_string(),
+                    container_name: String::new(),
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
@@ -250,6 +253,15 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // (`agentdefhide` / `agentdefunhide`). Phase 2 of
                     // SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md.
                     user_hidden: old.user_hidden,
+                    // Preserve existing container config when the caller omits the field
+                    // (cmd.container_image defaults to "" via #[serde(default)]). Callers
+                    // that only update name/icon/etc. (AgentDefForm) don't carry container
+                    // fields, so falling back to old values prevents silently wiping a
+                    // container agent's image and volumes — same guard as `accounts` above.
+                    container_image: if cmd.container_image.is_empty() { old.container_image.clone() } else { cmd.container_image },
+                    container_volumes: if cmd.container_volumes == "[]" { old.container_volumes.clone() } else { cmd.container_volumes },
+                    // container_name is server-managed; preserve the existing value.
+                    container_name: old.container_name.clone(),
                 };
                 let found = wstore.agent_def_update(&mut agent).map_err(|e| format!("updateagent: {e}"))?;
                 if !found {
@@ -389,6 +401,11 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // (Q2 Decision Y) — hide applies only to seeded
                     // templates, never to user-owned agents.
                     user_hidden: 0,
+                    // Inherit container config from template so container-type
+                    // templates propagate their image to user-cloned agents.
+                    container_image: template.container_image.clone(),
+                    container_volumes: template.container_volumes.clone(),
+                    container_name: String::new(),
                 };
                 wstore
                     .agent_def_insert(&mut new_def)
@@ -831,6 +848,9 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     branch_label: String::new(),
                     updated_at: now,
                     user_hidden: 0,
+                    container_image: String::new(),
+                    container_volumes: "[]".to_string(),
+                    container_name: String::new(),
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
 
@@ -963,6 +983,9 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         branch_label: String::new(),
                         updated_at: now,
                         user_hidden: 0,
+                        container_image: String::new(),
+                        container_volumes: "[]".to_string(),
+                        container_name: String::new(),
                     };
 
                     if let Err(e) = wstore.agent_def_insert(&mut agent) {
@@ -1952,6 +1975,11 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     branch_label: branch_label.clone(),
                     updated_at: now,
                     user_hidden: 0,
+                    // Forks inherit container config from source so forked container agents
+                    // retain their image and volumes.
+                    container_image: source.container_image.clone(),
+                    container_volumes: source.container_volumes.clone(),
+                    container_name: String::new(),
                 };
                 wstore
                     .agent_def_insert(&mut fork)
@@ -2813,6 +2841,9 @@ mod recent_sessions_tests {
             branch_label: String::new(),
             updated_at: 0,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         let mut def_mut = def.clone();
         wstore.agent_def_insert(&mut def_mut).unwrap();
@@ -3083,6 +3114,9 @@ mod recent_sessions_tests {
             branch_label: String::new(),
             updated_at: 1_700_000_000_000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         wstore.agent_def_insert(&mut tpl).unwrap();
 
@@ -3109,6 +3143,9 @@ mod recent_sessions_tests {
             branch_label: String::new(),
             updated_at: 1_700_000_001_000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         wstore.agent_def_insert(&mut user_a).unwrap();
 
