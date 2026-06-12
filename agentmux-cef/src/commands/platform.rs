@@ -1096,11 +1096,15 @@ pub fn open_external(args: &serde_json::Value) -> Result<serde_json::Value, Stri
     Ok(serde_json::Value::Null)
 }
 
-/// Open the system file manager with the given file selected.
-/// On Windows: `explorer /select,<path>`.
-/// On macOS:   `open -R <path>`.
-/// On Linux:   opens the parent directory via `xdg-open` (no cross-desktop
-///             "select file" standard exists).
+/// Open the system file manager at the given path.
+/// Directories are opened directly; files are revealed (selected) in their
+/// parent directory.
+///
+/// | Platform | Directory        | File                        |
+/// |----------|------------------|-----------------------------|
+/// | Windows  | `explorer <dir>` | `explorer /select,<file>`   |
+/// | macOS    | `open <dir>`     | `open -R <file>`            |
+/// | Linux    | `xdg-open <dir>` | `xdg-open <parent dir>`     |
 pub fn reveal_in_file_explorer(args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let file_path = args
         .get("filePath")
@@ -1111,30 +1115,47 @@ pub fn reveal_in_file_explorer(args: &serde_json::Value) -> Result<serde_json::V
     {
         // Convert forward slashes (from JS normalisation) back to backslashes.
         let native = file_path.replace('/', "\\");
-        // /select,<path> must be a single argument — the comma is the delimiter
-        // between the switch and the path, not a shell separator.
+        let is_dir = std::path::Path::new(&native).is_dir();
+        let arg = if is_dir {
+            // Open the directory itself.
+            native.clone()
+        } else {
+            // /select,<path> must be a single argument — the comma delimits the
+            // switch from the path. Reveals the file in its parent directory.
+            format!("/select,{}", native)
+        };
         let _ = std::process::Command::new("explorer.exe")
-            .arg(format!("/select,{}", native))
+            .arg(arg)
             .spawn()
-            .map_err(|e| format!("Failed to reveal in Explorer: {}", e))?;
+            .map_err(|e| format!("Failed to open in Explorer: {}", e))?;
     }
     #[cfg(target_os = "macos")]
     {
-        let _ = std::process::Command::new("open")
-            .args(["-R", file_path])
-            .spawn()
-            .map_err(|e| format!("Failed to reveal in Finder: {}", e))?;
+        let is_dir = std::path::Path::new(file_path).is_dir();
+        if is_dir {
+            let _ = std::process::Command::new("open")
+                .arg(file_path)
+                .spawn()
+                .map_err(|e| format!("Failed to open directory in Finder: {}", e))?;
+        } else {
+            let _ = std::process::Command::new("open")
+                .args(["-R", file_path])
+                .spawn()
+                .map_err(|e| format!("Failed to reveal file in Finder: {}", e))?;
+        }
     }
     #[cfg(target_os = "linux")]
     {
-        let parent = std::path::Path::new(file_path)
-            .parent()
-            .and_then(|p| p.to_str())
-            .unwrap_or(file_path);
+        let path = std::path::Path::new(file_path);
+        let open_path = if path.is_dir() {
+            file_path
+        } else {
+            path.parent().and_then(|p| p.to_str()).unwrap_or(file_path)
+        };
         let _ = std::process::Command::new("xdg-open")
-            .arg(parent)
+            .arg(open_path)
             .spawn()
-            .map_err(|e| format!("Failed to open parent directory: {}", e))?;
+            .map_err(|e| format!("Failed to open path: {}", e))?;
     }
 
     Ok(serde_json::Value::Null)
