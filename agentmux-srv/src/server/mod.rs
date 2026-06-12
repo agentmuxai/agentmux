@@ -402,10 +402,26 @@ async fn handle_shell_create(
         .unwrap_or_default()
         .as_millis() as u64;
 
+    // If cwd wasn't supplied by the caller, fall back to the agent block's
+    // cmd:cwd — the working directory the agent pane was launched with.
+    // Without this, ShellNodeRunner would inherit agentmux-srv's cwd
+    // (typically the portable runtime/ dir) instead of the project dir.
+    let effective_cwd = req.cwd.or_else(|| {
+        state.wstore
+            .get::<crate::backend::obj::Block>(&req.agent_block_id)
+            .ok()
+            .flatten()
+            .and_then(|block| {
+                let cwd = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
+                if cwd.is_empty() { None } else { Some(cwd.to_string()) }
+            })
+    });
+
     tracing::info!(
         block_id = %req.agent_block_id,
         shell_id = %shell_id,
         cmd = %req.cmd,
+        cwd = ?effective_cwd,
         "shell.create"
     );
 
@@ -419,7 +435,7 @@ async fn handle_shell_create(
         data: Some(json!({
             "shell_id": shell_id,
             "cmd": req.cmd,
-            "cwd": req.cwd,
+            "cwd": effective_cwd,
             "title": title,
             "timestamp": now_ms,
         })),
@@ -430,7 +446,7 @@ async fn handle_shell_create(
         shell_id: shell_id.clone(),
         block_id: req.agent_block_id,
         cmd: req.cmd,
-        cwd: req.cwd,
+        cwd: effective_cwd,
         extra_env: req.env.unwrap_or_default(),
         broker: Arc::clone(&state.broker),
     };
