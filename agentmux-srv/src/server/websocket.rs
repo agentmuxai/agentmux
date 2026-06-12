@@ -958,6 +958,13 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     .as_any()
                     .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
                 {
+                    // Container agents use per-turn docker exec — incompatible with a
+                    // long-lived persistent subprocess. Fail loudly instead of silently
+                    // spawning the CLI on the host.
+                    let agent_mode = crate::backend::obj::meta_get_string(&block.meta, "agentMode", "host");
+                    if agent_mode == "container" {
+                        return Err("container agents require a subprocess controller; this provider uses a persistent controller".to_string());
+                    }
                     let config = blockcontroller::persistent::PersistentSpawnConfig {
                         cli_command,
                         cli_args,
@@ -1018,12 +1025,14 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
 
                         // Build `docker exec -i -e KEY=VAL ... <container> <cli_command> [args]`.
                         // Use -i (not -t): tty allocates a PTY and corrupts NDJSON newlines.
-                        // Forward all turn env vars so the in-container agent gets its credentials.
+                        // Forward turn env vars except host-path vars (container has its own values).
                         // Do NOT pass -w: cmd:cwd is a host path, not a container path.
                         let mut docker_args = vec!["exec".to_string(), "-i".to_string()];
                         for (k, v) in &env_vars {
-                            docker_args.push("-e".to_string());
-                            docker_args.push(format!("{k}={v}"));
+                            if !crate::backend::container::CONTAINER_ENV_DENYLIST.contains(&k.as_str()) {
+                                docker_args.push("-e".to_string());
+                                docker_args.push(format!("{k}={v}"));
+                            }
                         }
                         docker_args.push(container_name);
                         docker_args.push(cli_command.clone());

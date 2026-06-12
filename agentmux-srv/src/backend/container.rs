@@ -27,6 +27,22 @@ use bollard::container::{
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::models::{HostConfig, Mount, MountTypeEnum};
 
+/// Env var names that reference host-filesystem paths and must NOT be forwarded
+/// into a container via `docker exec -e`. The container image supplies its own
+/// values for these (e.g. `CLAUDE_CONFIG_DIR=/home/agent/.claude` baked in).
+pub const CONTAINER_ENV_DENYLIST: &[&str] = &[
+    "CLAUDE_CONFIG_DIR",
+    "GH_CONFIG_DIR",
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+];
+
 /// Shared container manager. Clone-on-Arc; cheap to pass around.
 #[derive(Clone)]
 pub struct ContainerManager {
