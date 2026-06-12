@@ -4,7 +4,8 @@
 #
 # Design decisions:
 #   - node:22-slim (Debian Bookworm): glibc required — Alpine/musl crashes Claude Code
-#   - tini as PID 1: docker exec -i does not propagate signals; tini handles reaping
+#   - tini as PID 1 + sleep infinity: container stays alive; agent turns run via
+#     `docker exec`, not as PID 1. tini handles signal forwarding and zombie reaping.
 #   - DISABLE_AUTOUPDATER=1: version pinned at image build time, not runtime
 #   - ~/.claude is a named Docker volume (not host bind mount) — credential isolation
 #   - /workspace is bind-mounted by the AgentMux runtime at container start
@@ -21,8 +22,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Non-root user with UID 1000 for host filesystem UID parity on Linux
-RUN useradd -m -u 1000 -s /bin/bash agent
+# node:22-slim ships a 'node' user at UID 1000. Rename it to 'agent' for clarity
+# rather than creating a second UID-1000 user (useradd --non-unique is fragile).
+RUN usermod -l agent -d /home/agent -m node \
+    && groupmod -n agent node
 
 # Claude Code — version pinned at build time for reproducible images.
 # Managed by rebuilding with a new CLAUDE_VERSION arg, not npm update.
@@ -43,8 +46,8 @@ ENV LANG=C.UTF-8
 WORKDIR /workspace
 USER agent
 
-# tini as PID 1 ensures:
-#   - Correct signal forwarding: SIGTERM from `docker stop` reaches claude
-#   - Zombie process reaping
-# Always exec-form to avoid shell as PID 1 (shell swallows signals).
-ENTRYPOINT ["/usr/bin/tini", "--", "claude"]
+# tini as PID 1 with sleep infinity keeps the container alive between agent turns.
+# Agent turns are executed via `docker exec`, not by replacing the PID-1 process.
+# SIGTERM from `docker stop` is forwarded by tini and terminates sleep cleanly.
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["sleep", "infinity"]
